@@ -2237,10 +2237,10 @@ def _head_may_move(toks, end, skip=None):
 
     That is any `gh` command, a wrapper shell, or a git command outside `_HEAD_KEEPING_SUBS`. Those
     subcommands leave the branch `HEAD` names and the push config as they found them, unless one
-    sets an upstream (`--set-upstream`, whole or cut short, or a push's `-u`). Anything else may
-    switch the branch or rewrite the push config before the push runs, and the branch read before
-    the command runs is then not the one the push uses. The scan stops at `end` and passes over
-    the git word at `skip` (see `_push_scan_end`). An `eval`/`source` is `_opaque_cd`'s.
+    sets an upstream. That is a `--set-upstream`, whole or cut short, or a push's `-u`. Anything
+    else may switch the branch or rewrite the push config before the push runs. The branch read
+    before the command runs is then not the one the push uses. The scan stops at `end` and passes
+    over the git word at `skip` (see `_push_scan_end`). An `eval`/`source` is `_opaque_cd`'s.
     """
     n = len(toks)
     for k in range(end):
@@ -2299,28 +2299,33 @@ def _short_push_cluster(arg):
 
 
 def _push_readings(args):
-    """Each way a push's arguments are read: as git reads them, and with no word taken as a value.
+    """The argument lists a push is read as, each checked on its own so either may deny.
 
-    A cluster ending in `-o`, or a long option taking a value cut short as `--rep`, takes the next
-    word as its value in git. That word was once read as a positional, which may name a branch git
-    never writes but never drops one it does, so both readings are checked and either may deny.
+    The first is the argv as given, which `_push_targets` reads with only `_PUSH_VALUE_FLAGS`
+    taking a value. In git a cluster ending in `-o`, or a value option cut short as `--rep`, takes
+    the next word as its value too. So where one appears, a second list is built in one pass from
+    the left. Each option taking a value keeps that value, unless it is itself another's value.
     """
-    takes_next = [
-        x
-        for x, a in enumerate(args)
-        if a not in _PUSH_VALUE_FLAGS
-        and (
-            (a.startswith("-") and not a.startswith("--") and _short_push_cluster(a)[1])
-            or ("=" not in a and _spells_long_option(a, _PUSH_LONG_VALUE_OPTS))
-        )
-    ]
-    if not takes_next:
+
+    def takes_next(a):
+        if a in _PUSH_VALUE_FLAGS:
+            return True
+        if a.startswith("-") and not a.startswith("--"):
+            return _short_push_cluster(a)[1]
+        return "=" not in a and _spells_long_option(a, _PUSH_LONG_VALUE_OPTS)
+
+    if not any(a not in _PUSH_VALUE_FLAGS and takes_next(a) for a in args):
         return [args]
     consumed = []
-    x = 0
-    while x < len(args):
-        consumed.append(args[x])
-        x += 2 if x in takes_next else 1
+    rest = iter(args)
+    for a in rest:
+        consumed.append(a)
+        if takes_next(a):
+            value = next(rest, None)
+            if value is not None and a not in _PUSH_VALUE_FLAGS:
+                continue
+            if value is not None:
+                consumed.append(value)
     return [args, consumed]
 
 
@@ -2586,6 +2591,9 @@ def _holds_attached_value(tok):
     return len(literal) >= 2 and literal[0] == "-" and literal[1] in _COMMIT_VALUE_LETTERS
 
 
+_LIST_EXPANSION = re.compile(r"\$[@*]|\$\{!?(?:[@*]|[A-Za-z_][A-Za-z0-9_]*(?:\[[@*]\]|[@*]))")
+
+
 def _expands_unquoted(raw, braces_only=False):
     """True when a token as written holds a `$`, a backtick, or a brace expansion outside double quotes.
 
@@ -2593,6 +2601,8 @@ def _expands_unquoted(raw, braces_only=False):
     expansion gives several words itself. One inside a `$(...)` that double quotes hold is still
     inside those quotes. A brace expands where its `{`, its `,` or `..`, and its `}` are unquoted,
     whatever quoted parts sit between them. With `braces_only`, only a brace expansion counts.
+    A list expansion such as `"$@"` or `"${a[@]}"` counts inside double quotes too, since it gives
+    one word per element there (see `_LIST_EXPANSION`).
     """
     stack = []
     i = 0
@@ -2608,6 +2618,8 @@ def _expands_unquoted(raw, braces_only=False):
         elif top == '"':
             if ch == '"':
                 stack.pop()
+            elif not braces_only and _LIST_EXPANSION.match(raw, i):
+                return True
             elif raw.startswith("$(", i):
                 stack.append("(")
                 i += 1
@@ -2655,7 +2667,8 @@ _QUOTE_DIR_FIX = (
     "Word splitting may split an unquoted value into more options or a subcommand, so the guard "
     'cannot tell what git runs. Failing closed. Quote the value, as in git -C "$dir", or '
     "write the directory out. Where it is already quoted, write the directory out, since the "
-    "guard cannot read its quoting beside the rest of the command."
+    "guard cannot read its quoting beside the rest of the command, or it is a list expansion "
+    'such as "$@" that gives one word per element.'
 )
 
 
@@ -2853,7 +2866,7 @@ def _rewritten_git_words(cmd):
                     ) and _outside_heredoc_data(text, toks[k : x + 1]):
                         form = (
                             f"a directory value, `{word}`, before the subcommand of `git`, and "
-                            "the guard cannot read that value as quoted"
+                            "the guard cannot read that value as one word"
                         )
                         return form, _QUOTE_DIR_FIX
                     continue
@@ -3015,10 +3028,10 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     Each refspec's op is read on its own. A `+src` refspec forces only its own branch and a `:dst`
     one deletes only its own, while `--force` and `--delete` apply to every refspec in the push. A
     refspec both forced and deleted yields both ops. A lone `:` refspec pushes every branch that
-    exists on both sides, and a pattern such as `refs/heads/*` or `refs/*` may match any of them
-    (see `_pattern_may_name_branch`). So each is read as writing every protected default and each
-    other branch named beside it, with its own ops. A pattern is also read as the branch its
-    destination literally names, which a ruleset pattern such as `release/*` matches. A
+    exists on both sides. A pattern such as `refs/heads/*` or `refs/*` may match any of them (see
+    `_pattern_may_name_branch`). So each is read as writing every protected default. It also
+    writes each other branch named beside it, with its own ops. A pattern is also read as the
+    branch its destination literally names, which a ruleset pattern such as `release/*` matches. A
     `HEAD`/`@` destination updates the branch `HEAD` names, read the way a bare push's branch is.
     It is compared without case, since a case-insensitive filesystem resolves `head` to `HEAD`. A
     differently cased one is also read as the branch it literally names. A push the guard cannot
@@ -3048,7 +3061,11 @@ def _push_targets(cmd, cwd=None, current_branch=None):
             letters = ""
             if t.startswith("-") and not t.startswith("--") and t not in _PUSH_VALUE_FLAGS:
                 letters = _short_push_cluster(t)[0]
-            if "f" in letters or _spells_long_option(t, _PUSH_FORCE_OPTS):
+            if (
+                "f" in letters
+                or t.startswith("--force-with-lease")
+                or _spells_long_option(t, _PUSH_FORCE_OPTS)
+            ):
                 force = True
             if "d" in letters or _spells_long_option(t, ("delete",)):
                 delete = True
@@ -3150,11 +3167,20 @@ def _gh_admin_merge(args):
     """True when a `gh` argv is `pr merge` carrying `--admin`, however the shell quoted it.
 
     The shell drops the quotes of `"--admin"` before gh reads it, so the argv is read rather than
-    the text. A word that is another option's value is text, as in `--body "--admin"`.
+    the text. A word that is another option's value is text, as in `--body "--admin"`. A repo
+    flag may sit between `pr` and `merge`, as in `gh pr -R example/repo merge`.
     """
-    if args[:2] != ["pr", "merge"]:
+    if args[:1] != ["pr"]:
         return False
-    rest = iter(args[2:])
+    k = 1
+    while k < len(args) and args[k] != "merge":
+        if args[k] in _REPO_FLAG_BARE:
+            k += 2
+        elif args[k].startswith(("--repo=", "-R")):
+            k += 1
+        else:
+            return False
+    rest = iter(args[k + 1 :])
     for a in rest:
         if a in _GH_MERGE_VALUE_FLAGS:
             next(rest, None)
@@ -3166,9 +3192,9 @@ def _gh_admin_merge(args):
 def _with_eval_payloads(texts, overflow):
     """`texts` plus the text each `eval` in them runs, read as a command, wrappers in it included.
 
-    The read is bounded by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST`, as the push check's is. Once
-    the budget is spent, the text from the next `eval` on is appended to `overflow` unread, which a
-    caller searches whole and so fails closed on.
+    The read has a budget of its own, sized by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST` as the
+    push check's is. Once it is spent, the text from the next `eval` on goes to `overflow` unread.
+    A caller searches that text whole, and so fails closed on it.
     """
     out = list(texts)
     budget = _EVAL_READ_BUDGET
@@ -3194,12 +3220,13 @@ def _with_eval_payloads(texts, overflow):
 def _check_bypass_flags(cmd):
     """Deny the explicit-bypass flags: they are a bypass by definition, no branch query needed.
 
-    A flag inside a quoted argument is not a real flag. One inside a wrapper body or a here-string
-    fed to a wrapper is. A body past the wrapper nesting cap, and a wrapper argument other than its
-    `-c` body, are read whole. An option argument is also read from its first `c` on, so an
-    attached `-c<body>` is read as the body it holds. An `eval` argument is read as the command it
-    runs, under the push check's eval budget. A `gh pr merge` argv is read for `--admin` too, so a
-    quoted `"--admin"` the shell passes as a flag is caught (see `_gh_admin_merge`).
+    A flag named inside a quoted argument's text is not a real flag. One inside a wrapper body or a
+    here-string fed to a wrapper is. A body past the wrapper nesting cap, and a wrapper argument
+    other than its `-c` body, are read whole. An option argument is also read from its first `c`
+    on, so an attached `-c<body>` is read as the body it holds. For `--admin` alone, an `eval`
+    argument is also read as the command it runs (see `_with_eval_payloads`). Each `gh pr merge`
+    argv is read for `--admin` as well, so a quoted `"--admin"` the shell passes as a flag is still
+    caught.
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
@@ -6195,6 +6222,20 @@ _GIT_CASES = [
         "a value option cut short is also read without taking its value",
     ),
     (
+        "git push -o -uo -uo example origin",
+        "develop",
+        {"develop": {"pull_request"}, "origin": set(), "example": set()},
+        "deny",
+        "an option that is -o's value takes no value of its own, so the push is bare",
+    ),
+    (
+        "git push --force-with-leasex origin develop",
+        None,
+        {"develop": {"non_fast_forward"}},
+        "deny",
+        "a word starting --force-with-lease is still read as a force",
+    ),
+    (
         "git push --atomic origin feature/x",
         None,
         {"main": set(), "master": set(), "develop": {"pull_request"}, "feature/x": set()},
@@ -6214,6 +6255,13 @@ _GIT_CASES = [
         {},
         "deny",
         "a quoted --admin with a value is still a flag",
+    ),
+    (
+        "gh pr -R example/repo merge 5 --admin",
+        None,
+        {},
+        "deny",
+        "a repo flag between pr and merge does not hide --admin",
     ),
     (
         'gh pr merge 5 --squash --body "--admin"',
@@ -6935,6 +6983,41 @@ _GIT_CASES = [
         {"feature/x": set()},
         "allow",
         "control: double-quoted attached directory values do not split",
+    ),
+    (
+        'git -C "$@" commit -m x',
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a double-quoted $@ as a -C value gives one word per parameter",
+    ),
+    (
+        'git -C "${a[@]}" commit -m x',
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a double-quoted array expansion as a -C value gives one word per element",
+    ),
+    (
+        'git --work-tree="${@:2}" status',
+        "feature/x",
+        {"feature/x": set()},
+        "deny",
+        "a double-quoted $@ slice as an attached directory value splits too",
+    ),
+    (
+        'git -C "$1" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: one double-quoted positional parameter does not split",
+    ),
+    (
+        'git -C "${W%/*}" status',
+        "feature/x",
+        {"feature/x": set()},
+        "allow",
+        "control: a double-quoted suffix trim holding a star is not a list expansion",
     ),
     (
         'git -C "$W" log --format=\'%H %s\' -1 && echo "$(date)"',
@@ -10326,6 +10409,11 @@ _PUSH_DIR_CASES = [
         "@wt git fetch --set-upstream origin develop && git push",
         "deny",
         "a --set-upstream before a bare push changes its upstream",
+    ),
+    (
+        "@wt git fetch --set-up origin develop && git push",
+        "deny",
+        "a --set-upstream cut short before a bare push changes its upstream too",
     ),
     ("@wt git add -u && git commit -m x && git push", "allow", "add -u sets no upstream"),
     ("@wt git push -u origin HEAD", "allow", "a push's own -u does not move its own target"),
