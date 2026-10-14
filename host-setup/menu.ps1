@@ -431,6 +431,14 @@ function Invoke-SkillsInstall {
         })
 }
 
+# Asks which tools to install, since the agent tools are installed only by name and never as a set someone did not choose.
+function Invoke-AgentsInstall {
+    $names = Read-Host 'Agent tools to install, separated by spaces (claude codex opencode herdr cswap)'
+    $words = @($names -split '\s+' | Where-Object { $_ })
+    if ($words.Count -eq 0) { return 0 }
+    return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments (@('-Install') + $words))
+}
+
 # The first candidate that is a Python 3.7+, the same probe install-skills.ps1 uses: none of py, python3 or python guarantees that version by construction on Windows.
 function Find-Python {
     $candidates = @(
@@ -542,18 +550,21 @@ function Show-Menu {
     log '   8  Report the WSL platform and the distributions installed'
     log '   9  Report fleet Skills install status'
     log '  10  Install or update the fleet Skills'
+    log '  11  Report the coding-agent tools installed for this user'
+    log '  12  Upgrade the coding-agent tools already installed'
+    log '  13  Install coding-agent tools by name'
     log ''
     log "Hub, $($script:HUB_REPO):"
-    log '  11  Audit a cataloged repo'
-    log '  12  Check the generated Skills distributions are current'
+    log '  14  Audit a cataloged repo'
+    log '  15  Check the generated Skills distributions are current'
     # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
     if ($script:DOWNSTREAM_ROOT -and $script:REF -eq $script:DEFAULT_REF) {
         log ''
         log 'Downstream, the repo this menu is run from:'
-        log '  13  Check what the hub would change here, change nothing'
-        log "  14  Pull the hub's verbatim-owned files into this repo"
-        log "  15  Check the hub's verbatim rule sections inside this repo's mixed files"
-        log '  16  Pull those rule sections in, leaving every other section alone'
+        log '  16  Check what the hub would change here, change nothing'
+        log "  17  Pull the hub's verbatim-owned files into this repo"
+        log "  18  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log '  19  Pull those rule sections in, leaving every other section alone'
     }
     log ''
     log '   q  Quit'
@@ -574,16 +585,19 @@ function Invoke-Dispatch {
         '8' { return (Invoke-HostTool -Tool 'setup-wsl.ps1' -Arguments '-Status') }
         '9' { return (Invoke-HostTool -Tool 'install-skills.ps1' -Arguments '-Report') }
         '10' { return (Invoke-SkillsInstall) }
-        '11' { return (Invoke-AuditRepo) }
-        '12' { return (Invoke-CheckSkillsDist) }
-        '13' { return (Invoke-CarryAction 'check') }
-        '14' {
+        '11' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Report') }
+        '12' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Upgrade') }
+        '13' { return (Invoke-AgentsInstall) }
+        '14' { return (Invoke-AuditRepo) }
+        '15' { return (Invoke-CheckSkillsDist) }
+        '16' { return (Invoke-CarryAction 'check') }
+        '17' {
             # -DryRun changes nothing, and scripts/carry.py itself has no dry-run mode, so a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check') }
             return (Invoke-CarryAction 'apply')
         }
-        '15' { return (Invoke-CarryAction 'check-sections') }
-        '16' {
+        '18' { return (Invoke-CarryAction 'check-sections') }
+        '19' {
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check-sections') }
             return (Invoke-CarryAction 'apply-sections')
         }
