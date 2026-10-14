@@ -281,7 +281,8 @@ That half is `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo
 Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
 `cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`.
 It also refuses a branch another open pull request has as its head or base.
-Any exit other than `0` stops the delete and reports it, and no hand-typed delete stands in.
+Any exit other than `0` is reported to the maintainer as it stands, since a `2` can mean the delete landed unconfirmed.
+No hand-typed delete stands in.
 Where the orchestrator's seat cannot run it, the delete is reported to the maintainer with the pull request number and `--repo`.
 The procedure covers every group that is done with its tree,
 which is the finished ones **and the abandoned ones**: a group told to abandon its branch keeps a
@@ -311,7 +312,7 @@ with no remote branch to delete where none was pushed. Either fails, and cleanup
 the group goes to the maintainer per "Raising a Blocked Question", since past that point removal
 discards work. A worker still live, a promotion fix included, keeps its worktree until the next
 round's cleanup step.
-A pushed branch of an abandoned group or a dead worker has no merged pull request for `cleanup` to read.
+A pushed branch with no merged pull request, an abandoned group's or a dead worker's, is out of `cleanup`'s reach.
 Its remote delete is reported to the maintainer.
 
 ### Choosing the Worker's Model Tier
