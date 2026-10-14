@@ -3176,10 +3176,11 @@ def _gh_admin_merge(args):
     The shell drops the quotes of `"--admin"` before gh reads it, so the argv is read rather than
     the text. A word that is another option's value is text, as in `--body "--admin"`. Any words
     may sit before `pr` or `merge`, as a flag and its value do in `gh pr -R example/repo merge`.
+    gh reads its flags wherever they sit, so `--admin` is looked for in every word.
     """
     if "pr" not in args or "merge" not in args[args.index("pr") :]:
         return False
-    rest = iter(args[args.index("merge", args.index("pr")) + 1 :])
+    rest = iter(args)
     for a in rest:
         if a in _GH_MERGE_VALUE_FLAGS:
             next(rest, None)
@@ -6276,6 +6277,13 @@ _GIT_CASES = [
         {},
         "deny",
         "any flag before pr does not hide --admin",
+    ),
+    (
+        "gh pr --admin=true merge 5",
+        None,
+        {},
+        "deny",
+        "an --admin written before merge is still merge's flag",
     ),
     (
         "; ".join(["eval 'echo x'"] * 300 + ["eval 'gh pr -R example/repo merge 5 --admin'"]),
