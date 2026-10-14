@@ -31,6 +31,25 @@ Subcommands
            reviewer or not at all, and three stale descriptions in one session generated six
            review findings between them. Read-only. Exit 0 = every reference resolves, 70 = one
            does not, 71 = there were references and none could be read, so nothing was decided.
+  cleanup  Delete a merged pull request's head branch, the verify-then-delete `drive-pr` and
+           `merge-and-release` prescribe, done here so it runs under the one allow rule the
+           host-safety installer registers for this script rather than as a hand-typed delete.
+           That rule approves any arguments, so every check lives here. It takes the pull request
+           number, never a branch name, and reads the branch from the pull request. It refuses
+           unless the pull request is merged into `develop` from a head in `--repo` itself, and
+           the head branch is none of `develop`, `main`, or the default branch read live. The
+           owner is bound to `registry/repos.json`, and the repository must be registered or a
+           fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or
+           branch protection covers, since the write guard's per-branch check never sees a delete
+           made in here. The ref is read exactly, its tip is checked against the pull request's
+           `headRefOid` before the delete is sent, and the delete is confirmed by reading the ref
+           back. The delete itself carries no expected tip, so this is verify-then-delete rather
+           than a compare-and-swap. No `--dry-run` exists, since no other subcommand here has
+           one. Exit 0 = deleted and confirmed gone, or already gone, 1 = refused, a
+           moved tip naming both commits among them, 2 = a read did not answer, a partial one
+           included, or the delete could not be confirmed, which argparse's own usage error
+           shares, 64 = the write scope could not be established or excludes the target, checked
+           before the registry and before any read.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
            and full diff coverage is stated for this head, by the round covering it or by the
@@ -351,6 +370,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import gh_graphql as shared
+import handoff
 
 # The directory this script sits in, and the anchor every scope answer is read from.
 # One value serves the owner probe and the refusal naming it, so the two cannot disagree.
@@ -997,6 +1017,22 @@ mutation($threadId:ID!,$body:String!){
 M_RESOLVE = """
 mutation($threadId:ID!){
   resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }}
+"""
+
+Q_CLEANUP_TARGET = """
+query($o:String!,$r:String!,$n:Int!){
+  repository(owner:$o,name:$r){
+    defaultBranchRef{ name }
+    pullRequest(number:$n){
+      merged baseRefName headRefName headRefOid headRepository{ nameWithOwner } } }}
+"""
+Q_CLEANUP_REF = """
+query($o:String!,$r:String!,$q:String!){
+  repository(owner:$o,name:$r){ ref(qualifiedName:$q){ id target{ oid } } }}
+"""
+M_DELETE_REF = """
+mutation($refId:ID!){
+  deleteRef(input:{refId:$refId}){ clientMutationId }}
 """
 
 
@@ -2069,23 +2105,28 @@ def reread_json(path: str, jq: str) -> object:
     None wherever nothing parseable came back, an absence GitHub answered included, so the caller
     has one value to refuse on.
     """
+    return parsed_json(reread(path, jq))
 
-    def parsed(proc: subprocess.CompletedProcess) -> object:
-        if proc.returncode != 0:
-            return None
-        try:
-            return json.loads(proc.stdout.strip())
-        except json.JSONDecodeError:
-            return None
 
+def reread(path: str, jq: str) -> subprocess.CompletedProcess:
+    """The last of `reread_json`'s reads, whole, so a caller can say why nothing parsed."""
     read = functools.partial(gh_rest, path, jq)
-    proc = backoff(
+    return backoff(
         read(),
         read,
-        lambda p: not answered_absent(p) and parsed(p) is None,
+        lambda p: not answered_absent(p) and parsed_json(p) is None,
         delays=READ_RETRY_DELAYS,
     )
-    return parsed(proc)
+
+
+def parsed_json(proc: subprocess.CompletedProcess) -> object:
+    """The read's JSON, or None where it failed or printed nothing parseable."""
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return None
 
 
 def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | None:
@@ -5571,6 +5612,183 @@ def check_claims(owner: str, repo: str, num: int) -> int:
     return 0
 
 
+class CleanupUnread(Exception):
+    """A read `cleanup` needed did not produce an answer, reported at exit 2."""
+
+
+def cleanup_read(query: str, **variables: object) -> dict:
+    """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1.
+
+    `gh_graphql` exits 1 on a failed read, which is `cleanup`'s refusal code, so a read that could
+    not answer would be reported as a refusal the caller can act on.
+    """
+    try:
+        return shared.request(query, variables).data
+    except shared.GraphQLError as exc:
+        sys.stderr.write(exc.detail)
+        raise CleanupUnread(str(exc)) from exc
+
+
+def cleanup_rest(path: str, what: str) -> object:
+    """One REST read for `cleanup`, retried, raising with its stderr where nothing parsed."""
+    proc = reread(path, ".")
+    data = parsed_json(proc)
+    if data is None:
+        sys.stderr.write(proc.stderr)
+        raise CleanupUnread(f"the {what} read failed rc={proc.returncode} or printed no JSON")
+    return data
+
+
+def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
+    """The branch's ref node, or None where the branch does not exist.
+
+    The read is by exact qualified name, so a branch sharing a suffix never answers for it. The
+    node id it returns goes straight to the delete, so no caller ever holds one to mistype.
+    """
+    data = cleanup_read(Q_CLEANUP_REF, o=owner, r=repo, q=f"refs/heads/{branch}")
+    repository = data.get("repository")
+    if not isinstance(repository, dict):
+        raise CleanupUnread(f"{owner}/{repo} returned no repository for the ref read")
+    ref = repository.get("ref")
+    if ref is None:
+        return None
+    oid = (ref.get("target") or {}).get("oid") if isinstance(ref, dict) else None
+    if not isinstance(ref, dict) or not ref.get("id") or not oid:
+        raise CleanupUnread(f"the ref read for {branch!r} returned no id and tip: {ref!r}")
+    return ref
+
+
+def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
+    """What protects the branch, rulesets and classic protection alike, empty where nothing does.
+
+    The branch travels inside a REST path, so a name that would change the path is not read, and
+    an unread rule set is never reported as no rules.
+    """
+    if UNSAFE_REF.search(branch) or DOT_SEGMENT.search(branch):
+        raise CleanupUnread(
+            f"the head branch {branch!r} holds a character that changes a REST path, so the "
+            "rules applying to it cannot be read"
+        )
+    rules = cleanup_rest(f"repos/{owner}/{repo}/rules/branches/{branch}", "branch rules")
+    if not isinstance(rules, list) or not all(isinstance(r, dict) for r in rules):
+        raise CleanupUnread(f"the branch rules read returned no list of rules: {rules!r}"[:400])
+    found = [f"ruleset rule {r.get('type') or 'unnamed'}" for r in rules]
+    detail = cleanup_rest(f"repos/{owner}/{repo}/branches/{branch}", "branch protection")
+    protected = detail.get("protected") if isinstance(detail, dict) else None
+    if not isinstance(protected, bool):
+        raise CleanupUnread(f"the branch read returned no protected flag: {detail!r}"[:400])
+    if protected:
+        found.append("branch protection")
+    return found
+
+
+def cleanup(owner: str, repo: str, num: int) -> int:
+    """Delete the head branch of merged pull request `num` once every check passes.
+
+    Returns 0 where the branch is deleted and the read back confirms it, or is already gone, 1 on
+    a refusal, 2 where a read did not answer or the delete could not be confirmed, and 64 where
+    the write scope `comment` and `reply` check excludes the target. Past that check, the owner is
+    bound to the fleet registry and the repository must be registered or a fork, by `handoff.py`'s
+    own write-scope check, reused rather than copied so the two cannot drift apart. Its refusal
+    text is printed as `handoff.py` words it.
+    """
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was deleted: {why}")
+        return 64
+    target = f"{owner}/{repo}"
+    try:
+        handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=target))
+    except handoff.Refusal as exc:
+        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
+        return 1
+    except handoff.Execution as exc:
+        print(f"status=UNREAD nothing was deleted: {exc}")
+        return 2
+    try:
+        return _cleanup(owner, repo, num)
+    except CleanupUnread as exc:
+        print(f"status=UNREAD nothing was deleted: {exc}")
+        return 2
+
+
+def _cleanup(owner: str, repo: str, num: int) -> int:
+    """The checks, the delete, and the read back, raising `CleanupUnread` on any unanswered read.
+
+    A branch anything protects is refused whatever that protection would allow, since the write
+    guard's per-branch rule check never sees a delete made from inside this script. A delete that
+    reports a failure may still have landed, so the read back decides the outcome either way.
+    """
+    target = f"{owner}/{repo}"
+    data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
+    repository = data.get("repository") or {}
+    pr = repository.get("pullRequest")
+    default = (repository.get("defaultBranchRef") or {}).get("name")
+    if not isinstance(pr, dict) or not default:
+        raise CleanupUnread(f"{target} #{num} returned no pull request or no default branch")
+    branch = pr.get("headRefName")
+    head = pr.get("headRefOid")
+    if not branch or not head:
+        raise CleanupUnread(f"{target} #{num} returned no head branch or head commit")
+    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or ""
+    refusals = []
+    if pr.get("merged") is not True:
+        refusals.append("the pull request is not merged")
+    if pr.get("baseRefName") != "develop":
+        refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
+    if head_repo.lower() != target.lower():
+        refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
+    if branch in ("develop", "main", default):
+        refusals.append(f"its head branch {branch!r} is a permanent branch")
+    if refusals:
+        print(f"status=REFUSED nothing was deleted from {target} #{num}: {', and '.join(refusals)}")
+        return 1
+
+    ref = cleanup_ref(owner, repo, branch)
+    if ref is None:
+        print(f"status=ALREADY_GONE branch={branch} is not on {target}, so nothing was deleted")
+        return 0
+    rules = branch_rules(owner, repo, branch)
+    if rules:
+        print(
+            f"status=REFUSED nothing was deleted: {branch!r} on {target} is covered by "
+            f"{', '.join(rules)}, so its delete is the maintainer's call"
+        )
+        return 1
+    tip = ref["target"]["oid"]
+    if tip != head:
+        print(
+            f"status=TIP_MOVED nothing was deleted: {branch!r} on {target} is at {tip}, and "
+            f"#{num} merged {head}, so something reached the branch after the merge or the name "
+            "was reused"
+        )
+        return 1
+
+    print(f"deleting: {branch} on {target} at {tip}")
+    try:
+        response = shared.request(M_DELETE_REF, {"refId": ref["id"]}).data
+        print(f"  response: {json.dumps(response)[:400]}")
+    except shared.GraphQLError as exc:
+        print(f"  the delete reported a failure: {exc}")
+        sys.stderr.write(exc.detail)
+    try:
+        after = cleanup_ref(owner, repo, branch)
+    except CleanupUnread as exc:
+        print(
+            f"status=DELETE_NOT_CONFIRMED the delete of {branch!r} on {target} was sent, and "
+            f"reading the ref back did not answer: {exc}"
+        )
+        return 2
+    if after is not None:
+        print(
+            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} still reads at "
+            f"{after['target']['oid']} after the delete"
+        )
+        return 2
+    print(f"status=DELETED branch={branch} oid={tip}, confirmed by reading the ref back")
+    return 0
+
+
 def utf8_console() -> None:
     """Write the console streams as UTF-8, whatever the host code page is.
 
@@ -5586,7 +5804,9 @@ def utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["attest", "claims", "comment", "status", "reply", "wait"])
+    ap.add_argument(
+        "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
+    )
     ap.add_argument("number", type=int)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
@@ -5737,6 +5957,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
+
+    if a.cmd == "cleanup":
+        return cleanup(owner, repo, a.number)
 
     if a.cmd == "attest":
         return attest(owner, repo, a.number, a.checkout or ".")

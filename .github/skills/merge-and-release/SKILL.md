@@ -227,7 +227,18 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      use `git branch -D -- "<exact-branch>"` here, safe only because the GitHub-state check just
      proved that exact branch finished, the narrow post-squash exception git-commit-conventions
      describes, never applied to an unverified branch. Then, only when the remote branch still
-     exists, delete it the same way, `git push origin --delete -- "<branch>"`.
+     exists, delete it with `python3 scripts/pr_review.py cleanup <number> --repo owner/repo`, run
+     from a hub checkout, `<number>` being the merged pull request the check above returned. It
+     re-reads that pull request and repeats the merged, base, head-repository, and tip checks in
+     code, refuses a permanent or protected branch, and confirms the delete by reading the ref
+     back. Exit `0` is done, and any other exit stops and reports: `1` is a refusal, `2` an
+     unanswered read or an unconfirmed delete, and `64` a target under an owner other than the hub
+     checkout's own `origin` or that `origin` unreadable, a registry refusal being a `1`. It runs
+     under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
+     which is what lets auto mode complete it.
+     On a host without that rule the fallback is `git push origin --delete -- "<branch>"` once the
+     tip checks above pass, and where this seat cannot run it, report it to the maintainer,
+     paste-ready with the values substituted.
      Never `--force-with-lease` here, git-commit-conventions
      forbids it unconditionally, the GitHub-state check just completed is the verification gate,
      not a compare-and-swap at delete time. Never apply this sweep to `develop` or `main`
