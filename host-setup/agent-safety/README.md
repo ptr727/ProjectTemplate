@@ -59,12 +59,12 @@ text says, because the harm it covers was never in the text.
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
    parses, a wrapper shell's body and a command substitution's body among them. Those bodies are
-   read up to a few levels of nesting, and a git commit or push nested deeper is denied. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
+   read up to a few levels of nesting, and a git commit or push nested deeper is denied. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. A run-time word among a `gh pr merge`'s words, such as `$A` or `"$(...)"`, may expand to `--admin`, so it fails closed. An option's value that word splitting cannot split is the exception, as in `--body "$BODY"`. A run-time `--repo` value fails closed too, since the target check cannot read it. `--no-verify` is also read cut short, as in `--no-veri`. A commit's `-n` is also read inside a short-option cluster such as `-an`, while the `n` in `-mn` is the message. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A push's force, delete, all, mirror, and prune options are read as
    git reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
-   `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. A refspec pattern
+   `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. Of `--force`, `--delete`, `--all`, `--mirror`, `--tags`, or `--prune` and its `--no-` form, the later one wins. `--no-force` leaves a `--force-with-lease` in place, as git does. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
    every branch protected by default. Beside such a pattern, a lone `:`
    refspec, `--all`, or a bare push, a `--prune` is read as deleting every branch protected by
