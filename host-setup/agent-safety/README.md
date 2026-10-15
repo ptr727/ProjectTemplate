@@ -93,7 +93,8 @@ text says, because the harm it covers was never in the text.
    one in text piped to a shell's input. It covers a push a persisted alias runs, or one set in
    the environment. An alias set in the environment is followed into the persisted config. A `!`
    shell alias is followed into each git command its text runs. It is denied where one of those
-   commands has no subcommand the hook can read, or names a possible alias under another directory. A
+   commands has no subcommand the hook can read, or where its text ends in an operator. So is one
+   whose git command names a possible alias under another directory. A
    persisted alias is read from the directory git runs in. It is also read from a `--git-dir` or
    `GIT_DIR` repository, through a linked worktree's `.git` file as git reads it. A git command nested past the wrapper reading cap is denied
    where its subcommand may be an alias. An alias set by `--config-env` for the subcommand it runs is denied too. An `eval`
