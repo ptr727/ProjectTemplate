@@ -40,8 +40,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO, cast
 
-from host_capability import bash_or_skip
-from test_skills_install import unprivileged_root_is_available
+from host_capability import bash_or_skip, requires_unprivileged_root
 
 ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
@@ -933,7 +932,7 @@ $wanted = @(
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
-    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade'
+    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -1382,6 +1381,19 @@ printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")
 exit 0
 """
 
+STUB_ARGS_TOOL = """\
+#!/usr/bin/env bash
+step="$(basename "$0")"
+for arg in "$@"; do
+    [[ $arg == --yes ]] || step="$step $arg"
+done
+kept=absent
+[[ -e "$KEPT_TREE/VERSION" ]] && kept=$(cat "$KEPT_TREE/VERSION")
+printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")" "$kept" >>"$STEP_LOG"
+[[ $step == "$FAIL_STEP" ]] && exit 7
+exit 0
+"""
+
 STUB_CURL = """\
 #!/usr/bin/env bash
 out="" url=""
@@ -1421,6 +1433,14 @@ STAND_UP_STEPS = (
 
 UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
 
+REPORT_STEPS = (
+    "upgrade-host.sh --status",
+    "install-tools.sh --report",
+    "setup-github.sh --status",
+    "install-skills.sh --report",
+    "install-agents.sh --report",
+)
+
 
 @unittest.skipUnless(
     sys.platform == "linux" and shutil.which("flock") and shutil.which("tar"),
@@ -1452,9 +1472,14 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.mv_log = self.root / "mv.log"
         self.tarball = self.root / "source.tar.gz"
         with tarfile.open(self.tarball, "w:gz") as archive:
-            for tool in sorted({step.split()[0] for step in (*STAND_UP_STEPS, *UPGRADE_STEPS)}):
+            for tool in sorted(
+                {step.split()[0] for step in (*STAND_UP_STEPS, *UPGRADE_STEPS, *REPORT_STEPS)}
+            ):
                 self.add_member(
-                    archive, f"ProjectTemplate-abc/host-setup/linux/{tool}", STUB_TOOL, 0o755
+                    archive,
+                    f"ProjectTemplate-abc/host-setup/linux/{tool}",
+                    STUB_ARGS_TOOL if tool == "install-agents.sh" else STUB_TOOL,
+                    0o755,
                 )
             self.add_member(archive, "ProjectTemplate-abc/VERSION", "new", 0o644)
 
@@ -1476,9 +1501,13 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         (self.kept / "VERSION").write_text("old", encoding="utf-8")
 
     def run_main(
-        self, fail_step: str = "", action: str = "--host", root: bool = False
+        self,
+        fail_step: str = "",
+        action: str = "--host",
+        root: bool = False,
+        args: tuple[str, ...] = (),
     ) -> subprocess.CompletedProcess[str]:
-        """Runs the loader with `action`, under a user namespace's EUID 0 where `root` is set."""
+        """Runs the loader with `action` and its arguments, under a user namespace's EUID 0 where `root` is set."""
         env = {
             "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
             "HOME": str(self.home),
@@ -1494,10 +1523,11 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 *(["unshare", "-r"] if root else []),
                 bash_or_skip(),
                 str(BOOTSTRAP),
-                action,
                 "--yes",
                 "--dir",
                 str(self.data),
+                action,
+                *args,
             ],
             capture_output=True,
             text=True,
@@ -1603,14 +1633,59 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual([step for step, _, _ in self.steps()], ["upgrade-host.sh --packages"])
 
-    @unittest.skipUnless(
-        unprivileged_root_is_available(), "needs an unprivileged user namespace to reach EUID 0"
-    )
+    @requires_unprivileged_root
     def test_an_upgrade_as_root_skips_the_agent_tools_and_says_so(self) -> None:
         result = self.run_main(action="--upgrade", root=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([step for step, _, _ in self.steps()], ["upgrade-host.sh --packages"])
         self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
+
+    def test_a_report_runs_every_step_including_the_agent_tools(self) -> None:
+        result = self.run_main(action="--report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS), result.stderr)
+        self.assertNotIn("did not report", result.stdout)
+
+    def test_a_report_whose_agent_tools_step_fails_still_completes_and_names_it(self) -> None:
+        result = self.run_main("install-agents.sh --report", action="--report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS), result.stderr)
+        self.assertIn(
+            "The agent tools step did not report, and the output above says why", result.stdout
+        )
+
+    @requires_unprivileged_root
+    def test_a_report_as_root_skips_the_agent_tools_and_says_so(self) -> None:
+        result = self.run_main(action="--report", root=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS[:-1]))
+        self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
+        self.assertNotIn("did not report", result.stdout)
+
+    def agents_steps(self) -> list[str]:
+        return [step for step, _, _ in self.steps() if step.startswith("install-agents.sh")]
+
+    def test_agents_hands_a_comma_list_off_as_an_install_of_those_names(self) -> None:
+        result = self.run_main(action="--agents", args=("herdr,cswap",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), ["install-agents.sh --install herdr cswap"])
+
+    def test_agents_all_hands_off_as_an_install_of_all(self) -> None:
+        result = self.run_main(action="--agents", args=("all",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), ["install-agents.sh --install --all"])
+
+    def test_agents_with_an_empty_list_is_refused_before_anything_runs(self) -> None:
+        result = self.run_main(action="--agents", args=("",))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--agents takes the tools to install", result.stderr)
+        self.assertEqual(self.steps(), [])
+
+    def test_agents_with_no_list_is_refused_before_anything_runs(self) -> None:
+        result = self.run_main(action="--agents")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--agents takes the tools to install", result.stderr)
+        self.assertEqual(self.steps(), [])
 
 
 STUB_POWERSHELL_TOOL = """\
@@ -1732,6 +1807,46 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS), result.stdout)
         self.assertNotIn("did not report", result.stdout)
+
+    @staticmethod
+    def name_split() -> str:
+        """The loader's own line turning `-Agents` into names, read from the file so the test holds the real split."""
+        text = BOOTSTRAP_PS.read_text(encoding="utf-8")
+        found = re.search(r"^\$AGENT_NAMES = .*$", text, re.MULTILINE)
+        assert found is not None
+        return found.group(0)
+
+    def run_agents(self, given: list[str]) -> subprocess.CompletedProcess[str]:
+        """Splits `given` as the loader splits `-Agents`, then hands off."""
+        quoted = ", ".join("'" + name + "'" for name in given)
+        return self.run_handoff(f"$Agents = @({quoted})\n{self.name_split()}\nInvoke-AgentsInstall")
+
+    def test_a_comma_list_hands_off_as_an_install_of_those_names(self) -> None:
+        result = self.run_agents(["herdr,cswap"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), ["install-agents.ps1 -Install herdr cswap"], result.stdout)
+
+    def test_separate_words_hand_off_as_the_same_install(self) -> None:
+        result = self.run_agents(["herdr", "cswap"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), ["install-agents.ps1 -Install herdr cswap"], result.stdout)
+
+    def test_all_alone_hands_off_as_an_install_of_all(self) -> None:
+        result = self.run_agents(["all"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), ["install-agents.ps1 -Install -All"], result.stdout)
+
+    def test_all_beside_other_names_is_refused(self) -> None:
+        result = self.run_agents(["all,herdr"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-Agents takes 'all' alone", result.stderr)
+        self.assertEqual(self.steps(), [])
+
+    def test_an_empty_list_is_refused(self) -> None:
+        result = self.run_agents([""])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-Agents takes the tools to install", result.stderr)
+        self.assertEqual(self.steps(), [])
 
 
 def menu_functions() -> str:
