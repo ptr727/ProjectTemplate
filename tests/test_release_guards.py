@@ -1098,13 +1098,19 @@ gh() {
         stubs.mkdir()
         # Each stub writes the report its real tool would, so the step's own report check is what decides.
         # The venv interpreter answers a version query with a version no host carries, so a test can tell it was asked.
-        # It holds mypy only where VENV_MYPY is set, and logs a mypy run the way the uv stubs log theirs.
+        # It holds mypy, ruff, or pyright only where VENV_MYPY, VENV_RUFF, or VENV_PYRIGHT is set, and logs a run of one the way the uv stubs log theirs.
         python_stub = (
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
-            '"-c "*find_spec*) [ -n "${VENV_MYPY:-}" ] ;;\n'
+            '"-c "*find_spec*)\n'
+            '  case "$2" in\n'
+            '  *\'"mypy"\'*) [ -n "${VENV_MYPY:-}" ] ;;\n'
+            '  *\'"ruff"\'*) [ -n "${VENV_RUFF:-}" ] ;;\n'
+            '  *\'"pyright"\'*) [ -n "${VENV_PYRIGHT:-}" ] ;;\n'
+            "  *) exit 1 ;;\n"
+            "  esac ;;\n"
             '"-c "*) echo 3.99 ;;\n'
-            '"-m mypy") echo "python $*" >> "$STUB_LOG" ;;\n'
+            '"-m mypy" | "-m ruff" | "-m pyright") echo "python $*" >> "$STUB_LOG" ;;\n'
             "*) echo x > coverage.xml ;;\n"
             "esac\n"
         )
@@ -1237,6 +1243,8 @@ gh() {
         root_config = {"pyproject.toml": "[tool.mypy]\n", "sub/pyproject.toml": "[tool.ruff]\n"}
         in_sub = {"PYTHON_PROJECTS": "lint-only\tsub\n"}
         venv_mypy = {"VENV_MYPY": "1"}
+        pyright_section = {**mypy_section, "pyproject.toml": "[tool.pyright]\n"}
+        venv_pyright = {"VENV_PYRIGHT": "1"}
         cases = {
             "declared pip mypy reads the venv": (
                 "pip",
@@ -1285,6 +1293,22 @@ gh() {
                 venv_mypy,
                 0,
                 r"^python -m mypy\n",
+            ),
+            "declared pip pyright reads the venv": (
+                "pip",
+                pyright_section,
+                True,
+                None,
+                0,
+                r"^uvx pyright@latest --pythonpath /\S+/\.venv/bin/python\n",
+            ),
+            "declared pip pyright installed in the venv runs there": (
+                "pip",
+                pyright_section,
+                True,
+                venv_pyright,
+                0,
+                r"^python -m pyright --pythonpath /\S+/\.venv/bin/python\n",
             ),
             "undeclared pip mypy keeps the old call": (
                 "pip",
@@ -1356,8 +1380,64 @@ gh() {
                     self.assertRegex(written, re.compile(call, re.MULTILINE))
                 if env is in_sub:
                     self.assertIn("mypy in sub, configured in .", stdout)
-                if env is venv_mypy:
+                if env is venv_mypy or env is venv_pyright:
                     self.assertNotIn("uvx", written)
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_ruff_prefers_a_declared_pip_directory_venv(self) -> None:
+        """A declared pip directory's ruff is the one its requirements pin, and uvx floats only where the venv lacks one."""
+        pip_tree = {"pyproject.toml": "", "requirements.txt": "", ".venv/bin/python": ""}
+        venv_ruff = {"VENV_RUFF": "1"}
+        for step, args in (
+            ("Lint Python step", "check ."),
+            ("Check Python formatting step", "format --check ."),
+        ):
+            cases = {
+                "declared pip ruff installed in the venv runs there": (
+                    "pip",
+                    pip_tree,
+                    True,
+                    venv_ruff,
+                    f"python -m ruff {args}\n",
+                ),
+                "declared pip with no venv ruff floats": (
+                    "pip",
+                    pip_tree,
+                    True,
+                    None,
+                    f"uvx ruff@latest {args}\n",
+                ),
+                "undeclared pip keeps the old call": (
+                    "pip",
+                    pip_tree,
+                    False,
+                    venv_ruff,
+                    f"uvx ruff@latest {args}\n",
+                ),
+                "lint-only floats": (
+                    "lint-only",
+                    {"pyproject.toml": ""},
+                    True,
+                    venv_ruff,
+                    f"uvx ruff@latest {args}\n",
+                ),
+                "uv runs its locked ruff": (
+                    "uv",
+                    {"pyproject.toml": ""},
+                    True,
+                    venv_ruff,
+                    f"uv run ruff {args}\n",
+                ),
+            }
+            for label, (kind, tree, declared, env, call) in cases.items():
+                with self.subTest(step=step, case=label):
+                    code, _, written = self.run_python_tests_step(
+                        kind, tree, declared, step_name=step, extra_env=env
+                    )
+                    self.assertEqual((0, call), (code, written))
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",

@@ -64,8 +64,9 @@ default baseline on first-party code (a repo may instead run mypy with its stric
 and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
 `strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
 standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
-editor and the CLI/CI (`uv run pyright` in the uv form, `uvx pyright@latest` in the pip form,
-pointed at the environment in a declared directory) run the same engine and never disagree.
+editor and the CLI/CI (`uv run pyright` in the uv form, the environment's own pyright or else
+`uvx pyright@latest` in the pip form, pointed at the environment in a declared directory) run the
+same engine and never disagree.
 The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
 when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
@@ -134,7 +135,11 @@ uvx ruff@latest format --check            # verify format clean
 Its type checker runs against that environment. mypy runs as `.venv/bin/python -m mypy` where the
 environment installs it, and otherwise as `uvx mypy@latest --python-executable .venv/bin/python`,
 adding `--python-version` with the environment's version unless the mypy config pins one. pyright
-runs as `uvx pyright@latest --pythonpath .venv/bin/python`. Where the config sits in the project
+runs as `.venv/bin/python -m pyright --pythonpath .venv/bin/python` where the environment installs
+it, and otherwise as `uvx pyright@latest --pythonpath .venv/bin/python`. ruff follows the same
+precedence, as `.venv/bin/python -m ruff` where the environment installs it, in place of the
+`uvx ruff@latest` above. A tool the requirements pin is then the version CI runs, which their own
+Dependabot updates track. Where the config sits in the project
 directory, CI runs the checker there with no path, as in the uv form. A declared subdirectory with
 no config of its own uses the repository root's instead. CI then runs the checker from the root
 with the directory as its path and the interpreter as `<dir>/.venv/bin/python`. Run it the same
