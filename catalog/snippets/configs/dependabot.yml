@@ -103,7 +103,7 @@ updates:
   # Its directory points at that Python directory, so adjust it per repo layout.
   - package-ecosystem: "pip"
     target-branch: "main"
-    directory: "/PythonScripts"
+    directory: "/PythonProject"
     schedule:
       interval: "daily"
     groups:
@@ -117,7 +117,7 @@ updates:
 
   - package-ecosystem: "pip"
     target-branch: "develop"
-    directory: "/PythonScripts"
+    directory: "/PythonProject"
     schedule:
       interval: "daily"
     groups:
