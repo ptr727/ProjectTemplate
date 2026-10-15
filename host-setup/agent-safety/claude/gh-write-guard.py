@@ -4395,9 +4395,10 @@ def _check_bypass_flags(cmd):
     if hidden_admin:
         return "deny", (
             f"This runs `gh pr merge` with a run-time word, `{hidden_admin}`, among its words. The "
-            "shell rewrites it before gh reads it, and it may expand to `--admin`, which merges "
-            "past required reviews and status checks. Failing closed. Write every word of the merge "
-            'out. Only an option\'s quoted value, as in --body "$BODY", may be a run-time word.'
+            "shell rewrites it before gh reads it. It may expand to `--admin`, which merges past "
+            "required reviews and status checks, or name a repository the target check cannot "
+            "read. Failing closed. Write every word of the merge out. Only a quoted value of an "
+            'option other than --repo, as in --body "$BODY", may be a run-time word.'
             + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
