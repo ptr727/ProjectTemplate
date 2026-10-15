@@ -1223,14 +1223,15 @@ def _is_command_config_key(key):
 def _command_value(key, value):
     """(the command text git runs for config `key` set to `value`, or None, whether the guard can read it).
 
-    An empty or boolean value runs nothing.
+    An empty value runs nothing, and so does a boolean one for a config key.
+    An environment variable, passed with an empty `key`, has no boolean values.
     A `!` prefix, as a credential helper or a submodule update takes, is dropped from the shell text it marks.
     A submodule update without one names a git mode and runs nothing.
     Any other value is unreadable where its program word is a path, an expansion, or a home-relative name.
     Each names a file the guard does not read.
     """
     v = value.strip()
-    if v == "" or v.lower() in _CONFIG_BOOLEANS:
+    if v == "" or (key and v.lower() in _CONFIG_BOOLEANS):
         return None, True
     if v.startswith("!"):
         v = v[1:]
@@ -1264,15 +1265,24 @@ def _config_override_sources(global_opts):
 def _env_assignments(toks):
     """The `NAME=value` words in `toks` that reach a git command, as (name, value).
 
-    That is the run of them just before a git word, an `env` argument among them.
+    That is the run of them before a git word, read back past a precommand such as `env`, `sudo`, or `timeout` and its options.
     It is also each argument of an `export`, which persists to the commands after it.
     """
     out = []
     for k, t in enumerate(toks):
         if _is_git_exe(t):
             j = k - 1
-            while j >= 0 and _ENV_ASSIGN_RE.match(toks[j]):
-                out.append(_ENV_ASSIGN_RE.match(toks[j]).groups())
+            while j >= 0 and not _is_separator(toks[j]):
+                m = _ENV_ASSIGN_RE.match(toks[j])
+                if m:
+                    out.append(m.groups())
+                elif not (
+                    _is_command_prefix(toks[j])
+                    or _is_timeout_exe(toks[j])
+                    or toks[j].startswith("-")
+                    or re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", toks[j])
+                ):
+                    break
                 j -= 1
         elif t == "export" and _opens_command(toks, k):
             for word in toks[k + 1 :]:
@@ -2181,7 +2191,7 @@ _FOREIGN_SHELL_FLAGS = {
     "powershell": ("-command", "-cwa", "-commandwithargs"),
     "fish": ("--command",),
     "script": ("--command",),
-    "cmd": ("/c", "/k", "/r"),
+    "cmd": ("/c", "/k", "/r", "//c", "//k", "//r"),
     "ash": (),
     "csh": (),
     "tcsh": (),
@@ -3029,6 +3039,7 @@ def _unreadable_push(cmd):
 _CODE_INTERPRETERS = {
     "python": "c",
     "pypy": "c",
+    "py": "c",
     "node": "ep",
     "nodejs": "ep",
     "perl": "eE",
@@ -3172,7 +3183,7 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
         assignments = _env_assignments(toks)
         env_values = _env_config_values(assignments)
         for name, value in assignments:
-            if name in _CONFIG_FILE_ENV_VARS and value not in ("", "/dev/null"):
+            if name in _CONFIG_FILE_ENV_VARS and value != "/dev/null":
                 return f"a `{name}` config file the guard does not read"
             if name in _COMMAND_ENV_VARS and not _command_value("", value)[1]:
                 return f"a `{name}` program the guard does not read"
@@ -13154,7 +13165,7 @@ _HIDDEN_GIT_CASES = [
         "a GIT_EDITOR value naming a script is denied",
     ),
     (
-        "GIT_EDITOR=true git commit",
+        "GIT_EDITOR=nano git commit",
         "feature/x",
         {"develop": _CODE_RULES},
         "allow",
@@ -13285,6 +13296,41 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a push in text piped to a shell behind a timeout is denied",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=refs/heads/feature/x:refs/heads/develop timeout 60 git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "config set through GIT_CONFIG_COUNT before a timeout prefix is still read on the push",
+    ),
+    (
+        'GIT_EDITOR="git push origin develop" sudo -E git commit',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value before a sudo prefix is still read",
+    ),
+    (
+        'cmd //c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a cmd //c body, the Git Bash spelling, is read as a command",
+    ),
+    (
+        "py -c \"import os; os.system('git push origin develop')\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in py launcher code is denied",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL= git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an empty GIT_CONFIG_GLOBAL is read as a file the guard does not read",
     ),
 ]
 
