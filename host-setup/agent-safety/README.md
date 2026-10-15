@@ -102,8 +102,8 @@ text says, because the harm it covers was never in the text.
    also checked whole and with its first segment dropped. A bare push whose push target resolves while `git remote` cannot list the
    remotes is denied. A bare push's destination is also read from the branch's own configuration.
    That is its own name under a `push.default` of `current` or `simple`, and each
-   `branch.<name>.merge` branch under `upstream`. Both are read where `push.default` holds a value git
-   does not define, or where its read fails for a reason other than an unset key. A bare push is denied
+   `branch.<name>.merge` branch under `upstream`. An unset `push.default` is read as `simple`. Both are
+   read where `push.default` holds a value git does not define, or where its read exits with any other error. A bare push is denied
    where any read of its branch, its push target, or `push.default` times out or cannot run. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
