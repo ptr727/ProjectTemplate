@@ -219,7 +219,9 @@ for, and it binds harder than any throughput target.
   has already opened a pull request, say whether it closes or waits, since one left open on an
   abandoned branch reads to every later round as a live claim. **Update the claim comment whenever
   the adjudication changes what a group holds**, in either direction, or the durable record drifts
-  from the real claim it exists to report.
+  from the real claim it exists to report. A group told to abandon its branch loses only the
+  contested file here, and the rest of its claim is left for cleanup to release or keep, per
+  "Cleanup Is the Orchestrator's".
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -260,6 +262,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
   A brief dispatching an issue returned to the ranking names a new branch.
+  The name is one no pull request on the repository has used as its head, checked with
+  `gh pr list --head <name> --state all` before the claim comment is written.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line, so a brief that omits it produces a pull request nothing can derive a closing set from.
@@ -299,7 +303,7 @@ one for the other is how a removal that discards nothing gets routed to the main
 removal that discards commits gets waved through. Retiring a worktree alone, the branch left
 standing, risks only what is uncommitted in it: a clean tree is the whole test, the branch's own
 contents do not enter it, and a tree that is not clean is left exactly as it stands while the
-group goes to the maintainer per "Raising a Blocked Question". Deleting the branch as well risks what is committed, so it carries
+group is stopped for the maintainer per "Raising a Blocked Question". Deleting the branch as well risks what is committed, so it carries
 whichever branch check the group's state calls for, `repo-worktree`'s verify-before-removing for a
 group whose pull request merged and the no-merge substitute below for one whose has not. Which
 check that is matters: a squash merge never makes the feature tip an ancestor of develop, so the
@@ -364,7 +368,7 @@ no commit that is not already on develop before anything is removed. A worker th
 fix and then died leaves a clean tree standing over commits develop has never seen, so that check
 is what separates the two. It holds, and the issue returns to the next round's ranking to be
 dispatched on a new branch, its claim comment released with the worktree. It fails, and cleanup stops there
-and the group goes to the maintainer, since past that point removal discards work. **A dirty one is left exactly as it stands**
+and the group is stopped for the maintainer per "Raising a Blocked Question", since past that point removal discards work. **A dirty one is left exactly as it stands**
 and the group is stopped for the maintainer per "Raising a Blocked Question", naming the worktree
 and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
 replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety".
