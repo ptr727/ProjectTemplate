@@ -314,7 +314,10 @@ def _live_branch_rules(owner, repo, branch):
 
 
 def _current_push_branch(cwd):
-    """Resolve the destination branches of a bare `git push` from the branch's configured push target."""
+    """Resolve the destination branches of a bare `git push` from the branch's configured push target.
+
+    It answers `_UNRESOLVED` when the push target resolves but the remote names cannot be read.
+    """
     return _read_branch(
         cwd,
         (
@@ -371,20 +374,23 @@ def _push_ref_branches(ref, remotes):
 
 
 def _read_branch(cwd, reads):
-    """The branch names the first of `reads` that succeeds in `cwd` gives, or None.
+    """The branch names the first of `reads` that succeeds in `cwd` gives, None, or `_UNRESOLVED`.
 
     Each read is `(args, remote)`. A remote read gives a full name such as
     `refs/remotes/origin/feature/x`, read by `_push_ref_branches` against the remotes `git remote`
     lists. The full name is read, since `--abbrev-ref` prints `remotes/origin/x` once a local branch
-    is named `origin/x`. A local read gives a branch name such as `release/1.0`, which is kept
-    whole. That name is also read with its first segment stripped, as this function read every
-    name before, so both names are checked.
+    is named `origin/x`. A failed `git remote` read is `_UNRESOLVED`, since without the remote
+    names a remote such as `up/stream` keeps a segment and its branch goes unread. A local read
+    gives a branch name such as `release/1.0`, which is kept whole. That name is also read with its
+    first segment stripped, as this function read every name before, so both names are checked.
     """
     for args, remote in reads:
         ref = _git_stdout(cwd, args)
         if ref and ref != "HEAD":
             if remote:
-                remotes = _git_stdout(cwd, ["remote"]) or ""
+                remotes = _git_stdout(cwd, ["remote"])
+                if remotes is None:
+                    return _UNRESOLVED
                 return _push_ref_branches(ref, remotes.splitlines())
             stripped = ref.split("/", 1)[1] if "/" in ref else ref
             return list(dict.fromkeys((ref, stripped)))
@@ -11092,6 +11098,55 @@ def _push_name_selftest(origin):
     return ok
 
 
+def _push_remote_read_selftest(origin):
+    """Check that a bare push whose `git remote` read fails is unresolved, in a constructed repository.
+
+    The push target is `refs/remotes/up/stream/develop`, under a remote whose name holds a slash.
+    Only the `git remote` read is made to fail, so the `@{push}` read still resolves.
+    """
+    import shutil
+    import tempfile
+
+    if os.name == "nt" or os.path.sep != "/":
+        print("  skip [push ] the failed remote read case needs POSIX paths")
+        return True
+    root = tempfile.mkdtemp(prefix="guard-push-remote-")
+    saved = globals()["_git_stdout"]
+    try:
+        repo = os.path.join(root, "repo")
+        setup = [
+            ["remote", "add", "up/stream", "https://example.invalid/stream.git"],
+            ["update-ref", "refs/remotes/up/stream/develop", "HEAD"],
+            ["config", "push.default", "upstream"],
+            ["switch", "-q", "-c", "feature/two"],
+            ["branch", "-q", "-u", "refs/remotes/up/stream/develop"],
+        ]
+        if not _build_selftest_repo(repo, setup):
+            print("  skip [push ] could not build the repository for the failed remote read case")
+            return True
+        globals()["_git_stdout"] = lambda cwd, args: (
+            None if args == ["remote"] else saved(cwd, args)
+        )
+        got = _current_push_branch(repo)
+        verdict, reason = classify(
+            "git push",
+            cwd=repo,
+            origin=origin,
+            rules_lookup=lambda br: {"pull_request"} if br == "develop" else set(),
+            environ={},
+            primary_checkout_lookup=lambda d: False,
+        )
+    finally:
+        globals()["_git_stdout"] = saved
+        shutil.rmtree(root, ignore_errors=True)
+    good = got is _UNRESOLVED and verdict == "deny" and "Could not tell which branch" in reason
+    print(
+        f"  {'ok  ' if good else 'FAIL'} [{verdict:5}] a failed git remote read under a slash-named"
+        " remote is unresolved"
+    )
+    return good
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -11576,6 +11631,8 @@ def _selftest():
     if not _push_dir_selftest(origin):
         ok = False
     if not _push_name_selftest(origin):
+        ok = False
+    if not _push_remote_read_selftest(origin):
         ok = False
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
