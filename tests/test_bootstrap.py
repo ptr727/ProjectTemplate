@@ -1385,7 +1385,9 @@ STUB_ARGS_TOOL = """\
 #!/usr/bin/env bash
 step="$(basename "$0")"
 for arg in "$@"; do
-    [[ $arg == --yes ]] || step="$step $arg"
+    [[ $arg == "--yes" ]] && continue
+    [[ $arg == *" "* ]] && arg="<$arg>"
+    step="$step $arg"
 done
 kept=absent
 [[ -e "$KEPT_TREE/VERSION" ]] && kept=$(cat "$KEPT_TREE/VERSION")
@@ -1641,12 +1643,18 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual([step for step, _, _ in self.steps()], ["upgrade-host.sh --packages"])
         self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
     def test_a_report_runs_every_step_including_the_agent_tools(self) -> None:
         result = self.run_main(action="--report")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS), result.stderr)
         self.assertNotIn("did not report", result.stdout)
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
     def test_a_report_whose_agent_tools_step_fails_still_completes_and_names_it(self) -> None:
         result = self.run_main("install-agents.sh --report", action="--report")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1692,7 +1700,8 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
 
 
 STUB_POWERSHELL_TOOL = """\
-$step = (@(Split-Path -Leaf $PSCommandPath) + $args) -join ' '
+$shown = $args | ForEach-Object { if ($_ -match '\\s') { "<$_>" } else { $_ } }
+$step = (@(Split-Path -Leaf $PSCommandPath) + $shown) -join ' '
 Add-Content -LiteralPath $env:STEP_LOG -Value $step
 if ($step -eq $env:FAIL_STEP) { exit 7 }
 exit 0

@@ -1,4 +1,4 @@
-"""Host capabilities a test needs and a Windows host may lack.
+"""Host capabilities a test needs and some hosts lack.
 
 A test that needs one of these skips with the reason when the host lacks it, rather than
 erroring on a precondition that has nothing to do with the code under test.
@@ -39,8 +39,8 @@ requires_symlink = unittest.skipUnless(can_symlink(), NO_SYMLINK)
 def unprivileged_root_is_available() -> bool:
     """Whether `unshare -r` gives this process an EUID of 0 without any real privilege.
 
-    The guard under test reads `$EUID`, which bash makes read-only, so the sudo'd run cannot be
-    faked by setting a variable and has to be a real EUID 0. A user namespace is the one way to
+    A guard reading `$EUID` cannot be fooled by setting a variable, since bash makes it read-only.
+    A sudo'd run therefore has to be a real EUID 0. A user namespace is the one way to
     reach that without root, and it is unavailable on a host that restricts unprivileged user
     namespaces, which is why this is probed rather than assumed.
     """
