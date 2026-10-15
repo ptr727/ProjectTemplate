@@ -90,8 +90,8 @@ text says, because the harm it covers was never in the text.
    branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
    segment dropped. A bare push's configured push target is read by its full name, such as
    `refs/remotes/up/stream/x`. Where the text after `refs/remotes/` starts with a remote name
-   `git remote` lists and a `/`, that name and its `/` are stripped. That text is also checked whole
-   and with its first segment dropped. A bare push whose push target resolves while `git remote` cannot list the
+   `git remote` lists and a `/`, that name and its `/` are stripped. The text after `refs/remotes/` is
+   also checked whole and with its first segment dropped. A bare push whose push target resolves while `git remote` cannot list the
    remotes is denied. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
