@@ -5416,8 +5416,9 @@ NARRATIVE_LISTED = (
 def with_narrative(
     listed: str | None = NARRATIVE_LISTED, label: str = "Open findings remain:"
 ) -> str:
-    """A revised-format body whose open section links the four `NARRATIVE_THREADED` threads, and
-    whose narrative block lists `listed` under `label` after its change bullets, where it was seen.
+    """A revised-format body whose open section links the four `NARRATIVE_THREADED` threads.
+
+    Its narrative block lists `listed` under `label` after its change bullets, where it was seen.
     `None` leaves the narrative carrying no such list.
     """
     body = revised_with(badged_section([(s, i) for s, i, _ in NARRATIVE_THREADED]))
@@ -5469,8 +5470,8 @@ class TestNarrativeFindings(GqlCase):
         self.assertIn("overview=4/4", out)
         self.assertIn("FINDINGS WITH NO THREAD (3)", out)
         self.assertIn(
-            "3 of the entries under its `Open findings remain:` label pair with no thread of "
-            "that round on its file at its severity",
+            "3 of the entries under its `Open findings remain:` label pair with no thread at "
+            "the severity it states, on a file it names where it names one",
             out,
         )
 
@@ -5525,10 +5526,16 @@ class TestNarrativeFindings(GqlCase):
         )
         self.assertEqual(0, self.count(body))
 
-    def test_an_earlier_round_s_thread_does_not_cover_an_entry(self) -> None:
-        """The list is this round's, so a thread another round opened on that file is not its."""
+    def test_an_earlier_round_s_thread_an_open_entry_links_covers_an_entry(self) -> None:
+        """An open entry standing for that thread makes it a finding this round still names."""
         listed = "- `pkg/guard.py`: a failed read skips the check (**critical**, 1 vote).\n"
-        self.assertEqual(1, self.count(with_narrative(listed), narrative_threads("PRR_old")[1:]))
+        self.assertEqual(0, self.count(with_narrative(listed), narrative_threads("PRR_old")))
+
+    def test_an_entry_saying_each_counts_as_two_findings(self) -> None:
+        """One low thread covers one of the two findings the entry names, and leaves the other."""
+        listed = "- Missing documentation and install coverage remain (**nit**, 2 votes each).\n"
+        self.assertEqual(1, self.count(with_narrative(listed), narrative_threads()[:2]))
+        self.assertEqual(0, self.count(with_narrative(listed)))
 
     def test_a_first_format_round_is_not_read(self) -> None:
         body = with_narrative().replace(CCR_MARKER, "")

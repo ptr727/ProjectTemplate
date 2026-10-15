@@ -219,7 +219,7 @@ Subcommands
            An `Open findings remain:` list is read the same way, except that an entry pairs only
            with a thread whose open entry is badged at the severity tier the entry's own bold
            word states. An entry naming no file pairs on that tier alone, and an entry or thread
-           whose tier is not read pairs with nothing.
+           whose tier is not read pairs with nothing. An entry saying `each` counts as two.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -533,7 +533,7 @@ SEVERITY_BADGE = re.compile(
 # The severity alone does not separate the two, a section being free to name one in its own heading.
 # Every vetted section heading here states its count and a finding's title states none, so the absence of one is the other half of the test.
 # Without it a section this has no reader for is vetted on its first word, which turns a shape that reports itself into one that is silently passed over.
-SEVERITY_TEXT = re.compile(r"(?:critical|high|medium|low)\s+severity\b", re.IGNORECASE)
+SEVERITY_TEXT = re.compile(r"(critical|high|medium|low)\s+severity\b", re.IGNORECASE)
 # The count as `normal` leaves it rather than as the heading wrote it.
 # `normal` rewrites every `(\d+)` to `(N)` before a marker is ever compared, so a reader keyed on the digits finds none and reads every section heading as carrying no count.
 NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
@@ -2669,7 +2669,7 @@ def unmatched(findings: int, threads: int, fits: Callable[[int, int], bool]) -> 
     """How many of `findings` pair with none of `threads`, where `fits` says which pairs may.
 
     Each thread pairs with one finding at most. The pairing is the largest there is, found by
-    augmenting paths, so no order of listing leaves a finding unpaired that some other pairing
+    augmenting paths. So no order of listing leaves a finding unpaired that some other pairing
     would place.
     """
     owner: dict[int, int] = {}
@@ -2807,8 +2807,8 @@ def labelled_entries(body: str, label: re.Pattern[str]) -> list[str]:
 
     An entry is a bullet at the margin in the run of lines directly under the label, and an
     indented line continues the entry above it. The label and the bullets are found where
-    quotations are masked, so a body quoting the list is not read as carrying one, and each
-    entry's text is taken from the body.
+    quotations are masked, so a body quoting the list is not read as carrying one. Each entry's
+    text is taken from the body.
     """
     raw = (body or "").splitlines()
     masked = mask_quotations(body or "").splitlines()
@@ -2869,7 +2869,7 @@ NARRATIVE_FINDINGS = re.compile(
     r"^ {0,3}[*_]{0,2}Open findings remain[*_]{0,2}:[*_]{0,2}[ \t]*$", re.IGNORECASE
 )
 ENTRY_SEVERITY = re.compile(r"\*\*([A-Za-z]+)\*\*")
-BADGE_SEVERITY = re.compile(r"\b([A-Za-z]+)\s+severity\b", re.IGNORECASE)
+ENTRY_EACH = re.compile(r"\beach\b", re.IGNORECASE)
 SEVERITY_TIER = {
     "critical": 3,
     "high": 3,
@@ -2884,8 +2884,8 @@ def entry_tier(entry: str) -> int | None:
     """The tier the bold severity words of one entry state, or None where they state not one.
 
     Read outside its code spans, so a quoted bold word is not a severity. The list and the open
-    section's badges spell severity in two vocabularies, and the one round seen wrote `critical`
-    over a `High` badge and `nit` over a `Low` one. So the top two words share a tier in
+    section's badges spell severity in two vocabularies. The one round seen wrote `critical` over
+    a `High` badge and `nit` over a `Low` one. So the top two words share a tier in
     `SEVERITY_TIER`, and a word missing from it states no tier.
     """
     words = ENTRY_SEVERITY.findall(CODE_SPAN.sub(" ", entry))
@@ -2909,7 +2909,7 @@ def open_entry_tiers(body: str) -> dict[str, int | None]:
             if not ids:
                 continue
             badge = SEVERITY_BADGE.search(line)
-            word = BADGE_SEVERITY.search(badge_text(badge)) if badge else None
+            word = SEVERITY_TEXT.search(badge_text(badge)) if badge else None
             tier = SEVERITY_TIER.get(word.group(1).casefold()) if word else None
             tiers[ids[0]] = tier if tiers.get(ids[0], tier) == tier else None
     return tiers
@@ -2918,19 +2918,26 @@ def open_entry_tiers(body: str) -> dict[str, int | None]:
 def unthreaded_narrative_findings(pr: dict) -> int:
     """How many `Open findings remain:` entries in the head round pair with no thread of it.
 
-    An entry pairs with a thread `round_accounted_threads` lists only at the tier its own bold
-    severity word states, which must equal the tier the open entry linking that thread is badged
-    at. It must also name that thread's file, per `names_path`, where it names any path at all.
-    The file alone was not enough, a round having listed an entry beside a thread on its file
-    that carried another finding. An entry naming no path pairs on the tier alone, a round having
-    listed one such entry for findings its threads carry. An entry or a thread whose tier is not
-    read pairs with nothing, which overstates rather than hides.
+    The threads are the ones `round_accounted_threads` lists. An entry's own bold severity word
+    states a tier, and it pairs only with a thread whose open entry is badged at that tier. It
+    must also name that thread's file, per `names_path`, where it names any path at all. The file
+    alone was not enough, a round having listed an entry beside a thread on its file that carried
+    another finding. An entry naming no path pairs on the tier alone, a round having listed one
+    such entry for findings its threads carry. An entry or a thread whose tier is not read pairs
+    with nothing, which overstates rather than hides.
+
+    An entry saying `each` names several findings, so it counts as two, each pairing on its own.
+    A third finding it names is the case this cannot see.
     """
     newest = second_format_head(pr)
     if newest is None:
         return 0
     body = newest.get("body") or ""
-    entries = labelled_entries(body, NARRATIVE_FINDINGS)
+    entries = [
+        entry
+        for entry in labelled_entries(body, NARRATIVE_FINDINGS)
+        for _ in range(2 if ENTRY_EACH.search(CODE_SPAN.sub(" ", entry)) else 1)
+    ]
     named = [entry_paths(entry) for entry in entries]
     wants = [entry_tier(entry) for entry in entries]
     tiers = open_entry_tiers(body)
@@ -4873,8 +4880,8 @@ def digest(
             )
             + (
                 f", and {narrative} of the entries under its `Open findings remain:` label "
-                f"{'pairs' if narrative == 1 else 'pair'} with no thread of that round on its "
-                "file at its severity"
+                f"{'pairs' if narrative == 1 else 'pair'} with no thread at the severity it "
+                "states, on a file it names where it names one"
                 if narrative
                 else ""
             )
