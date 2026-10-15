@@ -1284,20 +1284,68 @@ def _env_assignments(toks, k=None):
 
 _DURATION_WORD = re.compile(r"\d+(?:\.\d+)?[smhd]?")
 _PRECOMMAND_VALUE_OPTS = {
-    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t", "-R", "-T"}),
+    "sudo": frozenset(
+        {
+            "-u",
+            "-g",
+            "-C",
+            "-D",
+            "-h",
+            "-p",
+            "-U",
+            "-r",
+            "-t",
+            "-R",
+            "-T",
+            "--user",
+            "--group",
+            "--chdir",
+            "--host",
+            "--prompt",
+            "--other-user",
+            "--role",
+            "--type",
+            "--close-from",
+            "--command-timeout",
+            "--chroot",
+        }
+    ),
     "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
     "gtimeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
     "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
     "nice": frozenset({"-n", "--adjustment"}),
-    "ionice": frozenset({"-c", "-n", "-p"}),
-    "stdbuf": frozenset({"-i", "-o", "-e"}),
-    "xargs": frozenset({"-n", "-L", "-P", "-d", "-E", "-I", "-a", "-s"}),
+    "ionice": frozenset({"-c", "-n", "-p", "--class", "--classdata", "--pid"}),
+    "stdbuf": frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
+    "xargs": frozenset(
+        {
+            "-n",
+            "-L",
+            "-P",
+            "-d",
+            "-E",
+            "-I",
+            "-a",
+            "-s",
+            "--delimiter",
+            "--eof",
+            "--arg-file",
+            "--max-args",
+            "--max-lines",
+            "--max-procs",
+            "--max-chars",
+        }
+    ),
 }
+
+
+def _base_name(tok):
+    """The lowercased base name of a command word, with any directory and an `.exe` suffix removed."""
+    return tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
 
 
 def _is_precommand(tok):
     """True if the word runs the command after it, such as `env`, `sudo`, `timeout`, or `xargs`."""
-    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    base = _base_name(tok)
     return _is_command_prefix(tok) or _is_timeout_exe(tok) or base == "xargs"
 
 
@@ -1330,7 +1378,7 @@ def _command_prefix(toks, k):
         elif toks[i].isdigit() and i + 1 < len(toks) and _is_redir_op(toks[i + 1]):
             i += 3
         elif _is_precommand(toks[i]):
-            base = toks[i].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+            base = _base_name(toks[i])
             takes = _PRECOMMAND_VALUE_OPTS.get(base, frozenset())
             i += 1
             while i < k and (toks[i].startswith("-") or _DURATION_WORD.fullmatch(toks[i])):
@@ -2264,7 +2312,7 @@ def _command_string_exe(tok):
     A shell `_FOREIGN_SHELL_FLAGS` names counts, beside the POSIX ones.
     Its body is read as a command, while the rules that read a POSIX wrapper as moving a push keep to `_SHELL_WRAPPER_EXE`.
     """
-    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    base = _base_name(tok)
     return base if base in _SHELL_WRAPPER_EXE or base in _FOREIGN_SHELL_FLAGS else None
 
 
@@ -3106,8 +3154,7 @@ def _interpreter_code(tok, args):
     That is the word after an option naming its code, and the option word itself, which may hold the code attached.
     An `awk` program is its first argument, so every awk argument is read.
     """
-    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
-    base = re.sub(r"[0-9.]+$", "", base)
+    base = re.sub(r"[0-9.]+$", "", _base_name(tok))
     letters = _CODE_INTERPRETERS.get(base)
     if letters is None:
         return []
@@ -13459,6 +13506,27 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "allow",
         "control: an assignment-shaped rg argument behind a timeout is not git's environment",
+    ),
+    (
+        "sudo --user root pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -Command body after a sudo with a long user option is read as a command",
+    ),
+    (
+        'GIT_EDITOR="git push origin develop" sudo -E --user root git commit',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value before a sudo with a long user option is still read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config xargs --delimiter , git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before xargs with a long delimiter option is still read",
     ),
 ]
 
