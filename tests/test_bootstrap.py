@@ -1684,6 +1684,30 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.agents_steps(), ["install-agents.sh --install --all"])
 
+    def test_agents_all_beside_other_names_is_refused_before_anything_runs(self) -> None:
+        for given in ("all,herdr", "herdr,all"):
+            with self.subTest(given=given):
+                result = self.run_main(action="--agents", args=(given,))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('--agents takes "all" alone', result.stderr)
+                self.assertEqual(self.steps(), [])
+
+    def test_agents_drops_empty_names_from_the_list(self) -> None:
+        result = self.run_main(action="--agents", args=("herdr,,cswap,",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), ["install-agents.sh --install herdr cswap"])
+
+    def test_agents_all_with_a_trailing_comma_is_still_all_alone(self) -> None:
+        result = self.run_main(action="--agents", args=("all,",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), ["install-agents.sh --install --all"])
+
+    def test_agents_with_only_commas_is_refused_before_anything_runs(self) -> None:
+        result = self.run_main(action="--agents", args=(",",))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--agents takes the tools to install", result.stderr)
+        self.assertEqual(self.steps(), [])
+
     def test_agents_with_an_empty_list_is_refused_before_anything_runs(self) -> None:
         result = self.run_main(action="--agents", args=("",))
         self.assertNotEqual(result.returncode, 0)
@@ -1853,6 +1877,11 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("-Agents takes 'all' alone", result.stderr)
         self.assertEqual(self.steps(), [])
+
+    def test_empty_names_are_dropped_from_the_list(self) -> None:
+        result = self.run_agents(["herdr,,cswap,"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), ["install-agents.ps1 -Install herdr cswap"], result.stdout)
 
     def test_an_empty_list_is_refused(self) -> None:
         result = self.run_agents([","])
