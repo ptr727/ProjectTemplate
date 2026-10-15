@@ -452,12 +452,17 @@ function Show-Report {
     if ($LASTEXITCODE -ne 0) { info 'The fleet skills step did not report a current copy, and the output above says why' }
     if (Test-AgentsUser) {
         Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) { info 'The agent tools step did not report, and the output above says why' }
     }
+}
+
+function Test-Elevated {
+    $IsWindows -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 # The agent tools live in a user's profile, and an administrator's holds none on a host where a person uses them, so an elevated run skips them and says so.
 function Test-AgentsUser {
-    if ($IsWindows -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    if (Test-Elevated) {
         info "Running elevated, so no user's coding-agent tools are read, run this as that user to include them"
         return $false
     }

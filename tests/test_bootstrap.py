@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import TextIO, cast
 
 from host_capability import bash_or_skip
+from test_skills_install import unprivileged_root_is_available
 
 ROOT = Path(__file__).resolve().parent.parent
 BOOTSTRAP = ROOT / "host-setup" / "bootstrap.sh"
@@ -930,7 +931,8 @@ $wanted = @(
     'log', 'info', 'step', 'warn', 'die',
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
-    'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall'
+    'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
+    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -987,6 +989,27 @@ function Set-MoveFailure {
 """
 
 
+def powershell_harness_command(work: Path, directory: Path, body: str) -> list[str]:
+    """The pwsh command running `body` in the harness, its files written under `work` and `directory` passed as the loader's -Dir."""
+    harness = work / "harness.ps1"
+    harness.write_text(POWERSHELL_TREE_HARNESS, encoding="utf-8")
+    body_file = work / "body.ps1"
+    body_file.write_text(body, encoding="utf-8")
+    return [
+        "pwsh",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        str(harness),
+        "-Loader",
+        str(BOOTSTRAP_PS),
+        "-Dir",
+        str(directory),
+        "-BodyFile",
+        str(body_file),
+    ]
+
+
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows loader's own functions")
 class TestPowerShellKeptTreeHandling(unittest.TestCase):
     """The Windows loader's removal and swap of the trees it owns, driven through its own functions.
@@ -1008,23 +1031,7 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
                 path.chmod(0o755)
 
     def loader_command(self, directory: Path, body: str) -> list[str]:
-        harness = directory / "harness.ps1"
-        harness.write_text(POWERSHELL_TREE_HARNESS, encoding="utf-8")
-        body_file = directory / "body.ps1"
-        body_file.write_text(body, encoding="utf-8")
-        return [
-            "pwsh",
-            "-NoProfile",
-            "-NonInteractive",
-            "-File",
-            str(harness),
-            "-Loader",
-            str(BOOTSTRAP_PS),
-            "-Dir",
-            str(self.dir),
-            "-BodyFile",
-            str(body_file),
-        ]
+        return powershell_harness_command(directory, self.dir, body)
 
     def run_loader(
         self, body: str, env: dict[str, str] | None = None
@@ -1411,6 +1418,8 @@ STAND_UP_STEPS = (
     "install-skills.sh",
 )
 
+UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
+
 
 @unittest.skipUnless(
     sys.platform == "linux" and shutil.which("flock") and shutil.which("tar"),
@@ -1441,7 +1450,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.mv_log = self.root / "mv.log"
         self.tarball = self.root / "source.tar.gz"
         with tarfile.open(self.tarball, "w:gz") as archive:
-            for tool in sorted({step.split()[0] for step in STAND_UP_STEPS}):
+            for tool in sorted({step.split()[0] for step in (*STAND_UP_STEPS, *UPGRADE_STEPS)}):
                 self.add_member(
                     archive, f"ProjectTemplate-abc/host-setup/linux/{tool}", STUB_TOOL, 0o755
                 )
@@ -1464,7 +1473,10 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         (self.kept / ".bootstrap-owned").touch()
         (self.kept / "VERSION").write_text("old", encoding="utf-8")
 
-    def run_main(self, fail_step: str = "") -> subprocess.CompletedProcess[str]:
+    def run_main(
+        self, fail_step: str = "", action: str = "--host", root: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs the loader with `action`, under a user namespace's EUID 0 where `root` is set."""
         env = {
             "PATH": f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
             "HOME": str(self.home),
@@ -1476,7 +1488,15 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
             "STUB_COMMIT": "0123456789abcdef0123456789abcdef01234567",
         }
         return subprocess.run(
-            [bash_or_skip(), str(BOOTSTRAP), "--host", "--yes", "--dir", str(self.data)],
+            [
+                *(["unshare", "-r"] if root else []),
+                bash_or_skip(),
+                str(BOOTSTRAP),
+                action,
+                "--yes",
+                "--dir",
+                str(self.data),
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1570,6 +1590,121 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(self.steps()[-1][0], "install-skills.sh")
         self.assertEqual(self.version(), "new", result.stderr)
         self.assertEqual(self.leftovers(), [], result.stderr)
+
+    def test_an_upgrade_runs_the_package_upgrade_then_the_agent_tools_upgrade(self) -> None:
+        result = self.run_main(action="--upgrade")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([step for step, _, _ in self.steps()], list(UPGRADE_STEPS), result.stderr)
+
+    def test_a_failed_package_upgrade_stops_before_the_agent_tools_upgrade(self) -> None:
+        result = self.run_main("upgrade-host.sh --packages", action="--upgrade")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual([step for step, _, _ in self.steps()], ["upgrade-host.sh --packages"])
+
+    @unittest.skipUnless(
+        unprivileged_root_is_available(), "needs an unprivileged user namespace to reach EUID 0"
+    )
+    def test_an_upgrade_as_root_skips_the_agent_tools_and_says_so(self) -> None:
+        result = self.run_main(action="--upgrade", root=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([step for step, _, _ in self.steps()], ["upgrade-host.sh --packages"])
+        self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
+
+
+STUB_POWERSHELL_TOOL = """\
+$step = (@(Split-Path -Leaf $PSCommandPath) + $args) -join ' '
+Add-Content -LiteralPath $env:STEP_LOG -Value $step
+if ($step -eq $env:FAIL_STEP) { exit 7 }
+exit 0
+"""
+
+POWERSHELL_REPORT_STEPS = (
+    "upgrade-host.ps1 -Status",
+    "install-tools.ps1 -Report",
+    "setup-github.ps1 -Status",
+    "install-skills.ps1 -Report",
+    "install-agents.ps1 -Report",
+)
+
+POWERSHELL_UPGRADE_STEPS = ("upgrade-host.ps1 -Packages", "install-agents.ps1 -Upgrade")
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows loader's own functions")
+class TestPowerShellToolHandoff(unittest.TestCase):
+    """`bootstrap.ps1`'s upgrade and report handoffs, run through its own functions against stub tools.
+
+    Each stub records the step it was run as, so the order and the set of steps are asserted from
+    what ran rather than from the loader's text. Elevation is stood in for through `Test-Elevated`
+    on every run, so a case reads the same on an elevated Windows runner as on a user's session.
+    """
+
+    def setUp(self) -> None:
+        self.work = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.tree = self.work / "tree"
+        tools = self.tree / "host-setup" / "windows"
+        tools.mkdir(parents=True)
+        for step in (*POWERSHELL_REPORT_STEPS, *POWERSHELL_UPGRADE_STEPS):
+            (tools / step.split()[0]).write_text(STUB_POWERSHELL_TOOL, encoding="utf-8")
+        self.log = self.work / "steps.log"
+
+    def run_handoff(
+        self, call: str, elevated: bool = False, fail_step: str = ""
+    ) -> subprocess.CompletedProcess[str]:
+        body = (
+            "$script:TREE = $env:FIXTURE_TREE\n"
+            "function Test-Elevated { $env:FIXTURE_ELEVATED -eq '1' }\n"
+            f"{call}\n"
+        )
+        harness = self.work / "harness"
+        harness.mkdir(exist_ok=True)
+        return subprocess.run(
+            powershell_harness_command(harness, self.work, body),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=120,
+            env={
+                **os.environ,
+                "FIXTURE_TREE": str(self.tree),
+                "FIXTURE_ELEVATED": "1" if elevated else "0",
+                "STEP_LOG": str(self.log),
+                "FAIL_STEP": fail_step,
+            },
+        )
+
+    def steps(self) -> list[str]:
+        if not self.log.exists():
+            return []
+        return self.log.read_text(encoding="utf-8").splitlines()
+
+    def test_an_upgrade_runs_the_package_upgrade_then_the_agent_tools_upgrade(self) -> None:
+        result = self.run_handoff("Invoke-Upgrade")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_UPGRADE_STEPS), result.stdout)
+
+    def test_a_failed_package_upgrade_stops_before_the_agent_tools_upgrade(self) -> None:
+        result = self.run_handoff("Invoke-Upgrade", fail_step="upgrade-host.ps1 -Packages")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.steps(), ["upgrade-host.ps1 -Packages"], result.stdout)
+
+    def test_an_elevated_upgrade_skips_the_agent_tools_and_says_so(self) -> None:
+        result = self.run_handoff("Invoke-Upgrade", elevated=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), ["upgrade-host.ps1 -Packages"], result.stdout)
+        self.assertIn("Running elevated, so no user's coding-agent tools are read", result.stdout)
+
+    def test_a_report_names_an_agent_tools_step_that_did_not_report(self) -> None:
+        result = self.run_handoff("Show-Report", fail_step="install-agents.ps1 -Report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS), result.stdout)
+        self.assertIn("The agent tools step did not report", result.stdout)
+
+    def test_a_report_whose_agent_tools_step_reports_names_no_failure(self) -> None:
+        result = self.run_handoff("Show-Report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS), result.stdout)
+        self.assertNotIn("did not report", result.stdout)
 
 
 def menu_functions() -> str:
