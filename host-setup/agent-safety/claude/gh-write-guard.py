@@ -6098,10 +6098,15 @@ def classify(
         return dec, reason
     hidden = _hidden_command(cmd, cwd, config_lookup)
     if hidden:
+        advice = (
+            "Run the command the alias expands to as its own command"
+            if hidden.startswith("a `!` shell alias")
+            else "Run the command without that override or variable"
+        )
         return "deny", (
             f"This git command holds {hidden}, so the guard cannot tell what it runs. Failing "
-            "closed. Run the command without that override or variable, and run a push as git "
-            "push itself with an explicit refspec." + _handoff(cmd)
+            f"closed. {advice}, and run a push as git push itself with an explicit refspec."
+            + _handoff(cmd)
         )
     # A word the shell rewrites before git reads it can hide a push target or a commit bypass, so it fails closed.
     rewritten = _rewritten_git_words(cmd)
@@ -13942,10 +13947,10 @@ _ALIAS_PUSH_CASES = [
         "a persisted shell alias is denied whatever it runs, since its shell text is not read",
     ),
     (
-        "git q origin develop",
-        {"q": "p", "p": "!sh -c 'git push origin develop'"},
+        "git q",
+        {"q": "p", "p": "!git st", "st": "status"},
         "deny",
-        "a persisted shell alias deeper in a chain is denied",
+        "a persisted shell alias deeper in a chain is denied, whatever it runs",
     ),
     (
         "bash -c 'git p origin develop'",
