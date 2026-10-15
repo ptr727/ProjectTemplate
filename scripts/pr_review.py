@@ -216,6 +216,10 @@ Subcommands
            thread per entry, is a finding with no thread. Where those entries outnumber the
            shortfall above, the block counts them instead. A thread an open entry links counts as
            that round's in both pairings, since the entry names a finding the round still holds.
+           An `Open findings remain:` list is read the same way, except that an entry pairs only
+           with a thread whose open entry is badged at the severity tier the entry's own bold
+           word states. An entry naming no file pairs on that tier alone, and an entry or thread
+           whose tier is not read pairs with nothing.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -2656,11 +2660,23 @@ def unpaired(named: list[list[str]], paths: list[str]) -> int:
     the largest there is, found by augmenting paths. So no order of listing leaves a finding
     unpaired that some other pairing would place.
     """
+    return unmatched(
+        len(named), len(paths), lambda f, t: any(names_path(n, paths[t]) for n in named[f])
+    )
+
+
+def unmatched(findings: int, threads: int, fits: Callable[[int, int], bool]) -> int:
+    """How many of `findings` pair with none of `threads`, where `fits` says which pairs may.
+
+    Each thread pairs with one finding at most. The pairing is the largest there is, found by
+    augmenting paths, so no order of listing leaves a finding unpaired that some other pairing
+    would place.
+    """
     owner: dict[int, int] = {}
 
     def place(finding: int, seen: set[int]) -> bool:
-        for thread, path in enumerate(paths):
-            if thread in seen or not any(names_path(n, path) for n in named[finding]):
+        for thread in range(threads):
+            if thread in seen or not fits(finding, thread):
                 continue
             seen.add(thread)
             if thread not in owner or place(owner[thread], seen):
@@ -2668,7 +2684,7 @@ def unpaired(named: list[list[str]], paths: list[str]) -> int:
                 return True
         return False
 
-    return sum(1 for finding in range(len(named)) if not place(finding, set()))
+    return sum(1 for finding in range(findings) if not place(finding, set()))
 
 
 def round_thread_paths(pr: dict, review: dict) -> list[str]:
@@ -2677,10 +2693,18 @@ def round_thread_paths(pr: dict, review: dict) -> list[str]:
     That is each thread the round opened and each its open entries link by their title anchor.
     An open entry standing for an earlier round's thread is a finding the round still names.
     """
+    return [
+        bare_path(first_comment(thread).get("path") or "")
+        for thread in round_accounted_threads(pr, review)
+    ]
+
+
+def round_accounted_threads(pr: dict, review: dict) -> list[dict]:
+    """Each thread the round opened and each its open entries link by their title anchor."""
     linked = open_entry_ids(pr)
     own = round_thread_nodes(pr, review)
     return [
-        bare_path(first_comment(thread).get("path") or "")
+        thread
         for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
         if thread in own or str(first_comment(thread).get("fullDatabaseId")) in linked
     ]
@@ -2774,19 +2798,24 @@ PROSE_FINDINGS = re.compile(
 
 
 def prose_findings(body: str) -> list[list[str]]:
-    """The paths each entry of a `Review findings:` list names, one list per entry.
+    """The paths each entry of a `Review findings:` list names, one list per entry."""
+    return [entry_paths(entry) for entry in labelled_entries(body, PROSE_FINDINGS)]
+
+
+def labelled_entries(body: str, label: re.Pattern[str]) -> list[str]:
+    """The text of each entry of every list directly under a line `label` matches.
 
     An entry is a bullet at the margin in the run of lines directly under the label, and an
     indented line continues the entry above it. The label and the bullets are found where
     quotations are masked, so a body quoting the list is not read as carrying one, and each
-    entry's paths are then read from its own code spans in the body.
+    entry's text is taken from the body.
     """
     raw = (body or "").splitlines()
     masked = mask_quotations(body or "").splitlines()
     entries: list[str] = []
     at = 0
     while at < len(masked):
-        if not PROSE_FINDINGS.match(masked[at]):
+        if not label.match(masked[at]):
             at += 1
             continue
         at += 1
@@ -2802,13 +2831,15 @@ def prose_findings(body: str) -> list[list[str]]:
             else:
                 break
             at += 1
+    return entries
+
+
+def entry_paths(entry: str) -> list[str]:
+    """The paths one list entry names, read from its own code spans."""
     return [
-        [
-            named
-            for span in CODE_SPAN.finditer(entry)
-            if (named := bare_path(span.group()[len(span.group(1)) : -len(span.group(1))]).strip())
-        ]
-        for entry in entries
+        named
+        for span in CODE_SPAN.finditer(entry)
+        if (named := bare_path(span.group()[len(span.group(1)) : -len(span.group(1))]).strip())
     ]
 
 
@@ -2832,6 +2863,92 @@ def unthreaded_prose_findings(pr: dict) -> int:
     if newest is None:
         return 0
     return unpaired(prose_findings(newest.get("body") or ""), round_thread_paths(pr, newest))
+
+
+NARRATIVE_FINDINGS = re.compile(
+    r"^ {0,3}[*_]{0,2}Open findings remain[*_]{0,2}:[*_]{0,2}[ \t]*$", re.IGNORECASE
+)
+ENTRY_SEVERITY = re.compile(r"\*\*([A-Za-z]+)\*\*")
+BADGE_SEVERITY = re.compile(r"\b([A-Za-z]+)\s+severity\b", re.IGNORECASE)
+SEVERITY_TIER = {
+    "critical": 3,
+    "high": 3,
+    "moderate": 2,
+    "medium": 2,
+    "low": 1,
+    "nit": 1,
+}
+
+
+def entry_tier(entry: str) -> int | None:
+    """The tier the bold severity words of one entry state, or None where they state not one.
+
+    Read outside its code spans, so a quoted bold word is not a severity. The list and the open
+    section's badges spell severity in two vocabularies, and the one round seen wrote `critical`
+    over a `High` badge and `nit` over a `Low` one. So the top two words share a tier in
+    `SEVERITY_TIER`, and a word missing from it states no tier.
+    """
+    words = ENTRY_SEVERITY.findall(CODE_SPAN.sub(" ", entry))
+    tiers = {SEVERITY_TIER.get(w.casefold()) for w in words}
+    tiers &= set(SEVERITY_TIER.values())
+    return tiers.pop() if len(tiers) == 1 else None
+
+
+def open_entry_tiers(body: str) -> dict[str, int | None]:
+    """The tier each open entry's badge states, keyed by the thread its title anchor links.
+
+    A thread two entries link at different tiers, or one an entry links under no badge this
+    reads, maps to None.
+    """
+    tiers: dict[str, int | None] = {}
+    for role, _, lines in section_entries(body):
+        if role == RESOLVED:
+            continue
+        for line in lines:
+            ids = DISCUSSION_LINK.findall(line)
+            if not ids:
+                continue
+            badge = SEVERITY_BADGE.search(line)
+            word = BADGE_SEVERITY.search(badge_text(badge)) if badge else None
+            tier = SEVERITY_TIER.get(word.group(1).casefold()) if word else None
+            tiers[ids[0]] = tier if tiers.get(ids[0], tier) == tier else None
+    return tiers
+
+
+def unthreaded_narrative_findings(pr: dict) -> int:
+    """How many `Open findings remain:` entries in the head round pair with no thread of it.
+
+    An entry pairs with a thread `round_accounted_threads` lists only at the tier its own bold
+    severity word states, which must equal the tier the open entry linking that thread is badged
+    at. It must also name that thread's file, per `names_path`, where it names any path at all.
+    The file alone was not enough, a round having listed an entry beside a thread on its file
+    that carried another finding. An entry naming no path pairs on the tier alone, a round having
+    listed one such entry for findings its threads carry. An entry or a thread whose tier is not
+    read pairs with nothing, which overstates rather than hides.
+    """
+    newest = second_format_head(pr)
+    if newest is None:
+        return 0
+    body = newest.get("body") or ""
+    entries = labelled_entries(body, NARRATIVE_FINDINGS)
+    named = [entry_paths(entry) for entry in entries]
+    wants = [entry_tier(entry) for entry in entries]
+    tiers = open_entry_tiers(body)
+    threads = [
+        (
+            bare_path(first_comment(t).get("path") or ""),
+            tiers.get(str(first_comment(t).get("fullDatabaseId"))),
+        )
+        for t in round_accounted_threads(pr, newest)
+    ]
+
+    def fits(finding: int, thread: int) -> bool:
+        path, tier = threads[thread]
+        if wants[finding] is None or wants[finding] != tier:
+            return False
+        return not named[finding] or any(names_path(n, path) for n in named[finding])
+
+    return unmatched(len(entries), len(threads), fits)
 
 
 def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
@@ -4556,6 +4673,7 @@ def digest(
     linked = total_section_entries(pr)
     restated = carried_open_threads(pr)
     prose = unthreaded_prose_findings(pr)
+    narrative = unthreaded_narrative_findings(pr)
     in_table = unthreaded_table_findings(pr)
     headlined, headline_listed = headline_shortfall(pr)
     unlisted = max(
@@ -4563,6 +4681,7 @@ def digest(
         if sectional
         else max(unlisted_findings((stated, listed + restated)), unthreaded),
         prose,
+        narrative,
         in_table,
         max(headlined - headline_listed, 0),
     )
@@ -4750,6 +4869,13 @@ def digest(
                 f", and {prose} of the entries under its `Review findings:` label "
                 f"{'pairs' if prose == 1 else 'pair'} with no thread of that round on its file"
                 if prose
+                else ""
+            )
+            + (
+                f", and {narrative} of the entries under its `Open findings remain:` label "
+                f"{'pairs' if narrative == 1 else 'pair'} with no thread of that round on its "
+                "file at its severity"
+                if narrative
                 else ""
             )
             + (
