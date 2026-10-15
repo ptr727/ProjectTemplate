@@ -15,6 +15,7 @@ import ntpath
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -2170,6 +2171,54 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
     def test_a_rooted_directory_still_resolves_off_windows(self):
         guard = self._guard()
         self.assertEqual(self._branch(guard, False, [], "/repos/wt-example"), "feature/example")
+
+
+@unittest.skipUnless(shutil.which("git"), "the alias read runs git")
+class TestAliasReadThroughLinkedWorktreeGitfile(unittest.TestCase):
+    """A persisted alias named through a linked worktree's `.git` file is read, as git reads it.
+
+    That `.git` is a file, so `git -C` cannot enter it, while git follows it for `--git-dir`.
+    The case needs a real checkout, so the self-test's path-keyed alias table cannot cover it.
+    The caller's git discovery and config variables are dropped, so no setup command writes into
+    a repository they name.
+    """
+
+    def test_a_push_alias_through_a_gitfile_git_dir_is_denied(self):
+        spec = importlib.util.spec_from_file_location("guard_gitfile", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        dropped = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in dropped and not k.startswith("GIT_CONFIG")
+        }
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, env, clear=True):
+            main, wt = os.path.join(tmp, "main"), os.path.join(tmp, "wt")
+            ident = ["-c", "user.name=Example", "-c", "user.email=example@example.invalid"]
+            for args in (
+                ["init", "-q", main],
+                [*ident, "-C", main, "commit", "-q", "--allow-empty", "-m", "x"],
+                ["-C", main, "worktree", "add", "-q", wt, "-b", "example"],
+                ["-C", main, "config", "alias.pp", "push"],
+            ):
+                subprocess.run(["git", *args], check=True, capture_output=True, timeout=30)
+            gitfile = os.path.join(wt, ".git")
+            self.assertTrue(os.path.isfile(gitfile))
+            self.assertEqual(guard._config_alias(gitfile, "pp", None, True), "push")
+            got, _ = guard.classify(
+                f"git --git-dir={shlex.quote(pathlib.Path(gitfile).as_posix())} pp origin develop",
+                cwd=tmp,
+                origin=("example-owner", "example-repo"),
+                current_branch="feature/x",
+                rules_lookup=lambda br: set(),
+                environ={},
+                primary_checkout_lookup=lambda d: False,
+            )
+            self.assertEqual(got, "deny")
 
 
 @unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")
