@@ -65,7 +65,12 @@ text says, because the harm it covers was never in the text.
    reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
    `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
-   every branch protected by default. A force-push and a delete each write the branch too, so a branch
+   every branch protected by default. A `--prune`, whole or cut short, beside such a pattern, a
+   lone `:` refspec, `--all`, or a bare push also reads that push as deleting every branch
+   protected by default. A `--mirror` push with no refspec is read as forcing and deleting every
+   branch protected by default. A destination outside `refs/` that starts `heads/`, such as
+   `HEAD:heads/develop` or `:heads/develop`, is read as the branch after `heads/` as well as by its
+   literal name, since git may complete it under `refs/`. A force-push and a delete each write the branch too, so a branch
    whose rules require a pull request denies them as it denies a direct push.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
@@ -83,8 +88,11 @@ text says, because the harm it covers was never in the text.
    argument holding an include key is read as the command it runs. It also covers a bare push or a
    `HEAD`/`@` refspec whose directory or branch may change before it runs. Such a push's local
    branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
-   segment dropped. A remote-tracking push target such as `origin/feature/x` is checked with its
-   remote dropped. A word the shell rewrites or drops before git reads it is denied where it can
+   segment dropped. A bare push's configured push target is read by its full name, such as
+   `refs/remotes/up/stream/x`. Each remote name `git remote` lists that prefixes the text after
+   `refs/remotes/` is stripped from it, and that text is also checked whole and with its first
+   segment dropped. A bare push whose push target resolves while `git remote` cannot list the
+   remotes is denied. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
    command it is denied among the global options where word splitting may split it. A
