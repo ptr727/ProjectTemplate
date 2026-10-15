@@ -4398,9 +4398,8 @@ def _check_bypass_flags(cmd):
             "shell rewrites it before gh reads it. It may expand to `--admin`, which merges past "
             "required reviews and status checks, or name a repository the target check cannot "
             "read. Failing closed. Write every word of the merge out. Only a quoted value of an "
-            'option other than --repo, as in --body "$BODY", may be a run-time word, and only where '
-            "the guard can read the command's quoting. An escaped quote anywhere in the command "
-            "hides it, so write such a value out too." + _handoff(cmd)
+            'option other than --repo, as in --body "$BODY", may be a run-time word.'
+            + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
