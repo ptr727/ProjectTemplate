@@ -5379,6 +5379,174 @@ class TestProseFindings(GqlCase):
         self.assertIn("Address the constructed retry issue", self.out.getvalue())
 
 
+def badged_section(entries: list[tuple[str, str]]) -> str:
+    """The revision's open-findings section, one entry per `(severity, thread id)` pair.
+
+    `open_section` badges every entry `Medium`, and the narrative reader pairs on the severity, so
+    this one takes each entry's own. Titles and ids are constructed, per GOVERNANCE.md
+    "Representative Data in Agent-Authored Text".
+    """
+    lines = "\n".join(
+        f'- <picture><img src="{s.lower()}.png" alt="{s} severity" width="16" height="16">'
+        f"</picture> [Constructed finding](#discussion_r{i}) \u00b7 New"
+        for s, i in entries
+    )
+    return (
+        f"<details open>\n<summary><strong>{len(entries)} open findings</strong></summary>\n\n"
+        f"{lines}\n</details>"
+    )
+
+
+NARRATIVE_IDS = ("8000000001", "8000000002", "8000000003", "8000000004")
+NARRATIVE_THREADED = [
+    ("High", NARRATIVE_IDS[0], "pkg/guard.py"),
+    ("Low", NARRATIVE_IDS[1], "docs/guide.md"),
+    ("Low", NARRATIVE_IDS[2], "setup/install.ps1"),
+    ("Low", NARRATIVE_IDS[3], "setup/install.sh"),
+]
+NARRATIVE_LISTED = (
+    "- `pkg/guard.py`: a failed read skips the check (**critical**, 1 vote).\n"
+    "- `pkg/guard.py`: a flag is read past the separator (**moderate**, 1 vote).\n"
+    "- `setup/install.ps1`: a failed step goes unreported (**moderate**, 1 vote).\n"
+    "- `tools/report.py`: one link can be counted twice (**moderate**, 1 vote).\n"
+    "- Missing documentation and install coverage remain (**nit**, 2\u20133 votes each).\n"
+)
+
+
+def with_narrative(
+    listed: str | None = NARRATIVE_LISTED, label: str = "Open findings remain:"
+) -> str:
+    """A revised-format body whose open section links the four `NARRATIVE_THREADED` threads.
+
+    Its narrative block lists `listed` under `label` after its change bullets, where it was seen.
+    `None` leaves the narrative carrying no such list.
+    """
+    body = revised_with(badged_section([(s, i) for s, i, _ in NARRATIVE_THREADED]))
+    if listed is None:
+        return body
+    anchor = "- Narrow the reader.\n"
+    assert anchor in body
+    return body.replace(anchor, f"{anchor}\n{label}\n{listed}", 1)
+
+
+def narrative_threads(rid: str = "PRR_head") -> list[dict]:
+    """The four threads the open section of `with_narrative` links, one per file it names."""
+    return [
+        thread(f"T{n}", rid=rid, cid=cid, path=path)
+        for n, (_, cid, path) in enumerate(NARRATIVE_THREADED)
+    ]
+
+
+class TestNarrativeFindings(GqlCase):
+    """A finding named only in the narrative block's `Open findings remain:` list.
+
+    `NARRATIVE_LISTED` is the shape that block was seen carrying, with every path and finding
+    constructed. Its first entry restates the high thread and its last restates the three low
+    ones. The middle three have no thread, the third sharing its file with a low thread on
+    another finding.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+
+    def digest(self, body: str, threads: list[dict] | None = None) -> str:
+        pr = payload(
+            [review(body=body, rid="PRR_head")],
+            narrative_threads() if threads is None else threads,
+        )
+        self.answer(pr)
+        return pr_review.digest("o", "r", 7)[0]
+
+    def count(self, body: str, threads: list[dict] | None = None) -> int:
+        pr = payload(
+            [review(body=body, rid="PRR_head")],
+            narrative_threads() if threads is None else threads,
+        )
+        return pr_review.unthreaded_narrative_findings(pr)
+
+    def test_the_seen_shape_counts_the_three_entries_with_no_thread(self) -> None:
+        out = self.digest(with_narrative())
+        self.assertIn("overview=4/4", out)
+        self.assertIn("FINDINGS WITH NO THREAD (3)", out)
+        self.assertIn(
+            "3 of the findings its `Open findings remain:` entries name pair with no thread at "
+            "the severity it states, on a file it names where it names one",
+            out,
+        )
+
+    def test_a_narrative_carrying_no_such_list_reads_as_before(self) -> None:
+        out = self.digest(with_narrative(None))
+        self.assertIn("overview=4/4", out)
+        self.assertNotIn("FINDINGS WITH NO THREAD", out)
+        self.assertEqual(0, self.count(with_narrative(None)))
+
+    def test_an_entry_sharing_a_file_with_a_thread_at_another_severity_is_counted(self) -> None:
+        """A file alone would pair the moderate entry with the low thread on its file and hide it."""
+        listed = "- `setup/install.ps1`: a failed step goes unreported (**moderate**, 1 vote).\n"
+        self.assertEqual(1, self.count(with_narrative(listed)))
+
+    def test_entries_restating_threads_count_none(self) -> None:
+        """A file and a severity both matching pairs, and an entry naming no file pairs on severity."""
+        listed = (
+            "- `pkg/guard.py`: a failed read skips the check (**critical**, 1 vote).\n"
+            "- `docs/guide.md`: a stale example (**nit**, 1 vote).\n"
+            "- Missing install coverage remains (**nit**, 2 votes each).\n"
+        )
+        self.assertEqual(0, self.count(with_narrative(listed)))
+        self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_narrative(listed)))
+
+    def test_an_entry_stating_no_severity_this_reads_is_counted(self) -> None:
+        for listed in (
+            "- `pkg/guard.py`: a failed read skips the check (1 vote).\n",
+            "- `pkg/guard.py`: a failed read skips the check (**urgent**, 1 vote).\n",
+        ):
+            with self.subTest(listed=listed):
+                self.assertEqual(1, self.count(with_narrative(listed)))
+
+    def test_a_thread_whose_severity_is_unread_pairs_with_no_entry(self) -> None:
+        """A thread the open section does not link carries no severity to compare."""
+        listed = "- `lib/extra.py`: a missing guard (**moderate**, 1 vote).\n"
+        threads = [*narrative_threads(), thread("T9", rid="PRR_head", path="lib/extra.py")]
+        self.assertEqual(1, self.count(with_narrative(listed), threads))
+
+    def test_the_list_ends_at_its_first_line_that_is_not_an_entry(self) -> None:
+        """Narrative prose after the list is not a finding."""
+        listed = NARRATIVE_LISTED + "\n- `tools/other.py`: a change bullet, not a finding.\n"
+        self.assertEqual(3, self.count(with_narrative(listed)))
+
+    def test_a_bold_label_is_read(self) -> None:
+        self.assertEqual(3, self.count(with_narrative(label="**Open findings remain:**")))
+
+    def test_a_quoted_list_is_not_read(self) -> None:
+        body = with_narrative(None).replace(
+            "- Narrow the reader.\n",
+            f"- Narrow the reader.\n\n```text\nOpen findings remain:\n{NARRATIVE_LISTED}```\n",
+            1,
+        )
+        self.assertEqual(0, self.count(body))
+
+    def test_an_earlier_round_s_thread_an_open_entry_links_covers_an_entry(self) -> None:
+        """An open entry standing for that thread makes it a finding this round still names."""
+        listed = "- `pkg/guard.py`: a failed read skips the check (**critical**, 1 vote).\n"
+        self.assertEqual(0, self.count(with_narrative(listed), narrative_threads("PRR_old")))
+
+    def test_each_in_an_entry_s_own_wording_counts_once(self) -> None:
+        """Only the vote count saying `each` names several findings, so prose saying it does not."""
+        listed = "- `pkg/guard.py`: each retry re-reads the token (**critical**, 1 vote).\n"
+        self.assertEqual(0, self.count(with_narrative(listed)))
+
+    def test_an_entry_saying_each_counts_as_two_findings(self) -> None:
+        """One low thread covers one of the two findings the entry names, and leaves the other."""
+        listed = "- Missing documentation and install coverage remain (**nit**, 2 votes each).\n"
+        self.assertEqual(1, self.count(with_narrative(listed), narrative_threads()[:2]))
+        self.assertEqual(0, self.count(with_narrative(listed)))
+
+    def test_a_first_format_round_is_not_read(self) -> None:
+        body = with_narrative().replace(CCR_MARKER, "")
+        self.assertEqual(0, self.count(body))
+
+
 class TestEveryGqlCaseKeepsItsBaseSetUp(unittest.TestCase):
     """A subclass overriding `setUp` without chaining silently drops what the base installs.
 
