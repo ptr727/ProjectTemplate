@@ -231,18 +231,7 @@ def _is_gh_write(cmd):
 
 
 def _origin_owner_repo(cwd):
-    try:
-        url = subprocess.run(
-            ["git", "-C", cwd or ".", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=5,
-            check=False,
-        ).stdout.strip()
-    # A checkout with no usable origin is answered as unknown rather than crashing the hook.
-    except Exception:  # noqa: BLE001
-        return None
+    _code, url = _git_read(cwd, ["remote", "get-url", "origin"])
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -435,8 +424,8 @@ def _read_branch(cwd, reads):
     names a remote such as `up/stream` keeps a segment and its branch goes unread. A local read
     gives a branch name such as `release/1.0`, which is kept whole. That name is also read with its
     first segment stripped, as this function read every name before, so both names are checked.
-    A read that times out or cannot run is `_UNRESOLVED` too, rather than a cue to try the next,
-    since only a non-zero exit says the ref is not there.
+    A read that times out or cannot run is `_UNRESOLVED` too, rather than a cue to try the next.
+    Only a non-zero exit says the ref is not there.
     """
     for args, remote in reads:
         code, ref = _git_read(cwd, args)
@@ -2235,11 +2224,10 @@ _UNRESOLVED = object()
 _SPLIT_WORD = re.compile(r"(?<=\S)\\\r?\n(?=\S)")
 
 
-def _opaque_cd(toks, globs=True):
+def _opaque_cd(toks):
     """True when something in the command may change the directory or the repository without a literal `cd`.
 
     That is a run-time word, an `eval`/`source`/`env`/`trap`, or a git dir variable, anywhere in the command.
-    With `globs` false a glob character is not read as one, which a pattern refspec carries.
     """
     for k, t in enumerate(toks):
         if t in ("eval", "source", "builtin", "command", "env", "trap"):
@@ -2249,9 +2237,33 @@ def _opaque_cd(toks, globs=True):
         plain = t.replace("$?", "")
         if "$" in plain or "`" in plain or "GIT_" in plain:
             return True
-        if globs and any(c in plain for c in "{[*?"):
+        if any(c in plain for c in "{[*?"):
             return True
     return False
+
+
+_REPO_ENV_PREFIXES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_COMMON_DIR=")
+_DIR_OPTION_PREFIXES = ("-C", "-D", "--chdir", "-execdir")
+
+
+def _repo_may_move(toks, end, leading_cd):
+    """True when a word before the `git` at `toks[end]` may run it in another checkout.
+
+    That is a `cd` past the leading one, or an `eval`, `source`, `.`, or `trap` in command position.
+    In the command that runs git it is also a directory option, such as `sudo -D` or `env -C`, or a
+    git directory variable. A word after the push, such as a later `cd`, changes nothing it reads.
+    """
+    start, cds = 0, 0
+    for k, t in enumerate(toks[:end]):
+        if _is_separator(t):
+            start = k + 1
+        elif t.rsplit("/", 1)[-1] in _CD_BUILTINS:
+            cds += 1
+        elif k == start and t in ("eval", "source", ".", "trap"):
+            return True
+    if cds > (1 if leading_cd else 0):
+        return True
+    return any(t.startswith(_DIR_OPTION_PREFIXES + _REPO_ENV_PREFIXES) for t in toks[start:end])
 
 
 def _attached_c(body):
@@ -3022,8 +3034,8 @@ def _rewritten_git_words(cmd):
 def _push_invocations(cmd):
     """Every `git push` as (c_dirs, work_tree, leading_cd, cd_unreliable, repo_unreliable, args).
 
-    Wrappers are included. `repo_unreliable` is `cd_unreliable` without the commands that may move
-    `HEAD`, since those change the branch a push reads but not the repository it runs in.
+    Wrappers are included. `repo_unreliable` says the push may run in another repository than the
+    one its `-C` and leading `cd` name (see `_repo_may_move`). A wrapper shell always sets it.
 
     A leading `cd` is trusted only while it is the one directory change in the text its push runs
     in, so a later `cd` marks the push unreliable rather than letting the first one vouch for it.
@@ -3040,10 +3052,7 @@ def _push_invocations(cmd):
         outer_cd = _leading_cd_dir(text)
         outer_toks = _shell_tokens(text)
         outer_extra = max(0, _count_cd(outer_toks) - (1 if outer_cd else 0))
-        outer_cds = outer_extra
-        off_position = _git_off_command_position(outer_toks)
-        outer_extra += 1 if _opaque_cd(outer_toks) or off_position else 0
-        repo_extra = outer_cds + (1 if _opaque_cd(outer_toks, globs=False) or off_position else 0)
+        outer_extra += 1 if _opaque_cd(outer_toks) or _git_off_command_position(outer_toks) else 0
         whole_moves = _head_may_move(outer_toks, len(outer_toks))
         quoted = _quoted_mask(text, outer_toks)
         export_dirs = _leading_export_dirs(text)
@@ -3051,7 +3060,6 @@ def _push_invocations(cmd):
         for inner in _embedded_wrapper_commands(text):
             batches.append((inner, outer_cd, outer_extra, True))
         for body, leading_cd, extra, wrapped_cd in batches:
-            moves_repo = repo_extra > 0 or wrapped_cd
             first = len(out)
             splits = []
             body_toks = outer_toks if body is text else _shell_tokens(body)
@@ -3070,7 +3078,9 @@ def _push_invocations(cmd):
                         )
                     else:
                         head_moves = whole_moves
-                    repo_unreliable = moves_repo or redirected
+                    repo_unreliable = (
+                        wrapped_cd or redirected or _repo_may_move(body_toks, word, leading_cd)
+                    )
                     unreliable = extra > 0 or head_moves or repo_unreliable
                     out.append((c_dirs, None, leading_cd, unreliable, repo_unreliable, args))
                     j = _git_subcommand_index(body_toks, word)
@@ -3168,8 +3178,8 @@ def _remote_mirrors(cwd, remote):
 
     A persisted `remote.<name>.mirror` makes a push naming no refspec a `--mirror` push. A push
     naming its remote reads that remote's key. A push naming none may run against any remote,
-    so every remote's key is read. A key that cannot be read as a boolean, or a read that times
-    out or cannot run, is `_UNRESOLVED`, since git then refuses or does what the guard cannot see.
+    so every remote's key is read. A key that cannot be read as a boolean is `_UNRESOLVED`, and
+    so is a read that times out or cannot run. Git then refuses or does what the guard cannot see.
     """
     if remote is None:
         code, out = _git_read(
@@ -3187,7 +3197,10 @@ def _remote_mirrors(cwd, remote):
 
 
 def _push_targets(cmd, cwd=None, current_branch=None):
-    """Parse every push in the command into a list of (op, branch); op is delete | force | update | mirror.
+    """Parse every push in the command into a list of (op, branch, repo) entries.
+
+    An op is delete, force, update, or mirror. The repo is the push's checkout (see `_push_repo`),
+    or None for the session's own.
 
     Each refspec's op is read on its own. A `+src` refspec forces only its own branch and a `:dst`
     one deletes only its own, while `--force` and `--delete` apply to every refspec in the push. A
@@ -3218,12 +3231,12 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     options, so the second only adds targets. A push with no refspec and no `--mirror` reads
     `remote.<name>.mirror` in the directory it runs in (see `_remote_mirrors`). A remote set to
     mirror, or a read that cannot answer, adds a `mirror` op, a force and a delete, on every
-    protected default.
+    protected default. A `current_branch` seam stands in for that read too, as no mirror.
     """
     results = []
     unreadable = _unreadable_push(cmd)
     if unreadable:
-        results.append(("unreadable", unreadable))
+        results.append(("unreadable", unreadable, None))
     readings = [
         (c_dirs, work_tree, leading_cd, cd_unreliable, repo_unreliable, reading, after_end)
         for c_dirs, work_tree, leading_cd, cd_unreliable, repo_unreliable, args in _push_invocations(
@@ -3233,6 +3246,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         for after_end in ((False, True) if _dash_word_after_end(reading) else (False,))
     ]
     for c_dirs, work_tree, leading_cd, cd_unreliable, repo_unreliable, args, after_end in readings:
+        found = []
         force = delete = push_all = mirror = tags_only = prune = options_ended = False
         positionals = []
         i = 0
@@ -3305,7 +3319,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                         cwd, c_dirs, work_tree, leading_cd, cd_unreliable, head=True
                     )
                 if b is _UNRESOLVED:
-                    results.append(("unresolved", leading_cd or " ".join(c_dirs)))
+                    found.append(("unresolved", leading_cd or " ".join(c_dirs)))
                 elif b:
                     targets.extend((ops, name) for name in _branch_names(b))
                 continue
@@ -3313,9 +3327,14 @@ def _push_targets(cmd, cwd=None, current_branch=None):
         if not refspecs and not mirror:
             remote = positionals[0] if positionals else None
             target = _push_dir(cwd, c_dirs, leading_cd, repo_unreliable)
-            mirrored = _UNRESOLVED if target is _UNRESOLVED else _remote_mirrors(target, remote)
+            if current_branch is not None:
+                mirrored = False
+            elif target is _UNRESOLVED:
+                mirrored = _UNRESOLVED
+            else:
+                mirrored = _remote_mirrors(target, remote)
             if mirrored:
-                results.extend(("mirror", br) for br in _PROTECTED_DEFAULT_ORDER)
+                found.extend(("mirror", br) for br in _PROTECTED_DEFAULT_ORDER)
         if not refspecs:
             if mirror:
                 targets = [({"force", "delete"}, br) for br in _PROTECTED_DEFAULT_ORDER]
@@ -3331,14 +3350,20 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 if b is None:
                     b = _bare_push_branch(cwd, c_dirs, work_tree, leading_cd, cd_unreliable)
                 if b is _UNRESOLVED:
-                    results.append(("unresolved", leading_cd or " ".join(c_dirs)))
+                    found.append(("unresolved", leading_cd or " ".join(c_dirs)))
+                    results.extend((op, br, None) for op, br in found)
                     continue
                 if b:
                     targets = [(push_ops or {"update"}, name) for name in _branch_names(b)]
-        results.extend((op, br) for ops, br in targets for op in sorted(ops))
+        found.extend((op, br) for ops, br in targets for op in sorted(ops))
         if matched_ops:
             matched = [*_PROTECTED_DEFAULT_ORDER, *(br for _ops, br in targets)]
-            results.extend((op, br) for br in matched for op in sorted(matched_ops))
+            found.extend((op, br) for br in matched for op in sorted(matched_ops))
+        if found and (c_dirs or leading_cd is not None or repo_unreliable):
+            repo = _push_repo(cwd, c_dirs, leading_cd, repo_unreliable)
+        else:
+            repo = None
+        results.extend((op, br, repo) for op, br in found)
     return results
 
 
@@ -3474,21 +3499,15 @@ def _check_bypass_flags(cmd):
     return "allow", ""
 
 
-def _push_repos(cmd, cwd):
-    """The repositories, as (owner, repo), that the pushes in `cmd` run in outside `cwd`.
+def _push_repo(cwd, c_dirs, leading_cd, repo_unreliable):
+    """The (owner, repo) origin of the checkout a push the command moves to runs in, or `_UNRESOLVED`.
 
-    A push the command moves to another directory runs in that checkout, whose origin may differ
-    from the session's. A push whose directory does not resolve, or whose checkout has no origin
-    the guard can read, is `_UNRESOLVED`.
+    That checkout's origin may differ from the session's. A directory that does not resolve, or a
+    checkout with no origin the guard can read, is `_UNRESOLVED`.
     """
-    out = []
-    for c_dirs, _work_tree, leading_cd, _cd, repo_unreliable, _args in _push_invocations(cmd):
-        if not c_dirs and leading_cd is None and not repo_unreliable:
-            continue
-        target = _push_dir(cwd, c_dirs, leading_cd, repo_unreliable)
-        repo = None if target is _UNRESOLVED else _origin_owner_repo(target)
-        out.append(_UNRESOLVED if repo is None else repo)
-    return list(dict.fromkeys(out))
+    target = _push_dir(cwd, c_dirs, leading_cd, repo_unreliable)
+    repo = None if target is _UNRESOLVED else _origin_owner_repo(target)
+    return _UNRESOLVED if repo is None else repo
 
 
 def _rule_denial(op, br, rules, reason, where):
@@ -3538,7 +3557,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
 
     A force and a delete each write the branch too, so a pull_request rule denies them as it
     denies an update. A push run in another checkout is also checked against that checkout's
-    origin (see `_push_repos`). The `rules_lookup` seam stands in for every query, so with it only
+    origin (see `_push_repo`). The `rules_lookup` seam stands in for every query, so with it only
     a checkout the guard cannot name adds a reading.
     """
     targets = _push_targets(cmd, cwd, current_branch)
@@ -3549,12 +3568,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
         )  # only a quoted mention or a non-push git command: no git/API work needed
     if rules_lookup is None and origin is None:
         origin = _origin_owner_repo(cwd)
-    others = [
-        r
-        for r in _push_repos(cmd, cwd)
-        if r != origin and (r is _UNRESOLVED or rules_lookup is None)
-    ]
-    for op, br in targets:
+    for op, br, repo in targets:
         if op == "unreadable":
             return "deny", (
                 f"This command runs a push the guard cannot read ({br}), so it cannot tell which "
@@ -3572,8 +3586,11 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                 "with an explicit refspec (git push origin <branch>:refs/heads/<branch>) as its own "
                 "command, or cd into a directory that exists." + _handoff(cmd)
             )
-        for repo in (None, *others):
-            if repo is None:
+        readings = [None]
+        if repo is not None and repo != origin and (repo is _UNRESOLVED or rules_lookup is None):
+            readings.append(repo)
+        for checkout in readings:
+            if checkout is None:
                 if rules_lookup is not None:
                     rules = rules_lookup(br)
                 elif origin is not None:
@@ -3586,7 +3603,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                     if origin is None and rules_lookup is None
                     else "its branch rules could not be read (the API may be unreachable)"
                 )
-            elif repo is _UNRESOLVED:
+            elif checkout is _UNRESOLVED:
                 rules, where = None, ""
                 reason = (
                     "the repository this push runs in could not be determined, so its origin's "
@@ -3594,8 +3611,8 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                     "with -C naming a directory that exists"
                 )
             else:
-                rules = _live_branch_rules(repo[0], repo[1], br)
-                where = f" in {repo[0]}/{repo[1]}"
+                rules = _live_branch_rules(checkout[0], checkout[1], br)
+                where = f" in {checkout[0]}/{checkout[1]}"
                 reason = f"its branch rules{where} could not be read (the API may be unreachable)"
             denial = _rule_denial(op, br, rules, reason, where)
             if denial:
@@ -5108,6 +5125,8 @@ def classify(
     ref) stands in for the live check that disambiguates a bare `checkout`/`switch` argument as a
     ref rather than a pathspec, and config_lookup(dir, name) stands in for the live git-config
     read that resolves a persisted (non-inline) alias.
+
+    The current_branch seam also stands in for the persisted mirror read a push with no refspec makes.
     """
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
@@ -6106,14 +6125,14 @@ _GIT_CASES = [
     ),
     (
         "git push --all origin",
-        None,
+        "feature/x",
         {"main": _CODE_RULES, "master": set(), "develop": _CODE_RULES},
         "deny",
         "--all updates every branch: a protected default denies",
     ),
     (
         "git push --all origin",
-        None,
+        "feature/x",
         {"main": set(), "master": set(), "develop": set()},
         "allow",
         "--all where no default branch is protected: allowed",
@@ -6125,7 +6144,13 @@ _GIT_CASES = [
         "deny",
         "--mirror force-prunes every ref: a protected default denies",
     ),
-    ("git push --tags origin", None, {}, "allow", "--tags pushes tags only, no branch target"),
+    (
+        "git push --tags origin",
+        "feature/x",
+        {},
+        "allow",
+        "--tags pushes tags only, no branch target",
+    ),
     (
         "git push --follow-tags origin",
         "develop",
@@ -6609,7 +6634,7 @@ _GIT_CASES = [
     (
         "git push origin -- -f",
         "develop",
-        {"develop": _CODE_RULES},
+        {"develop": {"non_fast_forward"}},
         "deny",
         "control: a dash-named word after -- is still read as the option it spells too",
     ),
@@ -11507,8 +11532,8 @@ _PUSH_CONFIG_CASES = [
 def _push_config_selftest(origin):
     """Run `_PUSH_CONFIG_CASES`, each in a fresh temporary repository built from constructed names only.
 
-    A case is the setup steps run with `git -C <repo>` on a feature branch tracking its own name,
-    the push run there, the verdict, and a label.
+    Each case's setup steps run with `git -C <repo>` on a feature branch tracking its own name.
+    A case also holds the push run there, the verdict, and a label.
     """
     import shutil
     import tempfile
