@@ -2582,13 +2582,23 @@ def total_section_entries(pr: dict) -> int:
     return sum(linked for role, _, _, linked in sections if role == TOTAL)
 
 
-def open_entry_ids(pr: dict) -> set[str]:
-    """The distinct title anchors the head round's open entries link, resolved sections left out."""
+def open_entry_links(pr: dict) -> list[list[str]]:
+    """The thread ids each of the head round's open entries links, resolved sections left out."""
     newest = second_format_head(pr)
     if newest is None:
-        return set()
+        return []
     sections = read_overview(newest.get("body") or "")[2]
-    return {entry[0] for role, _, ids, _ in sections if role != RESOLVED for entry in ids}
+    return [entry for role, _, ids, _ in sections if role != RESOLVED for entry in ids]
+
+
+def open_entry_ids(pr: dict) -> set[str]:
+    """The distinct title anchors the head round's open entries link."""
+    return {entry[0] for entry in open_entry_links(pr)}
+
+
+def open_linked_ids(pr: dict) -> set[str]:
+    """Every thread id the head round's open entries link, back-references included."""
+    return {found for entry in open_entry_links(pr) for found in entry}
 
 
 TABLE_VOTES = re.compile(r"\(\d+ votes?\b[^()]*\)")
@@ -2755,7 +2765,7 @@ def headline_shortfall(pr: dict) -> tuple[int, int]:
     )
     withheld = suppressed_blocks(body) + previously_missed_blocks(body)
     accounted = max(listed, stated_total(body) or 0) + sum(map(finding_count, withheld))
-    return stated, accounted + len(earlier_round_threads(pr, newest) - open_entry_ids(pr))
+    return stated, accounted + len(earlier_round_threads(pr, newest) - open_linked_ids(pr))
 
 
 PROSE_FINDINGS = re.compile(
