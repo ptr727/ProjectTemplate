@@ -1372,6 +1372,15 @@ def _command_prefix(toks, k):
     A precommand is passed with its options, their values, and a duration.
     The first other word is the command, so the word at `k` is the command only where it is that word.
     """
+    i, out = _prefix_walk(toks, k)
+    return i == k, out if i == k else []
+
+
+def _prefix_walk(toks, k):
+    """(the index of the first word `_command_prefix` does not pass, the assignments before it).
+
+    The walk stops there, or at `k`, whichever comes first.
+    """
     start = k
     while start > 0 and not _is_separator(toks[start - 1]):
         start -= 1
@@ -1393,8 +1402,8 @@ def _command_prefix(toks, k):
             while i < k and (toks[i].startswith("-") or _DURATION_WORD.fullmatch(toks[i])):
                 i += 2 if _option_takes_next(toks[i], takes) else 1
         else:
-            return False, []
-    return i == k, out if i == k else []
+            return i, out
+    return i, out
 
 
 def _option_takes_next(tok, takes):
@@ -3386,34 +3395,36 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
     `git_dir` says `target` is an explicit `--git-dir`/`GIT_DIR` value (see `_config_alias`).
     A name is matched without case, as git matches an alias name.
     A name `aliases` gives several values is followed through each, since the guard cannot tell which one git reads.
+    Names are read breadth first, each once, so a name many paths reach costs one read rather than one per path.
     """
     table = {}
     for key, values in aliases.items():
         table.setdefault(key.lower(), []).extend(values if isinstance(values, list) else [values])
-
-    def walk(name, seen):
-        if not _may_name_alias(name) or name.lower() in seen or len(seen) >= _MAX_ALIAS_DEPTH:
-            return False
-        seen = seen | {name.lower()}
-        expansions = table.get(name.lower())
-        if expansions is None:
-            if config_lookup is None and _PINNED_ALIASES:
-                found = _PINNED_ALIASES[0].get(name)
-            else:
-                found = _config_alias(target, name, config_lookup, git_dir)
-            expansions = [] if found is None else [found]
-        for expansion in expansions:
-            if _alias_runs_push(expansion):
-                return True
-            try:
-                words = shlex.split(expansion)
-            except ValueError:
+    level, seen = [sub], set()
+    for _depth in range(_MAX_ALIAS_DEPTH):
+        following = []
+        for name in level:
+            if not _may_name_alias(name) or name.lower() in seen:
                 continue
-            if words and not expansion.startswith("!") and walk(words[0], seen):
-                return True
-        return False
-
-    return walk(sub, frozenset())
+            seen.add(name.lower())
+            expansions = table.get(name.lower())
+            if expansions is None:
+                if config_lookup is None and _PINNED_ALIASES:
+                    found = _PINNED_ALIASES[0].get(name)
+                else:
+                    found = _config_alias(target, name, config_lookup, git_dir)
+                expansions = [] if found is None else [found]
+            for expansion in dict.fromkeys(expansions):
+                if _alias_runs_push(expansion):
+                    return True
+                try:
+                    words = shlex.split(expansion)
+                except ValueError:
+                    continue
+                if words and not expansion.startswith("!"):
+                    following.append(words[0])
+        level = following
+    return False
 
 
 def _may_run_alias(text):
@@ -3448,7 +3459,7 @@ def _wrapper_env_assignments(toks):
 
     The shell is a `sh -c`-style wrapper or one `_FOREIGN_SHELL_FLAGS` names, as its simple command's command.
     That is its own prefix (see `_command_prefix`), and each `export` argument before it.
-    Behind a launcher `_command_prefix` does not know, it is the assignments that open the command (see `_launcher_assignments`).
+    Behind a launcher `_command_prefix` does not know, it is the assignments before that launcher (see `_launcher_prefix`).
     Its command string is read as a command of its own, which these do not reach.
     """
     out, exported = [], []
@@ -3460,29 +3471,22 @@ def _wrapper_env_assignments(toks):
         if found and any(_runs_git(body) for body in found[0]):
             reached, prefix = _command_prefix(toks, x)
             if not reached:
-                prefix = _launcher_assignments(toks, x)
-            if reached or prefix:
+                reached, prefix = _launcher_prefix(toks, x)
+            if reached:
                 out.extend(exported + prefix)
     return out
 
 
-def _launcher_assignments(toks, k):
-    """The `NAME=value` words opening the simple command holding `toks[k]`, as (name, value), where its head runs `toks[k]`.
+def _launcher_prefix(toks, k):
+    """(whether a launcher `_command_prefix` does not know may run `toks[k]`, the assignments before that launcher).
 
-    A launcher `_command_prefix` does not know, such as `flock <file>`, passes them to the command it runs.
-    A head `_NAMES_ITS_ARGUMENTS` names, such as `grep`, runs nothing, so none are given for it.
+    Such a launcher, as `flock <file>` is, passes its environment to the command it runs.
+    The launcher is the first word `_prefix_walk` does not pass, and runs `toks[k]` unless `_NAMES_ITS_ARGUMENTS` names it, as `grep`.
     """
-    start = k
-    while start > 0 and not _is_separator(toks[start - 1]):
-        start -= 1
-    out = []
-    head = start
-    while head < k and _ENV_ASSIGN_RE.match(toks[head]):
-        out.append(_ENV_ASSIGN_RE.match(toks[head]).groups())
-        head += 1
-    if head == k or _base_name(toks[head]) in _NAMES_ITS_ARGUMENTS:
-        return []
-    return out
+    i, out = _prefix_walk(toks, k)
+    if i >= k or _base_name(toks[i]) in _NAMES_ITS_ARGUMENTS:
+        return False, []
+    return True, out
 
 
 def _runs_git(text):
@@ -13830,6 +13834,20 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a push alias set before flock reaches the git in the wrapper body flock runs",
+    ),
+    (
+        "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push; flock /example/lock bash -c 'git p origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an exported push alias reaches the git in the wrapper body flock runs",
+    ),
+    (
+        "env GIT_CONFIG_GLOBAL=/example/config flock /example/lock bash -c 'git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file env sets before flock reaches the git in the wrapper body",
     ),
     (
         "GIT_CONFIG_GLOBAL=/example/config grep bash -c 'git status'",
