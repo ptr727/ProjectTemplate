@@ -3207,6 +3207,31 @@ class TestSyntaxDispatch(unittest.TestCase):
             ]
 
 
+class TestAnUppercaseMarkdownSuffixIsMarkdown(BaitCase):
+    """Every Markdown-only branch reads the suffix case-insensitively, as `syntax_for` does."""
+
+    def test_each_markdown_only_branch_reads_an_uppercase_suffix_alike(self) -> None:
+        over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1)) + "."
+        british = next(iter(prose_lint.BRITISH))
+        for rules, text, expected in (
+            ({"comment-wrap", "comment-case"}, "<!-- group header -->\n", []),
+            (
+                {"sentence-split"},
+                "A sentence that keeps\ngoing onto the next line.\n",
+                ["sentence-split"],
+            ),
+            ({"sentence-length"}, over + "\n", ["sentence-length"]),
+            ({"semicolon"}, f"{SPLICE_BAIT}.\n", ["semicolon"]),
+            ({"dupword"}, f'<!-- Recast "{DUP}" as one. -->\n', []),
+            ({"dash"}, "It runs - and it gates.\n", ["dash"]),
+            ({"dupword"}, f"One {DUP} here.\n", ["dupword"]),
+            ({"spelling"}, f"One {british} here.\n", ["spelling"]),
+        ):
+            for name in ("notes.md", "NOTES.MD"):
+                with self.subTest(rules=sorted(rules), text=text.strip(), name=name):
+                    self.assertEqual(expected, self.kinds(text, rules, name=name))
+
+
 class TestChangedLines(unittest.TestCase):
     """The `--diff` scope, which decides which findings a CI run is allowed to report.
 
@@ -4771,6 +4796,12 @@ class TestDeadPath(unittest.TestCase):
             "dead-path", self.kinds(root, "See [it](../scripts/gone.py).\n", rel="docs/D.md")
         )
         self.assertEqual([], self.kinds(root, "See [it](../scripts/kept.py).\n", rel="docs/D.md"))
+
+    def test_an_uppercase_markdown_suffix_is_judged_for_dead_paths(self) -> None:
+        root = self.repo()
+        self.assertIn(
+            "dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n", rel="DOC.MD")
+        )
 
     def test_a_ref_or_directory_shaped_span_is_not_a_candidate(self) -> None:
         """`origin/develop` styles a ref and `scripts/` a layout, and neither asserts a file."""
