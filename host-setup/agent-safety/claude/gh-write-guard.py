@@ -3372,7 +3372,8 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
         if op == "unresolved":
             return "deny", (
                 "Could not tell which branch this push targets, because the directory it runs in "
-                "does not resolve to a checkout the guard can read, or something earlier in the "
+                "does not resolve to a checkout the guard can read, git could not list that "
+                "checkout's remotes, or something earlier in the "
                 "command (a cd, a wrapper shell, a command that may switch the branch) may change it "
                 "before the push runs. Failing closed rather than read the session's own branch. Push "
                 "with an explicit refspec (git push origin <branch>:refs/heads/<branch>) as its own "
