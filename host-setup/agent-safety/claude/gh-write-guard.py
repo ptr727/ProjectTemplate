@@ -1327,7 +1327,6 @@ _PRECOMMAND_VALUE_OPTS = {
             "-a",
             "-s",
             "--delimiter",
-            "--eof",
             "--arg-file",
             "--max-args",
             "--max-lines",
@@ -13527,6 +13526,20 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a GIT_CONFIG_GLOBAL file before xargs with a long delimiter option is still read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config xargs --eof git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before xargs --eof, whose value is attached, is still read",
+    ),
+    (
+        "xargs --eof pwsh -c 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -c body after xargs --eof is read as a command",
     ),
 ]
 
