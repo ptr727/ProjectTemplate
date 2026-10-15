@@ -388,7 +388,7 @@ menu() {
 
 parse_args() {
     local -a actions=() agent_fields=()
-    local agent_name
+    local agent_name saw_all=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -405,14 +405,18 @@ parse_args() {
             [[ $# -ge 2 && -n $2 ]] || die "--agents takes the tools to install, separated by commas, or \"all\""
             actions+=(agents)
             AGENTS=()
+            saw_all=false
             IFS=',' read -r -a agent_fields <<<"$2"
             for agent_name in "${agent_fields[@]}"; do
                 if [[ -n $agent_name ]]; then
                     AGENTS+=("$agent_name")
+                    if [[ $agent_name == "all" ]]; then
+                        saw_all=true
+                    fi
                 fi
             done
             [[ ${#AGENTS[@]} -gt 0 ]] || die "--agents takes the tools to install, separated by commas, or \"all\""
-            if [[ " ${AGENTS[*]} " == *" all "* ]]; then
+            if [[ $saw_all == true ]]; then
                 [[ ${#AGENTS[@]} -eq 1 ]] || die "--agents takes \"all\" alone, or a list of tool names"
                 AGENTS=(--all)
             fi

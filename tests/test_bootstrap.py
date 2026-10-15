@@ -1692,6 +1692,13 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 self.assertIn('--agents takes "all" alone', result.stderr)
                 self.assertEqual(self.steps(), [])
 
+    def test_agents_a_name_holding_a_space_and_all_is_not_all(self) -> None:
+        for given in ("herdr all", " all"):
+            with self.subTest(given=given):
+                result = self.run_main(action="--agents", args=(given,))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"install-agents.sh --install <{given}>", self.agents_steps())
+
     def test_agents_drops_empty_names_from_the_list(self) -> None:
         result = self.run_main(action="--agents", args=("herdr,,cswap,",))
         self.assertEqual(result.returncode, 0, result.stderr)
