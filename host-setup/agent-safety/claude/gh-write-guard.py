@@ -3297,12 +3297,13 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
     - a `--config-env` alias for the subcommand it runs
     - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
     - an alias from the environment, or one persisted in the checkout's config, that runs a push
-    - a setting `_wrapper_env_reason` names, on a shell whose command string names git
+    - a setting `_wrapper_env_reason` names, on a shell whose command string runs git (see `_runs_git`)
     - a git command past the wrapper reading cap that `_may_run_alias` says may run an alias
 
     Heredoc data is not read (see `_command_readings`).
     A persisted alias is read only for a subcommand that can name one, which git does not list, nor `_COMMON_GIT_COMMANDS` names.
-    It is read from the `--git-dir` or `GIT_DIR` repository where one is given, else from the directory git runs in.
+    It is read from the directory git runs in, and from the `--git-dir` or `GIT_DIR` repository where one is given.
+    It is read from the `--work-tree` too, so a git directory the guard resolves wrongly still fails closed.
     An inline `-c alias.<name>` override is followed into the persisted config the same way.
     So is one set in the environment, below an inline one as git reads it.
     The chain is also read without it, since the environment may not reach that git command.
@@ -3361,12 +3362,21 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                         return f"a `--config-env` value for `{key}`, which git runs as a command"
                     if not _command_value(key, setting)[1]:
                         return f"a `{key}` value naming a program the guard does not read"
-    for c_dirs, _work_tree, git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
+    for c_dirs, work_tree, git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
         repo_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
-        target = repo_dir or _effective_cwd(c_dirs, leading_cd, cwd)
-        for aliases in [inline, {**env_aliases, **inline}] if env_aliases else [inline]:
-            if _alias_chain_runs_push(sub, aliases, target, config_lookup, repo_dir is not None):
-                return f"a push run by `git {sub}` through an alias"
+        targets = dict.fromkeys(
+            [
+                (_effective_cwd(c_dirs, leading_cd, cwd), False),
+                (_resolve_target_dir(c_dirs, work_tree, leading_cd, cwd), False),
+            ]
+        )
+        if repo_dir is not None:
+            targets[(repo_dir, True)] = None
+        tables = [inline, {**env_aliases, **inline}] if env_aliases else [inline]
+        for target, explicit in targets:
+            for aliases in tables:
+                if _alias_chain_runs_push(sub, aliases, target, config_lookup, explicit):
+                    return f"a push run by `git {sub}` through an alias"
     return None
 
 
@@ -3374,11 +3384,13 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
     """True when `sub` runs a push through a chain of aliases, read from `aliases` first, then the config in `target`.
 
     `git_dir` says `target` is an explicit `--git-dir`/`GIT_DIR` value (see `_config_alias`).
+    A name is matched without case, as git matches an alias name.
     """
+    aliases = {k.lower(): v for k, v in aliases.items()}
     name, seen = sub, set()
     while _may_name_alias(name) and name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
         seen.add(name)
-        expansion = aliases.get(name)
+        expansion = aliases.get(name.lower())
         if expansion is None and config_lookup is None and _PINNED_ALIASES:
             expansion = _PINNED_ALIASES[0].get(name)
         elif expansion is None:
@@ -3425,7 +3437,7 @@ def _unread_env_setting(name, value):
 
 
 def _wrapper_env_assignments(toks):
-    """The assignments reaching a shell whose command string names git, as (name, value).
+    """The assignments reaching a shell whose command string runs git (see `_runs_git`), as (name, value).
 
     The shell is a `sh -c`-style wrapper or one `_FOREIGN_SHELL_FLAGS` names, as its simple command's command.
     That is its own prefix (see `_command_prefix`), and each `export` argument before it.
@@ -3445,10 +3457,13 @@ def _wrapper_env_assignments(toks):
 
 
 def _runs_git(text):
-    """True when a git word is a command word in `text`, or in a command string it embeds (see `_embedded_wrapper_commands`)."""
+    """True when a git word runs as a command (see `_runs_as_command`) in `text`, or in a command string it embeds.
+
+    The embedded strings are those `_embedded_wrapper_commands` reads.
+    """
     for body in [text, *_embedded_wrapper_commands(text)]:
         toks = _shell_tokens(body)
-        if any(_is_git_exe(t) and _command_prefix(toks, k)[0] for k, t in enumerate(toks)):
+        if any(_is_git_exe(t) and _runs_as_command(toks, k) for k, t in enumerate(toks)):
             return True
     return False
 
@@ -13767,6 +13782,20 @@ _HIDDEN_GIT_CASES = [
         "a GIT_SSH_COMMAND running git on a wrapper shell is denied",
     ),
     (
+        "GIT_CONFIG_GLOBAL=/example/config bash -c 'flock /example/lock git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file on a wrapper shell reaches a git that flock runs",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push bash -c 'until git p origin develop; do sleep 1; done'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push alias set on a wrapper shell reaches a git an until loop runs",
+    ),
+    (
         "sudo -iu root pwsh -Command 'git push origin develop'",
         "feature/x",
         {"develop": _CODE_RULES},
@@ -13852,6 +13881,12 @@ _ALIAS_PUSH_CASES = [
         "allow",
         "control: an environment alias chaining to a persisted status alias is allowed",
     ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=p git Q origin develop",
+        {"p": "push"},
+        "deny",
+        "an environment alias is matched without case, as git matches it",
+    ),
 ]
 
 _ALIAS_DIR_CASES = [
@@ -13882,6 +13917,13 @@ _ALIAS_DIR_CASES = [
         {"st": "status"},
         "allow",
         "control: a persisted status alias in the --git-dir repository is allowed",
+    ),
+    (
+        'git --git-dir="$PWD/.git" p origin develop',
+        "/example/cwd",
+        {"p": "push"},
+        "deny",
+        "a persisted push alias in the directory git runs in is read where --git-dir is a run-time word",
     ),
 ]
 
