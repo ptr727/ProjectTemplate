@@ -2524,17 +2524,17 @@ def _gh_target_readings(cmd):
 
     `-f` alone is value-taking only inside `api`. On `pr create` it is the boolean `--fill`, so
     reading it as taking a value there would swallow a real following `--repo` flag whole. On
-    `pr merge`, `-m` is the boolean `--merge`. So an argv that may be one is read a second time,
-    by `_GH_MERGE_VALUE_FLAGS` less the repo flags. A target either reading finds counts.
+    `pr merge`, `-m` is the boolean `--merge`. So a merge argv (see `_runs_gh_pr_merge`) is read
+    again, by `_GH_MERGE_TEXT_FLAGS`, the merge value options less the repo flags. A target either
+    reading finds counts.
     """
-    merge_flags = _GH_MERGE_VALUE_FLAGS - _REPO_FLAG_BARE
     for args in _all_gh_arg_lists(cmd):
         if args and args[0] == "api":
             yield args, _GH_API_VALUE_FLAGS
             continue
         yield args, _GH_CREATE_TEXT_VALUE_FLAGS
-        if _is_gh_pr_merge(args):
-            yield args, merge_flags
+        if _runs_gh_pr_merge(args):
+            yield args, _GH_MERGE_TEXT_FLAGS
 
 
 def _gh_write_targets(cmd):
@@ -4011,9 +4011,9 @@ def _push_targets(cmd, cwd=None, current_branch=None):
     Options are read as git reads them. A short-option cluster such as `-uf` or `-ud` forces or
     deletes, while `-ofd` is a push option with the value `fd`. A long option cut short, such as
     `--del`, `--al`, or `--mirr`, is the option it starts. `--branches` is `--all`. Of `--prune`
-    and `--no-prune`, the later one wins, and so it is for `--force`, `--delete`, `--all`, and
-    `--mirror` and each one's `--no-` form (see `_PUSH_NEGATIONS`). A short-option cluster has no
-    negated form, so `-f` after `--no-force` forces. `--no-force` leaves a `--force-with-lease` in
+    and `--no-prune`, the later one wins. So it is for `--force`, `--delete`, `--all`, `--mirror`,
+    and `--tags`, each beside its `--no-` form (see `_PUSH_NEGATIONS`). A short-option cluster has
+    no negated form, so `-f` after `--no-force` forces. `--no-force` leaves a `--force-with-lease` in
     place, as git does. A negated option after `--` or `--end-of-options` is a refspec to git, so
     it cancels nothing. A delete with
     no refspec is read as a bare push, which git refuses, rather than as nothing. Each push is
@@ -4192,6 +4192,9 @@ def _is_gh_pr_merge(args):
     return "pr" in args and "merge" in args[args.index("pr") :]
 
 
+_GH_MERGE_TEXT_FLAGS = _GH_MERGE_VALUE_FLAGS - _REPO_FLAG_BARE
+
+
 def _runs_gh_pr_merge(args):
     """True when a `gh` argv's subcommand under `pr` is `merge`, past `pr`'s own flags.
 
@@ -4231,7 +4234,8 @@ def _gh_merge_run_time_word(text):
     The shell rewrites such a word before gh reads it, so `"$(printf %s --admin)"` or an unquoted
     `$A` may pass `--admin`. An option's value is left alone where word splitting cannot split it,
     as in `--body "$BODY"`. gh then reads it whole as that value. The option is one of
-    `_GH_MERGE_VALUE_FLAGS`, with its value as the next word or attached as in `--body=...`. A
+    `_GH_MERGE_TEXT_FLAGS`, with its value as the next word or attached as in `--body=...`. A repo
+    flag's value is not, since the target check cannot read a run-time one. A
     word inside a heredoc body that is data is left alone too. Only a gh word in a command's
     position counts, the test `_rewritten_git_words` gives git, so `echo gh pr merge $N` is no
     merge.
@@ -4254,7 +4258,7 @@ def _gh_merge_run_time_word(text):
                 x += 2 if x + 1 < end and not _is_shell_op(toks[x + 1]) else 1
                 continue
             at, is_value = x, _gh_merge_attached_value(word)
-            if word in _GH_MERGE_VALUE_FLAGS and x + 1 < end:
+            if word in _GH_MERGE_TEXT_FLAGS and x + 1 < end:
                 at, is_value = x + 1, True
             x = at + 1
             if (
@@ -4267,13 +4271,13 @@ def _gh_merge_run_time_word(text):
 
 
 def _gh_merge_attached_value(word):
-    """True when `word` is a `_GH_MERGE_VALUE_FLAGS` option with its value attached.
+    """True when `word` is a `_GH_MERGE_TEXT_FLAGS` option with its value attached.
 
     That is `--body=<value>`, or a short one such as `-b<value>` or `-b=<value>`.
     """
     if word.startswith("--"):
-        return word.partition("=")[0] in _GH_MERGE_VALUE_FLAGS and "=" in word
-    return len(word) > 2 and word[:2] in _GH_MERGE_VALUE_FLAGS
+        return word.partition("=")[0] in _GH_MERGE_TEXT_FLAGS and "=" in word
+    return len(word) > 2 and word[:2] in _GH_MERGE_TEXT_FLAGS
 
 
 def _with_eval_payloads(texts, overflow):
@@ -7819,6 +7823,27 @@ _GIT_CASES = [
         {},
         "deny",
         "merge's -m is the boolean --merge, so the -R after it is still read as the target",
+    ),
+    (
+        "gh pr create --title merge -m -Rstranger/example",
+        None,
+        {},
+        "allow",
+        "control: on pr create, -m takes the next word as a milestone, whatever a title says",
+    ),
+    (
+        'gh pr merge 5 --squash --repo "$TARGET"',
+        None,
+        {},
+        "deny",
+        "a run-time repo value on a merge cannot be checked as a target, so it fails closed",
+    ),
+    (
+        'gh pr merge 5 --squash -R"$TARGET"',
+        None,
+        {},
+        "deny",
+        "an attached run-time repo value on a merge fails closed too",
     ),
     (
         "gh pr merge 5 -m -R ptr727/other",
