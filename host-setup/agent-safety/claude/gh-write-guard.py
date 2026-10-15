@@ -2256,8 +2256,8 @@ def _opaque_cd(toks):
 _REPO_ENV_PREFIXES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_COMMON_DIR=")
 _DIR_OPTION_PREFIXES = ("-C", "-D", "--chdir", "-execdir")
 _STAYING_LAUNCHERS = frozenset(
-    {"timeout", "nice", "nohup", "command", "builtin", "exec", "stdbuf", "ionice", "env", "sudo"}
-    | {"xargs"}
+    {"timeout", "gtimeout", "nice", "nohup", "command", "builtin", "exec", "stdbuf", "ionice"}
+    | {"env", "sudo", "xargs", "setsid", "time", "flock", "winpty"}
 )
 
 
@@ -2266,11 +2266,12 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
 
     A `cd` past the leading one may move it, and so may a git directory variable. An `eval`,
     `source`, `.`, or `trap` in command position may too. The scan covers the words before the
-    push, or the whole command where a later word may run first (see `_push_scan_end`). In the
-    command that runs git, a directory option such as `sudo -D` or `env -C` moves it. So does
-    running git as an argument of any command not known to keep its directory, such as `timeout`.
+    push. Where a loop or a function may run a later word first, it covers the whole command (see
+    `_reruns`). In the command that runs git, a directory option such as `sudo -D` or `env -C`
+    moves it. So does a first command word outside `_STAYING_LAUNCHERS`, such as `uv`, that runs
+    git as its argument. Options, redirections, and assignments are not command words.
     """
-    end = max(_push_scan_end(toks, quoted, word)[0], word)
+    end = len(toks) if _reruns(toks, quoted) else word
     cds, prev = 0, None
     for t in toks[:end]:
         if t.rsplit("/", 1)[-1] in _CD_BUILTINS:
@@ -2294,7 +2295,17 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
     own = toks[start:word]
     if any(t.startswith(_DIR_OPTION_PREFIXES) for t in own):
         return True
-    runners = [t for t in own if not _ENV_ASSIGN_RE.match(t) and t not in _COND_PRECEDERS]
+    runners, k = [], 0
+    while k < len(own):
+        t = own[k]
+        if _is_redir_op(t):
+            k += 2
+            continue
+        if not (
+            _ENV_ASSIGN_RE.match(t) or t in _COND_PRECEDERS or t.startswith("-") or t.isdigit()
+        ):
+            runners.append(t)
+        k += 1
     return bool(runners) and runners[0].rsplit("/", 1)[-1] not in _STAYING_LAUNCHERS
 
 
@@ -2339,17 +2350,25 @@ def _push_scan_end(toks, quoted, word):
     words too.
     """
     syntax = [not (quoted and quoted[k]) for k in range(len(toks))]
-    reruns = any(
-        syntax[k] and (t in _OUT_OF_ORDER_WORDS or (_is_shell_op(t) and "(" in t))
-        for k, t in enumerate(toks)
-    )
-    if reruns:
+    if _reruns(toks, quoted):
         return len(toks), None
     if _forks_out_of_reach(toks) or any(
         syntax[k] and _is_shell_op(t) and not _is_ordered_operator(t) for k, t in enumerate(toks)
     ):
         return len(toks), word
     return word, None
+
+
+def _reruns(toks, quoted):
+    """True when a loop or a function may run a command written after another first.
+
+    An opening parenthesis counts, since a function definition carries one. A word `quoted` marks
+    as quoted is not syntax, and with no mask every word is.
+    """
+    return any(
+        not (quoted and quoted[k]) and (t in _OUT_OF_ORDER_WORDS or (_is_shell_op(t) and "(" in t))
+        for k, t in enumerate(toks)
+    )
 
 
 _ORDERED_OPERATORS = frozenset({">", ">>", "<", "<<", "<<<", "<>", ">&", "<&", "&>", "&>>", ">|"})
@@ -11649,6 +11668,16 @@ _PUSH_REPO_CASES = [
         "timeout 60 git push origin develop && cd {beta}",
         "allow",
         "control: a timeout prefix and a later cd leave the push in the session's checkout",
+    ),
+    (
+        "git push origin develop 2>&1 | tail -3 && cd {beta}",
+        "allow",
+        "control: a pipe does not let a later cd run before the push",
+    ),
+    (
+        "setsid --wait timeout 60 git push origin develop",
+        "allow",
+        "control: launchers that keep their directory, options included, leave the push in place",
     ),
     (
         "git -C {alpha2} push origin develop",
