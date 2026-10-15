@@ -3397,7 +3397,7 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
     A name is matched without case, as git matches an alias name.
     A name `aliases` gives several values is followed through each, since the guard cannot tell which one git reads.
     Names are read breadth first, each once, so a name many paths reach costs one read rather than one per path.
-    A `!` shell alias is followed into the subcommand of each git command its text runs, which may be another alias.
+    A `!` shell alias is followed into the subcommand of each git command its text runs (see `_shell_alias_hides_git`).
     """
     table = {}
     for key, values in aliases.items():
@@ -3420,7 +3420,8 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
                 if _alias_runs_push(expansion):
                     return True
                 if expansion.startswith("!"):
-                    following.extend(inv[4] for inv in _all_git_invocations(expansion[1:]))
+                    if _shell_alias_hides_git(expansion[1:], table, following):
+                        return True
                     continue
                 try:
                     words = shlex.split(expansion)
@@ -3429,6 +3430,27 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
                 if words:
                     following.append(words[0])
         level = following
+    return False
+
+
+def _shell_alias_hides_git(text, table, following):
+    """True when the git commands a `!` shell alias's `text` runs cannot be followed, else queue them.
+
+    Each command's subcommand goes on `following`, and its inline `-c alias.<name>` values join `table`.
+    A command that cannot be followed is one whose subcommand is missing or a run-time word, as git appends the alias's arguments.
+    So is one naming a possible alias under another directory, whose config the chain does not read.
+    """
+    invocations = _all_git_invocations(text)
+    if not invocations:
+        return _runs_git(text)
+    for c_dirs, work_tree, git_dir, inline, sub, _args, leading_cd in invocations:
+        if not sub or _is_run_time_word(sub):
+            return True
+        for key, value in inline.items():
+            table.setdefault(key.lower(), []).append(value)
+        if (c_dirs or work_tree or git_dir or leading_cd) and _may_name_alias(sub):
+            return True
+        following.append(sub)
     return False
 
 
@@ -13984,6 +14006,36 @@ _ALIAS_PUSH_CASES = [
         {"q": "!git st", "st": "status"},
         "allow",
         "control: a persisted shell alias running a persisted status alias is allowed",
+    ),
+    (
+        "git q origin develop",
+        {"q": "!git -c alias.x=p x", "p": "push"},
+        "deny",
+        "a persisted shell alias whose git sets an inline alias chaining to a push alias is denied",
+    ),
+    (
+        "git g p origin develop",
+        {"g": "!git", "p": "push"},
+        "deny",
+        "a persisted shell alias running git with the arguments git appends is denied",
+    ),
+    (
+        "git g p origin develop",
+        {"g": '!f() { git "$@"; }; f', "p": "push"},
+        "deny",
+        "a persisted shell alias running git on its run-time arguments is denied",
+    ),
+    (
+        "git q",
+        {"q": "!git -C /example/other p", "p": "status"},
+        "deny",
+        "a persisted shell alias running a possible alias under another directory is denied",
+    ),
+    (
+        "git lg",
+        {"lg": '!f() { git log --oneline "$@"; }; f'},
+        "allow",
+        "control: a persisted shell alias running a builtin on its arguments is allowed",
     ),
     (
         "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=st GIT_CONFIG_KEY_1=alias.q GIT_CONFIG_VALUE_1=p git q origin develop",
