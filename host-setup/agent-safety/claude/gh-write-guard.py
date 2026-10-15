@@ -1289,12 +1289,18 @@ def _is_precommand(tok):
 
 
 def _git_word_assignments(toks, k):
-    """The assignments in the prefix of the simple command that runs the git word at `toks[k]`.
+    """The assignments in the prefix of the simple command that runs the git word at `toks[k]` (see `_command_prefix`)."""
+    reached, out = _command_prefix(toks, k)
+    return out if reached else []
+
+
+def _command_prefix(toks, k):
+    """(whether the word at `toks[k]` may be its simple command's command, the assignments before it).
 
     The command is read forward from its start.
     An assignment is collected.
     A precommand is passed with every word up to the next assignment or precommand, its options and their values among them.
-    Any other word means the git word is an argument rather than the command, so nothing is collected.
+    Any other word means the word at `k` is an argument rather than the command.
     """
     start = k
     while start > 0 and not _is_separator(toks[start - 1]):
@@ -1311,8 +1317,8 @@ def _git_word_assignments(toks, k):
             while i < k and not (_ENV_ASSIGN_RE.match(toks[i]) or _is_precommand(toks[i])):
                 i += 1
         else:
-            return []
-    return out
+            return False, []
+    return True, out
 
 
 def _command_readings(text):
@@ -2246,15 +2252,13 @@ def _command_string_exe(tok):
 def _foreign_shell_at(toks, i):
     """The base name of a shell `_FOREIGN_SHELL_FLAGS` names that `toks[i]` runs as a command, or None.
 
-    The word must open a command, or follow a `timeout` and its duration.
+    The word must be its simple command's command, past any assignment or precommand such as `sudo -u root` (see `_command_prefix`).
     So a `cmd` or `script` directory named as an argument is not read as a shell.
     """
     exe = _command_string_exe(toks[i])
     if exe is None or exe in _SHELL_WRAPPER_EXE:
         return None
-    if _opens_command(toks, i) or (i >= 2 and _is_timeout_exe(toks[i - 2])):
-        return exe
-    return None
+    return exe if _command_prefix(toks, i)[0] else None
 
 
 def _foreign_shell_bodies(exe, args):
@@ -13387,6 +13391,27 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "allow",
         "control: config set on an earlier git command does not reach a later push",
+    ),
+    (
+        "sudo -u root pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -Command body after a sudo with a user option is read as a command",
+    ),
+    (
+        "timeout -s KILL 60 pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -Command body after a timeout with a signal option is read as a command",
+    ),
+    (
+        "echo GIT_CONFIG_GLOBAL=/example/x -n git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an assignment-shaped echo argument before a git word and its subcommand is not read",
     ),
 ]
 
