@@ -231,7 +231,18 @@ def _is_gh_write(cmd):
 
 
 def _origin_owner_repo(cwd):
-    _code, url = _git_read(cwd, ["remote", "get-url", "origin"])
+    try:
+        url = subprocess.run(
+            ["git", "-C", cwd or ".", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    # A checkout with no usable origin is answered as unknown rather than crashing the hook.
+    except Exception:  # noqa: BLE001
+        return None
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -2244,26 +2255,47 @@ def _opaque_cd(toks):
 
 _REPO_ENV_PREFIXES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_COMMON_DIR=")
 _DIR_OPTION_PREFIXES = ("-C", "-D", "--chdir", "-execdir")
+_STAYING_LAUNCHERS = frozenset(
+    {"timeout", "nice", "nohup", "command", "builtin", "exec", "stdbuf", "ionice", "env", "sudo"}
+    | {"xargs"}
+)
 
 
-def _repo_may_move(toks, end, leading_cd):
-    """True when a word before the `git` at `toks[end]` may run it in another checkout.
+def _repo_may_move(toks, word, leading_cd, quoted=None):
+    """True when the `git` at `toks[word]` may run in another checkout than its `-C` and leading `cd` name.
 
-    That is a `cd` past the leading one, or an `eval`, `source`, `.`, or `trap` in command position.
-    In the command that runs git it is also a directory option, such as `sudo -D` or `env -C`, or a
-    git directory variable. A word after the push, such as a later `cd`, changes nothing it reads.
+    A `cd` past the leading one may move it, and so may a git directory variable. An `eval`,
+    `source`, `.`, or `trap` in command position may too. The scan covers the words before the
+    push, or the whole command where a later word may run first (see `_push_scan_end`). In the
+    command that runs git, a directory option such as `sudo -D` or `env -C` moves it. So does
+    running git as an argument of any command not known to keep its directory, such as `timeout`.
     """
-    start, cds = 0, 0
-    for k, t in enumerate(toks[:end]):
-        if _is_separator(t):
-            start = k + 1
-        elif t.rsplit("/", 1)[-1] in _CD_BUILTINS:
+    end = max(_push_scan_end(toks, quoted, word)[0], word)
+    cds, prev = 0, None
+    for t in toks[:end]:
+        if t.rsplit("/", 1)[-1] in _CD_BUILTINS:
             cds += 1
-        elif k == start and t in ("eval", "source", ".", "trap"):
+        elif t.startswith(_REPO_ENV_PREFIXES) or (
+            t in ("eval", "source", ".", "trap")
+            and (
+                prev is None
+                or _is_separator(prev)
+                or prev in _COND_PRECEDERS
+                or prev in ("command", "builtin")
+            )
+        ):
             return True
+        prev = t
     if cds > (1 if leading_cd else 0):
         return True
-    return any(t.startswith(_DIR_OPTION_PREFIXES + _REPO_ENV_PREFIXES) for t in toks[start:end])
+    start = word
+    while start > 0 and not _is_separator(toks[start - 1]):
+        start -= 1
+    own = toks[start:word]
+    if any(t.startswith(_DIR_OPTION_PREFIXES) for t in own):
+        return True
+    runners = [t for t in own if not _ENV_ASSIGN_RE.match(t) and t not in _COND_PRECEDERS]
+    return bool(runners) and runners[0].rsplit("/", 1)[-1] not in _STAYING_LAUNCHERS
 
 
 def _attached_c(body):
@@ -3079,7 +3111,11 @@ def _push_invocations(cmd):
                     else:
                         head_moves = whole_moves
                     repo_unreliable = (
-                        wrapped_cd or redirected or _repo_may_move(body_toks, word, leading_cd)
+                        wrapped_cd
+                        or redirected
+                        or _repo_may_move(
+                            body_toks, word, leading_cd, quoted if body is text else None
+                        )
                     )
                     unreliable = extra > 0 or head_moves or repo_unreliable
                     out.append((c_dirs, None, leading_cd, unreliable, repo_unreliable, args))
@@ -11595,9 +11631,24 @@ _PUSH_REPO_CASES = [
         "a push into a directory that does not exist fails closed on a protected default",
     ),
     (
+        "uv run --directory {beta} git push origin develop",
+        "deny",
+        "git run by a command not known to keep its directory fails closed on a protected default",
+    ),
+    (
+        "for r in a b; do git push origin develop; cd {beta}; done",
+        "deny",
+        "a cd written after the push in a loop may run before it, so it fails closed",
+    ),
+    (
         "git push origin develop",
         "allow",
         "control: the origin of the session's own checkout allows its develop",
+    ),
+    (
+        "timeout 60 git push origin develop && cd {beta}",
+        "allow",
+        "control: a timeout prefix and a later cd leave the push in the session's checkout",
     ),
     (
         "git -C {alpha2} push origin develop",
