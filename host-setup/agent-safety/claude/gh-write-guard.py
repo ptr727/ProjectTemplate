@@ -2363,13 +2363,16 @@ def _reruns(toks, quoted, subshells=True):
     """True when a loop or a function may run a command written after another first.
 
     Any opening parenthesis counts, since a function definition carries one. With `subshells`
-    false only the `()` of a definition does, so a subshell or a `$(` counts for nothing. A word
-    `quoted` marks as quoted is not syntax, and with no mask every word is.
+    false only the `()` of a definition does, fused with what follows it or not. A subshell or a
+    `$(` then counts for nothing. A word `quoted` marks as quoted is not syntax, and with no mask
+    every word is.
     """
 
     def opens(k, t):
         if not subshells:
-            return t == "()" or (t == "(" and k + 1 < len(toks) and toks[k + 1] == ")")
+            return t.startswith("()") or (
+                t == "(" and k + 1 < len(toks) and toks[k + 1].startswith(")")
+            )
         return _is_shell_op(t) and "(" in t
 
     return any(
@@ -11680,6 +11683,16 @@ _PUSH_REPO_CASES = [
         "git push origin develop 2>&1 | tail -3 && cd {beta}",
         "allow",
         "control: a pipe does not let a later cd run before the push",
+    ),
+    (
+        "f()\n{{ git push origin develop; }}\ncd {beta}\nf",
+        "deny",
+        "a definition whose brace sits on the next line may run a later cd first",
+    ),
+    (
+        "f()(git push origin develop); cd {beta}; f",
+        "deny",
+        "a definition with a subshell body may run a later cd first",
     ),
     (
         "git push origin develop && (cd {beta} && git status)",
