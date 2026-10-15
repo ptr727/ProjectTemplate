@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from host_capability import requires_symlink
+from host_capability import requires_symlink, requires_unprivileged_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import skills_install
@@ -955,35 +955,7 @@ LINUX_WRAPPER = (
 )
 
 
-def unprivileged_root_is_available() -> bool:
-    """Whether `unshare -r` gives this process an EUID of 0 without any real privilege.
-
-    The guard under test reads `$EUID`, which bash makes read-only, so the sudo'd run cannot be
-    faked by setting a variable and has to be a real EUID 0. A user namespace is the one way to
-    reach that without root, and it is unavailable on a host that restricts unprivileged user
-    namespaces, which is why this is probed rather than assumed.
-    """
-    if sys.platform != "linux" or not shutil.which("unshare"):
-        return False
-    try:
-        return (
-            subprocess.run(
-                ["unshare", "-r", "id", "-u"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=20,
-                check=False,
-            ).stdout.strip()
-            == "0"
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-@unittest.skipUnless(
-    unprivileged_root_is_available(), "needs an unprivileged user namespace to reach EUID 0"
-)
+@requires_unprivileged_root
 class LinuxWrapperSudoGuardCase(unittest.TestCase):
     """`install-skills.sh` refuses a sudo'd run rather than installing for root and exiting 0.
 

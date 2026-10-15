@@ -1,4 +1,4 @@
-"""Host capabilities a test needs and a Windows host may lack.
+"""Host capabilities a test needs and some hosts lack.
 
 A test that needs one of these skips with the reason when the host lacks it, rather than
 erroring on a precondition that has nothing to do with the code under test.
@@ -10,6 +10,8 @@ import functools
 import ntpath
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +33,39 @@ def can_symlink() -> bool:
 
 NO_SYMLINK = "this host cannot create a symlink without Developer Mode or elevation"
 requires_symlink = unittest.skipUnless(can_symlink(), NO_SYMLINK)
+
+
+@functools.cache
+def unprivileged_root_is_available() -> bool:
+    """Whether `unshare -r` gives this process an EUID of 0 without any real privilege.
+
+    A guard reading `$EUID` cannot be fooled by setting a variable, since bash makes it read-only.
+    A sudo'd run therefore has to be a real EUID 0. A user namespace is the one way to
+    reach that without root, and it is unavailable on a host that restricts unprivileged user
+    namespaces, which is why this is probed rather than assumed.
+    """
+    if sys.platform != "linux" or not shutil.which("unshare"):
+        return False
+    try:
+        return (
+            subprocess.run(
+                ["unshare", "-r", "id", "-u"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=20,
+                check=False,
+            ).stdout.strip()
+            == "0"
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+NO_UNPRIVILEGED_ROOT = "needs an unprivileged user namespace to reach EUID 0"
+requires_unprivileged_root = unittest.skipUnless(
+    unprivileged_root_is_available(), NO_UNPRIVILEGED_ROOT
+)
 
 
 _WINDOWS = os.name == "nt"
