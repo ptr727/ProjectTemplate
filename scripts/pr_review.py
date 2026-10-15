@@ -219,7 +219,7 @@ Subcommands
            An `Open findings remain:` list is read the same way, except that an entry pairs only
            with a thread whose open entry is badged at the severity tier the entry's own bold
            word states. An entry naming no file pairs on that tier alone, and an entry or thread
-           whose tier is not read pairs with nothing. An entry saying `each` counts as two.
+           whose tier is not read pairs with nothing. An entry stating `votes each` counts as two.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -2869,7 +2869,7 @@ NARRATIVE_FINDINGS = re.compile(
     r"^ {0,3}[*_]{0,2}Open findings remain[*_]{0,2}:[*_]{0,2}[ \t]*$", re.IGNORECASE
 )
 ENTRY_SEVERITY = re.compile(r"\*\*([A-Za-z]+)\*\*")
-ENTRY_EACH = re.compile(r"\beach\b", re.IGNORECASE)
+ENTRY_EACH = re.compile(r"\bvotes?\s+each\b", re.IGNORECASE)
 SEVERITY_TIER = {
     "critical": 3,
     "high": 3,
@@ -2926,7 +2926,8 @@ def unthreaded_narrative_findings(pr: dict) -> int:
     such entry for findings its threads carry. An entry or a thread whose tier is not read pairs
     with nothing, which overstates rather than hides.
 
-    An entry saying `each` names several findings, so it counts as two, each pairing on its own.
+    An entry stating `votes each` names several findings, so it counts as two, each pairing on
+    its own.
     A third finding it names is the case this cannot see.
     """
     newest = second_format_head(pr)
@@ -4879,7 +4880,7 @@ def digest(
                 else ""
             )
             + (
-                f", and {narrative} of the entries under its `Open findings remain:` label "
+                f", and {narrative} of the findings its `Open findings remain:` entries name "
                 f"{'pairs' if narrative == 1 else 'pair'} with no thread at the severity it "
                 "states, on a file it names where it names one"
                 if narrative

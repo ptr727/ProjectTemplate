@@ -5470,7 +5470,7 @@ class TestNarrativeFindings(GqlCase):
         self.assertIn("overview=4/4", out)
         self.assertIn("FINDINGS WITH NO THREAD (3)", out)
         self.assertIn(
-            "3 of the entries under its `Open findings remain:` label pair with no thread at "
+            "3 of the findings its `Open findings remain:` entries name pair with no thread at "
             "the severity it states, on a file it names where it names one",
             out,
         )
@@ -5530,6 +5530,11 @@ class TestNarrativeFindings(GqlCase):
         """An open entry standing for that thread makes it a finding this round still names."""
         listed = "- `pkg/guard.py`: a failed read skips the check (**critical**, 1 vote).\n"
         self.assertEqual(0, self.count(with_narrative(listed), narrative_threads("PRR_old")))
+
+    def test_each_in_an_entry_s_own_wording_counts_once(self) -> None:
+        """Only the vote count saying `each` names several findings, so prose saying it does not."""
+        listed = "- `pkg/guard.py`: each retry re-reads the token (**critical**, 1 vote).\n"
+        self.assertEqual(0, self.count(with_narrative(listed)))
 
     def test_an_entry_saying_each_counts_as_two_findings(self) -> None:
         """One low thread covers one of the two findings the entry names, and leaves the other."""
