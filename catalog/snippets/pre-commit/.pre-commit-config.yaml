@@ -10,7 +10,6 @@
 # A pip-form repo whose root the validator's `python-directories` input declares may swap an entry for `.venv/bin/python -m <tool>` where its requirements install that tool, matching CI.
 # Run that way, pyright also takes `--pythonpath .venv/bin/python`.
 # On Windows each of those interpreter paths is `.venv\Scripts\python.exe` instead.
-# A declared subdirectory matches CI only with its entry run from inside that directory.
 # The prose/EOL hooks fetch their scripts fresh from ptr727/ProjectTemplate's `main` branch via hub-fetch-run.py, rather than vendoring or pinning a copy.
 # See that file's docstring for why.
 # A fetch failure fails the commit, and it never silently skips the gate.
