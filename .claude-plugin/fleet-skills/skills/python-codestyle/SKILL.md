@@ -64,9 +64,10 @@ default baseline on first-party code (a repo may instead run mypy with its stric
 and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
 `strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
 standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
-editor and the CLI/CI run the same engine and never disagree. The CLI/CI form is `uv run pyright`
-in the uv form. In the pip form a declared directory runs the environment's own pyright, or
-`uvx pyright@latest` pointed at the environment where it installs none.
+editor and the CLI/CI run the same engine. A pyright the requirements pin can lag the one Pylance
+bundles, though. The CLI/CI form is `uv run pyright` in the uv form. In the pip form a declared
+directory runs the environment's own pyright, or `uvx pyright@latest` pointed at the environment
+where it installs none.
 The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
 when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
@@ -125,7 +126,7 @@ carries a `[project]` table it then installs the directory itself as editable, w
 uv venv --clear                           # creates .venv, replacing an existing one
 uv pip install -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
 uv pip install -e .                       # only where pyproject.toml has a [project] table
-# where .venv installs ruff, .venv/bin/python -m ruff replaces uvx ruff@latest below
+# in a declared directory whose .venv installs ruff, .venv/bin/python -m ruff replaces uvx ruff@latest
 uvx ruff@latest format                    # auto-format
 uvx ruff@latest check --fix               # auto-fix lint
 uvx ruff@latest check                     # verify lint clean
