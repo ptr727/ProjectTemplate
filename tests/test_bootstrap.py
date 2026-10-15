@@ -24,6 +24,7 @@ Run as `python3 tests/test_bootstrap.py`, or under `python3 -m unittest discover
 
 from __future__ import annotations
 
+import ctypes
 import io
 import json
 import os
@@ -1630,13 +1631,24 @@ POWERSHELL_REPORT_STEPS = (
 POWERSHELL_UPGRADE_STEPS = ("upgrade-host.ps1 -Packages", "install-agents.ps1 -Upgrade")
 
 
+def host_is_elevated() -> bool:
+    """Whether `bootstrap.ps1` should read this process as elevated, asked of the shell API rather than the check under test.
+
+    The loader's check is Windows-only, so it reads no other host as elevated, root included.
+    """
+    if sys.platform == "win32":
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    return False
+
+
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows loader's own functions")
 class TestPowerShellToolHandoff(unittest.TestCase):
     """`bootstrap.ps1`'s upgrade and report handoffs, run through its own functions against stub tools.
 
     Each stub records the step it was run as. The steps are asserted from what ran rather than from
-    the loader's text. Every run stands in for elevation through `Test-Elevated`. A case then reads
-    the same on an elevated Windows runner as in a user's session.
+    the loader's text. Every other case stands in for elevation through `Test-Elevated`. A case then
+    reads the same on an elevated Windows runner as in a user's session. One case runs the real
+    `Test-Elevated` and holds it to the host's own answer.
     """
 
     def setUp(self) -> None:
@@ -1649,13 +1661,13 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.log = self.work / "steps.log"
 
     def run_handoff(
-        self, call: str, elevated: bool = False, fail_step: str = ""
+        self, call: str, elevated: bool | None = False, fail_step: str = ""
     ) -> subprocess.CompletedProcess[str]:
-        body = (
-            "$script:TREE = $env:FIXTURE_TREE\n"
-            "function Test-Elevated { $env:FIXTURE_ELEVATED -eq '1' }\n"
-            f"{call}\n"
+        """Runs `call` with elevation stood in for as `elevated`, or the loader's own check where it is None."""
+        stand_in = (
+            "" if elevated is None else "function Test-Elevated { $env:FIXTURE_ELEVATED -eq '1' }\n"
         )
+        body = f"$script:TREE = $env:FIXTURE_TREE\n{stand_in}{call}\n"
         harness = self.work / "harness"
         harness.mkdir(exist_ok=True)
         return subprocess.run(
@@ -1678,6 +1690,14 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         if not self.log.exists():
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
+
+    def test_the_elevation_check_agrees_with_the_host(self) -> None:
+        result = self.run_handoff(
+            "if (Test-Elevated) { log 'elevated' } else { log 'not elevated' }", elevated=None
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = "elevated" if host_is_elevated() else "not elevated"
+        self.assertEqual(result.stdout.splitlines()[-1:], [expected], result.stderr)
 
     def test_an_upgrade_runs_the_package_upgrade_then_the_agent_tools_upgrade(self) -> None:
         result = self.run_handoff("Invoke-Upgrade")
