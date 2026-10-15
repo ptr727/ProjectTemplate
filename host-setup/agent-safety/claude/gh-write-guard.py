@@ -2271,7 +2271,7 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
     moves it. So does a first command word outside `_STAYING_LAUNCHERS`, such as `uv`, that runs
     git as its argument. Options, redirections, and assignments are not command words.
     """
-    end = len(toks) if _reruns(toks, quoted) else word
+    end = len(toks) if _reruns(toks, quoted, subshells=False) else word
     cds, prev = 0, None
     for t in toks[:end]:
         if t.rsplit("/", 1)[-1] in _CD_BUILTINS:
@@ -2359,14 +2359,21 @@ def _push_scan_end(toks, quoted, word):
     return word, None
 
 
-def _reruns(toks, quoted):
+def _reruns(toks, quoted, subshells=True):
     """True when a loop or a function may run a command written after another first.
 
-    An opening parenthesis counts, since a function definition carries one. A word `quoted` marks
-    as quoted is not syntax, and with no mask every word is.
+    Any opening parenthesis counts, since a function definition carries one. With `subshells`
+    false only the `()` of a definition does, so a subshell or a `$(` counts for nothing. A word
+    `quoted` marks as quoted is not syntax, and with no mask every word is.
     """
+
+    def opens(k, t):
+        if not subshells:
+            return t == "()" or (t == "(" and k + 1 < len(toks) and toks[k + 1] == ")")
+        return _is_shell_op(t) and "(" in t
+
     return any(
-        not (quoted and quoted[k]) and (t in _OUT_OF_ORDER_WORDS or (_is_shell_op(t) and "(" in t))
+        not (quoted and quoted[k]) and (t in _OUT_OF_ORDER_WORDS or opens(k, t))
         for k, t in enumerate(toks)
     )
 
@@ -11673,6 +11680,11 @@ _PUSH_REPO_CASES = [
         "git push origin develop 2>&1 | tail -3 && cd {beta}",
         "allow",
         "control: a pipe does not let a later cd run before the push",
+    ),
+    (
+        "git push origin develop && (cd {beta} && git status)",
+        "allow",
+        "control: a cd in a later subshell does not move the push",
     ),
     (
         "setsid --wait timeout 60 git push origin develop",
