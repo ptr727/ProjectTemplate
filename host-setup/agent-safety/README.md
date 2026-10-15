@@ -134,9 +134,9 @@ text says, because the harm it covers was never in the text.
    `include.path`/`includeIf` override is denied on any git command. So is a `GIT_CONFIG_GLOBAL`
    or `GIT_CONFIG_SYSTEM` file other than `/dev/null`. Either file may set any of those keys.
    A shell whose command string runs git is denied where its prefix or an earlier `export` sets
-   such a file, or config through `GIT_CONFIG_COUNT`. So is one where they set a variable git
-   runs as a command, unless it names a plain program that runs no git. The hook reads that
-   string without them.
+   such a file, or config through `GIT_CONFIG_COUNT`. A variable git runs as a command, set
+   there, counts too, unless it names a plain program that runs no git. The hook reads that
+   string without those settings.
    The push and include checks also read each command with its quotes and backslashes removed and
    `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
    workaround is an explicit refspec run as its own command. Every other

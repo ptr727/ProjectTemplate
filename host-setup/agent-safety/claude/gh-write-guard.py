@@ -3350,7 +3350,7 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                     )
                 if key.startswith("alias."):
                     if source == "env":
-                        env_aliases.setdefault(key[len("alias.") :], setting)
+                        env_aliases.setdefault(key[len("alias.") :], []).append(setting)
                     if not sub or key[len("alias.") :] != sub.lower():
                         continue
                     if source == "config-env":
@@ -3385,28 +3385,35 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
 
     `git_dir` says `target` is an explicit `--git-dir`/`GIT_DIR` value (see `_config_alias`).
     A name is matched without case, as git matches an alias name.
+    A name `aliases` gives several values is followed through each, since the guard cannot tell which one git reads.
     """
-    aliases = {k.lower(): v for k, v in aliases.items()}
-    name, seen = sub, set()
-    while _may_name_alias(name) and name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
-        seen.add(name)
-        expansion = aliases.get(name.lower())
-        if expansion is None and config_lookup is None and _PINNED_ALIASES:
-            expansion = _PINNED_ALIASES[0].get(name)
-        elif expansion is None:
-            expansion = _config_alias(target, name, config_lookup, git_dir)
-        if expansion is None:
+    table = {}
+    for key, values in aliases.items():
+        table.setdefault(key.lower(), []).extend(values if isinstance(values, list) else [values])
+
+    def walk(name, seen):
+        if not _may_name_alias(name) or name.lower() in seen or len(seen) >= _MAX_ALIAS_DEPTH:
             return False
-        if _alias_runs_push(expansion):
-            return True
-        try:
-            words = shlex.split(expansion)
-        except ValueError:
-            return False
-        if expansion.startswith("!") or not words:
-            return False
-        name = words[0]
-    return False
+        seen = seen | {name.lower()}
+        expansions = table.get(name.lower())
+        if expansions is None:
+            if config_lookup is None and _PINNED_ALIASES:
+                found = _PINNED_ALIASES[0].get(name)
+            else:
+                found = _config_alias(target, name, config_lookup, git_dir)
+            expansions = [] if found is None else [found]
+        for expansion in expansions:
+            if _alias_runs_push(expansion):
+                return True
+            try:
+                words = shlex.split(expansion)
+            except ValueError:
+                continue
+            if words and not expansion.startswith("!") and walk(words[0], seen):
+                return True
+        return False
+
+    return walk(sub, frozenset())
 
 
 def _may_run_alias(text):
@@ -3441,6 +3448,7 @@ def _wrapper_env_assignments(toks):
 
     The shell is a `sh -c`-style wrapper or one `_FOREIGN_SHELL_FLAGS` names, as its simple command's command.
     That is its own prefix (see `_command_prefix`), and each `export` argument before it.
+    Behind a launcher `_command_prefix` does not know, it is the assignments that open the command (see `_launcher_assignments`).
     Its command string is read as a command of its own, which these do not reach.
     """
     out, exported = [], []
@@ -3451,8 +3459,29 @@ def _wrapper_env_assignments(toks):
         found = _shell_bodies_at(toks, x)
         if found and any(_runs_git(body) for body in found[0]):
             reached, prefix = _command_prefix(toks, x)
-            if reached:
+            if not reached:
+                prefix = _launcher_assignments(toks, x)
+            if reached or prefix:
                 out.extend(exported + prefix)
+    return out
+
+
+def _launcher_assignments(toks, k):
+    """The `NAME=value` words opening the simple command holding `toks[k]`, as (name, value), where its head runs `toks[k]`.
+
+    A launcher `_command_prefix` does not know, such as `flock <file>`, passes them to the command it runs.
+    A head `_NAMES_ITS_ARGUMENTS` names, such as `grep`, runs nothing, so none are given for it.
+    """
+    start = k
+    while start > 0 and not _is_separator(toks[start - 1]):
+        start -= 1
+    out = []
+    head = start
+    while head < k and _ENV_ASSIGN_RE.match(toks[head]):
+        out.append(_ENV_ASSIGN_RE.match(toks[head]).groups())
+        head += 1
+    if head == k or _base_name(toks[head]) in _NAMES_ITS_ARGUMENTS:
+        return []
     return out
 
 
@@ -13796,6 +13825,20 @@ _HIDDEN_GIT_CASES = [
         "a push alias set on a wrapper shell reaches a git an until loop runs",
     ),
     (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push flock /example/lock bash -c 'git p origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push alias set before flock reaches the git in the wrapper body flock runs",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config grep bash -c 'git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a wrapper-shaped word grep searches for is not a shell its prefix reaches",
+    ),
+    (
         "sudo -iu root pwsh -Command 'git push origin develop'",
         "feature/x",
         {"develop": _CODE_RULES},
@@ -13887,6 +13930,12 @@ _ALIAS_PUSH_CASES = [
         "deny",
         "an environment alias is matched without case, as git matches it",
     ),
+    (
+        "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=st GIT_CONFIG_KEY_1=alias.q GIT_CONFIG_VALUE_1=p git q origin develop",
+        {"p": "push", "st": "status"},
+        "deny",
+        "an environment alias set twice is followed through each value",
+    ),
 ]
 
 _ALIAS_DIR_CASES = [
@@ -13909,7 +13958,7 @@ _ALIAS_DIR_CASES = [
         "/example/cwd",
         {"p": "push"},
         "deny",
-        "a persisted push alias is read from the directory git runs in, not the --work-tree",
+        "a persisted push alias only in the directory git runs in, beside a --work-tree, is read",
     ),
     (
         "git --git-dir=/example/repo/.git st",

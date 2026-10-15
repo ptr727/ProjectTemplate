@@ -15,6 +15,7 @@ import ntpath
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -2209,7 +2210,7 @@ class TestAliasReadThroughLinkedWorktreeGitfile(unittest.TestCase):
             self.assertTrue(os.path.isfile(gitfile))
             self.assertEqual(guard._config_alias(gitfile, "pp", None, True), "push")
             got, _ = guard.classify(
-                f"git --git-dir={pathlib.Path(gitfile).as_posix()} pp origin develop",
+                f"git --git-dir={shlex.quote(pathlib.Path(gitfile).as_posix())} pp origin develop",
                 cwd=tmp,
                 origin=("example-owner", "example-repo"),
                 current_branch="feature/x",
