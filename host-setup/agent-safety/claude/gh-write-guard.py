@@ -1143,15 +1143,7 @@ def _git_config_overrides(global_opts):
     That is `-c <v>`, `--config-env <v>`, and `--config-env=<v>`. An attached `-c<v>` is read as
     an override too. Git rejects that spelling, so this only fails closed on it.
     """
-    values = []
-    for i, t in enumerate(global_opts):
-        if t in ("-c", "--config-env"):
-            values.append(global_opts[i + 1] if i + 1 < len(global_opts) else "")
-        elif t.startswith("--config-env="):
-            values.append(t[len("--config-env=") :])
-        elif t.startswith("-c") and len(t) > 2:
-            values.append(t[2:])
-    return values
+    return [v for v, _from_env in _config_override_sources(global_opts)]
 
 
 def _config_key(value):
@@ -1191,11 +1183,6 @@ _COMMAND_CONFIG_KEYS = frozenset(
         "gpg.ssh.program",
         "gpg.ssh.defaultkeycommand",
         "interactive.difffilter",
-        "uploadpack.packobjectshook",
-        "web.browser",
-        "sendemail.sendmailcmd",
-        "sendemail.tocmd",
-        "sendemail.cccmd",
     }
 )
 _COMMAND_CONFIG_PATTERN = re.compile(
@@ -1203,6 +1190,7 @@ _COMMAND_CONFIG_PATTERN = re.compile(
     r"|filter\..+\.(?:clean|smudge|process)|(?:difftool|mergetool|browser|man)\..+\.(?:cmd|path)"
     r"|remote\..+\.(?:uploadpack|receivepack)|submodule\..+\.update|trailer\..+\.(?:command|cmd)"
 )
+_GIT_WORD = re.compile(r"git", re.IGNORECASE)
 _COMMAND_ENV_VARS = frozenset(
     {
         "GIT_EDITOR",
@@ -1235,7 +1223,8 @@ def _command_value(key, value):
     An empty or boolean value runs nothing.
     A `!` prefix, as a credential helper or a submodule update takes, is dropped from the shell text it marks.
     A submodule update without one names a git mode and runs nothing.
-    Any other value is unreadable where its program word is a path, an expansion, or a home-relative name, since that names a file the guard does not read.
+    Any other value is unreadable where its program word is a path, an expansion, or a home-relative name.
+    Each names a file the guard does not read.
     """
     v = value.strip()
     if v == "" or v.lower() in _CONFIG_BOOLEANS:
@@ -1270,8 +1259,31 @@ def _config_override_sources(global_opts):
 
 
 def _env_assignments(toks):
-    """Every `NAME=value` word in `toks`, as (name, value), an `export` or `env` argument among them."""
-    return [m.groups() for t in toks for m in [_ENV_ASSIGN_RE.match(t)] if m]
+    """The `NAME=value` words in `toks` that reach a git command, as (name, value).
+
+    That is the run of them just before a git word, an `env` argument among them.
+    It is also each argument of an `export`, which persists to the commands after it.
+    """
+    out = []
+    for k, t in enumerate(toks):
+        if _is_git_exe(t):
+            j = k - 1
+            while j >= 0 and _ENV_ASSIGN_RE.match(toks[j]):
+                out.append(_ENV_ASSIGN_RE.match(toks[j]).groups())
+                j -= 1
+        elif t == "export" and _opens_command(toks, k):
+            for word in toks[k + 1 :]:
+                m = _ENV_ASSIGN_RE.match(word)
+                if not (m or word.startswith("-")):
+                    break
+                if m:
+                    out.append(m.groups())
+    return out
+
+
+def _command_readings(text):
+    """The tokens of each reading of `text` with its heredoc data removed (see `_heredoc_readings`)."""
+    return [_shell_tokens(r) for r in (_heredoc_readings(text) or [text])]
 
 
 def _env_config_values(assignments):
@@ -1306,29 +1318,30 @@ def _command_value_bodies(cmd):
     """The command text git runs from a config value or environment variable in `cmd`, for each the guard can read.
 
     That is a `-c` value for a key `_is_command_config_key` names, one set through `GIT_CONFIG_KEY_<n>`, and the value of each of `_COMMAND_ENV_VARS`.
-    The environment is read only in text holding a git word.
+    The environment is read only where it reaches a git command (see `_env_assignments`).
+    Heredoc data is not read (see `_command_readings`).
     """
-    toks = _shell_tokens(cmd)
     out = []
-    if not any(_is_git_exe(t) for t in toks):
+    if not _GIT_WORD.search(cmd):
         return out
-    assignments = _env_assignments(toks)
-    values = list(_env_config_values(assignments))
-    for k, t in enumerate(toks):
-        if _is_git_exe(t):
-            opts = toks[k + 1 : _git_subcommand_index(toks, k)]
-            values.extend(v for v, from_env in _config_override_sources(opts) if not from_env)
-    for v in values:
-        key, _, value = v.partition("=")
-        if _is_command_config_key(key.lower()):
-            text, _readable = _command_value(key.lower(), value)
-            if text:
-                out.append(text)
-    for name, value in assignments:
-        if name in _COMMAND_ENV_VARS:
-            text, _readable = _command_value("", value)
-            if text:
-                out.append(text)
+    for toks in _command_readings(cmd):
+        assignments = _env_assignments(toks)
+        values = list(_env_config_values(assignments))
+        for k, t in enumerate(toks):
+            if _is_git_exe(t):
+                opts = toks[k + 1 : _git_subcommand_index(toks, k)]
+                values.extend(v for v, from_env in _config_override_sources(opts) if not from_env)
+        for v in values:
+            key, _, value = v.partition("=")
+            if _is_command_config_key(key.lower()):
+                text, _readable = _command_value(key.lower(), value)
+                if text:
+                    out.append(text)
+        for name, value in assignments:
+            if name in _COMMAND_ENV_VARS:
+                text, _readable = _command_value("", value)
+                if text:
+                    out.append(text)
     return list(dict.fromkeys(out))
 
 
@@ -1984,6 +1997,7 @@ def _cd_dot_dot(cmd):
 
 _GIT_COMMAND_NAMES: list[set[str]] = []
 _GIT_BUILTIN_NAMES: list[set[str]] = []
+_PINNED_ALIASES: list[dict[str, str]] = []
 
 
 def _git_command_names():
@@ -2164,18 +2178,25 @@ _FOREIGN_SHELL_FLAGS = {
     "powershell": ("-command", "-cwa", "-commandwithargs"),
     "fish": ("--command",),
     "script": ("--command",),
-    "nu": ("--commands",),
     "cmd": ("/c", "/k", "/r"),
     "ash": (),
     "csh": (),
     "tcsh": (),
-    "mksh": (),
-    "yash": (),
-    "posh": (),
     "rbash": (),
-    "elvish": (),
-    "xonsh": (),
 }
+_POWERSHELL_VALUE_OPTS = frozenset(
+    {
+        "-executionpolicy",
+        "-ep",
+        "-windowstyle",
+        "-inputformat",
+        "-outputformat",
+        "-psconsolefile",
+        "-version",
+        "-configurationname",
+        "-workingdirectory",
+    }
+)
 
 
 def _command_string_exe(tok):
@@ -2186,6 +2207,39 @@ def _command_string_exe(tok):
     """
     base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
     return base if base in _SHELL_WRAPPER_EXE or base in _FOREIGN_SHELL_FLAGS else None
+
+
+def _foreign_shell_at(toks, i):
+    """The base name of a shell `_FOREIGN_SHELL_FLAGS` names that `toks[i]` runs as a command, or None.
+
+    The word must open a command, or follow a `timeout` and its duration.
+    So a `cmd` or `script` directory named as an argument is not read as a shell.
+    """
+    exe = _command_string_exe(toks[i])
+    if exe is None or exe in _SHELL_WRAPPER_EXE:
+        return None
+    if _opens_command(toks, i) or (i >= 2 and _is_timeout_exe(toks[i - 2])):
+        return exe
+    return None
+
+
+def _foreign_shell_bodies(exe, args):
+    """The command strings a shell `_FOREIGN_SHELL_FLAGS` names runs from `args`.
+
+    That is the word after its command option, a `--command=<body>` value, and for `powershell` a first positional word, which Windows PowerShell runs as a command.
+    """
+    ci = _command_string_index(exe, args)
+    if ci is not None:
+        return args[ci + 1 : ci + 2]
+    bodies = [a.split("=", 1)[1] for a in args if a.lower().startswith("--command=")]
+    if exe == "powershell" and not bodies:
+        x = 0
+        while x < len(args) and args[x].startswith("-"):
+            if args[x].lower() in ("-file", "-f"):
+                return []
+            x += 2 if args[x].lower() in _POWERSHELL_VALUE_OPTS else 1
+        bodies = args[x : x + 1]
+    return bodies
 
 
 def _command_string_index(exe, args):
@@ -2308,12 +2362,17 @@ def _embedded_wrapper_commands(cmd, _depth=0, overflow=None):
     n = len(toks)
     i = 0
     while i < n:
-        exe = _command_string_exe(toks[i])
-        if exe:
+        foreign = _foreign_shell_at(toks, i)
+        if foreign:
+            for inner in _foreign_shell_bodies(foreign, _collect_arglist(toks, i + 1)[0]):
+                out.append(inner)
+                out.extend(_embedded_wrapper_commands(inner, _depth + 1, overflow))
+            i += 1
+        elif _is_shell_wrapper_exe(toks[i]):
             args, k = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`, `sh -ec`), the command string still the next argv token.
             # A form left out here is a silent bypass of every rule below, the same shape a bare `-c` closes.
-            ci = _command_string_index(exe, args)
+            ci = _wrapper_c_index(args)
             bodies = [args[ci + 1]] if ci is not None and ci + 1 < len(args) else []
             bodies += [
                 toks[x + 1]
@@ -2810,11 +2869,6 @@ def _names_push(text):
 _GIT_COMMIT = re.compile(r"(?i:git)\b.*?\bcommit\b", re.DOTALL)
 
 
-def _names_commit(text):
-    """True when `text` spells a git commit as written, or once its quoting is removed, as `_names_push` reads a push."""
-    return bool(_GIT_COMMIT.search(text) or _GIT_COMMIT.search(_unquoted(text)))
-
-
 def _names_include(text, pattern=_GIT_INCLUDE):
     """True when `pattern` matches `text` as written, or once its quoting is removed."""
     return bool(pattern.search(text) or pattern.search(_unquoted(text)))
@@ -2855,6 +2909,8 @@ def _unreadable_push(cmd):
       an alias it defines may push whatever the arguments name
     - an include key in a wrapper shell argument other than the `-c` body, or in a wrapper body
       nested past the reading cap
+    - interpreter code that names a push and can start a process (see `_interpreter_code`)
+    - text piped to a shell that reads its script from that pipe
 
     An `eval` argument holding an include key is read as the command it runs, for this check
     alone. It is bounded by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST`, as the wait rule's is.
@@ -2862,7 +2918,8 @@ def _unreadable_push(cmd):
     key, which fails closed, and no later `eval` in that text is read.
 
     Any `-c`/`--config-env` on a push, or on a git command that runs one, counts too, an attached
-    `-c<value>` among them, which git rejects (see `_git_config_overrides`). Config such
+    `-c<value>` among them, which git rejects (see `_git_config_overrides`). So does config set
+    through `GIT_CONFIG_COUNT` and its key and value variables (see `_sets_env_config`). Config such
     as `push.default` or `remote.<name>.push` changes what a push updates, an explicit refspec
     included. A word is matched by `_GIT_PUSH`, which needs no word boundary before `git`. An
     unquoted `-c'git push'` reads as `-cgit push`, while `.github` still matches nothing.
@@ -2896,20 +2953,18 @@ def _unreadable_push(cmd):
                                 "wrapper shells or substitutions nested deeper than the guard reads"
                             )
             code = _interpreter_code(t, _collect_arglist(toks, k + 1)[0])
-            if any(_names_push(a) for a in code):
+            if any(_names_push(a) and _SPAWNS_PROCESS.search(a) for a in code):
                 return f"a push inside code `{t}` runs, which the guard does not read as a command"
             exe = _command_string_exe(t)
-            if exe and _pipes_into(toks, k):
-                args, _ = _collect_arglist(toks, k + 1)
-                start = k
-                while start > 0 and not _ends_pipeline(toks[start - 1]):
-                    start -= 1
-                if _command_string_index(exe, args) is None and _names_push(
-                    " ".join(toks[start:k])
-                ):
-                    return (
-                        f"a push in text piped to `{t}`, which the guard does not read as a command"
-                    )
+            start = _pipeline_start(toks, k)
+            if (
+                exe
+                and any(w in ("|", "|&") for w in toks[start:k])
+                and _runs_as_command(toks, k)
+                and _command_string_index(exe, _collect_arglist(toks, k + 1)[0]) is None
+                and _names_push(" ".join(toks[start:k]))
+            ):
+                return f"a push in text piped to `{t}`, which the guard does not read as a command"
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
                 if _is_shell_wrapper_exe(t):
@@ -2929,8 +2984,7 @@ def _unreadable_push(cmd):
                 continue
             j = _git_subcommand_index(toks, k)
             opts = toks[k + 1 : j]
-            assignments = _env_assignments(toks)
-            values = _git_config_overrides(opts) + _env_config_values(assignments)
+            values = _git_config_overrides(opts)
             if any(
                 _names_push(v)
                 or _INLINE_PUSH_ALIAS.match(v)
@@ -2938,7 +2992,7 @@ def _unreadable_push(cmd):
                 for v in values
             ):
                 return "a push inside a git `-c` config value"
-            config = bool(values) or _sets_env_config(assignments)
+            config = bool(values) or _sets_env_config(_env_assignments(toks))
             if j >= n:
                 continue
             if toks[j] == "push" and config:
@@ -2974,27 +3028,24 @@ _CODE_INTERPRETERS = {
     "pypy": "c",
     "node": "ep",
     "nodejs": "ep",
-    "bun": "ep",
-    "deno": "e",
     "perl": "eE",
     "ruby": "e",
-    "php": "r",
-    "lua": "e",
-    "luajit": "e",
-    "osascript": "e",
-    "rscript": "e",
     "awk": "",
     "gawk": "",
     "mawk": "",
     "nawk": "",
 }
 _CODE_LONG_OPTS = frozenset({"--eval", "--print"})
+_SPAWNS_PROCESS = re.compile(
+    r"system|popen|subprocess|spawn|exec|child_process|`|\bqx|%x|open3|getline|\|\s*\"|\"\s*\||\|-|-\|",
+    re.IGNORECASE,
+)
 
 
 def _interpreter_code(tok, args):
     """The words of `args` an interpreter named by `tok` may run as code, or [] where `tok` names none.
 
-    That is the word after an option naming its code, the option word itself, which may hold the code attached, and a `deno eval` argument.
+    That is the word after an option naming its code, and the option word itself, which may hold the code attached.
     An `awk` program is its first argument, so every awk argument is read.
     """
     base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
@@ -3013,19 +3064,15 @@ def _interpreter_code(tok, args):
                 not a.startswith("--") and a[-1] in letters
             ):
                 out.extend(nxt)
-        elif base == "deno" and a == "eval":
-            out.extend(nxt)
     return out
 
 
-def _pipes_into(toks, k):
-    """True when the command at `toks[k]` reads a pipe, a `|` or `|&` sitting between it and its pipeline's start."""
-    for t in reversed(toks[:k]):
-        if t in ("|", "|&"):
-            return True
-        if _ends_pipeline(t):
-            return False
-    return False
+def _pipeline_start(toks, k):
+    """The index of the first word of the pipeline holding `toks[k]`, where a `|` or `|&` continues one."""
+    start = k
+    while start > 0 and (toks[start - 1] in ("|", "|&") or not _is_separator(toks[start - 1])):
+        start -= 1
+    return start
 
 
 _COMMON_GIT_COMMANDS = frozenset(
@@ -3098,18 +3145,25 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
     That is one of these:
 
     - an `include.path`/`includeIf` override on any git command, by `-c`, `--config-env`, or the environment
-    - a `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` file other than `/dev/null`, in text holding a git word
+    - a `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` file other than `/dev/null`, where it reaches a git command
     - a `--config-env` value for a key `_is_command_config_key` names
     - a `--config-env` alias for the subcommand it runs
     - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
     - an alias from the environment, or one persisted in the checkout's config, that runs a push
 
-    A persisted alias is read only for a subcommand git does not list, nor `_COMMON_GIT_COMMANDS` names.
+    Heredoc data is not read (see `_command_readings`).
+    A persisted alias is read only for a subcommand that can name one, which git does not list, nor `_COMMON_GIT_COMMANDS` names.
+    An inline `-c alias.<name>` override is followed into the persisted config the same way.
     `config_lookup` stands in for that read, as rule 6 takes it.
+    Without one, a table in `_PINNED_ALIASES` does, which the self-test pins so no case reads the host's aliases.
     """
     overflow = []
-    for text in [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]:
-        toks = _shell_tokens(text)
+    readings = [
+        toks
+        for text in [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
+        for toks in _command_readings(text)
+    ]
+    for toks in readings:
         if not any(_is_git_exe(t) for t in toks):
             continue
         assignments = _env_assignments(toks)
@@ -3149,19 +3203,15 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                     if not _command_value(key, setting)[1]:
                         return f"a `{key}` value naming a program the guard does not read"
     for c_dirs, work_tree, _git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
-        if (
-            sub.startswith("-")
-            or _is_shell_op(sub)
-            or sub in _COMMON_GIT_COMMANDS
-            or sub in inline
-            or sub in _git_command_names()
-        ):
-            continue
         target = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
         name, seen = sub, set()
-        while name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
+        while _may_name_alias(name) and name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
             seen.add(name)
-            expansion = _config_alias(target, name, config_lookup)
+            expansion = inline.get(name)
+            if expansion is None and config_lookup is None and _PINNED_ALIASES:
+                expansion = _PINNED_ALIASES[0].get(name)
+            elif expansion is None:
+                expansion = _config_alias(target, name, config_lookup)
             if expansion is None:
                 break
             if _alias_runs_push(expansion):
@@ -3174,6 +3224,16 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                 break
             name = words[0]
     return None
+
+
+_ALIAS_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+
+
+def _may_name_alias(name):
+    """True when `name` has the shape of a git alias and is no command git runs ahead of an alias."""
+    return bool(_ALIAS_NAME.fullmatch(name)) and not (
+        name in _COMMON_GIT_COMMANDS or name in _git_command_names()
+    )
 
 
 _GIT_DIR_VALUE_OPTS = frozenset({"-C", "--git-dir", "--work-tree"})
@@ -4030,7 +4090,7 @@ def _check_bypass_flags(cmd):
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
-    if any(_names_push(t) or _names_commit(t) for t in overflow):
+    if any(_names_push(t) or _names_include(t, _GIT_COMMIT) for t in overflow):
         return "deny", (
             "This runs a git commit or push inside wrapper shells or substitutions nested deeper "
             "than the guard reads, so it cannot tell whether a hook-bypass flag or override is "
@@ -12597,61 +12657,6 @@ _PUSH_REPO_CASES = [
 ]
 
 
-_ALIAS_PUSH_CASES = [
-    (
-        "git p origin develop",
-        {"p": "push"},
-        "deny",
-        "a persisted alias expanding to push is denied",
-    ),
-    (
-        "git q origin develop",
-        {"q": "p", "p": "push"},
-        "deny",
-        "a persisted alias chain ending in push is denied",
-    ),
-    (
-        "git p",
-        {"p": "!git push origin develop"},
-        "deny",
-        "a persisted shell alias running a push is denied",
-    ),
-    (
-        "bash -c 'git p origin develop'",
-        {"p": "push"},
-        "deny",
-        "a persisted push alias inside a wrapper body is denied",
-    ),
-    (
-        "git st",
-        {"st": "status"},
-        "allow",
-        "control: a persisted alias expanding to status is allowed",
-    ),
-    ("git p origin develop", {}, "allow", "control: a subcommand no alias defines is allowed"),
-]
-
-
-def _alias_push_selftest(origin):
-    """Run `_ALIAS_PUSH_CASES` with the persisted alias read replaced by each case's table."""
-    ok = True
-    for cmd, aliases, want, label in _ALIAS_PUSH_CASES:
-        got, _ = classify(
-            cmd,
-            origin=origin,
-            current_branch="feature/x",
-            rules_lookup=lambda br: _CODE_RULES if br == "develop" else set(),
-            environ={},
-            primary_checkout_lookup=lambda d: False,
-            config_lookup=lambda _d, name, _a=aliases: _a.get(name),
-        )
-        mark = "ok  " if got == want else "FAIL"
-        if got != want:
-            ok = False
-        print(f"  {mark} [{got:5}] want={want:5} {label}")
-    return ok
-
-
 def _push_repo_selftest():
     """Run `_PUSH_REPO_CASES` with the live rule query replaced, in constructed repositories.
 
@@ -12703,6 +12708,7 @@ def _selftest():
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
     ok = True
+    _PINNED_ALIASES[:] = [{}]
     # Every existing loop below pins primary_checkout_lookup to a constant False (never a primary checkout), so rule 6 stays inert for every case that predates it.
     # Without this, a mutating subcommand incidental to a case testing a different rule (git commit, in a few of them) would fall through to the real _is_primary_checkout and resolve against wherever the self-test process actually runs, which is a primary checkout in CI, silently changing what those cases test.
     for cmd, want, label in _CASES:
@@ -12775,7 +12781,7 @@ def _selftest():
     _GIT_BUILTIN_NAMES[:] = [
         {"checkout", "commit", "rebase", "reset", "status", "submodule", "worktree"}
     ]
-    for cmd, cur, rmap, want, label in _GIT_CASES:
+    for cmd, cur, rmap, want, label in _GIT_CASES + _HIDDEN_GIT_CASES:
         got, _ = classify(
             cmd,
             origin=origin,
@@ -13193,8 +13199,459 @@ def _selftest():
         ok = False
     if not _alias_push_selftest(origin):
         ok = False
+    _PINNED_ALIASES.clear()
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
+
+
+_HIDDEN_GIT_CASES = [
+    (
+        "git -c core.fsmonitor=/example/script status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.fsmonitor value naming a script on any git command is denied, since the guard does not read it",
+    ),
+    (
+        "git -c core.pager=/example/script log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.pager value naming a script is denied",
+    ),
+    (
+        "git -c core.sshCommand=/example/script fetch",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.sshCommand value naming a script is denied",
+    ),
+    (
+        "git -c diff.example.textconv=/example/script diff",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a textconv value naming a script is denied",
+    ),
+    (
+        "git --config-env=core.pager=EXAMPLE_PAGER log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a --config-env value for a key git runs as a command is denied, since the guard does not read the variable",
+    ),
+    (
+        "git -c include.path=/example/config checkout feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include override on checkout is denied, since its file may set a key git runs as a command",
+    ),
+    (
+        'git -c "core.pager=git commit --no-verify -m x" log',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.pager value is read as the command git runs, a hook-bypass commit in it included",
+    ),
+    (
+        "git -c core.pager=cat log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a core.pager value naming a program by name is read and allowed",
+    ),
+    (
+        "git -c core.fsmonitor=false status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a boolean core.fsmonitor value runs no command",
+    ),
+    (
+        "git -c credential.helper= fetch",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an empty credential.helper value runs no command",
+    ),
+    (
+        'git -c "core.sshCommand=ssh -i ~/.ssh/example" fetch',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a core.sshCommand program named by name may take a path argument",
+    ),
+    (
+        'x="$(cat <<EOF\n$(git commit --no-verify -m x)\nEOF\n)"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a substitution in an unquoted-delimiter heredoc inside a substitution is read as a command",
+    ),
+    (
+        "x=\"$(cat <<'EOF'\n$(git commit --no-verify -m x)\nEOF\n)\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a quoted-delimiter heredoc inside a substitution stays data",
+    ),
+    (
+        'x="$(cat <<EOF\n$(git push origin develop)\nEOF\n)"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in an unquoted-delimiter heredoc inside a substitution is read as a push",
+    ),
+    (
+        'echo "${X:-$(git push origin develop)}"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a substitution inside a double-quoted parameter expansion is read as a command",
+    ),
+    (
+        'echo "${X:-`git push origin develop`}"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a backtick substitution inside a double-quoted parameter expansion is read as a command",
+    ),
+    (
+        'echo "${X:-plain}"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a double-quoted parameter expansion holding no substitution runs nothing",
+    ),
+    (
+        "git commit -F - <<EOF\nmsg `git push origin develop`\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a backtick span in an unquoted-delimiter commit message body runs, so its push is read",
+    ),
+    (
+        "git commit -F - <<'EOF'\nmsg `git push origin develop`\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a backtick span in a quoted-delimiter commit message body is data",
+    ),
+    (
+        "git commit -F - <<EOF\nmsg $(date)\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an unquoted-delimiter body's substitution is judged as the command it is",
+    ),
+    (
+        'pwsh -c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -c body is read as a command",
+    ),
+    (
+        'powershell -NoProfile -Command "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a powershell -Command body is read as a command",
+    ),
+    (
+        'fish -c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a fish -c body is read as a command",
+    ),
+    (
+        'script -qc "git push origin develop" /dev/null',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a script -c body is read as a command",
+    ),
+    (
+        'cmd /c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a cmd /c body is read as a command",
+    ),
+    (
+        'pwsh -c "git push origin feature/x"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a pwsh -c push to a feature branch is judged by its target",
+    ),
+    (
+        "python3 -c \"import os; os.system('git push origin develop')\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in python -c code is denied, since the guard does not read Python",
+    ),
+    (
+        "node -e \"require('child_process').execSync('git push origin develop')\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in node -e code is denied",
+    ),
+    (
+        'python3 -c "print(1)"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: python -c code naming no push is allowed",
+    ),
+    (
+        'python3 example.py --note "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a push named in an interpreter argument that is not code is not read",
+    ),
+    (
+        'echo "git push origin develop" | bash',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in text piped to a shell's stdin is denied",
+    ),
+    (
+        "printf '%s\\n' 'git push origin develop' | sh",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push printed into a shell's stdin is denied",
+    ),
+    (
+        'echo "git status" | bash',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: text piped to a shell naming no push is allowed",
+    ),
+    (
+        'GIT_EDITOR="git push origin develop" git commit',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value is read as the command git runs",
+    ),
+    (
+        'GIT_SEQUENCE_EDITOR="git push origin develop" git rebase -i HEAD~2',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_SEQUENCE_EDITOR value is read as the command git runs",
+    ),
+    (
+        "GIT_EDITOR=/example/script git commit",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value naming a script is denied",
+    ),
+    (
+        "GIT_EDITOR=true git commit",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_EDITOR naming a program by name is allowed",
+    ),
+    (
+        "GIT_SSH_COMMAND='ssh -o BatchMode=yes' git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_SSH_COMMAND naming ssh is read and allowed",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=refs/heads/feature/x:refs/heads/develop git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "config set through GIT_CONFIG_COUNT on a push is read as a config override",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an alias set through GIT_CONFIG_KEY that runs a push is denied",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=/example/script git log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a command key set through GIT_CONFIG_KEY to a script is denied",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file is read as an include the guard does not read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/dev/null git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_CONFIG_GLOBAL of /dev/null holds no config",
+    ),
+    (
+        "git --config-env=alias.p=EXAMPLE p origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a --config-env alias for the subcommand it runs is denied",
+    ),
+    (
+        "find cmd -type f -exec sh -c 'git push origin develop' \\;",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a wrapper after a word naming another shell is still read",
+    ),
+    (
+        "git push origin feature/x 2>&1 | grep -v script",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a shell name piped to as an argument is not a shell reading the pipe",
+    ),
+    (
+        "git commit -F - <<'EOF'\nGIT_CONFIG_GLOBAL=/example/config is now denied.\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an assignment in a quoted-delimiter heredoc body is data",
+    ),
+    (
+        'git commit -m "EDITOR=/usr/bin/vim is no longer read"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an assignment inside a commit message is not an environment variable",
+    ),
+    (
+        "git status && PAGER=/usr/bin/less man git",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an assignment prefixing a command other than git is not read",
+    ),
+    (
+        "perl -pi -e 's/git push origin develop/git push origin main/' README.md",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: interpreter code naming a push but starting no process is allowed",
+    ),
+    (
+        'fish --command="git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a fish --command=<body> value is read as a command",
+    ),
+    (
+        'powershell -NoProfile "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a powershell positional command string is read as a command",
+    ),
+    (
+        'timeout 60 pwsh -c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -c body after a timeout is read as a command",
+    ),
+    (
+        'echo "git push origin develop" |& bash',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in text piped by |& to a shell's stdin is denied",
+    ),
+    (
+        'echo "git push origin develop" | timeout 5 bash',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in text piped to a shell behind a timeout is denied",
+    ),
+]
+
+
+_ALIAS_PUSH_CASES = [
+    (
+        "git p origin develop",
+        {"p": "push"},
+        "deny",
+        "a persisted alias expanding to push is denied",
+    ),
+    (
+        "git q origin develop",
+        {"q": "p", "p": "push"},
+        "deny",
+        "a persisted alias chain ending in push is denied",
+    ),
+    (
+        "git p",
+        {"p": "!git push origin develop"},
+        "deny",
+        "a persisted shell alias running a push is denied",
+    ),
+    (
+        "bash -c 'git p origin develop'",
+        {"p": "push"},
+        "deny",
+        "a persisted push alias inside a wrapper body is denied",
+    ),
+    (
+        "git -c alias.q=p q origin develop",
+        {"p": "push"},
+        "deny",
+        "an inline alias chaining to a persisted push alias is denied",
+    ),
+    (
+        "git st",
+        {"st": "status"},
+        "allow",
+        "control: a persisted alias expanding to status is allowed",
+    ),
+    ("git p origin develop", {}, "allow", "control: a subcommand no alias defines is allowed"),
+]
+
+
+def _alias_push_selftest(origin):
+    """Run `_ALIAS_PUSH_CASES` with the persisted alias read replaced by each case's table."""
+    ok = True
+    for cmd, aliases, want, label in _ALIAS_PUSH_CASES:
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: _CODE_RULES if br == "develop" else set(),
+            environ={},
+            primary_checkout_lookup=lambda d: False,
+            config_lookup=lambda _d, name, _a=aliases: _a.get(name),
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    return ok
 
 
 def _is_primary_checkout_selftest():
