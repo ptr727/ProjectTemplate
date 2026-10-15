@@ -1098,7 +1098,8 @@ gh() {
         stubs.mkdir()
         # Each stub writes the report its real tool would, so the step's own report check is what decides.
         # The venv interpreter answers a version query with a version no host carries, so a test can tell it was asked.
-        # It holds mypy, ruff, or pyright only where VENV_MYPY, VENV_RUFF, or VENV_PYRIGHT is set, and logs a run of one the way the uv stubs log theirs.
+        # It holds mypy, ruff, or pyright only where VENV_MYPY, VENV_RUFF, or VENV_PYRIGHT is set.
+        # It logs a run of any of them the way the uv stubs log theirs.
         python_stub = (
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
