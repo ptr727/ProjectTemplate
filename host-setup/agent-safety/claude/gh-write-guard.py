@@ -1410,11 +1410,12 @@ def _option_takes_next(tok, takes):
     """True when a precommand option word leaves its value to the next word.
 
     That is an option `takes` names, or a short-option cluster such as `-iu` whose first letter taking a value ends it.
+    A word not starting with `-`, such as the duration `30s`, is no cluster.
     A value-taking letter before the end takes the rest of the word as its value instead.
     """
     if tok in takes:
         return True
-    if tok.startswith("--") or len(tok) < 3:
+    if not tok.startswith("-") or tok.startswith("--") or len(tok) < 3:
         return False
     for x, c in enumerate(tok[1:], 1):
         if f"-{c}" in takes:
@@ -13876,6 +13877,20 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a GIT_CONFIG_GLOBAL file before a sudo user option with its value attached still reaches git",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config timeout 30s git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before a timeout whose duration ends in s still reaches git",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config timeout 30s bash -c 'git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before a timeout whose duration ends in s reaches the wrapper body's git",
     ),
 ]
 
