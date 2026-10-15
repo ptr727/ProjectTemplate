@@ -61,11 +61,16 @@ text says, because the harm it covers was never in the text.
    parses, a wrapper shell's body and a command substitution's body among them. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
-   deletes only its own branch. A push's force, delete, all, and mirror options are read as git
-   reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
+   deletes only its own branch. A push's force, delete, all, mirror, and prune options are read as
+   git reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
    `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
-   every branch protected by default. A force-push and a delete each write the branch too, so a branch
+   every branch protected by default. Beside such a pattern, a lone `:`
+   refspec, `--all`, or a bare push, a `--prune` is read as deleting every branch protected by
+   default. A `--mirror` push with no refspec is read as forcing and deleting every branch
+   protected by default. Git may complete a destination outside `refs/` that starts `heads/` under
+   `refs/`, as in `HEAD:heads/develop` or `:heads/develop`. So such a destination is read as the
+   branch after `heads/` as well as by its literal name. A force-push and a delete each write the branch too, so a branch
    whose rules require a pull request denies them as it denies a direct push.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
@@ -83,8 +88,11 @@ text says, because the harm it covers was never in the text.
    argument holding an include key is read as the command it runs. It also covers a bare push or a
    `HEAD`/`@` refspec whose directory or branch may change before it runs. Such a push's local
    branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
-   segment dropped. A remote-tracking push target such as `origin/feature/x` is checked with its
-   remote dropped. A word the shell rewrites or drops before git reads it is denied where it can
+   segment dropped. A bare push's configured push target is read by its full name, such as
+   `refs/remotes/up/stream/x`. Where the text after `refs/remotes/` starts with a remote name
+   `git remote` lists and a `/`, that name and its `/` are stripped. The text after `refs/remotes/` is
+   also checked whole and with its first segment dropped. A bare push whose push target resolves while `git remote` cannot list the
+   remotes is denied. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
    command it is denied among the global options where word splitting may split it. A
