@@ -68,7 +68,11 @@ text says, because the harm it covers was never in the text.
    every branch protected by default. Beside such a pattern, a lone `:`
    refspec, `--all`, or a bare push, a `--prune` is read as deleting every branch protected by
    default. A `--mirror` push with no refspec is read as forcing and deleting every branch
-   protected by default. Git may complete a destination outside `refs/` that starts `heads/` under
+   protected by default. So is a push with no refspec whose remote has a persisted
+   `remote.<name>.mirror` set true. So is one whose setting the hook cannot read where the push
+   runs. A push naming no remote reads every remote's setting. Git reads every word after a push's
+   first `--` or `--end-of-options` as the remote or a refspec, and so does the hook. A refspec
+   there that starts with a dash is then checked. Git may complete a destination outside `refs/` that starts `heads/` under
    `refs/`, as in `HEAD:heads/develop` or `:heads/develop`. So such a destination is read as the
    branch after `heads/` as well as by its literal name. A force-push and a delete each write the branch too, so a branch
    whose rules require a pull request denies them as it denies a direct push.
@@ -76,7 +80,11 @@ text says, because the harm it covers was never in the text.
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
    unresolvable), deny rather than allow, because the harm is a silent success under the
    maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
-   passes this requirement instead, since there is nothing yet on record to bypass. Apart from
+   passes this requirement instead, since there is nothing yet on record to bypass. A push that
+   `-C` or a leading `cd` runs in another checkout is judged against that checkout's origin as well
+   as the session's. The hook may not name the checkout a push runs in or that checkout's origin.
+   That holds under `sudo -D` or `env -C`, in a wrapper shell, and in a directory that does not
+   exist. That push's rules then count as undetermined. Apart from
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
    That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
    override. It covers a git command under an `include.path`/`includeIf` override too, where git
@@ -92,7 +100,11 @@ text says, because the harm it covers was never in the text.
    `refs/remotes/up/stream/x`. Where the text after `refs/remotes/` starts with a remote name
    `git remote` lists and a `/`, that name and its `/` are stripped. The text after `refs/remotes/` is
    also checked whole and with its first segment dropped. A bare push whose push target resolves while `git remote` cannot list the
-   remotes is denied. A word the shell rewrites or drops before git reads it is denied where it can
+   remotes is denied. A bare push's destination is also read from the branch's own configuration.
+   That is its own name under a `push.default` of `current` or `simple`, and each
+   `branch.<name>.merge` branch under `upstream`. Both are read where `push.default` cannot be read
+   or holds a value git does not define for it. A bare push is denied where any other read of its branch or push
+   target times out or cannot run. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
    command it is denied among the global options where word splitting may split it. A
