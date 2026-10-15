@@ -381,6 +381,15 @@ install_skills_locked() {
     fi
 }
 
+# Asks which tools to install, since the agent tools are installed only by name and never as a set someone did not choose.
+install_agents() {
+    local -a names=()
+    read -r -a names -p "Agent tools to install, separated by spaces (claude codex opencode herdr cswap): "
+    if [[ ${#names[@]} -gt 0 ]]; then
+        host_tool install-agents.sh --install "${names[@]}"
+    fi
+}
+
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
 # Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no interpreter yet can still use every host action, and only the actions that need one name it as their own prerequisite.
 # The prerequisite failure returns 127, bash's own "command not found" convention, so a caller reading a specific exit code from the tool itself (build_dist.py's 0-clean/1-stale contract) can tell "python3 never ran" apart from "python3 ran and returned 1".
@@ -492,18 +501,21 @@ print_menu() {
     log "   7  Configure git and GitHub"
     log "   8  Report fleet Skills install status"
     log "   9  Install or update the fleet Skills"
+    log "  10  Report the coding-agent tools installed for this user"
+    log "  11  Upgrade the coding-agent tools already installed"
+    log "  12  Install coding-agent tools by name"
     log ""
     log "Hub, $HUB_REPO:"
-    log "  10  Audit a cataloged repo"
-    log "  11  Check the generated Skills distributions are current"
+    log "  13  Audit a cataloged repo"
+    log "  14  Check the generated Skills distributions are current"
     # Also gated on REF: carry.py always rejects a hub checkout that is not exactly on the default ref, so these tasks cannot work in a non-default --ref session regardless of a downstream repo being detected.
     if [[ -n $DOWNSTREAM_ROOT && $REF == "$DEFAULT_REF" ]]; then
         log ""
         log "Downstream, the repo this menu is run from:"
-        log "  12  Check what the hub would change here, change nothing"
-        log "  13  Pull the hub's verbatim-owned files into this repo"
-        log "  14  Check the hub's verbatim rule sections inside this repo's mixed files"
-        log "  15  Pull those rule sections in, leaving every other section alone"
+        log "  15  Check what the hub would change here, change nothing"
+        log "  16  Pull the hub's verbatim-owned files into this repo"
+        log "  17  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log "  18  Pull those rule sections in, leaving every other section alone"
     fi
     log ""
     log "   q  Quit"
@@ -525,19 +537,22 @@ dispatch() {
     7) host_tool setup-github.sh --configure ;;
     8) host_tool install-skills.sh --report ;;
     9) install_skills ;;
-    10) audit_repo ;;
-    11) check_skills_dist ;;
-    12) carry_action check ;;
+    10) host_tool install-agents.sh --report ;;
+    11) host_tool install-agents.sh --upgrade ;;
+    12) install_agents ;;
+    13) audit_repo ;;
+    14) check_skills_dist ;;
+    15) carry_action check ;;
     # --dry-run changes nothing, and carry.py itself has no dry-run mode, so a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
-    13)
+    16)
         if [[ $DRY_RUN == true ]]; then
             carry_action check
         else
             carry_action apply
         fi
         ;;
-    14) carry_action check-sections ;;
-    15)
+    17) carry_action check-sections ;;
+    18)
         if [[ $DRY_RUN == true ]]; then
             carry_action check-sections
         else

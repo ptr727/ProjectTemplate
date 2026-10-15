@@ -204,14 +204,18 @@ Subcommands
            round's thread is no finding without one, while a finding that section's count names
            and no entry links is still counted. Entries are counted rather than links, so a
            back-reference beside an entry's own link covers no other entry.
-           The block also counts each finding the file table annotates as `<Severity> finding (N
-           votes): <title>` that matches no entry of an open section, and a headline spelling
-           out more findings than the open sections list, since either names a finding no thread
-           and no section carries.
+           The block also counts each finding a file table row names with a vote count, `(N
+           votes)`, that pairs with no thread of that round on the row's file. Each thread pairs
+           with one finding at most, so two findings on a file one thread is on leave one.
+           It counts a headline spelling out more findings than the round and the reviewer's
+           earlier threads account for, those threads resolved or not, since a headline counts
+           across rounds and counts a settled finding as readily as an owed one.
            A round can also list its findings in prose under a `Review findings:` label, each
-           entry naming the files it concerns in code spans. An entry naming no file a thread of
-           that round is on is a finding with no thread, so where those entries outnumber the
-           shortfall above, the block counts them instead.
+           entry naming the files it concerns in code spans, a trailing part of a path or a
+           directory holding it included. An entry that pairs with no thread of that round, one
+           thread per entry, is a finding with no thread. Where those entries outnumber the
+           shortfall above, the block counts them instead. A thread an open entry links counts as
+           that round's in both pairings, since the entry names a finding the round still holds.
            Ten bodies in that format have been read here, so what follows describes those rather
            than the format in general. None carried a `Suppressed comments` heading, which is
            why this field rather than `suppressed=` is what finds a withheld finding in one.
@@ -1035,13 +1039,16 @@ Q_CLEANUP_REF = """
 query($o:String!,$r:String!,$q:String!){
   repository(owner:$o,name:$r){ ref(qualifiedName:$q){ id target{ oid } } }}
 """
-Q_CLEANUP_USERS = """
+Q_CLEANUP_HEADS = """
+query($o:String!,$r:String!,$b:String!,$after:String){
+  repository(owner:$o,name:$r){
+    heads: pullRequests(states:OPEN,headRefName:$b,first:100,after:$after){
+      pageInfo{ hasNextPage endCursor } nodes{ number headRepository{ nameWithOwner } } } }}
+"""
+Q_CLEANUP_BASES = """
 query($o:String!,$r:String!,$b:String!){
   repository(owner:$o,name:$r){
-    heads: pullRequests(states:OPEN,headRefName:$b,first:20){
-      totalCount nodes{ number headRepository{ nameWithOwner } } }
-    bases: pullRequests(states:OPEN,baseRefName:$b,first:20){ totalCount nodes{ number } }
-  }}
+    bases: pullRequests(states:OPEN,baseRefName:$b,first:20){ totalCount nodes{ number } } }}
 """
 M_DELETE_REF = """
 mutation($refId:ID!){
@@ -2575,19 +2582,26 @@ def total_section_entries(pr: dict) -> int:
     return sum(linked for role, _, _, linked in sections if role == TOTAL)
 
 
-def open_entry_ids(pr: dict) -> set[str]:
-    """The distinct title anchors the head round's open entries link, resolved sections left out."""
+def open_entry_links(pr: dict) -> list[list[str]]:
+    """The thread ids each of the head round's open entries links, resolved sections left out."""
     newest = second_format_head(pr)
     if newest is None:
-        return set()
+        return []
     sections = read_overview(newest.get("body") or "")[2]
-    return {entry[0] for role, _, ids, _ in sections if role != RESOLVED for entry in ids}
+    return [entry for role, _, ids, _ in sections if role != RESOLVED for entry in ids]
 
 
-TABLE_FINDING = re.compile(
-    r"\*{0,2}[A-Za-z]+ finding \((\d+) votes?\):?\*{0,2}:?\s*"
-    r"((?:[^|\\]|\\.)+?)(?=\s*\*{0,2}[A-Za-z]+ finding \(\d+ votes?\)|\s*(?<!\\)\||\s*$)"
-)
+def open_entry_ids(pr: dict) -> set[str]:
+    """The distinct title anchors the head round's open entries link."""
+    return {entry[0] for entry in open_entry_links(pr)}
+
+
+def open_linked_ids(pr: dict) -> set[str]:
+    """Every thread id the head round's open entries link, back-references included."""
+    return {found for entry in open_entry_links(pr) for found in entry}
+
+
+TABLE_VOTES = re.compile(r"\(\d+ votes?\b[^()]*\)")
 NUMBER_WORDS = {
     word: n
     for n, word in enumerate(
@@ -2611,106 +2625,131 @@ NUMBER_WORDS = {
 HEADLINE_COUNT = re.compile(
     r"\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+(?:[a-z-]+\s+){0,2}?findings?\b", re.IGNORECASE
 )
-SETTLED = re.compile(
-    r"(?<!not )(?<!not yet )\b(?:resolved|fixed|addressed|closed)\b",
-    re.IGNORECASE,
-)
 
 
-def title_key(text: str) -> str:
-    """A finding title reduced to lowercase words, the form two spellings of one title compare in."""
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.casefold()).split())
+def table_findings(body: str) -> list[list[str]]:
+    """The first cell's paths of the file table row naming each finding, one list per finding.
 
-
-def table_findings(body: str) -> list[str]:
-    """The titles the file table's rows annotate as findings, in the order the table names them.
-
-    Each is a `<Severity> finding (N votes): <title>` annotation, which is where a round can name
-    a finding that its open sections and threads never carry.
+    A row names a finding by the vote count written beside it, so one row can name several. Each
+    is listed with the paths the row's first cell names, as `cell_paths` reads them. The wording
+    is not read, since a finding is paired with a thread by its file rather than by its title.
+    A count inside a code span is a quotation and is not read.
     """
-    titles = []
+    found = []
     for row in table_rows(body):
+        first = TABLE_ROW.match(row)
+        named = cell_paths(bare_path(first.group(1))) if first else []
         quoted = [span.span() for span in CODE_SPAN.finditer(row)]
-        for match in TABLE_FINDING.finditer(row):
-            if any(a <= match.start() < b for a, b in quoted):
-                continue
-            if title := title_key(match.group(2)):
-                titles.append(title)
-    return titles
+        found += [
+            named
+            for match in TABLE_VOTES.finditer(row)
+            if not any(a <= match.start() < b for a, b in quoted)
+        ]
+    return found
 
 
-def entry_text(line: str) -> str:
-    """One open-section entry as the words it reads, markup dropped and a link kept as its label."""
-    plain = re.sub(r"<picture>.*?</picture>|<[^>]*>", " ", ENTRY_LINE.sub("", line, count=1))
-    return title_key(re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", plain))
+def unpaired(named: list[list[str]], paths: list[str]) -> int:
+    """How many findings, each read as the paths it names, pair with no thread's path.
 
-
-def reworded(title: str, text: str) -> bool:
-    """Whether an annotation title and an entry's words name one finding.
-
-    Either containing the other matches, and so does an entry holding at least two and half of the
-    title's distinct words of three letters or more, since the table and the section are one reviewer's
-    wording of a finding and the words and their order differ between the two.
+    A finding pairs with a thread on a file it names, per `names_path`. Each thread pairs with one
+    finding at most, so two findings on a file one thread is on leave one unpaired. The pairing is
+    the largest there is, found by augmenting paths. So no order of listing leaves a finding
+    unpaired that some other pairing would place.
     """
-    if title in text or (text and text in title):
-        return True
-    words = [w for w in title.split() if len(w) >= 3]
-    have = set(text.split())
-    shared = len({w for w in words if w in have})
-    return shared >= 2 and 2 * shared >= len(set(words))
+    owner: dict[int, int] = {}
+
+    def place(finding: int, seen: set[int]) -> bool:
+        for thread, path in enumerate(paths):
+            if thread in seen or not any(names_path(n, path) for n in named[finding]):
+                continue
+            seen.add(thread)
+            if thread not in owner or place(owner[thread], seen):
+                owner[thread] = finding
+                return True
+        return False
+
+    return sum(1 for finding in range(len(named)) if not place(finding, set()))
 
 
-def open_entry_texts(body: str) -> list[str]:
-    """The entry lines of every open section of a round, as `entry_text` reads them."""
+def round_thread_paths(pr: dict, review: dict) -> list[str]:
+    """The file of each thread the round accounts for, one per thread, so a file can repeat.
+
+    That is each thread the round opened and each its open entries link by their title anchor.
+    An open entry standing for an earlier round's thread is a finding the round still names.
+    """
+    linked = open_entry_ids(pr)
+    own = round_thread_nodes(pr, review)
     return [
-        entry_text(line)
-        for role, _, entries in section_entries(body)
-        if role != RESOLVED
-        for line in entries
+        bare_path(first_comment(thread).get("path") or "")
+        for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
+        if thread in own or str(first_comment(thread).get("fullDatabaseId")) in linked
     ]
 
 
-def unmatched_table_findings(pr: dict) -> int:
-    """How many distinct file-table annotations the head round's open sections have no entry for.
+def unthreaded_table_findings(pr: dict) -> int:
+    """How many findings the head round's file table names that pair with no thread of that round.
 
-    A title matches an entry as `reworded` states. An annotation matching nothing is a finding
-    named only in a table row, which no thread poll and no open section reaches.
+    A finding is paired by the file its row is about, as `unpaired` pairs it, against the threads
+    `round_thread_paths` lists. Each path the row's first cell names is read against those
+    threads' files as `row_paths` reads one against a diff. That is exactly, or through a gap or a
+    wildcard. A finding left unpaired is named only in a table row, which no thread poll reaches.
     """
     newest = second_format_head(pr)
     if newest is None:
         return 0
-    body = newest.get("body") or ""
-    entries = open_entry_texts(body)
-    return sum(
-        1
-        for title in dict.fromkeys(table_findings(body))
-        if not any(reworded(title, text) for text in entries)
-    )
+    paths = round_thread_paths(pr, newest)
+    files = set(paths)
+    named = [
+        [path for name in names for path in row_paths(name, files)[0]]
+        for names in table_findings(newest.get("body") or "")
+    ]
+    return unpaired(named, paths)
 
 
 def headline_findings(headline: str) -> int | None:
-    """The count of findings a headline spells out, or None where it states none.
+    """The largest count of findings a headline spells out, or None where it states none.
 
-    The largest wins, so an ambiguous headline overstates rather than suppresses. A sentence
-    saying anything is resolved, fixed, addressed, or closed counts what is settled rather than
-    what is owed, and `unresolved` is a different word so it does not.
+    Every count is read, whatever its sentence says about it. Whether a count is settled or owed
+    is the prose's to say. So `headline_shortfall` compares it against every finding the pull
+    request accounts for, settled ones included. The largest wins, so a headline overstates.
     """
     counts = []
-    for sentence in re.split(r"(?<=[.!?])\s+", headline):
-        if SETTLED.search(sentence):
-            continue
-        for match in HEADLINE_COUNT.finditer(sentence):
-            word = match.group(1).casefold()
-            counts.append(NUMBER_WORDS[word] if word in NUMBER_WORDS else int(word))
+    for match in HEADLINE_COUNT.finditer(headline):
+        word = match.group(1).casefold()
+        counts.append(NUMBER_WORDS[word] if word in NUMBER_WORDS else int(word))
     return max(counts, default=None)
 
 
-def headline_shortfall(pr: dict) -> tuple[int, int]:
-    """The headline's finding count beside the findings the head round's open sections list.
+def earlier_round_threads(pr: dict, review: dict) -> set[str]:
+    """The first-comment ids of the threads the reviewer's other rounds opened, resolved or not.
 
-    The listed count is the larger of what an open section states and what it lists, so a section
-    stating its count without its entries still counts. Both are zero where the head round is not
-    in the second format or its headline states no count.
+    Read by the thread's own author and round rather than from the review list. That list's window
+    holds the newest reviews, while the thread window holds the oldest threads.
+    """
+    return thread_comment_ids(
+        [
+            thread
+            for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
+            if thread_author(thread) == REVIEWER
+            and (first_comment(thread).get("pullRequestReview") or {}).get("id")
+            not in (None, review.get("id"))
+        ]
+    )
+
+
+def headline_shortfall(pr: dict) -> tuple[int, int]:
+    """The headline's finding count beside every finding the pull request accounts for.
+
+    A headline counts across rounds, so it is compared against all of them rather than the open
+    sections alone. That is the larger of the open sections' count and the round's stated total.
+    The round's suppressed and previously missed findings are added, and so is each thread the
+    reviewer's other rounds opened that no open entry links. Both are zero where the head round is
+    not in the second format or its headline states no count.
+
+    Those threads count resolved or not, since a headline counts a settled finding as readily as
+    an owed one. Telling the two apart was a reading of its prose, and each attempt left a phrasing
+    unread. The cost is a headline naming no more findings than earlier rounds opened threads,
+    which this does not report. The file table and the `Review findings:` list are read apart.
     """
     newest = second_format_head(pr)
     if newest is None:
@@ -2724,7 +2763,9 @@ def headline_shortfall(pr: dict) -> tuple[int, int]:
         for role, count, entries in section_entries(body)
         if role != RESOLVED
     )
-    return stated, listed
+    withheld = suppressed_blocks(body) + previously_missed_blocks(body)
+    accounted = max(listed, stated_total(body) or 0) + sum(map(finding_count, withheld))
+    return stated, accounted + len(earlier_round_threads(pr, newest) - open_linked_ids(pr))
 
 
 PROSE_FINDINGS = re.compile(
@@ -2780,24 +2821,17 @@ def names_path(named: str, path: str) -> bool:
 
 
 def unthreaded_prose_findings(pr: dict) -> int:
-    """How many `Review findings:` entries in the head round name no file its own threads are on.
+    """How many `Review findings:` entries in the head round pair with no thread of that round.
 
-    Matched by file because an entry names a file and a thread carries one, where its wording
-    shares nothing a match could key on. An entry naming no path is counted. An entry whose file
-    carries a thread on some other finding is not, which is the case this cannot see.
+    Paired by file, as `unpaired` pairs them, against the threads `round_thread_paths` lists. An
+    entry names a file and a thread carries one, where its wording shares nothing a match could key
+    on. An entry naming no path is counted. An entry paired with a thread on some other finding
+    the list leaves out is not, which is the case this cannot see.
     """
     newest = second_format_head(pr)
     if newest is None:
         return 0
-    paths = {
-        bare_path(first_comment(thread).get("path") or "")
-        for thread in round_thread_nodes(pr, newest)
-    }
-    return sum(
-        1
-        for named in prose_findings(newest.get("body") or "")
-        if not any(names_path(n, p) for n in named for p in paths)
-    )
+    return unpaired(prose_findings(newest.get("body") or ""), round_thread_paths(pr, newest))
 
 
 def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
@@ -4522,7 +4556,7 @@ def digest(
     linked = total_section_entries(pr)
     restated = carried_open_threads(pr)
     prose = unthreaded_prose_findings(pr)
-    in_table = unmatched_table_findings(pr)
+    in_table = unthreaded_table_findings(pr)
     headlined, headline_listed = headline_shortfall(pr)
     unlisted = max(
         max((stated or 0) - linked, 0) + unthreaded
@@ -4714,19 +4748,19 @@ def digest(
             )
             + (
                 f", and {prose} of the entries under its `Review findings:` label "
-                f"{'names' if prose == 1 else 'name'} no file a thread of that round is on"
+                f"{'pairs' if prose == 1 else 'pair'} with no thread of that round on its file"
                 if prose
                 else ""
             )
             + (
-                f", and {in_table} of the findings its file table annotates "
-                f"{'matches' if in_table == 1 else 'match'} no entry of its open sections"
+                f", and {in_table} of the findings its file table names "
+                f"{'pairs' if in_table == 1 else 'pair'} with no thread of that round on its file"
                 if in_table
                 else ""
             )
             + (
                 f", and its headline states {headlined} finding{'' if headlined == 1 else 's'} "
-                f"where its open sections list {headline_listed}"
+                f"where the round and earlier rounds' threads account for {headline_listed}"
                 if headlined > headline_listed
                 else ""
             )
@@ -5888,33 +5922,54 @@ def in_repository(node: dict, owner: str, repo: str) -> bool:
     return name.lower() == f"{owner}/{repo}".lower()
 
 
+def local_heads(owner: str, repo: str, branch: str) -> list[object]:
+    """The number of each open pull request whose head is the branch in `owner/repo`.
+
+    The connection also holds forks' pull requests on a same-named branch. So every page is read
+    and filtered to this repository's own before anything is decided, and a fork's is never
+    counted. A page that does not answer, or one that cannot be followed to the next, raises rather
+    than reading as no pull request.
+    """
+
+    def fetch(cursor: str | None) -> dict:
+        extra = {"after": cursor} if cursor else {}
+        return cleanup_read(Q_CLEANUP_HEADS, o=owner, r=repo, b=branch, **extra)
+
+    numbers: list[object] = []
+    try:
+        for parent in shared.walk(fetch, ("repository", "heads"), strict_page=True):
+            nodes = parent["heads"].get("nodes")
+            if not isinstance(nodes, list) or not all(isinstance(n, dict) for n in nodes):
+                raise CleanupUnread(
+                    f"the open pull request read returned no heads list: {nodes!r}"[:400]
+                )
+            numbers += [n.get("number") for n in nodes if in_repository(n, owner, repo)]
+    except shared.GraphQLError as exc:
+        raise CleanupUnread(str(exc)) from exc
+    return numbers
+
+
 def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     """The open pull requests in this repository whose head or base is the branch.
 
-    Deleting a branch closes every open pull request headed on it and retargets or closes the ones
-    based on it, so each is named where one exists. A pull request past the twenty read is counted
-    rather than named, and an unanswered read is never reported as no pull request.
+    Deleting a branch closes every open pull request headed on it. It retargets or closes the ones
+    based on it, so each is named where one exists. Every head is read, per `local_heads`. A base
+    past the twenty read is counted rather than named, every one being this repository's own. An
+    unanswered read is never reported as no pull request.
     """
-    data = cleanup_read(Q_CLEANUP_USERS, o=owner, r=repo, b=branch)
+    users = [f"#{number} (head)" for number in local_heads(owner, repo, branch)]
+    data = cleanup_read(Q_CLEANUP_BASES, o=owner, r=repo, b=branch)
     repository = data.get("repository")
     if not isinstance(repository, dict):
         raise CleanupUnread(f"{owner}/{repo} returned no repository for the open pull request read")
-    users = []
-    for field, role in (("heads", "head"), ("bases", "base")):
-        found = repository.get(field)
-        nodes = found.get("nodes") if isinstance(found, dict) else None
-        total = found.get("totalCount") if isinstance(found, dict) else None
-        if not isinstance(nodes, list) or not isinstance(total, int):
-            raise CleanupUnread(
-                f"the open pull request read returned no {field} list: {found!r}"[:400]
-            )
-        users += [
-            f"#{n.get('number')} ({role})"
-            for n in nodes
-            if isinstance(n, dict) and (role == "base" or in_repository(n, owner, repo))
-        ]
-        if total > len(nodes):
-            users.append(f"{total - len(nodes)} more with the branch as {role}")
+    found = repository.get("bases")
+    nodes = found.get("nodes") if isinstance(found, dict) else None
+    total = found.get("totalCount") if isinstance(found, dict) else None
+    if not isinstance(nodes, list) or not isinstance(total, int):
+        raise CleanupUnread(f"the open pull request read returned no bases list: {found!r}"[:400])
+    users += [f"#{n.get('number')} (base)" for n in nodes if isinstance(n, dict)]
+    if total > len(nodes):
+        users.append(f"{total - len(nodes)} more with the branch as base")
     return users
 
 

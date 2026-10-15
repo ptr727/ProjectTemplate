@@ -30,6 +30,8 @@ param(
     [Alias('y')][switch]$Yes,
     [string]$Ref,
     [string]$Dir,
+    # Declared after -Ref and -Dir, so the positions those two had before it existed stay theirs.
+    [string[]]$Agents,
     [switch]$Keep,
     [Alias('h')][switch]$Help
 )
@@ -63,6 +65,7 @@ function die { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Messa
 $ACTIONS = [ordered]@{
     report  = [bool]$Report
     upgrade = [bool]$Upgrade
+    agents  = [bool]$Agents
     tools   = [bool]$Tools
     github  = [bool]$Github
     skills  = [bool]$Skills
@@ -70,6 +73,8 @@ $ACTIONS = [ordered]@{
     host    = [bool]$StandUpHost
     dev     = [bool]$Dev
 }
+# Names arrive as separate words or as one comma separated word, since -File hands a comma list over as a single string.
+$AGENT_NAMES = @($Agents | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $WANT_HELP = [bool]$Help
 $DRY_RUN = [bool]$DryRun
 $ASSUME_YES = [bool]$Yes
@@ -97,7 +102,10 @@ Actions, name one, default -Report:
   -r, -Report       Report what each tool would do, change nothing
       -Host         Upgrade packages, install the tools, configure git and GitHub, install the skills
       -Dev          As -Host, and add the tools a development machine needs
-      -Upgrade      Upgrade the packages winget manages, only
+      -Upgrade      Upgrade the packages winget manages, and this user's coding-agent tools
+                    that are already installed
+      -Agents LIST  Install the named coding-agent tools for this user only, LIST being names
+                    separated by commas (claude, codex, opencode, herdr, cswap) or 'all'
       -Tools        Install the host tools, only
       -Github       Configure git, the SSH key, and commit signing, only
       -Skills       Install the fleet skills for the current user, only
@@ -128,6 +136,7 @@ Examples:
   bootstrap.ps1 -Host -Yes             Stand a host up unattended
   bootstrap.ps1 -Ref develop -Report   Report using the tooling on develop
   bootstrap.ps1 -Tools -DryRun         Show what installing the tools would run
+  bootstrap.ps1 -Agents herdr,cswap    Install two coding-agent tools
 '@
 }
 
@@ -174,7 +183,7 @@ function Get-ForwardedArgument {
             if ($value.IsPresent) { $forward += "-$key" }
         } else {
             $forward += "-$key"
-            $forward += "$value"
+            $forward += ($value -join ',')
         }
     }
     return , $forward
@@ -189,7 +198,7 @@ function Format-ForwardedArgumentForDisplay {
             if ($value.IsPresent) { "-$key" }
         } else {
             "-$key"
-            "'" + ("$value" -replace "'", "''") + "'"
+            "'" + (($value -join ',') -replace "'", "''") + "'"
         }
     }
     return ($parts -join ' ')
@@ -441,6 +450,43 @@ function Show-Report {
     # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
     Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
     if ($LASTEXITCODE -ne 0) { info 'The fleet skills step did not report a current copy, and the output above says why' }
+    if (Test-AgentsUser) {
+        Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) { info 'The agent tools step did not report, and the output above says why' }
+    }
+}
+
+function Test-Elevated {
+    $IsWindows -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# The agent tools live in a user's profile, and an administrator's holds none on a host where a person uses them, so an elevated run skips them and says so.
+function Test-AgentsUser {
+    if (Test-Elevated) {
+        info "Running elevated, so no user's coding-agent tools are read, run this as that user to include them"
+        return $false
+    }
+    return $true
+}
+
+# Packages first, then the agent tools, which need no elevation and so keep the package step's prompt apart from them.
+# Only the tools already installed are touched, so an upgrade never adds one.
+function Invoke-Upgrade {
+    Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Packages'
+    if (Test-AgentsUser) {
+        Invoke-Tool -Tool 'install-agents.ps1' -Arguments '-Upgrade'
+    }
+}
+
+# Installs only what is named, since the agent tools are never installed as a set nobody chose.
+function Invoke-AgentsInstall {
+    if ($script:AGENT_NAMES.Count -eq 0) { die "-Agents takes the tools to install, separated by commas, or 'all'" }
+    if ($script:AGENT_NAMES -contains 'all') {
+        if ($script:AGENT_NAMES.Count -gt 1) { die "-Agents takes 'all' alone, or a list of tool names" }
+        Invoke-Tool -Tool 'install-agents.ps1' -Arguments '-Install', '-All'
+        return
+    }
+    Invoke-Tool -Tool 'install-agents.ps1' -Arguments (@('-Install') + $script:AGENT_NAMES)
 }
 
 # The order is fixed rather than chosen.
@@ -487,7 +533,7 @@ function Show-Menu {
     log "Standing up $(Get-HostDescription)"
     log ''
     log '  1  Report only, change nothing'
-    log '  2  Upgrade the packages winget manages'
+    log '  2  Upgrade the packages winget manages, and the agent tools already installed'
     log '  3  Install the host tools'
     log '  4  Configure git and GitHub'
     log '  5  Install the fleet skills'
@@ -593,7 +639,8 @@ function main {
         Get-Tree
         switch ($script:MODE) {
             'report' { Show-Report }
-            'upgrade' { Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Packages' }
+            'upgrade' { Invoke-Upgrade }
+            'agents' { Invoke-AgentsInstall }
             'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
             'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
             'skills' { Invoke-SkillsInstall }

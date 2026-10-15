@@ -58,10 +58,14 @@ text says, because the harm it covers was never in the text.
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
-   parses, a wrapper shell's body and a command substitution's body among them, and not inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
+   parses, a wrapper shell's body and a command substitution's body among them. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
-   deletes only its own branch. A force-push and a delete each write the branch too, so a branch
+   deletes only its own branch. A push's force, delete, all, and mirror options are read as git
+   reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
+   `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. A refspec pattern
+   whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
+   every branch protected by default. A force-push and a delete each write the branch too, so a branch
    whose rules require a pull request denies them as it denies a direct push.
    **This one fails closed, but only for a branch protected by default** (`main`, `master`,
    `develop`): when that branch's rules cannot be determined at all (network unreachable, origin
@@ -89,7 +93,9 @@ text says, because the harm it covers was never in the text.
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. Some words are read as they
    stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
-   commit path after `--`, and a redirection target held in one word. A `-C`, `--git-dir`, or `--work-tree` value that word
+   commit path after `--`, and a redirection target held in one word. A directory value or a
+   commit option's value holding a double-quoted list expansion, such as `"$@"` or `"${a[@]}"`,
+   or an indirect `"${!name}"`, is denied instead. Each may give several words. A `-C`, `--git-dir`, or `--work-tree` value that word
    splitting may split, or that holds a brace expansion, is denied on every git subcommand,
    because the split value may add options or a subcommand the guard cannot see. So is a value holding an
    expansion whose quoting the guard cannot read. The deny for an unquoted variable names quoting it or writing
