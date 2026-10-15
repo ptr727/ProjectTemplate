@@ -2524,8 +2524,8 @@ def _gh_target_readings(cmd):
 
     `-f` alone is value-taking only inside `api`. On `pr create` it is the boolean `--fill`, so
     reading it as taking a value there would swallow a real following `--repo` flag whole. On
-    `pr merge`, `-m` is the boolean `--merge`, so an argv that may be one is read a second time
-    by `_GH_MERGE_VALUE_FLAGS` less the repo flags, and a target either reading finds counts.
+    `pr merge`, `-m` is the boolean `--merge`. So an argv that may be one is read a second time,
+    by `_GH_MERGE_VALUE_FLAGS` less the repo flags. A target either reading finds counts.
     """
     merge_flags = _GH_MERGE_VALUE_FLAGS - _REPO_FLAG_BARE
     for args in _all_gh_arg_lists(cmd):
@@ -2928,6 +2928,7 @@ _PUSH_NEGATIONS = {
     "no-all": "no-al",
     "no-branches": "no-b",
     "no-mirror": "no-m",
+    "no-tags": "no-ta",
 }
 
 
@@ -4069,6 +4070,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                     _negates_push_option(t, "no-all") or _negates_push_option(t, "no-branches")
                 )
                 mirror = mirror and not _negates_push_option(t, "no-mirror")
+                tags_only = tags_only and not _negates_push_option(t, "no-tags")
             if _spells_long_option(t, ("prune",)):
                 prune = True
             elif not options_ended and _spells_long_option(t, ("no-prune",)):
@@ -4190,6 +4192,21 @@ def _is_gh_pr_merge(args):
     return "pr" in args and "merge" in args[args.index("pr") :]
 
 
+def _runs_gh_pr_merge(args):
+    """True when a `gh` argv's subcommand under `pr` is `merge`, past `pr`'s own flags.
+
+    A repo flag's value is passed too, as in `gh pr -R example/repo merge`. This is narrower
+    than `_is_gh_pr_merge`, so a `merge` word in another subcommand's value, as in
+    `gh pr comment 5 --body merge`, is not read as one.
+    """
+    if "pr" not in args:
+        return False
+    j = args.index("pr") + 1
+    while j < len(args) and args[j].startswith("-"):
+        j += 2 if args[j] in _REPO_FLAG_BARE else 1
+    return j < len(args) and args[j] == "merge"
+
+
 def _gh_admin_merge(args):
     """True when a `gh` argv is `pr merge` carrying `--admin`, however the shell quoted it.
 
@@ -4212,18 +4229,23 @@ def _gh_merge_run_time_word(text):
     """The first run-time word among the words of a `gh pr merge` in `text`, or None.
 
     The shell rewrites such a word before gh reads it, so `"$(printf %s --admin)"` or an unquoted
-    `$A` may pass `--admin`. A `_GH_MERGE_VALUE_FLAGS` option's value, whether the next word or
-    attached as in `--body=...`, is left alone where word splitting cannot split it, as in
-    `--body "$BODY"`, since gh then reads it whole as that value. A word inside a heredoc body that
-    is data is left alone too.
+    `$A` may pass `--admin`. An option's value is left alone where word splitting cannot split it,
+    as in `--body "$BODY"`. gh then reads it whole as that value. The option is one of
+    `_GH_MERGE_VALUE_FLAGS`, with its value as the next word or attached as in `--body=...`. A
+    word inside a heredoc body that is data is left alone too. Only a gh word in a command's
+    position counts, the test `_rewritten_git_words` gives git, so `echo gh pr merge $N` is no
+    merge.
     """
     toks = _shell_tokens(text)
     mask = raw = None
     for k, t in enumerate(toks):
-        if not _is_gh_exe(t) or not _is_gh_pr_merge(_collect_arglist(toks, k + 1)[0]):
+        if not _is_gh_exe(t) or not _runs_gh_pr_merge(_collect_arglist(toks, k + 1)[0]):
             continue
         if mask is None:
             mask, raw = _quoted_mask(text, toks), _quote_kept_tokens(text, toks)
+        opened = k and toks[k - 1].endswith("(") and not (mask and mask[k - 1])
+        if not opened and not _runs_as_command(toks, k, mask):
+            continue
         end = _region_end(toks, k, mask)
         x = k + 1
         while x < end:
@@ -4295,13 +4317,20 @@ def _commit_cluster_skips_hooks(args):
     """True when a commit's short-option cluster sets `-n`, as `-an` does.
 
     Git reads a cluster letter by letter. A letter in `_COMMIT_VALUE_LETTERS` takes the rest of
-    its word as its value, so `-mn` is a message, or the next word where it ends its word, so the
-    `-an` in `-m -an` is a message too. `-S` and `-u` take only the rest of their word. The words
-    are read from the left, so a word that is itself a value takes nothing.
+    its word as its value, so `-mn` is a message. Where it ends its word, it takes the next word,
+    so the `-an` in `-m -an` is a message too. `-S` and `-u` take only the rest of their word. A
+    long value option takes the next word too (see `_is_commit_value_option`), and a word after
+    `--` is a pathspec. The words are read from the left, so a word that is a value takes nothing.
     """
     rest = iter(args)
     for a in rest:
-        if a[:1] != "-" or a[:2] == "--":
+        if a == "--":
+            break
+        if a[:2] == "--":
+            if _is_commit_value_option(a):
+                next(rest, None)
+            continue
+        if a[:1] != "-":
             continue
         for at, letter in enumerate(a[1:], 2):
             if letter == "n":
@@ -4322,7 +4351,7 @@ def _check_bypass_flags(cmd):
     on, so an attached `-c<body>` is read as the body it holds. For `--admin` alone, an `eval`
     argument is also read as the command it runs (see `_with_eval_payloads`). Each `gh pr merge`
     argv is read for `--admin` as well, so a quoted `"--admin"` the shell passes as a flag is still
-    caught, and a run-time word among its words fails closed (see `_gh_merge_run_time_word`).
+    caught. A run-time word among its words fails closed (see `_gh_merge_run_time_word`).
     `--no-verify` is read whole or cut short (see `_names_no_verify`), and a commit's `-n` inside
     a short-option cluster too (see `_commit_cluster_skips_hooks`).
     """
@@ -4364,7 +4393,8 @@ def _check_bypass_flags(cmd):
             f"This runs `gh pr merge` with a run-time word, `{hidden_admin}`, among its words. The "
             "shell rewrites it before gh reads it, and it may expand to `--admin`, which merges "
             "past required reviews and status checks. Failing closed. Write every word of the merge "
-            "out, and quote an option's value." + _handoff(cmd)
+            'out. Only an option\'s quoted value, as in --body "$BODY", may be a run-time word.'
+            + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
@@ -7756,6 +7786,34 @@ _GIT_CASES = [
         "control: a run-time word on a gh command other than a merge is left alone",
     ),
     (
+        'gh pr edit "$PR" --add-label merge',
+        None,
+        {},
+        "allow",
+        "control: a merge word that is another subcommand's value is no merge",
+    ),
+    (
+        "echo gh pr merge $PR",
+        None,
+        {},
+        "allow",
+        "control: a gh word that is an argument rather than a command runs no merge",
+    ),
+    (
+        "timeout 60 gh pr merge 5 $A",
+        None,
+        {},
+        "deny",
+        "a merge behind a prefix command still fails closed on a run-time word",
+    ),
+    (
+        "gh pr -R ptr727/other merge 5 $A",
+        None,
+        {},
+        "deny",
+        "a repo flag between pr and merge does not hide a run-time word",
+    ),
+    (
         "gh pr merge 5 -m -R stranger/example",
         None,
         {},
@@ -7799,7 +7857,10 @@ _GIT_CASES = [
         "deny",
         "a cluster after a word that is a value is read as a cluster",
     ),
+    ("git commit -mm -an", None, {}, "deny", "a cluster after -m with its value attached is read"),
     ("git commit -mn", None, {}, "allow", "control: the n in -mn is the message"),
+    ("git commit --mess -an", None, {}, "allow", "control: a word after --mess is the message"),
+    ("git commit -m x -- -an", None, {}, "allow", "control: a word after -- is a pathspec"),
     ("git commit -m -an", None, {}, "allow", "control: a word after -m is the message"),
     ("git commit -Sn -m x", None, {}, "allow", "control: the n in -Sn is a key id"),
     ("git commit -uno -m x", None, {}, "allow", "control: the no in -uno is a mode"),
@@ -7900,6 +7961,20 @@ _GIT_CASES = [
         {"main": _CODE_RULES, "master": _CODE_RULES, "develop": _CODE_RULES, "feature/x": set()},
         "allow",
         "a later --no-mirror cancels an earlier --mirror",
+    ),
+    (
+        "git push --tags --no-tags origin",
+        "develop",
+        {"main": _CODE_RULES, "master": _CODE_RULES, "develop": _CODE_RULES},
+        "deny",
+        "a later --no-tags cancels --tags, so the push updates the current branch",
+    ),
+    (
+        "git push --tags origin",
+        "develop",
+        {"main": _CODE_RULES, "master": _CODE_RULES, "develop": _CODE_RULES},
+        "allow",
+        "control: --tags alone pushes only tags",
     ),
     (
         "git push --mirror origin -- --no-mirror",
