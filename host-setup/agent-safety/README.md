@@ -58,7 +58,8 @@ text says, because the harm it covers was never in the text.
    `--no-verify` or a `-c core.hooksPath=` override on a commit/push). An `include.path`/`includeIf`
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
-   parses, a wrapper shell's body and a command substitution's body among them. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
+   parses, a wrapper shell's body and a command substitution's body among them. Those bodies are
+   read up to a few levels of nesting, and a git commit or push nested deeper is denied. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A push's force, delete, all, mirror, and prune options are read as
@@ -87,12 +88,10 @@ text says, because the harm it covers was never in the text.
    exist. That push's rules then count as undetermined. Apart from
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
    That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
-   override. It covers a git command under an `include.path`/`includeIf` override too, where git
-   lists no such subcommand, since the included file may define it as a push alias. The same holds
-   where git does not build the subcommand in. An `--exec-path`, a `GIT_EXEC_PATH`, or a PATH
-   change can leave such a name to an alias. The override is also unreadable on a git command that
-   runs other git commands (`rebase`, `submodule`, `bisect`, `filter-branch`, `difftool`,
-   `mergetool`), whatever its arguments say. It reaches every git command that one runs. An `eval`
+   override, or config set through `GIT_CONFIG_COUNT` and its key and value variables. It covers
+   a push in code an interpreter such as `python3 -c` or `node -e` runs, and one in text piped to
+   a shell's input. It covers a push a persisted alias or one set in the environment runs, and an
+   alias set by `--config-env` for the subcommand it runs. An `eval`
    argument holding an include key is read as the command it runs. It also covers a bare push or a
    `HEAD`/`@` refspec whose directory or branch may change before it runs. Such a push's local
    branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
@@ -123,7 +122,14 @@ text says, because the harm it covers was never in the text.
    where its subcommand word past git's global options is `push` or `commit`, because the shell
    decides what git runs. The body of a double-quoted `$(...)` or backtick substitution, and of
    an unquoted backtick substitution, is read as a command, so this requirement's checks apply
-   inside it. The
+   inside it. So is the body of one inside a double-quoted `${...}`, or inside a heredoc whose
+   delimiter is unquoted. A command string another shell runs, such as `pwsh`, `fish`, `script`,
+   or `cmd`, is read as a wrapper shell's body. So is a config value or an environment variable git runs as
+   a command, such as `core.pager`, `core.fsmonitor`, or `GIT_EDITOR`. Such a value is denied on
+   any git command where it names its program by a path or an expansion, or comes from
+   `--config-env`, since the hook does not read that program. An `include.path`/`includeIf`
+   override is denied on any git command, and so is a `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM`
+   file other than `/dev/null`, since such a file may set any of those keys. The
    push and include checks also read each command with its quotes and backslashes removed and
    `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
    workaround is an explicit refspec run as its own command. Every other

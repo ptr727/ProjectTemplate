@@ -500,6 +500,7 @@ def _skip_quote_body(cmd, i, closer, out=None):
     or `$'...'` span. Both honor a backslash escape, and a double-quoted span also holds nested
     substitutions, each skipped whole, since a quote inside one does not end the outer span.
     With `out`, each `$(...)` or backtick substitution body in a double-quoted span goes to it.
+    So does each one inside a `${...}` there, which the shell expands too.
     """
     while i < len(cmd):
         ch = cmd[i]
@@ -515,10 +516,83 @@ def _skip_quote_body(cmd, i, closer, out=None):
                 out.append(_DQ_ESCAPE.sub(r"\1", cmd[i + 1 : end - 1]))
             elif out is not None and cmd.startswith("$(", i) and not cmd.startswith("$((", i):
                 out.append(cmd[i + 2 : end - 1])
+            elif out is not None and cmd.startswith("${", i):
+                _expansion_substitutions(cmd[i + 2 : end - 1], out, quotes=True)
             i = end
         else:
             i += 1
     raise ValueError("unterminated quote")
+
+
+def _expansion_substitutions(text, out, quotes):
+    """Append each `$(...)` or backtick substitution body `text` holds to `out`.
+
+    `text` is a `${...}` body inside double quotes, or with `quotes` False an unquoted-delimiter
+    heredoc body, where a quote is text.
+    A nested `${...}` is read the same way.
+    Text whose quoting does not close is read up to that point.
+    """
+    i = 0
+    try:
+        while i < len(text):
+            ch = text[i]
+            if ch == "\\":
+                i += 2
+            elif ch == "`":
+                end = _skip_backticks(text, i + 1)
+                out.append(_DQ_ESCAPE.sub(r"\1", text[i + 1 : end - 1]))
+                i = end
+            elif text.startswith(("$$", "$(("), i):
+                i = _skip_nested(text, i)
+            elif text.startswith("$(", i):
+                end = _skip_nested(text, i)
+                out.append(text[i + 2 : end - 1])
+                i = end
+            elif text.startswith("${", i):
+                end = _skip_nested(text, i)
+                _expansion_substitutions(text[i + 2 : end - 1], out, quotes)
+                i = end
+            elif quotes and ch == '"':
+                i = _skip_quote_body(text, i + 1, '"', out)
+            else:
+                i += 1
+    except (ValueError, RecursionError):
+        pass
+
+
+def _unquoted_heredoc_bodies(cmd):
+    """The body of each heredoc in `cmd` whose delimiter is unquoted, where the shell expands substitutions.
+
+    A line opens the heredocs `_heredoc_openers` finds there.
+    A delimiter is quoted where `_HEREDOC_IN_GROUP` finds that tag on the line quoted, as in `<<'EOF'`, `<<"EOF"`, or `<<\\EOF`.
+    A tag the pattern does not find on the line is read as unquoted, so its body is read rather than dropped.
+    """
+    if "<<" not in cmd:
+        return []
+    lines = cmd.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        if "<<" not in line:
+            continue
+        opened, _shift = _heredoc_openers(line)
+        marks = [
+            (
+                m.group(2) or m.group(3) or m.group(4),
+                m.group(2) is not None or m.group(3) is not None or "\\" in m.group(0),
+            )
+            for m in _HEREDOC_IN_GROUP.finditer(line)
+        ]
+        for tag, dash, _fed in opened:
+            k = next((x for x, (t, _q) in enumerate(marks) if t == tag), None)
+            quoted = False if k is None else marks.pop(k)[1]
+            end, term = _heredoc_body_end(lines, i, (tag, dash))
+            if not quoted:
+                out.append("\n".join(lines[i : end - len(term)]))
+            i = end
+    return out
 
 
 _HEREDOC_IN_GROUP = re.compile(
@@ -1097,6 +1171,165 @@ def _overrides_include(global_opts):
     one is read as a hooks-path override.
     """
     return any(_includes_config_file(v) for v in _git_config_overrides(global_opts))
+
+
+_COMMAND_CONFIG_KEYS = frozenset(
+    {
+        "core.fsmonitor",
+        "core.pager",
+        "core.editor",
+        "core.sshcommand",
+        "core.askpass",
+        "core.gitproxy",
+        "core.alternaterefscommand",
+        "diff.external",
+        "sequence.editor",
+        "credential.helper",
+        "gpg.program",
+        "gpg.openpgp.program",
+        "gpg.x509.program",
+        "gpg.ssh.program",
+        "gpg.ssh.defaultkeycommand",
+        "interactive.difffilter",
+        "uploadpack.packobjectshook",
+        "web.browser",
+        "sendemail.sendmailcmd",
+        "sendemail.tocmd",
+        "sendemail.cccmd",
+    }
+)
+_COMMAND_CONFIG_PATTERN = re.compile(
+    r"pager\..+|credential\..+\.helper|diff\..+\.(?:textconv|command)|merge\..+\.driver"
+    r"|filter\..+\.(?:clean|smudge|process)|(?:difftool|mergetool|browser|man)\..+\.(?:cmd|path)"
+    r"|remote\..+\.(?:uploadpack|receivepack)|submodule\..+\.update|trailer\..+\.(?:command|cmd)"
+)
+_COMMAND_ENV_VARS = frozenset(
+    {
+        "GIT_EDITOR",
+        "GIT_SEQUENCE_EDITOR",
+        "GIT_PAGER",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH",
+        "GIT_ASKPASS",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PROXY_COMMAND",
+        "SSH_ASKPASS",
+        "EDITOR",
+        "VISUAL",
+        "PAGER",
+    }
+)
+_CONFIG_FILE_ENV_VARS = frozenset({"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"})
+_CONFIG_PAIR_ENV = re.compile(r"GIT_CONFIG_(KEY|VALUE)_(\d+)")
+_CONFIG_BOOLEANS = frozenset({"true", "false", "yes", "no", "on", "off", "1", "0"})
+
+
+def _is_command_config_key(key):
+    """True when git runs the value of the lowercased config `key` as a command."""
+    return key in _COMMAND_CONFIG_KEYS or bool(_COMMAND_CONFIG_PATTERN.fullmatch(key))
+
+
+def _command_value(key, value):
+    """(the command text git runs for config `key` set to `value`, or None, whether the guard can read it).
+
+    An empty or boolean value runs nothing.
+    A `!` prefix, as a credential helper or a submodule update takes, is dropped from the shell text it marks.
+    A submodule update without one names a git mode and runs nothing.
+    Any other value is unreadable where its program word is a path, an expansion, or a home-relative name, since that names a file the guard does not read.
+    """
+    v = value.strip()
+    if v == "" or v.lower() in _CONFIG_BOOLEANS:
+        return None, True
+    if v.startswith("!"):
+        v = v[1:]
+    elif key.startswith("submodule."):
+        return None, True
+    try:
+        words = shlex.split(v)
+    except ValueError:
+        return v, False
+    words = [w for w in words if not _ENV_ASSIGN_RE.match(w)][:1]
+    program = words[0] if words else ""
+    return v, not (any(c in program for c in "/\\$`") or program.startswith("~"))
+
+
+def _config_override_sources(global_opts):
+    """Every `-c`/`--config-env` value in a git invocation's global options, as (value, from_env).
+
+    A `--config-env` value names the variable holding the value, which the guard does not read.
+    """
+    out = []
+    for i, t in enumerate(global_opts):
+        if t in ("-c", "--config-env"):
+            out.append((global_opts[i + 1] if i + 1 < len(global_opts) else "", t != "-c"))
+        elif t.startswith("--config-env="):
+            out.append((t[len("--config-env=") :], True))
+        elif t.startswith("-c") and len(t) > 2:
+            out.append((t[2:], False))
+    return out
+
+
+def _env_assignments(toks):
+    """Every `NAME=value` word in `toks`, as (name, value), an `export` or `env` argument among them."""
+    return [m.groups() for t in toks for m in [_ENV_ASSIGN_RE.match(t)] if m]
+
+
+def _env_config_values(assignments):
+    """The `key=value` overrides `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>` and `GIT_CONFIG_PARAMETERS` set.
+
+    A key with no value beside it is read with an empty one.
+    A `GIT_CONFIG_PARAMETERS` the guard cannot split is given as one value.
+    """
+    keys, values, out = {}, {}, []
+    for name, value in assignments:
+        m = _CONFIG_PAIR_ENV.fullmatch(name)
+        if m:
+            (keys if m.group(1) == "KEY" else values)[m.group(2)] = value
+        elif name == "GIT_CONFIG_PARAMETERS":
+            try:
+                out.extend(shlex.split(value))
+            except ValueError:
+                out.append(value)
+    out.extend(f"{k}={values.get(n, '')}" for n, k in keys.items())
+    return out
+
+
+def _sets_env_config(assignments):
+    """True when an assignment sets git config through the environment, which `GIT_CONFIG_COUNT` turns on."""
+    return any(
+        name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS") or _CONFIG_PAIR_ENV.fullmatch(name)
+        for name, _value in assignments
+    )
+
+
+def _command_value_bodies(cmd):
+    """The command text git runs from a config value or environment variable in `cmd`, for each the guard can read.
+
+    That is a `-c` value for a key `_is_command_config_key` names, one set through `GIT_CONFIG_KEY_<n>`, and the value of each of `_COMMAND_ENV_VARS`.
+    The environment is read only in text holding a git word.
+    """
+    toks = _shell_tokens(cmd)
+    out = []
+    if not any(_is_git_exe(t) for t in toks):
+        return out
+    assignments = _env_assignments(toks)
+    values = list(_env_config_values(assignments))
+    for k, t in enumerate(toks):
+        if _is_git_exe(t):
+            opts = toks[k + 1 : _git_subcommand_index(toks, k)]
+            values.extend(v for v, from_env in _config_override_sources(opts) if not from_env)
+    for v in values:
+        key, _, value = v.partition("=")
+        if _is_command_config_key(key.lower()):
+            text, _readable = _command_value(key.lower(), value)
+            if text:
+                out.append(text)
+    for name, value in assignments:
+        if name in _COMMAND_ENV_VARS:
+            text, _readable = _command_value("", value)
+            if text:
+                out.append(text)
+    return list(dict.fromkeys(out))
 
 
 # --- Rule 6: a mutating git op against a primary checkout ---------------------------------------------
@@ -1926,6 +2159,55 @@ def _is_shell_wrapper_exe(tok):
     return base in _SHELL_WRAPPER_EXE
 
 
+_FOREIGN_SHELL_FLAGS = {
+    "pwsh": ("-command", "-cwa", "-commandwithargs"),
+    "powershell": ("-command", "-cwa", "-commandwithargs"),
+    "fish": ("--command",),
+    "script": ("--command",),
+    "nu": ("--commands",),
+    "cmd": ("/c", "/k", "/r"),
+    "ash": (),
+    "csh": (),
+    "tcsh": (),
+    "mksh": (),
+    "yash": (),
+    "posh": (),
+    "rbash": (),
+    "elvish": (),
+    "xonsh": (),
+}
+
+
+def _command_string_exe(tok):
+    """The lowercased base name of a shell that runs a command string an option names, or None.
+
+    A shell `_FOREIGN_SHELL_FLAGS` names counts, beside the POSIX ones.
+    Its body is read as a command, while the rules that read a POSIX wrapper as moving a push keep to `_SHELL_WRAPPER_EXE`.
+    """
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return base if base in _SHELL_WRAPPER_EXE or base in _FOREIGN_SHELL_FLAGS else None
+
+
+def _command_string_index(exe, args):
+    """The index of the option naming the command string in shell `exe`'s argv, or None.
+
+    That is a POSIX `-c` cluster for every shell but `cmd`, and the options `_FOREIGN_SHELL_FLAGS` names.
+    A PowerShell option may be cut short to `-com` or longer, and its options match without case.
+    """
+    if exe in _SHELL_WRAPPER_EXE:
+        return _wrapper_c_index(args)
+    flags = _FOREIGN_SHELL_FLAGS[exe]
+    for x, a in enumerate(args):
+        low = a.lower()
+        if exe != "cmd" and a.startswith("-") and not a.startswith("--") and low.endswith("c"):
+            return x
+        if low in flags or (
+            exe in ("pwsh", "powershell") and len(low) >= 4 and "-command".startswith(low)
+        ):
+            return x
+    return None
+
+
 _WRAPPER_NESTING_LIMIT = 4
 
 
@@ -1959,11 +2241,15 @@ def _substitution_bodies(cmd):
     It is also a backtick substitution outside them, which the tokenizer gives as `` `git ``.
     An unquoted `$(...)` is left alone, since the tokenizer already splits it at its parenthesis.
     A quoted span inside one is still scanned.
-    A heredoc body is not scanned, whether or not its delimiter is quoted.
+    So is a `${...}` inside double quotes, for the substitutions it holds.
+    A heredoc body whose delimiter is unquoted is scanned for its substitutions, since the shell runs them.
+    A body under a quoted delimiter is data and is not scanned.
     The same holds for a heredoc body inside a substitution's body.
     Text whose quoting does not close is scanned up to that point, since the shell runs none of it.
     """
     out = []
+    for body in _unquoted_heredoc_bodies(cmd):
+        _expansion_substitutions(body, out, quotes=False)
     readings = _heredoc_readings(cmd) or [cmd]
     for text in readings:
         i = 0
@@ -1988,6 +2274,8 @@ def _substitution_bodies(cmd):
     bodies = []
     for body in dict.fromkeys(out):
         bodies.extend(_heredoc_readings(body) or [body])
+        for heredoc in _unquoted_heredoc_bodies(body):
+            _expansion_substitutions(heredoc, bodies, quotes=False)
     return list(dict.fromkeys(bodies))
 
 
@@ -2001,26 +2289,31 @@ def _embedded_wrapper_commands(cmd, _depth=0, overflow=None):
     that goes unread. Such a body is appended to `overflow`, when given, so a caller can fail closed.
     A substitution body the tokenizer keeps inside one word, as in `"$(...)"`, is read the same way.
     `_substitution_bodies` says which bodies those are.
+    A shell `_FOREIGN_SHELL_FLAGS` names is read as a wrapper too, by the option that names its command string.
+    So is the command a config value or an environment variable has git run (see `_command_value_bodies`).
     """
     if _depth > _WRAPPER_NESTING_LIMIT:
         if overflow is not None and (
-            any(_is_shell_wrapper_exe(t) for t in _shell_tokens(cmd)) or _substitution_bodies(cmd)
+            any(_command_string_exe(t) for t in _shell_tokens(cmd))
+            or _substitution_bodies(cmd)
+            or _command_value_bodies(cmd)
         ):
             overflow.append(cmd)
         return []
     out = []
-    for inner in _substitution_bodies(cmd):
+    for inner in _substitution_bodies(cmd) + _command_value_bodies(cmd):
         out.append(inner)
         out.extend(_embedded_wrapper_commands(inner, _depth + 1, overflow))
     toks = _shell_tokens(cmd)
     n = len(toks)
     i = 0
     while i < n:
-        if _is_shell_wrapper_exe(toks[i]):
+        exe = _command_string_exe(toks[i])
+        if exe:
             args, k = _collect_arglist(toks, i + 1)
             # `-c` may be clustered with other short options (`bash -lc`, `sh -ec`), the command string still the next argv token.
             # A form left out here is a silent bypass of every rule below, the same shape a bare `-c` closes.
-            ci = _wrapper_c_index(args)
+            ci = _command_string_index(exe, args)
             bodies = [args[ci + 1]] if ci is not None and ci + 1 < len(args) else []
             bodies += [
                 toks[x + 1]
@@ -2514,6 +2807,14 @@ def _names_push(text):
     return bool(_GIT_PUSH.search(text) or _GIT_PUSH_UNQUOTED.search(_unquoted(text)))
 
 
+_GIT_COMMIT = re.compile(r"(?i:git)\b.*?\bcommit\b", re.DOTALL)
+
+
+def _names_commit(text):
+    """True when `text` spells a git commit as written, or once its quoting is removed, as `_names_push` reads a push."""
+    return bool(_GIT_COMMIT.search(text) or _GIT_COMMIT.search(_unquoted(text)))
+
+
 def _names_include(text, pattern=_GIT_INCLUDE):
     """True when `pattern` matches `text` as written, or once its quoting is removed."""
     return bool(pattern.search(text) or pattern.search(_unquoted(text)))
@@ -2594,6 +2895,21 @@ def _unreadable_push(cmd):
                             return (
                                 "wrapper shells or substitutions nested deeper than the guard reads"
                             )
+            code = _interpreter_code(t, _collect_arglist(toks, k + 1)[0])
+            if any(_names_push(a) for a in code):
+                return f"a push inside code `{t}` runs, which the guard does not read as a command"
+            exe = _command_string_exe(t)
+            if exe and _pipes_into(toks, k):
+                args, _ = _collect_arglist(toks, k + 1)
+                start = k
+                while start > 0 and not _ends_pipeline(toks[start - 1]):
+                    start -= 1
+                if _command_string_index(exe, args) is None and _names_push(
+                    " ".join(toks[start:k])
+                ):
+                    return (
+                        f"a push in text piped to `{t}`, which the guard does not read as a command"
+                    )
             if t in ("eval", "source", ".") or _is_shell_wrapper_exe(t):
                 args, _ = _collect_arglist(toks, k + 1)
                 if _is_shell_wrapper_exe(t):
@@ -2613,7 +2929,8 @@ def _unreadable_push(cmd):
                 continue
             j = _git_subcommand_index(toks, k)
             opts = toks[k + 1 : j]
-            values = _git_config_overrides(opts)
+            assignments = _env_assignments(toks)
+            values = _git_config_overrides(opts) + _env_config_values(assignments)
             if any(
                 _names_push(v)
                 or _INLINE_PUSH_ALIAS.match(v)
@@ -2621,7 +2938,7 @@ def _unreadable_push(cmd):
                 for v in values
             ):
                 return "a push inside a git `-c` config value"
-            config = bool(values)
+            config = bool(values) or _sets_env_config(assignments)
             if j >= n:
                 continue
             if toks[j] == "push" and config:
@@ -2649,6 +2966,213 @@ def _unreadable_push(cmd):
                     return f"a push run by `git {toks[j]}` under a `-c`/`--config-env` override"
                 if any(_names_push(a) for a in args):
                     return f"a push inside one quoted argument of `git {toks[j]}`"
+    return None
+
+
+_CODE_INTERPRETERS = {
+    "python": "c",
+    "pypy": "c",
+    "node": "ep",
+    "nodejs": "ep",
+    "bun": "ep",
+    "deno": "e",
+    "perl": "eE",
+    "ruby": "e",
+    "php": "r",
+    "lua": "e",
+    "luajit": "e",
+    "osascript": "e",
+    "rscript": "e",
+    "awk": "",
+    "gawk": "",
+    "mawk": "",
+    "nawk": "",
+}
+_CODE_LONG_OPTS = frozenset({"--eval", "--print"})
+
+
+def _interpreter_code(tok, args):
+    """The words of `args` an interpreter named by `tok` may run as code, or [] where `tok` names none.
+
+    That is the word after an option naming its code, the option word itself, which may hold the code attached, and a `deno eval` argument.
+    An `awk` program is its first argument, so every awk argument is read.
+    """
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    base = re.sub(r"[0-9.]+$", "", base)
+    letters = _CODE_INTERPRETERS.get(base)
+    if letters is None:
+        return []
+    if not letters:
+        return list(args)
+    out = []
+    for x, a in enumerate(args):
+        nxt = args[x + 1 : x + 2]
+        if a.startswith("-"):
+            out.append(a)
+            if a.split("=", 1)[0] in _CODE_LONG_OPTS or (
+                not a.startswith("--") and a[-1] in letters
+            ):
+                out.extend(nxt)
+        elif base == "deno" and a == "eval":
+            out.extend(nxt)
+    return out
+
+
+def _pipes_into(toks, k):
+    """True when the command at `toks[k]` reads a pipe, a `|` or `|&` sitting between it and its pipeline's start."""
+    for t in reversed(toks[:k]):
+        if t in ("|", "|&"):
+            return True
+        if _ends_pipeline(t):
+            return False
+    return False
+
+
+_COMMON_GIT_COMMANDS = frozenset(
+    {
+        "add",
+        "am",
+        "apply",
+        "bisect",
+        "blame",
+        "branch",
+        "cat-file",
+        "checkout",
+        "cherry-pick",
+        "clean",
+        "clone",
+        "commit",
+        "config",
+        "describe",
+        "diff",
+        "fetch",
+        "for-each-ref",
+        "format-patch",
+        "gc",
+        "grep",
+        "init",
+        "log",
+        "ls-files",
+        "ls-remote",
+        "merge",
+        "mv",
+        "notes",
+        "pull",
+        "push",
+        "rebase",
+        "reflog",
+        "remote",
+        "reset",
+        "restore",
+        "rev-list",
+        "rev-parse",
+        "revert",
+        "rm",
+        "show",
+        "stash",
+        "status",
+        "submodule",
+        "switch",
+        "symbolic-ref",
+        "tag",
+        "update-ref",
+        "worktree",
+    }
+)
+
+
+def _alias_runs_push(expansion):
+    """True when an alias expansion is a push, or a `!` shell alias whose text names one."""
+    if expansion.startswith("!"):
+        return _names_push(expansion[1:])
+    try:
+        words = shlex.split(expansion)
+    except ValueError:
+        return _names_push("git " + expansion)
+    return bool(words) and words[0] == "push"
+
+
+def _hidden_command(cmd, cwd=None, config_lookup=None):
+    """Name what a git command runs that the guard cannot read, or that runs a push through an alias, else None.
+
+    That is one of these:
+
+    - an `include.path`/`includeIf` override on any git command, by `-c`, `--config-env`, or the environment
+    - a `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` file other than `/dev/null`, in text holding a git word
+    - a `--config-env` value for a key `_is_command_config_key` names
+    - a `--config-env` alias for the subcommand it runs
+    - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
+    - an alias from the environment, or one persisted in the checkout's config, that runs a push
+
+    A persisted alias is read only for a subcommand git does not list, nor `_COMMON_GIT_COMMANDS` names.
+    `config_lookup` stands in for that read, as rule 6 takes it.
+    """
+    overflow = []
+    for text in [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]:
+        toks = _shell_tokens(text)
+        if not any(_is_git_exe(t) for t in toks):
+            continue
+        assignments = _env_assignments(toks)
+        env_values = _env_config_values(assignments)
+        for name, value in assignments:
+            if name in _CONFIG_FILE_ENV_VARS and value not in ("", "/dev/null"):
+                return f"a `{name}` config file the guard does not read"
+            if name in _COMMAND_ENV_VARS and not _command_value("", value)[1]:
+                return f"a `{name}` program the guard does not read"
+        n = len(toks)
+        for k, t in enumerate(toks):
+            if not _is_git_exe(t):
+                continue
+            j = _git_subcommand_index(toks, k)
+            sub = toks[j] if j < n and not _is_shell_op(toks[j]) else ""
+            sources = [
+                (v, "config-env" if from_env else "c")
+                for v, from_env in _config_override_sources(toks[k + 1 : j])
+            ] + [(v, "env") for v in env_values]
+            for value, source in sources:
+                key, _, setting = value.partition("=")
+                key = key.lower()
+                if _includes_config_file(value):
+                    return (
+                        "an `include.path`/`includeIf` override, whose file the guard does not read"
+                    )
+                if key.startswith("alias."):
+                    if not sub or key[len("alias.") :] != sub.lower():
+                        continue
+                    if source == "config-env":
+                        return f"a `--config-env` alias for `git {sub}`, whose expansion the guard does not read"
+                    if source == "env" and _alias_runs_push(setting):
+                        return f"a push run by `git {sub}` through an alias set in the environment"
+                elif _is_command_config_key(key):
+                    if source == "config-env":
+                        return f"a `--config-env` value for `{key}`, which git runs as a command"
+                    if not _command_value(key, setting)[1]:
+                        return f"a `{key}` value naming a program the guard does not read"
+    for c_dirs, work_tree, _git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
+        if (
+            sub.startswith("-")
+            or _is_shell_op(sub)
+            or sub in _COMMON_GIT_COMMANDS
+            or sub in inline
+            or sub in _git_command_names()
+        ):
+            continue
+        target = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
+        name, seen = sub, set()
+        while name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
+            seen.add(name)
+            expansion = _config_alias(target, name, config_lookup)
+            if expansion is None:
+                break
+            if _alias_runs_push(expansion):
+                return f"a push run by `git {sub}` through an alias the checkout's config defines"
+            try:
+                words = shlex.split(expansion)
+            except ValueError:
+                break
+            if expansion.startswith("!") or not words:
+                break
+            name = words[0]
     return None
 
 
@@ -3506,6 +4030,12 @@ def _check_bypass_flags(cmd):
     """
     overflow = []
     texts = [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
+    if any(_names_push(t) or _names_commit(t) for t in overflow):
+        return "deny", (
+            "This runs a git commit or push inside wrapper shells or substitutions nested deeper "
+            "than the guard reads, so it cannot tell whether a hook-bypass flag or override is "
+            "among its words. Run the commit or push with fewer levels of nesting." + _handoff(cmd)
+        )
     unread = [
         a
         for t in texts
@@ -5203,6 +5733,13 @@ def classify(
     dec, reason = _check_bypass_flags(cmd)
     if dec == "deny":
         return dec, reason
+    hidden = _hidden_command(cmd, cwd, config_lookup)
+    if hidden:
+        return "deny", (
+            f"This git command holds {hidden}, so the guard cannot tell what it runs. Failing "
+            "closed. Run the command without that override or variable, and run a push as git "
+            "push itself with an explicit refspec." + _handoff(cmd)
+        )
     # A word the shell rewrites before git reads it can hide a push target or a commit bypass, so it fails closed.
     rewritten = _rewritten_git_words(cmd)
     if rewritten:
@@ -6945,8 +7482,8 @@ _GIT_CASES = [
         "git -c include.path=/example/config status",
         None,
         {"develop": _CODE_RULES},
-        "allow",
-        "control: an alias cannot shadow a command git lists, so an include on status defines no push alias",
+        "deny",
+        "an include on status is denied, since its file may set a key git runs as a command",
     ),
     (
         "git -c include.path=/example/config commit -m x",
@@ -7078,8 +7615,8 @@ _GIT_CASES = [
         "git -c include.path=/example/config --exec-path=/example/libexec status",
         "feature/x",
         {"feature/x": set()},
-        "allow",
-        "control: a builtin runs before any alias, so an --exec-path cannot hand it to one",
+        "deny",
+        "an include on a builtin under an --exec-path is denied, as an include on any git command is",
     ),
     (
         "PATH=/example/bin git -c include.path=/example/config lfs",
@@ -7920,6 +8457,314 @@ _GIT_CASES = [
         {"feature/x": set(), "develop": _CODE_RULES},
         "allow",
         "control: an escaped backtick inside double quotes is text",
+    ),
+    (
+        "git -c core.fsmonitor=/example/script status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.fsmonitor value naming a script on any git command is denied, since the guard does not read it",
+    ),
+    (
+        "git -c core.pager=/example/script log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.pager value naming a script is denied",
+    ),
+    (
+        "git -c core.sshCommand=/example/script fetch",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.sshCommand value naming a script is denied",
+    ),
+    (
+        "git -c diff.example.textconv=/example/script diff",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a textconv value naming a script is denied",
+    ),
+    (
+        "git --config-env=core.pager=EXAMPLE_PAGER log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a --config-env value for a key git runs as a command is denied, since the guard does not read the variable",
+    ),
+    (
+        "git -c include.path=/example/config checkout feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an include override on checkout is denied, since its file may set a key git runs as a command",
+    ),
+    (
+        'git -c "core.pager=git commit --no-verify -m x" log',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a core.pager value is read as the command git runs, a hook-bypass commit in it included",
+    ),
+    (
+        "git -c core.pager=cat log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a core.pager value naming a program by name is read and allowed",
+    ),
+    (
+        "git -c core.fsmonitor=false status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a boolean core.fsmonitor value runs no command",
+    ),
+    (
+        "git -c credential.helper= fetch",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an empty credential.helper value runs no command",
+    ),
+    (
+        'git -c "core.sshCommand=ssh -i ~/.ssh/example" fetch',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a core.sshCommand program named by name may take a path argument",
+    ),
+    (
+        'x="$(cat <<EOF\n$(git commit --no-verify -m x)\nEOF\n)"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a substitution in an unquoted-delimiter heredoc inside a substitution is read as a command",
+    ),
+    (
+        "x=\"$(cat <<'EOF'\n$(git commit --no-verify -m x)\nEOF\n)\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a quoted-delimiter heredoc inside a substitution stays data",
+    ),
+    (
+        'x="$(cat <<EOF\n$(git push origin develop)\nEOF\n)"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in an unquoted-delimiter heredoc inside a substitution is read as a push",
+    ),
+    (
+        'echo "${X:-$(git push origin develop)}"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a substitution inside a double-quoted parameter expansion is read as a command",
+    ),
+    (
+        'echo "${X:-`git push origin develop`}"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a backtick substitution inside a double-quoted parameter expansion is read as a command",
+    ),
+    (
+        'echo "${X:-plain}"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a double-quoted parameter expansion holding no substitution runs nothing",
+    ),
+    (
+        "git commit -F - <<EOF\nmsg `git push origin develop`\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a backtick span in an unquoted-delimiter commit message body runs, so its push is read",
+    ),
+    (
+        "git commit -F - <<'EOF'\nmsg `git push origin develop`\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a backtick span in a quoted-delimiter commit message body is data",
+    ),
+    (
+        "git commit -F - <<EOF\nmsg $(date)\nEOF",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an unquoted-delimiter body's substitution is judged as the command it is",
+    ),
+    (
+        'pwsh -c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -c body is read as a command",
+    ),
+    (
+        'powershell -NoProfile -Command "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a powershell -Command body is read as a command",
+    ),
+    (
+        'fish -c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a fish -c body is read as a command",
+    ),
+    (
+        'script -qc "git push origin develop" /dev/null',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a script -c body is read as a command",
+    ),
+    (
+        'cmd /c "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a cmd /c body is read as a command",
+    ),
+    (
+        'pwsh -c "git push origin feature/x"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a pwsh -c push to a feature branch is judged by its target",
+    ),
+    (
+        "python3 -c \"import os; os.system('git push origin develop')\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in python -c code is denied, since the guard does not read Python",
+    ),
+    (
+        "node -e \"require('child_process').execSync('git push origin develop')\"",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in node -e code is denied",
+    ),
+    (
+        'python3 -c "print(1)"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: python -c code naming no push is allowed",
+    ),
+    (
+        'python3 example.py --note "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a push named in an interpreter argument that is not code is not read",
+    ),
+    (
+        'echo "git push origin develop" | bash',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push in text piped to a shell's stdin is denied",
+    ),
+    (
+        "printf '%s\\n' 'git push origin develop' | sh",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push printed into a shell's stdin is denied",
+    ),
+    (
+        'echo "git status" | bash',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: text piped to a shell naming no push is allowed",
+    ),
+    (
+        'GIT_EDITOR="git push origin develop" git commit',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value is read as the command git runs",
+    ),
+    (
+        'GIT_SEQUENCE_EDITOR="git push origin develop" git rebase -i HEAD~2',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_SEQUENCE_EDITOR value is read as the command git runs",
+    ),
+    (
+        "GIT_EDITOR=/example/script git commit",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value naming a script is denied",
+    ),
+    (
+        "GIT_EDITOR=true git commit",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_EDITOR naming a program by name is allowed",
+    ),
+    (
+        "GIT_SSH_COMMAND='ssh -o BatchMode=yes' git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_SSH_COMMAND naming ssh is read and allowed",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=refs/heads/feature/x:refs/heads/develop git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "config set through GIT_CONFIG_COUNT on a push is read as a config override",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an alias set through GIT_CONFIG_KEY that runs a push is denied",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=/example/script git log",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a command key set through GIT_CONFIG_KEY to a script is denied",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file is read as an include the guard does not read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/dev/null git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_CONFIG_GLOBAL of /dev/null holds no config",
+    ),
+    (
+        "git --config-env=alias.p=EXAMPLE p origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a --config-env alias for the subcommand it runs is denied",
     ),
 ]
 
@@ -10712,6 +11557,41 @@ def _nested_wrapper(body, depth):
 
 _PUSH_DIR_CASES = [
     (
+        "@wt " + _nested_wrapper("git commit --no-verify -m x", 6),
+        "deny",
+        "a --no-verify commit in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        "@wt " + _nested_wrapper("git commit -n -m x", 6),
+        "deny",
+        "a commit -n in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        "@wt " + _nested_wrapper("git -c core.hooksPath=/example/hooks commit -m x", 6),
+        "deny",
+        "a hooks-path commit in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        "@wt " + _nested_wrapper("git commit -m x", 6),
+        "deny",
+        "any commit in a wrapper body past the nesting cap fails closed, since its flags are not read",
+    ),
+    (
+        "@wt " + _nested_wrapper("git commit -m x", 2),
+        "allow",
+        "control: a commit in a wrapper body under the nesting cap is read and allowed",
+    ),
+    (
+        "@wt " + _nested_wrapper("git commit --no-verify -m x", 2),
+        "deny",
+        "a --no-verify commit in a wrapper body under the nesting cap is still read and denied",
+    ),
+    (
+        "@wt " + _nested_wrapper("echo example", 6),
+        "allow",
+        "control: a body past the nesting cap naming no commit or push is allowed",
+    ),
+    (
         "@wt " + _nested_wrapper("git -c include.path=/example/config p", 6),
         "deny",
         "an include key in a wrapper body past the nesting cap fails closed",
@@ -11717,6 +12597,61 @@ _PUSH_REPO_CASES = [
 ]
 
 
+_ALIAS_PUSH_CASES = [
+    (
+        "git p origin develop",
+        {"p": "push"},
+        "deny",
+        "a persisted alias expanding to push is denied",
+    ),
+    (
+        "git q origin develop",
+        {"q": "p", "p": "push"},
+        "deny",
+        "a persisted alias chain ending in push is denied",
+    ),
+    (
+        "git p",
+        {"p": "!git push origin develop"},
+        "deny",
+        "a persisted shell alias running a push is denied",
+    ),
+    (
+        "bash -c 'git p origin develop'",
+        {"p": "push"},
+        "deny",
+        "a persisted push alias inside a wrapper body is denied",
+    ),
+    (
+        "git st",
+        {"st": "status"},
+        "allow",
+        "control: a persisted alias expanding to status is allowed",
+    ),
+    ("git p origin develop", {}, "allow", "control: a subcommand no alias defines is allowed"),
+]
+
+
+def _alias_push_selftest(origin):
+    """Run `_ALIAS_PUSH_CASES` with the persisted alias read replaced by each case's table."""
+    ok = True
+    for cmd, aliases, want, label in _ALIAS_PUSH_CASES:
+        got, _ = classify(
+            cmd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: _CODE_RULES if br == "develop" else set(),
+            environ={},
+            primary_checkout_lookup=lambda d: False,
+            config_lookup=lambda _d, name, _a=aliases: _a.get(name),
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    return ok
+
+
 def _push_repo_selftest():
     """Run `_PUSH_REPO_CASES` with the live rule query replaced, in constructed repositories.
 
@@ -12255,6 +13190,8 @@ def _selftest():
     if not _push_config_selftest(origin):
         ok = False
     if not _push_repo_selftest():
+        ok = False
+    if not _alias_push_selftest(origin):
         ok = False
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1
