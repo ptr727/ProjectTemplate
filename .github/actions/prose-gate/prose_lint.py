@@ -2330,6 +2330,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     body and the comment line after it is not read as that line's continuation.
     """
     comments, kept, configured = prose_comment_candidates(path, raw, lines)
+    markdown = path.suffix.lower() == ".md"
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
@@ -2344,7 +2345,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
         # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
         # A comment that does punctuate a sentence is prose and is judged as prose.
-        if path.suffix == ".md" and not SENT_END.search(body):
+        if markdown and not SENT_END.search(body):
             prev_body = ""
             continue
         body = ENUM_PREFIX.sub("", body)
@@ -3069,11 +3070,12 @@ def check_file(
     if raw != decoded and {"charset", "charset-unknown"} & rules:
         out.extend(f for f in charset_findings(1, "\ufeff") if f[1] in rules)
     lines = raw.split("\n")
+    markdown = path.suffix.lower() == ".md"
     # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
     # The file's own directory anchors a relative link, the repository root anchors the rest.
     # No git means no deletion history to key on, so the rule stands down rather than guess.
     dead_root: Path | None = None
-    if "dead-path" in rules and path.suffix == ".md":
+    if "dead-path" in rules and markdown:
         found = str(root) if root else repo_root(path)
         if found:
             dead_root = Path(found)
@@ -3094,13 +3096,13 @@ def check_file(
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
-    if {"spelling", "dupword"} & rules and path.suffix != ".md":
+    if {"spelling", "dupword"} & rules and not markdown:
         for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     if "sentence-length" in rules:
-        if path.suffix == ".md":
+        if markdown:
             out.extend(sentence_length_findings(lines, allowed))
-        elif path.suffix.lower() != ".md":
+        else:
             out.extend(comment_sentence_findings(path, raw, lines, allowed))
             if path.suffix.lower() == ".py":
                 out.extend(docstring_sentence_findings(raw, lines, allowed))
@@ -3127,11 +3129,11 @@ def check_file(
             out.extend(dead_path_findings(dead_root, path.resolve().parent, i, line))
 
         txt = strip_inline_code(line)
-        prose = strip_quoted(txt) if path.suffix == ".md" else txt
+        prose = strip_quoted(txt) if markdown else txt
 
         # Both prose rules are Markdown-only until a comment can be told from code.
         # A shell script carries 78 statement separators that are not prose at all.
-        if path.suffix == ".md":
+        if markdown:
             unquoted = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
             if "semicolon" in rules:
                 for span in list_spans(unquoted):
@@ -3165,11 +3167,7 @@ def check_file(
         if "dupword" in rules:
             # Each comment on the line is judged on its own rather than joined with its neighbors.
             # Joining them would read the second's opening word as a repeat of the first's last.
-            texts = (
-                [prose]
-                if path.suffix == ".md"
-                else [strip_inline_code(c) for c in comments.get(i, [])]
-            )
+            texts = [prose] if markdown else [strip_inline_code(c) for c in comments.get(i, [])]
             for text in texts:
                 for m in DUPWORD.finditer(text):
                     if m.group(0).lower() in DUP_ALLOW:
@@ -3177,12 +3175,12 @@ def check_file(
                     out.append((i, "dupword", f"duplicated word '{m.group(1)}'"))
 
         if "spelling" in rules:
-            texts = [prose] if path.suffix == ".md" else comments.get(i, [])
+            texts = [prose] if markdown else comments.get(i, [])
             for m in BRITISH_RE.finditer(strip_inline_code(" ".join(texts))):
                 found = m.group(0)
                 out.append((i, "spelling", f"British spelling '{found}' -> '{us_form(found)}'"))
 
-        if "sentence-split" in rules and path.suffix == ".md":
+        if "sentence-split" in rules and markdown:
             stripped = txt.strip()
             is_prose = (
                 stripped
