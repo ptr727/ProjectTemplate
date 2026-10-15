@@ -1297,6 +1297,8 @@ _PRECOMMAND_VALUE_OPTS = {
             "-t",
             "-R",
             "-T",
+            "-a",
+            "-c",
             "--user",
             "--group",
             "--chdir",
@@ -1308,6 +1310,8 @@ _PRECOMMAND_VALUE_OPTS = {
             "--close-from",
             "--command-timeout",
             "--chroot",
+            "--auth-type",
+            "--login-class",
         }
     ),
     "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
@@ -1329,7 +1333,6 @@ _PRECOMMAND_VALUE_OPTS = {
             "--delimiter",
             "--arg-file",
             "--max-args",
-            "--max-lines",
             "--max-procs",
             "--max-chars",
         }
@@ -13540,6 +13543,20 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a pwsh -c body after xargs --eof is read as a command",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config xargs --max-lines git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before xargs --max-lines, whose value is attached, is still read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config sudo -a example git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before a sudo with an auth-type option is still read",
     ),
 ]
 
