@@ -5240,6 +5240,18 @@ class TestTableFindings(GqlCase):
         out = pr_review.digest("o", "r", 7)[0]
         self.assertIn("account for 2", out)
 
+    def test_a_back_reference_an_open_entry_links_is_not_counted_again(self) -> None:
+        """An earlier thread linked beside an entry's own is already in the listed entries."""
+        body = with_table_findings(TABLE_LISTED, "Three unresolved findings remain.")
+        own = "(#discussion_r4000000002) New"
+        self.assertIn(own, body)
+        body = body.replace(own, f"{own}, same cause as [earlier](#discussion_r4000000009)")
+        old, threads = earlier_round("4000000009", resolved=False)
+        out = self.digest(body, [old], threads)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn("its headline states 3 findings where", out)
+        self.assertIn("account for 2", out)
+
     def test_a_clean_round_summing_up_its_resolved_findings_reports_nothing(self) -> None:
         body = overview_v2_revised().replace(
             "One reader still needs a look.", "All three earlier findings are resolved."

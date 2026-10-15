@@ -2591,6 +2591,15 @@ def open_entry_ids(pr: dict) -> set[str]:
     return {entry[0] for role, _, ids, _ in sections if role != RESOLVED for entry in ids}
 
 
+def open_linked_ids(pr: dict) -> set[str]:
+    """Every thread id the head round's open entries link, back-references included."""
+    newest = second_format_head(pr)
+    if newest is None:
+        return set()
+    sections = read_overview(newest.get("body") or "")[2]
+    return {i for role, _, ids, _ in sections if role != RESOLVED for entry in ids for i in entry}
+
+
 TABLE_VOTES = re.compile(r"\(\d+ votes?\b[^()]*\)")
 NUMBER_WORDS = {
     word: n
@@ -2755,7 +2764,7 @@ def headline_shortfall(pr: dict) -> tuple[int, int]:
     )
     withheld = suppressed_blocks(body) + previously_missed_blocks(body)
     accounted = max(listed, stated_total(body) or 0) + sum(map(finding_count, withheld))
-    return stated, accounted + len(earlier_round_threads(pr, newest) - open_entry_ids(pr))
+    return stated, accounted + len(earlier_round_threads(pr, newest) - open_linked_ids(pr))
 
 
 PROSE_FINDINGS = re.compile(
