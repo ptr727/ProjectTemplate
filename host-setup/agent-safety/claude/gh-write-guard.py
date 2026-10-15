@@ -7863,6 +7863,8 @@ _GIT_CASES = [
     ("git commit -m x -- -an", None, {}, "allow", "control: a word after -- is a pathspec"),
     ("git commit -m -an", None, {}, "allow", "control: a word after -m is the message"),
     ("git commit -Sn -m x", None, {}, "allow", "control: the n in -Sn is a key id"),
+    ("git commit -S -an", None, {}, "deny", "-S takes no next word, so the -an after it is read"),
+    ("git commit -u -an", None, {}, "deny", "-u takes no next word, so the -an after it is read"),
     ("git commit -uno -m x", None, {}, "allow", "control: the no in -uno is a mode"),
     (
         "git push --force --no-force origin develop",
@@ -7891,6 +7893,13 @@ _GIT_CASES = [
         {"develop": _CONFIG_RULES},
         "deny",
         "--no-force leaves a --force-with-lease in place",
+    ),
+    (
+        "git push --force-wi --no-force origin develop",
+        None,
+        {"develop": _CONFIG_RULES},
+        "deny",
+        "--no-force leaves a --force-with-lease cut short in place",
     ),
     (
         "git push --force --no-forc origin develop",

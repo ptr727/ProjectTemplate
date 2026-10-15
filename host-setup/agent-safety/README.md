@@ -64,7 +64,7 @@ text says, because the harm it covers was never in the text.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A push's force, delete, all, mirror, and prune options are read as
    git reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
-   `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. Of an option and its `--no-` form, such as `--force` and `--no-force`, the later one wins. `--no-force` leaves a `--force-with-lease` in place, as git does. A refspec pattern
+   `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. Of `--force`, `--delete`, `--all`, `--mirror`, `--tags`, or `--prune` and its `--no-` form, the later one wins. `--no-force` leaves a `--force-with-lease` in place, as git does. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
    every branch protected by default. Beside such a pattern, a lone `:`
    refspec, `--all`, or a bare push, a `--prune` is read as deleting every branch protected by
