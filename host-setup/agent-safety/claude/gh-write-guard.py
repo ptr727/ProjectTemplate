@@ -341,8 +341,9 @@ def _configured_push_branches(cwd):
 
     `current` and `simple` write the branch's own name. Git refuses a `simple` push to the upstream
     remote when the upstream's name differs, and to any other remote it writes the own name.
-    `upstream` and `tracking` write each `branch.<name>.merge` branch. A `push.default` that cannot
-    be read, or holds a value not listed here, is read as both. `nothing` writes none, and
+    `upstream` and `tracking` write each `branch.<name>.merge` branch. An unset `push.default` is
+    read as `simple`. One that holds a value not listed here, or whose read exits with another
+    error, is read as both. `nothing` writes none, and
     `matching` is left to the `@{push}` read. A detached `HEAD` is no branch, so it writes none,
     and neither does a directory git cannot read as a checkout. A read that times out or cannot
     run is `_UNRESOLVED`.
@@ -356,6 +357,8 @@ def _configured_push_branches(cwd):
         return _UNRESOLVED
     name = ref[len("refs/heads/") :]
     code, mode = _git_read(cwd, ["config", "--get", "push.default"])
+    if code is None:
+        return _UNRESOLVED
     mode = mode.lower() if code == 0 else "simple" if code == 1 else None
     if mode in ("nothing", "matching"):
         return []
@@ -12149,6 +12152,7 @@ def _push_read_failure_selftest(origin):
         for marker, label in (
             ("@{push}", "a timed-out @{push} read is unresolved, not a cue to read HEAD"),
             ("symbolic-ref", "a timed-out branch config read is unresolved"),
+            ("push.default", "a timed-out push.default read is unresolved, not read as both"),
         ):
 
             def timed_out(argv, *args, _m=marker, **kwargs):
