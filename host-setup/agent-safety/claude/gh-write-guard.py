@@ -3307,6 +3307,7 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
     - a `--config-env` alias for the subcommand it runs
     - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
     - an alias from the environment, or one persisted in the checkout's config, that runs a push
+    - a `!` shell alias such a chain reaches (see `_alias_chain_hides_push`)
     - a setting `_wrapper_env_reason` names, on a shell whose command string runs git (see `_runs_git`)
     - a git command past the wrapper reading cap that `_may_run_alias` says may run an alias
 
@@ -3385,13 +3386,19 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
         tables = [inline, {**env_aliases, **inline}] if env_aliases else [inline]
         for target, explicit in targets:
             for aliases in tables:
-                if _alias_chain_runs_push(sub, aliases, target, config_lookup, explicit):
+                hidden = _alias_chain_hides_push(sub, aliases, target, config_lookup, explicit)
+                if hidden == "shell":
+                    return f"a `!` shell alias `git {sub}` reaches, whose shell text the guard does not read"
+                if hidden:
                     return f"a push run by `git {sub}` through an alias"
     return None
 
 
-def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
-    """True when `sub` runs a push through a chain of aliases, read from `aliases` first, then the config in `target`.
+def _alias_chain_hides_push(sub, aliases, target, config_lookup, git_dir):
+    """Name what hides a push in `sub`'s chain of aliases, read from `aliases` first, then the config in `target`, else None.
+
+    That is "push" for an alias expanding to a push.
+    It is "shell" for a `!` shell alias anywhere in the chain, which may run any git command, the alias's appended arguments among them.
 
     `git_dir` says `target` is an explicit `--git-dir`/`GIT_DIR` value (see `_config_alias`).
     A name is matched without case, as git matches an alias name.
@@ -3416,16 +3423,18 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
                     found = _config_alias(target, name, config_lookup, git_dir)
                 expansions = [] if found is None else [found]
             for expansion in dict.fromkeys(expansions):
+                if expansion.startswith("!"):
+                    return "shell"
                 if _alias_runs_push(expansion):
-                    return True
+                    return "push"
                 try:
                     words = shlex.split(expansion)
                 except ValueError:
                     continue
-                if words and not expansion.startswith("!"):
+                if words:
                     following.append(words[0])
         level = following
-    return False
+    return None
 
 
 def _may_run_alias(text):
@@ -6089,10 +6098,15 @@ def classify(
         return dec, reason
     hidden = _hidden_command(cmd, cwd, config_lookup)
     if hidden:
+        advice = (
+            "Run the command the alias expands to as its own command"
+            if hidden.startswith("a `!` shell alias")
+            else "Run the command without that override or variable"
+        )
         return "deny", (
             f"This git command holds {hidden}, so the guard cannot tell what it runs. Failing "
-            "closed. Run the command without that override or variable, and run a push as git "
-            "push itself with an explicit refspec." + _handoff(cmd)
+            f"closed. {advice}, and run a push as git push itself with an explicit refspec."
+            + _handoff(cmd)
         )
     # A word the shell rewrites before git reads it can hide a push target or a commit bypass, so it fails closed.
     rewritten = _rewritten_git_words(cmd)
@@ -13913,6 +13927,30 @@ _ALIAS_PUSH_CASES = [
         {"p": "!git push origin develop"},
         "deny",
         "a persisted shell alias running a push is denied",
+    ),
+    (
+        "git q origin develop",
+        {"q": "!git p", "p": "push"},
+        "deny",
+        "a persisted shell alias running a persisted push alias is denied",
+    ),
+    (
+        "git x git p origin develop",
+        {"x": "!env", "p": "push"},
+        "deny",
+        "a persisted shell alias whose command runs its appended arguments is denied",
+    ),
+    (
+        "git q",
+        {"q": "!git st", "st": "status"},
+        "deny",
+        "a persisted shell alias is denied whatever it runs, since its shell text is not read",
+    ),
+    (
+        "git q",
+        {"q": "p", "p": "!git st", "st": "status"},
+        "deny",
+        "a persisted shell alias deeper in a chain is denied, whatever it runs",
     ),
     (
         "bash -c 'git p origin develop'",
