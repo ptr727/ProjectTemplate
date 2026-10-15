@@ -1262,35 +1262,56 @@ def _config_override_sources(global_opts):
     return out
 
 
-def _env_assignments(toks):
+def _env_assignments(toks, k=None):
     """The `NAME=value` words in `toks` that reach a git command, as (name, value).
 
-    That is the run of them before a git word, read back past a precommand such as `env`, `sudo`, or `timeout` and its options.
-    It is also each argument of an `export`, which persists to the commands after it.
+    That is each argument of an `export`, which persists to the commands after it.
+    It is also the prefix of the git word at index `k`, or of every git word where `k` is None (see `_git_word_assignments`).
     """
     out = []
-    for k, t in enumerate(toks):
-        if _is_git_exe(t):
-            j = k - 1
-            while j >= 0 and not _is_separator(toks[j]):
-                m = _ENV_ASSIGN_RE.match(toks[j])
-                if m:
-                    out.append(m.groups())
-                elif not (
-                    _is_command_prefix(toks[j])
-                    or _is_timeout_exe(toks[j])
-                    or toks[j].startswith("-")
-                    or re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", toks[j])
-                ):
-                    break
-                j -= 1
-        elif t == "export" and _opens_command(toks, k):
-            for word in toks[k + 1 :]:
+    for x, t in enumerate(toks):
+        if _is_git_exe(t) and k in (None, x):
+            out.extend(_git_word_assignments(toks, x))
+        elif t == "export" and _opens_command(toks, x):
+            for word in toks[x + 1 :]:
                 m = _ENV_ASSIGN_RE.match(word)
                 if not (m or word.startswith("-")):
                     break
                 if m:
                     out.append(m.groups())
+    return out
+
+
+def _is_precommand(tok):
+    """True if the word runs the command after it, such as `env`, `sudo`, `timeout`, or `xargs`."""
+    base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+    return _is_command_prefix(tok) or _is_timeout_exe(tok) or base == "xargs"
+
+
+def _git_word_assignments(toks, k):
+    """The assignments in the prefix of the simple command that runs the git word at `toks[k]`.
+
+    The command is read forward from its start.
+    An assignment is collected.
+    A precommand is passed with every word up to the next assignment or precommand, its options and their values among them.
+    Any other word means the git word is an argument rather than the command, so nothing is collected.
+    """
+    start = k
+    while start > 0 and not _is_separator(toks[start - 1]):
+        start -= 1
+    out = []
+    i = start
+    while i < k:
+        m = _ENV_ASSIGN_RE.match(toks[i])
+        if m:
+            out.append(m.groups())
+            i += 1
+        elif _is_precommand(toks[i]):
+            i += 1
+            while i < k and not (_ENV_ASSIGN_RE.match(toks[i]) or _is_precommand(toks[i])):
+                i += 1
+        else:
+            return []
     return out
 
 
@@ -3005,7 +3026,7 @@ def _unreadable_push(cmd):
                 for v in values
             ):
                 return "a push inside a git `-c` config value"
-            config = bool(values) or _sets_env_config(_env_assignments(toks))
+            config = bool(values) or _sets_env_config(_env_assignments(toks, k))
             if j >= n:
                 continue
             if toks[j] == "push" and config:
@@ -13331,6 +13352,41 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "an empty GIT_CONFIG_GLOBAL is read as a file the guard does not read",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=refs/heads/feature/x:refs/heads/develop timeout -s KILL 60 git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "config set through GIT_CONFIG_COUNT before a timeout with a signal option is still read",
+    ),
+    (
+        'GIT_EDITOR="git push origin develop" sudo -E -u root git commit',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR value before a sudo with a user option is still read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config xargs git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before xargs running git is still read",
+    ),
+    (
+        "echo GIT_CONFIG_GLOBAL=/example/x -n git",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an assignment-shaped argument of echo is not git's environment",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/example/wt git status && git push origin feature/x",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: config set on an earlier git command does not reach a later push",
     ),
 ]
 
