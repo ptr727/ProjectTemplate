@@ -139,7 +139,8 @@ adding `--python-version` with the environment's version unless the mypy config 
 runs as `.venv/bin/python -m pyright --pythonpath .venv/bin/python` where the environment installs
 it, and otherwise as `uvx pyright@latest --pythonpath .venv/bin/python`. ruff follows the same
 precedence, as `.venv/bin/python -m ruff` where the environment installs it, in place of the
-`uvx ruff@latest` above. A tool the requirements pin is then the version CI runs. Where the config
+`uvx ruff@latest` above. In a directory the validator's `python-directories` input declares, a tool
+the requirements pin is then the version CI runs. Where the config
 sits in the project directory, CI runs the checker there with no path, as in the uv form. A
 declared subdirectory with no config of its own uses the repository root's instead. CI then runs
 the checker from the root with the directory as its path and the interpreter as `<dir>/.venv/bin/python`. Run it the same

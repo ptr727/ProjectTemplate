@@ -7,7 +7,7 @@
 # The type checker and ruff hooks run via uvx, native tooling, no Docker.
 # That needs no project dependency, matching CI's own invocation for the lint-only profile.
 # A repo on the build profile with a uv.lock may swap an entry for `uv run <tool>` to pin its own project version instead.
-# A pip-form repo whose requirements install a tool may swap its entry for `.venv/bin/python -m <tool>`, matching CI.
+# A pip-form directory declared in the validator's `python-directories` input may swap an entry for `.venv/bin/python -m <tool>` where its requirements install that tool, matching CI.
 # Run that way, pyright also takes `--pythonpath .venv/bin/python`.
 # On Windows each of those interpreter paths is `.venv\Scripts\python.exe` instead.
 # The prose/EOL hooks fetch their scripts fresh from ptr727/ProjectTemplate's `main` branch via hub-fetch-run.py, rather than vendoring or pinning a copy.

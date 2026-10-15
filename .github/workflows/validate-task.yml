@@ -337,7 +337,7 @@ jobs:
             fi
           done <<< "$PYTHON_PROJECTS"
 
-      # A declared pip directory runs the ruff its venv installs, the version its requirements pin.
+      # A declared pip directory runs the ruff its venv installs, so a version its requirements pin is the one CI runs.
       # It falls back to uvx only where the venv holds none.
       - name: Lint Python step
         if: steps.python.outputs.any == 'true'
