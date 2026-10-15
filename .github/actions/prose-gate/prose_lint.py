@@ -852,13 +852,18 @@ INSTRUCTION_DOCS = frozenset(
 )
 
 
+def is_markdown(path: Path) -> bool:
+    """Whether the file is Markdown, its suffix read in any case as `syntax_for` reads it."""
+    return path.suffix.lower() == ".md"
+
+
 def is_instruction_text(path: Path, root: Path | None) -> bool:
     """Whether this Markdown file is instruction text rather than the repository's own narrative.
 
     A skill is matched by its root rather than by its name, since the source tree and each
     generated distribution carry the same file under a root of its own.
     """
-    if path.suffix.lower() != ".md":
+    if not is_markdown(path):
         return False
     key = repo_key(path, root) if root is not None else rel(path)
     if key in INSTRUCTION_DOCS or key.startswith(SKILL_ROOTS):
@@ -2330,7 +2335,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     body and the comment line after it is not read as that line's continuation.
     """
     comments, kept, configured = prose_comment_candidates(path, raw, lines)
-    markdown = path.suffix.lower() == ".md"
+    markdown = is_markdown(path)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
@@ -2488,7 +2493,7 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     label is the remedy, since a directive whose written reason is punctuated as a sentence reads
     as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
     """
-    if path.suffix.lower() == ".md" or syntax_for(path) is None:
+    if is_markdown(path) or syntax_for(path) is None:
         return []
     spec = POWERSHELL_DOC if path.suffix.lower() in {".ps1", ".psm1"} else None
     bodies = comment_bodies(path, raw, spec)
@@ -2650,7 +2655,7 @@ def issue_ref_findings(
     out: list[tuple[int, str, str]] = []
     spans: dict[int, list[str]] = {}
     links: dict[int, list[str]] = {}
-    if path.suffix.lower() == ".md":
+    if is_markdown(path):
         if not is_instruction_text(path, root):
             return out
         fenced = fenced_lines(lines)
@@ -3070,7 +3075,7 @@ def check_file(
     if raw != decoded and {"charset", "charset-unknown"} & rules:
         out.extend(f for f in charset_findings(1, "\ufeff") if f[1] in rules)
     lines = raw.split("\n")
-    markdown = path.suffix.lower() == ".md"
+    markdown = is_markdown(path)
     # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
     # The file's own directory anchors a relative link, the repository root anchors the rest.
     # No git means no deletion history to key on, so the rule stands down rather than guess.
