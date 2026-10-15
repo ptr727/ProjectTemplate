@@ -1282,6 +1282,19 @@ def _env_assignments(toks, k=None):
     return out
 
 
+_DURATION_WORD = re.compile(r"\d+(?:\.\d+)?[smhd]?")
+_PRECOMMAND_VALUE_OPTS = {
+    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t", "-R", "-T"}),
+    "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
+    "gtimeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
+    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "ionice": frozenset({"-c", "-n", "-p"}),
+    "stdbuf": frozenset({"-i", "-o", "-e"}),
+    "xargs": frozenset({"-n", "-L", "-P", "-d", "-E", "-I", "-a", "-s"}),
+}
+
+
 def _is_precommand(tok):
     """True if the word runs the command after it, such as `env`, `sudo`, `timeout`, or `xargs`."""
     base = tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
@@ -1298,9 +1311,9 @@ def _command_prefix(toks, k):
     """(whether the word at `toks[k]` may be its simple command's command, the assignments before it).
 
     The command is read forward from its start.
-    An assignment is collected.
-    A precommand is passed with every word up to the next assignment or precommand, its options and their values among them.
-    Any other word means the word at `k` is an argument rather than the command.
+    An assignment is collected, and a redirection is passed with its target.
+    A precommand is passed with its options, their values, and a duration.
+    The first other word is the command, so the word at `k` is the command only where it is that word.
     """
     start = k
     while start > 0 and not _is_separator(toks[start - 1]):
@@ -1312,13 +1325,19 @@ def _command_prefix(toks, k):
         if m:
             out.append(m.groups())
             i += 1
+        elif _is_redir_op(toks[i]):
+            i += 2
+        elif toks[i].isdigit() and i + 1 < len(toks) and _is_redir_op(toks[i + 1]):
+            i += 3
         elif _is_precommand(toks[i]):
+            base = toks[i].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
+            takes = _PRECOMMAND_VALUE_OPTS.get(base, frozenset())
             i += 1
-            while i < k and not (_ENV_ASSIGN_RE.match(toks[i]) or _is_precommand(toks[i])):
-                i += 1
+            while i < k and (toks[i].startswith("-") or _DURATION_WORD.fullmatch(toks[i])):
+                i += 2 if toks[i] in takes else 1
         else:
             return False, []
-    return True, out
+    return i == k, out if i == k else []
 
 
 def _command_readings(text):
@@ -13412,6 +13431,34 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "allow",
         "control: an assignment-shaped echo argument before a git word and its subcommand is not read",
+    ),
+    (
+        "> /example/out.txt GIT_CONFIG_GLOBAL=/example/c git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an assignment after a leading redirection still reaches git",
+    ),
+    (
+        "GIT_EDITOR=/example/x 2>/dev/null git commit",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an assignment before a numbered redirection still reaches git",
+    ),
+    (
+        'timeout 60 grep -rn powershell "git push origin develop"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a shell name grep searches for behind a timeout is not a shell",
+    ),
+    (
+        "timeout 60 rg -n GIT_CONFIG_GLOBAL=/example/x git",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an assignment-shaped rg argument behind a timeout is not git's environment",
     ),
 ]
 
