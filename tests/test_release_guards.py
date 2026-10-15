@@ -1420,7 +1420,7 @@ gh() {
                 ),
                 "lint-only floats": (
                     "lint-only",
-                    {"pyproject.toml": ""},
+                    pip_tree,
                     True,
                     venv_ruff,
                     f"uvx ruff@latest {args}\n",

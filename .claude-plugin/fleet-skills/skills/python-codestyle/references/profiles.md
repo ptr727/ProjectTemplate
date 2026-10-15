@@ -41,12 +41,12 @@ configuration alone marks the lint-only one:
   `[project.optional-dependencies]` extra. The pip form is a `pyproject.toml` beside a
   `requirements*.txt`, installed with pip, whether or not it carries a `[project]` table. A
   committed `uv.lock` makes a directory the uv form even where a `requirements*.txt` sits beside it.
-  In the pip form CI builds the environment as `SKILL.md` "Local development loop" shows, runs
-  pytest from it as `.venv/bin/python -m pytest`, and runs ruff through `uvx`. In a directory
-  declared in the hub validator's `python-directories` input it runs the type checker through
-  `uvx` pointed at that environment, or runs mypy from the environment where it is installed
-  there, while the undeclared default root runs a bare `uvx <checker>@latest` with nothing
-  installed.
+  In the pip form CI builds the environment as `SKILL.md` "Local development loop" shows, and runs
+  pytest from it as `.venv/bin/python -m pytest`. A directory declared in the hub validator's
+  `python-directories` input runs ruff and the type checker from that environment where it
+  installs them. It otherwise runs them through `uvx`, with the checker pointed at that
+  environment. The undeclared default root runs `uvx ruff@latest` and a bare
+  `uvx <checker>@latest`, with nothing installed.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
   (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and

@@ -65,8 +65,8 @@ and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyrigh
 `strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
 standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
 editor and the CLI/CI run the same engine and never disagree. The CLI/CI form is `uv run pyright`
-in the uv form. In the pip form it is the environment's own pyright, or `uvx pyright@latest` where
-the environment installs none, pointed at the environment in a declared directory.
+in the uv form. In the pip form a declared directory runs the environment's own pyright, or
+`uvx pyright@latest` pointed at the environment where it installs none.
 The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
 when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
