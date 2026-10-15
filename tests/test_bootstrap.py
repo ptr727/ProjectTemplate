@@ -1426,11 +1426,12 @@ UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
     "runs the Linux loader's whole main flow, which needs flock and tar",
 )
 class TestKeptTreeEndToEnd(unittest.TestCase):
-    """`bootstrap.sh --host` run whole, with a stub curl serving a local tarball and stub tools failing at a chosen step.
+    """`bootstrap.sh` run whole, with a stub curl serving a local tarball and stub tools failing at a chosen step.
 
-    The tree the plugin loads is asserted from disk afterwards, so this holds the loader's own
-    ordering to the property rather than restating it: a failed stand-up leaves the previous tree
-    loading, and a successful one leaves only the new tree.
+    A `--host` case asserts the tree the plugin loads from disk afterwards. That holds the loader's
+    own ordering to the property rather than restating it. A failed stand-up leaves the previous
+    tree loading, and a successful one leaves only the new tree. An `--upgrade` case keeps no tree,
+    so it asserts the steps the stub tools record instead.
     """
 
     def setUp(self) -> None:
@@ -1633,9 +1634,9 @@ POWERSHELL_UPGRADE_STEPS = ("upgrade-host.ps1 -Packages", "install-agents.ps1 -U
 class TestPowerShellToolHandoff(unittest.TestCase):
     """`bootstrap.ps1`'s upgrade and report handoffs, run through its own functions against stub tools.
 
-    Each stub records the step it was run as, so the order and the set of steps are asserted from
-    what ran rather than from the loader's text. Elevation is stood in for through `Test-Elevated`
-    on every run, so a case reads the same on an elevated Windows runner as on a user's session.
+    Each stub records the step it was run as. The steps are asserted from what ran rather than from
+    the loader's text. Every run stands in for elevation through `Test-Elevated`. A case then reads
+    the same on an elevated Windows runner as in a user's session.
     """
 
     def setUp(self) -> None:
@@ -1699,6 +1700,12 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS), result.stdout)
         self.assertIn("The agent tools step did not report", result.stdout)
+
+    def test_an_elevated_report_skips_the_agent_tools_and_says_so(self) -> None:
+        result = self.run_handoff("Show-Report", elevated=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS[:-1]), result.stdout)
+        self.assertIn("Running elevated, so no user's coding-agent tools are read", result.stdout)
 
     def test_a_report_whose_agent_tools_step_reports_names_no_failure(self) -> None:
         result = self.run_handoff("Show-Report")
