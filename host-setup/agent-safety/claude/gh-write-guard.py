@@ -3397,6 +3397,7 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
     A name is matched without case, as git matches an alias name.
     A name `aliases` gives several values is followed through each, since the guard cannot tell which one git reads.
     Names are read breadth first, each once, so a name many paths reach costs one read rather than one per path.
+    A `!` shell alias is followed into the subcommand of each git command its text runs, which may be another alias.
     """
     table = {}
     for key, values in aliases.items():
@@ -3418,11 +3419,14 @@ def _alias_chain_runs_push(sub, aliases, target, config_lookup, git_dir):
             for expansion in dict.fromkeys(expansions):
                 if _alias_runs_push(expansion):
                     return True
+                if expansion.startswith("!"):
+                    following.extend(inv[4] for inv in _all_git_invocations(expansion[1:]))
+                    continue
                 try:
                     words = shlex.split(expansion)
                 except ValueError:
                     continue
-                if words and not expansion.startswith("!"):
+                if words:
                     following.append(words[0])
         level = following
     return False
@@ -13962,6 +13966,24 @@ _ALIAS_PUSH_CASES = [
         {"p": "push"},
         "deny",
         "an environment alias is matched without case, as git matches it",
+    ),
+    (
+        "git q origin develop",
+        {"q": "!git p", "p": "push"},
+        "deny",
+        "a persisted shell alias running a persisted push alias is denied",
+    ),
+    (
+        "git q",
+        {"q": "!sh -c 'git p origin develop'", "p": "push"},
+        "deny",
+        "a persisted shell alias whose wrapper runs a persisted push alias is denied",
+    ),
+    (
+        "git q",
+        {"q": "!git st", "st": "status"},
+        "allow",
+        "control: a persisted shell alias running a persisted status alias is allowed",
     ),
     (
         "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=st GIT_CONFIG_KEY_1=alias.q GIT_CONFIG_VALUE_1=p git q origin develop",
