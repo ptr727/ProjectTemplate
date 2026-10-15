@@ -1452,7 +1452,8 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     A `--host` case asserts the tree the plugin loads from disk afterwards. That holds the loader's
     own ordering to the property rather than restating it. A failed stand-up leaves the previous
     tree loading, and a successful one leaves only the new tree. An `--upgrade` case keeps no tree,
-    so it asserts the steps the stub tools record instead.
+    so it asserts the steps the stub tools record instead. A `--report` or `--agents` case keeps no
+    tree either, and asserts the steps the same way.
     """
 
     def setUp(self) -> None:
@@ -1663,7 +1664,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertNotIn("did not report", result.stdout)
 
     def agents_steps(self) -> list[str]:
-        return [step for step, _, _ in self.steps() if step.startswith("install-agents.sh")]
+        return [step for step, _, _ in self.steps()]
 
     def test_agents_hands_a_comma_list_off_as_an_install_of_those_names(self) -> None:
         result = self.run_main(action="--agents", args=("herdr,cswap",))
@@ -1680,12 +1681,14 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--agents takes the tools to install", result.stderr)
         self.assertEqual(self.steps(), [])
+        self.assertEqual(list(self.data.iterdir()), [])
 
     def test_agents_with_no_list_is_refused_before_anything_runs(self) -> None:
         result = self.run_main(action="--agents")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--agents takes the tools to install", result.stderr)
         self.assertEqual(self.steps(), [])
+        self.assertEqual(list(self.data.iterdir()), [])
 
 
 STUB_POWERSHELL_TOOL = """\
@@ -1718,7 +1721,7 @@ def host_is_elevated() -> bool:
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows loader's own functions")
 class TestPowerShellToolHandoff(unittest.TestCase):
-    """`bootstrap.ps1`'s upgrade and report handoffs, run through its own functions against stub tools.
+    """`bootstrap.ps1`'s upgrade, report, and agents install handoffs, run through its own functions against stub tools.
 
     Each stub records the step it was run as. The steps are asserted from what ran rather than from
     the loader's text. Every other case stands in for elevation through `Test-Elevated`. A case then
@@ -1843,7 +1846,7 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertEqual(self.steps(), [])
 
     def test_an_empty_list_is_refused(self) -> None:
-        result = self.run_agents([""])
+        result = self.run_agents([","])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("-Agents takes the tools to install", result.stderr)
         self.assertEqual(self.steps(), [])
