@@ -219,9 +219,9 @@ for, and it binds harder than any throughput target.
   has already opened a pull request, say whether it closes or waits, since one left open on an
   abandoned branch reads to every later round as a live claim. **Update the claim comment whenever
   the adjudication changes what a group holds**, in either direction, or the durable record drifts
-  from the real claim it exists to report. A group told to abandon its branch loses only the
-  contested file here, and the rest of its claim is left for cleanup to release or keep, per
-  "Cleanup Is the Orchestrator's".
+  from the real claim it exists to report. A group told to abandon its branch keeps its claim
+  comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
+  Orchestrator's".
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -262,8 +262,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
   A brief dispatching an issue returned to the ranking names a new branch.
-  The name is one no pull request on the repository has used as its head, checked with
-  `gh pr list --head <name> --state all` before the claim comment is written.
+  A new branch name is one no pull request on the repository has used as its head, checked with
+  `gh pr list --head <name> --state all` before the claim comment naming it is written.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line, so a brief that omits it produces a pull request nothing can derive a closing set from.
