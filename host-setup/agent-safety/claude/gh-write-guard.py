@@ -1384,10 +1384,26 @@ def _command_prefix(toks, k):
             takes = _PRECOMMAND_VALUE_OPTS.get(base, frozenset())
             i += 1
             while i < k and (toks[i].startswith("-") or _DURATION_WORD.fullmatch(toks[i])):
-                i += 2 if toks[i] in takes else 1
+                i += 2 if _option_takes_next(toks[i], takes) else 1
         else:
             return False, []
     return i == k, out if i == k else []
+
+
+def _option_takes_next(tok, takes):
+    """True when a precommand option word leaves its value to the next word.
+
+    That is an option `takes` names, or a short-option cluster such as `-iu` whose first letter taking a value ends it.
+    A value-taking letter before the end takes the rest of the word as its value instead.
+    """
+    if tok in takes:
+        return True
+    if tok.startswith("--") or len(tok) < 3:
+        return False
+    for x, c in enumerate(tok[1:], 1):
+        if f"-{c}" in takes:
+            return x == len(tok) - 1
+    return False
 
 
 def _command_readings(text):
@@ -3257,10 +3273,14 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
     - a `--config-env` alias for the subcommand it runs
     - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
     - an alias from the environment, or one persisted in the checkout's config, that runs a push
+    - a setting `_wrapper_env_reason` names, on a shell whose command string names git
+    - a git command past the wrapper reading cap that `_may_run_alias` says may run an alias
 
     Heredoc data is not read (see `_command_readings`).
     A persisted alias is read only for a subcommand that can name one, which git does not list, nor `_COMMON_GIT_COMMANDS` names.
+    It is read from the `--git-dir` or `GIT_DIR` repository where one is given, else from the directory git runs in.
     An inline `-c alias.<name>` override is followed into the persisted config the same way.
+    So is one set in the environment, read both above and below an inline one, and the chain is read without it too, since the environment may not reach that git command.
     `config_lookup` stands in for that read, as rule 6 takes it.
     Without one, a table in `_PINNED_ALIASES` does, which the self-test pins so no case reads the host's aliases.
     """
@@ -3270,7 +3290,13 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
         for text in [cmd, *_embedded_wrapper_commands(cmd, overflow=overflow)]
         for toks in _command_readings(text)
     ]
+    if any(_may_run_alias(o) for o in overflow):
+        return "a git command nested deeper than the guard reads, which may run an alias"
+    env_aliases = {}
     for toks in readings:
+        wrapper_env = _wrapper_env_reason(_wrapper_env_assignments(toks))
+        if wrapper_env:
+            return wrapper_env
         if not any(_is_git_exe(t) for t in toks):
             continue
         assignments = _env_assignments(toks)
@@ -3298,6 +3324,8 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                         "an `include.path`/`includeIf` override, whose file the guard does not read"
                     )
                 if key.startswith("alias."):
+                    if source == "env":
+                        env_aliases.setdefault(key[len("alias.") :], setting)
                     if not sub or key[len("alias.") :] != sub.lower():
                         continue
                     if source == "config-env":
@@ -3309,27 +3337,94 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                         return f"a `--config-env` value for `{key}`, which git runs as a command"
                     if not _command_value(key, setting)[1]:
                         return f"a `{key}` value naming a program the guard does not read"
-    for c_dirs, work_tree, _git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
-        target = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
-        name, seen = sub, set()
-        while _may_name_alias(name) and name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
-            seen.add(name)
-            expansion = inline.get(name)
-            if expansion is None and config_lookup is None and _PINNED_ALIASES:
-                expansion = _PINNED_ALIASES[0].get(name)
-            elif expansion is None:
-                expansion = _config_alias(target, name, config_lookup)
-            if expansion is None:
-                break
-            if _alias_runs_push(expansion):
+    for c_dirs, _work_tree, git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
+        target = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd) or _effective_cwd(
+            c_dirs, leading_cd, cwd
+        )
+        tables = [inline, {**env_aliases, **inline}, {**inline, **env_aliases}]
+        for aliases in tables if env_aliases else tables[:1]:
+            if _alias_chain_runs_push(sub, aliases, target, config_lookup):
                 return f"a push run by `git {sub}` through an alias the checkout's config defines"
-            try:
-                words = shlex.split(expansion)
-            except ValueError:
-                break
-            if expansion.startswith("!") or not words:
-                break
-            name = words[0]
+    return None
+
+
+def _alias_chain_runs_push(sub, aliases, target, config_lookup):
+    """True when `sub` runs a push through a chain of aliases, read from `aliases` first, then the config in `target`."""
+    name, seen = sub, set()
+    while _may_name_alias(name) and name not in seen and len(seen) < _MAX_ALIAS_DEPTH:
+        seen.add(name)
+        expansion = aliases.get(name)
+        if expansion is None and config_lookup is None and _PINNED_ALIASES:
+            expansion = _PINNED_ALIASES[0].get(name)
+        elif expansion is None:
+            expansion = _config_alias(target, name, config_lookup)
+        if expansion is None:
+            return False
+        if _alias_runs_push(expansion):
+            return True
+        try:
+            words = shlex.split(expansion)
+        except ValueError:
+            return False
+        if expansion.startswith("!") or not words:
+            return False
+        name = words[0]
+    return False
+
+
+def _may_run_alias(text):
+    """True when a git word in `text`, read with its quoting removed, may run an alias.
+
+    That is one whose subcommand `_may_name_alias` accepts or the shell may rewrite.
+    It reads a body nested past the cap, whose wrappers the quoting removal flattens into one command.
+    """
+    toks = _shell_tokens(_unquoted(text))
+    for k, t in enumerate(toks):
+        if _is_git_exe(t):
+            j = _git_subcommand_index(toks, k)
+            if j < len(toks) and (_may_name_alias(toks[j]) or _is_run_time_word(toks[j])):
+                return True
+    return False
+
+
+def _wrapper_env_assignments(toks):
+    """The assignments reaching a shell whose command string names git, as (name, value).
+
+    The shell is a `sh -c`-style wrapper or one `_FOREIGN_SHELL_FLAGS` names, as its simple command's command.
+    That is its own prefix (see `_command_prefix`), and each `export` argument before it.
+    Its command string is read as a command of its own, which these do not reach.
+    """
+    out, exported = [], []
+    for x, t in enumerate(toks):
+        if t == "export" and _opens_command(toks, x):
+            for word in toks[x + 1 :]:
+                m = _ENV_ASSIGN_RE.match(word)
+                if not (m or word.startswith("-")):
+                    break
+                if m:
+                    exported.append(m.groups())
+        elif _is_shell_wrapper_exe(t) or _foreign_shell_at(toks, x):
+            reached, prefix = _command_prefix(toks, x)
+            if reached and _GIT_WORD.search(" ".join(toks[x : _region_end(toks, x)])):
+                out.extend(exported + prefix)
+    return out
+
+
+def _wrapper_env_reason(assignments):
+    """Name the git setting among `assignments` that a shell's command string would run under, else None.
+
+    That is a config file other than `/dev/null`, config set through `GIT_CONFIG_COUNT`, or one of
+    `_COMMAND_ENV_VARS` naming a program the guard does not read, or a command naming git.
+    """
+    for name, value in assignments:
+        if name in _CONFIG_FILE_ENV_VARS and value != "/dev/null":
+            return f"a `{name}` config file set on a shell whose git command is read without it"
+        if name in _COMMAND_ENV_VARS:
+            text, readable = _command_value("", value)
+            if not readable or (text and _GIT_WORD.search(text)):
+                return f"a `{name}` program set on a shell whose git command is read without it"
+    if _sets_env_config(assignments):
+        return "config set in the environment of a shell whose git command is read without it"
     return None
 
 
@@ -13558,6 +13653,69 @@ _HIDDEN_GIT_CASES = [
         "deny",
         "a GIT_CONFIG_GLOBAL file before a sudo with an auth-type option is still read",
     ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config bash -c 'git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file on a wrapper shell reaches the git in its body",
+    ),
+    (
+        "export GIT_CONFIG_GLOBAL=/example/config; bash -c 'git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an exported GIT_CONFIG_GLOBAL file reaches the git in a later wrapper body",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push bash -c 'git p origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push alias set in the environment of a wrapper shell reaches the git in its body",
+    ),
+    (
+        "GIT_EDITOR=/example/x pwsh -Command 'git commit'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_EDITOR script on another shell reaches the git in its command string",
+    ),
+    (
+        "GIT_PAGER=cat bash -c 'git log'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_PAGER naming a plain program on a wrapper shell is allowed",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config bash -c 'ls'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a GIT_CONFIG_GLOBAL file on a wrapper body naming no git is allowed",
+    ),
+    (
+        "sudo -iu root pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh -Command body after a sudo option cluster ending in a user option is read",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config sudo -Eu root git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before a sudo option cluster ending in a user option still reaches git",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config sudo -uroot git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file before a sudo user option with its value attached still reaches git",
+    ),
 ]
 
 
@@ -13599,11 +13757,69 @@ _ALIAS_PUSH_CASES = [
         "control: a persisted alias expanding to status is allowed",
     ),
     ("git p origin develop", {}, "allow", "control: a subcommand no alias defines is allowed"),
+    (
+        _nested_wrapper("git p origin develop", 6),
+        {"p": "push"},
+        "deny",
+        "a persisted push alias in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        _nested_wrapper("git status", 6),
+        {},
+        "allow",
+        "control: a builtin git command past the nesting cap runs no alias",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=p git q origin develop",
+        {"p": "push"},
+        "deny",
+        "an environment alias chaining to a persisted push alias is denied",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=st git q",
+        {"st": "status"},
+        "allow",
+        "control: an environment alias chaining to a persisted status alias is allowed",
+    ),
+]
+
+_ALIAS_DIR_CASES = [
+    (
+        "git --git-dir=/example/repo/.git --work-tree=/example/wt p origin develop",
+        "/example/repo/.git",
+        {"p": "push"},
+        "deny",
+        "a persisted push alias is read from the --git-dir repository",
+    ),
+    (
+        "GIT_DIR=/example/repo/.git git p origin develop",
+        "/example/repo/.git",
+        {"p": "push"},
+        "deny",
+        "a persisted push alias is read from the GIT_DIR repository",
+    ),
+    (
+        "git --work-tree=/example/wt p origin develop",
+        "/example/cwd",
+        {"p": "push"},
+        "deny",
+        "a persisted push alias is read from the directory git runs in, not the --work-tree",
+    ),
+    (
+        "git --git-dir=/example/repo/.git st",
+        "/example/repo/.git",
+        {"st": "status"},
+        "allow",
+        "control: a persisted status alias in the --git-dir repository is allowed",
+    ),
 ]
 
 
 def _alias_push_selftest(origin):
-    """Run `_ALIAS_PUSH_CASES` with the persisted alias read replaced by each case's table."""
+    """Run `_ALIAS_PUSH_CASES` with the persisted alias read replaced by each case's table.
+
+    Then run `_ALIAS_DIR_CASES`, whose table answers only for its named directory, read with `/` separators.
+    """
     ok = True
     for cmd, aliases, want, label in _ALIAS_PUSH_CASES:
         got, _ = classify(
@@ -13614,6 +13830,23 @@ def _alias_push_selftest(origin):
             environ={},
             primary_checkout_lookup=lambda d: False,
             config_lookup=lambda _d, name, _a=aliases: _a.get(name),
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, alias_dir, aliases, want, label in _ALIAS_DIR_CASES:
+        got, _ = classify(
+            cmd,
+            cwd="/example/cwd",
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: _CODE_RULES if br == "develop" else set(),
+            environ={},
+            primary_checkout_lookup=lambda d: False,
+            config_lookup=lambda d, name, _a=aliases, _ad=alias_dir: (
+                _a.get(name) if (d or "").replace("\\", "/") == _ad else None
+            ),
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:

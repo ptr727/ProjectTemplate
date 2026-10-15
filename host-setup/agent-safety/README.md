@@ -91,7 +91,10 @@ text says, because the harm it covers was never in the text.
    override. Config set through `GIT_CONFIG_COUNT` counts as one. It covers a push in
    interpreter code that can start a process, such as `python3 -c` or `node -e` code. It covers
    one in text piped to a shell's input. It covers a push a persisted alias runs, or one set in
-   the environment. An alias set by `--config-env` for the subcommand it runs is denied too. An `eval`
+   the environment. An alias set in the environment is followed into the persisted config. A
+   persisted alias is read from the `--git-dir` or `GIT_DIR` repository where one is given, else
+   from the directory git runs in. A git command nested past the wrapper reading cap is denied
+   where its subcommand may be an alias. An alias set by `--config-env` for the subcommand it runs is denied too. An `eval`
    argument holding an include key is read as the command it runs. It also covers a bare push or a
    `HEAD`/`@` refspec whose directory or branch may change before it runs. Such a push's local
    branch is checked under its whole name, such as `release/1.0`. It is also checked with its first
@@ -130,6 +133,10 @@ text says, because the harm it covers was never in the text.
    path or an expansion, or comes from `--config-env`. The hook does not read that program. An
    `include.path`/`includeIf` override is denied on any git command. So is a `GIT_CONFIG_GLOBAL`
    or `GIT_CONFIG_SYSTEM` file other than `/dev/null`. Either file may set any of those keys.
+   Such a file, config set through `GIT_CONFIG_COUNT`, or a variable git runs as a command is
+   denied too when set on a shell whose command string names git, by its prefix or an earlier
+   `export`. The hook reads that string without it. A variable naming a plain program with no
+   `git` in its text is the exception.
    The push and include checks also read each command with its quotes and backslashes removed and
    `git` in any case, so a `p''ush` or an uppercase `GIT` reaches them. The
    workaround is an explicit refspec run as its own command. Every other
