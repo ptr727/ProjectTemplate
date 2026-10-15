@@ -262,8 +262,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   it before dispatch. The worker still creates its own worktree, on that named branch rather than
   one of its choosing, since a claim naming a branch nobody used points at nothing.
   A brief dispatching an issue returned to the ranking names a new branch.
-  A new branch name is one no pull request on the repository has used as its head, checked with
-  `gh pr list --head <name> --state all` before the claim comment naming it is written.
+  A branch a claim comment names for the first time is one no pull request on the repository has
+  used as its head, checked with `gh pr list --head <name> --state all` before that comment is written.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line, so a brief that omits it produces a pull request nothing can derive a closing set from.
