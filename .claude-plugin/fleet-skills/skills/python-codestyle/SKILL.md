@@ -125,6 +125,7 @@ carries a `[project]` table it then installs the directory itself as editable, w
 uv venv --clear                           # creates .venv, replacing an existing one
 uv pip install -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
 uv pip install -e .                       # only where pyproject.toml has a [project] table
+# where .venv installs ruff, .venv/bin/python -m ruff replaces uvx ruff@latest below
 uvx ruff@latest format                    # auto-format
 uvx ruff@latest check --fix               # auto-fix lint
 uvx ruff@latest check                     # verify lint clean
@@ -138,11 +139,10 @@ adding `--python-version` with the environment's version unless the mypy config 
 runs as `.venv/bin/python -m pyright --pythonpath .venv/bin/python` where the environment installs
 it, and otherwise as `uvx pyright@latest --pythonpath .venv/bin/python`. ruff follows the same
 precedence, as `.venv/bin/python -m ruff` where the environment installs it, in place of the
-`uvx ruff@latest` above. A tool the requirements pin is then the version CI runs, which their own
-Dependabot updates track. Where the config sits in the project
-directory, CI runs the checker there with no path, as in the uv form. A declared subdirectory with
-no config of its own uses the repository root's instead. CI then runs the checker from the root
-with the directory as its path and the interpreter as `<dir>/.venv/bin/python`. Run it the same
+`uvx ruff@latest` above. A tool the requirements pin is then the version CI runs. Where the config
+sits in the project directory, CI runs the checker there with no path, as in the uv form. A
+declared subdirectory with no config of its own uses the repository root's instead. CI then runs
+the checker from the root with the directory as its path and the interpreter as `<dir>/.venv/bin/python`. Run it the same
 way, as in `<dir>/.venv/bin/python -m mypy <dir>`. On Windows each interpreter path ends in
 `.venv\Scripts\python.exe` instead. Those ruff commands and that type checker are the pip form's
 clean-compile, run with pytest before committing.
