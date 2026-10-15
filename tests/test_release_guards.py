@@ -1124,8 +1124,7 @@ gh() {
             '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
             "esac\n"
         )
-        venv_python = work / ".venv/bin/python"
-        if venv_python.exists():
+        for venv_python in work.glob("**/.venv/bin/python"):
             venv_python.write_text(python_stub, encoding="utf-8")
             venv_python.chmod(0o755)
         for name in ("uv", "uvx"):
@@ -1424,6 +1423,13 @@ gh() {
                     True,
                     venv_ruff,
                     f"uvx ruff@latest {args}\n",
+                ),
+                "a declared pip subdirectory reads its own venv": (
+                    "pip",
+                    {f"sub/{path}": text for path, text in pip_tree.items()},
+                    True,
+                    {**venv_ruff, "PYTHON_PROJECTS": "pip\tsub\n"},
+                    f"python -m ruff {args}\n",
                 ),
                 "uv runs its locked ruff": (
                     "uv",
