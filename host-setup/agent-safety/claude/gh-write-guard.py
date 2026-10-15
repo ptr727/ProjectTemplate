@@ -3307,6 +3307,7 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
     - a `--config-env` alias for the subcommand it runs
     - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
     - an alias from the environment, or one persisted in the checkout's config, that runs a push
+    - a `!` shell alias such a chain reaches (see `_alias_chain_hides_push`)
     - a setting `_wrapper_env_reason` names, on a shell whose command string runs git (see `_runs_git`)
     - a git command past the wrapper reading cap that `_may_run_alias` says may run an alias
 
@@ -3372,7 +3373,7 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
                         return f"a `--config-env` value for `{key}`, which git runs as a command"
                     if not _command_value(key, setting)[1]:
                         return f"a `{key}` value naming a program the guard does not read"
-    for c_dirs, work_tree, git_dir, inline, sub, args, leading_cd in _all_git_invocations(cmd):
+    for c_dirs, work_tree, git_dir, inline, sub, _args, leading_cd in _all_git_invocations(cmd):
         repo_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
         targets = dict.fromkeys(
             [
@@ -3385,50 +3386,28 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
         tables = [inline, {**env_aliases, **inline}] if env_aliases else [inline]
         for target, explicit in targets:
             for aliases in tables:
-                if _alias_chain_runs_push(
-                    sub, aliases, target, config_lookup, explicit, has_args=bool(args)
-                ):
+                hidden = _alias_chain_hides_push(sub, aliases, target, config_lookup, explicit)
+                if hidden == "shell":
+                    return f"a `!` shell alias `git {sub}` reaches, whose shell text the guard does not read"
+                if hidden:
                     return f"a push run by `git {sub}` through an alias"
     return None
 
 
-def _alias_chain_runs_push(
-    sub, aliases, target, config_lookup, git_dir, has_args=True, _nesting=0, _memo=None
-):
-    """True when `sub` runs a push through a chain of aliases, read from `aliases` first, then the config in `target`.
+def _alias_chain_hides_push(sub, aliases, target, config_lookup, git_dir):
+    """Name what hides a push in `sub`'s chain of aliases, read from `aliases` first, then the config in `target`, else None.
+
+    That is "push" for an alias expanding to a push.
+    It is "shell" for a `!` shell alias anywhere in the chain, which may run any git command, the alias's appended arguments among them.
 
     `git_dir` says `target` is an explicit `--git-dir`/`GIT_DIR` value (see `_config_alias`).
     A name is matched without case, as git matches an alias name.
     A name `aliases` gives several values is followed through each, since the guard cannot tell which one git reads.
     Names are read breadth first, each once, so a name many paths reach costs one read rather than one per path.
-    A `!` shell alias is followed into the subcommand of each git command its text runs (see `_shell_alias_hides_git`).
-    A git command there carrying its own inline aliases starts a chain of its own with them, nested at most twice.
-    Each such chain is read once per name and inline table (`_memo`).
-    `has_args` says arguments may follow, which git appends to a `!` alias's text (see `_appended_args_run`).
     """
     table = {}
     for key, values in aliases.items():
         table.setdefault(key.lower(), []).extend(values if isinstance(values, list) else [values])
-    memo = {} if _memo is None else _memo
-    args_present = has_args
-
-    def nested(name, inline, with_args):
-        if _nesting >= 2:
-            return True
-        key = (name.lower(), tuple(sorted(inline.items())), with_args)
-        if key not in memo:
-            memo[key] = _alias_chain_runs_push(
-                name,
-                {**table, **inline},
-                target,
-                config_lookup,
-                git_dir,
-                with_args,
-                _nesting + 1,
-                memo,
-            )
-        return memo[key]
-
     level, seen = [sub], set()
     for _depth in range(_MAX_ALIAS_DEPTH):
         following = []
@@ -3444,68 +3423,18 @@ def _alias_chain_runs_push(
                     found = _config_alias(target, name, config_lookup, git_dir)
                 expansions = [] if found is None else [found]
             for expansion in dict.fromkeys(expansions):
-                if _alias_runs_push(expansion):
-                    return True
                 if expansion.startswith("!"):
-                    if _shell_alias_hides_git(expansion[1:], following, nested, args_present):
-                        return True
-                    continue
+                    return "shell"
+                if _alias_runs_push(expansion):
+                    return "push"
                 try:
                     words = shlex.split(expansion)
                 except ValueError:
                     continue
                 if words:
                     following.append(words[0])
-                    args_present = args_present or len(words) > 1
         level = following
-    return False
-
-
-def _shell_alias_hides_git(text, following, nested, has_args):
-    """True when the git commands a `!` shell alias's `text` runs cannot be followed, else queue them.
-
-    Each command's subcommand goes on `following`.
-    One carrying inline `-c alias.<name>` values is also read by `nested(sub, inline, has_args)`, a chain of its own.
-    Where `has_args`, the text is read with the arguments git appends (see `_appended_args_run`).
-    A command with a run-time subcommand cannot be followed, nor one past the wrapper reading cap that `_may_run_alias` names.
-    Nor can one naming a possible alias under another directory, whose config the chain does not read.
-    """
-    if has_args and _appended_args_run(text):
-        return True
-    overflow = []
-    _embedded_wrapper_commands(text, overflow=overflow)
-    if any(_may_run_alias(o) for o in overflow):
-        return True
-    for c_dirs, work_tree, git_dir, inline, sub, args, leading_cd in _all_git_invocations(text):
-        if not sub or _is_run_time_word(sub):
-            return True
-        if (c_dirs or work_tree or git_dir or leading_cd) and _may_name_alias(sub):
-            return True
-        if inline and nested(sub, inline, has_args or bool(args)):
-            return True
-        following.append(sub)
-    return False
-
-
-def _appended_args_run(text):
-    """True when the arguments git appends to a `!` alias's `text`, as `"$@"`, may run as a command.
-
-    That is where they land as a command word or as the subcommand of a bare `git`.
-    It is also where they are arguments of a head that may run them, such as `env`, `eval`, or `sh`.
-    A head that is a git command with its own subcommand takes them as arguments.
-    So does a function the text defines, whose body is read on its own, or a head `_NAMES_ITS_ARGUMENTS` names.
-    """
-    toks = _shell_tokens(text + ' "$@"')
-    last = len(toks) - 1
-    i, _assignments = _prefix_walk(toks, last)
-    if i >= last:
-        return True
-    head = toks[i]
-    if _is_git_exe(head):
-        return _git_subcommand_index(toks, i) >= last
-    functions = {toks[x] for x in range(last) if toks[x + 1] == "()"}
-    functions |= {toks[x + 1] for x in range(last) if toks[x] == "function"}
-    return not (head in functions or _base_name(head) in _NAMES_ITS_ARGUMENTS)
+    return None
 
 
 def _may_run_alias(text):
@@ -13995,6 +13924,30 @@ _ALIAS_PUSH_CASES = [
         "a persisted shell alias running a push is denied",
     ),
     (
+        "git q origin develop",
+        {"q": "!git p", "p": "push"},
+        "deny",
+        "a persisted shell alias running a persisted push alias is denied",
+    ),
+    (
+        "git x git p origin develop",
+        {"x": "!env", "p": "push"},
+        "deny",
+        "a persisted shell alias whose command runs its appended arguments is denied",
+    ),
+    (
+        "git q",
+        {"q": "!git st", "st": "status"},
+        "deny",
+        "a persisted shell alias is denied whatever it runs, since its shell text is not read",
+    ),
+    (
+        "git q origin develop",
+        {"q": "p", "p": "!sh -c 'git push origin develop'"},
+        "deny",
+        "a persisted shell alias deeper in a chain is denied",
+    ),
+    (
         "bash -c 'git p origin develop'",
         {"p": "push"},
         "deny",
@@ -14042,119 +13995,6 @@ _ALIAS_PUSH_CASES = [
         {"p": "push"},
         "deny",
         "an environment alias is matched without case, as git matches it",
-    ),
-    (
-        "git q origin develop",
-        {"q": "!git p", "p": "push"},
-        "deny",
-        "a persisted shell alias running a persisted push alias is denied",
-    ),
-    (
-        "git q",
-        {"q": "!sh -c 'git p origin develop'", "p": "push"},
-        "deny",
-        "a persisted shell alias whose wrapper runs a persisted push alias is denied",
-    ),
-    (
-        "git q",
-        {"q": "!git st", "st": "status"},
-        "allow",
-        "control: a persisted shell alias running a persisted status alias is allowed",
-    ),
-    (
-        "git q origin develop",
-        {"q": "!git -c alias.x=p x", "p": "push"},
-        "deny",
-        "a persisted shell alias whose git sets an inline alias chaining to a push alias is denied",
-    ),
-    (
-        "git g p origin develop",
-        {"g": "!git", "p": "push"},
-        "deny",
-        "a persisted shell alias running git with the arguments git appends is denied",
-    ),
-    (
-        "git g p origin develop",
-        {"g": '!f() { git "$@"; }; f', "p": "push"},
-        "deny",
-        "a persisted shell alias running git on its run-time arguments is denied",
-    ),
-    (
-        "git q",
-        {"q": "!git -C /example/other p", "p": "status"},
-        "deny",
-        "a persisted shell alias running a possible alias under another directory is denied",
-    ),
-    (
-        "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0='!git -c alias.p=status st' GIT_CONFIG_KEY_1=alias.q GIT_CONFIG_VALUE_1=p git q origin develop",
-        {"p": "push"},
-        "deny",
-        "a nested inline alias in one shell alias value does not hide the persisted push alias another value reaches",
-    ),
-    (
-        "git q",
-        {"q": "!git -c alias.p=status st && git p origin develop", "p": "push"},
-        "deny",
-        "a nested inline alias on one git command does not hide a persisted push alias a later one runs",
-    ),
-    (
-        "git q p origin develop",
-        {"q": "!git fetch && git", "p": "push"},
-        "deny",
-        "a persisted shell alias ending in a bare git, which takes the appended arguments, is denied",
-    ),
-    (
-        "git q git p origin develop",
-        {"q": "!git fetch;", "p": "push"},
-        "deny",
-        "a persisted shell alias ending in an operator, whose appended arguments run as a command, is denied",
-    ),
-    (
-        "git x git p origin develop",
-        {"x": "!env", "p": "push"},
-        "deny",
-        "a persisted shell alias whose command runs its appended arguments is denied",
-    ),
-    (
-        "git x git p origin develop",
-        {"x": "!sh -c", "p": "push"},
-        "deny",
-        "a persisted shell alias whose shell runs its appended arguments as a script is denied",
-    ),
-    (
-        "git k",
-        {"k": "!gitk --all &"},
-        "allow",
-        "control: a persisted shell alias ending in an operator, called with no arguments, is allowed",
-    ),
-    (
-        "git x",
-        {"x": "!(cd sub && git status)"},
-        "allow",
-        "control: a persisted shell alias running a subshell, called with no arguments, is allowed",
-    ),
-    (
-        "git q origin develop",
-        {"q": "!" + _nested_wrapper("git p origin develop", 6), "p": "push"},
-        "deny",
-        "a persisted shell alias whose git is nested past the wrapper reading cap fails closed",
-    ),
-    (
-        "git q",
-        {
-            "q": "!git -c "
-            + shlex.quote("alias.a=!git -c " + shlex.quote("alias.b=!git -c alias.c=st c") + " b")
-            + " a",
-            "st": "status",
-        },
-        "deny",
-        "a shell alias chain nesting inline aliases past the cap fails closed",
-    ),
-    (
-        "git lg",
-        {"lg": '!f() { git log --oneline "$@"; }; f'},
-        "allow",
-        "control: a persisted shell alias running a builtin on its arguments is allowed",
     ),
     (
         "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=alias.q GIT_CONFIG_VALUE_0=st GIT_CONFIG_KEY_1=alias.q GIT_CONFIG_VALUE_1=p git q origin develop",

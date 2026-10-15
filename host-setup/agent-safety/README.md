@@ -92,10 +92,7 @@ text says, because the harm it covers was never in the text.
    interpreter code that can start a process, such as `python3 -c` or `node -e` code. It covers
    one in text piped to a shell's input. It covers a push a persisted alias runs, or one set in
    the environment. An alias set in the environment is followed into the persisted config. A `!`
-   shell alias is followed into each git command its text runs. Where arguments follow, it is read
-   with them appended, as git appends them, and denied where they may run as a command. It is also
-   denied where one of those commands has a run-time subcommand, or names a possible alias under
-   another directory. A
+   shell alias the chain reaches is denied, since the hook does not read the shell text it runs. A
    persisted alias is read from the directory git runs in. It is also read from a `--git-dir` or
    `GIT_DIR` repository, through a linked worktree's `.git` file as git reads it. A git command nested past the wrapper reading cap is denied
    where its subcommand may be an alias. An alias set by `--config-env` for the subcommand it runs is denied too. An `eval`
