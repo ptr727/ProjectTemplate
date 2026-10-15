@@ -337,10 +337,13 @@ jobs:
             fi
           done <<< "$PYTHON_PROJECTS"
 
+      # A declared pip directory runs the ruff its venv installs, so a version its requirements pin is the one CI runs.
+      # It falls back to uvx only where the venv holds none.
       - name: Lint Python step
         if: steps.python.outputs.any == 'true'
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
           while IFS=$'\t' read -r kind dir; do
@@ -348,6 +351,8 @@ jobs:
             echo "ruff check in $dir"
             if [ "$kind" = uv ]; then
               (cd "$dir" && uv run ruff check .) < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && "$dir/.venv/bin/python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("ruff") is None)' < /dev/null; then
+              (cd "$dir" && .venv/bin/python -m ruff check .) < /dev/null
             else
               (cd "$dir" && uvx ruff@latest check .) < /dev/null
             fi
@@ -357,6 +362,7 @@ jobs:
         if: steps.python.outputs.any == 'true'
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
+          DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
           while IFS=$'\t' read -r kind dir; do
@@ -364,6 +370,8 @@ jobs:
             echo "ruff format --check in $dir"
             if [ "$kind" = uv ]; then
               (cd "$dir" && uv run ruff format --check .) < /dev/null
+            elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && "$dir/.venv/bin/python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("ruff") is None)' < /dev/null; then
+              (cd "$dir" && .venv/bin/python -m ruff format --check .) < /dev/null
             else
               (cd "$dir" && uvx ruff@latest format --check .) < /dev/null
             fi
@@ -446,7 +454,12 @@ jobs:
                 (cd "$config_dir" && uvx mypy@latest --python-executable "$venv_python" "${version_args[@]}" "${targets[@]}") < /dev/null
               fi
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
-              (cd "$config_dir" && uvx pyright@latest --pythonpath "$venv_python" "${targets[@]}") < /dev/null
+              if "$venv_python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("pyright") is None)'; then
+                # The venv's own pyright is the version its requirements pin, as with ruff, and the flag still names the interpreter whose packages it reads.
+                (cd "$config_dir" && "$venv_python" -m pyright --pythonpath "$venv_python" "${targets[@]}") < /dev/null
+              else
+                (cd "$config_dir" && uvx pyright@latest --pythonpath "$venv_python" "${targets[@]}") < /dev/null
+              fi
             else
               (cd "$config_dir" && uvx "$checker@latest" "${targets[@]}") < /dev/null
             fi
