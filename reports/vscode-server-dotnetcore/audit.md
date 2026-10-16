@@ -5,7 +5,7 @@
 - **Verdict:** operational
 - **Date:** 2026-10-16
 
-Basis: `python3 spec/audit.py VSCode-Server-DotNetCore` run 2026-10-16T06:40:34Z at hub `ddaeefb4`, reporting 0 defect, letter, or error findings, plus a read of the `main` tree. This report replaces the 2026-07-04 report, which described the repository before its resync to hub 2.0.685 (ptr727/VSCode-Server-DotNetCore#127 through #131) and its later pin bumps.
+Basis: `python3 spec/audit.py VSCode-Server-DotNetCore` run 2026-10-16T06:40:34Z at hub `ddaeefb4`, reporting 0 defect, letter, or error findings, plus a read of the `main` tree. This report replaces the 2026-07-04 report, which described the repository before its resync to hub 2.0.685 (ptr727/VSCode-Server-DotNetCore#127 through #131) and the second resync to hub 2.0.972 (ptr727/VSCode-Server-DotNetCore#153).
 
 ## Develop Drift
 
@@ -21,12 +21,12 @@ Basis: `python3 spec/audit.py VSCode-Server-DotNetCore` run 2026-10-16T06:40:34Z
 | python | - | - | N/A | no `pyproject.toml` or `setup.py` |
 | dotnet-publish | - | - | N/A | `enable_dotnet_publish: false` in both callers |
 | hugo | - | - | N/A | no site |
-| docker | pass | pass | operational | the image is built by the hub's `build-release-task.yml` with `enable_docker: true` and `docker_image: ptr727/vscode-server-dotnetcore` (`publish-release.yml:41-62`); the Hub overview is published by the hub's `publish-docker-readme-task.yml` (`publish-release.yml:66`), main-only per the job comment, and no local copy of either task remains (`.github/workflows/` holds three files). Static `DOCKER_HUB_*` secrets, expected for docker |
+| docker | pass | pass | operational | the image is built by the hub's `build-release-task.yml` with `enable_docker: true` and `docker_image: ptr727/vscode-server-dotnetcore` (`publish-release.yml:41-59`); the Hub overview is published by the hub's `publish-docker-readme-task.yml` (`publish-release.yml:66`), main-only per the job comment, and no local copy of either task remains (`.github/workflows/` holds three files). Static `DOCKER_HUB_*` secrets, expected for docker |
 | branch-model | pass | pass | operational | rulesets `develop` and `main` both `enforcement: active` (`gh api repos/ptr727/VSCode-Server-DotNetCore/rulesets`); the required context `Check pull request workflow status job` matches the aggregator `name:` (`test-pull-request.yml`); the stale `repo-config/ruleset-*.json` copies are gone |
 | carried-scope | pass | pass | operational | the `spec/audit.py` run reports no `scope` finding |
 | repo-setup | pass | pass | operational | the actions and dependabot secret stores both hold `DOCKER_HUB_USERNAME`, `DOCKER_HUB_ACCESS_TOKEN`, `CODEGEN_APP_CLIENT_ID`, and `CODEGEN_APP_PRIVATE_KEY`; no forbidden `NUGET_API_KEY` or `CODEGEN_APP_ID` |
-| runtime-secrets | pass | pass | operational | every secret the callers map (`publish-release.yml:47-48,69-70`, `test-pull-request.yml` smoke job) exists in the actions store |
-| verbatim-tree | drift | pass | drift | the carried instruction files and skills tree match a past hub revision, not the current canonical (`spec/audit.py`: `verbatim` and `tree` findings for `GOVERNANCE.md`, `.markdownlint-cli2.jsonc`, and 17 `.github/skills/` files), because the hub advanced after the 2.0.972 resync. Re-vendor from hub `main` |
+| runtime-secrets | pass | pass | operational | every secret the callers map (`publish-release.yml:46-47,70-71`, `test-pull-request.yml` smoke job) exists in the actions store |
+| verbatim-tree | drift | pass | drift | the carried instruction files and skills tree match a past hub revision, not the current canonical (`spec/audit.py`: `verbatim` and `tree` findings for `GOVERNANCE.md`, `.markdownlint-cli2.jsonc`, and 16 `.github/skills/` files), because the hub advanced after the 2.0.972 resync. Re-vendor from hub `main` |
 | linter-parity | pass | pass | operational | one `.markdownlint-cli2.jsonc` and `cspell.json` drive editor and CI, and the hub's `validate-task.yml` runs in both `test-pull-request.yml` and `publish-release.yml:33` |
 | recurring-violations | pass | pass | operational | `.editorconfig:21` sets the global `end_of_line = lf` default; no committed rulesets or mixed-ending workflow remain; `Docker/Dockerfile` is the path the hub Docker core expects |
 | readme-structure | pass | pass | operational | `README.md` carries `## Build and Distribution` (`:7`), `## Table of Contents` (`:35`), `## Installation`, `## Usage`, `## Questions or Issues`, `## 3rd Party Tools`, and `## License` last (`:90`) |
@@ -38,7 +38,7 @@ None. The `spec/audit.py` run reports 0 defect, letter, or error findings.
 
 ## Drift Findings
 
-- Carried content trails the hub: `GOVERNANCE.md` (four sections), `CODESTYLE.md`, `WORKFLOW.md`, `.github/copilot-instructions.md`, `.editorconfig`, `.editorconfig-checker.json`, `.gitattributes`, `.markdownlint-cli2.jsonc`, `cspell.json`, `version.json`, and 17 files under `.github/skills/` match a past hub revision or predate a later hub change. The resync landed at hub 2.0.972 and the hub has moved since. The next resync closes it, and it is that repository's work.
+- Carried content trails the hub: `GOVERNANCE.md` (four sections), `CODESTYLE.md`, `WORKFLOW.md`, `.github/copilot-instructions.md`, `.editorconfig`, `.editorconfig-checker.json`, `.gitattributes`, `.markdownlint-cli2.jsonc`, `cspell.json`, `version.json`, and 16 files under `.github/skills/` match a past hub revision or predate a later hub change. The resync landed at hub 2.0.972 and the hub has moved since. The next resync closes it, and it is that repository's work.
 - The earlier report's structural findings (single-branch publisher, no paths-filter, mixed line endings, off-baseline `repo-config/` names, reshaped README, bespoke release task) are resolved by the resync and no longer apply.
 
 ## Proposed Registry / Spec Updates
