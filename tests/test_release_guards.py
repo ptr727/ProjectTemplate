@@ -206,7 +206,7 @@ def shell_blocks(markdown: str) -> list[str]:
 
 def yaml_blocks(markdown: str) -> list[str]:
     """The body of every fenced YAML block in `markdown`, ending in the newline a file holding it ends in."""
-    return [b.body + "\n" for b in fenced_blocks(markdown) if b.label.lower() == "yaml"]
+    return re.findall(r"(?ms)^```yaml\n(.*?)^```\n", markdown)
 
 
 def fenced_shell_block(markdown: str, marker: str) -> str:
