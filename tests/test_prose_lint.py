@@ -30,6 +30,7 @@ from typing import ClassVar
 from unittest import mock
 
 from host_capability import bash_or_skip
+from runner_commands import FORGING_NAMES, forged_lines
 from workflow_steps import step_script, yaml_step, yaml_value
 
 try:
@@ -5395,6 +5396,49 @@ class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
         self.assertEqual(1, done.returncode, done.stderr)
         self.assertIn("dupword", done.stdout)
         self.assertNotIn("UnicodeEncodeError", done.stderr)
+
+
+class TestNamesCannotForgeWorkflowCommands(unittest.TestCase):
+    """A tracked name or file text shaped like a workflow command prints as inert text.
+
+    The finding line opens on the tracked name with no indent at all, and the runner reads
+    both of the gate's streams, so each is checked.
+    """
+
+    def test_printable_leaves_no_line_a_command_parser_reads(self) -> None:
+        for line in (*FORGING_NAMES, "  ::add-mask::x", "::", "a::b ##[ ##["):
+            with self.subTest(line=line):
+                self.assertEqual([], forged_lines(prose_lint.printable(line)))
+
+    def test_printable_leaves_an_ordinary_line_as_it_was(self) -> None:
+        for line in ("docs/a.md:3: dupword: x", "a::b: mid-line colons", "# [heading]"):
+            with self.subTest(line=line):
+                self.assertEqual(line, prose_lint.printable(line))
+
+    def test_a_forging_name_raises_its_finding_without_forging_a_command(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        names = (*FORGING_NAMES, "split.md\n::error::forged")
+        try:
+            for name in names:
+                (root / f"{name}.md").write_text("It has a dupword dupword in it.\n", "utf-8")
+        except OSError:
+            self.skipTest("this filesystem refuses a colon, a bracket, or a newline in a name")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        done = subprocess.run(
+            [sys.executable, str(PROSE_LINT_SCRIPT), str(root), "--check", "dupword"],
+            capture_output=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            check=False,
+            cwd=root,
+        )
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertEqual(len(names), done.stdout.count(": dupword: "), done.stdout)
+        self.assertEqual([], forged_lines(done.stdout))
+        self.assertEqual([], forged_lines(done.stderr))
+        self.assertIn("\\x3a:error title=forged::all checks passed.md:1: dupword", done.stdout)
+        self.assertIn("split.md\\x0a::error::forged.md:1: dupword", done.stdout)
 
 
 class TestDiffScopeReachesAQuotedName(unittest.TestCase):

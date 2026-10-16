@@ -56,6 +56,8 @@ HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 ABSENT = {"404", "422"}
 GH_TIMEOUT = 20
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+COMMAND_LEAD = re.compile(r"\A(\s*):(?=:)")
+LEGACY_COMMAND = "##["
 
 # How a check says it did less than its name.
 # A gate that quietly degrades to a weaker reading prints the same clean line as one that ran.
@@ -783,8 +785,14 @@ def printable(line: str) -> str:
     or drives the reader's terminal, so each C0 or C1 control and DEL is escaped here, where it is
     shown. A byte that is not UTF-8 arrives as a lone surrogate, which a strict stream refuses to
     encode, so it is spelled as an escape too, leaving the result safe on any stream.
+
+    The Actions runner executes a line opening on `::` once leading whitespace is trimmed, and a
+    line holding `##[` anywhere, so a name shaped like either forges a workflow command. The colon
+    opening such a line and the bracket of each `##[` are spelled as escapes for that reason.
     """
     escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+    escaped = COMMAND_LEAD.sub(lambda m: f"{m.group(1)}\\x3a", escaped)
+    escaped = escaped.replace(LEGACY_COMMAND, "##\\x5b")
     return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
