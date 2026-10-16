@@ -3047,7 +3047,8 @@ def _gh_positional_repo_words(args):
     A `pr` or `issue` write takes its pull request or issue as a URL too, which names the
     repository, as in `gh pr comment https://github.com/stranger/example/pull/5`. A number or a
     branch there selects inside the repository gh reads otherwise, so it is no target. A wholly
-    run-time word there may hold a URL too, and is left alone, since it is far more often a number. A `_GH_REPO_POSITIONAL_SUBS` write takes the repository itself, as `gh repo
+    run-time word there may hold a URL too, and is left alone, since it is far more often a number.
+    A `_GH_REPO_POSITIONAL_SUBS` write takes the repository itself, as `gh repo
     edit stranger/example` does. `gh issue transfer` takes its destination second, and
     `gh issue develop --branch-repo` names the repository its branch goes to. A flag's value is
     passed by `_GH_POSITIONAL_VALUE_FLAGS`, the value-taking flags gh's help lists for each such
@@ -3170,7 +3171,7 @@ def _gh_repo_assignments(cmd, environ=None):
         reaching = _wrapper_env_assignments(toks, lambda body: bool(_all_gh_arg_lists(body)))
         inherited = [(v, False) for name, v in reaching if name == "GH_REPO"][-1:]
         for inner in _embedded_wrapper_commands(reading):
-            out += _gh_word_repo_values(inner, base + inherited)
+            out += _gh_word_repo_values(inner, inherited or base)
         out += _gh_wrapper_repo_values(reading, base)
     return out
 
@@ -3211,32 +3212,52 @@ def _gh_repo_states(toks, inherited):
     `GH_REPO=v` standing as its own command once GH_REPO is exported, by an `export GH_REPO`
     before or after it or by `inherited`, whose environment exports it. That plain value is read
     beside the latest exported one, so the reading can only add a value. A value from the session's
-    environment is kept beside both, since an export in a subshell, a function, or an untaken
-    branch does not replace it in the shell that runs the gh word.
+    environment is kept beside both until a top-level command replaces it (see `_runs_unconditionally`).
     """
     exported, marked, plain, states = list(inherited), bool(inherited), None, []
     env = [v for v in inherited if v[1]]
+    depth = 0
     for x, t in enumerate(toks):
         values = exported[-1:] + [v for v in env if v not in exported[-1:]]
         states.append(values + ([plain] if marked and plain else []))
+        replaces = depth == 0 and _runs_unconditionally(toks, x)
+        depth += _nesting_change(t)
         if t == "export" and _opens_command(toks, x):
             pairs, names = _export_words(toks, x)
             values = [(v, False) for name, v in pairs if name == "GH_REPO"]
             exported += values
             plain = None if values else plain
             marked = marked or bool(values) or "GH_REPO" in names
+            env = [] if values and replaces else env
             continue
         values = [v for name, v in _plain_assignments(toks, x) if name == "GH_REPO"]
         plain = (values[-1], False) if values else plain
+        env = [] if values and replaces and marked else env
     return states
+
+
+def _runs_unconditionally(toks, x):
+    """True when the command starting at `toks[x]` runs whenever the text before it does.
+
+    That is a command opening the text or following `;`, `&`, or a newline. One after `&&`, `||`,
+    a pipe, or a keyword such as `then` may not run, or runs in a subshell.
+    """
+    return x == 0 or toks[x - 1] in (";", "&", "\n")
+
+
+def _nesting_change(tok):
+    """How far a token opens (+) or closes (-) a subshell, a group, or a function body."""
+    if tok in ("{", "}"):
+        return 1 if tok == "{" else -1
+    return tok.count("(") - tok.count(")") if _is_shell_op(tok) else 0
 
 
 def _gh_word_repo_values(text, inherited):
     """The `GH_REPO` value reaching each gh word in `text` itself, as (value, argv, from_env), past `inherited`.
 
-    A gh write behind a run-time command word is one such word (see `_gh_invocations`). A prefix
-    reaches the word as its own command's, or behind a launcher (see `_launcher_prefix`). The
-    shell's state reaches it wherever it runs, as behind `flock` or `find -exec`.
+    A gh write behind a run-time command word is one such word (see `_gh_invocations`). A gh word
+    runs as its own command, or behind a launcher such as `flock` or `find -exec` (see
+    `_launcher_prefix`). Its prefix reaches it there, or else the shell's state does.
     """
     toks, invocations = _gh_invocations(text)
     states = _gh_repo_states(toks, inherited)
@@ -3249,7 +3270,9 @@ def _gh_word_repo_values(text, inherited):
         reached, pairs = _command_prefix(toks, x)
         if not reached:
             reached, pairs = _launcher_prefix(toks, x)
-        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"] if reached else []
+        if not reached:
+            continue
+        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"]
         out += [(v, argv, env) for v, env in prefix or states[x]]
     return out
 
@@ -7482,6 +7505,31 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         _STRANGER_GH_REPO,
         "deny",
         "an environment GH_REPO behind find -exec",
+    ),
+    (
+        "export GH_REPO=example/repo; gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "allow",
+        "a top-level export replaces an environment GH_REPO",
+    ),
+    (
+        "GH_REPO=example/repo bash -c 'gh pr comment 5 -b x'",
+        _STRANGER_GH_REPO,
+        "allow",
+        "a wrapper prefix replaces an environment GH_REPO",
+    ),
+    ("echo gh pr comment 5 -b x", _STRANGER_GH_REPO, "allow", "a gh word that is an argument"),
+    (
+        "false && export GH_REPO=example/repo; gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "a conditional export does not replace an environment GH_REPO",
+    ),
+    (
+        "f() { export GH_REPO=example/repo; }; gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "a function's export does not replace an environment GH_REPO",
     ),
     (
         "(export GH_REPO=example/repo; gh pr view 1); gh pr comment 5 -b x",
