@@ -30,6 +30,7 @@ from typing import ClassVar
 from unittest import mock
 
 from host_capability import bash_or_skip
+from runner_commands import FORGING_LINES, FORGING_NAMES, ORDINARY_LINES, forged_lines
 from workflow_steps import step_script, yaml_step, yaml_value
 
 try:
@@ -4432,6 +4433,16 @@ class TestReusableGateExclusions(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("Excluding 1 path(s)", result.stdout)
 
+    def test_an_exclusion_shaped_like_a_command_is_echoed_inert(self) -> None:
+        (self.root / ".github" / "prose-gate-excludes").write_bytes(
+            b"vendor/x##[error]forged\nvendor/a\r::error::forged\n"
+        )
+        result = self.run_action()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual([], forged_lines(result.stdout + result.stderr))
+        self.assertIn("vendor/x##\\x5berror]forged", result.stdout)
+        self.assertIn("vendor/a\\x0d::error::forged", result.stdout)
+
     def test_an_empty_contract_is_no_exclusions(self) -> None:
         (self.root / ".github" / "prose-gate-excludes").write_bytes(b"")
         result = self.run_action()
@@ -5395,6 +5406,68 @@ class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
         self.assertEqual(1, done.returncode, done.stderr)
         self.assertIn("dupword", done.stdout)
         self.assertNotIn("UnicodeEncodeError", done.stderr)
+
+
+class TestNamesCannotForgeWorkflowCommands(unittest.TestCase):
+    """A tracked name or file text shaped like a workflow command prints as inert text.
+
+    The finding line opens on the tracked name with no indent at all. The runner reads both of
+    the gate's streams, so each is checked, on every output mode that prints a name.
+    """
+
+    NAMES = (*FORGING_NAMES, "split.md\n::error::forged")
+    UNDECODED = "run-##[error]undecoded.md"
+
+    def test_printable_leaves_no_line_a_command_parser_reads(self) -> None:
+        for line in FORGING_LINES:
+            with self.subTest(line=line):
+                self.assertEqual([], forged_lines(prose_lint.printable(line)))
+
+    def test_printable_leaves_an_ordinary_line_as_it_was(self) -> None:
+        for line in ORDINARY_LINES:
+            with self.subTest(line=line):
+                self.assertEqual(line, prose_lint.printable(line))
+
+    def tree(self) -> Path:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        try:
+            for name in self.NAMES:
+                (root / f"{name}.md").write_text("It has a dupword dupword in it.\n", "utf-8")
+            (root / self.UNDECODED).write_bytes(b"caf\xe9\n")
+        except OSError:
+            self.skipTest("this filesystem refuses a colon, a bracket, or a newline in a name")
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        return root
+
+    def run_gate(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        done = subprocess.run(
+            [sys.executable, str(PROSE_LINT_SCRIPT), str(root), "--check", "dupword", *args],
+            capture_output=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            check=False,
+            cwd=root,
+        )
+        self.assertEqual([], forged_lines(done.stdout))
+        self.assertEqual([], forged_lines(done.stderr))
+        return done
+
+    def test_a_forging_name_raises_its_finding_without_forging_a_command(self) -> None:
+        done = self.run_gate(self.tree())
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertEqual(len(self.NAMES), done.stdout.count(": dupword: "), done.stdout)
+        self.assertIn("\\x3a:error title=forged::all checks passed.md:1: dupword", done.stdout)
+        self.assertIn("split.md\\x0a::error::forged.md:1: dupword", done.stdout)
+        self.assertIn("run-##\\x5berror]undecoded.md", done.stderr)
+
+    def test_the_summary_and_the_file_listing_print_a_forging_name_inert(self) -> None:
+        root = self.tree()
+        summary = self.run_gate(root, "--summary")
+        self.assertIn("run-##\\x5berror]forged.md", summary.stderr)
+        listing = self.run_gate(root, "--list-files")
+        self.assertEqual(0, listing.returncode, listing.stderr)
+        self.assertIn("\\x3a:error title=forged::all checks passed.md", listing.stdout)
 
 
 class TestDiffScopeReachesAQuotedName(unittest.TestCase):

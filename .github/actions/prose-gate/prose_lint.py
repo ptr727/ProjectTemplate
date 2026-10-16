@@ -899,6 +899,26 @@ def quoted(paths, cap: int | None = None) -> str:
     return ", ".join(repr(str(p)) for p in shown) + more
 
 
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+COMMAND_LEAD = re.compile(r"\A(\s*):(?=:)")
+LEGACY_COMMAND = "##["
+
+
+def printable(line: str) -> str:
+    """`line` spelled so it prints as one line of this gate's output and nothing else.
+
+    A tracked name and a file's own text both reach a finding, and either may hold a newline, an
+    escape sequence, or a workflow command. The Actions runner executes a line opening on `::`
+    once leading whitespace is trimmed, and a line holding `##[` anywhere. So each C0 or C1
+    control and DEL is escaped, as are the colon opening such a line and the bracket of each
+    `##[`. A lone surrogate from a name that is not UTF-8 is escaped too, for a strict stream.
+    """
+    escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+    escaped = COMMAND_LEAD.sub(lambda m: f"{m.group(1)}\\x3a", escaped)
+    escaped = escaped.replace(LEGACY_COMMAND, "##\\x5b")
+    return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
 def repo_root(path: Path) -> str:
     """The repository top level containing `path`, or '' when git cannot say."""
     start = path if path.is_dir() else path.parent
@@ -1001,7 +1021,9 @@ def discover(
         # It also printed that git could not describe a tree git describes fine.
         if candidates is None and not repo_root(base):
             print(
-                f"warning: git cannot describe {base}, falling back to a filesystem walk",
+                printable(
+                    f"warning: git cannot describe {base}, falling back to a filesystem walk"
+                ),
                 file=sys.stderr,
             )
             # A walk reports what is on disk, so it carries the untracked files already.
@@ -3288,18 +3310,22 @@ def main(argv: list[str] | None = None) -> int:
     if unusable:
         # Quoted, since a path holding a space or a comma is unreadable in a bare comma-joined list.
         print(
-            f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
-            "Refusing rather than falling back to the current directory, which would scan one "
-            "tree and choose the rule set from another.",
+            printable(
+                f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
+                "Refusing rather than falling back to the current directory, which would scan "
+                "one tree and choose the rule set from another."
+            ),
             file=sys.stderr,
         )
         return 2
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
         print(
-            f"error: the requested paths span more than one repository ({quoted(git_roots)}). "
-            "Each declares its own workflow model, so no single rule set is correct for all of "
-            "them. Run the gate once per repository.",
+            printable(
+                f"error: the requested paths span more than one repository ({quoted(git_roots)}). "
+                "Each declares its own workflow model, so no single rule set is correct for all "
+                "of them. Run the gate once per repository."
+            ),
             file=sys.stderr,
         )
         return 2
@@ -3355,7 +3381,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.list_files:
         for f in files:
-            print(keys[f])
+            print(printable(keys[f]))
         return 0
 
     discovered = len(files)
@@ -3368,10 +3394,12 @@ def main(argv: list[str] | None = None) -> int:
         # A CI adoption hits this first, where an unresolvable base walls off the first run.
         # Scoping to nothing instead would report a false clean, so neither default is honest.
         print(
-            f"error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed "
-            "lines. Refusing to scan the whole tree instead, since that reports the existing "
-            "backlog as though this change introduced it. Check the ref exists and that the "
-            "checkout carries its history.",
+            printable(
+                f"error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed "
+                "lines. Refusing to scan the whole tree instead, since that reports the existing "
+                "backlog as though this change introduced it. Check the ref exists and that the "
+                "checkout carries its history."
+            ),
             file=sys.stderr,
         )
         return 2
@@ -3390,12 +3418,14 @@ def main(argv: list[str] | None = None) -> int:
             if unread:
                 shown = quoted(unread, 5)
                 print(
-                    f"error: the diff against {a.diff!r} names {len(unread)} readable file(s) "
-                    f"this run was asked about, and the scan matched none of them: {shown}. "
-                    "Refusing to report a clean run, since a gate that read nothing is "
-                    "indistinguishable from a gate with nothing to read. Check that the run "
-                    "starts at the repository top level and that the requested paths cover "
-                    "the change.",
+                    printable(
+                        f"error: the diff against {a.diff!r} names {len(unread)} readable "
+                        f"file(s) this run was asked about, and the scan matched none of them: "
+                        f"{shown}. Refusing to report a clean run, since a gate that read nothing "
+                        "is indistinguishable from a gate with nothing to read. Check that the "
+                        "run starts at the repository top level and that the requested paths "
+                        "cover the change."
+                    ),
                     file=sys.stderr,
                 )
                 return 2
@@ -3415,18 +3445,20 @@ def main(argv: list[str] | None = None) -> int:
             bykind[kind] = bykind.get(kind, 0) + 1
             byfile[keys[f]] = byfile.get(keys[f], 0) + 1
             if not a.summary:
-                print(f"{keys[f]}:{ln}: {kind}: {msg}")
+                print(printable(f"{keys[f]}:{ln}: {kind}: {msg}"))
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
     print(
-        scope_note(
-            len(files),
-            discovered,
-            inscope,
-            a.diff,
-            gate_provenance(a.provenance),
-            [keys[f] for f in refused],
-            [keys[f] for f in undecoded],
+        printable(
+            scope_note(
+                len(files),
+                discovered,
+                inscope,
+                a.diff,
+                gate_provenance(a.provenance),
+                [keys[f] for f in refused],
+                [keys[f] for f in undecoded],
+            )
         ),
         file=sys.stderr,
     )
@@ -3436,7 +3468,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {k:16} {v}", file=sys.stderr)
         if a.summary:
             for k, v in sorted(byfile.items(), key=lambda kv: -kv[1])[:15]:
-                print(f"  {v:5}  {k}", file=sys.stderr)
+                print(printable(f"  {v:5}  {k}"), file=sys.stderr)
     return 1 if total else 0
 
 
