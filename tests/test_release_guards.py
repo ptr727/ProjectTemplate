@@ -16,6 +16,7 @@ from subprocess import run
 from typing import NamedTuple
 
 from host_capability import bash_or_skip
+from runner_commands import forged_lines
 from workflow_steps import step_script_text
 
 REPO = Path(__file__).resolve().parents[1]
@@ -57,8 +58,8 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
     Legal Markdown is among what this refuses, a fence under a second list level and one
     carrying a tilde in its info string among it, and the refused cases below are the list.
-    No document here uses any of it today, and only `AUDIT.md` is under test, so that stays
-    true by convention rather than by check.
+    No document here uses any of it today. Only `AUDIT.md` and `docs/reusable-workflows.md` are
+    under test, so that stays true by convention rather than by check.
 
     One container case is left rather than refused. An HTML block holding an odd number of
     fence-shaped lines flips the open and closed parity, since a renderer reads the block as raw
@@ -204,6 +205,11 @@ def shell_blocks(markdown: str) -> list[str]:
     return [b.body for b in fenced_blocks(markdown) if b.label.lower() in SHELL_LABELS]
 
 
+def yaml_blocks(markdown: str) -> list[str]:
+    """The body of every fenced YAML block in `markdown`, ending in the newline a file holding it ends in."""
+    return [b.body + "\n" for b in fenced_blocks(markdown) if b.label.lower() == "yaml"]
+
+
 def fenced_shell_block(markdown: str, marker: str) -> str:
     """The one fenced shell block in `markdown` containing `marker`.
 
@@ -309,7 +315,11 @@ class ReleaseGuardCase(unittest.TestCase):
 
             # The rejected value is printed for diagnosis, and neither command syntax may survive in it.
             # The runner reads a :: command only at a line start, but a ##[ command anywhere in a line.
-            for injected in ("1.2\n::error::injected", "1.2\n##[error]injected"):
+            for injected in (
+                "1.2\n::error::injected",
+                "1.2\n##[error]injected",
+                "1.2\n\u3000::warning::injected",
+            ):
                 with self.subTest(injected=injected):
                     output.write_text("", encoding="utf-8")
                     env = {**os.environ, "BRANCH": "main", "SEMVER2": injected}
@@ -324,9 +334,10 @@ class ReleaseGuardCase(unittest.TestCase):
                     )
                     self.assertEqual(1, verdict.returncode)
                     self.assertIn("injected", verdict.stdout)
-                    lines = verdict.stdout.splitlines()
-                    self.assertEqual(1, len([line for line in lines if line.startswith("::")]))
-                    self.assertNotIn("##[", verdict.stdout)
+                    self.assertEqual(
+                        ["::error::semver2 carries no M.N.P core to build a PEP 440 version from."],
+                        forged_lines(verdict.stdout),
+                    )
 
             # The version step compares the branch but never prints it.
             output.write_text("", encoding="utf-8")
@@ -396,8 +407,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual("", suffix_for("push", main, "ptr727-codegen[bot]"))
         self.assertEqual("-7", suffix_for("push", main, "someone"))
         self.assertEqual("-7", suffix_for("push", "refs/heads/develop", "ptr727-codegen[bot]"))
-        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
-        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         stub_name = stub.splitlines()[0]
         self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
 
@@ -568,9 +578,12 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(smoke=smoke):
                 code, output = gate(injected, "1.2.34-g1a2b3c4d5e", smoke=smoke)
                 self.assertEqual(1, code)
-                commands = [line for line in output.splitlines() if line.startswith("::")]
-                self.assertEqual(1, len(commands))
-                self.assertNotIn("##[", output)
+                self.assertEqual(
+                    [
+                        "::error::The branch input is not a valid git branch name, so the build is refused."
+                    ],
+                    forged_lines(output),
+                )
                 self.assertNotIn("injected", output)
 
         # A valid branch reaches the version check, whose refusal names the version it rejected.
@@ -701,6 +714,15 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stub_text)
 
+    def test_smoke_caller_stub_is_its_snippet_byte_for_byte(self) -> None:
+        """The documented release-with-smoke stub is the catalog snippet, so the two cannot drift."""
+        stub = (REPO / "catalog/snippets/workflows/test-pull-request-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
+        self.assertIn(stub, blocks)
+        self.assertIn("smoke: true", stub)
+
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         jobs = re.split(r"(?m)^  (?=[a-z][a-z-]*:\n)", workflow.split("\njobs:\n", 1)[1])
@@ -820,7 +842,13 @@ class ReleaseGuardCase(unittest.TestCase):
 
         offenders: list[tuple[str, str]] = []
         exempt = 0
-        for function in (fenced_blocks, shell_blocks, mislabeled_posix_blocks, fenced_shell_block):
+        for function in (
+            fenced_blocks,
+            shell_blocks,
+            yaml_blocks,
+            mislabeled_posix_blocks,
+            fenced_shell_block,
+        ):
             found, marked = bare_whitespace_predicates(inspect.getsource(function))
             offenders.extend((function.__name__, line) for line in found)
             exempt += marked
@@ -1098,13 +1126,20 @@ gh() {
         stubs.mkdir()
         # Each stub writes the report its real tool would, so the step's own report check is what decides.
         # The venv interpreter answers a version query with a version no host carries, so a test can tell it was asked.
-        # It holds mypy only where VENV_MYPY is set, and logs a mypy run the way the uv stubs log theirs.
+        # It holds mypy, ruff, or pyright only where VENV_MYPY, VENV_RUFF, or VENV_PYRIGHT is set.
+        # It logs a run of any of them the way the uv stubs log theirs.
         python_stub = (
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
-            '"-c "*find_spec*) [ -n "${VENV_MYPY:-}" ] ;;\n'
+            '"-c "*find_spec*)\n'
+            '  case "$2" in\n'
+            '  *\'"mypy"\'*) [ -n "${VENV_MYPY:-}" ] ;;\n'
+            '  *\'"ruff"\'*) [ -n "${VENV_RUFF:-}" ] ;;\n'
+            '  *\'"pyright"\'*) [ -n "${VENV_PYRIGHT:-}" ] ;;\n'
+            "  *) exit 1 ;;\n"
+            "  esac ;;\n"
             '"-c "*) echo 3.99 ;;\n'
-            '"-m mypy") echo "python $*" >> "$STUB_LOG" ;;\n'
+            '"-m mypy" | "-m ruff" | "-m pyright") echo "python $*" >> "$STUB_LOG" ;;\n'
             "*) echo x > coverage.xml ;;\n"
             "esac\n"
         )
@@ -1117,8 +1152,7 @@ gh() {
             '*" pytest "*|*" xml "*) echo x > coverage.xml ;;\n'
             "esac\n"
         )
-        venv_python = work / ".venv/bin/python"
-        if venv_python.exists():
+        for venv_python in work.glob("**/.venv/bin/python"):
             venv_python.write_text(python_stub, encoding="utf-8")
             venv_python.chmod(0o755)
         for name in ("uv", "uvx"):
@@ -1237,6 +1271,8 @@ gh() {
         root_config = {"pyproject.toml": "[tool.mypy]\n", "sub/pyproject.toml": "[tool.ruff]\n"}
         in_sub = {"PYTHON_PROJECTS": "lint-only\tsub\n"}
         venv_mypy = {"VENV_MYPY": "1"}
+        pyright_section = {**mypy_section, "pyproject.toml": "[tool.pyright]\n"}
+        venv_pyright = {"VENV_PYRIGHT": "1"}
         cases = {
             "declared pip mypy reads the venv": (
                 "pip",
@@ -1285,6 +1321,22 @@ gh() {
                 venv_mypy,
                 0,
                 r"^python -m mypy\n",
+            ),
+            "declared pip pyright reads the venv": (
+                "pip",
+                pyright_section,
+                True,
+                None,
+                0,
+                r"^uvx pyright@latest --pythonpath /\S+/\.venv/bin/python\n",
+            ),
+            "declared pip pyright installed in the venv runs there": (
+                "pip",
+                pyright_section,
+                True,
+                venv_pyright,
+                0,
+                r"^python -m pyright --pythonpath /\S+/\.venv/bin/python\n",
             ),
             "undeclared pip mypy keeps the old call": (
                 "pip",
@@ -1356,8 +1408,71 @@ gh() {
                     self.assertRegex(written, re.compile(call, re.MULTILINE))
                 if env is in_sub:
                     self.assertIn("mypy in sub, configured in .", stdout)
-                if env is venv_mypy:
+                if env is venv_mypy or env is venv_pyright:
                     self.assertNotIn("uvx", written)
+
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "runs stand-in tools only a POSIX host can execute",
+    )
+    def test_ruff_prefers_a_declared_pip_directory_venv(self) -> None:
+        """A declared pip directory's ruff is the one its requirements pin, and uvx floats only where the venv lacks one."""
+        pip_tree = {"pyproject.toml": "", "requirements.txt": "", ".venv/bin/python": ""}
+        venv_ruff = {"VENV_RUFF": "1"}
+        for step, args in (
+            ("Lint Python step", "check ."),
+            ("Check Python formatting step", "format --check ."),
+        ):
+            cases = {
+                "declared pip ruff installed in the venv runs there": (
+                    "pip",
+                    pip_tree,
+                    True,
+                    venv_ruff,
+                    f"python -m ruff {args}\n",
+                ),
+                "declared pip with no venv ruff floats": (
+                    "pip",
+                    pip_tree,
+                    True,
+                    None,
+                    f"uvx ruff@latest {args}\n",
+                ),
+                "undeclared pip keeps the old call": (
+                    "pip",
+                    pip_tree,
+                    False,
+                    venv_ruff,
+                    f"uvx ruff@latest {args}\n",
+                ),
+                "lint-only floats": (
+                    "lint-only",
+                    pip_tree,
+                    True,
+                    venv_ruff,
+                    f"uvx ruff@latest {args}\n",
+                ),
+                "a declared pip subdirectory reads its own venv": (
+                    "pip",
+                    {f"sub/{path}": text for path, text in pip_tree.items()},
+                    True,
+                    {**venv_ruff, "PYTHON_PROJECTS": "pip\tsub\n"},
+                    f"python -m ruff {args}\n",
+                ),
+                "uv runs its locked ruff": (
+                    "uv",
+                    {"pyproject.toml": ""},
+                    True,
+                    venv_ruff,
+                    f"uv run ruff {args}\n",
+                ),
+            }
+            for label, (kind, tree, declared, env, call) in cases.items():
+                with self.subTest(step=step, case=label):
+                    code, _, written = self.run_python_tests_step(
+                        kind, tree, declared, step_name=step, extra_env=env
+                    )
+                    self.assertEqual((0, call), (code, written))
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",

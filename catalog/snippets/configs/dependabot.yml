@@ -43,9 +43,13 @@ updates:
           - "husky"
           - "dotnet-outdated-tool"
 
+  # The "/" directory covers only .github/workflows and a root action.yml.
+  # A repo carrying its own composite actions under .github/actions, such as a validate hook, keeps the second glob so their pins stay current.
   - package-ecosystem: "github-actions"
     target-branch: "main"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "daily"
     groups:
@@ -55,7 +59,9 @@ updates:
 
   - package-ecosystem: "github-actions"
     target-branch: "develop"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "daily"
     groups:
@@ -82,6 +88,36 @@ updates:
   - package-ecosystem: "uv"
     target-branch: "develop"
     directory: "/PythonPackage"
+    schedule:
+      interval: "daily"
+    groups:
+      pypi-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "ruff"
+          - "pyright"
+          - "mypy"
+
+  # The pip pair is kept only by a repo with a pip-form Python directory, a requirements*.txt with no uv.lock.
+  # Its directory points at that Python directory, so adjust it per repo layout.
+  - package-ecosystem: "pip"
+    target-branch: "main"
+    directory: "/PythonProject"
+    schedule:
+      interval: "daily"
+    groups:
+      pypi-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "ruff"
+          - "pyright"
+          - "mypy"
+
+  - package-ecosystem: "pip"
+    target-branch: "develop"
+    directory: "/PythonProject"
     schedule:
       interval: "daily"
     groups:

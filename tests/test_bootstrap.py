@@ -932,7 +932,7 @@ $wanted = @(
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
-    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall'
+    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -1326,6 +1326,70 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
         result = self.run_loader("Lock-Directory")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_a_run_ending_inside_its_callers_process_releases_the_directory_lock(self) -> None:
+        """Two runs in one pwsh process, as two typed at one interactive prompt are, the first ending through `die`'s exit.
+
+        The exit ends only the script it is in, so the process and anything the run left open outlive it.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            harness = work / "harness.ps1"
+            harness.write_text(POWERSHELL_TREE_HARNESS, encoding="utf-8")
+            first = work / "first.ps1"
+            first.write_text(
+                "$script:WANT_HELP = $false\n"
+                "function Test-Prerequisite {}\n"
+                "function Resolve-Mode { 'report' }\n"
+                "function Resolve-Ref {}\n"
+                "function Get-Tree { die 'the download failed' }\n"
+                "main",
+                encoding="utf-8",
+            )
+            second = work / "second.ps1"
+            # The same mode as the first run's, since the mode names the lock file and the harness defaults to another.
+            second.write_text(
+                "$script:MODE = 'report'\nLock-Directory\n[Console]::Out.WriteLine('locked')",
+                encoding="utf-8",
+            )
+            driver = work / "driver.ps1"
+            driver.write_text(
+                "param([string]$Harness, [string]$Loader, [string]$Dir, [string]$First, [string]$Second)\n"
+                "& $Harness -Loader $Loader -Dir $Dir -BodyFile $First\n"
+                '[Console]::Out.WriteLine("first exited $LASTEXITCODE")\n'
+                "$global:LASTEXITCODE = 0\n"
+                "& $Harness -Loader $Loader -Dir $Dir -BodyFile $Second\n"
+                "exit $LASTEXITCODE\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "pwsh",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-File",
+                    str(driver),
+                    "-Harness",
+                    str(harness),
+                    "-Loader",
+                    str(BOOTSTRAP_PS),
+                    "-Dir",
+                    str(self.dir),
+                    "-First",
+                    str(first),
+                    "-Second",
+                    str(second),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=120,
+            )
+        self.assertIn("the download failed", result.stderr)
+        self.assertIn("first exited 1", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("locked", result.stdout)
+
     @unittest.skipUnless(sys.platform == "linux", "the lock bootstrap.sh takes is a Linux flock")
     def test_a_lock_bootstrap_sh_holds_refuses_this_loader(self) -> None:
         """FileShare.None is a flock on Linux, which is the one thing that makes the two loaders' locks one lock."""
@@ -1699,6 +1763,15 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(f"install-agents.sh --install <{given}>", self.agents_steps())
 
+    def test_agents_all_in_another_case_is_a_tool_name_not_the_keyword(self) -> None:
+        expected: list[str] = []
+        for given in ("ALL", "All"):
+            with self.subTest(given=given):
+                result = self.run_main(action="--agents", args=(given,))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected.append(f"install-agents.sh --install {given}")
+                self.assertEqual(self.agents_steps(), expected)
+
     def test_agents_drops_empty_names_from_the_list(self) -> None:
         result = self.run_main(action="--agents", args=("herdr,,cswap,",))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1878,6 +1951,15 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         result = self.run_agents(["all"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), ["install-agents.ps1 -Install -All"], result.stdout)
+
+    def test_all_in_another_case_is_a_tool_name_not_the_keyword(self) -> None:
+        expected: list[str] = []
+        for given in ("ALL", "All"):
+            with self.subTest(given=given):
+                result = self.run_agents([given])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected.append(f"install-agents.ps1 -Install {given}")
+                self.assertEqual(self.steps(), expected, result.stdout)
 
     def test_all_beside_other_names_is_refused(self) -> None:
         result = self.run_agents(["all,herdr"])

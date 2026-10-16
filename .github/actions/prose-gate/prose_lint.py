@@ -852,13 +852,18 @@ INSTRUCTION_DOCS = frozenset(
 )
 
 
+def is_markdown(path: Path) -> bool:
+    """Whether the file is Markdown, its suffix read in any case as `syntax_for` reads it."""
+    return path.suffix.lower() == ".md"
+
+
 def is_instruction_text(path: Path, root: Path | None) -> bool:
     """Whether this Markdown file is instruction text rather than the repository's own narrative.
 
     A skill is matched by its root rather than by its name, since the source tree and each
     generated distribution carry the same file under a root of its own.
     """
-    if path.suffix.lower() != ".md":
+    if not is_markdown(path):
         return False
     key = repo_key(path, root) if root is not None else rel(path)
     if key in INSTRUCTION_DOCS or key.startswith(SKILL_ROOTS):
@@ -892,6 +897,26 @@ def quoted(paths, cap: int | None = None) -> str:
     shown = ordered if cap is None else ordered[:cap]
     more = " and more" if len(shown) < len(ordered) else ""
     return ", ".join(repr(str(p)) for p in shown) + more
+
+
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+COMMAND_LEAD = re.compile(r"\A(\s*):(?=:)")
+LEGACY_COMMAND = "##["
+
+
+def printable(line: str) -> str:
+    """`line` spelled so it prints as one line of this gate's output and nothing else.
+
+    A tracked name and a file's own text both reach a finding, and either may hold a newline, an
+    escape sequence, or a workflow command. The Actions runner executes a line opening on `::`
+    once leading whitespace is trimmed, and a line holding `##[` anywhere. So each C0 or C1
+    control and DEL is escaped, as are the colon opening such a line and the bracket of each
+    `##[`. A lone surrogate from a name that is not UTF-8 is escaped too, for a strict stream.
+    """
+    escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
+    escaped = COMMAND_LEAD.sub(lambda m: f"{m.group(1)}\\x3a", escaped)
+    escaped = escaped.replace(LEGACY_COMMAND, "##\\x5b")
+    return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
 def repo_root(path: Path) -> str:
@@ -996,7 +1021,9 @@ def discover(
         # It also printed that git could not describe a tree git describes fine.
         if candidates is None and not repo_root(base):
             print(
-                f"warning: git cannot describe {base}, falling back to a filesystem walk",
+                printable(
+                    f"warning: git cannot describe {base}, falling back to a filesystem walk"
+                ),
                 file=sys.stderr,
             )
             # A walk reports what is on disk, so it carries the untracked files already.
@@ -2330,6 +2357,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
     body and the comment line after it is not read as that line's continuation.
     """
     comments, kept, configured = prose_comment_candidates(path, raw, lines)
+    markdown = is_markdown(path)
 
     out: list[tuple[int, str, str]] = []
     prev_body = ""
@@ -2344,7 +2372,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
         # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
         # A comment that does punctuate a sentence is prose and is judged as prose.
-        if path.suffix == ".md" and not SENT_END.search(body):
+        if markdown and not SENT_END.search(body):
             prev_body = ""
             continue
         body = ENUM_PREFIX.sub("", body)
@@ -2487,7 +2515,7 @@ def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
     label is the remedy, since a directive whose written reason is punctuated as a sentence reads
     as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
     """
-    if path.suffix.lower() == ".md" or syntax_for(path) is None:
+    if is_markdown(path) or syntax_for(path) is None:
         return []
     spec = POWERSHELL_DOC if path.suffix.lower() in {".ps1", ".psm1"} else None
     bodies = comment_bodies(path, raw, spec)
@@ -2649,7 +2677,7 @@ def issue_ref_findings(
     out: list[tuple[int, str, str]] = []
     spans: dict[int, list[str]] = {}
     links: dict[int, list[str]] = {}
-    if path.suffix.lower() == ".md":
+    if is_markdown(path):
         if not is_instruction_text(path, root):
             return out
         fenced = fenced_lines(lines)
@@ -3069,11 +3097,12 @@ def check_file(
     if raw != decoded and {"charset", "charset-unknown"} & rules:
         out.extend(f for f in charset_findings(1, "\ufeff") if f[1] in rules)
     lines = raw.split("\n")
+    markdown = is_markdown(path)
     # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
     # The file's own directory anchors a relative link, the repository root anchors the rest.
     # No git means no deletion history to key on, so the rule stands down rather than guess.
     dead_root: Path | None = None
-    if "dead-path" in rules and path.suffix == ".md":
+    if "dead-path" in rules and markdown:
         found = str(root) if root else repo_root(path)
         if found:
             dead_root = Path(found)
@@ -3094,13 +3123,13 @@ def check_file(
     # A source line holds identifiers and literals, and an attribute value may legally repeat.
     # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
     comments: dict[int, list[str]] = {}
-    if {"spelling", "dupword"} & rules and path.suffix != ".md":
+    if {"spelling", "dupword"} & rules and not markdown:
         for ln, text, _leading, _raw in extracted_comments(path, lines):
             comments.setdefault(ln, []).append(text)
     if "sentence-length" in rules:
-        if path.suffix == ".md":
+        if markdown:
             out.extend(sentence_length_findings(lines, allowed))
-        elif path.suffix.lower() != ".md":
+        else:
             out.extend(comment_sentence_findings(path, raw, lines, allowed))
             if path.suffix.lower() == ".py":
                 out.extend(docstring_sentence_findings(raw, lines, allowed))
@@ -3127,11 +3156,11 @@ def check_file(
             out.extend(dead_path_findings(dead_root, path.resolve().parent, i, line))
 
         txt = strip_inline_code(line)
-        prose = strip_quoted(txt) if path.suffix == ".md" else txt
+        prose = strip_quoted(txt) if markdown else txt
 
         # Both prose rules are Markdown-only until a comment can be told from code.
         # A shell script carries 78 statement separators that are not prose at all.
-        if path.suffix == ".md":
+        if markdown:
             unquoted = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
             if "semicolon" in rules:
                 for span in list_spans(unquoted):
@@ -3165,11 +3194,7 @@ def check_file(
         if "dupword" in rules:
             # Each comment on the line is judged on its own rather than joined with its neighbors.
             # Joining them would read the second's opening word as a repeat of the first's last.
-            texts = (
-                [prose]
-                if path.suffix == ".md"
-                else [strip_inline_code(c) for c in comments.get(i, [])]
-            )
+            texts = [prose] if markdown else [strip_inline_code(c) for c in comments.get(i, [])]
             for text in texts:
                 for m in DUPWORD.finditer(text):
                     if m.group(0).lower() in DUP_ALLOW:
@@ -3177,12 +3202,12 @@ def check_file(
                     out.append((i, "dupword", f"duplicated word '{m.group(1)}'"))
 
         if "spelling" in rules:
-            texts = [prose] if path.suffix == ".md" else comments.get(i, [])
+            texts = [prose] if markdown else comments.get(i, [])
             for m in BRITISH_RE.finditer(strip_inline_code(" ".join(texts))):
                 found = m.group(0)
                 out.append((i, "spelling", f"British spelling '{found}' -> '{us_form(found)}'"))
 
-        if "sentence-split" in rules and path.suffix == ".md":
+        if "sentence-split" in rules and markdown:
             stripped = txt.strip()
             is_prose = (
                 stripped
@@ -3285,18 +3310,22 @@ def main(argv: list[str] | None = None) -> int:
     if unusable:
         # Quoted, since a path holding a space or a comma is unreadable in a bare comma-joined list.
         print(
-            f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
-            "Refusing rather than falling back to the current directory, which would scan one "
-            "tree and choose the rule set from another.",
+            printable(
+                f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
+                "Refusing rather than falling back to the current directory, which would scan "
+                "one tree and choose the rule set from another."
+            ),
             file=sys.stderr,
         )
         return 2
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
         print(
-            f"error: the requested paths span more than one repository ({quoted(git_roots)}). "
-            "Each declares its own workflow model, so no single rule set is correct for all of "
-            "them. Run the gate once per repository.",
+            printable(
+                f"error: the requested paths span more than one repository ({quoted(git_roots)}). "
+                "Each declares its own workflow model, so no single rule set is correct for all "
+                "of them. Run the gate once per repository."
+            ),
             file=sys.stderr,
         )
         return 2
@@ -3352,7 +3381,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.list_files:
         for f in files:
-            print(keys[f])
+            print(printable(keys[f]))
         return 0
 
     discovered = len(files)
@@ -3365,10 +3394,12 @@ def main(argv: list[str] | None = None) -> int:
         # A CI adoption hits this first, where an unresolvable base walls off the first run.
         # Scoping to nothing instead would report a false clean, so neither default is honest.
         print(
-            f"error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed "
-            "lines. Refusing to scan the whole tree instead, since that reports the existing "
-            "backlog as though this change introduced it. Check the ref exists and that the "
-            "checkout carries its history.",
+            printable(
+                f"error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed "
+                "lines. Refusing to scan the whole tree instead, since that reports the existing "
+                "backlog as though this change introduced it. Check the ref exists and that the "
+                "checkout carries its history."
+            ),
             file=sys.stderr,
         )
         return 2
@@ -3387,12 +3418,14 @@ def main(argv: list[str] | None = None) -> int:
             if unread:
                 shown = quoted(unread, 5)
                 print(
-                    f"error: the diff against {a.diff!r} names {len(unread)} readable file(s) "
-                    f"this run was asked about, and the scan matched none of them: {shown}. "
-                    "Refusing to report a clean run, since a gate that read nothing is "
-                    "indistinguishable from a gate with nothing to read. Check that the run "
-                    "starts at the repository top level and that the requested paths cover "
-                    "the change.",
+                    printable(
+                        f"error: the diff against {a.diff!r} names {len(unread)} readable "
+                        f"file(s) this run was asked about, and the scan matched none of them: "
+                        f"{shown}. Refusing to report a clean run, since a gate that read nothing "
+                        "is indistinguishable from a gate with nothing to read. Check that the "
+                        "run starts at the repository top level and that the requested paths "
+                        "cover the change."
+                    ),
                     file=sys.stderr,
                 )
                 return 2
@@ -3412,18 +3445,20 @@ def main(argv: list[str] | None = None) -> int:
             bykind[kind] = bykind.get(kind, 0) + 1
             byfile[keys[f]] = byfile.get(keys[f], 0) + 1
             if not a.summary:
-                print(f"{keys[f]}:{ln}: {kind}: {msg}")
+                print(printable(f"{keys[f]}:{ln}: {kind}: {msg}"))
 
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
     print(
-        scope_note(
-            len(files),
-            discovered,
-            inscope,
-            a.diff,
-            gate_provenance(a.provenance),
-            [keys[f] for f in refused],
-            [keys[f] for f in undecoded],
+        printable(
+            scope_note(
+                len(files),
+                discovered,
+                inscope,
+                a.diff,
+                gate_provenance(a.provenance),
+                [keys[f] for f in refused],
+                [keys[f] for f in undecoded],
+            )
         ),
         file=sys.stderr,
     )
@@ -3433,7 +3468,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {k:16} {v}", file=sys.stderr)
         if a.summary:
             for k, v in sorted(byfile.items(), key=lambda kv: -kv[1])[:15]:
-                print(f"  {v:5}  {k}", file=sys.stderr)
+                print(printable(f"  {v:5}  {k}"), file=sys.stderr)
     return 1 if total else 0
 
 
