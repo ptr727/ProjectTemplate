@@ -225,10 +225,10 @@ def escapes_repo_root(value):
 def alternatives_errors(baseline):
     """The errors in each baseline entry's `alternatives`, the other paths its file may sit at instead.
 
-    The audit reads an alternative for a file's presence and an intent unit's staleness advisory. A
-    section, a contract, and a verbatim hash read whatever was found, and a carry writes the declared
-    path. So only a whole-file presence or intent entry may declare alternatives. It must also be
-    the one entry naming its path, since a second entry could add any of those checks. No
+    The audit runs every check on the file at the first of its declared path and alternatives
+    present, while a carry writes the declared path alone. So only a whole-file presence or intent
+    entry may declare alternatives, as the one entry naming its path, since a second entry could add
+    a section, a contract, or a verbatim hash. No
     alternative may be a declared path, which the audit would read as a second unit. CI runs no
     schema validation, so the list's shape is checked here as files.schema.json states it.
     """
