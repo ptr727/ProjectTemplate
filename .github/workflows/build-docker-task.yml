@@ -79,6 +79,9 @@ on:
       DOCKER_HUB_ACCESS_TOKEN:
         required: true
 
+env:
+  PLATFORMS: ${{ (!inputs.smoke && inputs.branch == 'main') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+
 jobs:
 
   # Resolves the image matrix once: the caller's matrix input directly, else the caller's own docker-prepare hook, else the hub default built from image.
@@ -189,7 +192,7 @@ jobs:
           push: ${{ inputs.push }}
           ref: ${{ inputs.ref }}
           branch: ${{ inputs.branch }}
-          smoke: ${{ inputs.smoke }}
+          platforms: ${{ env.PLATFORMS }}
 
   build-docker:
     name: Build Docker image job
@@ -202,9 +205,6 @@ jobs:
     strategy:
       matrix:
         image: ${{ fromJSON(needs.docker-prepare.outputs.matrix) }}
-    env:
-      # Multi-arch (amd64+arm64) only on a full main publish, and smoke and develop build amd64 only.
-      PLATFORMS: ${{ (!inputs.smoke && inputs.branch == 'main') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
 
     steps:
 
