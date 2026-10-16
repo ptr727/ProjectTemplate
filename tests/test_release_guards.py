@@ -701,6 +701,17 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stub_text)
 
+    def test_smoke_caller_stub_is_its_snippet_byte_for_byte(self) -> None:
+        """The documented release-with-smoke stub is the catalog snippet, so the two cannot drift."""
+        stub = (REPO / "catalog/snippets/workflows/test-pull-request-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        self.assertIn(stub, blocks)
+        self.assertIn("smoke: true", stub)
+        self.assertNotIn("<hub-main-commit-sha>", stub)
+
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         jobs = re.split(r"(?m)^  (?=[a-z][a-z-]*:\n)", workflow.split("\njobs:\n", 1)[1])

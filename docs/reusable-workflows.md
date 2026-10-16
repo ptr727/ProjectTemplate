@@ -156,7 +156,7 @@ Hub: `validate-task.yml` hosts a `lint` job (the fleet doc-lint block, language 
 
 - [x] Hub pull request on `develop` with the task, the hub's own hook and default, the manifest contracts, and the catalog snippets left for the release that follows, [#760][pr-760].
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `validate-task.yml`.
-- [ ] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates]. The no-build shape has one, `catalog/snippets/workflows/test-pull-request.yml`, re-pinned to `2.0.376` in #826. The release-with-smoke shape reaches the hub's `build-release-task.yml` by pin, so a snippet of its own is now writable, and this item stays open until one lands.
+- [x] Catalog snippets for both stub shapes in [Adopting the Gates][adopting-the-gates]. The no-build shape has one, `catalog/snippets/workflows/test-pull-request.yml`, re-pinned to `2.0.376` in #826. The release-with-smoke shape has `catalog/snippets/workflows/test-pull-request-smoke.yml`, pinned to `2.0.587`, the release its `publish-release.yml` snippet pins.
 - [x] Hook override path observed on a hub pull request run, [proof run][override-path-run] (runs `./.github/actions/validate`, no hub checkout). Default path observed on PhotoCleaner's adoption pull request, [pilot smoke run][pilot-smoke-run], where the hub's `validate-default` ran because that repo carries no `validate` hook. The follow-up self-reference pilot also runs the bundled prose and repository gates through `$/.github/actions/` without checking out the hub.
 - [x] PhotoCleaner (pilot, release trigger shape with smoke, the same repo that piloted stage 1): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`), both on 2026-08-16. `test-pull-request.yml` calls the hub validate task and no repo hook was needed.
 - [x] HomeAutomation-Config (second pilot, operational trigger shape at adoption, and release model since its 2026-09-24 reclassification): ptr727/HomeAutomation-Config#58 on `develop` (`d920805`), merged 2026-08-19 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin, and the same audit reports no `interface` finding on that file.
@@ -295,7 +295,7 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 ## Adopting the Gates
 
-A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below keeps the placeholder `@<hub-main-commit-sha> # <release-tag>` until it has a catalog snippet of its own. A downstream `publish-release.yml` reaches the same `validate-task.yml` by a released pin for its `validate` job. The hub workflow uses its local task path instead.
+A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes, and deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below is the [release-with-smoke caller snippet][smoke-caller-snippet] byte for byte, pinned the same way. A downstream repo carries it as `.github/workflows/test-pull-request.yml`, since the catalog file takes another name only because the no-build snippet holds that one. A downstream `publish-release.yml` reaches the same `validate-task.yml` by a released pin for its `validate` job. The hub workflow uses its local task path instead.
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
 
@@ -347,7 +347,7 @@ jobs:
   # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
     permissions:
       contents: read
 
@@ -356,7 +356,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
     permissions:
       contents: read
     # A Docker repo maps DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN by name here, since the task logs in to Docker Hub on every build for the higher rate limit.
@@ -369,8 +369,8 @@ jobs:
       enable_pypi: false
       enable_dotnet_publish: false
       nuget_project: ./Widget/Widget.csproj
-      # On a pull_request event github.ref_name is the PR ref (for example 123/merge), never the target branch,
-      # so the logical branch reads base_ref first and only falls back to ref_name on a non-PR trigger.
+      # On a pull_request event github.ref_name is the PR ref (for example 123/merge), never the target branch.
+      # The logical branch therefore reads base_ref first and falls back to ref_name only on a non-PR trigger.
       branch: ${{ github.base_ref || github.ref_name }}
 
   # Treats a skipped smoke-build (an unchanged target) as pass, and blocks on failure or cancelled (D1.5, D7.4).
@@ -810,6 +810,7 @@ Four things the hub cannot prove fall to downstream adopters. The first is cross
 [run-purpleair-417]: https://github.com/ptr727/homeassistant-purpleair/actions/runs/37581098442
 [run-startup-failure]: https://github.com/ptr727/ProjectTemplate/actions/runs/31972504539
 [secrets]: ../spec/secrets.json
+[smoke-caller-snippet]: ../catalog/snippets/workflows/test-pull-request-smoke.yml
 [todo]: ../TODO.md
 [workflow]: ../WORKFLOW.md
 [workflow-d8]: ../WORKFLOW.md#d8---bots--automation
