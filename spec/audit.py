@@ -2729,6 +2729,79 @@ def intent_canonical_rel(item, path):
     return path
 
 
+def declared_alternatives(baseline):
+    """Map each baseline path to the `alternatives` its entry declares, the other paths it may sit at.
+
+    spec/validate.py holds a path declaring alternatives to a single entry, so nothing here merges.
+    """
+    return {
+        item["path"]: list(item["alternatives"]) for item in baseline if item.get("alternatives")
+    }
+
+
+def contents_text(content):
+    """The decoded text of a contents API response, or None where it holds no inline file content.
+
+    A directory returns a list, and a too-large file returns encoding "none". An empty file decodes
+    to an empty string, so the guard is on the encoding rather than on truthiness.
+    """
+    if not isinstance(content, dict) or content.get("encoding") != "base64":
+        return None
+    return base64.b64decode(content["content"]).decode("utf-8", "replace")
+
+
+def read_baseline_file(slug, ground, path, alternatives=()):
+    """The path a baseline file was found at and its contents response, or `(path, None)`.
+
+    The declared path is read first and an alternative only while nothing is found. A repo holding
+    both is therefore read at the declared path.
+    """
+    for candidate in (path, *alternatives):
+        content = gh(f"repos/{slug}/contents/{candidate}?ref={ground}", ok404=True)
+        if content is not None:
+            return candidate, content
+    return path, None
+
+
+def baseline_file_findings(slug, ground, path, alternatives, item, is_hub):
+    """Read one baseline file, returning `(content, text, findings)` for what reading it alone owes.
+
+    Where no path is present, an interface unit's absence is DRIFT, since a workflow's naming varies
+    more than a carried config's. Any other unit's absence is a file-presence LETTER. `text` is None
+    where the contents API returned no inline content, as for a too-large file, while an empty file
+    decodes to an empty string. An intent unit outside the hub gets its staleness advisory, read at
+    the path the file was found at. The hub's own copies are the canonicals, so it has none.
+    """
+    found, content = read_baseline_file(slug, ground, path, alternatives)
+    fid = item.get("fidelity") if item else "presence"
+    if content is None:
+        if fid == "interface":
+            return (
+                None,
+                None,
+                [("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract")],
+            )
+        named = " or ".join((path, *alternatives))
+        return (
+            None,
+            None,
+            [
+                (
+                    "LETTER",
+                    f"file: {named} absent on {ground} (verify intent per AUDIT.md section 7)",
+                )
+            ],
+        )
+    text = contents_text(content)
+    if item is None or fid != "intent" or is_hub:
+        return content, text, []
+    return (
+        content,
+        text,
+        check_intent_staleness(slug, ground, found, intent_canonical_rel(item, path), text),
+    )
+
+
 def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
 
@@ -3071,11 +3144,12 @@ def audit_repo(entry, spec, branch=None):
     # It only runs where dependabot.yml exists, since its absence is already a file-presence LETTER below.
     # Language ecosystems such as nuget, uv and npm are directory-scoped and not yet cross-checked here.
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
-    if db and db.get("content"):
+    db_text = contents_text(db)
+    if db_text:
         declared = set(
             re.findall(
                 r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)',
-                base64.b64decode(db["content"]).decode("utf-8", "replace"),
+                db_text,
                 re.MULTILINE,
             )
         )
@@ -3106,6 +3180,7 @@ def audit_repo(entry, spec, branch=None):
     verbatim_secs = {}  # path -> set of section names checked byte-for-byte against the hub canonical
     doc_texts = {}  # README.md / HISTORY.md content, retained for the mirror check
     check_item = {}  # path -> entry, for a fidelity interface/verbatim entry (last applicable wins per path)
+    alternatives = declared_alternatives(spec["files"]["baseline"])
     path_order = []
     for item in spec["files"]["baseline"]:
         if not applies(item.get("appliesTo", "*"), sel):
@@ -3122,31 +3197,19 @@ def audit_repo(entry, spec, branch=None):
         if item.get("fidelity") in ("interface", "verbatim", "intent"):
             check_item[path] = item
     for path in path_order:
-        content = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
         item = check_item.get(path)
         fid = item.get("fidelity") if item else "presence"
-        if content is None:
-            # An interface unit's presence is DRIFT rather than LETTER, since a workflow's naming is more variable than a carried config, so absence is a hint to verify.
-            # Any other unit's absence is a file-presence LETTER.
-            if fid == "interface":
-                findings.append(
-                    ("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract")
-                )
-            else:
-                findings.append(
-                    (
-                        "LETTER",
-                        f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)",
-                    )
-                )
-            continue
-        # Guard on encoding rather than truthiness, since an empty file returns encoding "base64" with an empty content that decodes to an empty string.
-        # A too-large or non-inline payload returns encoding "none", where text stays None and is flagged.
-        text = (
-            base64.b64decode(content["content"]).decode("utf-8", "replace")
-            if content.get("encoding") == "base64"
-            else None
+        content, text, file_findings = baseline_file_findings(
+            slug,
+            ground,
+            path,
+            alternatives.get(path, []),
+            item,
+            entry.get("name") == hub_repo_name(),
         )
+        findings.extend(file_findings)
+        if content is None:
+            continue
         if path in ("README.md", "HISTORY.md") and text is not None:
             doc_texts[path] = text  # retained for the README/HISTORY mirror check below
         # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
@@ -3184,12 +3247,6 @@ def audit_repo(entry, spec, branch=None):
                 )
             else:
                 findings.extend(check_verbatim(path, text, item.get("reference") or path))
-        # Intent staleness: the one advisory an intent unit gets, a last-modified comparison.
-        # The hub's own copies are the canonicals, so the hub itself has nothing to trail.
-        elif item is not None and fid == "intent" and entry.get("name") != hub_repo_name():
-            findings.extend(
-                check_intent_staleness(slug, ground, path, intent_canonical_rel(item, path), text)
-            )
         # Heading-based presence is only meaningful for Markdown.
         # A section named on a non-md file (a tasks.json task group) is not checked, only the file's presence, and RESYNC.md aligns it by hand.
         needed = wanted_sections[path]
@@ -3452,12 +3509,7 @@ def audit_repo(entry, spec, branch=None):
             if not ws_name.endswith(".code-workspace"):
                 continue
             ws = gh(f"repos/{slug}/contents/{ws_name}?ref={ground}", ok404=True)
-            # The isinstance guard is needed because the contents API returns a list for a directory, where .get would raise.
-            ws_text = (
-                base64.b64decode(ws["content"]).decode("utf-8", "replace")
-                if isinstance(ws, dict) and ws.get("encoding") == "base64"
-                else None
-            )
+            ws_text = contents_text(ws)
             if ws_text is None:
                 findings.append(
                     (
@@ -6172,6 +6224,84 @@ def _selftest():
         print(
             "  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs"
         )
+
+    real_gh = globals()["gh"]
+
+    def holding(*paths):
+        def fake(path, ok404=False):
+            if "/commits?path=" in path:
+                name = path.split("/commits?path=", 1)[1].split("&", 1)[0]
+                stamp = {"commit": {"committer": {"date": "2000-01-01T00:00:00+00:00"}}}
+                return [stamp] if name in paths else []
+            name = path.split("/contents/", 1)[1].split("?", 1)[0]
+            return (
+                {"encoding": "base64", "content": "eA==", "name": name} if name in paths else None
+            )
+
+        return fake
+
+    alt_cases = [
+        (("codecov.yml",), ("codecov.yml", "codecov.yml"), "only the declared path"),
+        ((".codecov.yml",), (".codecov.yml", ".codecov.yml"), "only the alternative"),
+        (("codecov.yml", ".codecov.yml"), ("codecov.yml", "codecov.yml"), "both, declared wins"),
+        ((), ("codecov.yml", None), "neither"),
+    ]
+    try:
+        for held, (want_path, want_name), label in alt_cases:
+            globals()["gh"] = holding(*held)
+            got_path, got = read_baseline_file("o/r", "main", "codecov.yml", [".codecov.yml"])
+            got_name = got["name"] if got is not None else None
+            if (got_path, got_name) != (want_path, want_name):
+                ok = False
+                print(f"  FAIL read_baseline_file, {label} -> {got_path}, {got_name}")
+            else:
+                print(
+                    f"  ok   read_baseline_file, {label}: read at {got_path}, found={got is not None}"
+                )
+        real_hub_change = globals()["hub_last_change"]
+        real_canon_text = globals()["canonical_current_text"]
+        globals()["hub_last_change"] = lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+        globals()["canonical_current_text"] = lambda rel: "canonical"
+        unit = {"path": "codecov.yml", "fidelity": "intent", "intentRef": "WORKFLOW.md"}
+        try:
+            globals()["gh"] = holding(".codecov.yml")
+            alt_content, _, alt_findings = baseline_file_findings(
+                "o/r", "main", "codecov.yml", [".codecov.yml"], unit, False
+            )
+            globals()["gh"] = holding()
+            _, _, none_findings = baseline_file_findings(
+                "o/r", "main", "codecov.yml", [".codecov.yml"], unit, False
+            )
+        finally:
+            globals()["hub_last_change"] = real_hub_change
+            globals()["canonical_current_text"] = real_canon_text
+        stale_at_alt = [t for lvl, t in alt_findings if lvl == "DRIFT" and ".codecov.yml" in t]
+        if alt_content is None or len(alt_findings) != 1 or len(stale_at_alt) != 1:
+            ok = False
+            print(f"  FAIL baseline_file_findings, only the alternative -> {alt_findings}")
+        else:
+            print(
+                "  ok   baseline_file_findings, only the alternative: present, its staleness read at the alternative"
+            )
+        want_none = [
+            (
+                "LETTER",
+                "file: codecov.yml or .codecov.yml absent on main (verify intent per AUDIT.md section 7)",
+            )
+        ]
+        if none_findings != want_none:
+            ok = False
+            print(f"  FAIL baseline_file_findings, neither -> {none_findings}")
+        else:
+            print("  ok   baseline_file_findings, neither: one LETTER naming both paths")
+    finally:
+        globals()["gh"] = real_gh
+    live_alts = declared_alternatives(load("spec/files.json")["baseline"])
+    if live_alts.get("codecov.yml") != [".codecov.yml"]:
+        ok = False
+        print(f"  FAIL declared_alternatives on the live manifest -> {live_alts}")
+    else:
+        print("  ok   declared_alternatives: the live manifest names .codecov.yml for codecov.yml")
 
     # Applicability turns on tests, so a package-only build repo is N/A rather than owing a token for a report nothing produces.
     type_mechs = {"csharp": "codecov", "python": "codecov"}

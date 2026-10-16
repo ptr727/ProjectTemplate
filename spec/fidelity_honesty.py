@@ -22,7 +22,6 @@ Usage: python3 spec/fidelity_honesty.py [--report]
 """
 
 import argparse
-import base64
 import sys
 
 import audit  # sibling, import-safe (its main is guarded)
@@ -33,19 +32,18 @@ REPORT_PATH = "reports/divergences.md"  # the generated, checked-in burn-down re
 SECTION_SEP = " > "  # joins a file path and a verbatim section name into one unit label (path > section), ASCII
 
 
-def fetch(slug, path, ref):
-    """Decoded downstream file content, or None if absent / not inline."""
-    content = audit.gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
-    if content is None or content.get("encoding") != "base64":
-        return None
-    return base64.b64decode(content["content"]).decode("utf-8", "replace")
+def fetch(slug, path, ref, alternatives=()):
+    """Decoded downstream file content at path or its first alternative present, or None if absent / not inline."""
+    _, content = audit.read_baseline_file(slug, ref, path, alternatives)
+    return audit.contents_text(content)
 
 
 def check_units(spec):
     """Yield the fleet's check units - whole intent/verbatim files, plus each verbatim section of any file.
 
     Each is (label, fidelity, entry_appliesTo, section_appliesTo, downstream_path, canonical_path, extract).
-    downstream_path is where the repo's copy lives (always the entry's `path`); canonical_path is the hub's
+    downstream_path is the entry's `path`. The repo's copy lives there unless it sits at one of the entry's
+    `alternatives`, which fetch reads in order where `path` is absent. canonical_path is the hub's
     canonical (the `reference` snippet for a reference-backed unit, else the same path). extract is None for a
     whole file, or a section extractor for a verbatim section (the region is compared, not the whole file).
     """
@@ -90,6 +88,7 @@ def fidelity_pass(spec):
     spreads = []  # (unit dict, spread dict) for the full table
     promote = []  # intent units that are uniform fleet-wide
     mislabel = []  # verbatim units that diverge non-stale
+    alternatives = audit.declared_alternatives(spec["files"]["baseline"])
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
@@ -116,7 +115,10 @@ def fidelity_pass(spec):
             if not (audit.applies(ent_ap, sel) and audit.applies(sec_ap, sel)):
                 continue
             text = fetch(
-                audit.repo_slug(r), down_path, audit.ground_branch_of(r, defaults=defaults)
+                audit.repo_slug(r),
+                down_path,
+                audit.ground_branch_of(r, defaults=defaults),
+                alternatives.get(down_path, []),
             )
             if (
                 text is None

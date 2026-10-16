@@ -17,6 +17,8 @@ Each [`spec/files.json`][files] entry declares one `fidelity`, defaulting to `pr
 
 A declaration in `trees[]` uses **verbatim-tree**. Each included source file exists at the corresponding target path with identical bytes. A pruned target contains no extra path. The tree root exists even when the included source inventory is empty. Tree target roots never overlap because two declarations cannot own the same path safely, regardless of whether either declaration prunes extras.
 
+A whole-file `presence` or `intent` entry may also declare `alternatives`, other paths its tool accepts the file at. The `codecov.yml` entry names `.codecov.yml` this way. The audit reads the declared path first and an alternative only while nothing is found. The file is absent only where no path holds it. `spec/validate.py` refuses `alternatives` on any other entry, on a path a second entry also names, and where an alternative is itself a declared path.
+
 Fidelity is a declared field defaulting to `presence`, never inferred from `whole`/`placeholders`. `.editorconfig` and `.markdownlint-cli2.jsonc` are both whole with no placeholders yet sit at opposite fidelity, because the discriminator is governance, not field shape.
 
 ## Why Each Unit Sits Where It Does

@@ -222,6 +222,40 @@ def escapes_repo_root(value):
     )
 
 
+def alternatives_errors(baseline):
+    """The errors in each baseline entry's `alternatives`, the other paths its file may sit at instead.
+
+    Only a whole-file presence or intent entry may declare them, as the one entry naming its path.
+    No alternative may be a declared path. CI runs no schema validation, so the list's shape is
+    checked here as files.schema.json states it.
+    """
+    entries = [i for i in baseline if isinstance(i, dict) and isinstance(i.get("path"), str)]
+    declared = {i["path"] for i in entries}
+    errors = []
+    for item in entries:
+        if "alternatives" not in item:
+            continue
+        alts = item["alternatives"]
+        path = item["path"]
+        if not (is_str_list(alts) and alts and all(alts) and len(set(alts)) == len(alts)):
+            errors.append(
+                f"files.json: {path} alternatives must be a non-empty array of distinct, non-empty strings"
+            )
+        elif declared.intersection(alts):
+            errors.append(
+                f"files.json: {path} alternative(s) {', '.join(sorted(declared.intersection(alts)))} already declared as a baseline path"
+            )
+        if item.get("fidelity", "presence") not in ("presence", "intent") or "sections" in item:
+            errors.append(
+                f"files.json: {path} declares alternatives, which only a whole-file presence or intent unit may carry"
+            )
+        if sum(1 for other in entries if other["path"] == path) > 1:
+            errors.append(
+                f"files.json: {path} declares alternatives, so no other baseline entry may name it"
+            )
+    return errors
+
+
 def reduces_to_repo_root(value):
     """Whether `value` reduces to the repository root under POSIX path rules.
 
@@ -1296,6 +1330,7 @@ def main(argv=()):
             errors.append(
                 f"files.json: Copilot instructions reference skill path {path} outside every carried tree include"
             )
+    errors.extend(alternatives_errors(baseline))
     for item in baseline:
         if not isinstance(item, dict):
             errors.append(f"files.json: baseline entry {item!r} is not an object")
