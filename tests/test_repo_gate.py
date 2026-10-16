@@ -27,7 +27,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github/actions/repo-gate"))
 import repo_gate
-from runner_commands import FORGING_NAMES, forged_lines
+from runner_commands import FORGING_LINES, FORGING_NAMES, ORDINARY_LINES, forged_lines
 
 REPO = Path(__file__).resolve().parent.parent
 GOVERNANCE = REPO / "GOVERNANCE.md"
@@ -591,14 +591,23 @@ class TestNamesCannotForgeWorkflowCommands(GitTreeCase):
     """A tracked name shaped like a workflow command prints as text the runner does not execute."""
 
     def test_printable_leaves_no_line_a_command_parser_reads(self) -> None:
-        for line in (*FORGING_NAMES, "  ::add-mask::x", "::", "a::b ##[ ##["):
+        for line in FORGING_LINES:
             with self.subTest(line=line):
                 self.assertEqual([], forged_lines(f"         {repo_gate.printable(line)}"))
 
     def test_printable_leaves_an_ordinary_line_as_it_was(self) -> None:
-        for line in ("lib.py: tracked path", "a::b: mid-line colons", "# [heading]"):
+        for line in ORDINARY_LINES:
             with self.subTest(line=line):
                 self.assertEqual(line, repo_gate.printable(line))
+
+    def test_both_gates_escape_a_line_identically(self) -> None:
+        """Each gate is fetched as one file, so each holds its own copy, and this keeps them equal."""
+        prose_gate = REPO / ".github/actions/prose-gate"
+        with mock.patch.object(sys, "path", [str(prose_gate), *sys.path]):
+            prose_lint = importlib.import_module("prose_lint")
+        for line in (*FORGING_LINES, *ORDINARY_LINES, "tab\there", "\x85::x", "bad\udcffbyte"):
+            with self.subTest(line=line):
+                self.assertEqual(repo_gate.printable(line), prose_lint.printable(line))
 
     def test_a_forging_name_raises_its_finding_without_forging_a_command(self) -> None:
         gitattributes = TestEolCoverage.GITATTRIBUTES.replace("eol=lf", "eol=crlf", 1)

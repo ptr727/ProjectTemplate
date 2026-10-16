@@ -786,9 +786,9 @@ def printable(line: str) -> str:
     shown. A byte that is not UTF-8 arrives as a lone surrogate, which a strict stream refuses to
     encode, so it is spelled as an escape too, leaving the result safe on any stream.
 
-    The Actions runner executes a line opening on `::` once leading whitespace is trimmed, and a
-    line holding `##[` anywhere, so a name shaped like either forges a workflow command. The colon
-    opening such a line and the bracket of each `##[` are spelled as escapes for that reason.
+    The Actions runner executes a line opening on `::` once leading whitespace is trimmed. It also
+    executes a line holding `##[` anywhere. A name shaped like either forges a workflow command.
+    The colon opening such a line and the bracket of each `##[` are escaped for that reason.
     """
     escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
     escaped = COMMAND_LEAD.sub(lambda m: f"{m.group(1)}\\x3a", escaped)
