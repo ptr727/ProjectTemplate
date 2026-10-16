@@ -32,6 +32,7 @@
                 "additionalProperties": false,
                 "properties": {
                     "path": { "type": "string" },
+                    "alternatives": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true },
                     "whole": { "type": "boolean" },
                     "sections": {
                         "type": "array",

@@ -2729,6 +2729,19 @@ def intent_canonical_rel(item, path):
     return path
 
 
+def read_baseline_file(slug, ground, path, alternatives=()):
+    """The path a baseline file was found at, and its contents response, or `(path, None)` where none is present.
+
+    The declared path is read first and an alternative only while nothing has been found, so a repo
+    holding both is read at the declared path.
+    """
+    for candidate in (path, *alternatives):
+        content = gh(f"repos/{slug}/contents/{candidate}?ref={ground}", ok404=True)
+        if content is not None:
+            return candidate, content
+    return path, None
+
+
 def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
     """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
 
@@ -3106,6 +3119,7 @@ def audit_repo(entry, spec, branch=None):
     verbatim_secs = {}  # path -> set of section names checked byte-for-byte against the hub canonical
     doc_texts = {}  # README.md / HISTORY.md content, retained for the mirror check
     check_item = {}  # path -> entry, for a fidelity interface/verbatim entry (last applicable wins per path)
+    alternatives = {}  # path -> other paths the file may sit at instead, unioned across applicable entries in manifest order
     path_order = []
     for item in spec["files"]["baseline"]:
         if not applies(item.get("appliesTo", "*"), sel):
@@ -3116,13 +3130,17 @@ def audit_repo(entry, spec, branch=None):
         if path not in wanted_sections:
             wanted_sections[path] = set()
             verbatim_secs[path] = set()
+            alternatives[path] = []
             path_order.append(path)
+        alternatives[path].extend(
+            a for a in item.get("alternatives", []) if a not in alternatives[path]
+        )
         wanted_sections[path].update(required_sections(item, sel))
         verbatim_secs[path].update(verbatim_sections(item, sel))
         if item.get("fidelity") in ("interface", "verbatim", "intent"):
             check_item[path] = item
     for path in path_order:
-        content = gh(f"repos/{slug}/contents/{path}?ref={ground}", ok404=True)
+        found, content = read_baseline_file(slug, ground, path, alternatives[path])
         item = check_item.get(path)
         fid = item.get("fidelity") if item else "presence"
         if content is None:
@@ -3133,10 +3151,11 @@ def audit_repo(entry, spec, branch=None):
                     ("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract")
                 )
             else:
+                named = " or ".join((path, *alternatives[path]))
                 findings.append(
                     (
                         "LETTER",
-                        f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)",
+                        f"file: {named} absent on {ground} (verify intent per AUDIT.md section 7)",
                     )
                 )
             continue
@@ -3188,7 +3207,7 @@ def audit_repo(entry, spec, branch=None):
         # The hub's own copies are the canonicals, so the hub itself has nothing to trail.
         elif item is not None and fid == "intent" and entry.get("name") != hub_repo_name():
             findings.extend(
-                check_intent_staleness(slug, ground, path, intent_canonical_rel(item, path), text)
+                check_intent_staleness(slug, ground, found, intent_canonical_rel(item, path), text)
             )
         # Heading-based presence is only meaningful for Markdown.
         # A section named on a non-md file (a tasks.json task group) is not checked, only the file's presence, and RESYNC.md aligns it by hand.
@@ -6172,6 +6191,36 @@ def _selftest():
         print(
             "  ok   repo_tree: a truncated tree and a missing tree sha both return None, and a whole one drops non-blobs"
         )
+
+    real_gh = globals()["gh"]
+
+    def holding(*paths):
+        def fake(path, ok404=False):
+            name = path.split("/contents/", 1)[1].split("?", 1)[0]
+            return {"encoding": "base64", "content": "", "name": name} if name in paths else None
+
+        return fake
+
+    alt_cases = [
+        (("codecov.yml",), ("codecov.yml", "codecov.yml"), "only the declared path"),
+        ((".codecov.yml",), (".codecov.yml", ".codecov.yml"), "only the alternative"),
+        (("codecov.yml", ".codecov.yml"), ("codecov.yml", "codecov.yml"), "both, declared wins"),
+        ((), ("codecov.yml", None), "neither"),
+    ]
+    try:
+        for held, (want_path, want_name), label in alt_cases:
+            globals()["gh"] = holding(*held)
+            got_path, got = read_baseline_file("o/r", "main", "codecov.yml", [".codecov.yml"])
+            got_name = got["name"] if got is not None else None
+            if (got_path, got_name) != (want_path, want_name):
+                ok = False
+                print(f"  FAIL read_baseline_file, {label} -> {got_path}, {got_name}")
+            else:
+                print(
+                    f"  ok   read_baseline_file, {label}: read at {got_path}, found={got is not None}"
+                )
+    finally:
+        globals()["gh"] = real_gh
 
     # Applicability turns on tests, so a package-only build repo is N/A rather than owing a token for a report nothing produces.
     type_mechs = {"csharp": "codecov", "python": "codecov"}

@@ -222,6 +222,35 @@ def escapes_repo_root(value):
     )
 
 
+def alternatives_errors(path, item):
+    """The errors in a baseline entry's `alternatives`, the other paths its file may sit at instead.
+
+    The audit reads an alternative only for a whole file's presence and an intent unit's staleness
+    advisory, and every other check reads the declared path, so any other unit is refused one.
+    """
+    alts = item.get("alternatives")
+    if alts is None:
+        return []
+    errors = []
+    if not (is_str_list(alts) and alts):
+        errors.append(f"files.json: {path} alternatives must be a non-empty array of strings")
+    else:
+        errors.extend(
+            f"files.json: {path} alternative '{alt}' must be a repo-relative path"
+            for alt in alts
+            if escapes_repo_root(alt)
+        )
+        if path in alts or len(set(alts)) != len(alts):
+            errors.append(
+                f"files.json: {path} alternatives repeat a path, the declared one or each other"
+            )
+    if item.get("fidelity", "presence") not in ("presence", "intent") or "sections" in item:
+        errors.append(
+            f"files.json: {path} declares alternatives, which only a whole-file presence or intent unit may carry"
+        )
+    return errors
+
+
 def reduces_to_repo_root(value):
     """Whether `value` reduces to the repository root under POSIX path rules.
 
@@ -1305,6 +1334,8 @@ def main(argv=()):
             errors.append(f"files.json: baseline entry has a missing or non-string path: {item!r}")
             continue
         check_selector(path, item.get("appliesTo", "*"))
+
+        errors.extend(alternatives_errors(path, item))
 
         # The fidelity field governs how faithfully the unit is checked, per spec/fidelity-model.md.
         # CI runs no schema validation, so shape-check the fidelity fields here rather than let a malformed contract or an outside-root reference slip through and crash a later check.

@@ -151,6 +151,72 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         self.assertEqual(1, len(validate.carried_link_errors(self.root, baseline)))
 
 
+class BaselineAlternativesCase(unittest.TestCase):
+    """A baseline entry's `alternatives`, the other paths its file may sit at instead."""
+
+    def test_an_intent_file_with_a_distinct_alternative_is_clean(self) -> None:
+        item = {"path": "tool.yml", "fidelity": "intent", "alternatives": [".tool.yml"]}
+
+        self.assertEqual(validate.alternatives_errors("tool.yml", item), [])
+
+    def test_an_entry_without_alternatives_is_clean(self) -> None:
+        self.assertEqual(validate.alternatives_errors("tool.yml", {"path": "tool.yml"}), [])
+
+    def test_an_empty_or_non_string_list_is_rejected(self) -> None:
+        for alts in ([], [1], ".tool.yml"):
+            with self.subTest(alts=alts):
+                errors = validate.alternatives_errors(
+                    "tool.yml", {"path": "tool.yml", "alternatives": alts}
+                )
+                self.assertEqual(
+                    errors,
+                    ["files.json: tool.yml alternatives must be a non-empty array of strings"],
+                )
+
+    def test_a_path_outside_the_repo_is_rejected(self) -> None:
+        errors = validate.alternatives_errors(
+            "tool.yml", {"path": "tool.yml", "alternatives": ["../tool.yml"]}
+        )
+
+        self.assertEqual(
+            errors, ["files.json: tool.yml alternative '../tool.yml' must be a repo-relative path"]
+        )
+
+    def test_repeating_the_declared_path_or_another_alternative_is_rejected(self) -> None:
+        for alts in (["tool.yml"], [".tool.yml", ".tool.yml"]):
+            with self.subTest(alts=alts):
+                errors = validate.alternatives_errors(
+                    "tool.yml", {"path": "tool.yml", "alternatives": alts}
+                )
+                self.assertEqual(
+                    errors,
+                    [
+                        "files.json: tool.yml alternatives repeat a path, the declared one or each other"
+                    ],
+                )
+
+    def test_a_unit_checked_at_its_declared_path_may_not_carry_one(self) -> None:
+        for extra in ({"fidelity": "verbatim"}, {"fidelity": "interface"}, {"sections": ["A"]}):
+            with self.subTest(extra=extra):
+                item = {"path": "tool.md", "alternatives": [".tool.md"], **extra}
+                self.assertEqual(
+                    validate.alternatives_errors("tool.md", item),
+                    [
+                        "files.json: tool.md declares alternatives, which only a whole-file presence or intent unit may carry"
+                    ],
+                )
+
+    def test_the_live_codecov_entry_accepts_the_dotfile_name(self) -> None:
+        codecov = next(
+            item
+            for item in validate.load("spec/files.json")["baseline"]
+            if item["path"] == "codecov.yml"
+        )
+
+        self.assertEqual(codecov.get("alternatives"), [".codecov.yml"])
+        self.assertEqual(validate.alternatives_errors("codecov.yml", codecov), [])
+
+
 class VersionLiteralCase(unittest.TestCase):
     """The hub's instruction documents name no three-part version or commit SHA, verbatim sections included."""
 

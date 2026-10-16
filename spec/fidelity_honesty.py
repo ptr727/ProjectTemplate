@@ -33,9 +33,9 @@ REPORT_PATH = "reports/divergences.md"  # the generated, checked-in burn-down re
 SECTION_SEP = " > "  # joins a file path and a verbatim section name into one unit label (path > section), ASCII
 
 
-def fetch(slug, path, ref):
-    """Decoded downstream file content, or None if absent / not inline."""
-    content = audit.gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
+def fetch(slug, path, ref, alternatives=()):
+    """Decoded downstream file content, read at the first of path and its alternatives present, or None if absent / not inline."""
+    _, content = audit.read_baseline_file(slug, ref, path, alternatives)
     if content is None or content.get("encoding") != "base64":
         return None
     return base64.b64decode(content["content"]).decode("utf-8", "replace")
@@ -90,6 +90,10 @@ def fidelity_pass(spec):
     spreads = []  # (unit dict, spread dict) for the full table
     promote = []  # intent units that are uniform fleet-wide
     mislabel = []  # verbatim units that diverge non-stale
+    alternatives = {}  # path -> other paths a repo may hold the file at instead, as the audit reads them
+    for e in spec["files"]["baseline"]:
+        merged = alternatives.setdefault(e["path"], [])
+        merged.extend(a for a in e.get("alternatives", []) if a not in merged)
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
@@ -116,7 +120,10 @@ def fidelity_pass(spec):
             if not (audit.applies(ent_ap, sel) and audit.applies(sec_ap, sel)):
                 continue
             text = fetch(
-                audit.repo_slug(r), down_path, audit.ground_branch_of(r, defaults=defaults)
+                audit.repo_slug(r),
+                down_path,
+                audit.ground_branch_of(r, defaults=defaults),
+                alternatives[down_path],
             )
             if (
                 text is None

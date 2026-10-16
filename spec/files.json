@@ -31,7 +31,7 @@
         { "path": ".github/workflows/deploy-site.yml", "fidelity": "interface", "contract": { "requiredJobKeys": ["assert-ref", "validate", "deploy"], "requireTokensInJob": { "deploy": ["deploy-site-task.yml", "with:\n      environment:", "contents: read", "DEPLOY_SSH_PRIVATE_KEY"] }, "forbidTokensInJob": { "deploy": ["\n    environment:"] } }, "intentRef": "docs/reusable-workflows.md#adopting-the-type-specific-tasks", "appliesTo": ["hugo"] },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks.json", "appliesTo": ["csharp"] },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks-python.json", "appliesTo": ["python"] },
-        { "path": "codecov.yml", "fidelity": "intent", "reference": "catalog/snippets/configs/codecov.yml", "intentRef": "WORKFLOW.md", "appliesTo": ["csharp", "python"] },
+        { "path": "codecov.yml", "alternatives": [".codecov.yml"], "fidelity": "intent", "reference": "catalog/snippets/configs/codecov.yml", "intentRef": "WORKFLOW.md", "appliesTo": ["csharp", "python"] },
         { "path": ".dockerignore", "appliesTo": ["docker"] },
         { "path": "Docker/README.md", "reference": "catalog/snippets/configs/docker-hub-readme.md", "appliesTo": ["docker"] }
     ]
