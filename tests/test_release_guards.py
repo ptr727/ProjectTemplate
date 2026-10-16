@@ -722,6 +722,10 @@ class ReleaseGuardCase(unittest.TestCase):
         blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         self.assertIn(stub, blocks)
         self.assertIn("smoke: true", stub)
+        self.assertIn(
+            "    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.release == 'true'\n",
+            stub,
+        )
 
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
