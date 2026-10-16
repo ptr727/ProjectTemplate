@@ -56,9 +56,9 @@ text says, because the harm it covers was never in the text.
    the command or between `pr` and its subcommand still names the target. The target is also the
    `R` in a short-option cluster such as `-dR`, and a `GH_REPO` value that reaches the gh word,
    the one in the environment the session was launched with included. A repository named by a
-   write's positional argument is one too, as a pull request or issue URL does, and so is the
-   repository `gh repo edit` or `gh issue transfer` takes. On a `gh api` write, an owner named by a
-   path outside `repos/` counts, as in `orgs/<owner>/...` or `user/starred/<owner>/<repo>`. A
+   write's positional argument is one too, as in a pull request or issue URL, and so is the
+   repository `gh repo edit` or `gh issue transfer` takes. On a `gh api` write, an owner named by an
+   `orgs/`, `users/`, or `user/...` path counts, as in `orgs/<owner>/...` or `user/starred/<owner>/<repo>`. A
    `[HOST/]OWNER/REPO` value is read by its middle owner as well as by its first part. A gh write
    run through a run-time command word, as in `G=gh; $G pr comment ...`, is read as one. One
    exception departs from that stance. A write whose repository owner is a run-time word fails
