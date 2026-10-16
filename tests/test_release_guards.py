@@ -204,6 +204,11 @@ def shell_blocks(markdown: str) -> list[str]:
     return [b.body for b in fenced_blocks(markdown) if b.label.lower() in SHELL_LABELS]
 
 
+def yaml_blocks(markdown: str) -> list[str]:
+    """The body of every fenced YAML block in `markdown`, ending in the newline a file holding it ends in."""
+    return [b.body + "\n" for b in fenced_blocks(markdown) if b.label.lower() == "yaml"]
+
+
 def fenced_shell_block(markdown: str, marker: str) -> str:
     """The one fenced shell block in `markdown` containing `marker`.
 
@@ -396,8 +401,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual("", suffix_for("push", main, "ptr727-codegen[bot]"))
         self.assertEqual("-7", suffix_for("push", main, "someone"))
         self.assertEqual("-7", suffix_for("push", "refs/heads/develop", "ptr727-codegen[bot]"))
-        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
-        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         stub_name = stub.splitlines()[0]
         self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
 
@@ -706,8 +710,7 @@ class ReleaseGuardCase(unittest.TestCase):
         stub = (REPO / "catalog/snippets/workflows/test-pull-request-smoke.yml").read_text(
             encoding="utf-8"
         )
-        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
-        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         self.assertIn(stub, blocks)
         self.assertIn("smoke: true", stub)
         self.assertNotIn("<hub-main-commit-sha>", stub)
