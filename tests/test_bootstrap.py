@@ -1802,6 +1802,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("starts with a dash", result.stderr)
                 self.assertEqual(self.steps(), [])
+                self.assertEqual(list(self.data.iterdir()), [])
 
     def test_agents_with_no_list_is_refused_before_anything_runs(self) -> None:
         result = self.run_main(action="--agents")
