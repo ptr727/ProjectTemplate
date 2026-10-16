@@ -1981,7 +1981,7 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertEqual(self.steps(), ["install-agents.ps1 -Install herdr cswap"], result.stdout)
 
     def test_a_dash_prefixed_name_is_refused(self) -> None:
-        for given in ("-All", "-a", "herdr,-All"):
+        for given in ("-All", "-a", "herdr,-All", "\u2013All", "herdr,\u2014y"):
             with self.subTest(given=given):
                 result = self.run_agents([given])
                 self.assertNotEqual(result.returncode, 0)
