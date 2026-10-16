@@ -65,7 +65,7 @@ without trusting the parts of it that have gone stale.
 - **A platform lane is for work that needs its platform.** A platform track is one kept for a single
   host platform, such as `wsl` or `windows`. It takes an issue only when its defect reproduces, or
   its fix can be verified, on that platform alone. It also needs that no Linux host outside WSL can
-  both fix the issue and verify the fix. An issue meeting each goes to its platform's lane. Any
+  both fix the issue and verify the fix. An issue meeting each condition goes to its platform's lane. Any
   other issue goes to the ordinary backlog, since a lane costs a separate chain and a host-bound
   session. A defect in WSL interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or
   `wslpath` reproduces only inside WSL. So does running a Windows `.exe` from Linux, although WSL
