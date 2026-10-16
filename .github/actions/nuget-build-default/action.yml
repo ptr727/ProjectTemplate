@@ -70,7 +70,7 @@ runs:
     # It runs inside the hub task's job, so an adopter's registry sees this hub in the job_workflow_ref claim and rejects the push.
     - name: Upload build artifacts step
       if: ${{ inputs.smoke != 'true' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: nuget-build-${{ inputs.branch }}
         path: |
@@ -89,7 +89,7 @@ runs:
     # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
     - name: Upload release asset step
       if: ${{ inputs.smoke != 'true' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: release-asset-${{ inputs.branch }}-nuget
         path: ${{ runner.temp }}/nuget.7z
