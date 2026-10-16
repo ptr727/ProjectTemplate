@@ -57,8 +57,8 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
     Legal Markdown is among what this refuses, a fence under a second list level and one
     carrying a tilde in its info string among it, and the refused cases below are the list.
-    No document here uses any of it today, and only `AUDIT.md` is under test, so that stays
-    true by convention rather than by check.
+    No document here uses any of it today. Only `AUDIT.md` and `docs/reusable-workflows.md` are
+    under test, so that stays true by convention rather than by check.
 
     One container case is left rather than refused. An HTML block holding an odd number of
     fence-shaped lines flips the open and closed parity, since a renderer reads the block as raw
@@ -202,6 +202,11 @@ def mislabeled_posix_blocks(markdown: str) -> list[tuple[int, str]]:
 def shell_blocks(markdown: str) -> list[str]:
     """The body of every fenced block in `markdown` whose label names a shell."""
     return [b.body for b in fenced_blocks(markdown) if b.label.lower() in SHELL_LABELS]
+
+
+def yaml_blocks(markdown: str) -> list[str]:
+    """The body of every fenced YAML block in `markdown`, ending in the newline a file holding it ends in."""
+    return [b.body + "\n" for b in fenced_blocks(markdown) if b.label.lower() == "yaml"]
 
 
 def fenced_shell_block(markdown: str, marker: str) -> str:
@@ -396,8 +401,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual("", suffix_for("push", main, "ptr727-codegen[bot]"))
         self.assertEqual("-7", suffix_for("push", main, "someone"))
         self.assertEqual("-7", suffix_for("push", "refs/heads/develop", "ptr727-codegen[bot]"))
-        docs = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
-        blocks = re.findall(r"(?ms)^```yaml\n(.*?)^```\n", docs)
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         stub_name = stub.splitlines()[0]
         self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
 
@@ -701,6 +705,15 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stub_text)
 
+    def test_smoke_caller_stub_is_its_snippet_byte_for_byte(self) -> None:
+        """The documented release-with-smoke stub is the catalog snippet, so the two cannot drift."""
+        stub = (REPO / "catalog/snippets/workflows/test-pull-request-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
+        self.assertIn(stub, blocks)
+        self.assertIn("smoke: true", stub)
+
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         jobs = re.split(r"(?m)^  (?=[a-z][a-z-]*:\n)", workflow.split("\njobs:\n", 1)[1])
@@ -820,7 +833,13 @@ class ReleaseGuardCase(unittest.TestCase):
 
         offenders: list[tuple[str, str]] = []
         exempt = 0
-        for function in (fenced_blocks, shell_blocks, mislabeled_posix_blocks, fenced_shell_block):
+        for function in (
+            fenced_blocks,
+            shell_blocks,
+            yaml_blocks,
+            mislabeled_posix_blocks,
+            fenced_shell_block,
+        ):
             found, marked = bare_whitespace_predicates(inspect.getsource(function))
             offenders.extend((function.__name__, line) for line in found)
             exempt += marked
