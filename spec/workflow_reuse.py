@@ -25,7 +25,6 @@ Usage: python3 spec/workflow_reuse.py [--report] [--selftest]
 """
 
 import argparse
-import base64
 import difflib
 import re
 import sys
@@ -68,9 +67,7 @@ def fetch_dir(slug, path, ref):
 def fetch(slug, path, ref):
     """Decoded downstream file content, or None if absent / not inline."""
     content = audit.gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
-    if content is None or content.get("encoding") != "base64":
-        return None
-    return base64.b64decode(content["content"]).decode("utf-8", "replace")
+    return audit.contents_text(content)
 
 
 def norm_lines(text):
