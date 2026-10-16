@@ -2908,7 +2908,10 @@ def _gh_short_value_letters(args, flags):
     return "".join(f[1] for f in flags if len(f) == 2)
 
 
-_GH_URL = re.compile(r"^https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)", re.IGNORECASE)
+_GH_URL = re.compile(
+    r"^(?:[a-z][a-z0-9+.\-]*://(?:[^/@]*@)?[^/]+/|[^/@:\s]+@[^/:]+:)(?P<owner>[^/]+)/(?P<repo>[^/]+)",
+    re.IGNORECASE,
+)
 _API_SEGMENT = r"[A-Za-z0-9_.\-]+"
 _API_OWNER_PATHS = (
     re.compile(rf"^(?:orgs|users)/(?P<owner>{_API_SEGMENT})(?:/|$)"),
@@ -3042,9 +3045,9 @@ def _gh_positional_repo_words(args):
     """Each repository word a gh write's positional arguments name, as (word, argv).
 
     A `pr` or `issue` write takes its pull request or issue as a URL too, which names the
-    repository, as in `gh pr comment https://github.com/stranger/example/pull/5`. A number, a
-    branch, or a wholly run-time word there selects inside the repository gh reads otherwise, so
-    it is no target. A `_GH_REPO_POSITIONAL_SUBS` write takes the repository itself, as `gh repo
+    repository, as in `gh pr comment https://github.com/stranger/example/pull/5`. A number or a
+    branch there selects inside the repository gh reads otherwise, so it is no target. A wholly
+    run-time word there may hold a URL too, and is left alone, since it is far more often a number. A `_GH_REPO_POSITIONAL_SUBS` write takes the repository itself, as `gh repo
     edit stranger/example` does. `gh issue transfer` takes its destination second, and
     `gh issue develop --branch-repo` names the repository its branch goes to. A flag's value is
     passed by `_GH_POSITIONAL_VALUE_FLAGS`, the value-taking flags gh's help lists for each such
@@ -3207,11 +3210,15 @@ def _gh_repo_states(toks, inherited):
     Each value is (value, from_env). The latest `export GH_REPO=v` sets the value. So does a plain
     `GH_REPO=v` standing as its own command once GH_REPO is exported, by an `export GH_REPO`
     before or after it or by `inherited`, whose environment exports it. That plain value is read
-    beside the latest exported one, so the reading can only add a value.
+    beside the latest exported one, so the reading can only add a value. A value from the session's
+    environment is kept beside both, since an export in a subshell, a function, or an untaken
+    branch does not replace it in the shell that runs the gh word.
     """
     exported, marked, plain, states = list(inherited), bool(inherited), None, []
+    env = [v for v in inherited if v[1]]
     for x, t in enumerate(toks):
-        states.append(exported[-1:] + ([plain] if marked and plain else []))
+        values = exported[-1:] + [v for v in env if v not in exported[-1:]]
+        states.append(values + ([plain] if marked and plain else []))
         if t == "export" and _opens_command(toks, x):
             pairs, names = _export_words(toks, x)
             values = [(v, False) for name, v in pairs if name == "GH_REPO"]
@@ -3227,18 +3234,22 @@ def _gh_repo_states(toks, inherited):
 def _gh_word_repo_values(text, inherited):
     """The `GH_REPO` value reaching each gh word in `text` itself, as (value, argv, from_env), past `inherited`.
 
-    A gh write behind a run-time command word is one such word (see `_gh_invocations`).
+    A gh write behind a run-time command word is one such word (see `_gh_invocations`). A prefix
+    reaches the word as its own command's, or behind a launcher (see `_launcher_prefix`). The
+    shell's state reaches it wherever it runs, as behind `flock` or `find -exec`.
     """
     toks, invocations = _gh_invocations(text)
     states = _gh_repo_states(toks, inherited)
     out = []
     for x, argv in invocations:
-        reached, pairs = _command_prefix(toks, x)
-        if not reached or any(not is_path for _w, is_path, _a in _gh_repo_words([argv])):
+        if any(not is_path for _w, is_path, _a in _gh_repo_words([argv])):
             continue
         if argv[:1] == ["api"] and not any(_GH_REPO_PLACEHOLDER.search(a) for a in argv):
             continue
-        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"]
+        reached, pairs = _command_prefix(toks, x)
+        if not reached:
+            reached, pairs = _launcher_prefix(toks, x)
+        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"] if reached else []
         out += [(v, argv, env) for v, env in prefix or states[x]]
     return out
 
@@ -3248,8 +3259,8 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
 
     A wrapper's bodies run under its own GH_REPO prefix, or else the value its command runs under
     (see `_gh_repo_states`), and a wrapper nested in one inherits from it in turn. A substitution
-    body the tokenizer keeps inside one word, as in `"$(...)"`, runs under the value at the word
-    holding it.
+    body the tokenizer keeps inside one word, as in `"$(...)"`, runs under the value at each word
+    opening it, or at every word where none is found.
     """
     if _depth > _WRAPPER_NESTING_LIMIT:
         return []
@@ -3263,15 +3274,16 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
         reached, pairs = _command_prefix(toks, x)
         if not reached:
             reached, pairs = _launcher_prefix(toks, x)
-        if not reached:
-            continue
-        reach = [(v, False) for name, v in pairs if name == "GH_REPO"] or states[x]
+        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"] if reached else []
+        reach = prefix or states[x]
         for body in found[0]:
             out += _gh_word_repo_values(body, reach)
             out += _gh_wrapper_repo_values(body, reach, _depth + 1)
     for body in _substitution_bodies(text):
-        x = next((k for k, t in enumerate(toks) if body in t), len(toks) - 1)
-        reach = states[x] if toks else list(inherited)
+        at = [k for k, t in enumerate(toks) if "$(" + body in t or "`" + body in t] or range(
+            len(toks)
+        )
+        reach = list(dict.fromkeys(v for k in at for v in states[k])) if toks else list(inherited)
         out += _gh_word_repo_values(body, reach)
         out += _gh_wrapper_repo_values(body, reach, _depth + 1)
     return out
@@ -7059,7 +7071,8 @@ def classify(
         )
 
     # 2. Literal node id in a mutation
-    if _GRAPHQL.search(cmd) and _MUTATION.search(cmd):
+    graphql = any(_gh_api_path(a) == "graphql" for a in _all_gh_arg_lists(cmd))
+    if (_GRAPHQL.search(cmd) or graphql) and _MUTATION.search(cmd):
         for m in _FIELD_ASSIGN.finditer(cmd):
             val = m.group("v").strip("'\"")
             if val.startswith(("$", "${")):
@@ -7458,6 +7471,48 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "a run-time plain GH_REPO, exported",
     ),
     ("gh pr view 5", _STRANGER_GH_REPO, "allow", "an environment GH_REPO on a read"),
+    (
+        "flock /tmp/l gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "an environment GH_REPO behind a launcher",
+    ),
+    (
+        "find . -name x -exec gh pr comment 5 -b x +",
+        _STRANGER_GH_REPO,
+        "deny",
+        "an environment GH_REPO behind find -exec",
+    ),
+    (
+        "(export GH_REPO=example/repo; gh pr view 1); gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "a subshell export does not replace an environment GH_REPO",
+    ),
+    (
+        'echo "run: gh pr comment 5 -b hi"; export GH_REPO=stranger/example; o="$(gh pr comment 5 -b hi)"',
+        {},
+        "deny",
+        "a substitution runs under the value at the word opening it",
+    ),
+    (
+        "gh repo delete ssh://git@github.com/stranger/example.git --yes",
+        {},
+        "deny",
+        "an ssh URL repo positional",
+    ),
+    (
+        "gh issue transfer 1 git@github.com:stranger/example.git",
+        {},
+        "deny",
+        "an scp-form destination",
+    ),
+    (
+        "$G api graphql -f query='mutation($i: ID!) { m(input: {id: $i}) { x } }' -F i=PR_kwDOABCDEFGHIJKLMNOP",
+        {},
+        "deny",
+        "a literal node id in a mutation behind a run-time command word",
+    ),
     (
         "gh pr comment 5 -R example/repo --body hi",
         _STRANGER_GH_REPO,
