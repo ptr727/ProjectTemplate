@@ -965,7 +965,7 @@ class TestOtherReviewers(GqlCase):
         self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
 
     def test_other_rate_limited_reads_the_command_reply_shape(self) -> None:
-        """The reply to an explicit review command names no service, so the login supplies it."""
+        """The command reply's marker says CodeRabbit rather than the service, so the login names it."""
         self.answer(
             payload(
                 [review()],

@@ -479,7 +479,8 @@ ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 # A structural marker rather than prose, so reading it needs no per-bot wording model the way `QUOTA` above needs one for Copilot's free-text refusal.
 # Observed on CodeRabbit, a plain PR comment rather than a formal review: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->".
 # The service name is captured rather than assumed.
-# A second bot using the same auto-generated-comment convention is read without a new pattern, and one that does not use it stays unread rather than guessed at.
+# A second bot using the same auto-generated-comment convention is read without a new pattern.
+# Any other shape stays unread unless a pattern of its own, like the reply one below, reads it.
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
 RATE_LIMITED_REPLY = re.compile(
     r"<!--\s*This is an auto-generated reply by [^>\n]*-->\s*(?:<!--[^>\n]*-->\s*)*"
@@ -1321,8 +1322,8 @@ def rate_limited_by(pr: dict, login: str) -> str | None:
     gives, so `RATE_LIMIT_SERVICE` names the service by login and both shapes read alike. A login
     missing there stays unread.
 
-    Reads both connections, since both observed shapes ride a plain PR comment rather than a
-    formal review. A future bot using the same convention might use either. A plain comment
+    Reads both connections. Both observed shapes ride a plain PR comment, and a future bot using
+    the same convention might ride a formal review instead. A plain comment
     carries no commit, so the reading is not scoped to the head. Current pull request
     only, unlike Copilot's `quota_signal`. That one generalizes from a pattern of silence across
     several pull requests, while this reads one notice rather than a history.
@@ -4743,7 +4744,7 @@ def digest(
             (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
         )
     ]
-    # The service name each tracked other-reviewer's own rate-limit marker gives, where its newest comment or review on this pull request carries one.
+    # The service each tracked other-reviewer's rate-limit notice names, or its login supplies, where its newest comment or review here is one.
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login))
     }
@@ -4768,7 +4769,7 @@ def digest(
         # Present only where at least one other tracked reviewer has posted on this exact head.
         # No verdict rides on it, unlike `review_on_head`, since nothing here reads what a CodeRabbit or qodo round said, only that one landed.
         + (f"other_reviewed={','.join(other_on_head)} " if other_on_head else "")
-        # Present only where a tracked other-reviewer's newest word is that marker.
+        # Present only where a tracked other-reviewer's newest word is one of those rate-limit notices.
         # The common case, neither is rate-limited right now, stays silent rather than printing `none`.
         + (
             f"other_rate_limited={','.join(f'{login}:{name}' for login, name in other_limited.items())} "
