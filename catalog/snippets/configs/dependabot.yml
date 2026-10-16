@@ -98,3 +98,33 @@ updates:
           - "ruff"
           - "pyright"
           - "mypy"
+
+  # The pip pair is kept only by a repo with a pip-form Python directory, a requirements*.txt with no uv.lock.
+  # Its directory points at that Python directory, so adjust it per repo layout.
+  - package-ecosystem: "pip"
+    target-branch: "main"
+    directory: "/PythonProject"
+    schedule:
+      interval: "daily"
+    groups:
+      pypi-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "ruff"
+          - "pyright"
+          - "mypy"
+
+  - package-ecosystem: "pip"
+    target-branch: "develop"
+    directory: "/PythonProject"
+    schedule:
+      interval: "daily"
+    groups:
+      pypi-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "ruff"
+          - "pyright"
+          - "mypy"
