@@ -51,7 +51,7 @@ jobs:
   smoke-build:
     name: Smoke build job
     needs: [changes]
-    if: needs.changes.outputs.release == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.release == 'true'
     uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
     permissions:
       contents: read

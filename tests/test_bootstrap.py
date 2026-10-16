@@ -1795,6 +1795,15 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(self.steps(), [])
         self.assertEqual(list(self.data.iterdir()), [])
 
+    def test_agents_a_dash_prefixed_name_is_refused_before_anything_runs(self) -> None:
+        for given in ("--all", "-a", "herdr,--all", "-x,herdr"):
+            with self.subTest(given=given):
+                result = self.run_main(action="--agents", args=(given,))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("starts with a dash", result.stderr)
+                self.assertEqual(self.steps(), [])
+                self.assertEqual(list(self.data.iterdir()), [])
+
     def test_agents_with_no_list_is_refused_before_anything_runs(self) -> None:
         result = self.run_main(action="--agents")
         self.assertNotEqual(result.returncode, 0)
@@ -1971,6 +1980,14 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         result = self.run_agents(["herdr,,cswap,"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), ["install-agents.ps1 -Install herdr cswap"], result.stdout)
+
+    def test_a_dash_prefixed_name_is_refused(self) -> None:
+        for given in ("-All", "-a", "herdr,-All", "\u2013All", "herdr,\u2014y", "\u2015All"):
+            with self.subTest(given=given):
+                result = self.run_agents([given])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("starts with a dash", result.stderr)
+                self.assertEqual(self.steps(), [])
 
     def test_an_empty_list_is_refused(self) -> None:
         result = self.run_agents([","])
