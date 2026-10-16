@@ -2788,7 +2788,7 @@ def _gh_short_value_letters(args, flags):
     """The short options taking a value in a gh argv, from its subcommand, or else the reading's table.
 
     `_GH_SHORT_VALUE_LETTERS` lists them per write subcommand, other than `-R`, as gh's own help
-    does, so an attached value such as `-BRelease/2.0` is read as the base branch it is.
+    does. So an attached value such as `-BRelease/2.0` is read as the base branch it is.
     """
     known = _GH_SHORT_VALUE_LETTERS.get(tuple(_gh_path(args)))
     if known is not None:
@@ -2867,7 +2867,7 @@ def _gh_word_repo_values(toks, inherited):
         if not _is_gh_exe(t):
             continue
         reached, pairs = _command_prefix(toks, x)
-        argv = _collect_arglist(toks, x + 1)[0]
+        argv = _api_first(_collect_arglist(toks, x + 1)[0])
         if not reached or any(not is_path for _w, is_path, _a in _gh_repo_words([argv])):
             continue
         if argv[:1] == ["api"] and not any("{owner}" in a or "{repo}" in a for a in argv):
@@ -4713,7 +4713,8 @@ def _gh_merge_run_time_word(text):
         path = _gh_path_at(args)
         unsure = [at[i] for i in path if _is_run_time_word(args[i])]
         if _is_gh_exe(t) and not merges and not _gh_may_merge(args):
-            if not unsure:
+            head = args[path[0]] if path else ""
+            if not unsure or head != "pr" and not _is_run_time_word(head):
                 continue
             if mask is None:
                 mask, raw = _quoted_mask(text, toks), _quote_kept_tokens(text, toks)
@@ -6911,6 +6912,21 @@ _GH_PATH_CASES: list[tuple[str, str, str]] = [
         "GH_REPO=stranger/example gh api -X POST repos/example/repo/issues/1/comments -f body=x",
         "allow",
         "GH_REPO fills no placeholder in an api path written out",
+    ),
+    (
+        "gh api repos/example/repo/pulls/$N",
+        "allow",
+        "an unquoted run-time word in an api read's endpoint",
+    ),
+    (
+        "gh issue $ACTION 5",
+        "allow",
+        "an unquoted run-time subcommand under a command other than pr",
+    ),
+    (
+        'GH_REPO="$T" gh --hostname github.com api -X POST repos/{owner}/{repo}/issues/1/comments -f body=x',
+        "deny",
+        "a run-time GH_REPO filling the placeholders of an api write whose flags precede api",
     ),
     ("gh -R stranger/example pr view 5", "allow", "a repo flag before a read's command"),
     ('gh pr view 5 -R "$T"', "allow", "a run-time repo value on a read"),
