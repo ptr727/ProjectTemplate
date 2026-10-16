@@ -191,7 +191,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
 - [x] Hub pull request on `develop`, #759.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `get-version-task.yml` and `publish-plan-task.yml`.
 - [ ] Catalog snippet for a caller stub, after the release: a caller of either task is a job inside a repo's own `publish-release.yml` or a future `build-release-task.yml` rather than a standalone top-level workflow, so today's honest answer is no snippet, only the `with:`/`uses:` lines in [Adopting the Pure Functions](#adopting-the-pure-functions). Revisit if an adopting repo's shape argues otherwise.
-- [ ] Adoption, one checkbox per carrier added when the hub pull request merges: today `get-version-task.yml` has 8 carriers and `publish-plan-task.yml` 3, with ESPHome-NonRoot and NxWitness carrying both.
+- [ ] Adoption, one checkbox per carrier added when the hub pull request merges: the carriers still holding a copy are the unticked items below, ESPHome-NonRoot and NxWitness carrying both tasks.
   - [ ] ESPHome-NonRoot (`get-version-task.yml` and `publish-plan-task.yml`)
   - [ ] NxWitness (`get-version-task.yml` and `publish-plan-task.yml`)
   - [ ] PhotoCleaner (`get-version-task.yml`)
