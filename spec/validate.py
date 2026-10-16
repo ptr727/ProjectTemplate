@@ -222,32 +222,31 @@ def escapes_repo_root(value):
     )
 
 
-def alternatives_errors(path, item):
-    """The errors in a baseline entry's `alternatives`, the other paths its file may sit at instead.
+def alternatives_errors(baseline):
+    """The errors in each baseline entry's `alternatives`, the other paths its file may sit at instead.
 
-    The audit reads an alternative only for a whole file's presence and an intent unit's staleness
-    advisory, and every other check reads the declared path, so any other unit is refused one.
+    The audit reads an alternative for a file's presence and an intent unit's staleness advisory. A
+    section, a contract, and a verbatim hash read whatever was found, and a carry writes the declared
+    path. So only a whole-file presence or intent entry may declare alternatives. It must also be
+    the one entry naming its path, since a second entry could add any of those checks.
     """
-    alts = item.get("alternatives")
-    if alts is None:
-        return []
+    entries = [i for i in baseline if isinstance(i, dict) and isinstance(i.get("path"), str)]
     errors = []
-    if not (is_str_list(alts) and alts):
-        errors.append(f"files.json: {path} alternatives must be a non-empty array of strings")
-    else:
-        errors.extend(
-            f"files.json: {path} alternative '{alt}' must be a repo-relative path"
-            for alt in alts
-            if escapes_repo_root(alt)
-        )
-        if path in alts or len(set(alts)) != len(alts):
+    for item in entries:
+        alts = item.get("alternatives")
+        if alts is None:
+            continue
+        path = item["path"]
+        if not (is_str_list(alts) and alts):
+            errors.append(f"files.json: {path} alternatives must be a non-empty array of strings")
+        if item.get("fidelity", "presence") not in ("presence", "intent") or "sections" in item:
             errors.append(
-                f"files.json: {path} alternatives repeat a path, the declared one or each other"
+                f"files.json: {path} declares alternatives, which only a whole-file presence or intent unit may carry"
             )
-    if item.get("fidelity", "presence") not in ("presence", "intent") or "sections" in item:
-        errors.append(
-            f"files.json: {path} declares alternatives, which only a whole-file presence or intent unit may carry"
-        )
+        if sum(1 for other in entries if other["path"] == path) > 1:
+            errors.append(
+                f"files.json: {path} declares alternatives, so no other baseline entry may name it"
+            )
     return errors
 
 
@@ -1325,6 +1324,7 @@ def main(argv=()):
             errors.append(
                 f"files.json: Copilot instructions reference skill path {path} outside every carried tree include"
             )
+    errors.extend(alternatives_errors(baseline))
     for item in baseline:
         if not isinstance(item, dict):
             errors.append(f"files.json: baseline entry {item!r} is not an object")
@@ -1334,8 +1334,6 @@ def main(argv=()):
             errors.append(f"files.json: baseline entry has a missing or non-string path: {item!r}")
             continue
         check_selector(path, item.get("appliesTo", "*"))
-
-        errors.extend(alternatives_errors(path, item))
 
         # The fidelity field governs how faithfully the unit is checked, per spec/fidelity-model.md.
         # CI runs no schema validation, so shape-check the fidelity fields here rather than let a malformed contract or an outside-root reference slip through and crash a later check.

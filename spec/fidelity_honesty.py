@@ -34,7 +34,7 @@ SECTION_SEP = " > "  # joins a file path and a verbatim section name into one un
 
 
 def fetch(slug, path, ref, alternatives=()):
-    """Decoded downstream file content, read at the first of path and its alternatives present, or None if absent / not inline."""
+    """Decoded downstream file content at path or its first alternative present, or None if absent / not inline."""
     _, content = audit.read_baseline_file(slug, ref, path, alternatives)
     if content is None or content.get("encoding") != "base64":
         return None
@@ -90,10 +90,7 @@ def fidelity_pass(spec):
     spreads = []  # (unit dict, spread dict) for the full table
     promote = []  # intent units that are uniform fleet-wide
     mislabel = []  # verbatim units that diverge non-stale
-    alternatives = {}  # path -> other paths a repo may hold the file at instead, as the audit reads them
-    for e in spec["files"]["baseline"]:
-        merged = alternatives.setdefault(e["path"], [])
-        merged.extend(a for a in e.get("alternatives", []) if a not in merged)
+    alternatives = audit.declared_alternatives(spec["files"]["baseline"])
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
@@ -123,7 +120,7 @@ def fidelity_pass(spec):
                 audit.repo_slug(r),
                 down_path,
                 audit.ground_branch_of(r, defaults=defaults),
-                alternatives[down_path],
+                alternatives.get(down_path, []),
             )
             if (
                 text is None
