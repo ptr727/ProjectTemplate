@@ -137,8 +137,7 @@
             "publish": [{ "target": "docker", "mechanism": "static-secret" }],
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "two-phase",
-            "driftNotes": ["Separate publish-docker-readme-task for the Hub overview."]
+            "releaseTrigger": "two-phase"
         },
         {
             "name": "NxWitness",
