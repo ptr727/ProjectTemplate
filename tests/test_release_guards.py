@@ -16,6 +16,7 @@ from subprocess import run
 from typing import NamedTuple
 
 from host_capability import bash_or_skip
+from runner_commands import forged_lines
 from workflow_steps import step_script_text
 
 REPO = Path(__file__).resolve().parents[1]
@@ -314,7 +315,11 @@ class ReleaseGuardCase(unittest.TestCase):
 
             # The rejected value is printed for diagnosis, and neither command syntax may survive in it.
             # The runner reads a :: command only at a line start, but a ##[ command anywhere in a line.
-            for injected in ("1.2\n::error::injected", "1.2\n##[error]injected"):
+            for injected in (
+                "1.2\n::error::injected",
+                "1.2\n##[error]injected",
+                "1.2\n\u3000::warning::injected",
+            ):
                 with self.subTest(injected=injected):
                     output.write_text("", encoding="utf-8")
                     env = {**os.environ, "BRANCH": "main", "SEMVER2": injected}
@@ -329,9 +334,7 @@ class ReleaseGuardCase(unittest.TestCase):
                     )
                     self.assertEqual(1, verdict.returncode)
                     self.assertIn("injected", verdict.stdout)
-                    lines = verdict.stdout.splitlines()
-                    self.assertEqual(1, len([line for line in lines if line.startswith("::")]))
-                    self.assertNotIn("##[", verdict.stdout)
+                    self.assertEqual(1, len(forged_lines(verdict.stdout)))
 
             # The version step compares the branch but never prints it.
             output.write_text("", encoding="utf-8")
@@ -572,9 +575,7 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(smoke=smoke):
                 code, output = gate(injected, "1.2.34-g1a2b3c4d5e", smoke=smoke)
                 self.assertEqual(1, code)
-                commands = [line for line in output.splitlines() if line.startswith("::")]
-                self.assertEqual(1, len(commands))
-                self.assertNotIn("##[", output)
+                self.assertEqual(1, len(forged_lines(output)))
                 self.assertNotIn("injected", output)
 
         # A valid branch reaches the version check, whose refusal names the version it rejected.
