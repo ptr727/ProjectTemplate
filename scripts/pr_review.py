@@ -139,13 +139,13 @@ Subcommands
            format and its own future task per bot. Where either has posted anything at all on
            the current head, `other_reviewed` names it, identity and commit only, no verdict
            read from what it said. `other_rate_limited` names one whose newest comment or review
-           carries its own rate-limit marker instead, a structural
+           carries its own rate-limit marker instead. That marker is a structural
            `<!-- ... rate limited by ... -->` convention rather than free-text prose (observed on
-           CodeRabbit), so reading it needs no per-bot wording model the way
-           Copilot's quota refusal needed `QUOTA` built for its own text. CodeRabbit's reply to an
-           explicit review command reads the same, an `auto-generated reply` marker over an
-           `Action not completed` block saying `Review rate limited.`, its service named from the
-           login since that marker names none.
+           CodeRabbit). Reading it needs no per-bot wording model the way Copilot's quota refusal
+           needed `QUOTA` built for its own text. CodeRabbit's reply to an
+           explicit review command reads the same. That reply is an `auto-generated reply` marker
+           over an `Action not completed` block saying `Review rate limited.`, and its service is
+           named from the login.
            Two of their own finding shapes are read, though, each its own blind spot a thread
            poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
            CodeRabbit's own "outside diff range" findings, collapsed into the review body rather
@@ -1317,14 +1317,14 @@ def rate_limited_by(pr: dict, login: str) -> str | None:
     """The service name a rate-limit marker gives, where this login's newest comment or review
     on this pull request carries one. `None` otherwise. CodeRabbit's reply to an explicit review
     command, `RATE_LIMITED_REPLY`, is read from its markers and its fixed `Action not completed`
-    block alone. That marker names no service, so `RATE_LIMIT_SERVICE` names it by login, and a
-    login missing there is named by itself rather than dropped.
+    block alone. Its marker says `CodeRabbit` rather than the `coderabbit.ai` the other shape
+    gives, so `RATE_LIMIT_SERVICE` names the service by login and both shapes read alike. A login
+    missing there stays unread.
 
-    Reads both connections since both observed shapes, each CodeRabbit's, ride a plain PR
-    comment rather than a formal review, and a future bot using the same convention might use
-    either. Current pull request only, unlike Copilot's `quota_signal`: that one generalizes
-    from a pattern of silence across several pull requests, and this reads one notice, not a
-    history to read one out of.
+    Reads both connections, since both observed shapes ride a plain PR comment rather than a
+    formal review. A future bot using the same convention might use either. Current pull request
+    only, unlike Copilot's `quota_signal`. That one generalizes from a pattern of silence across
+    several pull requests, while this reads one notice rather than a history.
     """
     nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
     if not nodes:
@@ -1334,7 +1334,7 @@ def rate_limited_by(pr: dict, login: str) -> str | None:
     if match := RATE_LIMITED.search(body):
         return match.group(1)
     if RATE_LIMITED_REPLY.search(body):
-        return RATE_LIMIT_SERVICE.get(login, login)
+        return RATE_LIMIT_SERVICE.get(login)
     return None
 
 

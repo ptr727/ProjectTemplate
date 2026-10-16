@@ -978,8 +978,8 @@ class TestOtherReviewers(GqlCase):
     def test_rate_limited_by_reads_both_shapes_and_not_an_ordinary_comment(self) -> None:
         """Constructed bodies, the reply shape's invocation id made up and its glyph escaped.
 
-        The last two are near misses: the reply marker over a block that is not the rate-limit
-        one, and the block's own words with no reply marker over them.
+        The last two are near misses. One is the reply marker over another block, and the other
+        is the block's own words with no reply marker over them.
         """
         other_reply = (
             "<!-- This is an auto-generated reply by CodeRabbit -->\n"
@@ -998,16 +998,9 @@ class TestOtherReviewers(GqlCase):
                 pr = payload([review()], comments=[comment(login="coderabbitai", body=body)])
                 self.assertEqual(expected, pr_review.rate_limited_by(pr, "coderabbitai"))
 
-    def test_rate_limited_by_names_an_unmapped_login_by_itself(self) -> None:
-        pr = payload(
-            [review()],
-            comments=[comment(login=pr_review.QODO_LOGIN, body=RATE_LIMITED_REPLY_COMMENT)],
-        )
-        self.assertEqual(pr_review.QODO_LOGIN, pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
-
     def test_rate_limited_by_reads_the_reviews_connection_too(self) -> None:
-        """The marker rides a plain comment on the one observed instance, but the reader
-        checks both connections, since a future bot's own marker might ride a formal review."""
+        """Both observed shapes ride a plain comment, but the reader checks both connections,
+        since a future bot's own marker might ride a formal review."""
         pr = payload(
             [review(), self.other_review("coderabbitai", body=RATE_LIMITED_COMMENT)],
             comments=[],
