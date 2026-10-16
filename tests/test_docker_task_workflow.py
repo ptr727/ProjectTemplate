@@ -32,13 +32,13 @@ class Step(NamedTuple):
 
 
 def job_texts(workflow: str) -> dict[str, str]:
-    """Each job's text keyed by job id, read by indentation as `workflow_steps` does."""
+    """Each job's text keyed by job id, read by indentation, since the suite runs on the standard library alone."""
     lines = workflow.splitlines()
-    start = next(i for i, line in enumerate(lines) if line == "jobs:")
+    start = next(i for i, line in enumerate(lines) if re.fullmatch(r"jobs:\s*(#.*)?", line))
     jobs: dict[str, list[str]] = {}
     current: list[str] | None = None
     for line in lines[start + 1 :]:
-        header = re.fullmatch(r"  ([A-Za-z0-9_-]+):\s*", line)
+        header = re.fullmatch(r"  ([A-Za-z0-9_-]+):\s*(#.*)?", line)
         if header:
             current = jobs.setdefault(header.group(1), [])
         elif line.strip() and not line.startswith(" "):
@@ -53,7 +53,7 @@ def job_steps(job: str) -> list[Step]:
     items: list[list[str]] = []
     in_steps = False
     for line in job.splitlines():
-        if re.fullmatch(r"    steps:\s*", line):
+        if re.fullmatch(r"    steps:\s*(#.*)?", line):
             in_steps = True
         elif in_steps and line.startswith("      - "):
             items.append([line])
@@ -65,7 +65,7 @@ def job_steps(job: str) -> list[Step]:
     for item in items:
         text = "\n".join(item)
         name = re.search(r"(?m)^      - name: (.+)$", text)
-        uses = re.search(r"(?m)^        uses: (\S+)", text)
+        uses = re.search(r"(?m)^        uses: [\"']?([^\s\"']+)", text)
         steps.append(
             Step(
                 name.group(1) if name else "",
@@ -82,7 +82,7 @@ def with_keys(item: list[str]) -> tuple[str, ...]:
     keys: list[str] = []
     in_with = False
     for line in item:
-        if re.fullmatch(r"        with:\s*", line):
+        if re.fullmatch(r"        with:\s*(#.*)?", line):
             in_with = True
         elif in_with:
             key = re.match(r"          ([A-Za-z0-9_-]+):", line)
@@ -93,6 +93,11 @@ def with_keys(item: list[str]) -> tuple[str, ...]:
     return tuple(keys)
 
 
+def ungated(step: Step) -> bool:
+    """The step has no `if` or `continue-on-error`, so it always runs and a failure stops the job."""
+    return not re.search(r"(?m)^        (?:if|continue-on-error):", step.text)
+
+
 def is_credential_check(step: Step) -> bool:
     """A run step reading both Docker Hub secrets through env and testing them empty."""
     return (
@@ -100,13 +105,17 @@ def is_credential_check(step: Step) -> bool:
         and "        run: |" in step.text
         and all(f"{name}: ${{{{ secrets.{name} }}}}" in step.text for name in CREDENTIAL_NAMES)
         and "-z" in step.text
+        and "exit 1" in step.text
+        and ungated(step)
     )
 
 
 def is_login(step: Step) -> bool:
     """The Docker login action fed both secrets."""
-    return step.uses.startswith(LOGIN_ACTION) and all(
-        f"secrets.{name}" in step.text for name in CREDENTIAL_NAMES
+    return (
+        step.uses.startswith(LOGIN_ACTION)
+        and all(f"secrets.{name}" in step.text for name in CREDENTIAL_NAMES)
+        and ungated(step)
     )
 
 
@@ -118,6 +127,9 @@ def can_push(step: Step) -> bool:
 
 def violations(workflow: str) -> list[str]:
     """Every way the workflow breaks the login-before-push order or the hook inputs."""
+    workflow = "\n".join(
+        line for line in workflow.splitlines() if not line.lstrip().startswith("#")
+    )
     found: list[str] = []
     pushing = 0
     for job_id, body in job_texts(workflow).items():
@@ -167,7 +179,8 @@ def move_step_after(workflow: str, job: str, name: str, anchor: str) -> str:
     cut = body.replace(moved, "", 1)
     anchor_text = step_text(cut, anchor)
     end = cut.index(anchor_text) + len(anchor_text)
-    return workflow.replace(body, cut[:end] + moved + cut[end:], 1)
+    head = cut[:end] if cut[:end].endswith("\n") else cut[:end] + "\n"
+    return workflow.replace(body, head + moved + cut[end:], 1)
 
 
 class DockerTaskWorkflowCase(unittest.TestCase):
@@ -212,6 +225,37 @@ class DockerTaskWorkflowCase(unittest.TestCase):
         mutated = move_step_after(self.workflow, "build-docker", "Login to Docker Hub step", build)
         self.assertNotEqual(self.workflow, mutated)
         self.assertIn("build-docker: no login before the first push step", violations(mutated))
+
+    def test_check_moved_after_the_login_is_caught(self) -> None:
+        mutated = move_step_after(
+            self.workflow,
+            "docker-build-base",
+            "Require Docker Hub credentials step",
+            "Login to Docker Hub step",
+        )
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn("docker-build-base: login before the credential check", violations(mutated))
+
+    def test_gated_check_and_login_are_caught(self) -> None:
+        for name, flag in (
+            ("Require Docker Hub credentials step", "continue-on-error: true"),
+            ("Login to Docker Hub step", "if: ${{ inputs.push }}"),
+        ):
+            with self.subTest(name=name):
+                body = job_texts(self.workflow)["build-docker"]
+                step = step_text(body, name)
+                gated = step.replace("\n        ", f"\n        {flag}\n        ", 1)
+                mutated = self.workflow.replace(step, gated, 1)
+                self.assertNotEqual(self.workflow, mutated)
+                self.assertTrue(violations(mutated))
+
+    def test_commented_out_secret_is_caught(self) -> None:
+        mutated = self.workflow.replace(
+            "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}",
+            "          # password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}",
+        )
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn("no login before the first push step", "\n".join(violations(mutated)))
 
     def test_each_dropped_hook_input_is_caught(self) -> None:
         body = job_texts(self.workflow)["docker-build-base"]
