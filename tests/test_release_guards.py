@@ -334,7 +334,10 @@ class ReleaseGuardCase(unittest.TestCase):
                     )
                     self.assertEqual(1, verdict.returncode)
                     self.assertIn("injected", verdict.stdout)
-                    self.assertEqual(1, len(forged_lines(verdict.stdout)))
+                    self.assertEqual(
+                        ["::error::semver2 carries no M.N.P core to build a PEP 440 version from."],
+                        forged_lines(verdict.stdout),
+                    )
 
             # The version step compares the branch but never prints it.
             output.write_text("", encoding="utf-8")
@@ -575,7 +578,12 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(smoke=smoke):
                 code, output = gate(injected, "1.2.34-g1a2b3c4d5e", smoke=smoke)
                 self.assertEqual(1, code)
-                self.assertEqual(1, len(forged_lines(output)))
+                self.assertEqual(
+                    [
+                        "::error::The branch input is not a valid git branch name, so the build is refused."
+                    ],
+                    forged_lines(output),
+                )
                 self.assertNotIn("injected", output)
 
         # A valid branch reaches the version check, whose refusal names the version it rejected.
