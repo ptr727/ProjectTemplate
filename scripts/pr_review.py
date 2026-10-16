@@ -481,7 +481,7 @@ ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 # The service name is captured rather than assumed.
 # A second bot using the same auto-generated-comment convention is read without a new pattern.
 # Any other shape stays unread unless a pattern of its own, like the reply one below, reads it.
-# That reply's marker carries no service name, so `RATE_LIMIT_SERVICE` supplies one by login.
+# That reply's marker names the product rather than the `coderabbit.ai` service, so `RATE_LIMIT_SERVICE` supplies the service by login.
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
 RATE_LIMITED_REPLY = re.compile(
     r"<!--\s*This is an auto-generated reply by [^>\n]*-->\s*(?:<!--[^>\n]*-->\s*)*"
