@@ -52,11 +52,12 @@ text says, because the harm it covers was never in the text.
    checkout whose remote can't be read), this requirement has nothing to compare the target against
    and does not fire -- requirements 1 and 2 still apply regardless, and this is the same
    precision-over-recall stance every requirement but 4 takes. A write is recognized by its command
-   and subcommand as gh's own parser finds them, past the flags before each, so a repo flag before
+   and subcommand as gh's own parser finds them, past the flags before each. So a repo flag before
    the command or between `pr` and its subcommand still names the target. The target is also the
-   `R` in a short-option cluster such as `-dR`, and a `GH_REPO` assignment in the command. A
-   write whose repository is a run-time word, such as `--repo "$T"`, `GH_REPO="$T"`, or
-   `repos/$O/$R`, fails closed, since it leaves nothing to compare.
+   `R` in a short-option cluster such as `-dR`, and a `GH_REPO` value that reaches the gh word. One
+   exception departs from that stance. A write whose repository owner is a run-time word fails
+   closed, since it leaves nothing to compare. That covers `--repo "$T"`, `GH_REPO="$T"`, and
+   `repos/$O/...`, while `--repo "example/$R"` names its owner and is compared as usual.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
@@ -64,7 +65,7 @@ text says, because the harm it covers was never in the text.
    override on a commit or push is denied as one too. The file it pulls in may set
    `core.hooksPath` where the hook cannot read it. These flags are read in a command the hook
    parses, a wrapper shell's body and a command substitution's body among them. Those bodies are
-   read up to a few levels of nesting, and a git commit or push nested deeper is denied. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. A run-time word among a `gh pr merge`'s words, such as `$A` or `"$(...)"`, may expand to `--admin`, so it fails closed. An option's value that word splitting cannot split is the exception, as in `--body "$BODY"`. A run-time `--repo` value fails closed too, since the target check cannot read it. A run-time word where gh's command or `pr`'s subcommand goes may expand to `pr merge`, so it fails closed beside a literal `--admin`, or where word splitting may split it. So does a run-time command word before `pr merge`, as in `G=gh; $G pr merge`. `--no-verify` is also read cut short, as in `--no-veri`. A commit's `-n` is also read inside a short-option cluster such as `-an`, while the `n` in `-mn` is the message. Judge branch-rule cases against that branch's *live* rules, so a
+   read up to a few levels of nesting, and a git commit or push nested deeper is denied. `--admin` is also read inside a quoted `eval` argument, as the command it runs. A quoted `"--admin"` is read too where the shell passes it to gh as a flag. The other flags are not read inside a quoted `eval` argument. A run-time word among a `gh pr merge`'s words, such as `$A` or `"$(...)"`, may expand to `--admin`, so it fails closed. An option's value that word splitting cannot split is the exception, as in `--body "$BODY"`. A run-time `--repo` value fails closed too, since the target check cannot read it. A run-time word where gh's command or `pr`'s subcommand goes may expand to `pr merge`. It fails closed beside a literal `--admin`, or where word splitting may split it. So does a run-time command word before `pr merge`, as in `G=gh; $G pr merge`. `--no-verify` is also read cut short, as in `--no-veri`. A commit's `-n` is also read inside a short-option cluster such as `-an`, while the `n` in `-mn` is the message. Judge branch-rule cases against that branch's *live* rules, so a
    code-style `develop` denies and a config-style `develop` allows with no per-repo configuration.
    Each refspec's operation is judged on its own, so a `+src` or a `:dst` refspec forces or
    deletes only its own branch. A push's force, delete, all, mirror, and prune options are read as
