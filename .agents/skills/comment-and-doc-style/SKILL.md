@@ -14,9 +14,8 @@ description: >-
   carried instruction file (AGENTS.md, GOVERNANCE.md, CODESTYLE.md, WORKFLOW.md,
   .github/copilot-instructions.md) is being edited (no coordination references to the template or
   a sibling repo), and when writing a PR title or commit message (imperative subject, no vague
-  titles, no unsolicited Co-Authored-By, no release-bump magnitude). Also triggers whenever a
-  sentence or comment states how many items a list, a table, or a set of cases holds, since that
-  count goes stale at the next edit to the enumeration.
+  titles, no unsolicited Co-Authored-By, no release-bump magnitude). Also triggers when text
+  states how many items a list or a table holds, since that count goes stale.
 ---
 
 # Comment and Doc Style
@@ -201,7 +200,7 @@ pull request carries the `comments` label and the gate stands down for that chan
 and `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
 left exported reaches the commit and never the merge gate.
 
-These facts about reaching those escapes read as a broken gate until they are known. On a public
+The facts below about reaching those escapes read as a broken gate until they are known. On a public
 repository the lint job reads the label when it runs, and its log says "Read the pull request's
 labels live". A label added before then applies, and a rerun picks up one added since. In a private
 repository, or where the log lacks that line, the event's snapshot decides. It misses a label
@@ -222,7 +221,7 @@ and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODES
 are the repository's own narrative and keep their references, as do a commit message and a pull
 request body, which are the surfaces a reference belongs on.
 
-The carve-outs below are each stated as a single case. Whatever neither of them affirmatively permits is
+The carve-outs below are each stated as a single case. Whatever none of them affirmatively permits is
 banned by the paragraph above, which is the whole of the test and is why no list of banned cases
 follows. The first: **in a code or workflow comment, a URL naming an issue or a pull request on a
 public repository other than this one is a source citation and is permitted.** It does the same job
@@ -238,7 +237,7 @@ citation beside a claim, which is the distinction this rule turns on.
 Separately, `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md` carry no three-part
 version and no commit SHA, full or abbreviated, whether a pin's value, an example, a minimum
 version, or a fixed constant, since a pin's copy goes stale at the next Dependabot bump and every
-other kind reads exactly like one. Neither carve-out above lifts this ban. Item 3 of this skill's
+other kind reads exactly like one. No carve-out above lifts this ban. Item 3 of this skill's
 carried-doc-references reference says what to write instead of each and carries the audit that flags
 a literal.
 
@@ -388,7 +387,7 @@ Clarify Devcontainer Setup Steps in README
 
 <!-- include: GOVERNANCE.md > Incidental Counts -->
 
-Text refers to an enumeration rather than stating its size, so it writes "the following checks", "each case", or "the rows below". This holds in every fleet repository, for docs, code and workflow comments, and docstrings alike. A stated count is a second copy of what the list or table already shows, and nothing keeps the two copies in sync. Every later edit to the enumeration then owes an edit to the sentence, and a missed one surfaces as a review finding. A word such as "both" or "all three" is a count too, where the list it counts can grow. A count is written only where the number is what the reader needs, such as a limit, a threshold, a version, or a measured result. Such a count names its source, such as the constant, the manifest, or the measurement, so a reader can re-derive it. A wrong incidental count is fixed by removing it rather than by correcting it, since a corrected number goes stale the same way.
+Text refers to an enumeration rather than stating its size, so it writes "the following checks", "each case", or "the rows below". This holds in every fleet repository, for docs, code and workflow comments, and docstrings alike. A stated count is a second copy of what the list or table already shows, and nothing keeps the two copies in sync. Every later edit to the enumeration then owes an edit to the sentence, and a missed one surfaces as a review finding. A word such as "both" or "all three" is a count too, where the list it counts can grow. A count is written only where the number is what the reader needs, such as a limit, a threshold, or a measured result. Such a count names its source, such as the constant or the measurement, so a reader can re-derive it. A wrong incidental count is fixed by removing it rather than by correcting it, since a corrected number goes stale the same way.
 
 <!-- /include -->
 

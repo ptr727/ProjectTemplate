@@ -194,7 +194,7 @@ for, and it binds harder than any throughput target.
   stops there and reports, rather than dispatching against a stale answer, and stopping rather
   than deferring is what the cleanup and promotion steps need too, since both read the same
   remote.
-  Those enumerate the branches, with one gap: a branch in the standalone clone `repo-worktree` allows as a fallback is
+  Those three enumerate the branches, with one gap: a branch in the standalone clone `repo-worktree` allows as a fallback is
   reached only once it is pushed, since `git branch -r` inventories the remote rather than this
   repository's checkouts. The claim comments are what say which files each branch holds, since a branch name says nothing about a file set, an unpushed branch has no
   pull request diff to read, and no diff of any branch reports the predicted set a claim records
