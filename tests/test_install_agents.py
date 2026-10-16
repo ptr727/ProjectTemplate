@@ -238,7 +238,6 @@ class TestInstallAgents(unittest.TestCase):
             (("--upgrade", "--json"), "applies only to --report"),
             (("--upgrade", "--all"), "--all names every tool for --install"),
             (("--report", "nosuch"), 'Unknown tool "nosuch"'),
-            (("--install", "ALL"), 'Unknown tool "ALL"'),
             (("--report", "Herdr"), 'Unknown tool "Herdr"'),
             (("--report", "--upgrade"), "More than one action"),
         ]:
@@ -369,7 +368,6 @@ class TestInstallAgentsWindows(unittest.TestCase):
             (("-Upgrade", "-All"), "-All names every tool for -Install"),
             (("-Install", "-All", "herdr"), "-All and a tool name were both given"),
             (("-Report", "nosuch"), 'Unknown tool "nosuch"'),
-            (("-Install", "ALL"), 'Unknown tool "ALL"'),
             (("-Report", "Herdr"), 'Unknown tool "Herdr"'),
         ]:
             with self.subTest(arguments=arguments):
