@@ -86,7 +86,6 @@ $MODE = ''
 $RESOLVED = ''
 $TREE = ''
 $PWSH_PATH = ''
-# Held rather than disposed, since the lock it carries lasts until this process ends.
 $LOCK = $null
 
 function usage {
@@ -284,6 +283,13 @@ function Lock-Directory {
         }
         die "Could not open $lock for locking. Check that $script:DIR is writable: $($reason.Message)"
     }
+}
+
+# A run typed at an interactive prompt runs in the caller's process, so a lock left for the process to release outlives the run and refuses the next one in that session.
+function Unlock-Directory {
+    if (-not $script:LOCK) { return }
+    $script:LOCK.Dispose()
+    $script:LOCK = $null
 }
 
 # Refuses to remove a tree this run did not create, rather than trusting the name.
@@ -651,7 +657,8 @@ function main {
             'dev' { Invoke-StandUp -Kind 'dev' }
         }
     } finally {
-        Invoke-Cleanup
+        # Released after the cleanup, so the cleanup still runs under the lock, and on die's exit too, which runs this finally on its way out.
+        try { Invoke-Cleanup } finally { Unlock-Directory }
     }
 
     step 'Done'
