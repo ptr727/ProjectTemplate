@@ -210,7 +210,9 @@ _GH_API_VALUE_FLAGS = _GH_CREATE_TEXT_VALUE_FLAGS | {
 def _is_gh_write(cmd):
     """True when `cmd` is a GitHub write: a known-mutating `gh` subcommand, a `git push`, or a `gh api`
     call whose effective method is not GET. A GraphQL call is a write only when its query is a mutation,
-    or when its body is supplied by `--input` and so cannot be read at all.
+    or when its body is supplied by `--input` and so cannot be read at all. A gh whose command or
+    subcommand is a run-time word some write could stand for is a write too (see `_gh_path_writes`).
+    Rules 1 to 5 then read it, as in `gh pr "$S" 5 2>/dev/null`.
     """
     # Argv-aware for the `gh api` half, reading a flag or a GraphQL query only from where it actually sits in one invocation's own argv, not a raw substring search over the whole command.
     # A substring search reads a write-method spelling out of an opaque flag value too, such as a
@@ -2787,8 +2789,10 @@ _GH_SHORT_VALUE_LETTERS = {
 def _gh_short_value_letters(args, flags):
     """The short options taking a value in a gh argv, from its subcommand, or else the reading's table.
 
-    `_GH_SHORT_VALUE_LETTERS` lists them per write subcommand, other than `-R`, as gh's own help
-    does. So an attached value such as `-BRelease/2.0` is read as the base branch it is.
+    `_GH_SHORT_VALUE_LETTERS` lists them, `-R` aside, for each pr, issue, release, label, secret,
+    and variable write it names, as gh's help does. So an attached value such as `-BRelease/2.0` is
+    read as the base branch it is. Any other subcommand takes the reading's table. A value there
+    holding an `R` and a `/` may then read as a target.
     """
     known = _GH_SHORT_VALUE_LETTERS.get(tuple(_gh_path(args)))
     if known is not None:
@@ -2841,10 +2845,11 @@ def _gh_repo_assignments(cmd):
     """Each `GH_REPO` value that reaches a gh word in `cmd`, as (value, argv), wrapper bodies included.
 
     gh reads its repository from GH_REPO where no repo flag names one, so a gh word whose argv
-    names one takes none. `gh api` reads it only to fill an `{owner}` or `{repo}` placeholder. A value reaches a gh word from the prefix of the simple command it runs
-    (see `_command_prefix`), or else from the latest `export` before it. A wrapper body takes what
-    `_wrapper_env_assignments` says reaches the wrapper. A heredoc body that is data is left out,
-    and a word that is an argument, as in `echo GH_REPO=x`, does not count.
+    names one takes none. `gh api` reads it only to fill an `{owner}` or `{repo}` placeholder. A
+    value reaches a gh word from the prefix of the simple command it runs (see `_command_prefix`),
+    or else from the latest `export` before it. A wrapper body takes what
+    `_wrapper_env_assignments` says reaches a wrapper, the latest such value for every body. A
+    heredoc body that is data is left out, and an argument such as `echo GH_REPO=x` does not count.
     """
     out = []
     for reading in _heredoc_readings(cmd) or [cmd]:
@@ -4908,7 +4913,8 @@ def _check_bypass_flags(cmd):
     if hidden_admin:
         return "deny", (
             f"This runs or may run `gh pr merge` with a run-time word, `{hidden_admin}`, among its "
-            "words or where gh's command or subcommand goes. The shell rewrites it before gh reads "
+            "words, where gh's command or subcommand goes, or where gh itself goes. The shell "
+            "rewrites it before gh reads "
             "it. It may expand to `--admin`, which merges past required reviews and status checks, "
             "to `pr merge` itself, or name a repository the target check cannot read. Failing "
             "closed. Write every word of the merge out. Only a quoted value of an option other "
@@ -6928,6 +6934,22 @@ _GH_PATH_CASES: list[tuple[str, str, str]] = [
         "deny",
         "a run-time GH_REPO filling the placeholders of an api write whose flags precede api",
     ),
+    (
+        'gh --foo pr merge 5 "$X"',
+        "allow",
+        "gh reads pr as the unknown flag's value, so no merge runs",
+    ),
+    (
+        'gh pr --squash merge 5 "$X"',
+        "allow",
+        "gh reads merge as the flag's value, so no merge runs",
+    ),
+    (
+        'gh pr -d merge 5 "$X"',
+        "allow",
+        "gh reads merge as the short flag's value, so no merge runs",
+    ),
+    ('gh pr -- merge 5 "$X"', "allow", "-- ends gh's subcommand search, so no merge runs"),
     ("gh -R stranger/example pr view 5", "allow", "a repo flag before a read's command"),
     ('gh pr view 5 -R "$T"', "allow", "a run-time repo value on a read"),
     ("GH_REPO=stranger/example gh pr view 5", "allow", "a GH_REPO prefix on a read"),
