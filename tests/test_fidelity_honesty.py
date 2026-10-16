@@ -37,6 +37,9 @@ class FidelityPassAlternativesCase(unittest.TestCase):
     The reader's own handling of alternatives is covered by spec/audit.py's --selftest, so what
     this adds is the call site. Were it to stop passing them, a repository holding only an
     alternative would land in the unavailable bucket while that self-test still passed.
+
+    The canonical's history is a git walk that refuses a shallow clone and fetches the hub's
+    origin, so it is answered as empty. The copy then matches on the current canonical alone.
     """
 
     def test_a_copy_held_only_at_the_alternative_is_read_and_compared(self) -> None:
@@ -55,7 +58,10 @@ class FidelityPassAlternativesCase(unittest.TestCase):
             "registry": {"repos": [ENTRY], "defaults": {}},
             "files": {"baseline": [CODECOV]},
         }
-        with mock.patch.object(audit, "gh", fake_gh):
+        with (
+            mock.patch.object(audit, "gh", fake_gh),
+            mock.patch.object(audit, "git_file_history", lambda rel_path: []),
+        ):
             spreads, _, _ = fidelity_honesty.fidelity_pass(spec)
 
         self.assertIn(f"repos/{SLUG}/contents/.codecov.yml?ref=main", reads)

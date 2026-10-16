@@ -33,7 +33,7 @@ CODECOV = {
 class FakeGh:
     """The REST reads audit_repo makes, answered for a repository carrying exactly `tree`.
 
-    An unanticipated read fails the test rather than answering, since a guessed answer could steer
+    An unanticipated read fails the test rather than answering. A guessed answer could steer
     audit_repo past the loop under test while still reading as a pass.
     """
 
@@ -73,7 +73,11 @@ class AuditRepoAlternativesCase(unittest.TestCase):
     """
 
     def run_audit(self, tree: set[str]) -> tuple[list[tuple[str, str]], FakeGh]:
-        """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed."""
+        """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
+
+        The hub's tracked paths come from a fetch of its origin. Answering them as empty keeps the
+        run offline and leaves the checkout the suite runs in untouched.
+        """
         spec = {
             "registry": {"repos": [ENTRY], "defaults": {}},
             "settings": audit.load("repo-config/settings.json"),
@@ -81,7 +85,10 @@ class AuditRepoAlternativesCase(unittest.TestCase):
             "files": {"baseline": [CODECOV]},
         }
         fake = FakeGh(tree)
-        with mock.patch.object(audit, "gh", fake):
+        with (
+            mock.patch.object(audit, "gh", fake),
+            mock.patch.object(audit, "hub_tracked", lambda rev=None: frozenset()),
+        ):
             findings, _ = audit.audit_repo(ENTRY, spec)
         return findings, fake
 
