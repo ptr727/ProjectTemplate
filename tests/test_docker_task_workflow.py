@@ -104,7 +104,7 @@ def is_credential_check(step: Step) -> bool:
         not step.uses
         and "        run: |" in step.text
         and all(f"{name}: ${{{{ secrets.{name} }}}}" in step.text for name in CREDENTIAL_NAMES)
-        and "-z" in step.text
+        and all(f'-z "${name}"' in step.text for name in CREDENTIAL_NAMES)
         and "exit 1" in step.text
         and ungated(step)
     )
@@ -152,6 +152,9 @@ def violations(workflow: str) -> list[str]:
                 missing = [key for key in HOOK_INPUTS if key not in step.with_keys]
                 if missing:
                     found.append(f"{job_id}: hook {step.uses} lacks {', '.join(missing)}")
+                for key in ("push", "ref", "branch"):
+                    if f"          {key}: ${{{{ inputs.{key} }}}}" not in step.text:
+                        found.append(f"{job_id}: hook {step.uses} does not forward inputs.{key}")
     if pushing < 2:
         found.append(f"expected at least two pushing jobs, found {pushing}")
     return found
@@ -245,9 +248,29 @@ class DockerTaskWorkflowCase(unittest.TestCase):
                 body = job_texts(self.workflow)["build-docker"]
                 step = step_text(body, name)
                 gated = step.replace("\n        ", f"\n        {flag}\n        ", 1)
-                mutated = self.workflow.replace(step, gated, 1)
+                mutated = self.workflow.replace(body, body.replace(step, gated, 1), 1)
                 self.assertNotEqual(self.workflow, mutated)
-                self.assertTrue(violations(mutated))
+                found = violations(mutated)
+                self.assertTrue(any(v.startswith("build-docker: no ") for v in found))
+
+    def test_half_a_credential_check_is_caught(self) -> None:
+        mutated = self.workflow.replace(' || -z "$DOCKER_HUB_ACCESS_TOKEN"', "", 1)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn(
+            "docker-build-base: no credential check before the first push step", violations(mutated)
+        )
+
+    def test_miswired_hook_input_is_caught(self) -> None:
+        mutated = self.workflow.replace(
+            "          ref: ${{ inputs.ref }}\n          branch:",
+            "          ref: ${{ inputs.branch }}\n          branch:",
+            1,
+        )
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn(
+            "docker-build-base: hook ./.github/actions/docker-build-base does not forward inputs.ref",
+            violations(mutated),
+        )
 
     def test_commented_out_secret_is_caught(self) -> None:
         mutated = self.workflow.replace(
