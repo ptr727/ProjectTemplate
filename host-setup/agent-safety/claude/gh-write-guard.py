@@ -17,8 +17,9 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
   1. a state-changing gh call whose output is discarded or forced to success
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
-  3. a gh write with an explicit -R/--repo/repos/<owner>/<repo> target under an owner other than the
-     checkout origin's, unless the maintainer granted that target in GH_WRITE_GUARD_ALLOW. Sibling
+  3. a gh write with an explicit target, such as -R/--repo, repos/<owner>/<repo>, GH_REPO, or a pull
+     request URL, under an owner other than the checkout origin's, unless the maintainer granted that
+     target in GH_WRITE_GUARD_ALLOW. Sibling
      repositories under the same owner are allowed, since the harm this guards is reaching a stranger's
      repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
@@ -110,15 +111,24 @@ _GH_WRITE_SUBS = {
     "pr": (
         *("create", "comment", "close", "merge", "edit"),
         *("review", "reopen", "ready", "lock", "unlock"),
+        *("revert", "update-branch"),
     ),
     "issue": (
         *("create", "comment", "close", "edit", "reopen", "delete"),
-        *("lock", "unlock", "pin", "unpin", "transfer"),
+        *("lock", "unlock", "pin", "unpin", "transfer", "develop"),
     ),
-    "release": ("create", "edit", "delete", "upload"),
-    "repo": ("create", "delete", "edit", "rename", "archive"),
-    **{g: ("create", "delete", "edit", "set") for g in ("label", "secret", "variable", "ruleset")},
+    "release": ("create", "edit", "delete", "upload", "delete-asset"),
+    "repo": ("create", "delete", "edit", "rename", "archive", "unarchive", "sync"),
+    **{g: ("create", "delete", "edit", "set") for g in ("secret", "variable", "ruleset")},
+    "label": ("create", "delete", "edit", "set", "clone"),
     "gist": ("create", "edit", "delete"),
+    "workflow": ("run", "enable", "disable"),
+    "run": ("rerun", "cancel", "delete"),
+    "cache": ("delete",),
+}
+_GH_WRITE_SUBSUBS = {
+    ("repo", "deploy-key"): ("add", "delete"),
+    ("repo", "autolink"): ("create", "delete"),
 }
 # The gh subcommands that mutate.
 # A path-qualified or `.exe`-suffixed `gh` still starts a shell word this matches, the same recognition `_is_gh_exe` gives it for argv-position parsing.
@@ -126,6 +136,8 @@ _GH_WRITE_SUBS = {
 _GH_WRITE_SUB = re.compile(
     r"\bgh(?:\.exe)?\s+(?:"
     + "|".join(rf"{g}\s+(?:{'|'.join(subs)})" for g, subs in _GH_WRITE_SUBS.items())
+    + "|"
+    + "|".join(rf"{g}\s+{s}\s+(?:{'|'.join(subs)})" for (g, s), subs in _GH_WRITE_SUBSUBS.items())
     + r")\b"
 )
 _GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
@@ -233,7 +245,11 @@ def _gh_argv_is_write(args):
     if not args:
         return False
     if args[0] != "api":
-        return _gh_path_writes(_gh_path(args))
+        return (
+            _gh_path_writes(_gh_path(args))
+            or _gh_path3_writes(args)
+            or _gh_write_past_run_time(args) is not None
+        )
     path = _gh_api_path(args)
     if path == "graphql":
         if _gh_has_input(args):
@@ -246,23 +262,23 @@ def _gh_argv_is_write(args):
 _GH_PATH_BOOL_FLAGS = frozenset({"--help", "--version"})
 
 
-def _gh_path(args):
+def _gh_path(args, limit=2):
     """gh's command and subcommand words in an argv, at most two, read the way cobra finds them.
 
     Cobra reads past each flag before them. A flag word with no `=` that is `--long` or one letter
     takes the next word as its value, unless it is a known boolean. An unknown flag is no boolean
     to it, so `gh pr --squash 5 merge` runs a merge. And `gh -R example/repo pr merge` names its
     repository before the command. A longer short form such as `-Rx` is one word, and `--` ends
-    the search.
+    the search. A `limit` of 3 reads the third word a `_GH_WRITE_SUBSUBS` write names.
     """
-    return [args[i] for i in _gh_path_at(args)]
+    return [args[i] for i in _gh_path_at(args, limit)]
 
 
-def _gh_path_at(args):
+def _gh_path_at(args, limit=2):
     """The index in `args` of each word `_gh_path` reads."""
     at = []
     i = 0
-    while i < len(args) and len(at) < 2:
+    while i < len(args) and len(at) < limit:
         a = args[i]
         if a == "--":
             break
@@ -280,6 +296,52 @@ def _gh_path_at(args):
 def _gh_path_writes(words):
     """True when gh's command and subcommand words, from `_gh_path`, are or may be a write."""
     return _gh_path_may_be(words, _GH_WRITE_SUBS)
+
+
+def _gh_path3_writes(args):
+    """True when a gh argv's first three path words are or may be a write `_GH_WRITE_SUBSUBS` lists."""
+    words = _gh_path(args, 3)
+    subs = _GH_WRITE_SUBSUBS.get(tuple(words[:2]), ())
+    return len(words) == 3 and bool(subs) and (words[2] in subs or _is_run_time_word(words[2]))
+
+
+def _gh_names_write(args):
+    """True when a gh argv's literal words name a write, as `_gh_argv_is_write` reads one.
+
+    That is a command and subcommand the write tables list, or a `gh api` write. A run-time word
+    where gh's command or subcommand goes does not count, unless a literal write sits behind it
+    (see `_gh_write_past_run_time`).
+    """
+    if args[:1] == ["api"]:
+        return _gh_argv_is_write(args)
+    words = _gh_path(args, 3)
+    if any(_is_run_time_word(w) for w in words[:2]):
+        return _gh_write_past_run_time(args) is not None
+    if len(words) > 1 and words[1] in _GH_WRITE_SUBS.get(words[0], ()):
+        return True
+    return len(words) == 3 and words[2] in _GH_WRITE_SUBSUBS.get(tuple(words[:2]), ())
+
+
+def _gh_write_past_run_time(args, _depth=0):
+    """The run-time word where gh's command or subcommand goes that a literal write sits behind, or None.
+
+    The shell may expand such a word to a flag with its value, attached or as the next word, as a
+    `"$R"` holding `--repo=stranger/example` does. gh then reads its command and subcommand past
+    it, so `gh "$R" pr comment 5` is a comment to a repository the guard cannot read. A `gh api`
+    argv has its endpoint where a subcommand goes, so it has no such word.
+    """
+    at = [i for i in _gh_path_at(args) if _is_run_time_word(args[i])]
+    if not at or _depth > 2 or args[:1] == ["api"]:
+        return None
+    i = at[0]
+    for rest in (args[:i] + args[i + 1 :], args[:i] + args[i + 2 :]):
+        rest = _api_first(rest)
+        if any(_is_run_time_word(w) for w in _gh_path(rest)):
+            if _gh_write_past_run_time(rest, _depth + 1) is not None:
+                return args[i]
+        elif _gh_names_write(rest):
+            return args[i]
+    return None
 
 
 def _gh_may_merge(args):
@@ -2421,6 +2483,46 @@ def _api_first(args):
     return args
 
 
+def _gh_invocations(text):
+    """(the tokens of `text`, each gh invocation in `text` itself as (token index, argv)).
+
+    That is each gh word, its argv read as `_gh_arg_lists` reads it. It is also each run-time word
+    in a command's place, such as `$G` or `"$(which gh)"`, whose argv names a gh write in literal
+    words (see `_gh_names_write`), as in `G=gh; $G pr comment 5 -R stranger/example`. A non-gh
+    command behind such a word whose words read as a gh write is read as one too.
+    """
+    toks = _shell_tokens(text)
+    out = []
+    mask = None
+    k = 0
+    while k < len(toks):
+        t = toks[k]
+        if _is_gh_exe(t):
+            args, end = _collect_arglist(toks, k + 1)
+            out.append((k, _api_first(args)))
+            k = end
+            continue
+        k += 1
+        if "$" not in t and "`" not in t:
+            continue
+        if mask is None:
+            mask = _quoted_mask(text, toks)
+        if not _is_run_time_command(toks, k - 1, mask):
+            continue
+        start = _span_end(toks, k - 1, _region_end(toks, k - 1, mask))
+        if start is None:
+            continue
+        args = _api_first(_collect_arglist(toks, start)[0])
+        if args and _gh_names_write(args):
+            out.append((k - 1, args))
+    return toks, out
+
+
+def _gh_target_arg_lists(text):
+    """The argv of each gh invocation `_gh_invocations` reads in `text` itself."""
+    return [args for _, args in _gh_invocations(text)[1]]
+
+
 _SHELL_WRAPPER_EXE = ("sh", "bash", "zsh", "ksh", "dash")
 
 
@@ -2654,10 +2756,11 @@ def _shell_bodies_at(toks, i):
 def _all_gh_arg_lists(cmd):
     """`_gh_arg_lists` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style wrapper
     embeds in it, so a `gh` call hidden behind such a wrapper is scanned exactly like a bare one.
+    A gh write behind a run-time command word is read too (see `_gh_invocations`).
     """
-    out = list(_gh_arg_lists(cmd))
+    out = list(_gh_target_arg_lists(cmd))
     for inner in _embedded_wrapper_commands(cmd):
-        out.extend(_gh_arg_lists(inner))
+        out.extend(_gh_target_arg_lists(inner))
     return out
 
 
@@ -2693,16 +2796,21 @@ def _gh_target_readings(argvs):
             yield args, _GH_MERGE_TEXT_FLAGS
 
 
-def _gh_write_targets(cmd):
+def _gh_write_targets(cmd, environ=None):
     """Every explicit owner/repo target named in an actual `gh` invocation's own argv (including one
     embedded in a `sh -c`/`bash -c` wrapper): a `--repo`/`-R` flag value, or a `repos/<owner>/<repo>` API
     path token. Argv-position parsing, the way `_push_targets` reads a git push target, so a --repo/repos
     mention that is only prose, inside an unrelated --body/--title value or a commit message, is never
-    read as one. A `GH_REPO` assignment's value is one too (see `_gh_repo_assignments`).
+    read as one. A `GH_REPO` value that reaches a gh word is one too (see `_gh_repo_assignments`), and
+    so is a repository a write's positional argument names (see `_gh_positional_repo_words`). Another
+    API path naming an owner is one on a `gh api` call (see `_API_OWNER_PATHS`).
     """
-    words = [(w, is_path) for w, is_path, _ in _gh_repo_words(_all_gh_arg_lists(cmd))]
-    words += [(w, False) for w, _ in _gh_repo_assignments(cmd)]
-    return [t for w, is_path in words for t in [_named_target(w, is_path)] if t]
+    argvs = _all_gh_arg_lists(cmd)
+    words = [(w, is_path, a[:1] == ["api"]) for w, is_path, a in _gh_repo_words(argvs)]
+    words += [(w, False, False) for w, _, _ in _gh_repo_assignments(cmd, environ)]
+    targets = [t for w, is_path, api in words for t in _named_targets(w, is_path, api)]
+    positional = [w for a in argvs for w, _ in _gh_positional_repo_words(a)]
+    return targets + [t for w in positional for t in [_gh_repo_value_reading(w)] if t]
 
 
 def _gh_repo_words(argvs):
@@ -2800,38 +2908,231 @@ def _gh_short_value_letters(args, flags):
     return "".join(f[1] for f in flags if len(f) == 2)
 
 
-def _named_target(word, is_path):
-    """The (owner, repo) a repository word or a normalized API path names, or None."""
+_GH_URL = re.compile(r"^https?://[^/]+/(?P<owner>[^/]+)/(?P<repo>[^/]+)", re.IGNORECASE)
+_API_SEGMENT = r"[A-Za-z0-9_.\-]+"
+_API_OWNER_PATHS = (
+    re.compile(rf"^(?:orgs|users)/(?P<owner>{_API_SEGMENT})(?:/|$)"),
+    re.compile(rf"^user/starred/(?P<owner>{_API_SEGMENT})/(?P<repo>{_API_SEGMENT})"),
+    re.compile(rf"^user/(?:following|blocks)/(?P<owner>{_API_SEGMENT})(?:/|$)"),
+    re.compile(rf"^user/memberships/orgs/(?P<owner>{_API_SEGMENT})(?:/|$)"),
+)
+_API_OWNER_SEGMENTS = (
+    re.compile(r"^(?:repos|orgs|users)/([^/]*)"),
+    re.compile(r"^user/(?:starred|following|blocks)/([^/]*)"),
+    re.compile(r"^user/memberships/orgs/([^/]*)"),
+    re.compile(r"^([^/]*)"),
+)
+
+
+def _gh_repo_value_reading(word):
+    """The (owner, repo) gh reads a repository word as, a URL or `[HOST/]OWNER/REPO`, else None."""
+    m = _GH_URL.match(word)
+    parts = [m.group("owner"), m.group("repo")] if m else word.split("/")
+    parts = parts[1:] if len(parts) == 3 else parts
+    if len(parts) != 2 or not all(parts) or "<" in word:
+        return None
+    return parts[0].lower(), parts[1].lower()
+
+
+def _named_targets(word, is_path, api=False):
+    """Each (owner, repo) a repository word or a normalized API path names.
+
+    A repository word is read as gh reads it (see `_gh_repo_value_reading`), and with its first
+    part as the owner as well, so the reading gh gives a three-part value only adds a target. An
+    API path names a `repos/` target, and on a `gh api` call (`api`) any `_API_OWNER_PATHS` one too.
+    A path naming an owner but no repository names all of the owner's, as `("stranger", "*")`.
+    """
+    if "<" in word:
+        return []
+    out = []
     if is_path:
         m = _REPOS_PATH_TOKEN.match(word)
-        if m and "<" not in word:
-            return m.group("owner").lower(), m.group("repo").lower()
-        return None
-    if "/" in word and "<" not in word:
+        if m:
+            out.append((m.group("owner").lower(), m.group("repo").lower()))
+        for pattern in _API_OWNER_PATHS if api else ():
+            m = pattern.match(word)
+            if m:
+                out.append((m.group("owner").lower(), (m.groupdict().get("repo") or "*").lower()))
+        return out
+    if "/" in word:
         o, r = word.split("/", 1)
-        return o.lower(), r.lower()
-    return None
+        out.append((o.lower(), r.lower()))
+    read = _gh_repo_value_reading(word)
+    return out + ([read] if read and read not in out else [])
+
+
+def _repo_value_owners(word, exact=False):
+    """Each part of a repository word `_named_targets` reads as an owner, whatever it holds.
+
+    With `exact`, that is only the owner gh reads, or the whole word where gh reads none, since
+    a run-time word may hold a whole `OWNER/REPO`.
+    """
+    read = _gh_repo_value_reading(word)
+    m = _GH_URL.match(word)
+    parts = word.split("/")
+    owner = m.group("owner") if m else (parts[1] if len(parts) == 3 else parts[0])
+    if exact:
+        return [owner if read or m else word]
+    return [parts[0], owner]
+
+
+_GH_POSITIONAL_VALUE_FLAGS = {
+    (cmd, sub): frozenset(flags.split())
+    for cmd, sub, flags in (
+        ("pr", "comment", "--attach -b --body -F --body-file"),
+        ("pr", "close", "-c --comment"),
+        (
+            "pr",
+            "merge",
+            "-A --author-email -b --body -F --body-file --match-head-commit -t --subject",
+        ),
+        (
+            "pr",
+            "edit",
+            (
+                "--add-assignee --add-label --add-project --add-reviewer --attach -B --base "
+                "-b --body -F --body-file -m --milestone --remove-assignee --remove-label "
+                "--remove-project --remove-reviewer -t --title"
+            ),
+        ),
+        ("pr", "review", "-b --body -F --body-file"),
+        ("pr", "reopen", "-c --comment"),
+        ("pr", "lock", "-r --reason"),
+        ("pr", "revert", "-b --body -F --body-file -t --title"),
+        ("issue", "comment", "--attach -b --body -F --body-file"),
+        ("issue", "close", "-c --comment --duplicate-of -r --reason"),
+        (
+            "issue",
+            "edit",
+            (
+                "--add-assignee --add-blocked-by --add-blocking --add-label --add-project "
+                "--add-sub-issue --attach -b --body -F --body-file -m --milestone --parent "
+                "--remove-assignee --remove-blocked-by --remove-blocking --remove-label "
+                "--remove-project --remove-sub-issue -t --title --type"
+            ),
+        ),
+        ("issue", "reopen", "-c --comment"),
+        ("issue", "lock", "-r --reason"),
+        ("issue", "develop", "-b --base --branch-repo -n --name --worktree"),
+        (
+            "repo",
+            "create",
+            (
+                "-d --description -g --gitignore -h --homepage -l --license "
+                "-r --remote -s --source -t --team -p --template"
+            ),
+        ),
+        (
+            "repo",
+            "edit",
+            (
+                "--add-topic --default-branch -d --description -h --homepage "
+                "--remove-topic --squash-merge-commit-message --visibility"
+            ),
+        ),
+        ("repo", "sync", "-b --branch -s --source"),
+    )
+}
+_GH_REPO_POSITIONAL_SUBS = frozenset(
+    ("repo", s) for s in ("create", "delete", "edit", "archive", "unarchive", "sync")
+)
+
+
+def _gh_positional_repo_words(args):
+    """Each repository word a gh write's positional arguments name, as (word, argv).
+
+    A `pr` or `issue` write takes its pull request or issue as a URL too, which names the
+    repository, as in `gh pr comment https://github.com/stranger/example/pull/5`. A number, a
+    branch, or a wholly run-time word there selects inside the repository gh reads otherwise, so
+    it is no target. A `_GH_REPO_POSITIONAL_SUBS` write takes the repository itself, as `gh repo
+    edit stranger/example` does. `gh issue transfer` takes its destination second, and
+    `gh issue develop --branch-repo` names the repository its branch goes to. A flag's value is
+    passed by `_GH_POSITIONAL_VALUE_FLAGS`, the value-taking flags gh's help lists for each such
+    write, and any other flag is read as a boolean.
+    """
+    key = tuple(_gh_path(args))
+    if len(key) < 2 or key[1] not in _GH_WRITE_SUBS.get(key[0], ()):
+        return []
+    takes = _GH_POSITIONAL_VALUE_FLAGS.get(key, frozenset()) | _REPO_FLAG_BARE
+    path = set(_gh_path_at(args))
+    positional, named, ended = [], [], False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if i - 1 in path:
+            continue
+        if ended or not a.startswith("-") or a == "-":
+            positional.append(a)
+            continue
+        if a == "--":
+            ended = True
+            continue
+        if key == ("issue", "develop") and a.partition("=")[0] == "--branch-repo":
+            named += [a.partition("=")[2]] if "=" in a else args[i : i + 1]
+        if a in takes:
+            i += 1
+    if key in _GH_REPO_POSITIONAL_SUBS:
+        named += positional
+    elif key == ("issue", "transfer"):
+        named += positional[1:]
+        positional = positional[:1]
+    if key[0] in ("pr", "issue"):
+        named += [w for w in positional if _GH_URL.match(w)]
+    return [(w, args) for w in named]
 
 
 _REPOS_PATH_OWNER = re.compile(r"^/?repos/[^/]*")
 
 
-def _gh_run_time_target(cmd):
+def _gh_api_run_time_owner(args):
+    """The endpoint of a `gh api` argv whose owner segment, or first segment, is a run-time word, else None.
+
+    The owner segment is the one an `_API_OWNER_SEGMENTS` path names, as `$O` in `orgs/$O/teams`. A
+    first segment that is a run-time word, as in `"$URL"`, may hold any owner.
+    """
+    path = _gh_api_path(args)
+    if path is None:
+        return None
+    for pattern in _API_OWNER_SEGMENTS:
+        m = pattern.match(path)
+        if m and _is_run_time_word(m.group(1)):
+            return path
+    return None
+
+
+def _gh_run_time_target(cmd, environ=None):
     """The first run-time word a gh write in `cmd` names its repository's owner with, or None.
 
     The shell rewrites it before gh reads it, so the target check has nothing to compare. That is
-    a repo flag's value, the owner segment of a `repos/` API path, or a `GH_REPO` value. A literal
-    owner is all the check compares, so `--repo "example/$R"` is left alone. So is a read naming
-    one, as in `gh pr view -R "$T"`, and a heredoc body that is data, wrapper bodies in it included.
+    a repo flag's value, the owner segment of a `repos/` API path, or a `GH_REPO` value. It is also
+    a repository a positional argument names (see `_gh_positional_repo_words`), the owner segment
+    or first segment of a `gh api` write's endpoint (see `_gh_api_run_time_owner`), and a word
+    before a literal write where gh's command goes (see `_gh_write_past_run_time`). A literal owner
+    is all the check compares, so `--repo "example/$R"` is left alone. So is a read naming one, as
+    in `gh pr view -R "$T"`, a `GH_REPO` the session's environment holds, and a heredoc body that
+    is data, wrapper bodies in it included.
     """
-    argvs = [a for t in _data_free_texts(cmd) for a in _gh_arg_lists(t)]
+    argvs = [a for t in _data_free_texts(cmd) for a in _gh_target_arg_lists(t)]
     for word, is_path, args in _gh_repo_words(argvs):
         m = _REPOS_PATH_OWNER.match(word) if is_path else None
-        owner = (m.group(0) if m else "") if is_path else word.partition("/")[0]
-        if _is_run_time_word(owner) and _gh_argv_is_write(args):
+        owners = ([m.group(0)] if m else []) if is_path else _repo_value_owners(word)
+        if any(_is_run_time_word(o) for o in owners) and _gh_argv_is_write(args):
             return word
-    for value, args in _gh_repo_assignments(cmd):
-        if _is_run_time_word(value.partition("/")[0]) and _gh_argv_is_write(args):
+    for args in argvs:
+        if not _gh_argv_is_write(args):
+            continue
+        hidden = _gh_write_past_run_time(args) or (
+            _gh_api_run_time_owner(args) if args[:1] == ["api"] else None
+        )
+        if hidden:
+            return hidden
+        for word, _ in _gh_positional_repo_words(args):
+            if any(_is_run_time_word(o) for o in _repo_value_owners(word, exact=True)):
+                return word
+    for value, args, from_env in _gh_repo_assignments(cmd, environ):
+        owners = [] if from_env else _repo_value_owners(value)
+        if any(_is_run_time_word(o) for o in owners) and _gh_argv_is_write(args):
             return value
     return None
 
@@ -2841,44 +3142,138 @@ def _data_free_texts(cmd):
     return [t for r in _heredoc_readings(cmd) or [cmd] for t in [r, *_embedded_wrapper_commands(r)]]
 
 
-def _gh_repo_assignments(cmd):
-    """Each `GH_REPO` value that reaches a gh word in `cmd`, as (value, argv), wrapper bodies included.
+_GH_REPO_PLACEHOLDER = re.compile(r":(?:owner|repo)\b|\{(?:owner|repo)\}")
+
+
+def _gh_repo_assignments(cmd, environ=None):
+    """Each `GH_REPO` value that reaches a gh word in `cmd`, as (value, argv, from_env), wrapper bodies included.
 
     gh reads its repository from GH_REPO where no repo flag names one, so a gh word whose argv
-    names one takes none. `gh api` reads it only to fill an `{owner}` or `{repo}` placeholder. A
+    names one takes none. `gh api` reads it only to fill a `_GH_REPO_PLACEHOLDER` placeholder, the
+    older `:owner` spelling included. A
     value reaches a gh word from the prefix of the simple command it runs (see `_command_prefix`),
-    or else from the latest `export` before it. A wrapper body takes what
-    `_wrapper_env_assignments` says reaches a wrapper, the latest such value for every body. A
-    heredoc body that is data is left out, and an argument such as `echo GH_REPO=x` does not count.
+    or else from the shell's state before it (see `_gh_repo_states`), which starts from a GH_REPO
+    the session's environment holds (`from_env`). A wrapper body takes what
+    `_wrapper_env_assignments` says reaches a wrapper, the latest such value for every body, and
+    also the value reaching its own wrapper alone (see `_gh_wrapper_repo_values`). A heredoc body
+    that is data is left out, and an argument such as `echo GH_REPO=x` does not count.
     """
+    env = (environ if environ is not None else os.environ).get("GH_REPO", "")
+    base = [(env, True)] if env else []
     out = []
     for reading in _heredoc_readings(cmd) or [cmd]:
+        out += _gh_word_repo_values(reading, base)
         toks = _shell_tokens(reading)
-        out += _gh_word_repo_values(toks, [])
         reaching = _wrapper_env_assignments(toks, lambda body: bool(_all_gh_arg_lists(body)))
-        inherited = [v for name, v in reaching if name == "GH_REPO"][-1:]
+        inherited = [(v, False) for name, v in reaching if name == "GH_REPO"][-1:]
         for inner in _embedded_wrapper_commands(reading):
-            out += _gh_word_repo_values(_shell_tokens(inner), inherited)
+            out += _gh_word_repo_values(inner, base + inherited)
+        out += _gh_wrapper_repo_values(reading, base)
     return out
 
 
-def _gh_word_repo_values(toks, inherited):
-    """The `GH_REPO` value reaching each gh word in `toks`, as (value, argv), past `inherited`."""
-    out, exported = [], list(inherited)
+def _export_words(toks, x):
+    """(the `NAME=value` arguments as (name, value), the bare names) of the `export` at `toks[x]`."""
+    pairs, names = [], []
+    for word in toks[x + 1 :]:
+        if _is_shell_op(word):
+            break
+        m = _ENV_ASSIGN_RE.match(word)
+        if m:
+            pairs.append(m.groups())
+        elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", word):
+            names.append(word)
+        elif not word.startswith("-"):
+            break
+    return pairs, names
+
+
+def _plain_assignments(toks, x):
+    """The `NAME=value` words starting at `toks[x]` that stand as a command of their own, as (name, value)."""
+    if x and not (_is_separator(toks[x - 1]) or toks[x - 1] in _COND_PRECEDERS):
+        return []
+    out = []
+    for word in toks[x:]:
+        m = _ENV_ASSIGN_RE.match(word)
+        if not m:
+            return out if _is_separator(word) else []
+        out.append(m.groups())
+    return out
+
+
+def _gh_repo_states(toks, inherited):
+    """The `GH_REPO` values a command at each index of `toks` runs under, past `inherited`, as a list each.
+
+    Each value is (value, from_env). The latest `export GH_REPO=v` sets the value. So does a plain
+    `GH_REPO=v` standing as its own command once GH_REPO is exported, by an `export GH_REPO`
+    before or after it or by `inherited`, whose environment exports it. That plain value is read
+    beside the latest exported one, so the reading can only add a value.
+    """
+    exported, marked, plain, states = list(inherited), bool(inherited), None, []
     for x, t in enumerate(toks):
+        states.append(exported[-1:] + ([plain] if marked and plain else []))
         if t == "export" and _opens_command(toks, x):
-            exported += [v for name, v in _export_assignments(toks, x) if name == "GH_REPO"]
+            pairs, names = _export_words(toks, x)
+            values = [(v, False) for name, v in pairs if name == "GH_REPO"]
+            exported += values
+            plain = None if values else plain
+            marked = marked or bool(values) or "GH_REPO" in names
             continue
-        if not _is_gh_exe(t):
-            continue
+        values = [v for name, v in _plain_assignments(toks, x) if name == "GH_REPO"]
+        plain = (values[-1], False) if values else plain
+    return states
+
+
+def _gh_word_repo_values(text, inherited):
+    """The `GH_REPO` value reaching each gh word in `text` itself, as (value, argv, from_env), past `inherited`.
+
+    A gh write behind a run-time command word is one such word (see `_gh_invocations`).
+    """
+    toks, invocations = _gh_invocations(text)
+    states = _gh_repo_states(toks, inherited)
+    out = []
+    for x, argv in invocations:
         reached, pairs = _command_prefix(toks, x)
-        argv = _api_first(_collect_arglist(toks, x + 1)[0])
         if not reached or any(not is_path for _w, is_path, _a in _gh_repo_words([argv])):
             continue
-        if argv[:1] == ["api"] and not any("{owner}" in a or "{repo}" in a for a in argv):
+        if argv[:1] == ["api"] and not any(_GH_REPO_PLACEHOLDER.search(a) for a in argv):
             continue
-        prefix = [v for name, v in pairs if name == "GH_REPO"]
-        out += [(v, argv) for v in prefix or exported[-1:]]
+        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"]
+        out += [(v, argv, env) for v, env in prefix or states[x]]
+    return out
+
+
+def _gh_wrapper_repo_values(text, inherited, _depth=0):
+    """The `GH_REPO` value reaching each gh word in a wrapper body in `text`, read for that wrapper alone.
+
+    A wrapper's bodies run under its own GH_REPO prefix, or else the value its command runs under
+    (see `_gh_repo_states`), and a wrapper nested in one inherits from it in turn. A substitution
+    body the tokenizer keeps inside one word, as in `"$(...)"`, runs under the value at the word
+    holding it.
+    """
+    if _depth > _WRAPPER_NESTING_LIMIT:
+        return []
+    toks = _shell_tokens(text)
+    states = _gh_repo_states(toks, inherited)
+    out = []
+    for x in range(len(toks)):
+        found = _shell_bodies_at(toks, x)
+        if not found:
+            continue
+        reached, pairs = _command_prefix(toks, x)
+        if not reached:
+            reached, pairs = _launcher_prefix(toks, x)
+        if not reached:
+            continue
+        reach = [(v, False) for name, v in pairs if name == "GH_REPO"] or states[x]
+        for body in found[0]:
+            out += _gh_word_repo_values(body, reach)
+            out += _gh_wrapper_repo_values(body, reach, _depth + 1)
+    for body in _substitution_bodies(text):
+        x = next((k for k, t in enumerate(toks) if body in t), len(toks) - 1)
+        reach = states[x] if toks else list(inherited)
+        out += _gh_word_repo_values(body, reach)
+        out += _gh_wrapper_repo_values(body, reach, _depth + 1)
     return out
 
 
@@ -4919,7 +5314,8 @@ def _check_bypass_flags(cmd):
             "to `pr merge` itself, or name a repository the target check cannot read. Failing "
             "closed. Write every word of the merge out. Only a quoted value of an option other "
             'than --repo, as in --body "$BODY", may be a run-time word, and a quoted one where '
-            "gh's command or subcommand goes when no --admin is among the words." + _handoff(cmd)
+            "gh itself, gh's command, or its subcommand goes when no --admin is among the words."
+            + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
@@ -6682,7 +7078,7 @@ def classify(
         origin = _origin_owner_repo(cwd)
     # `_gh_write_targets` reads argv position within each real `gh` invocation, so a compound command carrying one target per invocation still has every one read (the write after `&&` is not skipped).
     # A --repo/repos/<owner>/<repo> mention living inside an unrelated --body/--title/-f value, or in a non-gh command entirely, is not read as a target.
-    targets = _gh_write_targets(cmd)
+    targets = _gh_write_targets(cmd, environ)
     # This only runs when origin resolves, meaning a git checkout, since with no project context there is nothing to compare an explicit target against, so the check is skipped and rules 1 and 2 still apply.
     # A node-id target is invisible here regardless, which is what rule 2 guards.
     if origin:
@@ -6700,7 +7096,7 @@ def classify(
                     "Safety', or the same section of the user-level CLAUDE.md where the repo has no "
                     "GOVERNANCE.md."
                 )
-        hidden_target = _gh_run_time_target(cmd)
+        hidden_target = _gh_run_time_target(cmd, environ)
         if hidden_target:
             return "deny", (
                 f"This write names its repository with a run-time word, `{hidden_target}`, which "
@@ -7032,6 +7428,221 @@ _GH_PATH_CASES: list[tuple[str, str, str]] = [
         "allow",
         "a repo flag before the command naming origin",
     ),
+]
+
+
+_STRANGER_GH_REPO = {"GH_REPO": "stranger/example"}
+_GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
+    (
+        "gh pr comment 5 --body hi",
+        _STRANGER_GH_REPO,
+        "deny",
+        "a GH_REPO the session's environment holds",
+    ),
+    (
+        "bash -c 'gh issue comment 5 --body hi'",
+        _STRANGER_GH_REPO,
+        "deny",
+        "an environment GH_REPO in a wrapper",
+    ),
+    (
+        "gh api -X POST repos/{owner}/{repo}/issues/1/comments -f body=x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "an environment GH_REPO filling api placeholders",
+    ),
+    (
+        'GH_REPO="$T"; gh pr comment 5 --body hi',
+        _STRANGER_GH_REPO,
+        "deny",
+        "a run-time plain GH_REPO, exported",
+    ),
+    ("gh pr view 5", _STRANGER_GH_REPO, "allow", "an environment GH_REPO on a read"),
+    (
+        "gh pr comment 5 -R example/repo --body hi",
+        _STRANGER_GH_REPO,
+        "allow",
+        "a repo flag overrides it",
+    ),
+    (
+        "GH_REPO=example/repo gh pr comment 5 --body hi",
+        _STRANGER_GH_REPO,
+        "allow",
+        "a prefix overrides it",
+    ),
+    ("gh pr comment 5 --body hi", {"GH_REPO": "example/other"}, "allow", "a sibling one"),
+    ('gh "$R" pr comment 5 --body hi', {}, "deny", "a quoted run-time word before pr comment"),
+    ('gh pr "$R" comment 5 --body hi', {}, "deny", "a quoted run-time word before comment"),
+    ('gh "$F" x pr comment 5 --body hi', {}, "deny", "a run-time flag taking the next word"),
+    (
+        'gh "$R" api -X POST repos/example/repo/issues -f title=t',
+        {},
+        "deny",
+        "a run-time word before an api write",
+    ),
+    ('gh "$R" pr view 5', {}, "allow", "a run-time word before a read"),
+    ('gh pr "$S" 5', {}, "allow", "a quoted run-time subcommand with no write behind it"),
+    (
+        "GH_REPO=stranger/example; export GH_REPO; gh pr comment 5 --body hi",
+        {},
+        "deny",
+        "a bare export of a plain GH_REPO",
+    ),
+    (
+        "export GH_REPO; GH_REPO=stranger/example; gh pr comment 5 --body hi",
+        {},
+        "deny",
+        "a plain GH_REPO after a bare export",
+    ),
+    (
+        "export A GH_REPO=stranger/example; gh pr comment 5 --body hi",
+        {},
+        "deny",
+        "a GH_REPO export past a bare name",
+    ),
+    (
+        "GH_REPO=stranger/example; gh pr comment 5 --body hi",
+        {},
+        "allow",
+        "a plain GH_REPO never exported",
+    ),
+    (
+        "G=gh; $G pr comment 5 -R stranger/example --body hi",
+        {},
+        "deny",
+        "a write behind a run-time command word",
+    ),
+    (
+        '"$(command -v gh)" issue comment 5 --repo stranger/example --body hi',
+        {},
+        "deny",
+        "a write behind a quoted command substitution",
+    ),
+    ('"$G" pr comment 5 -R "$T" --body hi', {}, "deny", "a run-time repo there"),
+    ("GH_REPO=stranger/example $G pr comment 5 --body hi", {}, "deny", "a GH_REPO prefix there"),
+    ("$G pr comment 5 --body hi 2>/dev/null", {}, "deny", "a suppressed write there"),
+    ('"$G" pr view 5 -R stranger/example', {}, "allow", "a read there"),
+    ("$G pr comment 5 -R example/repo --body hi", {}, "allow", "an origin write there"),
+    ('"$EDITOR" notes.md', {}, "allow", "a run-time command word naming no gh write"),
+    (
+        (
+            "GH_REPO=stranger/example bash -c 'gh issue comment 5 --body hi'; "
+            "GH_REPO=example/repo bash -c 'gh pr view 5'"
+        ),
+        {},
+        "deny",
+        "a GH_REPO is read for the wrapper it prefixes",
+    ),
+    (
+        'export GH_REPO=stranger/example; echo "$(gh pr comment 5 --body hi)"',
+        {},
+        "deny",
+        "an exported GH_REPO reaches a quoted substitution",
+    ),
+    (
+        'GH_REPO=stranger/example echo "$(gh pr comment 5 --body hi)"',
+        {},
+        "allow",
+        "a prefix on the command holding a substitution does not reach it",
+    ),
+    (
+        "GH_REPO=stranger/example gh api -X POST repos/:owner/:repo/issues/1/comments -f body=x",
+        {},
+        "deny",
+        "a GH_REPO filling the older :owner placeholders",
+    ),
+    (
+        "gh pr comment 5 --repo example/stranger/x -b x",
+        {},
+        "deny",
+        "a host-prefixed repo value is read by its middle owner",
+    ),
+    (
+        "GH_REPO=example/stranger/x gh pr comment 5 -b x",
+        {},
+        "deny",
+        "a host-prefixed GH_REPO is read by its middle owner",
+    ),
+    (
+        "gh pr comment https://github.com/stranger/example/pull/5 --body x",
+        {},
+        "deny",
+        "a pull request URL naming another owner",
+    ),
+    (
+        "gh issue edit 5 https://github.com/stranger/example/issues/6 --add-label x",
+        {},
+        "deny",
+        "an issue URL among several",
+    ),
+    (
+        'gh pr comment "https://github.com/$O/example/pull/5" --body x',
+        {},
+        "deny",
+        "a URL with a run-time owner",
+    ),
+    ("gh repo edit stranger/example --description x", {}, "deny", "a repo write's positional"),
+    ("gh repo create stranger/example --private", {}, "deny", "a repo create under another owner"),
+    ("gh repo archive https://github.com/stranger/example -y", {}, "deny", "a repo URL positional"),
+    ('gh repo edit "$R" --description x', {}, "deny", "a run-time repo positional"),
+    ("gh issue transfer 5 stranger/example", {}, "deny", "a transfer's destination"),
+    ('gh issue transfer 5 "$DEST"', {}, "deny", "a run-time transfer destination"),
+    ("gh issue develop 5 --branch-repo=stranger/example", {}, "deny", "a develop branch repo"),
+    ("gh workflow run ci.yml -R stranger/example", {}, "deny", "a workflow run"),
+    ("gh run rerun 123 -R stranger/example", {}, "deny", "a run rerun"),
+    ("gh cache delete --all -R stranger/example", {}, "deny", "a cache delete"),
+    ("gh pr update-branch 5 -R stranger/example", {}, "deny", "a pr update-branch"),
+    ("gh label clone example/repo -R stranger/example", {}, "deny", "a label clone"),
+    ("gh repo deploy-key add k.pub -R stranger/example", {}, "deny", "a deploy key add"),
+    (
+        "gh pr comment https://github.com/example/repo/pull/5 --body x",
+        {},
+        "allow",
+        "a pull request URL naming the origin",
+    ),
+    ('gh pr comment "$PR" --body x', {}, "allow", "a run-time pull request selector"),
+    (
+        "gh pr comment 5 --body https://github.com/stranger/example/pull/5",
+        {},
+        "allow",
+        "a URL in a body",
+    ),
+    ("gh repo create newrepo --private", {}, "allow", "a repo create naming no owner"),
+    (
+        'gh repo create "example/$NAME" --private',
+        {},
+        "allow",
+        "a run-time name under the origin owner",
+    ),
+    (
+        "gh repo edit example/other --description stranger/example",
+        {},
+        "allow",
+        "an owner/repo-shaped description",
+    ),
+    ("gh repo fork stranger/example", {}, "allow", "a fork reads its source"),
+    ("gh label clone stranger/example", {}, "allow", "a label clone reads its source"),
+    ("gh repo deploy-key list -R stranger/example", {}, "allow", "a deploy key list"),
+    ("gh api -X POST orgs/stranger/teams -f name=x", {}, "deny", "an orgs/ api write"),
+    ("gh api -X PUT user/starred/stranger/example", {}, "deny", "a star"),
+    ("gh api -X PUT user/following/stranger", {}, "deny", "a follow"),
+    (
+        "gh api -X POST https://api.github.com/orgs/stranger/repos -f name=x",
+        {},
+        "deny",
+        "an orgs/ URL",
+    ),
+    ('gh api -X POST "$URL" -f body=x', {}, "deny", "an api write whose endpoint is run-time"),
+    ('gh api -X POST "orgs/$ORG/teams" -f name=x', {}, "deny", "a run-time orgs/ owner"),
+    ("gh api orgs/stranger/teams", {}, "allow", "an orgs/ read"),
+    ('gh api "$URL"', {}, "allow", "a run-time endpoint on a read"),
+    (
+        "gh api -X POST orgs/example/teams -f name=x",
+        {},
+        "allow",
+        "an orgs/ write under the origin owner",
+    ),
+    ('gh api -X POST "orgs/example/$T" -f x=y', {}, "allow", "a run-time segment past the owner"),
 ]
 
 
@@ -13752,6 +14363,19 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ={},
+            primary_checkout_lookup=lambda d: False,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, env, want, label in _GH_TARGET_CASES:
+        got, _ = classify(
+            cmd,
+            origin=("example", "repo"),
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ=env,
             primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
