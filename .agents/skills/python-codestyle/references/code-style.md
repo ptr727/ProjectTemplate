@@ -87,6 +87,14 @@
 - **Don't use exceptions for expected control flow.** Exceptions are for unexpected states.
 - **Don't suppress errors silently** (`except Exception: pass`). Either handle the specific
   exception and document why it's safe, or let it propagate.
+- **Don't leave a text-mode `subprocess` call to the locale's encoding.** Every call that reads
+  or writes a pipe as text (`text=True`, `universal_newlines=True`, or an `errors` argument) names
+  its `encoding`. A call that names none decodes with the locale encoding, which is UTF-8 on Linux
+  and a legacy code page on Windows, so the omission looks correct on Linux and misreads non-ASCII
+  output on a Windows host. No rule in the ruff, pyright, or mypy toolchain checks a subprocess
+  call for it, so naming the encoding is the only guard. Naming it settles how the bytes are read,
+  not what a byte outside that encoding is worth. Each call decides that with its own `errors`
+  argument, and the strict default decides it by raising.
 
 <!-- External -->
 
