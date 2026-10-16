@@ -409,6 +409,7 @@ parse_args() {
             IFS=',' read -r -a agent_fields <<<"$2"
             for agent_name in "${agent_fields[@]}"; do
                 if [[ -n $agent_name ]]; then
+                    [[ $agent_name != -* ]] || die "--agents takes tool names, and \"$agent_name\" starts with a dash"
                     AGENTS+=("$agent_name")
                     if [[ $agent_name == "all" ]]; then
                         saw_all=true

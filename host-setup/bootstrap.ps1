@@ -488,6 +488,9 @@ function Invoke-Upgrade {
 # Installs only what is named, since the agent tools are never installed as a set nobody chose.
 function Invoke-AgentsInstall {
     if ($script:AGENT_NAMES.Count -eq 0) { die "-Agents takes the tools to install, separated by commas, or 'all'" }
+    foreach ($name in $script:AGENT_NAMES) {
+        if ($name.StartsWith('-')) { die "-Agents takes tool names, and '$name' starts with a dash" }
+    }
     if ($script:AGENT_NAMES -ccontains 'all') {
         if ($script:AGENT_NAMES.Count -gt 1) { die "-Agents takes 'all' alone, or a list of tool names" }
         Invoke-Tool -Tool 'install-agents.ps1' -Arguments '-Install', '-All'
