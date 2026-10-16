@@ -1699,6 +1699,13 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(f"install-agents.sh --install <{given}>", self.agents_steps())
 
+    def test_agents_all_in_another_case_is_a_tool_name_not_the_keyword(self) -> None:
+        for given in ("ALL", "All"):
+            with self.subTest(given=given):
+                result = self.run_main(action="--agents", args=(given,))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.agents_steps()[-1:], [f"install-agents.sh --install {given}"])
+
     def test_agents_drops_empty_names_from_the_list(self) -> None:
         result = self.run_main(action="--agents", args=("herdr,,cswap,",))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1878,6 +1885,15 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         result = self.run_agents(["all"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), ["install-agents.ps1 -Install -All"], result.stdout)
+
+    def test_all_in_another_case_is_a_tool_name_not_the_keyword(self) -> None:
+        for given in ("ALL", "All"):
+            with self.subTest(given=given):
+                result = self.run_agents([given])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    self.steps()[-1:], [f"install-agents.ps1 -Install {given}"], result.stdout
+                )
 
     def test_all_beside_other_names_is_refused(self) -> None:
         result = self.run_agents(["all,herdr"])

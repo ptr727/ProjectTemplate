@@ -372,7 +372,7 @@ $TOOLS = @(
 
 function Get-Tool {
     param([string]$ToolName)
-    return ($script:TOOLS | Where-Object { $_.Name -eq $ToolName } | Select-Object -First 1)
+    return ($script:TOOLS | Where-Object { $_.Name -ceq $ToolName } | Select-Object -First 1)
 }
 
 # --- Report ---
@@ -564,7 +564,7 @@ function Show-List {
 function Resolve-Selection {
     $names = @($script:TOOLS | ForEach-Object { $_.Name })
     foreach ($candidate in $script:WANT_TOOLS) {
-        if ($names -notcontains $candidate) { die "Unknown tool `"$candidate`", -List names the managed tools" }
+        if ($names -cnotcontains $candidate) { die "Unknown tool `"$candidate`", -List names the managed tools" }
     }
     if ($script:WANT_TOOLS.Count -eq 0) {
         if ($script:MODE -eq 'install' -and -not $script:INSTALL_ALL) {
@@ -573,7 +573,7 @@ function Resolve-Selection {
         return , $names
     }
     # Sorted into registry order rather than the order they were typed, so a run reads the same however it was asked for.
-    return , @($names | Where-Object { $script:WANT_TOOLS -contains $_ })
+    return , @($names | Where-Object { $script:WANT_TOOLS -ccontains $_ })
 }
 
 # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
