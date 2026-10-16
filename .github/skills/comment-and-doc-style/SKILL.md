@@ -14,7 +14,9 @@ description: >-
   carried instruction file (AGENTS.md, GOVERNANCE.md, CODESTYLE.md, WORKFLOW.md,
   .github/copilot-instructions.md) is being edited (no coordination references to the template or
   a sibling repo), and when writing a PR title or commit message (imperative subject, no vague
-  titles, no unsolicited Co-Authored-By, no release-bump magnitude).
+  titles, no unsolicited Co-Authored-By, no release-bump magnitude). Also triggers whenever a
+  sentence or comment states how many items a list, a table, or a set of cases holds, since that
+  count goes stale at the next edit to the enumeration.
 ---
 
 # Comment and Doc Style
@@ -65,7 +67,7 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
   file, so a new topical doc is not spell-gated in CI (the editor extension still flags it live).
   A repo may widen its own CI list, README plus HISTORY is the default. A repo shipping no
   `HISTORY.md` drops it from the CI workflow, the `Lint: Spelling` task, and the GOVERNANCE.md
-  cspell line together, all three or none.
+  cspell line together, all of them or none.
 - **`HISTORY.md` mirrors the README's opening**: the same `# <Title>`, the same tagline verbatim
   (the first line after the README's H1), then its own `## Release History`. It never repeats a
   paragraph below the README's tagline.
@@ -199,7 +201,7 @@ pull request carries the `comments` label and the gate stands down for that chan
 and `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
 left exported reaches the commit and never the merge gate.
 
-Three things about reaching those escapes read as a broken gate until they are known. On a public
+These facts about reaching those escapes read as a broken gate until they are known. On a public
 repository the lint job reads the label when it runs, and its log says "Read the pull request's
 labels live". A label added before then applies, and a rerun picks up one added since. In a private
 repository, or where the log lacks that line, the event's snapshot decides. It misses a label
@@ -220,7 +222,7 @@ and the fleet's own rule documents: `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODES
 are the repository's own narrative and keep their references, as do a commit message and a pull
 request body, which are the surfaces a reference belongs on.
 
-Two carve-outs, each stated as a single case. Whatever neither of them affirmatively permits is
+The carve-outs below are each stated as a single case. Whatever neither of them affirmatively permits is
 banned by the paragraph above, which is the whole of the test and is why no list of banned cases
 follows. The first: **in a code or workflow comment, a URL naming an issue or a pull request on a
 public repository other than this one is a source citation and is permitted.** It does the same job
@@ -240,7 +242,7 @@ other kind reads exactly like one. Neither carve-out above lifts this ban. Item 
 carried-doc-references reference says what to write instead of each and carries the audit that flags
 a literal.
 
-Three reasons, and the first decides it.
+The reasons follow, and the first decides it.
 
 - **A reference is a second lookup, and the reader is already holding the file.** A comment earns
   its place by explaining the line under it to whoever reads that line now. A number they have to
@@ -294,7 +296,7 @@ would report a fixture rather than a claim about this repository.
 ## Character set
 
 Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR
-descriptions. A non-ASCII character is read against three tiers, because whether one is
+descriptions. A non-ASCII character is read against the tiers below, because whether one is
 typography or meaning depends on where it sits. A character in no tier is a finding rather than a
 silent pass, a letter of a recorded name excepted per the bullet below.
 
@@ -384,6 +386,13 @@ Clarify Devcontainer Setup Steps in README
 
 ## Quantitative claims
 
-A quantitative claim in `README.md` (a count, a size, a version floor, a supported-platform list)
-is verified against current code before it is written. When a doc number is derived from a code
-constant, mark the dependency in a source-code comment so the next editor knows to update both.
+<!-- include: GOVERNANCE.md > Incidental Counts -->
+
+Text refers to an enumeration rather than stating its size, so it writes "the following checks", "each case", or "the rows below". This holds in every fleet repository, for docs, code and workflow comments, and docstrings alike. A stated count is a second copy of what the list or table already shows, and nothing keeps the two copies in sync. Every later edit to the enumeration then owes an edit to the sentence, and a missed one surfaces as a review finding. A word such as "both" or "all three" is a count too, where the list it counts can grow. A count is written only where the number is what the reader needs, such as a limit, a threshold, a version, or a measured result. Such a count names its source, such as the constant, the manifest, or the measurement, so a reader can re-derive it. A wrong incidental count is fixed by removing it rather than by correcting it, since a corrected number goes stale the same way.
+
+<!-- /include -->
+
+A `README.md` quantitative claim (a count, a size, a version floor, a supported-platform list) is
+verified against current code before it is written. When a doc number
+is derived from a code constant, mark the dependency in a source-code comment so the next editor
+knows to update both.

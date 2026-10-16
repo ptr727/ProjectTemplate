@@ -25,7 +25,7 @@ description: >-
 
 The attended session, `session-handoff`'s "The Attended Session", needs the maintainer for every
 decision it meets. Most open issues need none, so a loop can work those while the maintainer is
-away and hand back only the ones that do. Two things make that loop hard. Its orchestrator runs for
+away and hand back only the ones that do. These things make that loop hard. Its orchestrator runs for
 hours, so any detail it reads is paid for again on every later round, and a loop that reads issues
 itself dies of its own context long before the backlog is empty. And a worker that meets a decision
 must stop without losing its work, in a state the maintainer's next attended session picks up with

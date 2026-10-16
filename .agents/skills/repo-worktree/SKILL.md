@@ -68,7 +68,7 @@ is whatever it last fetched rather than the branch it names.
 The base clone is a fetch source, not a place to do task work. `fetch` and `worktree add` run
 against it for that purpose, and outside two steps below, nothing else mutates its working tree,
 index, or HEAD while a task is in progress: never `checkout`, `pull`, `reset`, `commit`, or any
-other such command. Those two are "Listing and Cleanup"'s own terminal step and "Creating a
+other such command. Those are "Listing and Cleanup"'s own terminal step and "Creating a
 Worktree"'s return of the base clone to its own working branch where a continuation finds the task
 branch checked out there. That distinction is the one a real incident missed, where an agent
 reused a primary checkout as the working directory itself rather than only as the source a
@@ -125,7 +125,7 @@ list`, the fleet worktree directory, and IDE worktree discovery. It also leaves 
 durable location the maintainer can inspect after the agent session ends.
 
 Before running that command, inspect the executor's active write boundaries. A linked worktree
-requires write access to both of these locations:
+requires write access to each of these locations:
 
 - the intended `~/repos/worktrees/<Repo>-<task-slug>` worktree directory
 - the base clone's `.git/worktrees/` administrative directory, which holds the index and locks

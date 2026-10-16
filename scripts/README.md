@@ -253,7 +253,7 @@ The match is on the block's heading rather than anywhere in the body, and on the
 
 ## `handoff.py`
 
-The session handoff chain, one open issue per track in a repository, each link naming the one before it. Six subcommands: four reads and the two writes that move a chain forward. A handoff written to a scratch file fails three ways the chain closes: the file is not found where the next session looks, more than one candidate is found and nothing says which is current, and there is no history, so a later round re-runs a path an earlier round already tried and already wrote down. The judgment half, what belongs in a handoff and what does not, is the `session-handoff` Skill in [`.agents/skills/`][agents-skills], and this is only the mechanics.
+The session handoff chain, one open issue per track in a repository, each link naming the one before it. Its subcommands are reads plus the writes that move a chain forward. The chain closes each way a handoff written to a scratch file fails: the file is not found where the next session looks, more than one candidate is found and nothing says which is current, and there is no history, so a later round re-runs a path an earlier round already tried and already wrote down. The judgment half, what belongs in a handoff and what does not, is the `session-handoff` Skill in [`.agents/skills/`][agents-skills], and this is only the mechanics.
 
 ```sh
 python3 scripts/handoff.py current --repo ptr727/ProjectTemplate --track default

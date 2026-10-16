@@ -14,7 +14,7 @@ verbatim, and this rule does not reach them.
 
 ## What is banned
 
-Three things, in the files above:
+The following, in the files above:
 
 1. **Any reference to the template repo**, in prose or in a link. The coordination flow that
    produced a carried file is machinery a consumer of that repo should never have to see, and

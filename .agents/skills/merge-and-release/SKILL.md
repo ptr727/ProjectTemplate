@@ -21,8 +21,8 @@ description: >-
 
 ## Why This Exists
 
-Once drive-pr (or a maintainer by hand) leaves a promotion PR ready, the same two steps follow
-every time: merge it, and usually dispatch the release it unblocks. In this hub a promotion can
+Once drive-pr (or a maintainer by hand) leaves a promotion PR ready, the same steps follow every
+time: merge it, and usually dispatch the release it unblocks. In this hub a promotion can
 also change `.agents/skills` content this very session depends on, so the release step always
 carries a Skills refresh with it there, never a separate branch to ask about, an ambiguous "merge
 and release" on the hub must not leave the maintainer unsure whether Skills got refreshed. One
@@ -156,8 +156,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `docs/host-setup.md` "Fleet Skills Install" cadence.
 8. Run cleanup regardless of how steps 5 through 7 ended, no release configured, a dispatch
    failure, an ambiguous run match, a timeout, a failed run, or a hub Skills refresh all still
-   reach this step, the merge in step 3 already landed by then. Two parts, both required, neither
-   optional:
+   reach this step, the merge in step 3 already landed by then. Every part below is required:
    - The promotion PR's own worktree: fetch and prune, remove the worktree, then bring the base
      clone to current `develop`, checking `develop` out first only where it sits on another
      branch, and fast-forwarding it with `git merge --ff-only origin/develop`. Where that checkout

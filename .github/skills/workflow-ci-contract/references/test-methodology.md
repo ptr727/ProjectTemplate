@@ -6,7 +6,7 @@ The section below is `WORKFLOW.md` section 5, whole. Its items and scenarios ans
 
 <!-- include: WORKFLOW.md > 5. Test Methodology -->
 
-An agent verifies a project in three escalating modes, then renders a verdict. **Skip N/A items** (`WORKFLOW.md` section 1): a guarantee or scenario for an absent construct is recorded N/A, not failed.
+An agent verifies a project in escalating modes, then renders a verdict. **Skip N/A items** (`WORKFLOW.md` section 1): a guarantee or scenario for an absent construct is recorded N/A, not failed.
 
 ### 5A. Static Audit (No Execution)
 
@@ -44,7 +44,7 @@ Every probe here that opens a pull request, dispatches a workflow, or re-runs a 
 - Open a trivial-change PR touching one target and confirm S1. *Caveat: the Docker leg logs in to the registry even on smoke and reads the buildcache, so it needs `DOCKER_HUB_*` secrets and cannot run on a fork PR (same-repo only).*
 - Per registry: after a real publish, query NuGet.org for the expected version + prerelease classification (and the `.snupkg` on the symbol server), and confirm a re-run added no duplicate. For PyPI read the built `dist/*` filenames out of the build job's log, `.dev0` off `develop` vs a plain version on the default branch.
 - Inspect the latest real publish's logs for `PublicRelease`/`SemVer2` per leg and confirm the artifact lifecycle (uploaded, consumed, deleted, with none left behind).
-- **The deploy ref gate (S13) is verified only by tripping it.** Dispatch the production environment from a non-default ref and expect the run to fail at the gate. The evidence is four things, and each of them matters: the gate job's conclusion, its error text naming the expected and the received ref, every downstream job recorded as **skipped** rather than passed, and the production environment's deployment list carrying no deployment from the dispatched ref. Capture all four, because a gate that fails open and a gate nobody tripped produce the same empty run history, so "we have never seen it fail" is not evidence about the one control standing between a mis-dispatch and the live site. **The agent prepares the command and reads all four back afterwards. It does not fire it.** The same split applies to any probe that acts on the deploy host directly, an outbound SSH exercising a forced command among them.
+- **The deploy ref gate (S13) is verified only by tripping it.** Dispatch the production environment from a non-default ref and expect the run to fail at the gate. The evidence is the following, and each item matters: the gate job's conclusion, its error text naming the expected and the received ref, every downstream job recorded as **skipped** rather than passed, and the production environment's deployment list carrying no deployment from the dispatched ref. Capture all of it, because a gate that fails open and a gate nobody tripped produce the same empty run history, so "we have never seen it fail" is not evidence about the one control standing between a mis-dispatch and the live site. **The agent prepares the command and reads it all back afterwards. It does not fire it.** The same split applies to any probe that acts on the deploy host directly, an outbound SSH exercising a forced command among them.
 
 ### Assessment
 

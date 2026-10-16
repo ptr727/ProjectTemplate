@@ -8,7 +8,7 @@ description: >-
 
 ## Why This Exists
 
-The audit is the fleet's measurement procedure, and the two failure shapes it guards against are both silent: a repo judged conformant with no committed evidence, and an audit that quietly edits what it was supposed to measure. `AUDIT.md` in the hub is the procedure and keeps authority. This skill carries the rules that get skipped in practice and says which section owns each step.
+The audit is the fleet's measurement procedure, and the failure shapes it guards against are all silent: a repo judged conformant with no committed evidence, and an audit that quietly edits what it was supposed to measure. `AUDIT.md` in the hub is the procedure and keeps authority. This skill carries the rules that get skipped in practice and says which section owns each step.
 
 ## Before Measuring Anything
 
