@@ -285,7 +285,8 @@ function Lock-Directory {
     }
 }
 
-# A run typed at an interactive prompt runs in the caller's process, so a lock left for the process to release outlives the run and refuses the next one in that session.
+# A run typed at an interactive prompt runs in the caller's process.
+# A lock left for that process to release outlives the run and refuses the next one in the same session.
 function Unlock-Directory {
     if (-not $script:LOCK) { return }
     $script:LOCK.Dispose()
