@@ -109,16 +109,24 @@ from urllib.parse import quote, urlsplit
 # The gh subcommands that mutate.
 # A path-qualified or `.exe`-suffixed `gh` still starts a shell word this matches, the same recognition `_is_gh_exe` gives it for argv-position parsing.
 # The `gh api` command is handled separately, in `_is_gh_write`, since it needs argv-aware method and GraphQL-query inspection rather than a fixed subcommand list.
+_GH_WRITE_SUBS = {
+    "pr": (
+        *("create", "comment", "close", "merge", "edit"),
+        *("review", "reopen", "ready", "lock", "unlock"),
+    ),
+    "issue": (
+        *("create", "comment", "close", "edit", "reopen", "delete"),
+        *("lock", "unlock", "pin", "unpin", "transfer"),
+    ),
+    "release": ("create", "edit", "delete", "upload"),
+    "repo": ("create", "delete", "edit", "rename", "archive"),
+    **{g: ("create", "delete", "edit", "set") for g in ("label", "secret", "variable", "ruleset")},
+    "gist": ("create", "edit", "delete"),
+}
 _GH_WRITE_SUB = re.compile(
-    r"""\bgh(?:\.exe)?\s+(?:
-        pr\s+(?:create|comment|close|merge|edit|review|reopen|ready|lock|unlock)
-      | issue\s+(?:create|comment|close|edit|reopen|delete|lock|unlock|pin|unpin|transfer)
-      | release\s+(?:create|edit|delete|upload)
-      | repo\s+(?:create|delete|edit|rename|archive)
-      | (?:label|secret|variable|ruleset)\s+(?:create|delete|edit|set)
-      | gist\s+(?:create|edit|delete)
-    )\b""",
-    re.VERBOSE,
+    r"\bgh(?:\.exe)?\s+(?:"
+    + "|".join(rf"{g}\s+(?:{'|'.join(subs)})" for g, subs in _GH_WRITE_SUBS.items())
+    + r")\b"
 )
 _GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
 _MUTATION = re.compile(r"\bmutation\b")
@@ -209,25 +217,89 @@ def _is_gh_write(cmd):
     # `--jq` expression that merely contains the text `-XPOST` as data, misclassifying a harmless read.
     if _GH_WRITE_SUB.search(cmd) or _push_arg_lists(cmd):
         return True
-    for args in _all_gh_arg_lists(cmd):
-        if not args or args[0] != "api":
-            continue
-        path = _gh_api_path(args)
-        if path == "graphql":
-            # --input checked before trusting any -f/-F query=... value.
-            # A -f/-F field becomes a URL query-string parameter rather than a body field whenever --input is also present.
-            # A harmless-looking inline query alongside --input therefore has no effect on the actual request, and the real body is the uninspectable input file.
-            if _gh_has_input(args):
-                return True  # uninspectable body, treated cautiously so rules 1-5 can look closer
-            q = _gh_graphql_query(args)
-            if q:
-                if _MUTATION.search(q):
-                    return True
-                continue  # a genuine read-only query, not a mutation
-            continue
-        if _gh_effective_method(args) != "GET":
-            return True
-    return False
+    return any(_gh_argv_is_write(args) for args in _all_gh_arg_lists(cmd))
+
+
+def _gh_argv_is_write(args):
+    """True when one `gh` argv is or may be a write, its subcommand read by `_gh_path`.
+
+    A GraphQL call's `--input` is checked before any `-f`/`-F` `query=` value is trusted. A field
+    becomes a URL query-string parameter rather than a body field whenever `--input` is present,
+    so a harmless-looking inline query beside it has no effect on the request, and the real body
+    is the uninspectable input file.
+    """
+    if not args:
+        return False
+    if args[0] != "api":
+        return _gh_path_writes(_gh_path(args))
+    path = _gh_api_path(args)
+    if path == "graphql":
+        if _gh_has_input(args):
+            return True  # uninspectable body, treated cautiously so rules 1-5 can look closer
+        q = _gh_graphql_query(args)
+        return bool(q and _MUTATION.search(q))
+    return _gh_effective_method(args) != "GET"
+
+
+_GH_PATH_BOOL_FLAGS = frozenset({"--help", "--version"})
+
+
+def _gh_path(args):
+    """gh's command and subcommand words in an argv, at most two, read the way cobra finds them.
+
+    Cobra reads past each flag before them, and a flag word with no `=` that is `--long` or one
+    letter takes the next word as its value, unless it is a known boolean. An unknown flag is no
+    boolean to it, so `gh pr --squash 5 merge` runs a merge and `gh -R example/repo pr merge` names
+    its repository before the command. A longer short form such as `-Rx` is one word, and `--`
+    ends the search.
+    """
+    return [args[i] for i in _gh_path_at(args)]
+
+
+def _gh_path_at(args):
+    """The index in `args` of each word `_gh_path` reads."""
+    at = []
+    i = 0
+    while i < len(args) and len(at) < 2:
+        a = args[i]
+        if a == "--":
+            break
+        if not a.startswith("-"):
+            if a:
+                at.append(i)
+            i += 1
+        elif "=" in a or a in _GH_PATH_BOOL_FLAGS or not (a.startswith("--") or len(a) == 2):
+            i += 1
+        else:
+            i += 2
+    return at
+
+
+def _gh_path_writes(words):
+    """True when gh's command and subcommand words, from `_gh_path`, are or may be a write.
+
+    A run-time word in either place may expand to any word, unquoted to several, so it counts
+    wherever some write could take its place.
+    """
+    if not words:
+        return False
+    cmd, sub = words[0], (words[1] if len(words) > 1 else None)
+    if _is_run_time_word(cmd):
+        return (
+            sub is None or _is_run_time_word(sub) or any(sub in s for s in _GH_WRITE_SUBS.values())
+        )
+    subs = _GH_WRITE_SUBS.get(cmd, ())
+    return sub is not None and bool(subs) and (sub in subs or _is_run_time_word(sub))
+
+
+def _gh_may_merge(args):
+    """True when a `gh` argv may be `pr merge` through a run-time word where `pr` or `merge` goes."""
+    words = _gh_path(args)
+    cmd = words[0] if words else None
+    sub = words[1] if len(words) > 1 else None
+    if cmd is not None and _is_run_time_word(cmd):
+        return sub is None or sub == "merge" or _is_run_time_word(sub)
+    return cmd == "pr" and sub is not None and _is_run_time_word(sub)
 
 
 def _origin_owner_repo(cwd):
@@ -1076,6 +1148,12 @@ def _collect_arglist(toks, start, split_fused=False):
 
     Returns (args, index_after_this_invocation).
     """
+    at, k = _arg_positions(toks, start, split_fused)
+    return [toks[p] for p in at], k
+
+
+def _arg_positions(toks, start, split_fused=False):
+    """`_collect_arglist` as the index in `toks` of each argv word, with the index after them."""
     n = len(toks)
     k = start
     args = []
@@ -1096,7 +1174,7 @@ def _collect_arglist(toks, start, split_fused=False):
             if k < n and not _is_shell_op(toks[k]):
                 k += 1
             continue
-        args.append(t)
+        args.append(k)
         k += 1
     return args, k
 
@@ -2576,14 +2654,14 @@ def _gh_target_readings(cmd):
     reading it as taking a value there would swallow a real following `--repo` flag whole. On
     `pr merge`, `-m` is the boolean `--merge`. So a merge argv (see `_runs_gh_pr_merge`) is read
     again, by `_GH_MERGE_TEXT_FLAGS`, the merge value options less the repo flags. A target either
-    reading finds counts.
+    reading finds counts. An argv that may merge (see `_gh_may_merge`) is read both ways too.
     """
     for args in _all_gh_arg_lists(cmd):
         if args and args[0] == "api":
             yield args, _GH_API_VALUE_FLAGS
             continue
         yield args, _GH_CREATE_TEXT_VALUE_FLAGS
-        if _runs_gh_pr_merge(args):
+        if _runs_gh_pr_merge(args) or _gh_may_merge(args):
             yield args, _GH_MERGE_TEXT_FLAGS
 
 
@@ -2592,9 +2670,21 @@ def _gh_write_targets(cmd):
     embedded in a `sh -c`/`bash -c` wrapper): a `--repo`/`-R` flag value, or a `repos/<owner>/<repo>` API
     path token. Argv-position parsing, the way `_push_targets` reads a git push target, so a --repo/repos
     mention that is only prose, inside an unrelated --body/--title value or a commit message, is never
-    read as one.
+    read as one. A `GH_REPO` assignment's value is one too (see `_gh_repo_assignments`).
     """
-    targets = []
+    words = [(w, is_path) for w, is_path, _ in _gh_repo_words(cmd)]
+    words += [(w, False) for w in _gh_repo_assignments(cmd)]
+    return [t for w, is_path in words for t in [_named_target(w, is_path)] if t]
+
+
+def _gh_repo_words(cmd):
+    """Each word a `gh` argv in `cmd` may name its repository with, as (word, is_path, argv).
+
+    That is a repo flag's value, as the next word or attached as in `--repo=x`, `-R=x`, or `-Rx`.
+    It is also an `R` in a short-option cluster, which pflag reads one letter at a time, so `-dR x`
+    is `-d -R x` (see `_cluster_repo_value`). Every other word comes back as an API path
+    candidate, normalized, with is_path set.
+    """
     for args, flags in _gh_target_readings(cmd):
         n = len(args)
         i = 0
@@ -2605,27 +2695,112 @@ def _gh_write_targets(cmd):
                 continue
             if t in _REPO_FLAG_BARE:
                 if i + 1 < n:
-                    val = args[i + 1]
-                    if "/" in val and "<" not in val:
-                        o, r = val.split("/", 1)
-                        targets.append((o.lower(), r.lower()))
+                    yield args[i + 1], False, args
                 i += 2
                 continue
             val = _repo_flag_value(t)
+            if val is None and t[:1] == "-" and t[1:2] not in ("", "-"):
+                val, ends = _cluster_repo_value(t, flags)
+                if ends and i + 1 < n:
+                    yield args[i + 1], False, args
             if val is not None:
-                if "/" in val and "<" not in val:
-                    o, r = val.split("/", 1)
-                    targets.append((o.lower(), r.lower()))
+                yield val, False, args
                 i += 1
                 continue
             # A full URL (`gh api https://api.github.com/repos/o/r/...` works exactly like the bare path form) is normalized the same way `_gh_api_path` normalizes it, so a URL-wrapped cross-owner target is not missed.
             # The placeholder check runs on the normalized path, not the raw token: a real URL's own query string or fragment (discarded by normalization) can carry a `<` with no bearing on whether the path itself is a real target.
-            normalized = _normalize_api_path(t)
-            m = _REPOS_PATH_TOKEN.match(normalized)
-            if m and "<" not in normalized:
-                targets.append((m.group("owner").lower(), m.group("repo").lower()))
+            yield _normalize_api_path(t), True, args
             i += 1
-    return targets
+
+
+def _cluster_repo_value(tok, flags):
+    """pflag's reading of a short-option cluster for its `R`, as (value, ends).
+
+    Each letter is a boolean in turn until one takes a value, which is the rest of the word, past
+    one `=`. An `R` there names the repository, and `ends` says it ends the word, so the value is
+    the next word. That word is still read for itself as well, since that can only add a target.
+    A letter `flags` lists is a text option, so the rest of the word is its value. Any other
+    letter is read as a boolean, which can only read more of the word as a target.
+    """
+    for x in range(1, len(tok)):
+        c = tok[x]
+        if c != "R" and f"-{c}" not in flags:
+            continue
+        rest = tok[x + 1 :]
+        rest = rest[1:] if len(rest) > 1 and rest[0] == "=" else rest
+        if c != "R":
+            return None, False
+        return (rest or None), not rest
+    return None, False
+
+
+def _named_target(word, is_path):
+    """The (owner, repo) a repository word or a normalized API path names, or None."""
+    if is_path:
+        m = _REPOS_PATH_TOKEN.match(word)
+        if m and "<" not in word:
+            return m.group("owner").lower(), m.group("repo").lower()
+        return None
+    if "/" in word and "<" not in word:
+        o, r = word.split("/", 1)
+        return o.lower(), r.lower()
+    return None
+
+
+_REPOS_PATH_HEAD = re.compile(r"^/?repos/[^/]*(?:/[^/]*)?")
+
+
+def _gh_run_time_target(cmd):
+    """The first run-time word a gh write in `cmd` names its repository with, or None.
+
+    The shell rewrites it before gh reads it, so the target check has nothing to compare. That is
+    a repo flag's value, the owner or repository segment of a `repos/` API path, or a `GH_REPO`
+    assignment's value. A read naming one is left alone, as in `gh pr view -R "$T"`.
+    """
+    for word, is_path, args in _gh_repo_words(cmd):
+        m = _REPOS_PATH_HEAD.match(word) if is_path else None
+        part = (m.group(0) if m else "") if is_path else word
+        if _is_run_time_word(part) and _gh_argv_is_write(args):
+            return word
+    return next((w for w in _gh_repo_assignments(cmd) if _is_run_time_word(w)), None)
+
+
+_ENV_SETTERS = frozenset({"export", "env", "declare", "typeset", "readonly", "local"})
+
+
+def _gh_repo_assignments(cmd):
+    """The value of each `GH_REPO=` assignment in `cmd`, wrapper bodies included.
+
+    gh reads its repository from GH_REPO where no repo flag names one. A word counts where the
+    shell reads it as an assignment, at a command's head or after other assignments there. It
+    counts among the words of a command such as `export` or `env` that sets the environment too.
+    A word that is an argument, as in `echo GH_REPO=x` or `--body GH_REPO=x`, does not.
+    """
+    out = []
+    for text in [cmd, *_embedded_wrapper_commands(cmd)]:
+        toks = _shell_tokens(text)
+        head, setter = True, False
+        k = 0
+        while k < len(toks):
+            t = toks[k]
+            k += 1
+            if _is_separator(t):
+                head, setter = True, False
+                continue
+            if _is_redir_op(t):
+                k += 1 if k < len(toks) and not _is_shell_op(toks[k]) else 0
+                continue
+            m = _ENV_ASSIGN_RE.match(t)
+            if m and (head or setter):
+                if m.group(1) == "GH_REPO":
+                    out.append(m.group(2))
+                continue
+            if head and t in _COND_PRECEDERS:
+                continue
+            if head:
+                setter = t.rsplit("/", 1)[-1] in _ENV_SETTERS
+            head = False
+    return out
 
 
 def _normalize_api_path(raw):
@@ -3790,29 +3965,11 @@ _LIST_OPENERS = frozenset({"for", "select"})
 def _run_time_command_sub(toks, k, mask):
     """The index of the `push` or `commit` a run-time word `toks[k]` runs as git, else None.
 
-    The word is read as a command word right after an unquoted `(`, as in `<($G push)`.
-    Elsewhere it is one where `_runs_as_command` says it runs.
-    No `git` or `gh` word before it in its run may take it as an argument.
-    A `case` run, or a `for` or `select` run holding `in`, lists words rather than running one.
-    An array assignment, as in `a=($X push)`, and any other assignment is no command word.
+    The word is one `_is_run_time_command` reads as a command word.
     The subcommand word is the first past git's global options and any redirection.
     A `$(...)` or backtick span holding a space is read through first.
     """
-    t = toks[k]
-    if "$" not in t and "`" not in t or _ENV_ASSIGN_RE.match(t):
-        return None
-    if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
-        if toks[k - 1] == "(" and k > 1 and toks[k - 2].endswith("="):
-            return None
-        start = k
-    elif _runs_as_command(toks, k, mask):
-        start = k
-        while start > 0 and not (_is_separator(toks[start - 1]) and not (mask and mask[start - 1])):
-            start -= 1
-    else:
-        return None
-    listed = toks[start] == "case" or (toks[start] in _LIST_OPENERS and "in" in toks[start:k])
-    if listed or any(_is_git_exe(w) or _is_gh_exe(w) for w in toks[start:k]):
+    if not _is_run_time_command(toks, k, mask):
         return None
     end = _region_end(toks, k, mask)
     j = _span_end(toks, k, end)
@@ -3829,6 +3986,32 @@ def _run_time_command_sub(toks, k, mask):
         else:
             break
     return j if j < end and toks[j] in ("push", "commit") else None
+
+
+def _is_run_time_command(toks, k, mask):
+    """True when a run-time word `toks[k]` runs as a command word, so it may expand to git or gh.
+
+    The word is read as a command word right after an unquoted `(`, as in `<($G push)`.
+    Elsewhere it is one where `_runs_as_command` says it runs.
+    No `git` or `gh` word before it in its run may take it as an argument.
+    A `case` run, or a `for` or `select` run holding `in`, lists words rather than running one.
+    An array assignment, as in `a=($X push)`, and any other assignment is no command word.
+    """
+    t = toks[k]
+    if "$" not in t and "`" not in t or _ENV_ASSIGN_RE.match(t):
+        return False
+    if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
+        if toks[k - 1] == "(" and k > 1 and toks[k - 2].endswith("="):
+            return False
+        start = k
+    elif _runs_as_command(toks, k, mask):
+        start = k
+        while start > 0 and not (_is_separator(toks[start - 1]) and not (mask and mask[start - 1])):
+            start -= 1
+    else:
+        return False
+    listed = toks[start] == "case" or (toks[start] in _LIST_OPENERS and "in" in toks[start:k])
+    return not (listed or any(_is_git_exe(w) or _is_gh_exe(w) for w in toks[start:k]))
 
 
 def _outside_heredoc_data(text, window):
@@ -4392,29 +4575,27 @@ _GH_MERGE_TEXT_FLAGS = _GH_MERGE_VALUE_FLAGS - _REPO_FLAG_BARE
 
 
 def _runs_gh_pr_merge(args):
-    """True when a `gh` argv's subcommand under `pr` is `merge`, past `pr`'s own flags.
+    """True when a `gh` argv's command and subcommand, read by `_gh_path`, are `pr merge`.
 
-    A repo flag's value is passed too, as in `gh pr -R example/repo merge`. This is narrower
-    than `_is_gh_pr_merge`, so a `merge` word in another subcommand's value, as in
-    `gh pr comment 5 --body merge`, is not read as one.
+    This is narrower than `_is_gh_pr_merge`, so a `merge` word in another subcommand's value, as
+    in `gh pr comment 5 --body merge`, is not read as one.
     """
-    if "pr" not in args:
-        return False
-    j = args.index("pr") + 1
-    while j < len(args) and args[j].startswith("-"):
-        j += 2 if args[j] in _REPO_FLAG_BARE else 1
-    return j < len(args) and args[j] == "merge"
+    return _gh_path(args) == ["pr", "merge"]
 
 
 def _gh_admin_merge(args):
-    """True when a `gh` argv is `pr merge` carrying `--admin`, however the shell quoted it.
+    """True when a `gh` argv is or may be `pr merge` carrying `--admin`, however the shell quoted it.
 
     The shell drops the quotes of `"--admin"` before gh reads it, so the argv is read rather than
     the text. A word that is another option's value is text, as in `--body "--admin"`. gh reads its
-    flags wherever they sit, so `--admin` is looked for in every word.
+    flags wherever they sit, so `--admin` is looked for in every word. A run-time word where `pr`
+    or `merge` goes may be either (see `_gh_may_merge`).
     """
-    if not _is_gh_pr_merge(args):
-        return False
+    return (_is_gh_pr_merge(args) or _gh_may_merge(args)) and _names_admin(args)
+
+
+def _names_admin(args):
+    """True when a `gh` argv holds `--admin` as a flag rather than as another option's value."""
     rest = iter(args)
     for a in rest:
         if a in _GH_MERGE_VALUE_FLAGS:
@@ -4435,20 +4616,47 @@ def _gh_merge_run_time_word(text):
     word inside a heredoc body that is data is left alone too. Only a gh word in a command's
     position counts, the test `_rewritten_git_words` gives git, so `echo gh pr merge $N` is no
     merge.
+
+    A gh whose `pr` or `merge` is a run-time word may merge too (see `_gh_may_merge`), and so may
+    a run-time command word before `pr`, as in `G=gh; $G pr merge`. Such a word comes back where
+    it may split, or where a literal `--admin` sits among the words. One that word splitting
+    cannot split is read as the one word it is, as in `gh pr "$S" 5`.
     """
     toks = _shell_tokens(text)
     mask = raw = None
     for k, t in enumerate(toks):
-        if not _is_gh_exe(t) or not _runs_gh_pr_merge(_collect_arglist(toks, k + 1)[0]):
+        if not _is_gh_exe(t) and ("$" not in t and "`" not in t):
+            continue
+        at = _arg_positions(toks, k + 1)[0]
+        args = [toks[p] for p in at]
+        merges = _runs_gh_pr_merge(args)
+        if _is_gh_exe(t):
+            unsure = [at[i] for i in _gh_path_at(args) if _is_run_time_word(args[i])]
+            if not merges and not (unsure and _gh_may_merge(args)):
+                continue
+            unsure = [] if merges else unsure
+        elif merges or _gh_path(args)[:1] == ["pr"] and _gh_may_merge(args):
+            unsure = [k] + [at[i] for i in _gh_path_at(args) if _is_run_time_word(args[i])]
+        else:
             continue
         if mask is None:
             mask, raw = _quoted_mask(text, toks), _quote_kept_tokens(text, toks)
         opened = k and toks[k - 1].endswith("(") and not (mask and mask[k - 1])
-        if not opened and not _runs_as_command(toks, k, mask):
+        if _is_gh_exe(t) and not opened and not _runs_as_command(toks, k, mask):
+            continue
+        if not _is_gh_exe(t) and not _is_run_time_command(toks, k, mask):
             continue
         end = _region_end(toks, k, mask)
+        hit = next((x for x in unsure if not _split_free(x, toks, mask, raw)), None)
+        if unsure and _names_admin(args):
+            hit = unsure[0]
+        if hit is not None and _outside_heredoc_data(text, toks[k : hit + 1]):
+            return toks[hit]
         x = k + 1
         while x < end:
+            if x in unsure:
+                x += 1
+                continue
             word = toks[x]
             if _is_redir_op(word):
                 x += 2 if x + 1 < end and not _is_shell_op(toks[x + 1]) else 1
@@ -4590,12 +4798,13 @@ def _check_bypass_flags(cmd):
     )
     if hidden_admin:
         return "deny", (
-            f"This runs `gh pr merge` with a run-time word, `{hidden_admin}`, among its words. The "
-            "shell rewrites it before gh reads it. It may expand to `--admin`, which merges past "
-            "required reviews and status checks, or name a repository the target check cannot "
-            "read. Failing closed. Write every word of the merge out. Only a quoted value of an "
-            'option other than --repo, as in --body "$BODY", may be a run-time word.'
-            + _handoff(cmd)
+            f"This runs or may run `gh pr merge` with a run-time word, `{hidden_admin}`, among its "
+            "words or where gh's command or subcommand goes. The shell rewrites it before gh reads "
+            "it. It may expand to `--admin`, which merges past required reviews and status checks, "
+            "to `pr merge` itself, or name a repository the target check cannot read. Failing "
+            "closed. Write every word of the merge out. Only a quoted value of an option other "
+            'than --repo, as in --body "$BODY", may be a run-time word, and a quoted one where '
+            "gh's subcommand goes when no --admin is among the words." + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
     # Other tools use --no-verify for unrelated things, and shlex keeps a quoted mention out of the argv.
@@ -6376,6 +6585,14 @@ def classify(
                     "Safety', or the same section of the user-level CLAUDE.md where the repo has no "
                     "GOVERNANCE.md."
                 )
+        hidden_target = _gh_run_time_target(cmd)
+        if hidden_target:
+            return "deny", (
+                f"This write names its repository with a run-time word, `{hidden_target}`, which "
+                "the shell rewrites before gh reads it, so the guard cannot tell which repository "
+                "it writes to. Failing closed. Write the repository out, as in --repo owner/repo, "
+                "GH_REPO=owner/repo, or repos/owner/repo." + _handoff(cmd)
+            )
 
     # 5. Hand-rolled reply/resolve for a review thread, bypassing scripts/pr_review.py's one-call helper.
     dec, reason = _check_reply_resolve_helper(cmd, environ)
@@ -6514,6 +6731,77 @@ _CASES = [
 
 # Rule-5 cases, covering the hand-rolled reply/resolve denial and its cross-owner grant escape.
 # Each carries the environment the grant is read from, matching the _SCOPE_CASES convention below.
+_GH_PATH_CASES: list[tuple[str, str, str]] = [
+    ("gh -R stranger/example pr merge 5 --squash", "deny", "a repo flag before gh's command"),
+    (
+        "gh --repo=stranger/example issue comment 5 --body hi",
+        "deny",
+        "an attached --repo= before gh's command",
+    ),
+    (
+        "gh -Rstranger/example pr create --title t --body b",
+        "deny",
+        "an attached -R before gh's command",
+    ),
+    ("gh pr -R stranger/example merge 5", "deny", "a repo flag between pr and merge"),
+    (
+        "gh pr --repo=stranger/example comment 5 --body hi",
+        "deny",
+        "an attached --repo= between pr and comment",
+    ),
+    (
+        "gh pr -R example/repo merge 5 -R stranger/example",
+        "deny",
+        "a second repo flag past a merge whose first flag sits before merge",
+    ),
+    (
+        'gh pr --squash 5 merge "$(printf %s --admin)"',
+        "deny",
+        "an unknown flag before merge takes the next word, so this is a merge with a run-time word",
+    ),
+    ("gh pr merge 5 -dR stranger/example", "deny", "a short-option cluster ending in R"),
+    ("gh pr merge 5 -sdRstranger/example", "deny", "an R inside a cluster takes the rest of it"),
+    ("gh pr create -fR stranger/example", "deny", "a cluster ending in R on pr create"),
+    ("GH_REPO=stranger/example gh pr merge 5 --squash", "deny", "a GH_REPO prefix"),
+    ('GH_REPO="$T" gh pr merge 5 --squash', "deny", "a run-time GH_REPO prefix"),
+    (
+        "export GH_REPO=stranger/example; gh issue comment 5 --body hi",
+        "deny",
+        "an exported GH_REPO earlier in the command",
+    ),
+    (
+        "GH_REPO=stranger/example gh api -X POST repos/{owner}/{repo}/issues/1/comments -f body=x",
+        "deny",
+        "a GH_REPO that fills gh api placeholders",
+    ),
+    ('gh issue comment 5 --repo "$T" --body hi', "deny", "a run-time --repo value on a comment"),
+    ("gh pr comment 5 -R $T --body hi", "deny", "a run-time -R value on a comment"),
+    (
+        'gh api -X POST "repos/$O/$R/issues/1/comments" -f body=x',
+        "deny",
+        "a run-time owner in a repos/ API path on a write",
+    ),
+    ("gh pr $S 5 --admin", "deny", "a run-time word where merge goes beside --admin"),
+    ("gh $P merge 5 --admin", "deny", "a run-time word where pr goes beside --admin"),
+    ("G=gh; $G pr merge 5 --admin", "deny", "a run-time command word before pr merge --admin"),
+    ("gh pr $S 5", "deny", "an unquoted run-time subcommand word may split into merge --admin"),
+    ("gh -R stranger/example pr view 5", "allow", "a repo flag before a read's command"),
+    ('gh pr view 5 -R "$T"', "allow", "a run-time repo value on a read"),
+    ("GH_REPO=stranger/example gh pr view 5", "allow", "a GH_REPO prefix on a read"),
+    (
+        "echo GH_REPO=stranger/example; gh pr merge 5 --squash",
+        "allow",
+        "a GH_REPO word that is an argument assigns nothing",
+    ),
+    ('gh pr "$S" 5', "allow", "a quoted run-time subcommand word with no --admin"),
+    (
+        "gh -R example/repo pr merge 5 --squash",
+        "allow",
+        "a repo flag before the command naming origin",
+    ),
+]
+
+
 _REPLY_RESOLVE_CASES = [
     # (command, environ, expected_decision, label)
     (
@@ -13216,6 +13504,19 @@ def _selftest():
             current_branch="feature/x",
             rules_lookup=lambda br: set(),
             environ=env,
+            primary_checkout_lookup=lambda d: False,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, want, label in _GH_PATH_CASES:
+        got, _ = classify(
+            cmd,
+            origin=("example", "repo"),
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
             primary_checkout_lookup=lambda d: False,
         )
         mark = "ok  " if got == want else "FAIL"
