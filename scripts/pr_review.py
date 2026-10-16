@@ -142,7 +142,10 @@ Subcommands
            carries its own rate-limit marker instead, a structural
            `<!-- ... rate limited by ... -->` convention rather than free-text prose (observed on
            CodeRabbit), so reading it needs no per-bot wording model the way
-           Copilot's quota refusal needed `QUOTA` built for its own text.
+           Copilot's quota refusal needed `QUOTA` built for its own text. CodeRabbit's reply to an
+           explicit review command reads the same, an `auto-generated reply` marker over an
+           `Action not completed` block saying `Review rate limited.`, its service named from the
+           login since that marker names none.
            Two of their own finding shapes are read, though, each its own blind spot a thread
            poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
            CodeRabbit's own "outside diff range" findings, collapsed into the review body rather
@@ -478,6 +481,11 @@ ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 # The service name is captured rather than assumed.
 # A second bot using the same auto-generated-comment convention is read without a new pattern, and one that does not use it stays unread rather than guessed at.
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
+RATE_LIMITED_REPLY = re.compile(
+    r"<!--\s*This is an auto-generated reply by [^\n]*?-->\s*(?:<!--[^\n]*?-->\s*)*"
+    r"<details>\s*<summary>[^<\n]*Action not completed\s*</summary>\s*Review rate limited\."
+)
+RATE_LIMIT_SERVICE = {CODERABBIT_LOGIN: "coderabbit.ai"}
 # Anchored to the `<h3>` tag rather than a bare substring, since prose elsewhere can mention the phrase without being the comment it names.
 QODO_REVIEW_HEADING = re.compile(r"<h3>\s*Code Review by Qodo\s*</h3>", re.IGNORECASE)
 # Only the numbered heading counts as a finding, told apart from Qodo's own nested sub-summaries by starting with a number and a period (`1.`, `2.`, ...).
@@ -1307,20 +1315,27 @@ def standing_quota(
 
 def rate_limited_by(pr: dict, login: str) -> str | None:
     """The service name a rate-limit marker gives, where this login's newest comment or review
-    on this pull request carries one. `None` otherwise.
+    on this pull request carries one. `None` otherwise. CodeRabbit's reply to an explicit review
+    command, `RATE_LIMITED_REPLY`, is read from its markers and its fixed `Action not completed`
+    block alone. That marker names no service, so `RATE_LIMIT_SERVICE` names it by login, and a
+    login missing there is named by itself rather than dropped.
 
-    Reads both connections since the one observed marker, CodeRabbit's, rides a
-    plain PR comment rather than a formal review, and a future bot using the same convention
-    might use either. Current pull request only, unlike Copilot's `quota_signal`: that one
-    generalizes from a pattern of silence across several pull requests, and this has one
-    observed instance to generalize from, not a history to read one out of.
+    Reads both connections since both observed shapes, each CodeRabbit's, ride a plain PR
+    comment rather than a formal review, and a future bot using the same convention might use
+    either. Current pull request only, unlike Copilot's `quota_signal`: that one generalizes
+    from a pattern of silence across several pull requests, and this reads one notice, not a
+    history to read one out of.
     """
     nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
     if not nodes:
         return None
     newest = max(nodes, key=lambda n: n.get("createdAt") or n.get("submittedAt") or "")
-    match = RATE_LIMITED.search(newest.get("body") or "")
-    return match.group(1) if match else None
+    body = newest.get("body") or ""
+    if match := RATE_LIMITED.search(body):
+        return match.group(1)
+    if RATE_LIMITED_REPLY.search(body):
+        return RATE_LIMIT_SERVICE.get(login, login)
+    return None
 
 
 def newest_request_event(pr: dict) -> str | None:

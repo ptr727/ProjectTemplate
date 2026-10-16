@@ -323,6 +323,13 @@ RATE_LIMITED_COMMENT = (
     "> [!WARNING]\n> ## Review limit reached\n"
 )
 
+RATE_LIMITED_REPLY_COMMENT = (
+    "<!-- This is an auto-generated reply by CodeRabbit -->\n"
+    "<!-- CodeRabbit review command invocation: v2:0123abcd -->\n"
+    "<details>\n<summary>\u26a0\ufe0f Action not completed</summary>\n\n"
+    "Review rate limited.\n</details>\n"
+)
+
 
 def thread(
     tid: str,
@@ -956,6 +963,47 @@ class TestOtherReviewers(GqlCase):
         )
         self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
         self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
+
+    def test_other_rate_limited_reads_the_command_reply_shape(self) -> None:
+        """The reply to an explicit review command names no service, so the login supplies it."""
+        self.answer(
+            payload(
+                [review()],
+                comments=[comment(login="coderabbitai", body=RATE_LIMITED_REPLY_COMMENT)],
+            )
+        )
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("other_rate_limited=coderabbitai:coderabbit.ai", out)
+
+    def test_rate_limited_by_reads_both_shapes_and_not_an_ordinary_comment(self) -> None:
+        """Constructed bodies, the reply shape's invocation id made up and its glyph escaped.
+
+        The last two are near misses: the reply marker over a block that is not the rate-limit
+        one, and the block's own words with no reply marker over them.
+        """
+        other_reply = (
+            "<!-- This is an auto-generated reply by CodeRabbit -->\n"
+            "<details>\n<summary>Action not completed</summary>\n\nSomething else.\n"
+        )
+        unmarked = "<details>\n<summary>Action not completed</summary>\n\nReview rate limited.\n"
+        summary = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n"
+        for body, expected in (
+            (RATE_LIMITED_REPLY_COMMENT, "coderabbit.ai"),
+            (RATE_LIMITED_COMMENT, "coderabbit.ai"),
+            (summary, None),
+            (other_reply, None),
+            (unmarked, None),
+        ):
+            with self.subTest(body=body):
+                pr = payload([review()], comments=[comment(login="coderabbitai", body=body)])
+                self.assertEqual(expected, pr_review.rate_limited_by(pr, "coderabbitai"))
+
+    def test_rate_limited_by_names_an_unmapped_login_by_itself(self) -> None:
+        pr = payload(
+            [review()],
+            comments=[comment(login=pr_review.QODO_LOGIN, body=RATE_LIMITED_REPLY_COMMENT)],
+        )
+        self.assertEqual(pr_review.QODO_LOGIN, pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
 
     def test_rate_limited_by_reads_the_reviews_connection_too(self) -> None:
         """The marker rides a plain comment on the one observed instance, but the reader
