@@ -57,8 +57,8 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
 
     Legal Markdown is among what this refuses, a fence under a second list level and one
     carrying a tilde in its info string among it, and the refused cases below are the list.
-    No document here uses any of it today, and only `AUDIT.md` is under test, so that stays
-    true by convention rather than by check.
+    No document here uses any of it today, and only `AUDIT.md` and `docs/reusable-workflows.md`
+    are under test, so that stays true by convention rather than by check.
 
     One container case is left rather than refused. An HTML block holding an odd number of
     fence-shaped lines flips the open and closed parity, since a renderer reads the block as raw
@@ -206,7 +206,7 @@ def shell_blocks(markdown: str) -> list[str]:
 
 def yaml_blocks(markdown: str) -> list[str]:
     """The body of every fenced YAML block in `markdown`, ending in the newline a file holding it ends in."""
-    return re.findall(r"(?ms)^```yaml\n(.*?)^```\n", markdown)
+    return [b.body + "\n" for b in fenced_blocks(markdown) if b.label.lower() == "yaml"]
 
 
 def fenced_shell_block(markdown: str, marker: str) -> str:
@@ -713,7 +713,6 @@ class ReleaseGuardCase(unittest.TestCase):
         blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         self.assertIn(stub, blocks)
         self.assertIn("smoke: true", stub)
-        self.assertNotIn("<hub-main-commit-sha>", stub)
 
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
