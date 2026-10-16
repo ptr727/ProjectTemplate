@@ -18,8 +18,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
   3. a gh write with an explicit target, such as -R/--repo, repos/<owner>/<repo>, GH_REPO, or a pull
-     request URL, under an owner other than the checkout origin's, unless the maintainer granted that
-     target in GH_WRITE_GUARD_ALLOW. Sibling
+     request URL, under an owner other than the checkout origin's, unless the maintainer granted
+     that target in GH_WRITE_GUARD_ALLOW. Sibling
      repositories under the same owner are allowed, since the harm this guards is reaching a stranger's
      repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
@@ -3212,16 +3212,15 @@ def _gh_repo_states(toks, inherited):
     `GH_REPO=v` standing as its own command once GH_REPO is exported, by an `export GH_REPO`
     before or after it or by `inherited`, whose environment exports it. That plain value is read
     beside the latest exported one, so the reading can only add a value. A value from the session's
-    environment is kept beside both until a top-level command replaces it (see `_runs_unconditionally`).
+    environment is kept beside both until a command replaces it that surely runs in the shell
+    itself (see `_runs_in_the_shell`).
     """
     exported, marked, plain, states = list(inherited), bool(inherited), None, []
     env = [v for v in inherited if v[1]]
-    depth = 0
     for x, t in enumerate(toks):
         values = exported[-1:] + [v for v in env if v not in exported[-1:]]
         states.append(values + ([plain] if marked and plain else []))
-        replaces = depth == 0 and _runs_unconditionally(toks, x)
-        depth += _nesting_change(t)
+        replaces = _runs_in_the_shell(toks, x)
         if t == "export" and _opens_command(toks, x):
             pairs, names = _export_words(toks, x)
             values = [(v, False) for name, v in pairs if name == "GH_REPO"]
@@ -3236,20 +3235,21 @@ def _gh_repo_states(toks, inherited):
     return states
 
 
-def _runs_unconditionally(toks, x):
-    """True when the command starting at `toks[x]` runs whenever the text before it does.
+def _runs_in_the_shell(toks, x):
+    """True when the command starting at `toks[x]` surely runs, in the shell running the text.
 
-    That is a command opening the text or following `;`, `&`, or a newline. One after `&&`, `||`,
-    a pipe, or a keyword such as `then` may not run, or runs in a subshell.
+    It opens the text or follows `;` or a newline, and ends at one of those, `&&`, `||`, or the
+    text's end, so it is neither backgrounded nor a pipeline element. No token before it opens or
+    closes a subshell, a group, a function body, or a `case`, so it is not inside one. A quoted
+    token of that shape counts too, which can only keep a value read.
     """
-    return x == 0 or toks[x - 1] in (";", "&", "\n")
-
-
-def _nesting_change(tok):
-    """How far a token opens (+) or closes (-) a subshell, a group, or a function body."""
-    if tok in ("{", "}"):
-        return 1 if tok == "{" else -1
-    return tok.count("(") - tok.count(")") if _is_shell_op(tok) else 0
+    if x and toks[x - 1] not in (";", "\n"):
+        return False
+    nesting = ("{", "}", "case", "esac")
+    if any(t in nesting or (_is_shell_op(t) and ("(" in t or ")" in t)) for t in toks[:x]):
+        return False
+    end = next((t for t in toks[x:] if _is_shell_op(t) and not _is_redir_op(t)), None)
+    return end in (None, ";", "\n", "&&", "||")
 
 
 def _gh_word_repo_values(text, inherited):
@@ -7524,6 +7524,24 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         _STRANGER_GH_REPO,
         "deny",
         "a conditional export does not replace an environment GH_REPO",
+    ),
+    (
+        "export GH_REPO=example/repo & gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "a backgrounded export does not replace an environment GH_REPO",
+    ),
+    (
+        "export GH_REPO=example/repo | cat; gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "an export in a pipeline does not replace an environment GH_REPO",
+    ),
+    (
+        "case a in a) true;; esac; (true; export GH_REPO=example/repo); gh pr comment 5 -b x",
+        _STRANGER_GH_REPO,
+        "deny",
+        "a subshell export past a case does not replace an environment GH_REPO",
     ),
     (
         "f() { export GH_REPO=example/repo; }; gh pr comment 5 -b x",
