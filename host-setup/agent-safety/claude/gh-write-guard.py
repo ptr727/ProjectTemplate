@@ -3212,44 +3212,24 @@ def _gh_repo_states(toks, inherited):
     `GH_REPO=v` standing as its own command once GH_REPO is exported, by an `export GH_REPO`
     before or after it or by `inherited`, whose environment exports it. That plain value is read
     beside the latest exported one, so the reading can only add a value. A value from the session's
-    environment is kept beside both until a command replaces it that surely runs in the shell
-    itself (see `_runs_in_the_shell`).
+    environment is kept beside both, since an export may sit where it never runs, as in a subshell
+    or an untaken branch. Only a prefix replaces it.
     """
     exported, marked, plain, states = list(inherited), bool(inherited), None, []
     env = [v for v in inherited if v[1]]
     for x, t in enumerate(toks):
         values = exported[-1:] + [v for v in env if v not in exported[-1:]]
         states.append(values + ([plain] if marked and plain else []))
-        replaces = _runs_in_the_shell(toks, x)
         if t == "export" and _opens_command(toks, x):
             pairs, names = _export_words(toks, x)
             values = [(v, False) for name, v in pairs if name == "GH_REPO"]
             exported += values
             plain = None if values else plain
             marked = marked or bool(values) or "GH_REPO" in names
-            env = [] if values and replaces else env
             continue
         values = [v for name, v in _plain_assignments(toks, x) if name == "GH_REPO"]
         plain = (values[-1], False) if values else plain
-        env = [] if values and replaces and marked else env
     return states
-
-
-def _runs_in_the_shell(toks, x):
-    """True when the command starting at `toks[x]` surely runs, in the shell running the text.
-
-    It opens the text or follows `;` or a newline, and ends at one of those, `&&`, `||`, or the
-    text's end, so it is neither backgrounded nor a pipeline element. No token before it opens or
-    closes a subshell, a group, a function body, or a `case`, so it is not inside one. A quoted
-    token of that shape counts too, which can only keep a value read.
-    """
-    if x and toks[x - 1] not in (";", "\n"):
-        return False
-    nesting = ("{", "}", "case", "esac")
-    if any(t in nesting or (_is_shell_op(t) and ("(" in t or ")" in t)) for t in toks[:x]):
-        return False
-    end = next((t for t in toks[x:] if _is_shell_op(t) and not _is_redir_op(t)), None)
-    return end in (None, ";", "\n", "&&", "||")
 
 
 def _gh_word_repo_values(text, inherited):
@@ -7507,10 +7487,10 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "an environment GH_REPO behind find -exec",
     ),
     (
-        "export GH_REPO=example/repo; gh pr comment 5 -b x",
+        "if false; then export GH_REPO=example/repo; fi; gh pr comment 5 -b x",
         _STRANGER_GH_REPO,
-        "allow",
-        "a top-level export replaces an environment GH_REPO",
+        "deny",
+        "an export in an untaken branch does not replace an environment GH_REPO",
     ),
     (
         "GH_REPO=example/repo bash -c 'gh pr comment 5 -b x'",
