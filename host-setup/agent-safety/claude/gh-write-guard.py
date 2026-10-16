@@ -2626,13 +2626,14 @@ def _shell_bodies_at(toks, i):
     return bodies, k
 
 
-def _all_gh_arg_lists(cmd):
+def _all_gh_arg_lists(cmd, reader=None):
     """`_gh_arg_lists` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style wrapper
     embeds in it, so a `gh` call hidden behind such a wrapper is scanned exactly like a bare one.
     """
-    out = list(_gh_arg_lists(cmd))
+    reader = reader or _gh_arg_lists
+    out = list(reader(cmd))
     for inner in _embedded_wrapper_commands(cmd):
-        out.extend(_gh_arg_lists(inner))
+        out.extend(reader(inner))
     return out
 
 
@@ -2761,14 +2762,13 @@ def _gh_run_time_target(cmd):
     owner is all the check compares, so `--repo "example/$R"` is left alone. So is a read naming
     one, as in `gh pr view -R "$T"`, and a heredoc body that is data.
     """
-    argvs = [a for t in [cmd, *_embedded_wrapper_commands(cmd)] for a in _data_free_gh_arg_lists(t)]
-    for word, is_path, args in _gh_repo_words(argvs):
+    for word, is_path, args in _gh_repo_words(_all_gh_arg_lists(cmd, _data_free_gh_arg_lists)):
         m = _REPOS_PATH_OWNER.match(word) if is_path else None
         owner = (m.group(0) if m else "") if is_path else word.partition("/")[0]
         if _is_run_time_word(owner) and _gh_argv_is_write(args):
             return word
     for value, args in _gh_repo_assignments(cmd):
-        if _is_run_time_word(value.partition("/")[0]) and (args is None or _gh_argv_is_write(args)):
+        if _is_run_time_word(value.partition("/")[0]) and _gh_argv_is_write(args):
             return value
     return None
 
@@ -2781,23 +2781,30 @@ def _data_free_gh_arg_lists(text):
 def _gh_repo_assignments(cmd):
     """Each `GH_REPO` value that reaches a gh word in `cmd`, as (value, argv), wrapper bodies included.
 
-    gh reads its repository from GH_REPO where no repo flag names one. The value is one in the
-    prefix of the simple command a gh word runs (see `_command_prefix`), with that gh's argv. An
-    `export` argument persists to every command after it, so its argv is None. A heredoc body
-    that is data is left out. A word that is an argument, as in `echo GH_REPO=x`, does not count.
+    gh reads its repository from GH_REPO where no repo flag names one. A value reaches a gh word
+    from the prefix of the simple command it runs (see `_command_prefix`). Otherwise the latest
+    `export` before it reaches it. A wrapper body is read with every `export` of the command
+    around it, since the guard does not place the wrapper among them. A heredoc body that is data
+    is left out, and a word that is an argument, as in `echo GH_REPO=x`, does not count.
     """
     out = []
-    for text in [cmd, *_embedded_wrapper_commands(cmd)]:
+    outer = []
+    for n, text in enumerate([cmd, *_embedded_wrapper_commands(cmd)]):
         for toks in _command_readings(text):
+            exported = list(outer) if n else []
             for x, t in enumerate(toks):
-                if _is_gh_exe(t):
-                    reached, pairs = _command_prefix(toks, x)
-                    argv = _collect_arglist(toks, x + 1)[0] if reached else None
-                elif t == "export" and _opens_command(toks, x):
-                    pairs, argv = _export_assignments(toks, x), None
-                else:
+                if t == "export" and _opens_command(toks, x):
+                    exported += [v for name, v in _export_assignments(toks, x) if name == "GH_REPO"]
                     continue
-                out += [(v, argv) for n, v in pairs if n == "GH_REPO"]
+                if not _is_gh_exe(t):
+                    continue
+                reached, pairs = _command_prefix(toks, x)
+                if reached:
+                    prefix = [v for name, v in pairs if name == "GH_REPO"]
+                    argv = _collect_arglist(toks, x + 1)[0]
+                    out += [(v, argv) for v in prefix or exported[-1:]]
+            if not n:
+                outer += exported
     return out
 
 
@@ -4625,7 +4632,12 @@ def _gh_merge_run_time_word(text):
     for k, t in enumerate(toks):
         if not _is_gh_exe(t) and ("$" not in t and "`" not in t):
             continue
-        at = _arg_positions(toks, k + 1)[0]
+        start = k + 1
+        if not _is_gh_exe(t):
+            if mask is None:
+                mask, raw = _quoted_mask(text, toks), _quote_kept_tokens(text, toks)
+            start = _span_end(toks, k, _region_end(toks, k, mask)) or start
+        at = _arg_positions(toks, start)[0]
         args = [toks[p] for p in at]
         merges = _runs_gh_pr_merge(args)
         if _is_gh_exe(t):
@@ -4650,7 +4662,7 @@ def _gh_merge_run_time_word(text):
             hit = unsure[0]
         if hit is not None and _outside_heredoc_data(text, toks[k : hit + 1]):
             return toks[hit]
-        x = k + 1
+        x = start
         while x < end:
             if x in unsure:
                 x += 1
@@ -6791,6 +6803,21 @@ _GH_PATH_CASES: list[tuple[str, str, str]] = [
     ),
     ('gh pr "$S" 5', "allow", "a quoted run-time subcommand word with no --admin"),
     ("env GH_REPO=stranger/example gh pr merge 5", "deny", "a GH_REPO an env precommand sets"),
+    (
+        "$(which gh) pr merge 5 --admin",
+        "deny",
+        "a command substitution as the command word before pr merge --admin",
+    ),
+    (
+        "export GH_REPO=stranger/example; bash -c 'gh issue comment 5 --body hi'",
+        "deny",
+        "an exported GH_REPO reaches a write in a wrapper body",
+    ),
+    (
+        'gh pr comment 5 --body x; export GH_REPO="$T"',
+        "allow",
+        "an export after a write does not reach it",
+    ),
     (
         'gh issue comment 5 --repo "example/$R" --body hi',
         "allow",
