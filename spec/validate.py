@@ -228,17 +228,26 @@ def alternatives_errors(baseline):
     The audit reads an alternative for a file's presence and an intent unit's staleness advisory. A
     section, a contract, and a verbatim hash read whatever was found, and a carry writes the declared
     path. So only a whole-file presence or intent entry may declare alternatives. It must also be
-    the one entry naming its path, since a second entry could add any of those checks.
+    the one entry naming its path, since a second entry could add any of those checks. No
+    alternative may be a declared path, which the audit would read as a second unit. CI runs no
+    schema validation, so the list's shape is checked here as files.schema.json states it.
     """
     entries = [i for i in baseline if isinstance(i, dict) and isinstance(i.get("path"), str)]
+    declared = {i["path"] for i in entries}
     errors = []
     for item in entries:
-        alts = item.get("alternatives")
-        if alts is None:
+        if "alternatives" not in item:
             continue
+        alts = item["alternatives"]
         path = item["path"]
-        if not (is_str_list(alts) and alts):
-            errors.append(f"files.json: {path} alternatives must be a non-empty array of strings")
+        if not (is_str_list(alts) and alts and all(alts) and len(set(alts)) == len(alts)):
+            errors.append(
+                f"files.json: {path} alternatives must be a non-empty array of distinct, non-empty strings"
+            )
+        elif declared.intersection(alts):
+            errors.append(
+                f"files.json: {path} alternative(s) {', '.join(sorted(declared.intersection(alts)))} already declared as a baseline path"
+            )
         if item.get("fidelity", "presence") not in ("presence", "intent") or "sections" in item:
             errors.append(
                 f"files.json: {path} declares alternatives, which only a whole-file presence or intent unit may carry"

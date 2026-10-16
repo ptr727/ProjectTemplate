@@ -2739,6 +2739,17 @@ def declared_alternatives(baseline):
     }
 
 
+def contents_text(content):
+    """The decoded text of a contents API response, or None where it holds no inline file content.
+
+    A directory returns a list, and a too-large file returns encoding "none". An empty file decodes
+    to an empty string, so the guard is on the encoding rather than on truthiness.
+    """
+    if not isinstance(content, dict) or content.get("encoding") != "base64":
+        return None
+    return base64.b64decode(content["content"]).decode("utf-8", "replace")
+
+
 def read_baseline_file(slug, ground, path, alternatives=()):
     """The path a baseline file was found at and its contents response, or `(path, None)`.
 
@@ -2781,11 +2792,7 @@ def baseline_file_findings(slug, ground, path, alternatives, item, is_hub):
                 )
             ],
         )
-    text = (
-        base64.b64decode(content["content"]).decode("utf-8", "replace")
-        if content.get("encoding") == "base64"
-        else None
-    )
+    text = contents_text(content)
     if item is None or fid != "intent" or is_hub:
         return content, text, []
     return (
@@ -3137,11 +3144,12 @@ def audit_repo(entry, spec, branch=None):
     # It only runs where dependabot.yml exists, since its absence is already a file-presence LETTER below.
     # Language ecosystems such as nuget, uv and npm are directory-scoped and not yet cross-checked here.
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
-    if db and db.get("content"):
+    db_text = contents_text(db)
+    if db_text:
         declared = set(
             re.findall(
                 r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)',
-                base64.b64decode(db["content"]).decode("utf-8", "replace"),
+                db_text,
                 re.MULTILINE,
             )
         )
@@ -3501,12 +3509,7 @@ def audit_repo(entry, spec, branch=None):
             if not ws_name.endswith(".code-workspace"):
                 continue
             ws = gh(f"repos/{slug}/contents/{ws_name}?ref={ground}", ok404=True)
-            # The isinstance guard is needed because the contents API returns a list for a directory, where .get would raise.
-            ws_text = (
-                base64.b64decode(ws["content"]).decode("utf-8", "replace")
-                if isinstance(ws, dict) and ws.get("encoding") == "base64"
-                else None
-            )
+            ws_text = contents_text(ws)
             if ws_text is None:
                 findings.append(
                     (

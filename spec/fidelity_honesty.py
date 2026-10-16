@@ -22,7 +22,6 @@ Usage: python3 spec/fidelity_honesty.py [--report]
 """
 
 import argparse
-import base64
 import sys
 
 import audit  # sibling, import-safe (its main is guarded)
@@ -36,16 +35,15 @@ SECTION_SEP = " > "  # joins a file path and a verbatim section name into one un
 def fetch(slug, path, ref, alternatives=()):
     """Decoded downstream file content at path or its first alternative present, or None if absent / not inline."""
     _, content = audit.read_baseline_file(slug, ref, path, alternatives)
-    if content is None or content.get("encoding") != "base64":
-        return None
-    return base64.b64decode(content["content"]).decode("utf-8", "replace")
+    return audit.contents_text(content)
 
 
 def check_units(spec):
     """Yield the fleet's check units - whole intent/verbatim files, plus each verbatim section of any file.
 
     Each is (label, fidelity, entry_appliesTo, section_appliesTo, downstream_path, canonical_path, extract).
-    downstream_path is where the repo's copy lives (always the entry's `path`); canonical_path is the hub's
+    downstream_path is the entry's `path`. The repo's copy lives there unless it sits at one of the entry's
+    `alternatives`, which fetch reads in order where `path` is absent. canonical_path is the hub's
     canonical (the `reference` snippet for a reference-backed unit, else the same path). extract is None for a
     whole file, or a section extractor for a verbatim section (the region is compared, not the whole file).
     """
