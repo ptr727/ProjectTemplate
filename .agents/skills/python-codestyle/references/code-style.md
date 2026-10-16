@@ -89,13 +89,14 @@
   exception and document why it's safe, or let it propagate.
 - **Don't leave a text-mode `subprocess` call to the locale's encoding.** Every call that reads
   or writes a pipe as text (`text=True`, `universal_newlines=True`, or an `errors` argument) names
-  its `encoding`. Below Python 3.15, a call that names none decodes with the locale encoding unless
-  UTF-8 Mode is on. That encoding follows the host's locale, usually UTF-8 on Linux and the ANSI
-  code page on Windows. The omission therefore looks correct on a UTF-8 host and misreads or
-  rejects non-ASCII output on any other, a Windows host being the common case. No static check
-  in the ruff, pyright, or mypy toolchain looks for the omission in a subprocess call. Naming the
-  encoding settles how the bytes are read, not what a byte outside that encoding is worth. Each
-  call decides that with its own `errors` argument, and the strict default decides it by raising.
+  the encoding its child actually writes. Below Python 3.15, a call that names none decodes with
+  the locale encoding unless UTF-8 Mode is on. That encoding follows the host's locale, usually
+  UTF-8 on Linux and the ANSI code page on Windows. The omission therefore looks correct on a UTF-8
+  host. On any other, a Windows host being the common case, it misreads or rejects non-ASCII output
+  from a child writing UTF-8. No static check in the ruff, pyright, or mypy toolchain looks for the
+  omission in a subprocess call. Naming the encoding settles how the bytes are read, not what a
+  byte outside that encoding is worth. Each call decides that with its own `errors` argument, and
+  the strict default decides it by raising.
 
 <!-- External -->
 
