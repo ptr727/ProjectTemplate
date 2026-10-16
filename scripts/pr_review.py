@@ -142,10 +142,10 @@ Subcommands
            carries its own rate-limit marker instead. That marker is a structural
            `<!-- ... rate limited by ... -->` convention rather than free-text prose (observed on
            CodeRabbit). Reading it needs no per-bot wording model the way Copilot's quota refusal
-           needed `QUOTA` built for its own text. CodeRabbit's reply to an
-           explicit review command reads the same. That reply is an `auto-generated reply` marker
-           over an `Action not completed` block saying `Review rate limited.`, and its service is
-           named from the login.
+           needed `QUOTA` built for its own text. CodeRabbit's reply to an explicit review command
+           lands in the same field, read by a pattern of its own for CodeRabbit's fixed wording.
+           That reply is an `auto-generated reply` marker over an `Action not completed` block
+           saying `Review rate limited.`, and its service is named from the login.
            Two of their own finding shapes are read, though, each its own blind spot a thread
            poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
            CodeRabbit's own "outside diff range" findings, collapsed into the review body rather
@@ -482,7 +482,7 @@ ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 # A second bot using the same auto-generated-comment convention is read without a new pattern, and one that does not use it stays unread rather than guessed at.
 RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
 RATE_LIMITED_REPLY = re.compile(
-    r"<!--\s*This is an auto-generated reply by [^\n]*?-->\s*(?:<!--[^\n]*?-->\s*)*"
+    r"<!--\s*This is an auto-generated reply by [^>\n]*-->\s*(?:<!--[^>\n]*-->\s*)*"
     r"<details>\s*<summary>[^<\n]*Action not completed\s*</summary>\s*Review rate limited\."
 )
 RATE_LIMIT_SERVICE = {CODERABBIT_LOGIN: "coderabbit.ai"}
@@ -1322,7 +1322,8 @@ def rate_limited_by(pr: dict, login: str) -> str | None:
     missing there stays unread.
 
     Reads both connections, since both observed shapes ride a plain PR comment rather than a
-    formal review. A future bot using the same convention might use either. Current pull request
+    formal review. A future bot using the same convention might use either. A plain comment
+    carries no commit, so the reading is not scoped to the head. Current pull request
     only, unlike Copilot's `quota_signal`. That one generalizes from a pattern of silence across
     several pull requests, while this reads one notice rather than a history.
     """
@@ -4743,7 +4744,6 @@ def digest(
         )
     ]
     # The service name each tracked other-reviewer's own rate-limit marker gives, where its newest comment or review on this pull request carries one.
-    # Not head-scoped, unlike `other_on_head`, since the one observed marker rides a plain comment, which carries no commit to compare against the head at all.
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login))
     }

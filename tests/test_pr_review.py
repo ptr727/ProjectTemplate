@@ -998,6 +998,13 @@ class TestOtherReviewers(GqlCase):
                 pr = payload([review()], comments=[comment(login="coderabbitai", body=body)])
                 self.assertEqual(expected, pr_review.rate_limited_by(pr, "coderabbitai"))
 
+    def test_rate_limited_by_leaves_the_reply_shape_unread_for_an_unmapped_login(self) -> None:
+        pr = payload(
+            [review()],
+            comments=[comment(login=pr_review.QODO_LOGIN, body=RATE_LIMITED_REPLY_COMMENT)],
+        )
+        self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
+
     def test_rate_limited_by_reads_the_reviews_connection_too(self) -> None:
         """Both observed shapes ride a plain comment, but the reader checks both connections,
         since a future bot's own marker might ride a formal review."""
