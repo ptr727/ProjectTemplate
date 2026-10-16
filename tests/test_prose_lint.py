@@ -4434,11 +4434,14 @@ class TestReusableGateExclusions(unittest.TestCase):
         self.assertIn("Excluding 1 path(s)", result.stdout)
 
     def test_an_exclusion_shaped_like_a_command_is_echoed_inert(self) -> None:
-        (self.root / ".github" / "prose-gate-excludes").write_bytes(b"vendor/x##[error]forged\n")
+        (self.root / ".github" / "prose-gate-excludes").write_bytes(
+            b"vendor/x##[error]forged\nvendor/a\r::error::forged\n"
+        )
         result = self.run_action()
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual([], forged_lines(result.stdout + result.stderr))
         self.assertIn("vendor/x##\\x5berror]forged", result.stdout)
+        self.assertIn("vendor/a\\x0d::error::forged", result.stdout)
 
     def test_an_empty_contract_is_no_exclusions(self) -> None:
         (self.root / ".github" / "prose-gate-excludes").write_bytes(b"")

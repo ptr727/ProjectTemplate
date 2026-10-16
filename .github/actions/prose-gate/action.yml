@@ -85,6 +85,7 @@ runs:
             exclude_args+=(--exclude "$excluded")
           done < "$exclude_file"
           inert_excludes="${excluded_paths[*]}"
+          inert_excludes="${inert_excludes//$'\r'/'\x0d'}"
           echo "Excluding ${#excluded_paths[@]} path(s) from $exclude_file: ${inert_excludes//'##['/'##\x5b'}"
         fi
         # The context is preferred and the default environment variable is the fallback, so a reference form that populates only one of them still names the pin.
