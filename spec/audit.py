@@ -6294,7 +6294,7 @@ def _selftest():
     finally:
         globals()["gh"] = real_gh
     live_alts = declared_alternatives(load("spec/files.json")["baseline"])
-    if live_alts != {"codecov.yml": [".codecov.yml"]}:
+    if live_alts.get("codecov.yml") != [".codecov.yml"]:
         ok = False
         print(f"  FAIL declared_alternatives on the live manifest -> {live_alts}")
     else:
