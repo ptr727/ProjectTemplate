@@ -313,7 +313,7 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 `repo-worktree`'s verify-before-removing step to read, so the check that step gives way to here is
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
-its worktree is clean. Both hold, and the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read: `git worktree remove <exact-path>`, then `git branch -D <exact-branch>`, the check just made standing in for the merged pull request.
+its worktree is clean. Both hold, and the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read: `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`, which refuses rather than discards where that check was wrong, a refusal stopping the group for the maintainer per "Raising a Blocked Question".
 Its claim comment is released and its issue returns to the next round's ranking.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and

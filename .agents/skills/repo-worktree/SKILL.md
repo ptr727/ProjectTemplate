@@ -291,14 +291,17 @@ since git then runs whatever that directory holds, and nothing where it holds no
   worktree, a detached helper worktree, and a temporary standalone clone. Confirm the tree is
   clean, then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
   `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held, a promotion
-  branch merged into `main` by a merge commit for one, is deleted with
-  `git branch -d <exact-branch>`, and a refusal is reported rather than forced. Its remote branch
-  follows the repository's normal pull request cleanup policy. Never delete `develop` after a
-  promotion, since it is the permanent integration branch.
-- **Return the base clone to current `develop`.** `cleanup` does this itself only where the base
-  clone is clean and already on `develop` or on the merged branch, and otherwise exits `0` with
-  `base=kept` on its `status=CLEANED` line. That line, and every hand removal, leaves this step
-  to run: fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
+  branch merged into `main` by a merge commit for one, is deleted after `git fetch --prune origin`
+  with `git branch -d <exact-branch>`, since `-d` judges the branch against its fetched upstream,
+  and a refusal is reported rather than forced. Where that branch was pushed, its remote branch is
+  reported to the maintainer for deletion, since `cleanup` reads only a pull request merged into
+  `develop`. Never delete `develop` after a promotion, since it is the permanent integration
+  branch.
+- **Return the base clone to current `develop`.** `cleanup` does this itself where the base clone
+  is on `develop` or on the merged branch with no tracked changes. A base clone on the merged
+  branch that it cannot switch is one of its refusals. One on another branch, or on `develop` with
+  tracked changes or no fast-forward, exits `0` with `base=kept` on its `status=CLEANED` line.
+  That line, and every hand removal, leaves this step to run: fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
   needed, and fast-forward it with `git merge --ff-only origin/develop`. A completed promotion or
   release does not leave the base clone on `main`. Stop and report a dirty base clone or a
   non-fast-forward instead of switching or reconciling it.
