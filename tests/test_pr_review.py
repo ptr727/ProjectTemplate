@@ -19,6 +19,8 @@ import itertools
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,7 +28,7 @@ import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -11939,6 +11941,914 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
         with mock.patch.object(pr_review.handoff, "registry", side_effect=failure):
             self.assertEqual(2, self.run_cleanup())
         self.assertEqual([], self.docs)
+
+
+EDIT_PICKS = (
+    r"import sys,re,pathlib; p=pathlib.Path(sys.argv[1]); "
+    r"p.write_text(re.sub(r\"^pick\", \"edit\", p.read_text(), flags=re.M))"
+)
+SEQUENCE_EDITOR = shlex.quote(sys.executable) + ' -c "' + EDIT_PICKS + '"'
+
+
+def run_git(cwd: str, *args: str) -> str:
+    """One git call in a throwaway repository, failing the test on a nonzero exit."""
+    done = subprocess.run(
+        ["git", "-C", cwd, *args], capture_output=True, text=True, encoding="utf-8", check=True
+    )
+    return done.stdout.strip()
+
+
+class LocalCleanupCase(CleanupCase):
+    """A bare origin, a primary clone naming o/r, and linked worktrees, all real git in a temp dir.
+
+    Only the GitHub reads and writes are mocked, so every local removal below is git's own.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = os.path.realpath(tmp.name)
+        self.enterContext(
+            mock.patch.dict(
+                os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+            )
+        )
+        self.bare = os.path.join(self.root, "origin.git")
+        self.primary = os.path.join(self.root, "primary")
+        self.seed = os.path.join(self.root, "seed")
+        subprocess.run(
+            ["git", "init", "--bare", "-b", "develop", self.bare], check=True, capture_output=True
+        )
+        subprocess.run(["git", "init", "-b", "develop", self.seed], check=True, capture_output=True)
+        self.configure(self.seed)
+        self.commit(self.seed, "seed")
+        run_git(self.seed, "push", self.bare, "develop:develop", "develop:main")
+        subprocess.run(["git", "clone", self.bare, self.primary], check=True, capture_output=True)
+        self.configure(self.primary)
+        run_git(self.primary, "branch", "main", "origin/main")
+        run_git(self.primary, "config", f"url.{self.bare}.insteadOf", "https://github.com/o/r.git")
+        run_git(self.primary, "remote", "set-url", "origin", "https://github.com/o/r.git")
+        self.count = 0
+
+    def configure(self, repo: str) -> None:
+        run_git(repo, "config", "user.name", "Test User")
+        run_git(repo, "config", "user.email", "test@example.com")
+        run_git(repo, "config", "commit.gpgsign", "false")
+
+    def commit(self, repo: str, message: str) -> str:
+        run_git(repo, "commit", "--allow-empty", "-m", message)
+        return run_git(repo, "rev-parse", "HEAD")
+
+    def worktree(self, branch: str, commits: int = 1) -> tuple[str, str]:
+        """A linked worktree on a new local branch with `commits` unpushed commits."""
+        path = os.path.join(self.root, "wt", branch.replace("/", "_"))
+        run_git(self.primary, "worktree", "add", "-b", branch, path, "origin/develop")
+        for _ in range(commits):
+            self.count += 1
+            self.commit(path, f"work {self.count}")
+        return path, run_git(path, "rev-parse", "HEAD")
+
+    def advance_origin(self) -> str:
+        """A new commit on origin's develop, as a merge into it would leave."""
+        run_git(self.seed, "pull", "--ff-only", self.bare, "develop")
+        self.count += 1
+        tip = self.commit(self.seed, f"merge {self.count}")
+        run_git(self.seed, "push", self.bare, "develop:develop")
+        return tip
+
+    def branches(self) -> list[str]:
+        out = run_git(self.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+        return out.splitlines()
+
+    def listed(self) -> list[str]:
+        out = run_git(self.primary, "worktree", "list", "--porcelain")
+        return [
+            os.path.realpath(ln.split(" ", 1)[1])
+            for ln in out.splitlines()
+            if ln.startswith("worktree ")
+        ]
+
+    def run_local(self, checkout: str | None = None) -> int:
+        argv = ["cleanup", "7", "--repo", "o/r", "--checkout", checkout or self.primary]
+        return pr_review.main(argv)
+
+    def pause_rebase(self, repo: str) -> None:
+        env = {**os.environ, "GIT_SEQUENCE_EDITOR": SEQUENCE_EDITOR}
+        argv = ["git", "-C", repo, "rebase", "-i", "HEAD~2"]
+        subprocess.run(argv, env=env, capture_output=True, check=True)
+
+    def wire_merged(self, tip: str) -> None:
+        self.wire(cleanup_pr(headRefOid=tip), refs=[tip, tip, None])
+
+
+class TestCleanupLocalHalf(LocalCleanupCase):
+    def test_the_worktree_and_branch_go_and_the_base_clone_catches_up(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        merged = self.advance_origin()
+        self.wire_merged(tip)
+        self.assertEqual(0, self.run_local())
+        self.assertFalse(os.path.exists(path))
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+        self.assertEqual([self.primary], self.listed())
+        self.assertEqual(merged, run_git(self.primary, "rev-parse", "HEAD"))
+        out = self.out.getvalue()
+        self.assertIn("status=DELETED", out)
+        self.assertIn("status=CLEANED", out)
+        self.assertIn("## develop...origin/develop", out)
+
+    def test_without_a_checkout_nothing_local_is_touched(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire(cleanup_pr(headRefOid=tip), refs=[tip, None])
+        self.assertEqual(0, pr_review.main(["cleanup", "7", "--repo", "o/r"]))
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+        self.assertNotIn("status=CLEANED", self.out.getvalue())
+
+    def test_a_branch_already_gone_locally_still_returns_the_base_clone(self) -> None:
+        merged = self.advance_origin()
+        self.wire(cleanup_pr(headRefOid=merged), refs=[merged, merged, None])
+        self.assertEqual(0, self.run_local())
+        self.assertIn("is already gone", self.out.getvalue())
+        self.assertEqual(merged, run_git(self.primary, "rev-parse", "HEAD"))
+
+    def test_a_moved_local_tip_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.count += 1
+        later = self.commit(path, f"unpushed {self.count}")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        out = self.out.getvalue()
+        self.assertIn("status=LOCAL_TIP_MOVED", out)
+        self.assertIn(tip, out)
+        self.assertIn(later, out)
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertEqual(later, run_git(self.primary, "rev-parse", CLEANUP_BRANCH))
+
+    def test_a_dirty_worktree_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        Path(path, "scratch.txt").write_text("x", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_DIRTY", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_locked_worktree_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        run_git(self.primary, "worktree", "lock", path)
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_checkout_whose_origin_is_another_repository_is_refused_before_the_remote_delete(
+        self,
+    ) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        run_git(self.primary, "remote", "set-url", "origin", "git@github.com:other/repo.git")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=BAD_CHECKOUT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertTrue(os.path.isdir(path))
+
+    def test_a_linked_worktree_is_not_a_primary_checkout(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local(path))
+        self.assertIn("status=BAD_CHECKOUT", self.out.getvalue())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_remote_refusal_skips_the_local_half(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire(cleanup_pr(headRefOid=tip, merged=False))
+        self.assertEqual(1, self.run_local())
+        self.assertNotIn("status=CLEANED", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_primary_holding_the_branch_moves_to_develop_before_the_delete(self) -> None:
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH)
+        tip = self.commit(self.primary, "primary work")
+        self.advance_origin()
+        self.wire_merged(tip)
+        self.assertEqual(0, self.run_local())
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+        self.assertEqual("develop", run_git(self.primary, "symbolic-ref", "--short", "HEAD"))
+        out = self.out.getvalue()
+        self.assertLess(out.index("switched"), out.index("deleting:"))
+
+    def test_a_rebase_paused_in_the_primary_on_the_branch_refuses(self) -> None:
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH)
+        for n in range(3):
+            self.commit(self.primary, f"primary work {n}")
+        tip = run_git(self.primary, "rev-parse", "HEAD")
+        self.pause_rebase(self.primary)
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_the_closing_informational_reads_never_fail_a_landed_cleanup(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_git
+
+        def flaky(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:1] == ("status",) and "--branch" in args:
+                raise pr_review.CleanupUnread("status read failed")
+            return real(root, *args, **kw)
+
+        listing = pr_review.cleanup_worktrees
+
+        def failing_list(primary: str) -> list[pr_review.Worktree]:
+            if "status unavailable" in self.out.getvalue():
+                raise pr_review.CleanupUnread("list read failed")
+            return listing(primary)
+
+        with (
+            mock.patch.object(pr_review, "cleanup_git", side_effect=flaky),
+            mock.patch.object(pr_review, "cleanup_worktrees", side_effect=failing_list),
+        ):
+            self.assertEqual(0, self.run_local())
+        out = self.out.getvalue()
+        self.assertIn("status unavailable", out)
+        self.assertIn("worktrees listed: unavailable", out)
+        self.assertIn("status=CLEANED", out)
+
+    def test_a_primary_stopped_mid_cherry_pick_on_the_branch_refuses(self) -> None:
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH)
+        tip = self.commit(self.primary, "primary work")
+        admin = Path(run_git(self.primary, "rev-parse", "--absolute-git-dir"))
+        (admin / "CHERRY_PICK_HEAD").write_text(tip + "\n", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_remote_branch_that_moved_before_the_delete_is_not_deleted(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire(cleanup_pr(headRefOid=tip), refs=[tip, "c" * 40])
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=TIP_MOVED", self.out.getvalue())
+        self.assertFalse(self.deleted())
+
+    def test_an_origin_branch_that_differs_from_the_merged_head_refuses(self) -> None:
+        path, _ = self.worktree(CLEANUP_BRANCH)
+        run_git(path, "push", "origin", CLEANUP_BRANCH)
+        self.count += 1
+        tip = self.commit(path, f"after the push {self.count}")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=TIP_MOVED", self.out.getvalue())
+        self.assertFalse(self.deleted())
+
+    def test_a_primary_holding_the_branch_with_tracked_changes_refuses(self) -> None:
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH)
+        Path(self.primary, "tracked.txt").write_text("a", encoding="utf-8")
+        run_git(self.primary, "add", "tracked.txt")
+        tip = run_git(self.primary, "rev-parse", "HEAD")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=BASE_DIRTY", self.out.getvalue())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_diverged_develop_is_reported_without_failing_the_removals(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.advance_origin()
+        run_git(self.primary, "fetch", "origin")
+        self.count += 1
+        self.commit(self.primary, f"local only {self.count}")
+        self.wire_merged(tip)
+        self.assertEqual(0, self.run_local())
+        out = self.out.getvalue()
+        self.assertLess(out.index("removed worktree"), out.index("status=BASE_NOT_FF"))
+        self.assertIn("base=kept", out)
+        self.assertFalse(os.path.exists(path))
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+
+    def test_the_shell_directory_inside_a_removed_worktree_is_handled_per_platform(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        os.chdir(path)
+        if pr_review.ON_WINDOWS:
+            self.assertEqual(1, self.run_local())
+            self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+            self.assertTrue(os.path.isdir(path))
+        else:
+            self.assertEqual(0, self.run_local())
+            self.assertIn("note: the shell's directory", self.out.getvalue())
+            self.assertFalse(os.path.exists(path))
+
+    def test_a_shell_inside_the_worktree_refuses_on_windows(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        os.chdir(path)
+        with mock.patch.object(pr_review, "ON_WINDOWS", True):
+            self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_worktree_with_submodules_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        Path(path, ".gitmodules").write_text("", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+
+    def test_a_rerun_with_the_primary_elsewhere_is_done_with_the_base_kept(self) -> None:
+        run_git(self.primary, "checkout", "-b", "elsewhere")
+        self.wire(cleanup_pr(headRefOid=CLEANUP_HEAD), refs=[CLEANUP_HEAD, CLEANUP_HEAD, None])
+        self.assertEqual(0, self.run_local())
+        out = self.out.getvalue()
+        self.assertIn("is already gone", out)
+        self.assertIn("base=kept", out)
+
+    def test_a_tip_that_moves_before_the_delete_is_a_refusal_after_the_removals(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_tip
+        heads = []
+
+        def moving(primary: str, ref: str) -> str | None:
+            if not ref.startswith("refs/heads/"):
+                return real(primary, ref)
+            heads.append(ref)
+            return "b" * 40 if len(heads) == 3 else real(primary, ref)
+
+        with mock.patch.object(pr_review, "cleanup_tip", side_effect=moving):
+            self.assertEqual(1, self.run_local())
+        out = self.out.getvalue()
+        self.assertLess(out.index("removed worktree"), out.index("status=LOCAL_TIP_MOVED"))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_an_unconfirmed_branch_delete_is_exit_2(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        with mock.patch.object(pr_review, "cleanup_tip", side_effect=itertools.repeat(tip)):
+            self.assertEqual(2, self.run_local())
+        self.assertIn("status=LOCAL_DELETE_NOT_CONFIRMED", self.out.getvalue())
+        self.assertFalse(os.path.exists(path))
+
+    def test_a_primary_on_another_branch_is_left_there(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        run_git(self.primary, "checkout", "-b", "elsewhere")
+        self.wire_merged(tip)
+        self.assertEqual(0, self.run_local())
+        self.assertEqual("elsewhere", run_git(self.primary, "symbolic-ref", "--short", "HEAD"))
+        out = self.out.getvalue()
+        self.assertIn("keep base-not-on-develop", out)
+        self.assertIn("base=kept", out)
+
+    def test_a_branch_being_bisected_in_another_worktree_is_kept(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH, commits=3)
+        run_git(path, "bisect", "start")
+        run_git(path, "bisect", "bad", "HEAD")
+        run_git(path, "bisect", "good", "HEAD~2")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+        self.assertTrue(os.path.isdir(path))
+
+    def test_a_branch_being_rebased_in_another_worktree_is_kept(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH, commits=3)
+        self.pause_rebase(path)
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_prunable_entry_holding_the_branch_is_removed_without_force(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        shutil.rmtree(path)
+        self.wire_merged(tip)
+        self.assertEqual(0, self.run_local())
+        self.assertEqual([self.primary], self.listed())
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_local_tip_behind_the_merged_head_is_removed(self) -> None:
+        path, _ = self.worktree(CLEANUP_BRANCH)
+        self.count += 1
+        ahead = self.commit(path, f"merged tip {self.count}")
+        run_git(self.primary, "branch", "ahead", ahead)
+        run_git(path, "reset", "--hard", "HEAD~1")
+        self.wire_merged(ahead)
+        self.assertEqual(0, self.run_local())
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_partly_removed_worktree_is_an_unconfirmed_removal(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_git
+
+        def partial(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "remove"):
+                real(root, *args)
+                os.makedirs(path)
+                raise pr_review.CleanupUnread("could not delete every file")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=partial):
+            self.assertEqual(2, self.run_local())
+        self.assertIn(path, self.out.getvalue())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_branch_delete_git_refuses_is_a_kept_branch(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_git
+
+        def refusing(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("branch", "-D"):
+                return subprocess.CompletedProcess([], 1, "", "error: used by worktree")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=refusing):
+            self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_worktree_mid_operation_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        admin = Path(run_git(path, "rev-parse", "--absolute-git-dir"))
+        (admin / "MERGE_HEAD").write_text(tip + "\n", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_worktree_removed_by_someone_else_mid_run_is_done(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_git
+
+        def racing(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "remove"):
+                real(root, *args)
+                raise pr_review.CleanupUnread("another process got there first")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=racing):
+            self.assertEqual(0, self.run_local())
+        self.assertIn("already gone", self.out.getvalue())
+        self.assertFalse(os.path.exists(path))
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_branch_deleted_by_someone_else_before_the_delete_is_already_gone(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_tip
+        calls = []
+
+        def vanishing(primary: str, ref: str) -> str | None:
+            if ref.startswith("refs/heads/"):
+                calls.append(ref)
+            if len(calls) == 3 and ref.startswith("refs/heads/"):
+                run_git(primary, "branch", "-D", "--", CLEANUP_BRANCH)
+                return None
+            return real(primary, ref)
+
+        with mock.patch.object(pr_review, "cleanup_tip", side_effect=vanishing):
+            self.assertEqual(0, self.run_local())
+        self.assertIn("status=CLEANED", self.out.getvalue())
+
+    def test_a_primary_that_cannot_leave_the_branch_keeps_it_and_exits_1(self) -> None:
+        Path(self.seed, "clash.txt").write_text("x", encoding="utf-8")
+        run_git(self.seed, "add", "clash.txt")
+        self.commit(self.seed, "add clash")
+        run_git(self.seed, "push", self.bare, "develop:develop")
+        run_git(self.primary, "pull", "--ff-only", "origin", "develop")
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH, "develop~1")
+        Path(self.primary, "clash.txt").write_text("y", encoding="utf-8")
+        tip = run_git(self.primary, "rev-parse", "HEAD")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("could not leave", self.out.getvalue())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertIn("nothing was deleted, remote branch included", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_develop_held_by_another_worktree_stops_the_primary_leaving(self) -> None:
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH)
+        tip = self.commit(self.primary, "primary work")
+        other = os.path.join(self.root, "wt", "develop-holder")
+        run_git(self.primary, "worktree", "add", other, "develop")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+
+class TestCleanupOriginParsing(unittest.TestCase):
+    def test_https_and_ssh_forms_name_the_repository_case_insensitively(self) -> None:
+        for url in (
+            "https://github.com/O/R.git",
+            "https://github.com/o/r",
+            "https://user@github.com/o/r.git/",
+            "git@github.com:o/R.git",
+            "ssh://git@github.com/O/r",
+        ):
+            found = pr_review.GITHUB_REMOTE.match(url)
+            self.assertIsNotNone(found, url)
+            assert found is not None
+            self.assertEqual("o/r", f"{found[1]}/{found[2]}".lower())
+
+    def test_other_hosts_and_shapes_do_not_match(self) -> None:
+        for url in ("https://example.com/o/r.git", "/srv/o/r.git", "https://github.com/o", ""):
+            self.assertIsNone(pr_review.GITHUB_REMOTE.match(url), url)
+
+
+class TestCleanupSweepArguments(CleanupCase):
+    def usage(self, *argv: str) -> None:
+        with self.assertRaises(SystemExit) as caught:
+            pr_review.main(list(argv))
+        self.assertEqual(2, caught.exception.code)
+
+    def test_a_missing_number_is_a_usage_error_outside_the_sweep(self) -> None:
+        self.usage("status", "--repo", "o/r")
+        self.usage("cleanup", "--repo", "o/r")
+
+    def test_a_required_number_still_parses_ahead_of_the_options(self) -> None:
+        class Reached(Exception):
+            pass
+
+        with (
+            mock.patch.object(pr_review, "full_read", side_effect=Reached),
+            self.assertRaises(Reached),
+        ):
+            pr_review.main(["status", "--repo", "o/r", "7"])
+        with mock.patch.object(pr_review, "cleanup", return_value=0) as cleaned:
+            self.assertEqual(
+                0, pr_review.main(["cleanup", "--repo", "o/r", "7", "--checkout", "x"])
+            )
+        cleaned.assert_called_once_with("o", "r", 7, "x")
+
+    def test_the_sweep_flags_are_checked_against_each_other(self) -> None:
+        self.usage("cleanup", "7", "--sweep", "--repo", "o/r", "--checkout", "/x")
+        self.usage("cleanup", "--sweep", "--repo", "o/r")
+        self.usage("cleanup", "7", "--repo", "o/r", "--apply")
+        self.usage("cleanup", "7", "--repo", "o/r", "--min-age-hours", "1")
+        self.usage("status", "7", "--repo", "o/r", "--sweep")
+
+
+class TestCleanupSweep(LocalCleanupCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.merged_prs: dict[str, list[dict]] = {}
+        self.failing: set[str] = set()
+
+    def age(self, path: str, hours: float) -> None:
+        """Set every file the sweep reads the age from to `hours` ago."""
+        admin = Path(path, ".git").read_text(encoding="utf-8").split(":", 1)[1].strip()
+        stamp = time.time() - hours * 3600
+        for p in (path, *(os.path.join(admin, n) for n in ("HEAD", "index", "logs/HEAD"))):
+            if os.path.exists(p):
+                os.utime(p, (stamp, stamp))
+
+    def age_branch(self, branch: str, hours: float) -> None:
+        log = os.path.join(self.primary, ".git", "logs", "refs", "heads", branch)
+        stamp = time.time() - hours * 3600
+        os.utime(log, (stamp, stamp))
+
+    def merged_pr(self, branch: str, tip: str, base: str = "develop") -> None:
+        node = {
+            "number": 7,
+            "baseRefName": base,
+            "headRefOid": tip,
+            "headRepository": {"nameWithOwner": "o/r"},
+        }
+        self.merged_prs[branch] = [node]
+
+    def wire_sweep(
+        self, remote_tip: str | None = None, remote_gone: bool = False, **pr: object
+    ) -> None:
+        refs: list[object] = [remote_tip, None] if remote_tip else []
+        if remote_gone:
+            refs = [None]
+        self.wire(cleanup_pr(headRefOid=remote_tip or CLEANUP_HEAD, **pr), refs=refs)
+        inner = pr_review.shared.request
+
+        def fake(query: str, variables: dict, **kw: Any) -> pr_review.shared.Response:
+            if query == pr_review.Q_SWEEP_DEFAULT:
+                head = {"defaultBranchRef": {"name": "main"}}
+                return pr_review.shared.Response({"repository": head}, [])
+            if query == pr_review.Q_SWEEP_MERGED:
+                if variables["b"] in self.failing:
+                    raise pr_review.shared.GraphQLError("gh graphql reported errors")
+                nodes = self.merged_prs.get(variables["b"], [])
+                page = {"merged": {"totalCount": len(nodes), "nodes": nodes}}
+                return pr_review.shared.Response({"repository": page}, [])
+            return inner(query, variables, **kw)
+
+        self.enterContext(mock.patch.object(pr_review.shared, "request", side_effect=fake))
+
+    def sweep(self, *extra: str) -> int:
+        argv = ["cleanup", "--sweep", "--repo", "o/r", "--checkout", self.primary, *extra]
+        return pr_review.main(argv)
+
+    def scenario(self) -> dict[str, str]:
+        """Old and finished items beside every kind of item that must stay."""
+        made: dict[str, str] = {}
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.merged_pr(CLEANUP_BRANCH, tip)
+        self.age(path, 48)
+        made["merged"] = path
+        detached = os.path.join(self.root, "wt", "detached")
+        run_git(self.primary, "worktree", "add", "--detach", detached, "origin/develop")
+        self.age(detached, 48)
+        made["detached"] = detached
+        gone = os.path.join(self.root, "wt", "gone")
+        run_git(self.primary, "worktree", "add", "--detach", gone, "origin/develop")
+        admin = Path(gone, ".git").read_text(encoding="utf-8").split(":", 1)[1].strip()
+        shutil.rmtree(gone)
+        old = time.time() - 48 * 3600
+        os.utime(os.path.join(admin, "index"), (old, old))
+        made["gone"] = gone
+        fresh = os.path.join(self.root, "wt", "fresh-gone")
+        run_git(self.primary, "worktree", "add", "--detach", fresh, "origin/develop")
+        shutil.rmtree(fresh)
+        made["fresh-gone"] = fresh
+        recent, recent_tip = self.worktree("recent-work")
+        self.merged_pr("recent-work", recent_tip)
+        made["recent"] = recent
+        unmerged, _ = self.worktree("unmerged-work")
+        self.age(unmerged, 48)
+        made["unmerged"] = unmerged
+        dirty, dirty_tip = self.worktree("dirty-work")
+        self.merged_pr("dirty-work", dirty_tip)
+        Path(dirty, "scratch.txt").write_text("x", encoding="utf-8")
+        self.age(dirty, 48)
+        made["dirty"] = dirty
+        locked, locked_tip = self.worktree("locked-work")
+        self.merged_pr("locked-work", locked_tip)
+        run_git(self.primary, "worktree", "lock", locked)
+        self.age(locked, 48)
+        made["locked"] = locked
+        run_git(self.primary, "branch", "loose-done", "origin/develop")
+        self.age_branch("loose-done", 48)
+        run_git(self.primary, "branch", "loose-recent", "origin/develop")
+        self.advance_origin()
+        return made
+
+    def test_a_dry_run_reports_every_item_and_removes_nothing(self) -> None:
+        made = self.scenario()
+        before = (sorted(self.branches()), sorted(self.listed()))
+        self.wire_sweep(remote_tip=run_git(self.primary, "rev-parse", CLEANUP_BRANCH))
+        self.assertEqual(0, self.sweep())
+        self.assertEqual(before, (sorted(self.branches()), sorted(self.listed())))
+        self.assertFalse(self.deleted())
+        out = self.out.getvalue()
+        self.assertIn(f"would-remove worktree {made['merged']}", out)
+        self.assertIn(f"would-remove worktree {made['detached']} detached", out)
+        self.assertIn(f"would-remove prunable worktree entry {made['gone']}", out)
+        self.assertIn("would-remove branch loose-done", out)
+        self.assertIn(f"would-remove remote branch {CLEANUP_BRANCH} via #7", out)
+        self.assertIn(f"would-fast-forward develop in {self.primary}", out)
+        self.assertNotIn("removed ", out.replace("would-remove", ""))
+
+    def test_apply_removes_what_is_finished_and_keeps_the_rest(self) -> None:
+        made = self.scenario()
+        tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
+        self.wire_sweep(remote_tip=tip)
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn(made["fresh-gone"], self.listed())
+        for gone in ("merged", "detached", "gone"):
+            self.assertNotIn(made[gone], self.listed(), gone)
+        self.assertFalse(os.path.exists(made["merged"]))
+        for kept in ("recent", "unmerged", "dirty", "locked"):
+            self.assertTrue(os.path.isdir(made[kept]), kept)
+            self.assertIn(made[kept], self.listed(), kept)
+        branches = self.branches()
+        self.assertNotIn(CLEANUP_BRANCH, branches)
+        self.assertNotIn("loose-done", branches)
+        for kept in ("develop", "main", "loose-recent", "recent-work", "unmerged-work"):
+            self.assertIn(kept, branches)
+        self.assertTrue(self.deleted())
+        out = self.out.getvalue()
+        self.assertIn("keep too-recent", out)
+        self.assertIn("keep unmerged-commits", out)
+        self.assertIn("keep dirty", out)
+        self.assertIn("keep locked", out)
+        self.assertEqual(
+            run_git(self.primary, "rev-parse", "origin/develop"),
+            run_git(self.primary, "rev-parse", "develop"),
+        )
+
+    def test_a_read_failure_continues_and_exits_2(self) -> None:
+        made = self.scenario()
+        early, _ = self.worktree("aa-failing")
+        self.age(early, 48)
+        self.failing.add("aa-failing")
+        tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
+        self.wire_sweep(remote_tip=tip)
+        self.assertEqual(2, self.sweep("--apply"))
+        out = self.out.getvalue()
+        self.assertLess(out.index("unread worktree"), out.index("removed worktree"))
+        self.assertNotIn(made["merged"], self.listed())
+        self.assertIn(early, self.listed())
+
+    def test_the_remote_check_in_a_report_names_a_refusal(self) -> None:
+        self.scenario()
+        self.wire_sweep(remote_tip=run_git(self.primary, "rev-parse", CLEANUP_BRANCH), merged=False)
+        self.assertEqual(0, self.sweep())
+        out = self.out.getvalue()
+        self.assertIn("keep-remote via #7", out)
+        self.assertNotIn("would-remove remote", out)
+        self.assertFalse(self.deleted())
+
+    def test_the_remote_check_in_a_report_names_a_branch_already_gone(self) -> None:
+        self.scenario()
+        self.wire_sweep(remote_gone=True)
+        self.assertEqual(0, self.sweep())
+        self.assertIn(f"remote already gone {CLEANUP_BRANCH} via #7", self.out.getvalue())
+
+    def test_a_loose_branch_whose_tip_moved_is_kept_as_tip_moved(self) -> None:
+        run_git(self.primary, "branch", "loose-done", "origin/develop")
+        self.age_branch("loose-done", 48)
+        self.wire_sweep()
+        moved = pr_review.CleanupRefused("LOCAL_TIP_MOVED", "moved")
+        with mock.patch.object(pr_review, "cleanup_delete_branch", side_effect=moved):
+            self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep tip-moved branch loose-done", self.out.getvalue())
+
+    def test_main_and_develop_survive_a_sweep_with_no_age_floor(self) -> None:
+        run_git(self.primary, "checkout", "-b", "primary-work")
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply", "--min-age-hours", "0"))
+        for kept in ("main", "develop", "primary-work"):
+            self.assertIn(kept, self.branches())
+
+    def test_the_primary_checkout_branch_is_never_touched(self) -> None:
+        run_git(self.primary, "checkout", "-b", "primary-work")
+        self.age_branch("primary-work", 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("primary-work", self.branches())
+        for line in self.out.getvalue().splitlines():
+            if "primary-work" in line:
+                self.assertTrue(line.startswith("keep base-not-on-develop"), line)
+
+    def test_a_branch_without_a_reflog_is_kept_as_age_unreadable(self) -> None:
+        run_git(self.primary, "branch", "loose-done", "origin/develop")
+        os.remove(os.path.join(self.primary, ".git", "logs", "refs", "heads", "loose-done"))
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep age-unreadable branch loose-done", self.out.getvalue())
+        self.assertIn("loose-done", self.branches())
+
+    def test_a_failed_prune_is_counted_and_the_other_items_still_run(self) -> None:
+        made = self.scenario()
+        tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
+        self.wire_sweep(remote_tip=tip)
+        real = pr_review.cleanup_git
+
+        def failing(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "prune"):
+                raise pr_review.CleanupUnread("prune failed")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=failing):
+            self.assertEqual(2, self.sweep("--apply"))
+        self.assertIn("unread prunable worktree entries", self.out.getvalue())
+        self.assertNotIn(made["merged"], self.listed())
+
+    def test_a_stale_remote_ref_for_a_deleted_branch_is_not_containment(self) -> None:
+        stale = os.path.join(self.root, "wt", "stale-detached")
+        run_git(self.primary, "worktree", "add", "--detach", stale, "origin/develop")
+        self.count += 1
+        self.commit(stale, f"only on a deleted branch {self.count}")
+        run_git(stale, "push", "origin", "HEAD:refs/heads/gone-branch")
+        run_git(self.primary, "fetch", "origin")
+        run_git(self.bare, "branch", "-D", "gone-branch")
+        self.age(stale, 48)
+        sha = run_git(stale, "rev-parse", "HEAD")
+        self.wire_sweep()
+        for extra in ((), ("--apply",)):
+            run_git(self.primary, "update-ref", "refs/remotes/origin/gone-branch", sha)
+            self.assertEqual(0, self.sweep(*extra))
+            out = self.out.getvalue()
+            self.assertIn(f"keep unpushed-commits worktree {stale} detached", out)
+            self.assertNotIn(f"would-remove worktree {stale}", out)
+            self.assertIn(stale, self.listed())
+
+    def test_a_primary_paused_mid_rebase_keeps_the_branch_in_both_modes(self) -> None:
+        run_git(self.primary, "checkout", "-b", "rebasing-work")
+        for n in range(3):
+            self.commit(self.primary, f"primary work {n}")
+        tip = run_git(self.primary, "rev-parse", "HEAD")
+        self.pause_rebase(self.primary)
+        self.merged_pr("rebasing-work", tip)
+        self.age_branch("rebasing-work", 48)
+        self.wire_sweep()
+        for extra in ((), ("--apply",)):
+            self.assertEqual(0, self.sweep(*extra))
+            self.assertIn("keep in-progress-operation branch rebasing-work", self.out.getvalue())
+            self.assertIn("rebasing-work", self.branches())
+
+    def test_a_worktree_with_submodules_is_kept(self) -> None:
+        path, tip = self.worktree("modular-work")
+        self.merged_pr("modular-work", tip)
+        Path(path, ".gitmodules").write_text("", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep submodules", self.out.getvalue())
+        self.assertIn(path, self.listed())
+
+    def test_a_shell_inside_a_worktree_keeps_it_on_windows(self) -> None:
+        path, tip = self.worktree("held-work")
+        self.merged_pr("held-work", tip)
+        self.age(path, 48)
+        self.wire_sweep()
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        os.chdir(path)
+        with mock.patch.object(pr_review, "ON_WINDOWS", True):
+            self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep cwd-inside", self.out.getvalue())
+        self.assertIn(path, self.listed())
+
+    def test_a_worktree_mid_operation_is_kept(self) -> None:
+        path, tip = self.worktree("paused-work")
+        self.merged_pr("paused-work", tip)
+        admin = Path(run_git(path, "rev-parse", "--absolute-git-dir"))
+        (admin / "BISECT_LOG").write_text("\n", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep in-progress-operation", self.out.getvalue())
+        self.assertIn(path, self.listed())
+        self.assertIn("paused-work", self.branches())
+
+    def test_a_branch_being_bisected_elsewhere_is_kept_as_in_progress(self) -> None:
+        path, tip = self.worktree("bisected-work", commits=3)
+        self.merged_pr("bisected-work", tip)
+        run_git(path, "bisect", "start")
+        run_git(path, "bisect", "bad", "HEAD")
+        run_git(path, "bisect", "good", "HEAD~2")
+        self.age(path, 48)
+        self.age_branch("bisected-work", 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep in-progress-operation branch bisected-work", self.out.getvalue())
+        self.assertIn("bisected-work", self.branches())
+        self.assertIn(path, self.listed())
+
+    def test_a_branch_delete_git_refuses_is_kept_as_checked_out_elsewhere(self) -> None:
+        run_git(self.primary, "branch", "loose-done", "origin/develop")
+        self.age_branch("loose-done", 48)
+        self.wire_sweep()
+        real = pr_review.cleanup_git
+
+        def refusing(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("branch", "-D"):
+                return subprocess.CompletedProcess([], 1, "", "error: used by worktree")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=refusing):
+            self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep checked-out-elsewhere branch loose-done", self.out.getvalue())
+
+    def test_a_branch_behind_a_merged_head_counts_as_finished(self) -> None:
+        path, _ = self.worktree("behind-work")
+        self.count += 1
+        ahead = self.commit(path, f"merged tip {self.count}")
+        run_git(self.primary, "branch", "ahead", ahead)
+        run_git(path, "reset", "--hard", "HEAD~1")
+        run_git(self.primary, "worktree", "remove", path)
+        self.merged_pr("behind-work", ahead)
+        self.age_branch("behind-work", 48)
+        self.wire_sweep(remote_tip=ahead)
+        self.assertEqual(0, self.sweep())
+        self.assertIn("would-remove branch behind-work", self.out.getvalue())
+
+    def test_a_checkout_naming_another_repository_is_refused(self) -> None:
+        run_git(self.primary, "remote", "set-url", "origin", "https://github.com/other/repo.git")
+        self.wire_sweep()
+        self.assertEqual(1, self.sweep("--apply"))
+        self.assertIn("status=BAD_CHECKOUT", self.out.getvalue())
 
 
 if __name__ == "__main__":
