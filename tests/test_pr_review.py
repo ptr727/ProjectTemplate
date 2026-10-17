@@ -1337,8 +1337,8 @@ class TestPreviouslyMissed(GqlCase):
         self.assertEqual(0, code)
 
     def test_prose_naming_the_section_is_not_the_section(self) -> None:
-        """`marker_blocks` accepts a line on a count alone, so an unanchored marker reads an
-        ordinary English sentence carrying a number as a section this round raised.
+        """`marker_blocks` accepts a line that is not a heading on a `(N)` alone. An unanchored
+        marker then reads an ordinary English sentence carrying a number as a section this round raised.
 
         The observed wording is common enough to write by accident, and the result is a banner
         telling the reader a clean round raised a finding against code the branch never touched.
@@ -1366,6 +1366,17 @@ class TestPreviouslyMissed(GqlCase):
                 line = f"{opener}Previously missed (2) findings were re-raised this round."
                 self.assertIsNone(pr_review.PREVIOUSLY_MISSED.match(line))
                 self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{line}\n"))
+                counted = f"{opener}2 previously missed issues were re-raised this round."
+                self.assertIsNone(pr_review.PREVIOUSLY_MISSED.match(counted))
+        for bare in (
+            "2 previously missed issues were re-raised this round.",
+            "2 previously missed (3) rounds ago, the guard is back.",
+            "> 2 previously missed (3) rounds ago, the guard is back.",
+            "<strong>2 previously missed (3) rounds ago</strong>",
+            "<em>2 previously missed (3) rounds ago, the guard is back.</em>",
+        ):
+            with self.subTest(bare=bare):
+                self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{bare}\n"))
 
     def test_the_heading_is_read_through_whatever_markup_it_wears(self) -> None:
         """What the anchor must admit, beside the prose above that it must not.
@@ -1386,9 +1397,153 @@ class TestPreviouslyMissed(GqlCase):
             # An emphasis marker is heading markup and a bullet is prose, and a space is what separates them, so both spellings are held here rather than only the one.
             ("italic, with no tags", "_Previously missed (1)_"),
             ("bold and italic", "***Previously missed (1)***"),
+            (
+                "the count-first spelling",
+                "<summary><strong>2 previously missed issues</strong></summary>",
+            ),
+            ("a count-first markdown heading", "### 2 previously missed issues"),
         ):
             with self.subTest(case=label):
                 self.assertIsNotNone(pr_review.PREVIOUSLY_MISSED.match(heading))
+
+    def test_a_count_first_heading_is_the_section_and_states_its_count(self) -> None:
+        """A later revision opens the heading on its count, `2 previously missed issues`.
+
+        Unread, the round exited 43 on an unvetted summary. Its findings open no thread, so they
+        reached the agent only through the raw body. Read without its count, the block fell to the
+        floor of one. It then reported one finding where the round raised two.
+        """
+        body = counted_missed(2)
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        blocks = pr_review.previously_missed_blocks(body)
+        self.assertEqual(1, len(blocks))
+        self.assertEqual(2, pr_review.finding_count(blocks[0]))
+        self.assertEqual([], pr_review.unrecognized_in(counted_missed(1)))
+        self.assertEqual(
+            3, pr_review.finding_count(pr_review.previously_missed_blocks(counted_missed(3))[0])
+        )
+        long_run = counted_missed(1).replace(
+            "1 previously missed issue", "12345 previously missed issue"
+        )
+        long_blocks = pr_review.previously_missed_blocks(long_run)
+        self.assertEqual(1, len(long_blocks))
+        self.assertEqual(1, pr_review.finding_count(long_blocks[0]))
+        self.answer(payload([review(body=body)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("previously_missed=2 (on_head=2 earlier=0)", out)
+        self.assertIn("shapes=ok", out)
+        self.assertIn("Low severity Constructed missed finding 2", out)
+
+    def test_a_summary_split_across_lines_is_still_the_section(self) -> None:
+        """A summary whose text sits on lines of its own is vetted by its spelling. A heading
+        found only within one line read it as no section, while `shapes=ok` reported nothing."""
+        for label, summary in (
+            (
+                "its text on a line of its own",
+                "<summary>\n<strong>2 previously missed issues</strong>\n</summary>",
+            ),
+            (
+                "its text set off by blank lines",
+                "<summary>\n\n<strong>2 previously missed issues</strong>\n\n</summary>",
+            ),
+            (
+                "its emphasis in capitals",
+                "<summary><STRONG>2 previously missed issues</STRONG></summary>",
+            ),
+            (
+                "its wording broken across lines",
+                "<summary><strong>2 previously\nmissed issues</strong></summary>",
+            ),
+        ):
+            with self.subTest(case=label):
+                body = counted_missed(2).replace(
+                    "<summary><strong>2 previously missed issues</strong></summary>", summary
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+                blocks = pr_review.previously_missed_blocks(body)
+                self.assertEqual(1, len(blocks))
+                self.assertEqual(2, pr_review.finding_count(blocks[0]))
+                self.assertIn("Constructed missed finding 2", blocks[0])
+
+    def test_a_vetted_summary_no_reader_finds_is_reported(self) -> None:
+        """The spelling is vetted wherever it appears, while the reader keys on how its line opens.
+
+        A layout the reader misses would hand its findings to nobody under `shapes=ok`. So the
+        shortfall between the two is reported as an unread shape instead.
+        """
+        body = counted_missed(2).replace(
+            "<strong>2 previously missed issues</strong>",
+            "<strong>2</strong> previously missed issues",
+        )
+        self.assertEqual([], pr_review.previously_missed_blocks(body))
+        found = pr_review.unrecognized_in(body)
+        self.assertEqual(1, len(found))
+        self.assertIn("no reader found its section", found[0])
+
+    def test_an_entry_title_opening_on_a_number_bounds_no_section(self) -> None:
+        """An entry's summary opens on its severity badge, which is not heading markup.
+
+        Read as markup, an entry titled `2 low confidence results are dropped` stated a count. That
+        entry then bounded the section, and the entries after it were dropped from it.
+        """
+        body = counted_missed(3).replace(
+            "Constructed missed finding 2", "2 low confidence results are dropped"
+        )
+        blocks = pr_review.previously_missed_blocks(body)
+        self.assertEqual(1, len(blocks))
+        self.assertIn("Constructed missed finding 3", blocks[0])
+        self.assertEqual(3, pr_review.finding_count(blocks[0]))
+
+    def test_a_tag_named_in_prose_folds_nothing(self) -> None:
+        """Only a line opening on `<summary` folds. A finding naming the tag mid-sentence folded
+        every line to the next close, and the sibling heading caught inside the fold was lost."""
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Suppressed comments (1)\n\n"
+            "The SUMMARY pattern misses a <summary class=x> opener.\n\n"
+            "<summary><strong>2 previously missed issues</strong></summary>\n\n"
+            "The previously missed finding.\n</details>\n"
+        )
+        missed = pr_review.previously_missed_blocks(shared)
+        self.assertEqual(1, len(missed))
+        self.assertIn("The previously missed finding.", missed[0])
+        suppressed = pr_review.suppressed_blocks(shared)
+        self.assertEqual(1, len(suppressed))
+        self.assertNotIn("The previously missed finding.", suppressed[0])
+
+    def test_a_section_ends_where_its_count_first_sibling_starts(self) -> None:
+        """A sibling bounds a section only where its heading states a count.
+
+        A bound reading only `(N)` ran a suppressed block into a count-first previously-missed
+        sibling. The digest then printed that finding twice, once under the suppressed banner.
+        """
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Suppressed comments (1)\n\nThe suppressed finding.\n\n"
+            "<details>\n<summary><strong>2 previously missed issues</strong></summary>\n\n"
+            "The previously missed finding.\n</details>\n</details>\n"
+        )
+        suppressed = pr_review.suppressed_blocks(shared)
+        self.assertEqual(1, len(suppressed))
+        self.assertIn("The suppressed finding.", suppressed[0])
+        self.assertNotIn("The previously missed finding.", suppressed[0])
+        self.answer(payload([review(body=shared)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertEqual(1, out.count("The previously missed finding."))
+
+    def test_a_count_first_section_cancels_the_flagging_verdict_reading(self) -> None:
+        """The round flags a closer look and states no open issue.
+
+        Its findings are the previously missed ones, which the digest now counts. So the round is
+        not a verdict naming nothing.
+        """
+        self.answer(payload([review(body=counted_missed(2))]))
+        self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=counted_missed(2))])))
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = pr_review.main(["status", "7", "--repo", "o/r"])
+        self.assertNotIn("VERDICT WITH NO COUNTED FINDING", printed.getvalue())
+        self.assertNotIn("UNRECOGNIZED", printed.getvalue())
+        self.assertEqual(0, code)
 
     def test_a_quoted_heading_is_not_a_section_this_round_raised(self) -> None:
         """Every other reader in this file strips a quotation before looking, and this one did not.
@@ -1877,6 +2032,29 @@ def previously_missed(
         "In code that hasn't changed since last review\n\n"
         f"<details>\n<summary>{badge} {title}</summary>\n\n{finding}\n</details>\n</details>\n"
     )
+
+
+def counted_missed(entries: int) -> str:
+    """The later revision's previously-missed section, its summary opening on the count.
+
+    The round flags a closer look and states its zero as `**No open issues**`. The section nests
+    one badged entry per finding, each a `FILE:LINE` anchor and a priority-tagged paragraph.
+    That nesting is the observed one, and every title, path, and sentence is constructed, per
+    GOVERNANCE.md "Representative Data in Agent-Authored Text".
+    """
+    noun = "issue" if entries == 1 else "issues"
+    found = "".join(
+        f"<details>\n<summary>{BADGE} Constructed missed finding {i}</summary>\n\n"
+        f"`a.py:{10 * i}`\n\n[P1] A constructed paragraph about the finding.\n</details>\n"
+        for i in range(1, entries + 1)
+    )
+    block = (
+        f"<details>\n<summary><strong>{entries} previously missed {noun}</strong></summary>\n\n"
+        f"In code that hasn't changed since last review\n\n{found}</details>\n\n<details>"
+    )
+    return revised_with(
+        "**No open issues** \U0001f389", "### \U0001f535 Needs a closer look"
+    ).replace("<details>", block, 1)
 
 
 class TestCoverage(GqlCase):
@@ -4109,6 +4287,22 @@ class TestSecondOverviewFormat(GqlCase):
         )
         self.assertIsNone(pr_review.stated_total(inside))
 
+    def test_the_revision_s_no_open_issues_line_is_a_stated_zero(self) -> None:
+        """A later revision writes its zero as `**No open issues**` closed by an emoji, and unread
+        it printed `?` over a round stating nothing open. The line anchor still holds, so prose
+        naming the words, or a line going on past the emoji, states nothing."""
+        for line, total in (
+            ("**No open issues** \U0001f389", 0),
+            ("**No open issues**", 0),
+            ("**1 open issue**", 1),
+            ("**2 open issues**", 2),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(total, pr_review.stated_total(overview_v2_revised(line)))
+        for line in ("It had **No open issues** before.", "**No open issues** \U0001f389 yet"):
+            with self.subTest(line=line):
+                self.assertIsNone(pr_review.stated_total(overview_v2_revised(line)))
+
     def test_a_total_split_across_severities_is_summed(self) -> None:
         """The format states a count per severity, so the first number alone undercounts.
 
@@ -4651,23 +4845,6 @@ class TestSecondOverviewFormat(GqlCase):
             comment_flowed_text(wrapped),
         )
 
-    def test_the_vetted_lists_hold_what_the_comment_beside_them_counts(self) -> None:
-        """The comment states the sizes, and adding an entry without it is how it goes stale."""
-        source = comment_flowed_text(Path(pr_review.__file__).read_text(encoding="utf-8"))
-        stated = re.search(
-            r"the output is regular: (\d+) headings, (\d+) summaries and (\d+) labels", source
-        )
-        if stated is None:
-            self.fail("the comment stating the vetted list sizes is no longer in the source")
-        self.assertEqual(
-            (
-                len(pr_review.VETTED_HEADINGS),
-                len(pr_review.VETTED_SUMMARIES),
-                len(pr_review.VETTED_LABELS),
-            ),
-            tuple(int(g) for g in stated.groups()),
-        )
-
 
 COVERS_ONE = "<!-- fleet-review: reviewed=1 changed=1 findings=0 -->"
 
@@ -4727,6 +4904,42 @@ class TestOverviewSections(GqlCase):
         opening this section, and unread it printed `?`."""
         body = revised_with(open_section(("6000000001", "6000000002", "6000000003")))
         self.assertEqual(3, pr_review.stated_total(body))
+
+    def test_the_open_issues_spelling_is_the_same_section(self) -> None:
+        """A later revision writes `1 open issue` where it wrote `1 open finding`, and exited 43.
+
+        Its entries link the round's own threads, as the earlier spelling's do. So it is read as the
+        same section: vetted, stating the total, and each entry checked against the threads.
+        """
+        for ids in (("6000000001",), ("6000000001", "6000000002")):
+            noun = "issue" if len(ids) == 1 else "issues"
+            with self.subTest(count=len(ids)):
+                body = revised_with(open_section(ids, noun=noun))
+                self.assertEqual([], pr_review.unrecognized_in(body))
+                self.assertEqual(len(ids), pr_review.stated_total(body))
+                rd = review(body=body, rid="PRR_head")
+                threads = [thread(f"T{i}", rid="PRR_head", cid=c) for i, c in enumerate(ids)]
+                self.assertEqual(0, pr_review.unthreaded_entries(payload([rd], threads)))
+        lone = revised_with(open_section(("6000000009",), noun="issue"))
+        self.assertEqual(1, pr_review.unthreaded_entries(payload([review(body=lone)])))
+
+    def test_a_summary_split_across_lines_keeps_its_count(self) -> None:
+        """The role is vetted on the whole summary, so its count is read from the whole summary
+        too. Read from its first line alone, `Open` then `(2)` stated no count."""
+        ids = ("6000000001", "6000000002", "6000000003")
+        split = revised_with(open_section(ids)).replace(
+            "<strong>3 open findings</strong>", "<strong>\n3 open findings\n</strong>"
+        )
+        self.assertEqual([3], [c for r, c, _ in pr_review.section_entries(split) if r == "total"])
+        self.assertEqual(3, pr_review.stated_total(split))
+        for spelled in ("<STRONG>3 open findings</STRONG>", "<strong>3</strong> open findings"):
+            with self.subTest(spelled=spelled):
+                body = revised_with(open_section(ids)).replace(
+                    "<strong>3 open findings</strong>", spelled
+                )
+                self.assertEqual(3, pr_review.stated_total(body))
+        closing = overview_v2().replace("<strong>Open (2)</strong>", "<strong>Open\n(2)</strong>")
+        self.assertEqual([2], [c for r, c, _ in pr_review.section_entries(closing) if r == "open"])
 
     def test_a_count_first_summary_outside_the_table_is_still_unvetted(self) -> None:
         """The table vets spellings, not any summary that opens on a count."""
@@ -5015,7 +5228,11 @@ class TestOverviewSections(GqlCase):
 
     def test_a_collapsed_finding_cancels_the_reading(self) -> None:
         """A suppressed or previously-missed block is a counted finding the digest already prints."""
-        for summary in ("Previously missed (1)", "Suppressed comments (1)"):
+        for summary in (
+            "Previously missed (1)",
+            "2 previously missed issues",
+            "Suppressed comments (1)",
+        ):
             with self.subTest(summary=summary):
                 block = (
                     f"<details>\n<summary><strong>{summary}</strong></summary>\n\n"
