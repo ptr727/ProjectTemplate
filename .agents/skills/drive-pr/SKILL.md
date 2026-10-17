@@ -103,10 +103,12 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    call, it is run from inside the task's own worktree per step 1, where the feature branch is
    checked out, and `gh pr merge --delete-branch` needs to switch that worktree to the base branch
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
-   case in this layout. Instead run repo-worktree's post-merge cleanup from the base clone, remove
-   the worktree and delete the now-merged local task branch, then delete the remote one, which is this
-   skill's own step rather than that one's, with
-   `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo>`, run from a hub checkout.
+   case in this layout. Instead run repo-worktree's post-merge cleanup with
+   `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
+   primary clone. It deletes the remote branch, then removes the task's worktree and local branch.
+   It decides its local refusals before the remote delete, and `repo-worktree` "Listing and
+   Cleanup" says what a refusal after it and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in
    code. It refuses unless the pull request merged into `develop` from a head in that same
    repository, and refuses a permanent branch or one any ruleset or branch protection covers. It
@@ -122,7 +124,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    It names each, since the delete would close or retarget it.
    Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.
    Name the pull request number and `--repo` so the maintainer runs the same command.
-   No direct `git push origin --delete` or ref API delete runs here, since `cleanup` holds the checks.
+   No direct `git push origin --delete`, ref API delete, `git worktree remove`, or `git branch -D` runs here, since `cleanup` holds the checks.
    A pull request opened from a fork follows `upstream-contribution-workflow` instead, and `cleanup` refuses it.
    The
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
