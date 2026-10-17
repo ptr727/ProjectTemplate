@@ -330,7 +330,7 @@ what it leaves to judgment here. The tier is chosen per group rather than defaul
 stronger tier produces better work and takes fewer review rounds to land it. That often
 costs less than a cheaper worker looping. The tier is `frontier` or `standard`, never `bulk`, since
 every worker judges its pull request's review findings. It is `highest` only where the maintainer
-named it for this run. These kinds of group are never tiered
+named it for this run. Groups of these kinds are never tiered
 below `frontier`:
 
 - One touching **carried canonical content**, as `GOVERNANCE.md` "Verification Discipline" bounds
