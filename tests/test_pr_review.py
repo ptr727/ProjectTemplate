@@ -12718,8 +12718,46 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertIn("keep age-unreadable branch loose-done", self.out.getvalue())
         self.assertIn("loose-done", self.branches())
 
+    def gone_on_branch(self, branch: str, entry_hours: float = 48) -> str:
+        """A finished, idle branch whose worktree directory is gone, its record `entry_hours` old."""
+        gone = os.path.join(self.root, "wt", branch)
+        run_git(self.primary, "worktree", "add", "-b", branch, gone, "origin/develop")
+        admin = Path(gone, ".git").read_text(encoding="utf-8").split(":", 1)[1].strip()
+        shutil.rmtree(gone)
+        old = time.time() - entry_hours * 3600
+        os.utime(os.path.join(admin, "index"), (old, old))
+        self.age_branch(branch, 48)
+        return gone
+
+    def test_a_pruned_entry_s_branch_is_swept_in_the_same_run(self) -> None:
+        gone = self.gone_on_branch("gone-done")
+        self.advance_origin()
+        self.wire_sweep(remote_tip=None)
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertNotIn(gone, self.listed())
+        self.assertNotIn("gone-done", self.branches())
+
+    def test_a_dry_run_reports_a_prunable_entry_s_branch(self) -> None:
+        self.gone_on_branch("gone-done")
+        self.advance_origin()
+        self.wire_sweep(remote_tip=None)
+        self.assertEqual(0, self.sweep())
+        self.assertIn("gone-done", self.branches())
+        self.assertIn("would-remove branch gone-done", self.out.getvalue())
+
+    def test_a_too_recent_prunable_entry_still_holds_its_branch(self) -> None:
+        gone = self.gone_on_branch("gone-recent", entry_hours=0)
+        self.advance_origin()
+        self.wire_sweep(remote_tip=None)
+        self.assertEqual(0, self.sweep())
+        self.assertNotIn("would-remove branch gone-recent", self.out.getvalue())
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn(gone, self.listed())
+        self.assertIn("gone-recent", self.branches())
+
     def test_a_failed_prune_is_counted_and_the_other_items_still_run(self) -> None:
         made = self.scenario()
+        self.gone_on_branch("gone-failed")
         tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
         self.wire_sweep(remote_tip=tip)
         real = pr_review.cleanup_git
@@ -12732,6 +12770,8 @@ class TestCleanupSweep(LocalCleanupCase):
         with mock.patch.object(pr_review, "cleanup_git", side_effect=failing):
             self.assertEqual(2, self.sweep("--apply"))
         self.assertIn("unread prunable worktree entries", self.out.getvalue())
+        self.assertNotIn("branch gone-failed", self.out.getvalue())
+        self.assertIn("gone-failed", self.branches())
         self.assertNotIn(made["merged"], self.listed())
 
     def test_a_stale_remote_ref_for_a_deleted_branch_is_not_containment(self) -> None:
