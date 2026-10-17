@@ -438,7 +438,7 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # The opener admits heading markup and anything outside ASCII, and nothing else.
 # One count may follow it, since a later revision opens the heading on its count, as `2 previously missed issues`.
 # A count opening a line is how a sentence opens too, so `marker_blocks` reads such a line as prose unless it is a heading.
-# `LEADING_COUNT` reads that count past this same opener, so whatever markup the anchor admits, the prose check strips.
+# `OPENING_COUNT` reads that count past this same opener, so whatever markup the anchor admits, the prose check strips.
 # An emoji is what this format already puts on its verdict headings, and a spelling that admitted no such character read a heading wearing one as no section at all.
 # That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read while the findings reach nobody.
 # Widened to any non-word character instead, ordinary punctuation opened the run and a sentence such as `- Previously missed (2) findings were re-raised` became the section, printing the prose around it as the finding.
@@ -827,8 +827,12 @@ HUB = "ptr727/ProjectTemplate"
 SUMMARY = re.compile(r"<summary(?:\s+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
-# A count opening a heading, past the opener `PREVIOUSLY_MISSED` admits, a summary's line breaks included.
-LEADING_COUNT = re.compile(rf"{HEADING_OPENER}([0-9]+)[ \t\r\n]")
+# A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
+OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
+# A count opening a heading's own text, past emphasis and nothing else that is a tag, a summary's line breaks included.
+# Narrower than the opener above, since a finding entry's summary opens on its severity badge.
+# A badge read as heading markup made an entry titled `2 low confidence results` state a count, and bound a section there.
+LEADING_COUNT = re.compile(r"(?:</?(?:strong|b|em|i)>|[ \t\r\n#*_]|[^\x00-\x7f])*([0-9]+)[ \t\r\n]")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
@@ -4425,8 +4429,9 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     """Return the review body's sections whose own heading matches `marker`, each sliced from
     that heading through to the end of its own region.
 
-    Shared by `suppressed_blocks` and `outside_diff_blocks`. `strip_blockquote` affects heading
-    detection only, never the returned content.
+    Shared by `suppressed_blocks`, `previously_missed_blocks`, and `outside_diff_blocks`.
+    `strip_blockquote` affects heading detection only, never the returned content. A summary split
+    across lines is folded onto its opening line in the returned content too, per `fold_summaries`.
 
     A line that is not a heading qualifies on a `(N)` it carries, and only where it does not open
     on a count. A count opening a line is how a heading states it and also how a sentence opens,
@@ -4450,11 +4455,15 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
         if strip_blockquote:
             scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
         for i, line in enumerate(scan_lines):
-            bare = COUNT.search(line) and not LEADING_COUNT.match(line)
+            bare = COUNT.search(line) and not OPENING_COUNT.match(line)
             if marker.search(line) and (HEADING.match(line) or bare):
                 blocks.append("\n".join(raw_lines[i : sibling_heading(scan_lines, i, marker)]))
                 break
     return blocks
+
+
+FOLD_OPENER = re.compile(r"[>\s]*<summary(?=[\s>]|$)", re.IGNORECASE)
+FOLD_STOP = re.compile(r"\s*<(?:details|summary)(?=[\s>/]|$)", re.IGNORECASE)
 
 
 def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[str], list[str]]:
@@ -4463,23 +4472,28 @@ def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[st
     A heading is found line by line, so a summary whose text sits on lines of its own read as no
     heading at all. `unrecognized_in` vetted its spelling meanwhile and reported nothing. The groups
     come from the scanned copy and apply to both, so the two keep addressing the same lines.
+
+    Only a line opening on `<summary` folds, and the fold stops short at a blank line or a line
+    opening another wrapper or summary. A tag named mid-sentence otherwise folded every line to the
+    next close. A sibling heading caught inside that fold was then no longer at a line's start.
+    A continuation line's blockquote markers are dropped, being the quoting rather than the text.
     """
     scan: list[str] = []
     raw: list[str] = []
     i = 0
     while i < len(scan_lines):
-        low = scan_lines[i].lower()
-        opened = low.rfind("<summary")
         end = i
-        if opened >= 0 and "</summary>" not in low[opened:]:
-            close = next(
-                (j for j in range(i + 1, len(scan_lines)) if "</summary>" in scan_lines[j].lower()),
-                None,
-            )
-            end = close if close is not None else i
+        if FOLD_OPENER.match(scan_lines[i]) and "</summary>" not in scan_lines[i].lower():
+            for j in range(i + 1, len(scan_lines)):
+                bare = BLOCKQUOTE.sub("", scan_lines[j].strip())
+                if not bare.strip() or FOLD_STOP.match(bare):
+                    break
+                if "</summary>" in bare.lower():
+                    end = j
+                    break
         for source, target in ((scan_lines, scan), (raw_lines, raw)):
-            parts = [source[i].rstrip()] + [ln.strip() for ln in source[i + 1 : end + 1]]
-            target.append(" ".join(parts))
+            parts = [BLOCKQUOTE.sub("", ln.strip()) for ln in source[i + 1 : end + 1]]
+            target.append(" ".join([source[i].rstrip(), *parts]))
         i = end + 1
     return scan, raw
 
@@ -4512,7 +4526,7 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     """
     for j in range(start + 1, len(scan_lines)):
         line = scan_lines[j]
-        if not (HEADING.match(line) and heading_count(line) is not None):
+        if not (HEADING.match(line) and heading_count(heading_of(line)) is not None):
             continue
         if any(o is not marker and o.search(line) for o in SECTION_MARKERS):
             return j

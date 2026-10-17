@@ -1457,6 +1457,37 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertEqual(2, pr_review.finding_count(blocks[0]))
                 self.assertIn("Constructed missed finding 2", blocks[0])
 
+    def test_an_entry_title_opening_on_a_number_bounds_no_section(self) -> None:
+        """An entry's summary opens on its severity badge, which is not heading markup.
+
+        Read as markup, an entry titled `2 low confidence results are dropped` stated a count. That
+        entry then bounded the section, and the entries after it were dropped from it.
+        """
+        body = counted_missed(3).replace(
+            "Constructed missed finding 2", "2 low confidence results are dropped"
+        )
+        blocks = pr_review.previously_missed_blocks(body)
+        self.assertEqual(1, len(blocks))
+        self.assertIn("Constructed missed finding 3", blocks[0])
+        self.assertEqual(3, pr_review.finding_count(blocks[0]))
+
+    def test_a_tag_named_in_prose_folds_nothing(self) -> None:
+        """Only a line opening on `<summary` folds. A finding naming the tag mid-sentence folded
+        every line to the next close, and the sibling heading caught inside the fold was lost."""
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Suppressed comments (1)\n\n"
+            "The SUMMARY pattern misses a <summary class=x> opener.\n\n"
+            "<summary><strong>2 previously missed issues</strong></summary>\n\n"
+            "The previously missed finding.\n</details>\n"
+        )
+        missed = pr_review.previously_missed_blocks(shared)
+        self.assertEqual(1, len(missed))
+        self.assertIn("The previously missed finding.", missed[0])
+        suppressed = pr_review.suppressed_blocks(shared)
+        self.assertEqual(1, len(suppressed))
+        self.assertNotIn("The previously missed finding.", suppressed[0])
+
     def test_a_section_ends_where_its_count_first_sibling_starts(self) -> None:
         """A sibling bounds a section only where its heading states a count.
 
