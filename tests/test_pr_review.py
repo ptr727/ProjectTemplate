@@ -1603,6 +1603,41 @@ class TestPreviouslyMissed(GqlCase):
         self.assertEqual(1, out.count("The suppressed finding."))
         self.assertEqual(1, out.count("The previously missed finding."))
 
+    def test_sections_alternating_in_one_wrapper_are_each_read(self) -> None:
+        """The chain of bounds runs through a section of the other kind rather than stopping there.
+
+        Stopped at the first sibling of the other kind, the second suppressed section reached no
+        block. The digest counted one suppressed finding of three, under `shapes=ok`.
+        """
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Suppressed comments (1)\n\nThe first suppressed finding.\n\n"
+            "### Previously missed (1)\n\nThe previously missed finding.\n\n"
+            "### Suppressed comments (2)\n\nThe second suppressed finding.\n\n"
+            "The third suppressed finding.\n</details>\n"
+        )
+        suppressed = pr_review.suppressed_blocks(shared)
+        self.assertEqual(2, len(suppressed))
+        self.assertIn("The first suppressed finding.", suppressed[0])
+        self.assertIn("The third suppressed finding.", suppressed[1])
+        self.assertNotIn("The previously missed finding.", "".join(suppressed))
+        missed = pr_review.previously_missed_blocks(shared)
+        self.assertEqual(1, len(missed))
+        self.assertNotIn("suppressed finding.", missed[0])
+        self.answer(payload([review(body=shared)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("suppressed=3", out)
+        for finding in ("first suppressed", "previously missed", "third suppressed"):
+            self.assertEqual(1, out.count(f"The {finding} finding."))
+        swapped = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "<summary><strong>Previously missed (1)</strong></summary>\n\nThe first.\n\n"
+            "<summary><strong>Suppressed comments (1)</strong></summary>\n\nThe second.\n\n"
+            "<summary><strong>Previously missed (1)</strong></summary>\n\nThe third.\n</details>\n"
+        )
+        self.assertEqual(2, len(pr_review.previously_missed_blocks(swapped)))
+        self.assertEqual([], pr_review.unrecognized_in(swapped))
+
     def test_a_finding_entry_is_no_section_whatever_its_title_says(self) -> None:
         """An entry's title is free text, and either section's marker words can appear in it.
 
