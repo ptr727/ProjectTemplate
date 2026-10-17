@@ -12757,6 +12757,7 @@ class TestCleanupSweep(LocalCleanupCase):
 
     def test_a_failed_prune_is_counted_and_the_other_items_still_run(self) -> None:
         made = self.scenario()
+        self.gone_on_branch("gone-failed")
         tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
         self.wire_sweep(remote_tip=tip)
         real = pr_review.cleanup_git
@@ -12769,6 +12770,8 @@ class TestCleanupSweep(LocalCleanupCase):
         with mock.patch.object(pr_review, "cleanup_git", side_effect=failing):
             self.assertEqual(2, self.sweep("--apply"))
         self.assertIn("unread prunable worktree entries", self.out.getvalue())
+        self.assertNotIn("branch gone-failed", self.out.getvalue())
+        self.assertIn("gone-failed", self.branches())
         self.assertNotIn(made["merged"], self.listed())
 
     def test_a_stale_remote_ref_for_a_deleted_branch_is_not_containment(self) -> None:
