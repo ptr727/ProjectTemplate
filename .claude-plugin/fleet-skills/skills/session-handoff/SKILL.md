@@ -290,8 +290,8 @@ The mechanics are the hub's `scripts/handoff.py`, run from a hub checkout, per `
 resolves in every repository and a chain read out of the wrong one is well formed. `current`,
 `resume`, `chain`, and `new` each take an optional `--track` defaulting to `default`, and `link`
 and `tracks` take none, since a pair of issue numbers and a whole-repository survey each name
-their own scope. A session working a named lane passes `--track` on each that accepts
-it. Omitting it does more than read the wrong chain, since `new` then files onto `default` and
+their own scope. A session working a named lane passes `--track` on each subcommand that
+accepts it. Omitting it does more than read the wrong chain, since `new` then files onto `default` and
 comments on whatever link that lane has, closing it too where it was open.
 
 - **`current` and `resume`** answer where a track stands, `resume` adding the body itself and an
@@ -309,7 +309,7 @@ comments on whatever link that lane has, closing it too where it was open.
 - **`new`** performs as many of the chain's steps as the track has links for. On a track
   with no link at all it creates and stops, since there is nothing to comment on or close. On one
   whose newest link is closed it creates and comments, since the close already happened. Only a
-  track with an open head takes every step. **`link`** finishes a run that stopped between them,
+  track with an open head takes every step. **`link`** finishes a run that stopped between those steps,
   and separately repairs a successor whose block names no predecessor, so its own writes are the
   comment, the close, and that body edit. The edit reaches only the repair case, since `new`
   embeds the predecessor in the block at create time, so a run interrupted after the create
