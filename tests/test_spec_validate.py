@@ -1556,17 +1556,27 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), want)
 
     def test_a_timed_out_corpus_probe_skips_rather_than_failing(self) -> None:
-        """A real timeout takes a minute, so the probe is made to raise one rather than to be slow."""
-        timeout = subprocess.TimeoutExpired("node", 60)
-        with (
-            unittest.mock.patch.object(shutil, "which", return_value="node"),
-            unittest.mock.patch.object(subprocess, "run", side_effect=timeout),
-        ):
+        """A real timeout takes a minute, so the probe is made to raise one rather than to be slow.
+
+        Node refusing a pattern exits non-zero, and that still fails, so a widened skip is caught too.
+        """
+
+        def probe(side_effect: BaseException) -> unittest.TestResult:
             result = unittest.TestResult()
-            type(self)("test_both_engines_agree_on_every_pattern_over_a_corpus").run(result)
-        self.assertEqual([], result.failures + result.errors)
-        self.assertEqual(1, len(result.skipped))
-        self.assertIn("node timed out", result.skipped[0][1])
+            with (
+                unittest.mock.patch.object(shutil, "which", return_value="node"),
+                unittest.mock.patch.object(subprocess, "run", side_effect=side_effect),
+            ):
+                type(self)("test_both_engines_agree_on_every_pattern_over_a_corpus").run(result)
+            return result
+
+        timed_out = probe(subprocess.TimeoutExpired("node", 60))
+        self.assertEqual([], timed_out.failures + timed_out.errors)
+        self.assertEqual(1, len(timed_out.skipped))
+        self.assertIn("node timed out", timed_out.skipped[0][1])
+        refused = probe(subprocess.CalledProcessError(1, "node"))
+        self.assertEqual([], refused.skipped)
+        self.assertEqual(1, len(refused.errors))
 
     def test_the_description_pattern_never_refuses_what_the_validator_accepts(self) -> None:
         """The schema's own statement rather than a copy, so the direction is what has to hold.
