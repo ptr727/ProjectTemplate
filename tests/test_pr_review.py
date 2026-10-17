@@ -1611,9 +1611,9 @@ class TestPreviouslyMissed(GqlCase):
         """
         shared = (
             f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
-            "### Suppressed comments (1)\n\nThe first suppressed finding.\n\n"
-            "### Previously missed (1)\n\nThe previously missed finding.\n\n"
-            "### Suppressed comments (2)\n\nThe second suppressed finding.\n\n"
+            "<summary>Suppressed comments (1)</summary>\n\nThe first suppressed finding.\n\n"
+            "<summary>Previously missed (1)</summary>\n\nThe previously missed finding.\n\n"
+            "<summary>Suppressed comments (2)</summary>\n\nThe second suppressed finding.\n\n"
             "The third suppressed finding.\n</details>\n"
         )
         suppressed = pr_review.suppressed_blocks(shared)
@@ -1627,6 +1627,7 @@ class TestPreviouslyMissed(GqlCase):
         self.answer(payload([review(body=shared)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("suppressed=3", out)
+        self.assertIn("shapes=ok", out)
         for finding in ("first suppressed", "previously missed", "third suppressed"):
             self.assertEqual(1, out.count(f"The {finding} finding."))
         swapped = (
