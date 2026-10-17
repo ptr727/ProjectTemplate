@@ -33,7 +33,7 @@ Dispatches one read-only subagent against this branch's full diff since it forke
 
 The subagent reads the full content of every file the diff and the untracked-file list touch, not just the hunks, since cross-file and whole-file context is exactly what incremental review misses. It reports findings only. It never fixes, stages, or commits anything.
 
-Review criteria are `fleet-code-review`'s "Review the Change" section, reused rather than restated here. Before any other reviewer sees the diff, this pass also calls out three traps: unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior differences. Each is called out only where the code's actual deployment can produce it, per `GOVERNANCE.md` "Trust Boundaries and Hardening Effort". The brief also asks the reviewer to search for an existing helper doing the job of each new one, per `GOVERNANCE.md` "Design Before Code". `fleet-code-review`'s separate "Publish Every Finding" section does not apply here. This skill's report contract below replaces it, since there is no PR to comment on and no coverage marker to close a review with.
+Review criteria are `fleet-code-review`'s "Review the Change" section, reused rather than restated here. Before any other reviewer sees the diff, this pass also calls out these traps: unguarded type coercions, TOCTOU/race conditions, and platform-specific behavior differences. Each is called out only where the code's actual deployment can produce it, per `GOVERNANCE.md` "Trust Boundaries and Hardening Effort". The brief also asks the reviewer to search for an existing helper doing the job of each new one, per `GOVERNANCE.md` "Design Before Code". `fleet-code-review`'s separate "Publish Every Finding" section does not apply here. This skill's report contract below replaces it, since there is no PR to comment on and no coverage marker to close a review with.
 
 ## Running It
 
@@ -109,7 +109,7 @@ A second pass under the same rule, run in the repository that authors canonical 
 
 **The unit is what a reviewer reads whole**, and `spec/files.json` rather than the document decides which, down to which files carry units at all. `canonical_review.py list` names the whole set and is the authority on it, so the rules are not paraphrased here, where a paraphrase can only drift from them. In the ordinary case a unit is one level-two section of a carried Markdown canonical, and `sweep` names each one it wants exactly as `record` takes it. The pass reads that unit's whole current text rather than the diff that moved it, because reproducing the carrier's read is the entire point, and a diff with surrounding context is a different read the pass above has already done.
 
-Run it at the same model tier and in the same delegation shape as the pass above. The brief, the engine, and its flags each differ, and all three are below.
+Run it at the same model tier and in the same delegation shape as the pass above. The brief, the engine, and its flags each differ, and each is below.
 
 ```text
 Task: adversarial review of one canonical unit, read as a repository carrying it for the first

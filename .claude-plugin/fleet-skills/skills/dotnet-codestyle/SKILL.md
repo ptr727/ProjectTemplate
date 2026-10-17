@@ -2,7 +2,7 @@
 name: dotnet-codestyle
 description: >-
   Governs C#/.NET code style for ptr727/ProjectTemplate fleet repos: the zero-warnings build
-  policy and its three-task clean-compile chain, central Directory.Build.props/
+  policy and its clean-compile task chain, central Directory.Build.props/
   Directory.Packages.props configuration, C# language and naming conventions, XML documentation,
   analyzer suppression scope, the library-versus-application logging split, async and
   error-handling patterns, xUnit v3 + AwesomeAssertions testing conventions, and AOT-compatible
@@ -32,10 +32,10 @@ real, and the language, naming, logging, and testing conventions.
 
 ### Zero warnings policy
 
-All builds must complete without warnings, enforced three ways:
+All builds must complete without warnings, enforced as follows:
 
 - **The `.NET Format` clean-compile task.** It chains `CSharpier Format` -> `.NET Build` ->
-  `dotnet format style --verify-no-changes`. A repo carries those three task definitions in its
+  `dotnet format style --verify-no-changes`. A repo carries those task definitions in its
   own `.vscode/tasks.json`, matching the canonical `vscode-tasks.json` snippet at
   `github.com/ptr727/ProjectTemplate/blob/main/catalog/snippets/configs/vscode-tasks.json`. Run
   the `.NET Format` task after any code change, before commit. To run it natively instead,

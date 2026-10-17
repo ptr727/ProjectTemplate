@@ -49,7 +49,7 @@
   carries that as the host floor `scripts/host_gate.py` enforces, so 3.10+-only syntax (`X | None`,
   `match`, etc.) needs no quoting, no `typing.Union` fallback, and no `from __future__ import
   annotations` guard on that account alone. Add that import only when a real forward reference
-  needs it, per the bullet above. Three named exceptions carry a lower floor on purpose and say so
+  needs it, per the bullet above. Named exceptions carry a lower floor on purpose and say so
   themselves: `scripts/skills_install.sh` and the `install-skills.*` bootstrap scripts, which must
   run on whatever interpreter a host already has before this floor's toolchain exists to install
   one, and `spec/resolve_description.py`, which `repo-config/configure.sh`'s own bootstrap probe
