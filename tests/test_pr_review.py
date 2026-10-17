@@ -1619,6 +1619,7 @@ class TestPreviouslyMissed(GqlCase):
         suppressed = pr_review.suppressed_blocks(shared)
         self.assertEqual(2, len(suppressed))
         self.assertIn("The first suppressed finding.", suppressed[0])
+        self.assertIn("The second suppressed finding.", suppressed[1])
         self.assertIn("The third suppressed finding.", suppressed[1])
         self.assertNotIn("The previously missed finding.", "".join(suppressed))
         missed = pr_review.previously_missed_blocks(shared)
@@ -1628,7 +1629,12 @@ class TestPreviouslyMissed(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("suppressed=3", out)
         self.assertIn("shapes=ok", out)
-        for finding in ("first suppressed", "previously missed", "third suppressed"):
+        for finding in (
+            "first suppressed",
+            "previously missed",
+            "second suppressed",
+            "third suppressed",
+        ):
             self.assertEqual(1, out.count(f"The {finding} finding."))
         swapped = (
             f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
