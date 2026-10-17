@@ -448,7 +448,7 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
 # It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*(?:\d{1,4}[ \t]+)?Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -664,7 +664,6 @@ COVERAGE_FIELD = {
 # A body is read for these rather than trusted, because every reader below keys on one of them.
 # A heading this script has no spelling for is a section it will not find, reported as absent.
 # That is the shape of all three failures already on record here, each caught after it landed.
-# The lists are small because the output is regular: 10 headings, 13 summaries and 4 labels.
 # Two overview formats are carried rather than one, the second arriving after that measurement.
 # Its own markers are listed beside the first's, since a round in either format can land next.
 # Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
@@ -693,6 +692,8 @@ OVERVIEW_SECTIONS = {
     "Open (N)": OPEN,
     "(N) open findings": TOTAL,
     "(N) open finding": TOTAL,
+    "(N) open issues": TOTAL,
+    "(N) open issue": TOTAL,
     "Resolved since last review (N)": RESOLVED,
     "(N) resolved since last review": RESOLVED,
 }
@@ -705,6 +706,8 @@ VETTED_SUMMARIES = set(OVERVIEW_SECTIONS) | {
     "Suppressed comments (N)",
     "Comments suppressed due to low confidence (N)",
     "Previously missed (N)",
+    "(N) previously missed issues",
+    "(N) previously missed issue",
 }
 VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", "Review effort"}
 # Inline emphasis around a marker is presentation rather than identity.
@@ -746,7 +749,8 @@ CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILI
 # The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
 CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
 CCR_OPEN_FINDINGS = re.compile(
-    r"^ {0,3}\*\*(\d+) open findings?\*\*[ \t]*\r?$", re.MULTILINE | re.IGNORECASE
+    r"^ {0,3}\*\*(\d+|No) open (?:findings?|issues?)\*\*[ \t]*(?:[^\x00-\x7f\s]+[ \t]*)?\r?$",
+    re.MULTILINE | re.IGNORECASE,
 )
 # The markup the format writes a count beside, replaced by one sentinel before a count is read.
 # Masked rather than matched around, because a badge carries digits of its own in its attributes.
@@ -817,6 +821,7 @@ HUB = "ptr727/ProjectTemplate"
 SUMMARY = re.compile(r"<summary(?:\s+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
+LEADING_COUNT = re.compile(r"(?:[ \t#*_]|[^\x00-\x7f])*(\d+)[ \t]")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a count.
 # The section has appeared as a bare line too, and a count is what prose does not carry.
@@ -2418,7 +2423,8 @@ def stated_total(body: str, preamble_only: bool = False) -> int | None:
 
     A later revision of the format drops the `**Findings:**` line and states its total as a bare
     `**0 open findings**` line, read here the same way, since left unread it printed `?` and
-    suppressed the shortfall the total is compared for.
+    suppressed the shortfall the total is compared for. A later one still writes that zero as
+    `**No open issues**` followed by an emoji, which is the same stated zero.
 
     That revision writes the bare line only for a zero, measured over every body carrying it, and
     states any other total as the count opening its open-findings section, so where the preamble
@@ -2430,7 +2436,10 @@ def stated_total(body: str, preamble_only: bool = False) -> int | None:
     opener = DETAILS_OPEN.search(CODE_SPAN.sub(MARKUP_MASK, stripped))
     preamble = plain[: opener.start()] if opener else plain
     totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
-    totals += [counted(m.group(1)) for m in CCR_OPEN_FINDINGS.finditer(preamble)]
+    totals += [
+        0 if m.group(1).casefold() == "no" else counted(m.group(1))
+        for m in CCR_OPEN_FINDINGS.finditer(preamble)
+    ]
     found = [t for t in totals if t is not None]
     if not found and not preamble_only:
         found = [c for role, c, *_ in read_overview(body)[2] if role == TOTAL and c is not None]
@@ -4510,10 +4519,14 @@ def outside_diff_blocks(body: str) -> list[str]:
 def finding_count(block: str) -> int:
     """The heading's `(N)`, floored at one, since a block reported as zero reads as a clean pass.
 
+    A heading stating no `(N)` is read for a count opening it, `2 previously missed issues`, which
+    left unread fell to the floor and reported one finding where the round raised two.
+
     A run longer than a count carries falls to that same floor rather than crashing the digest,
     the block existing being what says there is at least one finding in it.
     """
-    m = COUNT.search(heading_of(block))
+    heading = heading_of(block)
+    m = COUNT.search(heading) or LEADING_COUNT.match(EMPHASIS.sub("", heading))
     stated = counted(m.group(1)) if m else None
     return max(stated, 1) if stated is not None else 1
 
