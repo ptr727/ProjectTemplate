@@ -5664,9 +5664,12 @@ class TestProseFindings(GqlCase):
         )
 
     def test_every_entry_on_a_threaded_file_counts_none(self) -> None:
-        """A trailing part, a zero-width space after a slash, and a directory each name a file."""
+        """A trailing part, a zero-width space after a slash, a directory, and a path carrying a
+        line or a line range each name a file.
+        """
         for listed in (
             PROSE_LISTED,
+            "- [P1] `lib/reader.py:340` drops an entry.\n- [P2] `writer.py:12-18` is stale.\n",
             "- `lib/\u200breader.py` and `lib/writer.py`: one issue each (2 votes each).\n",
             "- `lib/`: moderate retry issue (2 votes).\n",
             "- A retry issue\n  in `lib/reader.py` (2 votes).\n",
@@ -5678,6 +5681,10 @@ class TestProseFindings(GqlCase):
     def test_a_second_entry_on_a_file_one_thread_is_on_is_counted(self) -> None:
         """Each thread pairs with one entry, so a second entry on its file has none."""
         out = self.digest(with_prose(PROSE_LISTED + "- `lib/reader.py`: a stale name (1 vote)."))
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+
+    def test_an_entry_carrying_a_line_on_a_file_no_thread_is_on_is_counted(self) -> None:
+        out = self.digest(with_prose(PROSE_LISTED + "- `lib/parser.py:7`: validation issue."))
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
     def test_a_bold_label_is_read(self) -> None:

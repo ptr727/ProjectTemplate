@@ -2876,12 +2876,23 @@ def labelled_entries(body: str, label: re.Pattern[str]) -> list[str]:
     return entries
 
 
+LINE_SUFFIX = re.compile(r":[0-9]+(?:-[0-9]+)?$")
+
+
 def entry_paths(entry: str) -> list[str]:
-    """The paths one list entry names, read from its own code spans."""
+    """The paths one list entry names, read from its own code spans.
+
+    A span written as `FILE:LINE` or `FILE:START-END` names the file, so the suffix is dropped.
+    Kept, `src/a.py:340` never named a thread on `src/a.py`, and every entry read as unthreaded.
+    """
     return [
         named
         for span in CODE_SPAN.finditer(entry)
-        if (named := bare_path(span.group()[len(span.group(1)) : -len(span.group(1))]).strip())
+        if (
+            named := LINE_SUFFIX.sub(
+                "", bare_path(span.group()[len(span.group(1)) : -len(span.group(1))]).strip()
+            )
+        )
     ]
 
 
