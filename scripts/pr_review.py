@@ -7051,11 +7051,11 @@ class CleanupSweep:
         for w in trees:
             if w.path == self.primary and w.branch:
                 self.permanent.add(w.branch)
-        held = {w.branch for w in trees if w.branch}
         for w in trees:
             if not w.prunable:
                 self.operating |= cleanup_operation_names(w.path)
-        self.prune([w for w in linked if w.prunable and not w.locked])
+        pruned = self.prune([w for w in linked if w.prunable and not w.locked])
+        held = {w.branch for w in trees if w.branch and w.path not in pruned}
         for w in linked:
             if not w.prunable or w.locked:
                 self.linked(w)
@@ -7070,8 +7070,12 @@ class CleanupSweep:
         self.base()
         return 2 if self.problems else 0
 
-    def prune(self, stale: list[Worktree]) -> None:
-        """Prune the entries whose directory is gone and whose record is old enough."""
+    def prune(self, stale: list[Worktree]) -> set[str]:
+        """Prune the entries whose directory is gone and whose record is old enough.
+
+        Returns the paths pruned, or under a report the paths a prune would remove, so their
+        branches are no longer held and are judged as loose branches in the same run.
+        """
         old = []
         for w in stale:
             hours = self.entry_hours(w)
@@ -7080,24 +7084,25 @@ class CleanupSweep:
             else:
                 old.append(w)
         if not old:
-            return
+            return set()
         if not self.apply:
             for w in old:
                 print(f"would-remove prunable worktree entry {w.path}")
-            return
+            return {w.path for w in old}
         expire = f"{int(self.min_age * 3600)}.seconds.ago"
         try:
             cleanup_git(self.primary, "worktree", "prune", "--expire", expire)
             left = {w.path for w in cleanup_worktrees(self.primary)}
         except CleanupUnread as exc:
             self.failed("prunable worktree entries", exc)
-            return
+            return set()
         for w in old:
             if w.path in left:
                 self.problems += 1
                 print(f"unread prunable worktree entry {w.path} is still listed after the prune")
             else:
                 print(f"removed prunable worktree entry {w.path}")
+        return {w.path for w in old if w.path not in left}
 
     def entry_hours(self, w: Worktree) -> float:
         """The idle hours of a missing worktree's record, from the `index` file prune reads.
