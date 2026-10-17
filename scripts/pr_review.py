@@ -45,12 +45,23 @@ Subcommands
            base, naming each. The ref is read exactly, its tip is checked against the pull request's
            `headRefOid` before the delete is sent, and the delete is confirmed by reading the ref
            back. The delete itself carries no expected tip, so this is verify-then-delete rather
-           than a compare-and-swap. No `--dry-run` exists, since no other subcommand here has
-           one. Exit 0 = deleted and confirmed gone, or already gone, 1 = refused, a
-           moved tip naming both commits among them, 2 = a read did not answer, a partial one
-           included, or the delete could not be confirmed, which argparse's own usage error
-           shares, 64 = the write scope could not be established or excludes the target, checked
-           before the registry and before any read.
+           than a compare-and-swap. With `--checkout <primary clone>`, the local half follows a
+           remote half that exited 0, on the pull request's own branch and head commit: it
+           removes the worktrees holding the branch, deletes the local branch only while it
+           still names that commit, and returns the clone to current `develop` by a fast-forward
+           only, never a reset, stash, or force. The clone must be a primary checkout whose
+           origin is `--repo`, and a locked, moved, or dirty worktree refuses before anything
+           local is removed. `cleanup --sweep --checkout <primary clone>` takes no pull request
+           and reports what is provably finished, one `would-remove` or `keep <reason>` line
+           per worktree or branch, and removes it only with `--apply`. An item must sit untouched
+           for `--min-age-hours` (default 24), be clean, and be merged by a pull request from
+           `--repo` at its exact tip or contained in `origin/develop` or `origin/main`, and the
+           primary checkout, permanent branches, locked worktrees, and submodule worktrees are
+           never touched. Exit 0 = deleted and confirmed gone, or already gone, or a sweep that
+           completed, 1 = refused, a moved tip naming both commits among them, 2 = a read did not
+           answer, a partial one included, or a delete or removal could not be confirmed, which
+           argparse's own usage error shares, 64 = the write scope could not be established or
+           excludes the target, checked before the registry and before any read.
   status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
            Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
            and full diff coverage is stated for this head, by the round covering it or by the
@@ -1084,6 +1095,15 @@ Q_CLEANUP_BASES = """
 query($o:String!,$r:String!,$b:String!){
   repository(owner:$o,name:$r){
     bases: pullRequests(states:OPEN,baseRefName:$b,first:20){ totalCount nodes{ number } } }}
+"""
+Q_SWEEP_DEFAULT = """
+query($o:String!,$r:String!){ repository(owner:$o,name:$r){ defaultBranchRef{ name } }}
+"""
+Q_SWEEP_MERGED = """
+query($o:String!,$r:String!,$b:String!){
+  repository(owner:$o,name:$r){
+    merged: pullRequests(states:MERGED,headRefName:$b,first:50){
+      totalCount nodes{ number baseRefName headRefOid headRepository{ nameWithOwner } } } }}
 """
 M_DELETE_REF = """
 mutation($refId:ID!){
@@ -6285,38 +6305,11 @@ def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     return users
 
 
-def cleanup(owner: str, repo: str, num: int) -> int:
-    """Delete the head branch of merged pull request `num` once every check passes.
-
-    Returns 0 where the branch is deleted and the read back confirms it, or is already gone, 1 on
-    a refusal, 2 where a read did not answer or the delete could not be confirmed, and 64 where
-    the write scope `comment` and `reply` check excludes the target. Past that check, the owner is
-    bound to the fleet registry and the repository must be registered or a fork, by `handoff.py`'s
-    own write-scope check, reused rather than copied so the two cannot drift apart. Its refusal
-    text is printed as `handoff.py` words it.
-    """
-    ok, why = in_scope(owner)
-    if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was deleted: {why}")
-        return 64
-    target = f"{owner}/{repo}"
-    try:
-        handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=target))
-    except handoff.Refusal as exc:
-        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
-        return 1
-    except handoff.Execution as exc:
-        print(f"status=UNREAD nothing was deleted: {exc}")
-        return 2
-    try:
-        return _cleanup(owner, repo, num)
-    except CleanupUnread as exc:
-        print(f"status=UNREAD nothing was deleted: {exc}")
-        return 2
-
-
-def _cleanup(owner: str, repo: str, num: int) -> int:
+def _cleanup(owner: str, repo: str, num: int, verified: dict[str, str] | None = None) -> int:
     """The checks, the delete, and the read back, raising `CleanupUnread` on any unanswered read.
+
+    Once the pull request passes its own refusals, `verified` receives its `branch` and `head`, so
+    the local half works from the pair this run read rather than from anything re-derived.
 
     A branch anything protects is refused whatever that protection would allow, since the write
     guard's per-branch rule check never sees a delete made from inside this script. A delete that
@@ -6346,6 +6339,8 @@ def _cleanup(owner: str, repo: str, num: int) -> int:
     if refusals:
         print(f"status=REFUSED nothing was deleted from {target} #{num}: {', and '.join(refusals)}")
         return 1
+    if verified is not None:
+        verified.update(branch=branch, head=head)
 
     ref = cleanup_ref(owner, repo, branch)
     if ref is None:
@@ -6399,6 +6394,571 @@ def _cleanup(owner: str, repo: str, num: int) -> int:
     return 0
 
 
+def cleanup_scope(owner: str, repo: str) -> int | None:
+    """The exit code where the write scope refuses or cannot be established, else None."""
+    ok, why = in_scope(owner)
+    if not ok:
+        print(f"status=OUT_OF_SCOPE nothing was deleted: {why}")
+        return 64
+    try:
+        handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=f"{owner}/{repo}"))
+    except handoff.Refusal as exc:
+        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
+        return 1
+    except handoff.Execution as exc:
+        print(f"status=UNREAD nothing was deleted: {exc}")
+        return 2
+    return None
+
+
+def cleanup(owner: str, repo: str, num: int, checkout: str | None = None) -> int:
+    """Delete the head branch of merged pull request `num` once every check passes.
+
+    Returns 0 where the branch is deleted and the read back confirms it, or is already gone, 1 on
+    a refusal, 2 where a read did not answer or the delete could not be confirmed, and 64 where
+    the write scope `comment` and `reply` check excludes the target. Past that check, the owner is
+    bound to the fleet registry and the repository must be registered or a fork, by `handoff.py`'s
+    own write-scope check, reused rather than copied so the two cannot drift apart. Its refusal
+    text is printed as `handoff.py` words it.
+
+    With `checkout`, the local half follows a remote half that exited 0. The checkout is judged
+    before the remote delete, so a mistyped path cannot leave the remote gone and the local
+    cleanup undone.
+    """
+    refused = cleanup_scope(owner, repo)
+    if refused is not None:
+        return refused
+    target = f"{owner}/{repo}"
+    primary = None
+    try:
+        if checkout is not None:
+            primary = cleanup_primary(checkout, target)
+        verified: dict[str, str] = {}
+        code = _cleanup(owner, repo, num, verified)
+    except CleanupRefused as exc:
+        print(f"status={exc.status} nothing was deleted: {exc}")
+        return 1
+    except CleanupUnread as exc:
+        print(f"status=UNREAD nothing was deleted: {exc}")
+        return 2
+    if code != 0 or primary is None:
+        return code
+    try:
+        return cleanup_local(primary, verified["branch"], verified["head"])
+    except CleanupRefused as exc:
+        print(f"status={exc.status} {exc}")
+        return 1
+    except CleanupUnread as exc:
+        print(f"status=UNREAD the local half stopped: {exc}")
+        return 2
+
+
+class CleanupRefused(Exception):
+    """A local check refused, carrying the `status=` name to print, reported at exit 1."""
+
+    def __init__(self, status: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+class Worktree(NamedTuple):
+    path: str
+    head: str
+    branch: str | None
+    locked: bool
+    prunable: bool
+
+
+GITHUB_REMOTE = re.compile(
+    r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://[^@/]+@github\.com/|[^@/]+@github\.com:)"
+    r"([^/]+)/([^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
+)
+
+
+def cleanup_git(
+    root: str, *args: str, ok: tuple[int, ...] = (0,)
+) -> subprocess.CompletedProcess[str]:
+    """One git call in `root` as an argv list, raising with its stderr on an unexpected code.
+
+    A return code the caller lists in `ok` is an answer it reads, and any other is a call that
+    did not do what was asked, so it is shown and ends the step rather than being swallowed.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", root, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CleanupUnread(f"`git {' '.join(args)}` did not run: {exc}") from exc
+    if proc.returncode not in ok:
+        sys.stderr.write(proc.stderr)
+        raise CleanupUnread(f"`git {' '.join(args)}` failed rc={proc.returncode}")
+    return proc
+
+
+def cleanup_primary(checkout: str, target: str) -> str:
+    """The real path of the primary checkout at `checkout`, refusing anything else.
+
+    A linked worktree is refused because removing worktrees and moving branches belongs to the
+    clone that owns them, and an origin naming another repository is refused because every local
+    step here is derived from a pull request in `target`.
+    """
+    probe = cleanup_git(
+        checkout,
+        "rev-parse",
+        "--absolute-git-dir",
+        "--git-common-dir",
+        "--show-toplevel",
+        ok=(0, 128),
+    )
+    lines = probe.stdout.splitlines()
+    if probe.returncode != 0 or len(lines) != 3:
+        raise CleanupRefused("BAD_CHECKOUT", f"{checkout!r} is not a git checkout with a work tree")
+    git_dir, common, top = lines
+    if os.path.realpath(git_dir) != os.path.realpath(os.path.join(checkout, common)):
+        raise CleanupRefused(
+            "BAD_CHECKOUT", f"{checkout!r} is a linked worktree, not a primary one"
+        )
+    url = cleanup_git(top, "config", "--get", "remote.origin.url", ok=(0, 1)).stdout.strip()
+    found = GITHUB_REMOTE.match(url)
+    if found is None or f"{found[1]}/{found[2]}".lower() != target.lower():
+        shown = re.sub(r"//[^/@]*@", "//", url) or "unset"
+        raise CleanupRefused("BAD_CHECKOUT", f"origin of {top} is {shown}, not {target}")
+    return os.path.realpath(top)
+
+
+def cleanup_worktrees(primary: str) -> list[Worktree]:
+    """Every worktree git lists for the clone, the primary first."""
+    out = cleanup_git(primary, "worktree", "list", "--porcelain").stdout
+    trees = []
+    for block in out.split("\n\n"):
+        fields = dict(line.partition(" ")[::2] for line in block.splitlines())
+        if "worktree" not in fields:
+            continue
+        branch = fields.get("branch")
+        trees.append(
+            Worktree(
+                path=fields["worktree"],
+                head=fields.get("HEAD", ""),
+                branch=branch.removeprefix("refs/heads/") if branch else None,
+                locked="locked" in fields,
+                prunable="prunable" in fields,
+            )
+        )
+    return trees
+
+
+def cleanup_tip(primary: str, ref: str) -> str | None:
+    """The commit `ref` names, or None where it does not exist."""
+    proc = cleanup_git(primary, "rev-parse", "--verify", "--quiet", ref, ok=(0, 1))
+    return proc.stdout.strip() or None
+
+
+def cleanup_dirty(path: str, untracked: bool) -> bool:
+    """Whether the work tree at `path` has changes, without refreshing its index.
+
+    `--no-optional-locks` keeps the read from rewriting the index, which would make an untouched
+    tree look touched to the age rule of `--sweep`.
+    """
+    flag = "--untracked-files=all" if untracked else "--untracked-files=no"
+    out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", flag).stdout
+    return bool(out.strip())
+
+
+def cleanup_remove_worktree(primary: str, path: str) -> None:
+    """Remove the worktree at `path` without force and read the list back for it."""
+    cleanup_git(primary, "worktree", "remove", path)
+    if any(os.path.realpath(w.path) == os.path.realpath(path) for w in cleanup_worktrees(primary)):
+        raise CleanupUnread(f"the worktree {path} is still listed after its removal")
+
+
+def cleanup_delete_branch(primary: str, branch: str, tip: str) -> None:
+    """Delete the local branch only while it still names `tip`, and read it back."""
+    ref = f"refs/heads/{branch}"
+    cleanup_git(primary, "update-ref", "-d", ref, tip)
+    if cleanup_tip(primary, ref) is not None:
+        raise CleanupUnread(f"{ref} still exists after its delete")
+
+
+def cleanup_base(primary: str, switch: bool) -> int:
+    """Return the primary checkout to current `develop`, never reset, stash, or force.
+
+    Returns 0 on success and 1 on a refusal, printing the status line either way. `switch` lets
+    it leave another branch for `develop`, which only a tracked-clean tree is allowed.
+    """
+    current = cleanup_git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", ok=(0, 1))
+    if cleanup_dirty(primary, False):
+        print(f"status=BASE_DIRTY {primary} has tracked changes, so it was left where it is")
+        return 1
+    if current.stdout.strip() != "develop" and switch:
+        cleanup_git(primary, "checkout", "develop")
+        print(f"  switched {primary} to develop")
+    merged = cleanup_git(primary, "merge", "--ff-only", "origin/develop", ok=(0, 1, 128))
+    if merged.returncode != 0:
+        sys.stderr.write(merged.stderr)
+        print(f"status=BASE_NOT_FF develop in {primary} cannot fast-forward to origin/develop")
+        return 1
+    print(f"  develop in {primary} is at origin/develop")
+    return 0
+
+
+def cleanup_local(primary: str, branch: str, head: str) -> int:
+    """Remove the finished branch's worktrees and local branch, then return the base clone.
+
+    Every refusal is decided before the first removal, so a refused run leaves all of it in
+    place. `head` is the commit the merged pull request carried, read live by the remote half,
+    and the local branch is only deleted while it still names exactly that commit.
+    """
+    cleanup_git(primary, "fetch", "--prune", "origin")
+    ref = f"refs/heads/{branch}"
+    tip = cleanup_tip(primary, ref)
+    if tip is not None and tip != head:
+        raise CleanupRefused(
+            "LOCAL_TIP_MOVED",
+            f"nothing local was removed: {ref} is at {tip}, and the pull request merged {head}, "
+            "so it may carry commits that were never pushed",
+        )
+    linked = []
+    for w in (w for w in cleanup_worktrees(primary) if w.branch == branch):
+        if os.path.realpath(w.path) == primary:
+            if cleanup_dirty(primary, False):
+                raise CleanupRefused(
+                    "BASE_DIRTY",
+                    f"nothing local was removed: {primary} has {branch!r} checked out"
+                    " with tracked changes",
+                )
+            continue
+        why = (
+            "its directory is missing, so `worktree prune` owns it"
+            if w.prunable
+            else "it is locked"
+            if w.locked
+            else f"it is at {w.head}, not {head}"
+            if w.head != head
+            else None
+        )
+        if why is not None:
+            raise CleanupRefused("WORKTREE_KEPT", f"nothing local was removed: {w.path}, {why}")
+        if cleanup_dirty(w.path, True):
+            raise CleanupRefused(
+                "WORKTREE_DIRTY", f"nothing local was removed: {w.path} has uncommitted changes"
+            )
+        linked.append(w)
+    try:
+        here = os.path.realpath(os.getcwd())
+    except OSError:
+        here = ""
+    for w in linked:
+        cleanup_remove_worktree(primary, w.path)
+        print(f"  removed worktree {w.path}")
+        inside = os.path.realpath(w.path)
+        if here == inside or here.startswith(inside + os.sep):
+            print(
+                "  note: the shell's directory was that worktree and is gone, so change directory"
+            )
+    holders = [w.path for w in cleanup_worktrees(primary) if w.branch == branch]
+    if any(os.path.realpath(path) == primary for path in holders):
+        cleanup_git(primary, "checkout", "develop")
+        print(f"  switched {primary} off {branch} to develop")
+    if tip is None:
+        print(f"  local branch {branch} is already gone")
+    else:
+        try:
+            cleanup_delete_branch(primary, branch, tip)
+        except CleanupUnread as exc:
+            print(f"status=LOCAL_DELETE_NOT_CONFIRMED {exc}")
+            return 2
+        print(f"  deleted local branch {branch} at {tip}, confirmed by reading the ref back")
+    code = cleanup_base(primary, switch=True)
+    if code != 0:
+        return code
+    first = cleanup_git(primary, "status", "--short", "--branch").stdout.splitlines()[:1]
+    print(f"  {first[0] if first else 'status unavailable'}")
+    print(f"  worktrees listed: {len(cleanup_worktrees(primary))}")
+    print(f"status=CLEANED branch={branch} oid={head} locally, and the base clone is current")
+    return 0
+
+
+class CleanupSweep:
+    """One pass over a clone's worktrees and local branches, removing what is provably finished.
+
+    Nothing here is a failure unless a read did not answer or a removal could not be confirmed,
+    which `problems` counts so the run can continue with the other items and still exit 2.
+    """
+
+    def __init__(self, owner: str, repo: str, primary: str, apply: bool, min_age: float) -> None:
+        self.owner = owner
+        self.repo = repo
+        self.target = f"{owner}/{repo}"
+        self.primary = primary
+        self.apply = apply
+        self.min_age = min_age
+        self.problems = 0
+        self.permanent = {"develop", "main"}
+        self.common = ""
+
+    def keep(self, reason: str, what: str) -> None:
+        print(f"keep {reason} {what}")
+
+    def failed(self, what: str, exc: CleanupUnread) -> None:
+        self.problems += 1
+        print(f"unread {what}: {exc}")
+
+    def newest_hours(self, paths: list[str]) -> float:
+        """Hours since the newest mtime among `paths`, infinite where none exists."""
+        stamps = [os.stat(p).st_mtime for p in paths if os.path.exists(p)]
+        return float("inf") if not stamps else (time.time() - max(stamps)) / 3600
+
+    def worktree_hours(self, w: Worktree) -> float | None:
+        """The idle hours of a linked worktree, or None where its admin directory is unreadable.
+
+        Taken before any status runs on it, and from the admin files git itself writes on use,
+        since the directory's own mtime moves only when an entry is added or removed.
+        """
+        try:
+            text = Path(w.path, ".git").read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not text.startswith("gitdir:"):
+            return None
+        admin = os.path.join(w.path, text.removeprefix("gitdir:").strip())
+        files = [os.path.join(admin, n) for n in ("HEAD", "index", os.path.join("logs", "HEAD"))]
+        return self.newest_hours([w.path, *files])
+
+    def finished(self, branch: str, tip: str) -> tuple[str, int | None] | None:
+        """How `branch` at `tip` is known finished, with the develop pull request's number if any.
+
+        A merged pull request counts only from a head in this repository whose last commit is
+        `tip`, so a reused branch name or a later commit never rides on an old merge.
+        """
+        data = cleanup_read(Q_SWEEP_MERGED, o=self.owner, r=self.repo, b=branch)
+        found = ((data.get("repository") or {}).get("merged")) or {}
+        nodes = found.get("nodes")
+        total = found.get("totalCount")
+        if not isinstance(nodes, list) or not isinstance(total, int) or total > len(nodes):
+            raise CleanupUnread(f"the merged pull request read for {branch!r} was incomplete")
+        matches = [
+            n
+            for n in nodes
+            if isinstance(n, dict)
+            and n.get("headRefOid") == tip
+            and ((n.get("headRepository") or {}).get("nameWithOwner") or "").lower()
+            == self.target.lower()
+        ]
+        matches.sort(key=lambda n: n.get("baseRefName") != "develop")
+        if matches:
+            num = matches[0].get("number")
+            return f"merged PR #{num}", num if matches[0].get("baseRefName") == "develop" else None
+        for upstream in ("origin/develop", "origin/main"):
+            ref = f"refs/remotes/{upstream}"
+            if cleanup_tip(self.primary, ref) is None:
+                continue
+            proc = cleanup_git(self.primary, "merge-base", "--is-ancestor", tip, ref, ok=(0, 1))
+            if proc.returncode == 0:
+                return f"contained in {upstream}", None
+        return None
+
+    def remote(self, num: int | None) -> None:
+        """Run the remote half for a develop pull request, whose refusal keeps only the remote."""
+        if num is None or not self.apply:
+            return
+        print(f"  remote half of #{num}:")
+        try:
+            code = _cleanup(self.owner, self.repo, num)
+        except CleanupUnread as exc:
+            self.failed(f"remote branch of #{num}", exc)
+            return
+        if code == 2:
+            self.problems += 1
+        elif code != 0:
+            print(f"kept-remote #{num}, the local removal stands")
+
+    def run(self) -> int:
+        cleanup_git(self.primary, "fetch", "--prune", "origin")
+        default = (
+            (cleanup_read(Q_SWEEP_DEFAULT, o=self.owner, r=self.repo).get("repository") or {})
+            .get("defaultBranchRef", {})
+            .get("name")
+        )
+        if not default:
+            raise CleanupUnread(f"{self.target} returned no default branch")
+        self.permanent.add(default)
+        self.common = os.path.realpath(
+            os.path.join(
+                self.primary,
+                cleanup_git(self.primary, "rev-parse", "--git-common-dir").stdout.strip(),
+            )
+        )
+        trees = cleanup_worktrees(self.primary)
+        linked = [w for w in trees if os.path.realpath(w.path) != self.primary]
+        for w in trees:
+            if os.path.realpath(w.path) == self.primary and w.branch:
+                self.permanent.add(w.branch)
+        held = {w.branch for w in trees if w.branch}
+        self.prune([w for w in linked if w.prunable and not w.locked])
+        for w in linked:
+            if not w.prunable or w.locked:
+                self.linked(w)
+        listed = cleanup_git(
+            self.primary, "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/heads/"
+        ).stdout.splitlines()
+        for line in listed:
+            name, _, tip = line.partition("\0")
+            branch = name.removeprefix("refs/heads/")
+            if branch not in held and branch not in self.permanent:
+                self.loose(branch, tip)
+        if self.apply:
+            self.base()
+        return 2 if self.problems else 0
+
+    def prune(self, stale: list[Worktree]) -> None:
+        if not stale:
+            return
+        if not self.apply:
+            for w in stale:
+                print(f"would-remove prunable worktree entry {w.path}")
+            return
+        cleanup_git(self.primary, "worktree", "prune")
+        left = {os.path.realpath(w.path) for w in cleanup_worktrees(self.primary)}
+        for w in stale:
+            if os.path.realpath(w.path) in left:
+                self.problems += 1
+                print(f"unread prunable worktree entry {w.path} is still listed after the prune")
+            else:
+                print(f"removed prunable worktree entry {w.path}")
+
+    def linked(self, w: Worktree) -> None:
+        what = f"worktree {w.path}" + (f" branch={w.branch}" if w.branch else " detached")
+        try:
+            if w.locked:
+                self.keep("locked", what)
+                return
+            if os.path.exists(os.path.join(w.path, ".gitmodules")):
+                self.keep("submodules", what)
+                return
+            if w.branch in self.permanent:
+                self.keep("permanent-branch", what)
+                return
+            hours = self.worktree_hours(w)
+            if hours is None:
+                self.keep("age-unreadable", what)
+                return
+            if hours < self.min_age:
+                self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
+                return
+            if cleanup_dirty(w.path, True):
+                self.keep("dirty", what)
+                return
+            if w.branch is None:
+                return self.detached(w, what)
+            tip = cleanup_tip(self.primary, f"refs/heads/{w.branch}")
+            if tip is None or tip != w.head:
+                self.keep("head-differs-from-branch", what)
+                return
+            done = self.finished(w.branch, tip)
+            if done is None:
+                self.keep("unmerged-commits", what)
+                return
+            evidence, num = done
+            line = f"{what} tip={tip} evidence={evidence}"
+            if not self.apply:
+                print(f"would-remove {line}")
+                return
+            cleanup_remove_worktree(self.primary, w.path)
+            print(f"removed worktree {w.path}")
+            cleanup_delete_branch(self.primary, w.branch, tip)
+            print(f"removed branch {w.branch} tip={tip} evidence={evidence}")
+            self.remote(num)
+        except CleanupUnread as exc:
+            self.failed(what, exc)
+
+    def detached(self, w: Worktree, what: str) -> None:
+        contained = cleanup_git(
+            self.primary,
+            "for-each-ref",
+            "--contains",
+            w.head,
+            "refs/remotes/origin",
+            "--count=1",
+            "--format=%(refname)",
+        ).stdout.strip()
+        if not contained:
+            self.keep("unpushed-commits", what)
+            return
+        if not self.apply:
+            print(f"would-remove {what} head={w.head} evidence=contained in {contained}")
+            return
+        cleanup_remove_worktree(self.primary, w.path)
+        print(f"removed worktree {w.path} head={w.head} evidence=contained in {contained}")
+
+    def loose(self, branch: str, tip: str) -> None:
+        """A local branch no worktree holds, judged by the age of its reflog."""
+        what = f"branch {branch}"
+        try:
+            hours = self.newest_hours([os.path.join(self.common, "logs", "refs", "heads", branch)])
+            if hours < self.min_age:
+                self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
+                return
+            done = self.finished(branch, tip)
+            if done is None:
+                self.keep("unmerged-commits", what)
+                return
+            evidence, num = done
+            if not self.apply:
+                print(f"would-remove {what} tip={tip} evidence={evidence}")
+                return
+            cleanup_delete_branch(self.primary, branch, tip)
+            print(f"removed {what} tip={tip} evidence={evidence}")
+            self.remote(num)
+        except CleanupUnread as exc:
+            self.failed(what, exc)
+
+    def base(self) -> None:
+        """Fast-forward the primary only where it already sits tracked-clean on `develop`."""
+        try:
+            current = cleanup_git(
+                self.primary, "symbolic-ref", "--quiet", "--short", "HEAD", ok=(0, 1)
+            ).stdout.strip()
+            if current != "develop":
+                print(
+                    f"keep base-not-on-develop {self.primary} is on {current or 'a detached head'}"
+                )
+            else:
+                cleanup_base(self.primary, switch=False)
+        except CleanupUnread as exc:
+            self.failed(f"base {self.primary}", exc)
+
+
+def cleanup_sweep(owner: str, repo: str, checkout: str, apply: bool, min_age: float) -> int:
+    """Report, or with `apply` remove, the clone's worktrees and branches that are provably done.
+
+    Exits 0 where the pass completed, and 2 where a read did not answer or a removal could not
+    be confirmed, the other items having been tried either way.
+    """
+    refused = cleanup_scope(owner, repo)
+    if refused is not None:
+        return refused
+    try:
+        primary = cleanup_primary(checkout, f"{owner}/{repo}")
+        sweep = CleanupSweep(owner, repo, primary, apply, min_age)
+        code = sweep.run()
+    except CleanupRefused as exc:
+        print(f"status={exc.status} nothing was removed: {exc}")
+        return 1
+    except CleanupUnread as exc:
+        print(f"status=UNREAD the sweep stopped: {exc}")
+        return 2
+    mode = "removed" if apply else "reported only, pass --apply to remove"
+    print(f"status=SWEPT {mode}, problems={sweep.problems}")
+    return code
+
+
 def utf8_console() -> None:
     """Write the console streams as UTF-8, whatever the host code page is.
 
@@ -6417,7 +6977,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
     )
-    ap.add_argument("number", type=int)
+    ap.add_argument("number", type=int, nargs="?")
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
     # The number resolves there, the digest renders, and nothing in the output disagrees.
@@ -6512,7 +7072,23 @@ def main(argv: list[str] | None = None) -> int:
         "--checkout",
         metavar="DIR",
         help="attest: the checkout holding the pull request's head and its recorded local pass "
-        "(default the current directory)",
+        "(default the current directory), cleanup: the primary clone whose worktree, local "
+        "branch, and base are cleaned after the remote branch, and the one `--sweep` cleans",
+    )
+    ap.add_argument(
+        "--sweep",
+        action="store_true",
+        help="cleanup: take no pull request, and report the finished worktrees and branches of "
+        "--checkout",
+    )
+    ap.add_argument(
+        "--apply", action="store_true", help="cleanup --sweep: remove what the report lists"
+    )
+    ap.add_argument(
+        "--min-age-hours",
+        type=float,
+        default=None,
+        help="cleanup --sweep: hours an item must sit untouched before it is eligible (default 24)",
     )
     a = ap.parse_args(argv)
     # Named for the command they belong to, since one silently ignored reads as one that took effect.
@@ -6530,8 +7106,20 @@ def main(argv: list[str] | None = None) -> int:
                 ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
     if a.cmd != "wait" and a.request:
         ap.error(f"--request belongs to `wait`, not `{a.cmd}`")
-    if a.cmd != "attest" and a.checkout is not None:
-        ap.error(f"--checkout belongs to `attest`, not `{a.cmd}`")
+    if a.cmd not in ("attest", "cleanup") and a.checkout is not None:
+        ap.error(f"--checkout belongs to `attest` or `cleanup`, not `{a.cmd}`")
+    if a.cmd != "cleanup" and a.sweep:
+        ap.error(f"--sweep belongs to `cleanup`, not `{a.cmd}`")
+    if a.number is None and not a.sweep:
+        ap.error("the following arguments are required: number")
+    if a.sweep and a.number is not None:
+        ap.error("--sweep takes no pull request number")
+    if a.sweep and a.checkout is None:
+        ap.error("--sweep requires --checkout, the primary clone it sweeps")
+    if not a.sweep and (a.apply or a.min_age_hours is not None):
+        ap.error("--apply and --min-age-hours belong to `cleanup --sweep`")
+    if a.min_age_hours is not None and a.min_age_hours < 0:
+        ap.error("--min-age-hours cannot be negative")
     if a.cmd not in ("comment", "reply") and a.body is not None:
         ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
     required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
@@ -6568,8 +7156,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
 
+    if a.cmd == "cleanup" and a.sweep:
+        return cleanup_sweep(
+            owner, repo, a.checkout, a.apply, 24.0 if a.min_age_hours is None else a.min_age_hours
+        )
+
     if a.cmd == "cleanup":
-        return cleanup(owner, repo, a.number)
+        return cleanup(owner, repo, a.number, a.checkout)
 
     if a.cmd == "attest":
         return attest(owner, repo, a.number, a.checkout or ".")
