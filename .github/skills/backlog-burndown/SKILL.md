@@ -23,7 +23,7 @@ description: >-
 ## Why This Exists
 
 Asking for one issue to be fixed is `drive-pr`'s job and needs no skill above it. Asking for a
-whole backlog to be worked down is a different problem, and three things about it are not obvious.
+whole backlog to be worked down is a different problem, and several things about it are not obvious.
 Parallelism is bounded by file overlap rather than by agent count, so the grouping decides the
 throughput. The backlog is not a fixed list, since every review round files deferral issues that
 belong in the next round's ranking, so a plan made once is stale by its second round. And a
@@ -330,7 +330,7 @@ what it leaves to judgment here. The tier is chosen per group rather than defaul
 stronger tier produces better work and takes fewer review rounds to land it. That often
 costs less than a cheaper worker looping. The tier is `frontier` or `standard`, never `bulk`, since
 every worker judges its pull request's review findings. It is `highest` only where the maintainer
-named it for this run. Three kinds of group are never tiered
+named it for this run. Groups of these kinds are never tiered
 below `frontier`:
 
 - One touching **carried canonical content**, as `GOVERNANCE.md` "Verification Discipline" bounds
@@ -520,7 +520,7 @@ restores a line another session's write dropped.
 
 ## Ending the Run
 
-The run ends at either of two points, and they are different endings.
+The run ends at one of the points below, and they are different endings.
 
 - **The backlog is worked out**, meaning a full re-rank finds no open issue this skill can act on.
   That is not the same as zero open issues, since a backlog of nothing but maintainer questions and

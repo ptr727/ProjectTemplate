@@ -87,6 +87,9 @@ Review carried fleet content by intent and fidelity. A byte-locked reference to 
 downstream repository does not carry is not a broken link. A substantive defect in canonical
 content remains a finding, with the fix located at its canonical source.
 
+A finding that a stated count is wrong suggests removing the count where it is incidental, per
+`GOVERNANCE.md` "Incidental Counts", rather than correcting the number.
+
 ## Publish Every Finding
 
 Never suppress or hide a finding because confidence is low. Investigate until it is supported

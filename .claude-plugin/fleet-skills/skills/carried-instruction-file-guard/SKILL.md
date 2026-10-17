@@ -21,7 +21,7 @@ description: >-
 
 A downstream repo's `AGENTS.md`/`GOVERNANCE.md`/`CODESTYLE.md`/`WORKFLOW.md` can hold two different kinds of content mixed in one file: sections that are stale copies of the hub's fleet-wide rules, and local rules the repo wrote for a fault the fleet has never seen elsewhere. Re-vendoring the hub's canonical version over the whole file deletes the second kind silently, because nothing about the diff looks wrong. This has actually happened: a resync replaced a repo's `AGENTS.md` wholesale with the hub's, and the repo's own local additions were gone with no error, no warning, and no review comment calling it out.
 
-The fix is not "be careful." Being careful is what failed the first time. The fix is a mechanical check you run before any overwrite touches one of these four files, every time, regardless of how routine the request sounds.
+The fix is not "be careful." Being careful is what failed the first time. The fix is a mechanical check you run before any overwrite touches one of these files, every time, regardless of how routine the request sounds.
 
 ## Before you touch any of these four files
 

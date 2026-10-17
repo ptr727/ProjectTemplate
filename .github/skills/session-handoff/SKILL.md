@@ -23,7 +23,7 @@ description: >-
 
 ## Why This Exists
 
-A handoff written to a scratch file fails three ways the chain closes. The file is not found where
+The chain closes each way a handoff written to a scratch file fails. The file is not found where
 the next session looks. More than one candidate file is found and nothing says which one is
 current. And there is no history at all, so a later round re-runs a path an earlier round already
 tried and already wrote down. The value of a handoff is precisely the record of what has already
@@ -65,7 +65,7 @@ without trusting the parts of it that have gone stale.
 - **A platform lane is for work that needs its platform.** A platform track is one kept for a single
   host platform, such as `wsl` or `windows`. It takes an issue only when its defect reproduces, or
   its fix can be verified, on that platform alone. It also needs that no Linux host outside WSL can
-  both fix the issue and verify the fix. An issue meeting both goes to its platform's lane. Any
+  both fix the issue and verify the fix. An issue meeting each condition goes to its platform's lane. Any
   other issue goes to the ordinary backlog, since a lane costs a separate chain and a host-bound
   session. A defect in WSL interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or
   `wslpath` reproduces only inside WSL. So does running a Windows `.exe` from Linux, although WSL
@@ -73,7 +73,7 @@ without trusting the parts of it that have gone stale.
   path and ACL semantics, reproduces only on Windows. Either still goes to the backlog where a Linux
   host outside WSL verifies its fix, as a plain unit test of a path translation can. An issue in
   systemd user scopes, apt, a bash script, or a `pwsh` script run in a Linux container gets no lane
-  by its topic. The two conditions decide it like any other issue. Where only part of an issue needs
+  by its topic. The conditions decide it like any other issue. Where only part of an issue needs
   a platform, the session finding it files each such part as its own issue for its platform's lane.
   The original is narrowed to the rest, or closed in favor of those issues where nothing is left. A
   session that may not write issues names the unsplit issue in its report or handoff instead. An
@@ -96,7 +96,7 @@ without trusting the parts of it that have gone stale.
   a given repository, read from each issue's metadata block rather than from the label, since an
   issue carrying the label and no block belongs to no readable track and blocks the count rather
   than joining it. Two or more on one track is a defect to report, never one to resolve by picking,
-  and a run interrupted between the three steps above is the one shape of it that `link` settles
+  and a run interrupted between the steps above is the one shape of it that `link` settles
   rather than a human.
 - **Zero open on a track is two different states.** The track has never had a handoff, or its lane
   was closed out and its newest link is closed. `new` chains onto the newest link either way, open
@@ -170,7 +170,7 @@ comments.
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
 closed links behind it, and `chain --grep` searches the bodies it walks for a regular expression,
 which is how a session answers whether a path has already been tried without reading every round.
-Three things bound that answer. The walk starts at one track's newest link and follows each
+The points below bound that answer. The walk starts at one track's newest link and follows each
 marker's `previous=` from there, which is normally that one lane and is in fact whatever the markers
 name, so every link prints its own track and a predecessor on another lane shows up rather than
 passing unseen. The walk stops at `--limit` and names the link it stopped short of, so a capped
@@ -255,9 +255,9 @@ it.
 ## The Parked Decision Queue
 
 The rules below are `GOVERNANCE.md` "Communicating with the User", carried whole so this skill works
-in isolation. Two of them state the obligation: the one opening "A question filed as an issue is
+in isolation. Some of them state the obligation: the one opening "A question filed as an issue is
 parked rather than asked" and the one opening "The session that writes a handoff presents the parked
-queue in the same act". Three more state the form the questions take, the one opening "Ask every
+queue in the same act". Others state the form the questions take, the one opening "Ask every
 question through the interface's prompt, never in prose", which also names the numbered list as the
 fallback where no prompt exists, the one opening "Raise work blocked on the user as a direct
 interactive prompt", which shapes the options, and the one opening "Lead every choice with a
@@ -290,8 +290,8 @@ The mechanics are the hub's `scripts/handoff.py`, run from a hub checkout, per `
 resolves in every repository and a chain read out of the wrong one is well formed. `current`,
 `resume`, `chain`, and `new` each take an optional `--track` defaulting to `default`, and `link`
 and `tracks` take none, since a pair of issue numbers and a whole-repository survey each name
-their own scope. A session working a named lane passes `--track` on each of the four that accept
-it. Omitting it does more than read the wrong chain, since `new` then files onto `default` and
+their own scope. A session working a named lane passes `--track` on each subcommand that
+accepts it. Omitting it does more than read the wrong chain, since `new` then files onto `default` and
 comments on whatever link that lane has, closing it too where it was open.
 
 - **`current` and `resume`** answer where a track stands, `resume` adding the body itself and an
@@ -306,10 +306,10 @@ comments on whatever link that lane has, closing it too where it was open.
   place an issue on a track until its own block says which track that is. With `--json` it prints
   the same rows as an array of number, title, track, labels, and updatedAt, the track null for
   an issue whose block is absent or unreadable, which is what a picker ranks by.
-- **`new`** performs as many of the chain's three steps as the track has links for. On a track
+- **`new`** performs as many of the chain's steps as the track has links for. On a track
   with no link at all it creates and stops, since there is nothing to comment on or close. On one
   whose newest link is closed it creates and comments, since the close already happened. Only a
-  track with an open head takes all three. **`link`** finishes a run that stopped between them,
+  track with an open head takes every step. **`link`** finishes a run that stopped between those steps,
   and separately repairs a successor whose block names no predecessor, so its own writes are the
   comment, the close, and that body edit. The edit reaches only the repair case, since `new`
   embeds the predecessor in the block at create time, so a run interrupted after the create
@@ -327,7 +327,7 @@ python3 "$handoff" tracks  --repo OWNER/NAME [--json]
 ```
 
 Read `--dry-run` output before the first real `new` of a session, since the run can close an issue.
-It is accepted by `new` and `link`, the two subcommands that write, and by no other.
+It is accepted by `new` and `link`, the subcommands that write, and by no other.
 
 Exit `0` is success, `1` a refusal the caller can act on, a usage error included, and `2` the
 command not having run to an answer, so a refusal and a failure to reach one never share a code. A

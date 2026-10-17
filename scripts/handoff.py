@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The session handoff chain - one open issue per track, each link naming the one before it.
 
-Why this exists: a handoff written to a file fails three ways that a chained issue does not. The
+Why this exists: a handoff written to a file fails in ways that a chained issue does not. The
 file is not found where the next session looks. More than one candidate is found and nothing says
 which is current. And there is no history, so a later round re-runs a path an earlier round already
 tried and already wrote down. The value of a handoff is the record of what has been attempted, and
