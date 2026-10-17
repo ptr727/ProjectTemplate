@@ -5683,10 +5683,6 @@ class TestProseFindings(GqlCase):
         out = self.digest(with_prose(PROSE_LISTED + "- `lib/reader.py`: a stale name (1 vote)."))
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
 
-    def test_an_entry_carrying_a_line_on_a_file_no_thread_is_on_is_counted(self) -> None:
-        out = self.digest(with_prose(PROSE_LISTED + "- `lib/parser.py:7`: validation issue."))
-        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
-
     def test_a_bold_label_is_read(self) -> None:
         body = with_prose("- `lib/parser.py`: validation issue (1 vote).").replace(
             "Review findings:", "**Review findings:**"
@@ -5869,6 +5865,10 @@ class TestNarrativeFindings(GqlCase):
         )
         self.assertEqual(0, self.count(with_narrative(listed)))
         self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_narrative(listed)))
+
+    def test_an_entry_naming_its_file_with_a_line_pairs_with_the_thread_on_it(self) -> None:
+        listed = "- `pkg/guard.py:12`: a failed read skips the check (**critical**, 1 vote).\n"
+        self.assertEqual(0, self.count(with_narrative(listed)))
 
     def test_an_entry_stating_no_severity_this_reads_is_counted(self) -> None:
         for listed in (

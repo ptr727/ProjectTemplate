@@ -2883,7 +2883,7 @@ def entry_paths(entry: str) -> list[str]:
     """The paths one list entry names, read from its own code spans.
 
     A span written as `FILE:LINE` or `FILE:START-END` names the file, so the suffix is dropped.
-    Kept, `src/a.py:340` never named a thread on `src/a.py`, and every entry read as unthreaded.
+    A thread carries the path alone, which is what the entry's path is paired against.
     """
     return [
         named
