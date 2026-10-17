@@ -106,9 +106,9 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    case in this layout. Instead run repo-worktree's post-merge cleanup with
    `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
-   primary clone. It deletes the remote branch, then removes the task's worktree and local branch
-   and returns the base clone to fast-forwarded `develop`, deciding every local refusal before
-   anything is deleted, the remote branch included.
+   primary clone. It deletes the remote branch, then removes the task's worktree and local branch.
+   It decides its local refusals before the remote delete, and `repo-worktree` "Listing and
+   Cleanup" says what a refusal after it and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in
    code. It refuses unless the pull request merged into `develop` from a head in that same
    repository, and refuses a permanent branch or one any ruleset or branch protection covers. It

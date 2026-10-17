@@ -279,15 +279,13 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 `repo-worktree`'s post-merge procedure returns the base clone to current develop before proving
 the cleanup, and `branching-and-release-model` states that requirement independently. Four workers doing
 that concurrently mutate one shared checkout, which `GOVERNANCE.md` "Repository Boundaries and
-Write Safety" forbids. A worker also cannot
-finish the procedure from inside its own worktree, since removing that worktree leaves it with no
-working directory in which to delete its branch.
+Write Safety" forbids.
 
-So the whole procedure moves to the orchestrator, which runs it from the base clone at the round's
+So the whole procedure moves to the orchestrator, which runs it against the base clone at the round's
 cleanup step, while no worker is live in a tree it touches.
 It carries the remote half of `drive-pr`'s post-merge cleanup too.
 For a merged group both halves are one command, `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`, run from a hub checkout once for each merged group, `<base-clone>` being the repository's primary clone.
-It deletes the remote branch, then removes the group's worktree and local branch and fast-forwards `develop`, per `repo-worktree` "Listing and Cleanup".
+It deletes the remote branch, then removes the group's worktree and local branch, per `repo-worktree` "Listing and Cleanup", which also says what its exit leaves to do.
 Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
 `cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`.
 It also refuses a branch another open pull request has as its head or base.
@@ -315,7 +313,7 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 `repo-worktree`'s verify-before-removing step to read, so the check that step gives way to here is
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
-its worktree is clean. Both hold, and the worktree and branch go the same way a merged group's do.
+its worktree is clean. Both hold, and the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read: `git worktree remove <exact-path>`, then `git branch -D <exact-branch>`, the check just made standing in for the merged pull request.
 Its claim comment is released and its issue returns to the next round's ranking.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
 No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and

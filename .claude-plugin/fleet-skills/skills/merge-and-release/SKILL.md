@@ -180,8 +180,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      repeats the merged, base, head-repository, and tip checks in code, refuses a permanent or
      protected branch, deletes the remote branch and confirms it by reading the ref back, treats
      a remote branch already gone as done, so a prior interrupted attempt finishes rather than
-     stops, then removes the worktree and local branch and fast-forwards `develop`. Every refusal
-     is decided before anything is deleted, a dirty worktree among them. Exit `0` is done, and
+     stops, then removes the worktree and local branch. Its local refusals, a dirty worktree
+     among them, are decided before the remote delete, and `repo-worktree` "Listing and Cleanup"
+     says what a refusal after it and a `base=kept` line each leave to do. Exit `0` is done, and
      any other exit stops and reports: `1` is a refusal, `2` an unanswered read or an unconfirmed
      delete, and `64` a target under an owner other than the hub checkout's own `origin` or that
      `origin` unreadable, a registry refusal being a `1`. It runs under the host-safety

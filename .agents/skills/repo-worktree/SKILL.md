@@ -270,29 +270,38 @@ since git then runs whatever that directory holds, and nothing where it holds no
 - **Cleanup after merge is the default terminal step.** Run it after a squash merge into `develop`. Run it again after a merge-commit promotion into `main`, unless the user explicitly says to retain a checkout or branch. A merge or release handoff is incomplete while finished task, conflict-resolution, installer, or release worktrees remain registered.
 - **Verify before removing.** A worktree or branch is removed only once live state proves it
   finished. For a pull request that is its merged state and head SHA read from GitHub, with the
-  worktree clean and at that head, which `cleanup` below checks in code. A dirty worktree stops
-  cleanup because force-removing it would discard work. A detached helper worktree needs no pull
-  request, but its commit must be contained in the branch whose completed operation created it.
+  worktree clean and the local branch at that head or behind it, which `cleanup` below checks in
+  code. A dirty worktree stops cleanup because force-removing it would discard work. A detached
+  helper worktree needs no pull request, but its commit must be contained in the branch whose
+  completed operation created it.
 - **A pull request merged into `develop` is cleaned up by one command.** Run
   `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`
   from a hub checkout outside the worktree it removes, `<base-clone>` being the repository's
-  primary clone. It reads the branch from the pull request, deletes the remote branch, removes
-  every worktree holding the branch without force, deletes the local branch, and returns the base
-  clone to fast-forwarded `develop`. Every refusal is decided before anything is deleted, a dirty
-  worktree, an operation in progress, and a local tip the merge did not carry among them. Exit `0`
-  is done. Any other exit stops and is reported as it stands rather than finished by hand, since
-  the raw `git worktree remove`, `git branch -D`, and remote delete it replaces are not on the
-  host-safety permission allowlist and the command is. `scripts/README.md` in the hub holds the
-  full contract.
+  primary clone. It reads the branch from the pull request and deletes the remote branch. It then
+  removes every worktree holding the branch without force, deletes the local branch, and
+  fast-forwards the base clone's `develop`. Its local refusals are decided before the remote
+  delete, so a dirty worktree, an operation in progress, or a local tip the merge did not carry
+  leaves everything in place. A re-check after the delete can still refuse where a concurrent
+  session changed a tree in between, and its output then names what was already deleted. Any exit
+  other than `0` stops and is reported as it stands rather than finished by hand. The raw
+  `git worktree remove`, `git branch -D`, and remote delete it replaces are not on the host-safety
+  permission allowlist, and the command is. `scripts/README.md` in the hub holds the full
+  contract.
 - **What no merged pull request into `develop` covers is removed by hand.** That is a promotion's
   worktree, a detached helper worktree, and a temporary standalone clone. Confirm the tree is
   clean, then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
-  `<temporary-root>/<Repo>-<task-slug>` directory. Never delete `develop` after a promotion, since
-  it is the permanent integration branch. Then fetch and prune `origin`, confirm the base clone is
-  clean, switch it to `develop` when needed, and fast-forward it with
-  `git merge --ff-only origin/develop`. A completed promotion or release does not leave the base
-  clone on `main`. Stop and report a dirty base clone or a non-fast-forward instead of switching
-  or reconciling it.
+  `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held, a promotion
+  branch merged into `main` by a merge commit for one, is deleted with
+  `git branch -d <exact-branch>`, and a refusal is reported rather than forced. Its remote branch
+  follows the repository's normal pull request cleanup policy. Never delete `develop` after a
+  promotion, since it is the permanent integration branch.
+- **Return the base clone to current `develop`.** `cleanup` does this itself only where the base
+  clone is clean and already on `develop` or on the merged branch, and otherwise exits `0` with
+  `base=kept` on its `status=CLEANED` line. That line, and every hand removal, leaves this step
+  to run: fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
+  needed, and fast-forward it with `git merge --ff-only origin/develop`. A completed promotion or
+  release does not leave the base clone on `main`. Stop and report a dirty base clone or a
+  non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
   `python3 scripts/pr_review.py cleanup --sweep --repo <owner>/<repo> --checkout <base-clone>`
   from a hub checkout. It fetches and prunes `origin` and writes nothing else, and it reports

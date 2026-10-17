@@ -327,11 +327,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    Once answered, the label comes off per `GOVERNANCE.md` "Communicating with the User". A declined
    rule's issue closes, and an adopted one stays open as ordinary work, which the loop may then
    take, since the maintainer has judged it.
-7. **Close the lane out on done.** Each pull request the lane merged into `develop` is cleaned up
-   first, per `drive-pr` step 4, with
-   `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
-   so no finished worktree or branch outlives the lane. An exit other than `0` is named in the
-   close-out comment rather than finished by hand. Comment on the handoff what merged, which
+7. **Close the lane out on done.** Each pull request the lane merged into `develop` has had
+   `drive-pr` step 4's cleanup run, so no finished worktree or branch outlives the lane. A cleanup
+   that exited other than `0` is named in the close-out comment rather than finished by hand. Comment on the handoff what merged, which
    issues it fixed, and what it filed along the way, the lesson issue included, then close it. An `auto-*` lane holds one
    issue, so its work is complete and it is the closed-out lane `session-handoff` "The Chain" names,
    needing no successor.
