@@ -1337,8 +1337,8 @@ class TestPreviouslyMissed(GqlCase):
         self.assertEqual(0, code)
 
     def test_prose_naming_the_section_is_not_the_section(self) -> None:
-        """`marker_blocks` accepts a line on a count alone, so an unanchored marker reads an
-        ordinary English sentence carrying a number as a section this round raised.
+        """`marker_blocks` accepts a line that is not a heading on a `(N)` alone. An unanchored
+        marker then reads an ordinary English sentence carrying a number as a section this round raised.
 
         The observed wording is common enough to write by accident, and the result is a banner
         telling the reader a clean round raised a finding against code the branch never touched.
@@ -1371,6 +1371,9 @@ class TestPreviouslyMissed(GqlCase):
         for bare in (
             "2 previously missed issues were re-raised this round.",
             "2 previously missed (3) rounds ago, the guard is back.",
+            "> 2 previously missed (3) rounds ago, the guard is back.",
+            "<strong>2 previously missed (3) rounds ago</strong>",
+            "<em>2 previously missed (3) rounds ago, the guard is back.</em>",
         ):
             with self.subTest(bare=bare):
                 self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{bare}\n"))
@@ -1430,6 +1433,29 @@ class TestPreviouslyMissed(GqlCase):
         self.assertIn("previously_missed=2 (on_head=2 earlier=0)", out)
         self.assertIn("shapes=ok", out)
         self.assertIn("Low severity Constructed missed finding 2", out)
+
+    def test_a_summary_split_across_lines_is_still_the_section(self) -> None:
+        """A summary whose text sits on lines of its own is vetted by its spelling. A heading
+        found only within one line read it as no section, while `shapes=ok` reported nothing."""
+        for label, summary in (
+            (
+                "its text on a line of its own",
+                "<summary>\n<strong>2 previously missed issues</strong>\n</summary>",
+            ),
+            (
+                "its wording broken across lines",
+                "<summary><strong>2 previously\nmissed issues</strong></summary>",
+            ),
+        ):
+            with self.subTest(case=label):
+                body = counted_missed(2).replace(
+                    "<summary><strong>2 previously missed issues</strong></summary>", summary
+                )
+                self.assertEqual([], pr_review.unrecognized_in(body))
+                blocks = pr_review.previously_missed_blocks(body)
+                self.assertEqual(1, len(blocks))
+                self.assertEqual(2, pr_review.finding_count(blocks[0]))
+                self.assertIn("Constructed missed finding 2", blocks[0])
 
     def test_a_section_ends_where_its_count_first_sibling_starts(self) -> None:
         """A sibling bounds a section only where its heading states a count.
@@ -4842,6 +4868,18 @@ class TestOverviewSections(GqlCase):
                 self.assertEqual(0, pr_review.unthreaded_entries(payload([rd], threads)))
         lone = revised_with(open_section(("6000000009",), noun="issue"))
         self.assertEqual(1, pr_review.unthreaded_entries(payload([review(body=lone)])))
+
+    def test_a_summary_split_across_lines_keeps_its_count(self) -> None:
+        """The role is vetted on the whole summary, so its count is read from the whole summary
+        too. Read from its first line alone, `Open` then `(2)` stated no count."""
+        ids = ("6000000001", "6000000002", "6000000003")
+        split = revised_with(open_section(ids)).replace(
+            "<strong>3 open findings</strong>", "<strong>\n3 open findings\n</strong>"
+        )
+        self.assertEqual([3], [c for r, c, _ in pr_review.section_entries(split) if r == "total"])
+        self.assertEqual(3, pr_review.stated_total(split))
+        closing = overview_v2().replace("<strong>Open (2)</strong>", "<strong>Open\n(2)</strong>")
+        self.assertEqual([2], [c for r, c, _ in pr_review.section_entries(closing) if r == "open"])
 
     def test_a_count_first_summary_outside_the_table_is_still_unvetted(self) -> None:
         """The table vets spellings, not any summary that opens on a count."""

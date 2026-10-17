@@ -433,8 +433,12 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # The second overview format's own section for a finding against code the pull request did not change.
 # Anchored to the opening of its line, past whatever markup a heading wears, rather than matched anywhere in it.
 # The wording is ordinary English, so a body-wide match reads a sentence such as `restores a guard previously missed (2) rounds ago` as this section.
-# `marker_blocks` accepts a line on a count alone, which is what lets that sentence through, so the anchor is what separates a heading from prose naming one.
+# `marker_blocks` accepts a line that is not a heading on a `(N)` alone, which is what lets that sentence through.
+# So the anchor is what separates a heading from prose naming one.
 # The opener admits heading markup and anything outside ASCII, and nothing else.
+# One count may follow it, since a later revision opens the heading on its count, as `2 previously missed issues`.
+# A count opening a line is how a sentence opens too, so `marker_blocks` reads such a line as prose unless it is a heading.
+# `LEADING_COUNT` reads that count past this same opener, so whatever markup the anchor admits, the prose check strips.
 # An emoji is what this format already puts on its verdict headings, and a spelling that admitted no such character read a heading wearing one as no section at all.
 # That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read while the findings reach nobody.
 # Widened to any non-word character instead, ordinary punctuation opened the run and a sentence such as `- Previously missed (2) findings were re-raised` became the section, printing the prose around it as the finding.
@@ -443,12 +447,14 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # Two alternatives able to consume the same character make the run ambiguous, and the parse then doubles per character of it on a line that does not go on to say this, which is a hang rather than a slow read.
 # A body carrying 30 non-breaking spaces in a line took minutes, and every alternative here now opens on a character the others cannot.
 # An emphasis marker is admitted only where no space follows it, which is what tells `**Previously missed (1)**` from the list item `* Previously missed (2) findings`.
-# A bullet is the one prose opener that is also heading markup, and `marker_blocks` accepts a line on a count alone, so the list item read as the section and printed the prose around it as findings.
+# A bullet is the one prose opener that is also heading markup, and `marker_blocks` accepts a line on a `(N)` alone.
+# So the list item read as the section and printed the prose around it as findings.
 # One character per iteration rather than a run of them, since a repeated group that can split a run of stars more than one way is ambiguous and parses exponentially in it.
 # What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
 # It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
+HEADING_OPENER = r"(?:</?[A-Za-z][^>]*>|[ \t\r\n>#]|[*_](?![ \t])|[^\x00-\x7f])*"
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*(?:[0-9]+[ \t]+)?Previously missed\b",
+    rf"^{HEADING_OPENER}(?:[0-9]+[ \t]+)?Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -821,10 +827,12 @@ HUB = "ptr727/ProjectTemplate"
 SUMMARY = re.compile(r"<summary(?:\s+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
-LEADING_COUNT = re.compile(r"(?:[ \t#*_]|[^\x00-\x7f])*([0-9]+)[ \t]")
+# A count opening a heading, past the opener `PREVIOUSLY_MISSED` admits, a summary's line breaks included.
+LEADING_COUNT = re.compile(rf"{HEADING_OPENER}([0-9]+)[ \t\r\n]")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
-# A line that is neither still qualifies where it carries a count.
-# The section has appeared as a bare line too, and a count is what prose does not carry.
+# A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
+# The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
+# A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
 HEADING = re.compile(r"\s*(?:#{1,6}\s|<summary)", re.IGNORECASE)
 
 # How many of the newest reviews and comments both queries read.
@@ -4274,15 +4282,17 @@ def heading_of(block: str) -> str:
     return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
 
 
-def heading_count(block: str) -> int | None:
-    """The count the block's own heading states, closing it as `(N)` or opening it.
+def heading_count(heading: str) -> int | None:
+    """The count a heading states, closing it as `(N)` or opening it.
 
     One reader serves every caller, since the format moved its count to the front of a summary.
     A caller reading only one of the two places misses the other. A section bounded on `(N)` alone
     ran into a count-first sibling and printed that sibling's findings twice.
+
+    It takes the heading itself rather than the block, and reads all of it. Cut to its first line,
+    a summary split as `Open` and then `(2)` lost the count its role was vetted with.
     """
-    heading = heading_of(block)
-    m = COUNT.search(heading) or LEADING_COUNT.match(EMPHASIS.sub("", heading))
+    m = COUNT.search(heading) or LEADING_COUNT.match(heading)
     return counted(m.group(1)) if m else None
 
 
@@ -4436,6 +4446,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
         # Scanned line by line rather than read from a wrapper's own summary.
         # A heading can sit in the wrapper's body instead, where reading only the summary would miss it.
         scan_lines = "".join(masked[a:b] for a, b in spans).splitlines()
+        scan_lines, raw_lines = fold_summaries(scan_lines, raw_lines)
         if strip_blockquote:
             scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
         for i, line in enumerate(scan_lines):
@@ -4444,6 +4455,33 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
                 blocks.append("\n".join(raw_lines[i : sibling_heading(scan_lines, i, marker)]))
                 break
     return blocks
+
+
+def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[str], list[str]]:
+    """Both line lists with each `<summary>` split across lines folded onto its opening line.
+
+    A heading is found line by line, so a summary whose text sits on lines of its own read as no
+    heading at all. `unrecognized_in` vetted its spelling meanwhile and reported nothing. The groups
+    come from the scanned copy and apply to both, so the two keep addressing the same lines.
+    """
+    scan: list[str] = []
+    raw: list[str] = []
+    i = 0
+    while i < len(scan_lines):
+        low = scan_lines[i].lower()
+        opened = low.rfind("<summary")
+        end = i
+        if opened >= 0 and "</summary>" not in low[opened:]:
+            close = next(
+                (j for j in range(i + 1, len(scan_lines)) if "</summary>" in scan_lines[j].lower()),
+                None,
+            )
+            end = close if close is not None else i
+        for source, target in ((scan_lines, scan), (raw_lines, raw)):
+            parts = [source[i].rstrip()] + [ln.strip() for ln in source[i + 1 : end + 1]]
+            target.append(" ".join(parts))
+        i = end + 1
+    return scan, raw
 
 
 def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) -> int:
@@ -4541,7 +4579,7 @@ def finding_count(block: str) -> int:
     A run longer than a count carries falls to that same floor rather than crashing the digest,
     the block existing being what says there is at least one finding in it.
     """
-    stated = heading_count(block)
+    stated = heading_count(heading_of(block))
     return max(stated, 1) if stated is not None else 1
 
 
