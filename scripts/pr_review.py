@@ -448,7 +448,7 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
 # It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*(?:[0-9]{1,4}[ \t]+)?Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*(?:[0-9]+[ \t]+)?Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -4417,6 +4417,10 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
 
     Shared by `suppressed_blocks` and `outside_diff_blocks`. `strip_blockquote` affects heading
     detection only, never the returned content.
+
+    A line that is not a heading qualifies on a `(N)` it carries, and only where it does not open
+    on a count. A count opening a line is how a heading states it and also how a sentence opens,
+    so `2 previously missed (3) rounds ago` is prose, not a section.
     """
     if not body:
         return []
@@ -4435,7 +4439,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
         if strip_blockquote:
             scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
         for i, line in enumerate(scan_lines):
-            if marker.search(line) and (HEADING.match(line) or COUNT.search(line)):
+            bare = COUNT.search(line) and not LEADING_COUNT.match(line)
+            if marker.search(line) and (HEADING.match(line) or bare):
                 blocks.append("\n".join(raw_lines[i : sibling_heading(scan_lines, i, marker)]))
                 break
     return blocks
@@ -4528,7 +4533,7 @@ def outside_diff_blocks(body: str) -> list[str]:
 
 
 def finding_count(block: str) -> int:
-    """The heading's `(N)`, floored at one, since a block reported as zero reads as a clean pass.
+    """The heading's stated count, floored at one, since a block reported as zero reads as clean.
 
     A heading stating its count first, `2 previously missed issues`, is read by `heading_count` too.
     Left unread, it fell to the floor and reported one finding where the round raised two.

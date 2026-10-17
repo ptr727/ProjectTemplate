@@ -1368,8 +1368,12 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{line}\n"))
                 counted = f"{opener}2 previously missed issues were re-raised this round."
                 self.assertIsNone(pr_review.PREVIOUSLY_MISSED.match(counted))
-        bare = "2 previously missed issues were re-raised this round."
-        self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{bare}\n"))
+        for bare in (
+            "2 previously missed issues were re-raised this round.",
+            "2 previously missed (3) rounds ago, the guard is back.",
+        ):
+            with self.subTest(bare=bare):
+                self.assertEqual([], pr_review.previously_missed_blocks(f"{OVERVIEW}\n{bare}\n"))
 
     def test_the_heading_is_read_through_whatever_markup_it_wears(self) -> None:
         """What the anchor must admit, beside the prose above that it must not.
@@ -1415,6 +1419,12 @@ class TestPreviouslyMissed(GqlCase):
         self.assertEqual(
             3, pr_review.finding_count(pr_review.previously_missed_blocks(counted_missed(3))[0])
         )
+        long_run = counted_missed(1).replace(
+            "1 previously missed issue", "12345 previously missed issue"
+        )
+        long_blocks = pr_review.previously_missed_blocks(long_run)
+        self.assertEqual(1, len(long_blocks))
+        self.assertEqual(1, pr_review.finding_count(long_blocks[0]))
         self.answer(payload([review(body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("previously_missed=2 (on_head=2 earlier=0)", out)
