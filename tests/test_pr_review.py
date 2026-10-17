@@ -1587,8 +1587,8 @@ class TestPreviouslyMissed(GqlCase):
     def test_a_finding_entry_is_no_section_whatever_its_title_says(self) -> None:
         """An entry's title is free text, and either section's marker words can appear in it.
 
-        Read as a heading, an entry in one section opened the other section at that entry, so the
-        finding printed under both banners, which assert opposite triage, under `shapes=ok`.
+        Read as a heading, an entry opened the other section at that entry. Its finding then
+        printed under both banners, which assert opposite triage, under `shapes=ok`.
         """
         body = f"{OVERVIEW}\n{COVERED}\n\n" + entries_section(
             "Previously missed (2)", "Constructed finding 1", "2 low confidence results are dropped"
@@ -1621,16 +1621,18 @@ class TestPreviouslyMissed(GqlCase):
     def test_the_vetted_but_unread_check_compares_which_summaries_were_read(self) -> None:
         """Compared by how many, a count of blocks stood in for which summaries they hold.
 
-        Two sections in one wrapper are one block holding both, which read as an unread section.
+        Two sections in one wrapper read as one block holding both, counted by the first heading.
         A bare line read in one region matched the count of a summary no reader found in another.
         """
         nested_pair = (
             f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
             + entries_section("Previously missed (1)", "Constructed finding 1")
-            + entries_section("Previously missed (1)", "Constructed finding 2")
+            + entries_section("Previously missed (2)", "Constructed finding 2", "Constructed 3")
             + "</details>\n"
         )
-        self.assertEqual(2, pr_review.previously_missed_blocks(nested_pair)[0].count("paragraph"))
+        blocks = pr_review.previously_missed_blocks(nested_pair)
+        self.assertEqual([1, 2], [pr_review.finding_count(b) for b in blocks])
+        self.assertEqual([1, 2], [b.count("paragraph") for b in blocks])
         self.assertEqual([], pr_review.unrecognized_in(nested_pair))
         stand_in = (
             f"{OVERVIEW}\n{COVERED}\n\nPreviously missed (2)\n\n<details>\n"
@@ -2092,17 +2094,21 @@ def previously_missed(
     )
 
 
-def entries_section(heading: str, *titles: str) -> str:
+def entries_section(
+    heading: str, *titles: str, preamble: str = "", paragraph: str = "A constructed paragraph."
+) -> str:
     """A collapsed section under `heading`, nesting one badged entry per title.
 
     The nesting is the observed one, and every title, path, and sentence is constructed.
     """
     found = "".join(
         f"<details>\n<summary>{BADGE} {title}</summary>\n\n"
-        f"`a.py:{10 * i}`\n\nA constructed paragraph.\n</details>\n"
+        f"`a.py:{10 * i}`\n\n{paragraph}\n</details>\n"
         for i, title in enumerate(titles, 1)
     )
-    return f"<details>\n<summary><strong>{heading}</strong></summary>\n\n{found}</details>\n"
+    return (
+        f"<details>\n<summary><strong>{heading}</strong></summary>\n\n{preamble}{found}</details>\n"
+    )
 
 
 def counted_missed(entries: int) -> str:
@@ -2114,15 +2120,13 @@ def counted_missed(entries: int) -> str:
     GOVERNANCE.md "Representative Data in Agent-Authored Text".
     """
     noun = "issue" if entries == 1 else "issues"
-    found = "".join(
-        f"<details>\n<summary>{BADGE} Constructed missed finding {i}</summary>\n\n"
-        f"`a.py:{10 * i}`\n\n[P1] A constructed paragraph about the finding.\n</details>\n"
-        for i in range(1, entries + 1)
+    block = entries_section(
+        f"{entries} previously missed {noun}",
+        *(f"Constructed missed finding {i}" for i in range(1, entries + 1)),
+        preamble="In code that hasn't changed since last review\n\n",
+        paragraph="[P1] A constructed paragraph about the finding.",
     )
-    block = (
-        f"<details>\n<summary><strong>{entries} previously missed {noun}</strong></summary>\n\n"
-        f"In code that hasn't changed since last review\n\n{found}</details>\n\n<details>"
-    )
+    block += "\n<details>"
     return revised_with(
         "**No open issues** \U0001f389", "### \U0001f535 Needs a closer look"
     ).replace("<details>", block, 1)
@@ -4169,8 +4173,7 @@ class TestSecondOverviewFormat(GqlCase):
     def test_the_role_a_summary_is_vetted_with_and_its_count_come_from_one_rule(self) -> None:
         """Defined once for vetting and once for counting, the leading count disagreed.
 
-        A form feed after the count still vetted the open-findings section while reading no count,
-        so the section's role was known and its total was not.
+        A form feed after the count vetted the open-findings section while reading no count.
         """
         summary = "<strong>2\fopen findings</strong>"
         self.assertEqual("(N) open findings", pr_review.normal(summary))

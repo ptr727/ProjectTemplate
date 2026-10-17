@@ -836,9 +836,6 @@ TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
 OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
-# A count opening a heading's text, read once `heading_count` has reduced its badge and emphasis as `normal` does.
-# No tag is skipped here, since a finding entry's summary opens on a severity badge rather than on heading markup.
-# A badge read as markup made an entry titled `2 low confidence results` state a count, and bound a section there.
 LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
@@ -3627,7 +3624,13 @@ def reduced(text: str) -> str:
 
 
 def spaced(text: str) -> str:
-    """The text `reduced`, then cut to ASCII and single spaces, which `LEADING_COUNT` reads."""
+    """The text `reduced`, then cut to ASCII and single spaces, which `LEADING_COUNT` reads.
+
+    `LEADING_COUNT` is the one leading-count rule `normal` and `heading_count` share. It reads a
+    count past a Markdown heading or emphasis marker, and `normal` keeps that marker in place. It
+    skips no tag, since a finding entry opens on a severity badge rather than on heading markup. A
+    badge read as markup made an entry titled `2 low confidence results` state a count.
+    """
     return re.sub(r"\s+", " ", "".join(c for c in reduced(text) if ord(c) < 128)).strip()
 
 
@@ -3646,8 +3649,8 @@ def normal(text: str) -> str:
     icon set is rebuilt, and the text it carries is the only part a reader wants.
 
     A count opening the marker is rewritten the same way, since a later revision of the second
-    format writes `3 resolved since last review` where it once closed the summary on `(3)`. It is
-    found by `LEADING_COUNT`, the rule `heading_count` reads the count by.
+    format writes `3 resolved since last review` where it once closed the summary on `(3)`.
+    `heading_count` reads that count by the same `LEADING_COUNT`.
     """
     return LEADING_COUNT.sub(r"\1(N)", re.sub(r"\([0-9]+\)", "(N)", spaced(text)))
 
@@ -3689,9 +3692,8 @@ def unrecognized_in(body: str) -> list[str]:
     A previously-missed summary that no reader finds as a section is reported too. Its spelling is
     vetted wherever it appears, while the reader keys on how its line opens. A layout the reader
     misses would otherwise hand its findings to nobody under `shapes=ok`. The check compares which
-    summaries the blocks hold rather than how many blocks there are, since one region yields one
-    block, and a bare `(N)` line read in one region otherwise stood in for a summary missed in
-    another.
+    summaries the blocks hold rather than how many blocks there are. Compared by count, a bare
+    `(N)` line read in one region stood in for a summary missed in another.
 
     A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
@@ -4475,8 +4477,8 @@ def entry_heading(line: str) -> bool:
     """Whether this line is a finding entry's own heading, which opens on a severity badge.
 
     A finding entry is never a section heading, whatever words its title carries. `SUPPRESSED`
-    matches anywhere in a line, and `PREVIOUSLY_MISSED` reads past the badge as heading markup, so
-    an entry titled `2 low confidence results are dropped` otherwise opened a section of its own.
+    matches anywhere in a line, and `PREVIOUSLY_MISSED` reads past the badge as heading markup.
+    Read as a heading, an entry titled `2 low confidence results are dropped` opened a section.
     A summary opening on a severity and stating a count is still reported by `unrecognized_in`,
     as an unvetted spelling.
     """
@@ -4485,7 +4487,7 @@ def entry_heading(line: str) -> bool:
 
 def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = False) -> list[str]:
     """Return the review body's sections whose own heading matches `marker`, each sliced from
-    that heading through to the end of its own region.
+    that heading through to the next sibling heading or the end of its own region.
 
     Shared by `suppressed_blocks`, `previously_missed_blocks`, and `outside_diff_blocks`.
     `strip_blockquote` affects heading detection only, never the returned content. A summary split
@@ -4512,11 +4514,16 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
         scan_lines, raw_lines = fold_summaries(scan_lines, raw_lines)
         if strip_blockquote:
             scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
-        for i, line in enumerate(scan_lines):
+        i = 0
+        while i < len(scan_lines):
+            line = scan_lines[i]
             bare = COUNT.search(line) and not OPENING_COUNT.match(line)
             if marker.search(line) and (HEADING.match(line) or bare) and not entry_heading(line):
-                blocks.append("\n".join(raw_lines[i : sibling_heading(scan_lines, i, marker)]))
-                break
+                end = sibling_heading(scan_lines, i)
+                blocks.append("\n".join(raw_lines[i:end]))
+                i = end
+            else:
+                i += 1
     return blocks
 
 
@@ -4556,13 +4563,16 @@ def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[st
     return scan, raw
 
 
-def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) -> int:
+def sibling_heading(scan_lines: list[str], start: int) -> int:
     """Where this block ends, which is the next sibling section's heading or the region's end.
 
     Two sections sharing one wrapper is a shape the corpus carries, a Markdown heading each inside
     the `Review details` wrapper rather than a wrapper of their own. Run to the end of the region
     regardless, the first section's block contains the second whole, and the digest prints those
     findings twice, the second time under a banner asserting the opposite triage about them.
+
+    A second section of the same kind bounds too, so each is its own block with its own count.
+    Read as one block, the digest counted only the first heading's findings.
 
     A heading is not enough to tell the two apart. In this format every finding entry is its own
     `<summary>`, so `HEADING` matches all of them, and the suppressed marker is ordinary English
@@ -4572,10 +4582,10 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     opposite triage about them, while both counts come out wrong.
 
     A stated count is what separates them, the same signal `finding_entry` reads: every section
-    heading here states one and a finding's own title does not. A title can still state one, so an
-    entry opening on its severity badge never bounds, per `entry_heading`. Requiring it also keeps this off
-    the CodeRabbit blocks, whose own marker is in neither of the two and which were never bounded
-    before this.
+    heading here states one and a finding's own title does not. A title can still state one, so
+    an entry opening on its severity badge never bounds, per `entry_heading`. Requiring a count
+    also keeps this off the CodeRabbit blocks, whose own marker is in neither of the two and which
+    were never bounded before this.
 
     The cost is named rather than hidden. A sibling heading stating no count does not bound, so a
     block runs into it, which is where this started before the bound existed at all. It is strictly
@@ -4589,7 +4599,7 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
             continue
         if entry_heading(line):
             continue
-        if any(o is not marker and o.search(line) for o in SECTION_MARKERS):
+        if any(o.search(line) for o in SECTION_MARKERS):
             return j
     return len(scan_lines)
 
