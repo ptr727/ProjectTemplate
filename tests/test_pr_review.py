@@ -5664,9 +5664,12 @@ class TestProseFindings(GqlCase):
         )
 
     def test_every_entry_on_a_threaded_file_counts_none(self) -> None:
-        """A trailing part, a zero-width space after a slash, and a directory each name a file."""
+        """A trailing part, a zero-width space after a slash, a directory, and a path carrying a
+        line or a line range each name a file.
+        """
         for listed in (
             PROSE_LISTED,
+            "- [P1] `lib/reader.py:340` drops an entry.\n- [P2] `writer.py:12-18` is stale.\n",
             "- `lib/\u200breader.py` and `lib/writer.py`: one issue each (2 votes each).\n",
             "- `lib/`: moderate retry issue (2 votes).\n",
             "- A retry issue\n  in `lib/reader.py` (2 votes).\n",
@@ -5862,6 +5865,10 @@ class TestNarrativeFindings(GqlCase):
         )
         self.assertEqual(0, self.count(with_narrative(listed)))
         self.assertNotIn("FINDINGS WITH NO THREAD", self.digest(with_narrative(listed)))
+
+    def test_an_entry_naming_its_file_with_a_line_pairs_with_the_thread_on_it(self) -> None:
+        listed = "- `pkg/guard.py:12`: a failed read skips the check (**critical**, 1 vote).\n"
+        self.assertEqual(0, self.count(with_narrative(listed)))
 
     def test_an_entry_stating_no_severity_this_reads_is_counted(self) -> None:
         for listed in (
