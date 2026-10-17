@@ -1531,6 +1531,23 @@ class TestPreviouslyMissed(GqlCase):
         out, _ = pr_review.digest("o", "r", 7)
         self.assertEqual(1, out.count("The previously missed finding."))
 
+    def test_prose_past_a_bound_opens_no_second_section(self) -> None:
+        """Only the sibling heading a section ends at can open another section in its region.
+
+        Scanned on past the bound, prose naming the marker beside a `(N)` opened a second
+        suppressed block, which printed the previously missed finding under both banners.
+        """
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Suppressed comments (1)\n\nThe suppressed finding.\n\n"
+            "<details>\n<summary><strong>2 previously missed issues</strong></summary>\n\n"
+            "A fallback treats low confidence (2) results as clean.\n</details>\n</details>\n"
+        )
+        suppressed = pr_review.suppressed_blocks(shared)
+        self.assertEqual(1, len(suppressed))
+        self.assertNotIn("A fallback treats", suppressed[0])
+        self.assertEqual(1, len(pr_review.previously_missed_blocks(shared)))
+
     def test_a_count_first_section_cancels_the_flagging_verdict_reading(self) -> None:
         """The round flags a closer look and states no open issue.
 

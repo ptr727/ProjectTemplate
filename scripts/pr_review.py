@@ -4486,8 +4486,10 @@ def entry_heading(line: str) -> bool:
 
 
 def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = False) -> list[str]:
-    """Return the review body's sections whose own heading matches `marker`, each sliced from
-    that heading through to the next sibling heading or the end of its own region.
+    """Return the review body's sections whose own heading matches `marker`.
+
+    Each is sliced from its heading to the next sibling heading or the end of its own region.
+    Past a region's first section, only the sibling heading it ends at can open another.
 
     Shared by `suppressed_blocks`, `previously_missed_blocks`, and `outside_diff_blocks`.
     `strip_blockquote` affects heading detection only, never the returned content. A summary split
@@ -4514,16 +4516,15 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
         scan_lines, raw_lines = fold_summaries(scan_lines, raw_lines)
         if strip_blockquote:
             scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
-        i = 0
-        while i < len(scan_lines):
-            line = scan_lines[i]
+        for i, line in enumerate(scan_lines):
             bare = COUNT.search(line) and not OPENING_COUNT.match(line)
             if marker.search(line) and (HEADING.match(line) or bare) and not entry_heading(line):
-                end = sibling_heading(scan_lines, i)
-                blocks.append("\n".join(raw_lines[i:end]))
-                i = end
-            else:
-                i += 1
+                start = i
+                while start < len(scan_lines) and marker.search(scan_lines[start]):
+                    end = sibling_heading(scan_lines, start)
+                    blocks.append("\n".join(raw_lines[start:end]))
+                    start = end
+                break
     return blocks
 
 
@@ -4571,9 +4572,6 @@ def sibling_heading(scan_lines: list[str], start: int) -> int:
     regardless, the first section's block contains the second whole, and the digest prints those
     findings twice, the second time under a banner asserting the opposite triage about them.
 
-    A second section of the same kind bounds too, so each is its own block with its own count.
-    Read as one block, the digest counted only the first heading's findings.
-
     A heading is not enough to tell the two apart. In this format every finding entry is its own
     `<summary>`, so `HEADING` matches all of them, and the suppressed marker is ordinary English
     that an entry's title carries as readily as a heading does. Bounded on the heading alone, a
@@ -4584,8 +4582,10 @@ def sibling_heading(scan_lines: list[str], start: int) -> int:
     A stated count is what separates them, the same signal `finding_entry` reads: every section
     heading here states one and a finding's own title does not. A title can still state one, so
     an entry opening on its severity badge never bounds, per `entry_heading`. Requiring a count
-    also keeps this off the CodeRabbit blocks, whose own marker is in neither of the two and which
-    were never bounded before this.
+    also narrows the bound on a CodeRabbit block, whose own marker is in neither of the two.
+
+    A second section of the same kind bounds too, so each is its own block with its own count.
+    Read as one block, the digest counted only the first heading's findings.
 
     The cost is named rather than hidden. A sibling heading stating no count does not bound, so a
     block runs into it, which is where this started before the bound existed at all. It is strictly
