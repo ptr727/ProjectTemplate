@@ -1481,6 +1481,9 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
 
         Node is what an editor's JSON language service uses, so it is the engine the schema actually meets. A host
         without node skips this rather than failing, since the shape check above still binds everywhere.
+
+        A probe that times out skips too, since a cold start on a slow runner is no verdict on the patterns. A
+        pattern that backtracks without end cannot hide behind that skip, since Python matches the corpus first.
         """
         node = shutil.which("node")
         if node is None:
@@ -1539,15 +1542,41 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
             "console.log(JSON.stringify(Object.fromEntries("
             "pats.map(p => [p, cases.map(c => new RegExp(p).test(c))]))));"
         )
-        result = subprocess.run(
-            [node, "-e", probe, json.dumps([patterns, corpus])],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=True,
-        )
+        try:
+            result = subprocess.run(
+                [node, "-e", probe, json.dumps([patterns, corpus])],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            self.skipTest("node timed out, which is no verdict on the patterns")
         self.assertEqual(json.loads(result.stdout), want)
+
+    def test_a_timed_out_corpus_probe_skips_rather_than_failing(self) -> None:
+        """A real timeout takes a minute, so the probe is made to raise one rather than to be slow.
+
+        Node refusing a pattern exits non-zero, and that still fails, so a widened skip is caught too.
+        """
+
+        def probe(side_effect: BaseException) -> unittest.TestResult:
+            result = unittest.TestResult()
+            with (
+                unittest.mock.patch.object(shutil, "which", return_value="node"),
+                unittest.mock.patch.object(subprocess, "run", side_effect=side_effect),
+            ):
+                type(self)("test_both_engines_agree_on_every_pattern_over_a_corpus").run(result)
+            return result
+
+        timed_out = probe(subprocess.TimeoutExpired("node", 60))
+        self.assertEqual([], timed_out.failures + timed_out.errors)
+        self.assertEqual(1, len(timed_out.skipped))
+        self.assertIn("node timed out", timed_out.skipped[0][1])
+        refused = probe(subprocess.CalledProcessError(1, "node"))
+        self.assertEqual([], refused.skipped)
+        self.assertEqual(1, len(refused.errors))
 
     def test_the_description_pattern_never_refuses_what_the_validator_accepts(self) -> None:
         """The schema's own statement rather than a copy, so the direction is what has to hold.
