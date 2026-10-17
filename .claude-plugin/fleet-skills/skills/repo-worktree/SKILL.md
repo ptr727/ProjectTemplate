@@ -291,9 +291,10 @@ since git then runs whatever that directory holds, and nothing where it holds no
   worktree, a detached helper worktree, and a temporary standalone clone. Confirm the tree is
   clean, then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
   `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held, a promotion
-  branch merged into `main` by a merge commit for one, is deleted after `git fetch --prune origin`
-  with `git branch -d <exact-branch>`, since `-d` judges the branch against its fetched upstream,
-  and a refusal is reported rather than forced. Where that branch was pushed, its remote branch is
+  branch merged into `main` by a merge commit for one, is left for the sweep below, which reads it
+  as finished once `origin/main` or `origin/develop` contains it. `git branch -d` is no substitute,
+  since it judges a branch with no upstream against `HEAD` and so refuses one merged only into
+  `main` while the base clone is on `develop`. Where that branch was pushed, its remote branch is
   reported to the maintainer for deletion, since `cleanup` reads only a pull request merged into
   `develop`. Never delete `develop` after a promotion, since it is the permanent integration
   branch.
