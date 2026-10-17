@@ -35,3 +35,5 @@ The audit is the fleet's measurement procedure, and the failure shapes it guards
 ## After the Report
 
 Measuring and fixing are separate phases. Converging is `AUDIT.md` section 10: fixes ship as pull requests on the target repo, one focused pull request per drift class, the Copilot loop driven to green per the `pr-review-conduct` skill, and the maintainer merges. For a repo already stood up, `RESYNC.md` sequences the findings, since order matters (a deletion lands before the re-vendor that would refresh it). Systemic drift shared by many repos is fixed in the hub spec, not hand-patched per repo, and spec questions are escalated rather than resolved silently (`AUDIT.md` section 9).
+
+The hub worktree a run measured from is removed when the run ends, per `repo-worktree` "Listing and Cleanup": the report's pull request through `pr_review.py cleanup <number>` once it merges, and a detached checkout at `main` that only read the hub by hand once it is clean. An audit leaves no checkout behind it, since one left standing is what a later sweep has to tell apart from live work.

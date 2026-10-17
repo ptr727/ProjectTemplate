@@ -286,7 +286,8 @@ working directory in which to delete its branch.
 So the whole procedure moves to the orchestrator, which runs it from the base clone at the round's
 cleanup step, while no worker is live in a tree it touches.
 It carries the remote half of `drive-pr`'s post-merge cleanup too.
-That half is `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo>`, run from a hub checkout once for each merged group.
+For a merged group both halves are one command, `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`, run from a hub checkout once for each merged group, `<base-clone>` being the repository's primary clone.
+It deletes the remote branch, then removes the group's worktree and local branch and fast-forwards `develop`, per `repo-worktree` "Listing and Cleanup".
 Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
 `cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`.
 It also refuses a branch another open pull request has as its head or base.

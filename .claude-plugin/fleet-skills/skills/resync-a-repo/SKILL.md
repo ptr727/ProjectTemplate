@@ -43,7 +43,9 @@ section 1, a file fetched with the hub rather than present in a carrier, since a
 answers confidently instead of failing. Never do the resync's own work in a checkout another task
 may be using, the maintainer's own primary checkout included, even one that looks current: for the
 hub and for the target repo alike, create a worktree of your own off that base clone and work
-there, per `repo-worktree`. On a machine carrying the hub's agent-safety install, Claude Code also
+there, per `repo-worktree`, and remove each one when the run ends, per that skill's "Listing and
+Cleanup": a merged pull request's worktree through `pr_review.py cleanup <number>`, and a hub
+worktree that only read the hub by hand once it is clean. On a machine carrying the hub's agent-safety install, Claude Code also
 refuses a mutating git command run directly in a primary checkout, though its rules classify git
 and gh commands only, so a plain file write is never denied and the re-vendoring this skill exists
 to govern goes uncaught. A compound command is judged whole, so a copy chained to a denied git

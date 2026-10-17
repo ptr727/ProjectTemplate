@@ -169,77 +169,33 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      not have, an interrupted loop, a fix landed by hand outside that skill, or a maintainer
      merge in the GitHub UI. `git worktree list` for any worktree still registered under this
      task's feature branches, `git branch -vv` for any local feature branch, `git ls-remote
-     --heads origin` for any matching remote feature branch. For each, verify it finished by
-     reading GitHub's own state with the exact fields this check needs, not a bare listing, and
-     stop and report rather than guessing when selection is not exactly one match, on a non-1
-     count exit non-zero rather than returning empty with success, an ambiguous or missing match
-     must fail loud, not read as an empty value still safe to act on: `gh pr list --head
-     "<branch>" --state merged --repo owner/repo --json
-     number,baseRefName,mergedAt,headRefOid,headRefName,headRepository --jq 'if length == 1 then
-     .[0] else error("expected exactly one merged PR for this head, got \(length)") end'`.
-     `--head` is expected to match exactly (verified against `gh` 2.97.0 on this repo, a bare
-     prefix of a real branch name returned nothing), but confirming `headRefName` equals `<branch>`
-     costs one field and is cheap insurance against a future `gh` behavior change, not a workaround
-     for a known partial-match case. Confirm `headRepository` is non-null and its `nameWithOwner` equals
-     `owner/repo`, the owner alone is not enough, a same-owner PR against an identically named
-     branch in a different repository must never pass this check either. Confirm `baseRefName`
-     is `develop` (a different merged pull request can share the same head branch name against a
-     different base, and that is never this sweep's target) and `mergedAt` is set. Compare tips
-     only where a remote branch actually exists. `git ls-remote --heads --exit-code -- origin
-     "refs/heads/<branch>"` is the exact-match form and must be, in that argument order. `--heads
-     origin "<branch>"` alone still tail-matches, a bare `topic/x` pattern also returns an unrelated
-     `other/topic/x` if one exists. `--` placed after `origin` instead of before it is not
-     equivalent either, verified empirically: with a `refs/heads/other/--` ref present, `--heads
-     origin -- "refs/heads/<branch>"` matched both that ref and the intended one, while `--heads --
-     origin "refs/heads/<branch>"` matched only the one intended. Exit status is a tri-state, not a
-     stdin-emptiness check: `--exit-code` makes exit `2` mean query succeeded, branch gone, most
-     likely a prior cleanup attempt got interrupted after the remote delete but before the local
-     one, so skip straight to the local-tip check below and never attempt the remote delete a
-     second time. Exit `0` means it matched. Anything else is a failed query, a network or auth
-     problem, and stops and reports rather than being read as absence, an unreachable remote and a
-     genuinely gone branch both print nothing to stdout, only the exit code tells them apart.
-     Where the remote branch does exist, its tip must match that exact pull request's `headRefOid`
-     before its own delete proceeds, proving nothing landed on it since. Where a local branch
-     still exists too, its tip (`git rev-parse --verify "refs/heads/<branch>"`) must independently
-     match `headRefOid` before its own delete proceeds. Neither side needs the other to exist, a
-     prior interrupted attempt may have deleted one side already and left only the other, so
-     verify and delete whichever side is still there and skip whichever already is not, never
-     block one side's cleanup on the other side's absence. No `--` on `rev-parse`, verified
-     empirically: `git rev-parse -- "<branch>"` treats the argument after `--` as a path rather
-     than a revision and never resolves a SHA at all. The fully-qualified form needs no `--`
-     regardless, since `refs/heads/<branch>` never itself starts with `-`, and `--verify` fails
-     loudly rather than guessing when it does not resolve. Every branch or
-     worktree-path placeholder below is the real value, substituted as its own quoted argument
-     (a shell variable expansion such as `"$branch"`, or an argv element), never handed to `eval`
-     or `sh -c` for a second round of shell parsing, the only way an embedded `$()` or backtick
-     would actually run. A valid ref can start with `-` or carry a shell metacharacter, which is
-     why it stays quoted regardless. `--` marks the
-     end of options wherever a command supports it.
-     `git merge-base --is-ancestor <branch> develop` must never be used for either tip check, a
-     squash merge (drive-pr's own merge method) never makes the feature tip a literal ancestor of
-     `develop`, so the check reports every already-finished branch as unmerged. Only once GitHub
-     confirms it, and only when a local worktree or branch is still there to remove, remove the
-     worktree by its exact path (a dirty worktree stops cleanup rather than discarding uncommitted
-     work), `git worktree remove "<worktree-path>"`, `git worktree list` names it, then delete the
-     local branch. `git branch
-     -d` has the identical squash blindness as `git merge-base --is-ancestor` and refuses too, so
-     use `git branch -D -- "<exact-branch>"` here, safe only because the GitHub-state check just
-     proved that exact branch finished, the narrow post-squash exception git-commit-conventions
-     describes, never applied to an unverified branch. Then, only when the remote branch still
-     exists, delete it with `python3 scripts/pr_review.py cleanup <number> --repo owner/repo`, run
-     from a hub checkout, `<number>` being the merged pull request the check above returned. It
-     re-reads that pull request and repeats the merged, base, head-repository, and tip checks in
-     code, refuses a permanent or protected branch, and confirms the delete by reading the ref
-     back. Exit `0` is done, and any other exit stops and reports: `1` is a refusal, `2` an
-     unanswered read or an unconfirmed delete, and `64` a target under an owner other than the hub
-     checkout's own `origin` or that `origin` unreadable, a registry refusal being a `1`. It runs
-     under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
-     which is what lets auto mode complete it.
+     --heads origin` for any matching remote feature branch. For each such branch, read the one
+     merged pull request into `develop` it headed, failing loud on any count other than one rather
+     than reading an empty answer as safe: `gh pr list --head "<branch>" --base develop --state
+     merged --repo owner/repo --json number --jq 'if length == 1 then .[0].number else
+     error("expected exactly one merged PR for this head, got \(length)") end'`. Then run
+     `python3 scripts/pr_review.py cleanup <number> --repo owner/repo --checkout <base-clone>`
+     from a hub checkout outside the worktree it removes, `<base-clone>` being the repository's
+     primary clone, per `repo-worktree` "Listing and Cleanup". It re-reads that pull request and
+     repeats the merged, base, head-repository, and tip checks in code, refuses a permanent or
+     protected branch, deletes the remote branch and confirms it by reading the ref back, treats
+     a remote branch already gone as done, so a prior interrupted attempt finishes rather than
+     stops, then removes the worktree and local branch and fast-forwards `develop`. Every refusal
+     is decided before anything is deleted, a dirty worktree among them. Exit `0` is done, and
+     any other exit stops and reports: `1` is a refusal, `2` an unanswered read or an unconfirmed
+     delete, and `64` a target under an owner other than the hub checkout's own `origin` or that
+     `origin` unreadable, a registry refusal being a `1`. It runs under the host-safety
+     installer's `Bash(python3 scripts/pr_review.py:*)` allow rule, which is what lets auto mode
+     complete it.
      It also refuses while another open pull request in the repository has the branch as its head or base, naming each.
-     Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand, naming the pull request number and `--repo`.
-     No direct `git push origin --delete` or ref API delete runs from this skill, because `cleanup` is the one place holding the checks.
+     Where this seat cannot run `cleanup`, report the cleanup to the maintainer instead of running its steps by hand, naming the pull request number and `--repo`.
+     No direct `git push origin --delete`, ref API delete, `git worktree remove`, or `git branch -D` runs on a feature branch from this skill, because `cleanup` is the one place holding the checks.
      Never apply this sweep to `develop` or `main`
      themselves, only to feature branches a drive-pr loop created.
+   - What no single pull request names: run
+     `python3 scripts/pr_review.py cleanup --sweep --repo owner/repo --checkout <base-clone>`
+     and report what it lists. It writes nothing but a fetch, and `--apply` runs only on the
+     maintainer's go-ahead, since the report reaches other sessions' finished work too.
 
 ## Mechanics Live Elsewhere
 
