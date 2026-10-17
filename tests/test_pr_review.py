@@ -12185,6 +12185,17 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertIn("worktrees listed: unavailable", out)
         self.assertIn("status=CLEANED", out)
 
+    def test_a_primary_stopped_mid_cherry_pick_on_the_branch_refuses(self) -> None:
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH)
+        tip = self.commit(self.primary, "primary work")
+        admin = Path(run_git(self.primary, "rev-parse", "--absolute-git-dir"))
+        (admin / "CHERRY_PICK_HEAD").write_text(tip + "\n", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
     def test_a_remote_branch_that_moved_before_the_delete_is_not_deleted(self) -> None:
         _, tip = self.worktree(CLEANUP_BRANCH)
         self.wire(cleanup_pr(headRefOid=tip), refs=[tip, "c" * 40])
@@ -12699,6 +12710,30 @@ class TestCleanupSweep(LocalCleanupCase):
             if "primary-work" in line:
                 self.assertTrue(line.startswith("keep base-not-on-develop"), line)
 
+    def test_a_branch_without_a_reflog_is_kept_as_age_unreadable(self) -> None:
+        run_git(self.primary, "branch", "loose-done", "origin/develop")
+        os.remove(os.path.join(self.primary, ".git", "logs", "refs", "heads", "loose-done"))
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep age-unreadable branch loose-done", self.out.getvalue())
+        self.assertIn("loose-done", self.branches())
+
+    def test_a_failed_prune_is_counted_and_the_other_items_still_run(self) -> None:
+        made = self.scenario()
+        tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
+        self.wire_sweep(remote_tip=tip)
+        real = pr_review.cleanup_git
+
+        def failing(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "prune"):
+                raise pr_review.CleanupUnread("prune failed")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=failing):
+            self.assertEqual(2, self.sweep("--apply"))
+        self.assertIn("unread prunable worktree entries", self.out.getvalue())
+        self.assertNotIn(made["merged"], self.listed())
+
     def test_a_stale_remote_ref_for_a_deleted_branch_is_not_containment(self) -> None:
         stale = os.path.join(self.root, "wt", "stale-detached")
         run_git(self.primary, "worktree", "add", "--detach", stale, "origin/develop")
@@ -12708,8 +12743,10 @@ class TestCleanupSweep(LocalCleanupCase):
         run_git(self.primary, "fetch", "origin")
         run_git(self.bare, "branch", "-D", "gone-branch")
         self.age(stale, 48)
+        sha = run_git(stale, "rev-parse", "HEAD")
         self.wire_sweep()
         for extra in ((), ("--apply",)):
+            run_git(self.primary, "update-ref", "refs/remotes/origin/gone-branch", sha)
             self.assertEqual(0, self.sweep(*extra))
             out = self.out.getvalue()
             self.assertIn(f"keep unpushed-commits worktree {stale} detached", out)

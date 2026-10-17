@@ -6835,6 +6835,10 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
                 "WORKTREE_KEPT", f"{w.path} has a rebase or bisect in progress on {branch!r}"
             )
     holds = any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary))
+    if holds and cleanup_in_progress(primary):
+        raise CleanupRefused(
+            "WORKTREE_KEPT", f"{primary} has a merge, cherry-pick, revert, or bisect in progress"
+        )
     if holds and cleanup_dirty(primary, False):
         raise CleanupRefused(
             "BASE_DIRTY", f"{primary} has {branch!r} checked out with tracked changes"
@@ -6993,11 +6997,7 @@ class CleanupSweep:
             num = matches[0].get("number")
             return f"merged PR #{num}", num if matches[0].get("baseRefName") == "develop" else None
         for upstream in ("origin/develop", "origin/main"):
-            ref = f"refs/remotes/{upstream}"
-            if cleanup_tip(self.primary, ref) is None:
-                continue
-            proc = cleanup_git(self.primary, "merge-base", "--is-ancestor", tip, ref, ok=(0, 1))
-            if proc.returncode == 0:
+            if cleanup_behind(self.primary, tip, f"refs/remotes/{upstream}"):
                 return f"contained in {upstream}", None
         return None
 
@@ -7086,8 +7086,12 @@ class CleanupSweep:
                 print(f"would-remove prunable worktree entry {w.path}")
             return
         expire = f"{int(self.min_age * 3600)}.seconds.ago"
-        cleanup_git(self.primary, "worktree", "prune", "--expire", expire)
-        left = {w.path for w in cleanup_worktrees(self.primary)}
+        try:
+            cleanup_git(self.primary, "worktree", "prune", "--expire", expire)
+            left = {w.path for w in cleanup_worktrees(self.primary)}
+        except CleanupUnread as exc:
+            self.failed("prunable worktree entries", exc)
+            return
         for w in old:
             if w.path in left:
                 self.problems += 1
@@ -7205,7 +7209,11 @@ class CleanupSweep:
             if branch in self.operating:
                 self.keep("in-progress-operation", what)
                 return
-            hours = self.newest_hours([os.path.join(self.common, "logs", "refs", "heads", branch)])
+            log = os.path.join(self.common, "logs", "refs", "heads", branch)
+            if not os.path.exists(log):
+                self.keep("age-unreadable", what)
+                return
+            hours = self.newest_hours([log])
             if hours < self.min_age:
                 self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
                 return
