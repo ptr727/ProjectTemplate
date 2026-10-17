@@ -4584,8 +4584,8 @@ def sibling_heading(scan_lines: list[str], start: int) -> int:
     an entry opening on its severity badge never bounds, per `entry_heading`. Requiring a count
     also narrows the bound on a CodeRabbit block, whose own marker is in neither of the two.
 
-    A second section of the same kind bounds too, so each is its own block with its own count.
-    Read as one block, the digest counted only the first heading's findings.
+    A section of the same kind that follows directly bounds too, so each is its own block with
+    its own count. Read as one block, the digest counted only the first heading's findings.
 
     The cost is named rather than hidden. A sibling heading stating no count does not bound, so a
     block runs into it, which is where this started before the bound existed at all. It is strictly

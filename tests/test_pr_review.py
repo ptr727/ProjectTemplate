@@ -1535,7 +1535,7 @@ class TestPreviouslyMissed(GqlCase):
         """Only the sibling heading a section ends at can open another section in its region.
 
         Scanned on past the bound, prose naming the marker beside a `(N)` opened a second
-        suppressed block, which printed the previously missed finding under both banners.
+        suppressed block. The previously missed finding then printed under both banners.
         """
         shared = (
             f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
