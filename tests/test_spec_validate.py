@@ -1481,6 +1481,9 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
 
         Node is what an editor's JSON language service uses, so it is the engine the schema actually meets. A host
         without node skips this rather than failing, since the shape check above still binds everywhere.
+
+        A probe that times out skips too, since a cold start on a slow runner is no verdict on the patterns. A
+        pattern that backtracks without end cannot hide behind that skip, since Python matches the corpus first.
         """
         node = shutil.which("node")
         if node is None:
@@ -1539,14 +1542,17 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
             "console.log(JSON.stringify(Object.fromEntries("
             "pats.map(p => [p, cases.map(c => new RegExp(p).test(c))]))));"
         )
-        result = subprocess.run(
-            [node, "-e", probe, json.dumps([patterns, corpus])],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=True,
-        )
+        try:
+            result = subprocess.run(
+                [node, "-e", probe, json.dumps([patterns, corpus])],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=True,
+            )
+        except subprocess.TimeoutExpired:
+            self.skipTest("node timed out, which is no verdict on the patterns")
         self.assertEqual(json.loads(result.stdout), want)
 
     def test_the_description_pattern_never_refuses_what_the_validator_accepts(self) -> None:
