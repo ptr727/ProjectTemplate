@@ -11944,7 +11944,9 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
 
 def run_git(cwd: str, *args: str) -> str:
     """One git call in a throwaway repository, failing the test on a nonzero exit."""
-    done = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True)
+    done = subprocess.run(
+        ["git", "-C", cwd, *args], capture_output=True, text=True, encoding="utf-8", check=True
+    )
     return done.stdout.strip()
 
 
@@ -12067,6 +12069,8 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertIn("status=LOCAL_TIP_MOVED", out)
         self.assertIn(tip, out)
         self.assertIn(later, out)
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", self.out.getvalue())
         self.assertTrue(os.path.isdir(path))
         self.assertEqual(later, run_git(self.primary, "rev-parse", CLEANUP_BRANCH))
 
@@ -12076,6 +12080,8 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.wire_merged(tip)
         self.assertEqual(1, self.run_local())
         self.assertIn("status=WORKTREE_DIRTY", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", self.out.getvalue())
         self.assertTrue(os.path.isdir(path))
         self.assertIn(CLEANUP_BRANCH, self.branches())
 
@@ -12085,6 +12091,8 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.wire_merged(tip)
         self.assertEqual(1, self.run_local())
         self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", self.out.getvalue())
         self.assertTrue(os.path.isdir(path))
         self.assertIn(CLEANUP_BRANCH, self.branches())
 
@@ -12193,7 +12201,7 @@ class TestCleanupLocalHalf(LocalCleanupCase):
     def test_a_tip_that_moves_before_the_delete_is_a_refusal_after_the_removals(self) -> None:
         _, tip = self.worktree(CLEANUP_BRANCH)
         self.wire_merged(tip)
-        with mock.patch.object(pr_review, "cleanup_tip", side_effect=[tip, "b" * 40]):
+        with mock.patch.object(pr_review, "cleanup_tip", side_effect=[tip, tip, "b" * 40]):
             self.assertEqual(1, self.run_local())
         out = self.out.getvalue()
         self.assertLess(out.index("removed worktree"), out.index("status=LOCAL_TIP_MOVED"))
@@ -12238,6 +12246,55 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertTrue(os.path.isdir(path))
         self.assertIn(CLEANUP_BRANCH, self.branches())
 
+    def test_a_worktree_removed_by_someone_else_mid_run_is_done(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_git
+
+        def racing(root: str, *args: str, **kw: Any) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ("worktree", "remove"):
+                real(root, *args)
+                raise pr_review.CleanupUnread("another process got there first")
+            return real(root, *args, **kw)
+
+        with mock.patch.object(pr_review, "cleanup_git", side_effect=racing):
+            self.assertEqual(0, self.run_local())
+        self.assertIn("already gone", self.out.getvalue())
+        self.assertFalse(os.path.exists(path))
+        self.assertNotIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_branch_deleted_by_someone_else_before_the_delete_is_already_gone(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        real = pr_review.cleanup_tip
+        calls = []
+
+        def vanishing(primary: str, ref: str) -> str | None:
+            calls.append(ref)
+            if len(calls) == 3:
+                run_git(primary, "branch", "-D", "--", CLEANUP_BRANCH)
+                return None
+            return real(primary, ref)
+
+        with mock.patch.object(pr_review, "cleanup_tip", side_effect=vanishing):
+            self.assertEqual(0, self.run_local())
+        self.assertIn("status=CLEANED", self.out.getvalue())
+
+    def test_a_primary_that_cannot_leave_the_branch_keeps_it_and_exits_1(self) -> None:
+        Path(self.seed, "clash.txt").write_text("x", encoding="utf-8")
+        run_git(self.seed, "add", "clash.txt")
+        self.commit(self.seed, "add clash")
+        run_git(self.seed, "push", self.bare, "develop:develop")
+        run_git(self.primary, "pull", "--ff-only", "origin", "develop")
+        run_git(self.primary, "checkout", "-b", CLEANUP_BRANCH, "develop~1")
+        Path(self.primary, "clash.txt").write_text("y", encoding="utf-8")
+        tip = run_git(self.primary, "rev-parse", "HEAD")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("could not leave", self.out.getvalue())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
 
 class TestCleanupOriginParsing(unittest.TestCase):
     def test_https_and_ssh_forms_name_the_repository_case_insensitively(self) -> None:
@@ -12267,6 +12324,21 @@ class TestCleanupSweepArguments(CleanupCase):
     def test_a_missing_number_is_a_usage_error_outside_the_sweep(self) -> None:
         self.usage("status", "--repo", "o/r")
         self.usage("cleanup", "--repo", "o/r")
+
+    def test_a_required_number_still_parses_ahead_of_the_options(self) -> None:
+        class Reached(Exception):
+            pass
+
+        with (
+            mock.patch.object(pr_review, "full_read", side_effect=Reached),
+            self.assertRaises(Reached),
+        ):
+            pr_review.main(["status", "--repo", "o/r", "7"])
+        with mock.patch.object(pr_review, "cleanup", return_value=0) as cleaned:
+            self.assertEqual(
+                0, pr_review.main(["cleanup", "--repo", "o/r", "7", "--checkout", "x"])
+            )
+        cleaned.assert_called_once_with("o", "r", 7, "x")
 
     def test_the_sweep_flags_are_checked_against_each_other(self) -> None:
         self.usage("cleanup", "7", "--sweep", "--repo", "o/r", "--checkout", "/x")
@@ -12304,9 +12376,13 @@ class TestCleanupSweep(LocalCleanupCase):
         }
         self.merged_prs[branch] = [node]
 
-    def wire_sweep(self, remote_tip: str | None = None) -> None:
+    def wire_sweep(
+        self, remote_tip: str | None = None, remote_gone: bool = False, **pr: object
+    ) -> None:
         refs: list[object] = [remote_tip, None] if remote_tip else []
-        self.wire(cleanup_pr(headRefOid=remote_tip or CLEANUP_HEAD), refs=refs)
+        if remote_gone:
+            refs = [None]
+        self.wire(cleanup_pr(headRefOid=remote_tip or CLEANUP_HEAD, **pr), refs=refs)
         inner = pr_review.shared.request
 
         def fake(query: str, variables: dict, **kw: Any) -> pr_review.shared.Response:
@@ -12374,7 +12450,7 @@ class TestCleanupSweep(LocalCleanupCase):
     def test_a_dry_run_reports_every_item_and_removes_nothing(self) -> None:
         made = self.scenario()
         before = (sorted(self.branches()), sorted(self.listed()))
-        self.wire_sweep()
+        self.wire_sweep(remote_tip=run_git(self.primary, "rev-parse", CLEANUP_BRANCH))
         self.assertEqual(0, self.sweep())
         self.assertEqual(before, (sorted(self.branches()), sorted(self.listed())))
         self.assertFalse(self.deleted())
@@ -12384,6 +12460,7 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertIn(f"would-remove prunable worktree entry {made['gone']}", out)
         self.assertIn("would-remove branch loose-done", out)
         self.assertIn(f"would-remove remote branch {CLEANUP_BRANCH} via #7", out)
+        self.assertIn(f"would-fast-forward develop in {self.primary}", out)
         self.assertNotIn("removed ", out.replace("would-remove", ""))
 
     def test_apply_removes_what_is_finished_and_keeps_the_rest(self) -> None:
@@ -12416,12 +12493,40 @@ class TestCleanupSweep(LocalCleanupCase):
 
     def test_a_read_failure_continues_and_exits_2(self) -> None:
         made = self.scenario()
-        self.failing.add("unmerged-work")
+        early, _ = self.worktree("aa-failing")
+        self.age(early, 48)
+        self.failing.add("aa-failing")
         tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
         self.wire_sweep(remote_tip=tip)
         self.assertEqual(2, self.sweep("--apply"))
+        out = self.out.getvalue()
+        self.assertLess(out.index("unread worktree"), out.index("removed worktree"))
         self.assertNotIn(made["merged"], self.listed())
-        self.assertIn("unread worktree", self.out.getvalue())
+        self.assertIn(early, self.listed())
+
+    def test_the_remote_check_in_a_report_names_a_refusal_and_a_missing_branch(self) -> None:
+        self.scenario()
+        self.wire_sweep(remote_tip=run_git(self.primary, "rev-parse", CLEANUP_BRANCH), merged=False)
+        self.assertEqual(0, self.sweep())
+        out = self.out.getvalue()
+        self.assertIn("keep-remote via #7", out)
+        self.assertNotIn("would-remove remote", out)
+        self.assertFalse(self.deleted())
+
+    def test_the_remote_check_in_a_report_names_a_branch_already_gone(self) -> None:
+        self.scenario()
+        self.wire_sweep(remote_gone=True)
+        self.assertEqual(0, self.sweep())
+        self.assertIn(f"remote already gone {CLEANUP_BRANCH} via #7", self.out.getvalue())
+
+    def test_a_loose_branch_whose_tip_moved_is_kept_as_tip_moved(self) -> None:
+        run_git(self.primary, "branch", "loose-done", "origin/develop")
+        self.age_branch("loose-done", 48)
+        self.wire_sweep()
+        moved = pr_review.CleanupRefused("LOCAL_TIP_MOVED", "moved")
+        with mock.patch.object(pr_review, "cleanup_delete_branch", side_effect=moved):
+            self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep tip-moved branch loose-done", self.out.getvalue())
 
     def test_main_and_develop_survive_a_sweep_with_no_age_floor(self) -> None:
         run_git(self.primary, "checkout", "-b", "primary-work")

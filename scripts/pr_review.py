@@ -46,18 +46,23 @@ Subcommands
            `headRefOid` before the delete is sent, and the delete is confirmed by reading the ref
            back. The delete itself carries no expected tip, so this is verify-then-delete rather
            than a compare-and-swap. With `--checkout <primary clone>`, a local half follows a
-           remote half that exited 0, on the pull request's own branch and head commit. It
-           removes the worktrees holding the branch and deletes the local branch only while it
-           still names that commit. Then it fast-forwards the clone to current `develop`, never
-           a reset, stash, or force. The clone must be a primary checkout whose origin is
-           `--repo`. A locked, moved, dirty, or mid-operation worktree refuses before anything
-           local is removed. A clone left behind is reported and does not fail the run. `cleanup --sweep --checkout <primary clone>` takes no pull request.
-           It reports what is provably finished, one `would-remove` or `keep <reason>` line per
-           worktree or branch, and removes it only with `--apply`. An item must sit untouched for
-           `--min-age-hours` (default 24) and be clean. It must also be merged by a pull request
-           from `--repo` at its exact tip, or be contained in `origin/develop` or `origin/main`.
-           For a merged develop pull request the sweep also deletes the remote head branch,
-           through the same checks as `cleanup <n>`. The primary checkout, permanent branches,
+           remote half that exited 0, on the pull request's own branch and head commit. Every
+           local refusal is decided before the remote delete, so a refusal means nothing at all
+           was deleted. The local half removes the worktrees holding the branch and deletes the
+           local branch only while it still names that commit. Then it fast-forwards the clone to
+           current `develop`, never a reset, stash, or force. The clone must be a primary checkout
+           whose origin is `--repo`. A locked, moved, dirty, or mid-operation worktree refuses
+           before anything is deleted. A clone left behind is reported and does not fail the run.
+           `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is
+           provably finished, one `would-remove` or `keep <reason>` line per worktree or branch,
+           and removes it only with `--apply`. An item must sit untouched for `--min-age-hours`
+           (default 24) and be clean. A branch is finished when a pull request from `--repo`
+           merged it at its exact tip, or when `origin/develop` or `origin/main` contains it. A
+           detached worktree is finished when any `origin` ref contains its commit. For a merged
+           develop pull request the sweep also deletes the remote head branch through the same
+           checks as `cleanup <n>`. The report runs those checks and names the result. The
+           sweep never touches the primary checkout except to fast-forward a tracked-clean
+           `develop` to `origin/develop`, and the report names that step. Permanent branches,
            locked worktrees, and worktrees mid-operation are never touched. Exit 0 = deleted
            and confirmed gone, or already gone, or a sweep that completed. Exit 1 = refused,
            a moved tip naming both commits among them. Exit 2 = a read did not answer, a
@@ -6307,15 +6312,18 @@ def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     return users
 
 
-def _cleanup(owner: str, repo: str, num: int, verified: dict[str, str] | None = None) -> int:
-    """The checks, the delete, and the read back, raising `CleanupUnread` on any unanswered read.
+class CleanupPlan(NamedTuple):
+    branch: str
+    head: str
+    ref: dict | None
 
-    Once the pull request passes its own refusals, `verified` receives its `branch` and `head`.
-    The local half works from that pair rather than from anything re-derived.
 
-    A branch anything protects is refused whatever that protection would allow, since the write
-    guard's per-branch rule check never sees a delete made from inside this script. A delete that
-    reports a failure may still have landed, so the read back decides the outcome either way.
+def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
+    """Every read-only check on pull request `num` and its remote branch, with no write.
+
+    Raises `CleanupRefused` carrying the whole refusal text, and `CleanupUnread` on any
+    unanswered read. A branch anything protects is refused whatever that protection would allow.
+    The write guard's per-branch rule check never sees a delete made from inside this script.
     """
     target = f"{owner}/{repo}"
     data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
@@ -6339,41 +6347,52 @@ def _cleanup(owner: str, repo: str, num: int, verified: dict[str, str] | None = 
     if branch in ("develop", "main", default):
         refusals.append(f"its head branch {branch!r} is a permanent branch")
     if refusals:
-        print(f"status=REFUSED nothing was deleted from {target} #{num}: {', and '.join(refusals)}")
-        return 1
-    if verified is not None:
-        verified.update(branch=branch, head=head)
+        raise CleanupRefused(
+            "REFUSED", f"nothing was deleted from {target} #{num}: {', and '.join(refusals)}"
+        )
 
     ref = cleanup_ref(owner, repo, branch)
     if ref is None:
-        print(f"status=ALREADY_GONE branch={branch} is not on {target}, so nothing was deleted")
-        return 0
+        return CleanupPlan(branch, head, None)
     rules = branch_rules(owner, repo, branch)
     if rules:
-        print(
-            f"status=REFUSED nothing was deleted: {branch!r} on {target} is covered by "
-            f"{', '.join(rules)}, so its delete is the maintainer's call"
+        raise CleanupRefused(
+            "REFUSED",
+            f"nothing was deleted: {branch!r} on {target} is covered by "
+            f"{', '.join(rules)}, so its delete is the maintainer's call",
         )
-        return 1
     users = branch_users(owner, repo, branch)
     if users:
-        print(
-            f"status=REFUSED nothing was deleted: open pull requests use {branch!r} on {target}, "
-            f"{', '.join(users)}, and deleting it would close or retarget them"
+        raise CleanupRefused(
+            "REFUSED",
+            f"nothing was deleted: open pull requests use {branch!r} on {target}, "
+            f"{', '.join(users)}, and deleting it would close or retarget them",
         )
-        return 1
     tip = ref["target"]["oid"]
     if tip != head:
-        print(
-            f"status=TIP_MOVED nothing was deleted: {branch!r} on {target} is at {tip}, and "
-            f"#{num} merged {head}, so something reached the branch after the merge or the name "
-            "was reused"
+        raise CleanupRefused(
+            "TIP_MOVED",
+            f"nothing was deleted: {branch!r} on {target} is at {tip}, and #{num} merged "
+            f"{head}, so something reached the branch after the merge or the name was reused",
         )
-        return 1
+    return CleanupPlan(branch, head, ref)
 
+
+def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
+    """Delete the remote branch `plan` verified and read it back.
+
+    A delete that reports a failure may still have landed, so the read back decides the outcome
+    either way.
+    """
+    target = f"{owner}/{repo}"
+    branch = plan.branch
+    if plan.ref is None:
+        print(f"status=ALREADY_GONE branch={branch} is not on {target}, so nothing was deleted")
+        return 0
+    tip = plan.ref["target"]["oid"]
     print(f"deleting: {branch} on {target} at {tip}")
     try:
-        response = shared.request(M_DELETE_REF, {"refId": ref["id"]}).data
+        response = shared.request(M_DELETE_REF, {"refId": plan.ref["id"]}).data
         print(f"  response: {json.dumps(response)[:400]}")
     except shared.GraphQLError as exc:
         print(f"  the delete reported a failure: {exc}")
@@ -6394,6 +6413,16 @@ def _cleanup(owner: str, repo: str, num: int, verified: dict[str, str] | None = 
         return 2
     print(f"status=DELETED branch={branch} oid={tip}, confirmed by reading the ref back")
     return 0
+
+
+def _cleanup(owner: str, repo: str, num: int) -> int:
+    """The checks, the delete, and the read back, raising `CleanupUnread` on any unanswered read."""
+    try:
+        plan = cleanup_check(owner, repo, num)
+    except CleanupRefused as exc:
+        print(f"status={exc.status} {exc}")
+        return 1
+    return cleanup_remote_delete(owner, repo, plan)
 
 
 def cleanup_scope(owner: str, repo: str) -> int | None:
@@ -6423,9 +6452,9 @@ def cleanup(owner: str, repo: str, num: int, checkout: str | None = None) -> int
     `handoff.py`'s own write-scope check, reused rather than copied so the two cannot drift
     apart. Its refusal text is printed as `handoff.py` words it.
 
-    With `checkout`, the local half follows a remote half that exited 0. The checkout is judged
-    before the remote delete, so a mistyped path cannot leave the remote gone and the local
-    cleanup undone.
+    With `checkout`, the local half follows a remote half that exited 0. The checkout and every
+    local refusal are judged before the remote delete. A local refusal then means nothing at all
+    was deleted, the remote branch included.
     """
     refused = cleanup_scope(owner, repo)
     if refused is not None:
@@ -6435,18 +6464,23 @@ def cleanup(owner: str, repo: str, num: int, checkout: str | None = None) -> int
     try:
         if checkout is not None:
             primary = cleanup_primary(checkout, target)
-        verified: dict[str, str] = {}
-        code = _cleanup(owner, repo, num, verified)
+        plan = cleanup_check(owner, repo, num)
+        if primary is not None:
+            cleanup_preflight(primary, plan.branch, plan.head)
     except CleanupRefused as exc:
-        print(f"status={exc.status} nothing was deleted: {exc}")
+        if exc.status in ("REFUSED", "TIP_MOVED", "BAD_CHECKOUT"):
+            print(f"status={exc.status} {exc}")
+        else:
+            print(f"status={exc.status} nothing was deleted, remote branch included: {exc}")
         return 1
     except CleanupUnread as exc:
         print(f"status=UNREAD nothing was deleted: {exc}")
         return 2
+    code = cleanup_remote_delete(owner, repo, plan)
     if code != 0 or primary is None:
         return code
     try:
-        return cleanup_local(primary, verified["branch"], verified["head"])
+        return cleanup_local(primary, plan.branch, plan.head)
     except CleanupRefused as exc:
         print(f"status={exc.status} {exc}")
         return 1
@@ -6622,7 +6656,13 @@ def cleanup_remove_worktree(primary: str, path: str) -> bool:
     inside = cleanup_cwd_inside(path)
     if inside:
         os.chdir(primary)
-    cleanup_git(primary, "worktree", "remove", path)
+    try:
+        cleanup_git(primary, "worktree", "remove", path)
+    except CleanupUnread:
+        if any(w.path == path for w in cleanup_worktrees(primary)):
+            raise
+        print(f"  git reported an error, yet {path} is no longer listed, so it is already gone")
+        return inside
     if any(w.path == path for w in cleanup_worktrees(primary)):
         raise CleanupUnread(f"the worktree {path} is still listed after its removal")
     return inside
@@ -6632,31 +6672,38 @@ def cleanup_moved_note() -> None:
     print("  note: the shell's directory was that worktree and is gone, so change directory")
 
 
-def cleanup_delete_branch(primary: str, branch: str, tip: str) -> None:
+def cleanup_delete_branch(primary: str, branch: str, tip: str) -> bool:
     """Delete the local branch while it still names `tip`, and read it back.
 
-    The tip is read again just before the delete. Git's own refusal then covers a branch that is
-    checked out, being rebased, or being bisected in any worktree. It is raised as a refusal.
+    Returns whether this call deleted it, False where it was already gone. The tip is read again
+    just before the delete. Git's own refusal then covers a branch that is checked out, being
+    rebased, or being bisected in any worktree. It is raised as a refusal.
     """
     ref = f"refs/heads/{branch}"
     now = cleanup_tip(primary, ref)
+    if now is None:
+        return False
     if now != tip:
         raise CleanupRefused(
             "LOCAL_TIP_MOVED", f"{ref} reads {now} just before its delete, and {tip} was expected"
         )
     proc = cleanup_git(primary, "branch", "-D", "--", branch, ok=(0, 1))
     if proc.returncode != 0:
+        if cleanup_tip(primary, ref) is None:
+            return False
         raise CleanupRefused("WORKTREE_KEPT", f"git kept {ref}: {proc.stderr.strip()}")
     if cleanup_tip(primary, ref) is not None:
         raise CleanupUnread(f"{ref} still exists after its delete")
+    return True
 
 
-def cleanup_base(primary: str) -> bool:
+def cleanup_base(primary: str, apply: bool = True) -> bool:
     """Fast-forward the primary checkout to current `develop`, never reset, stash, or force.
 
     Returns whether the clone is current, printing a status line for each way it is not. A clone
     on another branch, with tracked changes, or that cannot fast-forward is left alone. No
-    outcome here is an error, so callers report it and never fail a run on it.
+    outcome here is an error, so callers report it and never fail a run on it. Without `apply`
+    it only reports the fast-forward it would make.
     """
     try:
         current = cleanup_git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", ok=(0, 1))
@@ -6673,11 +6720,19 @@ def cleanup_base(primary: str) -> bool:
         if behind.returncode == 1:
             print(f"status=BASE_NOT_FF develop in {primary} cannot fast-forward to origin/develop")
             return False
-        try:
-            cleanup_git(primary, "merge", "--ff-only", "origin/develop")
-        except CleanupUnread:
-            if cleanup_tip(primary, "HEAD") != cleanup_tip(primary, "refs/remotes/origin/develop"):
-                raise
+        if not apply and cleanup_tip(primary, "HEAD") != cleanup_tip(
+            primary, "refs/remotes/origin/develop"
+        ):
+            print(f"would-fast-forward develop in {primary}")
+            return True
+        if apply:
+            try:
+                cleanup_git(primary, "merge", "--ff-only", "origin/develop")
+            except CleanupUnread:
+                if cleanup_tip(primary, "HEAD") != cleanup_tip(
+                    primary, "refs/remotes/origin/develop"
+                ):
+                    raise
     except CleanupUnread as exc:
         print(f"status=BASE_UNREAD develop in {primary} could not be brought current: {exc}")
         return False
@@ -6685,13 +6740,11 @@ def cleanup_base(primary: str) -> bool:
     return True
 
 
-def cleanup_local(primary: str, branch: str, head: str) -> int:
-    """Remove the finished branch's worktrees and local branch, then return the base clone.
+def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None, list[Worktree]]:
+    """Fetch, then decide every local refusal, returning the branch tip and the worktrees to remove.
 
-    Every refusal is decided before the first removal, so a refused run leaves all of it in
-    place. The base clone's return is reported and never fails the run.
-    `head` is the commit the merged pull request carried, read live by the remote half. The
-    local branch is only deleted while it still names exactly that commit.
+    Nothing is removed here, so a refusal leaves all of it in place. `head` is the commit the
+    merged pull request carried, read live by the remote half.
     """
     cleanup_git(primary, "fetch", "--prune", "origin")
     ref = f"refs/heads/{branch}"
@@ -6699,7 +6752,7 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
     if tip is not None and tip != head:
         raise CleanupRefused(
             "LOCAL_TIP_MOVED",
-            f"nothing local was removed: {ref} is at {tip}, and the pull request merged {head}, "
+            f"{ref} is at {tip}, and the pull request merged {head}, "
             "so it may carry commits that were never pushed",
         )
     linked = []
@@ -6707,9 +6760,7 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
         if w.path == primary:
             if cleanup_dirty(primary, False):
                 raise CleanupRefused(
-                    "BASE_DIRTY",
-                    f"nothing local was removed: {primary} has {branch!r} checked out"
-                    " with tracked changes",
+                    "BASE_DIRTY", f"{primary} has {branch!r} checked out with tracked changes"
                 )
             continue
         why = (
@@ -6726,29 +6777,50 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
             else None
         )
         if why is not None:
-            raise CleanupRefused("WORKTREE_KEPT", f"nothing local was removed: {w.path}, {why}")
+            raise CleanupRefused("WORKTREE_KEPT", f"{w.path}, {why}")
         if cleanup_dirty(w.path, True):
-            raise CleanupRefused(
-                "WORKTREE_DIRTY", f"nothing local was removed: {w.path} has uncommitted changes"
-            )
+            raise CleanupRefused("WORKTREE_DIRTY", f"{w.path} has uncommitted changes")
         linked.append(w)
+    return tip, linked
+
+
+def cleanup_local(primary: str, branch: str, head: str) -> int:
+    """Remove the finished branch's worktrees and local branch, then return the base clone.
+
+    The refusals are decided again before the first removal, so a refused run leaves all of it
+    in place. The base clone's return is reported and never fails the run. The local branch is
+    only deleted while it still names exactly `head`.
+    """
+    try:
+        tip, linked = cleanup_preflight(primary, branch, head)
+    except CleanupRefused as exc:
+        raise CleanupRefused(exc.status, f"nothing local was removed: {exc}") from exc
     for w in linked:
         moved = cleanup_remove_worktree(primary, w.path)
         print(f"  removed worktree {w.path}")
         if moved:
             cleanup_moved_note()
     if any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
-        cleanup_git(primary, "checkout", "develop")
+        try:
+            cleanup_git(primary, "checkout", "develop")
+        except CleanupUnread:
+            print(
+                f"status=WORKTREE_KEPT {primary} could not leave {branch}, so the branch was kept"
+            )
+            return 1
         print(f"  switched {primary} off {branch} to develop")
     if tip is None:
         print(f"  local branch {branch} is already gone")
     else:
         try:
-            cleanup_delete_branch(primary, branch, tip)
+            deleted = cleanup_delete_branch(primary, branch, tip)
         except CleanupUnread as exc:
             print(f"status=LOCAL_DELETE_NOT_CONFIRMED {exc}")
             return 2
-        print(f"  deleted local branch {branch} at {tip}, confirmed by reading the ref back")
+        if deleted:
+            print(f"  deleted local branch {branch} at {tip}, confirmed by reading the ref back")
+        else:
+            print(f"  local branch {branch} is already gone")
     current = cleanup_base(primary)
     first = cleanup_git(primary, "status", "--short", "--branch").stdout.splitlines()[:1]
     print(f"  {first[0] if first else 'status unavailable'}")
@@ -6840,12 +6912,23 @@ class CleanupSweep:
     def remote(self, num: int | None, branch: str) -> None:
         """Report, or with `apply` run, the remote half for a merged develop pull request.
 
-        The remote half makes its own checks, so its refusal keeps only the remote branch.
+        The remote half makes its own checks, so its refusal keeps only the remote branch. A
+        report runs those same checks and writes nothing.
         """
         if num is None:
             return
         if not self.apply:
-            print(f"would-remove remote branch {branch} via #{num}")
+            try:
+                plan = cleanup_check(self.owner, self.repo, num)
+            except CleanupRefused as exc:
+                print(f"keep-remote via #{num}: {exc}")
+            except CleanupUnread as exc:
+                self.failed(f"remote branch of #{num}", exc)
+            else:
+                if plan.ref is None:
+                    print(f"remote already gone {branch} via #{num}")
+                else:
+                    print(f"would-remove remote branch {branch} via #{num}")
             return
         print(f"  remote half of #{num}:")
         try:
@@ -6889,8 +6972,7 @@ class CleanupSweep:
             branch = name.removeprefix("refs/heads/")
             if branch not in held and branch not in self.permanent:
                 self.loose(branch, tip)
-        if self.apply:
-            self.base()
+        self.base()
         return 2 if self.problems else 0
 
     def prune(self, stale: list[Worktree]) -> None:
@@ -6986,11 +7068,14 @@ class CleanupSweep:
                 cleanup_moved_note()
             print(f"removed worktree {w.path}")
             try:
-                cleanup_delete_branch(self.primary, w.branch, tip)
+                deleted = cleanup_delete_branch(self.primary, w.branch, tip)
             except CleanupRefused as exc:
                 print(f"kept branch {w.branch} after removing its worktree: {exc}")
                 return
-            print(f"removed branch {w.branch} tip={tip} evidence={evidence}")
+            if deleted:
+                print(f"removed branch {w.branch} tip={tip} evidence={evidence}")
+            else:
+                print(f"branch {w.branch} was already gone")
             self.remote(num, w.branch)
         except CleanupUnread as exc:
             self.failed(what, exc)
@@ -7032,17 +7117,20 @@ class CleanupSweep:
                 print(f"would-remove {what} tip={tip} evidence={evidence}")
                 self.remote(num, branch)
                 return
-            cleanup_delete_branch(self.primary, branch, tip)
-            print(f"removed {what} tip={tip} evidence={evidence}")
+            if cleanup_delete_branch(self.primary, branch, tip):
+                print(f"removed {what} tip={tip} evidence={evidence}")
+            else:
+                print(f"{what} was already gone")
             self.remote(num, branch)
         except CleanupRefused as exc:
-            self.keep("checked-out-elsewhere", f"{what}: {exc}")
+            reason = "tip-moved" if exc.status == "LOCAL_TIP_MOVED" else "checked-out-elsewhere"
+            self.keep(reason, f"{what}: {exc}")
         except CleanupUnread as exc:
             self.failed(what, exc)
 
     def base(self) -> None:
         """Return the primary checkout to current `develop`, reporting what it could not do."""
-        cleanup_base(self.primary)
+        cleanup_base(self.primary, self.apply)
 
 
 def cleanup_sweep(owner: str, repo: str, checkout: str, apply: bool, min_age: float) -> int:
@@ -7084,10 +7172,11 @@ def utf8_console() -> None:
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     ap = argparse.ArgumentParser()
+    sweeping = "--sweep" in (sys.argv[1:] if argv is None else argv)
     ap.add_argument(
         "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
     )
-    ap.add_argument("number", type=int, nargs="?")
+    ap.add_argument("number", type=int, nargs="?" if sweeping else None)
     # No default, because the wrong repository is the failure this argument has actually had.
     # A default names one repository, and every run from elsewhere silently reads that one.
     # The number resolves there, the digest renders, and nothing in the output disagrees.
