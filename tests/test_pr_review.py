@@ -1443,6 +1443,14 @@ class TestPreviouslyMissed(GqlCase):
                 "<summary>\n<strong>2 previously missed issues</strong>\n</summary>",
             ),
             (
+                "its text set off by blank lines",
+                "<summary>\n\n<strong>2 previously missed issues</strong>\n\n</summary>",
+            ),
+            (
+                "its emphasis in capitals",
+                "<summary><STRONG>2 previously missed issues</STRONG></summary>",
+            ),
+            (
                 "its wording broken across lines",
                 "<summary><strong>2 previously\nmissed issues</strong></summary>",
             ),
@@ -1456,6 +1464,21 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertEqual(1, len(blocks))
                 self.assertEqual(2, pr_review.finding_count(blocks[0]))
                 self.assertIn("Constructed missed finding 2", blocks[0])
+
+    def test_a_vetted_summary_no_reader_finds_is_reported(self) -> None:
+        """The spelling is vetted wherever it appears, while the reader keys on how its line opens.
+
+        A layout the reader misses would hand its findings to nobody under `shapes=ok`. So the
+        shortfall between the two is reported as an unread shape instead.
+        """
+        body = counted_missed(2).replace(
+            "<strong>2 previously missed issues</strong>",
+            "<strong>2</strong> previously missed issues",
+        )
+        self.assertEqual([], pr_review.previously_missed_blocks(body))
+        found = pr_review.unrecognized_in(body)
+        self.assertEqual(1, len(found))
+        self.assertIn("no reader found its section", found[0])
 
     def test_an_entry_title_opening_on_a_number_bounds_no_section(self) -> None:
         """An entry's summary opens on its severity badge, which is not heading markup.
@@ -4909,6 +4932,12 @@ class TestOverviewSections(GqlCase):
         )
         self.assertEqual([3], [c for r, c, _ in pr_review.section_entries(split) if r == "total"])
         self.assertEqual(3, pr_review.stated_total(split))
+        for spelled in ("<STRONG>3 open findings</STRONG>", "<strong>3</strong> open findings"):
+            with self.subTest(spelled=spelled):
+                body = revised_with(open_section(ids)).replace(
+                    "<strong>3 open findings</strong>", spelled
+                )
+                self.assertEqual(3, pr_review.stated_total(body))
         closing = overview_v2().replace("<strong>Open (2)</strong>", "<strong>Open\n(2)</strong>")
         self.assertEqual([2], [c for r, c, _ in pr_review.section_entries(closing) if r == "open"])
 

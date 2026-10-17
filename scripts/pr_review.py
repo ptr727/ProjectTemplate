@@ -452,7 +452,7 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # One character per iteration rather than a run of them, since a repeated group that can split a run of stars more than one way is ambiguous and parses exponentially in it.
 # What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
 # It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
-HEADING_OPENER = r"(?:</?[A-Za-z][^>]*>|[ \t\r\n>#]|[*_](?![ \t])|[^\x00-\x7f])*"
+HEADING_OPENER = r"(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*"
 PREVIOUSLY_MISSED = re.compile(
     rf"^{HEADING_OPENER}(?:[0-9]+[ \t]+)?Previously missed\b",
     re.IGNORECASE,
@@ -703,18 +703,24 @@ OVERVIEW_SECTIONS = {
     "Resolved since last review (N)": RESOLVED,
     "(N) resolved since last review": RESOLVED,
 }
-VETTED_SUMMARIES = set(OVERVIEW_SECTIONS) | {
-    "Pull request overview",
-    NARRATIVE_SUMMARY,
-    "Show a summary per file",
-    "File summaries",
-    "Review details",
-    "Suppressed comments (N)",
-    "Comments suppressed due to low confidence (N)",
+PREVIOUSLY_MISSED_SUMMARIES = {
     "Previously missed (N)",
     "(N) previously missed issues",
     "(N) previously missed issue",
 }
+VETTED_SUMMARIES = (
+    set(OVERVIEW_SECTIONS)
+    | {
+        "Pull request overview",
+        NARRATIVE_SUMMARY,
+        "Show a summary per file",
+        "File summaries",
+        "Review details",
+        "Suppressed comments (N)",
+        "Comments suppressed due to low confidence (N)",
+    }
+    | PREVIOUSLY_MISSED_SUMMARIES
+)
 VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", "Review effort"}
 # Inline emphasis around a marker is presentation rather than identity.
 # The second overview format wraps every `<summary>` in `<strong>` where the first wrapped none.
@@ -829,10 +835,10 @@ TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
 OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
-# A count opening a heading's own text, past emphasis and nothing else that is a tag, a summary's line breaks included.
-# Narrower than the opener above, since a finding entry's summary opens on its severity badge.
-# A badge read as heading markup made an entry titled `2 low confidence results` state a count, and bound a section there.
-LEADING_COUNT = re.compile(r"(?:</?(?:strong|b|em|i)>|[ \t\r\n#*_]|[^\x00-\x7f])*([0-9]+)[ \t\r\n]")
+# A count opening a heading's text, read once `heading_count` has reduced its badge and emphasis as `normal` does.
+# No tag is skipped here, since a finding entry's summary opens on a severity badge rather than on heading markup.
+# A badge read as markup made an entry titled `2 low confidence results` state a count, and bound a section there.
+LEADING_COUNT = re.compile(r"(?:[ \t\r\n#*_]|[^\x00-\x7f])*([0-9]+)[ \t\r\n]")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
@@ -3667,6 +3673,10 @@ def unrecognized_in(body: str) -> list[str]:
     quoting a heading is not a review carrying one, and this script's own pull requests quote
     these lists in full.
 
+    A previously-missed summary that no reader finds as a section is reported too. Its spelling is
+    vetted wherever it appears, while the reader keys on how its line opens. A layout the reader
+    misses would otherwise hand its findings to nobody under `shapes=ok`.
+
     A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
     is the exemption, being a bare paragraph by design and already classified as one.
@@ -3689,6 +3699,13 @@ def unrecognized_in(body: str) -> list[str]:
         for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
         if unvetted(marker, VETTED_SUMMARIES) and not finding_entry(marker)
     ]
+    missed = [
+        marker
+        for marker in (normal(s) for s in SUMMARY.findall(plain))
+        if not unvetted(marker, PREVIOUSLY_MISSED_SUMMARIES)
+    ]
+    if len(missed) > len(previously_missed_blocks(body)):
+        found.append(f"summary: {missed[0]}, vetted while no reader found its section")
     found += [
         f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
     ]
@@ -4295,8 +4312,13 @@ def heading_count(heading: str) -> int | None:
 
     It takes the heading itself rather than the block, and reads all of it. Cut to its first line,
     a summary split as `Open` and then `(2)` lost the count its role was vetted with.
+
+    The badge and the emphasis are reduced first, as `normal` reduces them before vetting. The
+    count is then read from the same text the role was vetted on. A badge reduces to its word, which is
+    what keeps an entry titled `2 low confidence results` from stating a count.
     """
-    m = COUNT.search(heading) or LEADING_COUNT.match(heading)
+    text = EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, heading))
+    m = COUNT.search(text) or LEADING_COUNT.match(text)
     return counted(m.group(1)) if m else None
 
 
@@ -4473,9 +4495,9 @@ def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[st
     heading at all. `unrecognized_in` vetted its spelling meanwhile and reported nothing. The groups
     come from the scanned copy and apply to both, so the two keep addressing the same lines.
 
-    Only a line opening on `<summary` folds, and the fold stops short at a blank line or a line
-    opening another wrapper or summary. A tag named mid-sentence otherwise folded every line to the
-    next close. A sibling heading caught inside that fold was then no longer at a line's start.
+    Only a line opening on `<summary` folds, and the fold stops short at a line opening another
+    wrapper, summary, or Markdown heading. A tag named mid-sentence otherwise folded every line to
+    the next close. A sibling heading caught inside that fold was then no longer at a line's start.
     A continuation line's blockquote markers are dropped, being the quoting rather than the text.
     """
     scan: list[str] = []
@@ -4486,7 +4508,7 @@ def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[st
         if FOLD_OPENER.match(scan_lines[i]) and "</summary>" not in scan_lines[i].lower():
             for j in range(i + 1, len(scan_lines)):
                 bare = BLOCKQUOTE.sub("", scan_lines[j].strip())
-                if not bare.strip() or FOLD_STOP.match(bare):
+                if FOLD_STOP.match(bare) or MARKDOWN_HEADING.match(bare):
                     break
                 if "</summary>" in bare.lower():
                     end = j
