@@ -49,29 +49,28 @@ Subcommands
            remote half that exited 0, on the pull request's own branch and head commit. Every
            refusal is decided before anything is deleted, the remote branch included. A re-check
            after the delete can still refuse when a concurrent session changed the branch or a
-           worktree in between. The output then names what already happened. The local half
-           removes the worktrees holding the branch. It deletes the local branch only at the
-           merged head or an ancestor of it, after a tip re-read shows it unchanged. Then it
-           fast-forwards the clone to current `develop`, never a reset, stash, or force. The clone must be a primary checkout
-           whose origin is `--repo`. A locked, dirty, or mid-operation worktree refuses
-           before anything is deleted. So does a branch tip that is neither the merged head nor
-           behind it. So does a rebase or bisect paused on the branch in another worktree.
-           A worktree entry whose directory is gone is removed. The primary leaves the merged
-           branch before the remote delete, and a failed checkout refuses. A clone left behind
-           is reported and does not fail the run.
-           `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is
-           provably finished, one `would-remove` or `keep <reason>` line per worktree or branch,
-           and removes it only with `--apply`. The report fetches `origin` and changes nothing
-           else. An item must sit untouched for `--min-age-hours`
-           (default 24) and be clean. A branch is finished when a pull request from `--repo`
-           merged it at its exact tip or past it. It is also finished when `origin/develop` or
-           `origin/main` contains it. A
-           detached worktree is finished when any `origin` ref contains its commit. For a merged
-           develop pull request the sweep also deletes the remote head branch through the same
-           checks as `cleanup <n>`. The report runs those checks and names the result. The
-           sweep never touches the primary checkout except to fast-forward a tracked-clean
-           `develop` to `origin/develop`, and the report names that step. Permanent branches,
-           locked worktrees, and worktrees mid-operation are never touched. Exit 0 = deleted
+           worktree in between. The output then names what already happened. A locked, dirty, or
+           mid-operation worktree refuses. So does a branch tip that is neither the merged head nor
+           behind it. So does a rebase or bisect paused on the branch in any worktree, the primary
+           included. A worktree entry whose directory is gone is removed. The primary leaves the
+           merged branch before the remote delete, and a failed checkout refuses. The local half
+           removes the worktrees holding the branch. It deletes the local branch only at the merged
+           head or an ancestor of it, after a tip re-read shows it unchanged. Then it fast-forwards
+           the clone to current `develop`, never a reset, stash, or force. A clone left behind is
+           reported and does not fail the run. The clone must be a primary checkout whose origin is
+           `--repo`. `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports
+           what is provably finished, one `would-remove` or `keep <reason>` line per worktree or
+           branch, and removes it only with `--apply`. The report fetches and prunes the
+           remote-tracking refs of `origin` and writes nothing else. An item must sit untouched for
+           `--min-age-hours` (default 24) and be clean. A branch is finished when a pull request
+           from `--repo` merged it at its exact tip or past it. It is also finished when
+           `origin/develop` or `origin/main` contains it. A detached worktree is finished when any
+           `origin` ref contains its commit. For a merged develop pull request the sweep also
+           deletes the remote head branch through the same checks as `cleanup <n>`. The report runs
+           those checks and names the result. The sweep never touches the primary checkout except
+           to fast-forward a tracked-clean `develop` to `origin/develop`, and the report names that
+           step. Permanent branches, locked worktrees, and worktrees mid-operation are never
+           touched. Exit 0 = deleted
            and confirmed gone, or already gone, or a sweep that completed. Exit 1 = refused,
            a moved tip naming both commits among them. Exit 2 = a read did not answer, a
            partial one included. A delete or removal that could not be confirmed also exits 2,
@@ -7035,7 +7034,7 @@ class CleanupSweep:
             print(f"kept-remote #{num}, the local removal stands")
 
     def run(self) -> int:
-        cleanup_git(self.primary, "fetch", *(["--prune"] if self.apply else []), "origin")
+        cleanup_git(self.primary, "fetch", "--prune", "origin")
         found = cleanup_read(Q_SWEEP_DEFAULT, o=self.owner, r=self.repo)
         default = ((found.get("repository") or {}).get("defaultBranchRef") or {}).get("name")
         if not default:

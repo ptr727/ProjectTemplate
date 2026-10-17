@@ -12168,10 +12168,21 @@ class TestCleanupLocalHalf(LocalCleanupCase):
                 raise pr_review.CleanupUnread("status read failed")
             return real(root, *args, **kw)
 
-        with mock.patch.object(pr_review, "cleanup_git", side_effect=flaky):
+        listing = pr_review.cleanup_worktrees
+
+        def failing_list(primary: str) -> list[pr_review.Worktree]:
+            if "status unavailable" in self.out.getvalue():
+                raise pr_review.CleanupUnread("list read failed")
+            return listing(primary)
+
+        with (
+            mock.patch.object(pr_review, "cleanup_git", side_effect=flaky),
+            mock.patch.object(pr_review, "cleanup_worktrees", side_effect=failing_list),
+        ):
             self.assertEqual(0, self.run_local())
         out = self.out.getvalue()
         self.assertIn("status unavailable", out)
+        self.assertIn("worktrees listed: unavailable", out)
         self.assertIn("status=CLEANED", out)
 
     def test_a_remote_branch_that_moved_before_the_delete_is_not_deleted(self) -> None:
@@ -12688,22 +12699,36 @@ class TestCleanupSweep(LocalCleanupCase):
             if "primary-work" in line:
                 self.assertTrue(line.startswith("keep base-not-on-develop"), line)
 
-    def test_a_report_fetches_without_pruning_and_an_apply_prunes(self) -> None:
-        path, _ = self.worktree("stale-work")
-        run_git(path, "push", "origin", "stale-work")
+    def test_a_stale_remote_ref_for_a_deleted_branch_is_not_containment(self) -> None:
+        stale = os.path.join(self.root, "wt", "stale-detached")
+        run_git(self.primary, "worktree", "add", "--detach", stale, "origin/develop")
+        self.count += 1
+        self.commit(stale, f"only on a deleted branch {self.count}")
+        run_git(stale, "push", "origin", "HEAD:refs/heads/gone-branch")
         run_git(self.primary, "fetch", "origin")
-        run_git(self.bare, "branch", "-D", "stale-work")
+        run_git(self.bare, "branch", "-D", "gone-branch")
+        self.age(stale, 48)
         self.wire_sweep()
-        self.assertEqual(0, self.sweep())
-        run_git(self.primary, "rev-parse", "--verify", "refs/remotes/origin/stale-work")
-        self.assertEqual(0, self.sweep("--apply"))
-        tracking = subprocess.run(
-            ["git", "-C", self.primary, "rev-parse", "--verify", "--quiet"]
-            + ["refs/remotes/origin/stale-work"],
-            capture_output=True,
-            check=False,
-        )
-        self.assertNotEqual(0, tracking.returncode)
+        for extra in ((), ("--apply",)):
+            self.assertEqual(0, self.sweep(*extra))
+            out = self.out.getvalue()
+            self.assertIn(f"keep unpushed-commits worktree {stale} detached", out)
+            self.assertNotIn(f"would-remove worktree {stale}", out)
+            self.assertIn(stale, self.listed())
+
+    def test_a_primary_paused_mid_rebase_keeps_the_branch_in_both_modes(self) -> None:
+        run_git(self.primary, "checkout", "-b", "rebasing-work")
+        for n in range(3):
+            self.commit(self.primary, f"primary work {n}")
+        tip = run_git(self.primary, "rev-parse", "HEAD")
+        self.pause_rebase(self.primary)
+        self.merged_pr("rebasing-work", tip)
+        self.age_branch("rebasing-work", 48)
+        self.wire_sweep()
+        for extra in ((), ("--apply",)):
+            self.assertEqual(0, self.sweep(*extra))
+            self.assertIn("keep in-progress-operation branch rebasing-work", self.out.getvalue())
+            self.assertIn("rebasing-work", self.branches())
 
     def test_a_worktree_with_submodules_is_kept(self) -> None:
         path, tip = self.worktree("modular-work")
