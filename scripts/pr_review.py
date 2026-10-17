@@ -51,13 +51,18 @@ Subcommands
            was deleted. The local half removes the worktrees holding the branch and deletes the
            local branch only while it still names that commit. Then it fast-forwards the clone to
            current `develop`, never a reset, stash, or force. The clone must be a primary checkout
-           whose origin is `--repo`. A locked, moved, dirty, or mid-operation worktree refuses
-           before anything is deleted. A clone left behind is reported and does not fail the run.
+           whose origin is `--repo`. A locked, dirty, or mid-operation worktree refuses
+           before anything is deleted. So does a branch tip that is neither the merged head nor
+           behind it. So does a rebase or bisect paused on the branch in another worktree.
+           A worktree entry whose directory is gone is removed. The primary leaves the merged
+           branch before the remote delete, and a failed checkout refuses. A clone left behind
+           is reported and does not fail the run.
            `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is
            provably finished, one `would-remove` or `keep <reason>` line per worktree or branch,
            and removes it only with `--apply`. An item must sit untouched for `--min-age-hours`
            (default 24) and be clean. A branch is finished when a pull request from `--repo`
-           merged it at its exact tip, or when `origin/develop` or `origin/main` contains it. A
+           merged it at its exact tip or past it. It is also finished when `origin/develop` or
+           `origin/main` contains it. A
            detached worktree is finished when any `origin` ref contains its commit. For a merged
            develop pull request the sweep also deletes the remote head branch through the same
            checks as `cleanup <n>`. The report runs those checks and names the result. The
@@ -6467,6 +6472,7 @@ def cleanup(owner: str, repo: str, num: int, checkout: str | None = None) -> int
         plan = cleanup_check(owner, repo, num)
         if primary is not None:
             cleanup_preflight(primary, plan.branch, plan.head)
+            cleanup_leave_branch(primary, plan.branch)
     except CleanupRefused as exc:
         if exc.status in ("REFUSED", "TIP_MOVED", "BAD_CHECKOUT"):
             print(f"status={exc.status} {exc}")
@@ -6637,6 +6643,24 @@ def cleanup_in_progress(path: str) -> bool:
     return admin is not None and any(os.path.exists(os.path.join(admin, n)) for n in IN_PROGRESS)
 
 
+def cleanup_operation_names(path: str) -> set[str]:
+    """The branch names a rebase or bisect paused in the worktree at `path` is working on.
+
+    Either detaches HEAD, so the worktree no longer lists the branch it will return to.
+    """
+    admin = cleanup_admin(path)
+    names: set[str] = set()
+    if admin is None:
+        return names
+    for name in ("rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START"):
+        try:
+            text = Path(admin, name).read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        names.add(text.removeprefix("refs/heads/"))
+    return names
+
+
 def cleanup_cwd_inside(path: str) -> bool:
     """Whether this process's working directory is the worktree at `path` or inside it."""
     try:
@@ -6661,6 +6685,8 @@ def cleanup_remove_worktree(primary: str, path: str) -> bool:
     except CleanupUnread:
         if any(w.path == path for w in cleanup_worktrees(primary)):
             raise
+        if os.path.exists(path):
+            raise CleanupUnread(f"git failed to remove {path}, which is unlisted but still on disk")
         print(f"  git reported an error, yet {path} is no longer listed, so it is already gone")
         return inside
     if any(w.path == path for w in cleanup_worktrees(primary)):
@@ -6740,6 +6766,15 @@ def cleanup_base(primary: str, apply: bool = True) -> bool:
     return True
 
 
+def cleanup_behind(primary: str, tip: str, head: str) -> bool:
+    """Whether commit `tip` is an ancestor of `head`, so it holds nothing `head` lacks.
+
+    A `head` object this clone lacks proves nothing, and reads as not behind.
+    """
+    proc = cleanup_git(primary, "merge-base", "--is-ancestor", tip, head, ok=(0, 1, 128))
+    return proc.returncode == 0
+
+
 def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None, list[Worktree]]:
     """Fetch, then decide every local refusal, returning the branch tip and the worktrees to remove.
 
@@ -6749,24 +6784,27 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
     cleanup_git(primary, "fetch", "--prune", "origin")
     ref = f"refs/heads/{branch}"
     tip = cleanup_tip(primary, ref)
-    if tip is not None and tip != head:
+    if tip is not None and tip != head and not cleanup_behind(primary, tip, head):
         raise CleanupRefused(
             "LOCAL_TIP_MOVED",
-            f"{ref} is at {tip}, and the pull request merged {head}, "
+            f"{ref} is at {tip}, which is neither the merged head {head} nor behind it, "
             "so it may carry commits that were never pushed",
         )
     linked = []
-    for w in (w for w in cleanup_worktrees(primary) if w.branch == branch):
-        if w.path == primary:
-            if cleanup_dirty(primary, False):
-                raise CleanupRefused(
-                    "BASE_DIRTY", f"{primary} has {branch!r} checked out with tracked changes"
-                )
-            continue
+    others = [w for w in cleanup_worktrees(primary) if w.path != primary]
+    for w in others:
+        if not w.prunable and branch in cleanup_operation_names(w.path):
+            raise CleanupRefused(
+                "WORKTREE_KEPT", f"{w.path} has a rebase or bisect in progress on {branch!r}"
+            )
+    holds = any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary))
+    if holds and cleanup_dirty(primary, False):
+        raise CleanupRefused(
+            "BASE_DIRTY", f"{primary} has {branch!r} checked out with tracked changes"
+        )
+    for w in (w for w in others if w.branch == branch):
         why = (
-            "its directory is missing, so `cleanup --sweep` owns it"
-            if w.prunable
-            else "it is locked"
+            "it is locked"
             if w.locked
             else "a rebase, bisect, merge, cherry-pick, or revert is in progress in it"
             if cleanup_in_progress(w.path)
@@ -6778,10 +6816,26 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
         )
         if why is not None:
             raise CleanupRefused("WORKTREE_KEPT", f"{w.path}, {why}")
-        if cleanup_dirty(w.path, True):
+        if not w.prunable and cleanup_dirty(w.path, True):
             raise CleanupRefused("WORKTREE_DIRTY", f"{w.path} has uncommitted changes")
         linked.append(w)
     return tip, linked
+
+
+def cleanup_leave_branch(primary: str, branch: str) -> None:
+    """Move the primary checkout to `develop` where it holds `branch`, refusing if git will not.
+
+    This runs before the remote delete, so a checkout that fails still deletes nothing.
+    """
+    if not any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
+        return
+    try:
+        cleanup_git(primary, "checkout", "develop")
+    except CleanupUnread as exc:
+        raise CleanupRefused(
+            "WORKTREE_KEPT", f"{primary} could not leave {branch}, so the branch was kept"
+        ) from exc
+    print(f"  switched {primary} off {branch} to develop")
 
 
 def cleanup_local(primary: str, branch: str, head: str) -> int:
@@ -6800,15 +6854,6 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
         print(f"  removed worktree {w.path}")
         if moved:
             cleanup_moved_note()
-    if any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
-        try:
-            cleanup_git(primary, "checkout", "develop")
-        except CleanupUnread:
-            print(
-                f"status=WORKTREE_KEPT {primary} could not leave {branch}, so the branch was kept"
-            )
-            return 1
-        print(f"  switched {primary} off {branch} to develop")
     if tip is None:
         print(f"  local branch {branch} is already gone")
     else:
@@ -6847,6 +6892,7 @@ class CleanupSweep:
         self.problems = 0
         self.permanent = {"develop", "main"}
         self.common = ""
+        self.operating: set[str] = set()
 
     def keep(self, reason: str, what: str) -> None:
         print(f"keep {reason} {what}")
@@ -6893,8 +6939,11 @@ class CleanupSweep:
             n
             for n in nodes
             if isinstance(n, dict)
-            and n.get("headRefOid") == tip
             and in_repository(n, self.owner, self.repo)
+            and (
+                n.get("headRefOid") == tip
+                or cleanup_behind(self.primary, tip, n.get("headRefOid") or "")
+            )
         ]
         matches.sort(key=lambda n: n.get("baseRefName") != "develop")
         if matches:
@@ -6960,6 +7009,9 @@ class CleanupSweep:
             if w.path == self.primary and w.branch:
                 self.permanent.add(w.branch)
         held = {w.branch for w in trees if w.branch}
+        for w in linked:
+            if not w.prunable:
+                self.operating |= cleanup_operation_names(w.path)
         self.prune([w for w in linked if w.prunable and not w.locked])
         for w in linked:
             if not w.prunable or w.locked:
@@ -7038,6 +7090,9 @@ class CleanupSweep:
             if w.branch in self.permanent:
                 self.keep("permanent-branch", what)
                 return
+            if w.branch in self.operating:
+                self.keep("in-progress-operation", what)
+                return
             hours = self.worktree_hours(w)
             if hours is None:
                 self.keep("age-unreadable", what)
@@ -7104,6 +7159,9 @@ class CleanupSweep:
         """A local branch no worktree holds, judged by the age of its reflog."""
         what = f"branch {branch}"
         try:
+            if branch in self.operating:
+                self.keep("in-progress-operation", what)
+                return
             hours = self.newest_hours([os.path.join(self.common, "logs", "refs", "heads", branch)])
             if hours < self.min_age:
                 self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
