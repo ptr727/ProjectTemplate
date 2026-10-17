@@ -328,11 +328,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    rule's issue closes, and an adopted one stays open as ordinary work, which the loop may then
    take, since the maintainer has judged it.
 7. **Close the lane out on done.** Each pull request the lane merged into `develop` has had
-   `drive-pr` step 4's cleanup run, so no finished worktree or branch outlives the lane. A cleanup
-   that exited other than `0` is named in the close-out comment rather than finished by hand. Comment on the handoff what merged, which
-   issues it fixed, and what it filed along the way, the lesson issue included, then close it. An `auto-*` lane holds one
-   issue, so its work is complete and it is the closed-out lane `session-handoff` "The Chain" names,
-   needing no successor.
+   `drive-pr` step 4's cleanup run. A cleanup that exited other than `0` leaves its worktree or
+   branch standing, and the close-out comment names it rather than the worker finishing it by
+   hand. Comment on the handoff what merged, which issues it fixed, and what it filed along the
+   way, the lesson issue included, then close it. An `auto-*` lane holds one issue, so its work is
+   complete and it is the closed-out lane `session-handoff` "The Chain" names, needing no
+   successor.
 8. **Save no memory**, since state lives in the chain where any session on any machine reads it.
    Reply with one line, and only once nothing the worker started is still running, per step 4.
 
