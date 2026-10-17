@@ -448,7 +448,7 @@ SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
 # What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
 # It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
 PREVIOUSLY_MISSED = re.compile(
-    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*(?:\d{1,4}[ \t]+)?Previously missed\b",
+    r"^(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*(?:[0-9]{1,4}[ \t]+)?Previously missed\b",
     re.IGNORECASE,
 )
 # CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
@@ -821,7 +821,7 @@ HUB = "ptr727/ProjectTemplate"
 SUMMARY = re.compile(r"<summary(?:\s+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
-LEADING_COUNT = re.compile(r"(?:[ \t#*_]|[^\x00-\x7f])*(\d+)[ \t]")
+LEADING_COUNT = re.compile(r"(?:[ \t#*_]|[^\x00-\x7f])*([0-9]+)[ \t]")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a count.
 # The section has appeared as a bare line too, and a count is what prose does not carry.
@@ -2400,8 +2400,7 @@ def section_entries(body: str) -> list[tuple[str, int | None, list[str]]]:
         role = roles.get(normal(summary).casefold())
         if role is None:
             continue
-        digits = re.search(r"\d+", EMPHASIS.sub("", summary))
-        count = counted(digits.group()) if digits else None
+        count = heading_count(summary)
         text = masked[start:end]
         own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
         found.append((role, count, [ln for ln in own.splitlines() if ENTRY_LINE.match(ln)]))
@@ -2422,9 +2421,9 @@ def stated_total(body: str, preamble_only: bool = False) -> int | None:
     `MARKUP_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
 
     A later revision of the format drops the `**Findings:**` line and states its total as a bare
-    `**0 open findings**` line, read here the same way, since left unread it printed `?` and
-    suppressed the shortfall the total is compared for. A later one still writes that zero as
-    `**No open issues**` followed by an emoji, which is the same stated zero.
+    `**0 open findings**` line. That line is read here the same way, since left unread it printed
+    `?` and suppressed the shortfall the total is compared for. A later one still writes that zero as
+    `**No open issues**` and an emoji. That is the same stated zero.
 
     That revision writes the bare line only for a zero, measured over every body carrying it, and
     states any other total as the count opening its open-findings section, so where the preamble
@@ -4275,6 +4274,18 @@ def heading_of(block: str) -> str:
     return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
 
 
+def heading_count(block: str) -> int | None:
+    """The count the block's own heading states, closing it as `(N)` or opening it.
+
+    One reader serves every caller, since the format moved its count to the front of a summary.
+    A caller reading only one of the two places misses the other. A section bounded on `(N)` alone
+    ran into a count-first sibling and printed that sibling's findings twice.
+    """
+    heading = heading_of(block)
+    m = COUNT.search(heading) or LEADING_COUNT.match(EMPHASIS.sub("", heading))
+    return counted(m.group(1)) if m else None
+
+
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
@@ -4458,7 +4469,7 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     """
     for j in range(start + 1, len(scan_lines)):
         line = scan_lines[j]
-        if not (HEADING.match(line) and COUNT.search(line)):
+        if not (HEADING.match(line) and heading_count(line) is not None):
             continue
         if any(o is not marker and o.search(line) for o in SECTION_MARKERS):
             return j
@@ -4519,15 +4530,13 @@ def outside_diff_blocks(body: str) -> list[str]:
 def finding_count(block: str) -> int:
     """The heading's `(N)`, floored at one, since a block reported as zero reads as a clean pass.
 
-    A heading stating no `(N)` is read for a count opening it, `2 previously missed issues`, which
-    left unread fell to the floor and reported one finding where the round raised two.
+    A heading stating its count first, `2 previously missed issues`, is read by `heading_count` too.
+    Left unread, it fell to the floor and reported one finding where the round raised two.
 
     A run longer than a count carries falls to that same floor rather than crashing the digest,
     the block existing being what says there is at least one finding in it.
     """
-    heading = heading_of(block)
-    m = COUNT.search(heading) or LEADING_COUNT.match(EMPHASIS.sub("", heading))
-    stated = counted(m.group(1)) if m else None
+    stated = heading_count(block)
     return max(stated, 1) if stated is not None else 1
 
 

@@ -1402,17 +1402,18 @@ class TestPreviouslyMissed(GqlCase):
     def test_a_count_first_heading_is_the_section_and_states_its_count(self) -> None:
         """A later revision opens the heading on its count, `2 previously missed issues`.
 
-        Unread, the round exited 43 on an unvetted summary, and its findings, which open no thread,
-        reached the agent only through the raw body. Read as the section without its count, the
-        block fell to the floor of one and reported one finding where the round raised two.
+        Unread, the round exited 43 on an unvetted summary. Its findings open no thread, so they
+        reached the agent only through the raw body. Read without its count, the block fell to the
+        floor of one. It then reported one finding where the round raised two.
         """
         body = counted_missed(2)
         self.assertEqual([], pr_review.unrecognized_in(body))
         blocks = pr_review.previously_missed_blocks(body)
         self.assertEqual(1, len(blocks))
         self.assertEqual(2, pr_review.finding_count(blocks[0]))
+        self.assertEqual([], pr_review.unrecognized_in(counted_missed(1)))
         self.assertEqual(
-            1, pr_review.finding_count(pr_review.previously_missed_blocks(counted_missed(1))[0])
+            3, pr_review.finding_count(pr_review.previously_missed_blocks(counted_missed(3))[0])
         )
         self.answer(payload([review(body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
@@ -1420,10 +1421,32 @@ class TestPreviouslyMissed(GqlCase):
         self.assertIn("shapes=ok", out)
         self.assertIn("Low severity Constructed missed finding 2", out)
 
+    def test_a_section_ends_where_its_count_first_sibling_starts(self) -> None:
+        """A sibling bounds a section only where its heading states a count.
+
+        A bound reading only `(N)` ran a suppressed block into a count-first previously-missed
+        sibling. The digest then printed that finding twice, once under the suppressed banner.
+        """
+        shared = (
+            f"{OVERVIEW}\n<details>\n<summary>Review details</summary>\n\n"
+            "### Suppressed comments (1)\n\nThe suppressed finding.\n\n"
+            "<details>\n<summary><strong>2 previously missed issues</strong></summary>\n\n"
+            "The previously missed finding.\n</details>\n</details>\n"
+        )
+        suppressed = pr_review.suppressed_blocks(shared)
+        self.assertEqual(1, len(suppressed))
+        self.assertIn("The suppressed finding.", suppressed[0])
+        self.assertNotIn("The previously missed finding.", suppressed[0])
+        self.answer(payload([review(body=shared)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertEqual(1, out.count("The previously missed finding."))
+
     def test_a_count_first_section_cancels_the_flagging_verdict_reading(self) -> None:
-        """The round flags a closer look and states no open issue, and its findings are the
-        previously missed ones, which the digest now counts, so the round is not a verdict naming
-        nothing."""
+        """The round flags a closer look and states no open issue.
+
+        Its findings are the previously missed ones, which the digest now counts. So the round is
+        not a verdict naming nothing.
+        """
         self.answer(payload([review(body=counted_missed(2))]))
         self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=counted_missed(2))])))
         with contextlib.redirect_stdout(io.StringIO()) as printed:
@@ -1924,8 +1947,8 @@ def previously_missed(
 def counted_missed(entries: int) -> str:
     """The later revision's previously-missed section, its summary opening on the count.
 
-    The round flags a closer look, states its zero as `**No open issues**`, and nests one badged
-    entry per finding under the section, each a `FILE:LINE` anchor and a priority-tagged paragraph.
+    The round flags a closer look and states its zero as `**No open issues**`. The section nests
+    one badged entry per finding, each a `FILE:LINE` anchor and a priority-tagged paragraph.
     That nesting is the observed one, and every title, path, and sentence is constructed, per
     GOVERNANCE.md "Representative Data in Agent-Authored Text".
     """
@@ -4795,7 +4818,7 @@ class TestOverviewSections(GqlCase):
     def test_the_open_issues_spelling_is_the_same_section(self) -> None:
         """A later revision writes `1 open issue` where it wrote `1 open finding`, and exited 43.
 
-        Its entries link the round's own threads as the earlier spelling's do, so it is read as the
+        Its entries link the round's own threads, as the earlier spelling's do. So it is read as the
         same section: vetted, stating the total, and each entry checked against the threads.
         """
         for ids in (("6000000001",), ("6000000001", "6000000002")):
