@@ -380,6 +380,7 @@ import tarfile
 import time
 import unicodedata
 import urllib.parse
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -838,7 +839,7 @@ OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
 # A count opening a heading's text, read once `heading_count` has reduced its badge and emphasis as `normal` does.
 # No tag is skipped here, since a finding entry's summary opens on a severity badge rather than on heading markup.
 # A badge read as markup made an entry titled `2 low confidence results` state a count, and bound a section there.
-LEADING_COUNT = re.compile(r"(?:[ \t\r\n#*_]|[^\x00-\x7f])*([0-9]+)[ \t\r\n]")
+LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # What makes a line a heading rather than prose mentioning the phrase, in either markup.
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
@@ -3616,6 +3617,20 @@ def counted(digits: str) -> int | None:
     return int(digits) if len(digits) <= COUNT_DIGITS else None
 
 
+def reduced(text: str) -> str:
+    """The text with each severity badge reduced to its word and its emphasis markup dropped.
+
+    The one reduction `normal`, `unwrap`, and `heading_count` share, so a heading is vetted,
+    printed, and counted from the same text.
+    """
+    return EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, text))
+
+
+def spaced(text: str) -> str:
+    """The text `reduced`, then cut to ASCII and single spaces, which `LEADING_COUNT` reads."""
+    return re.sub(r"\s+", " ", "".join(c for c in reduced(text) if ord(c) < 128)).strip()
+
+
 def normal(text: str) -> str:
     """A marker reduced toward what a vetted list compares: emphasis markup dropped, ASCII,
     single spaces, counts as `(N)`.
@@ -3631,12 +3646,10 @@ def normal(text: str) -> str:
     icon set is rebuilt, and the text it carries is the only part a reader wants.
 
     A count opening the marker is rewritten the same way, since a later revision of the second
-    format writes `3 resolved since last review` where it once closed the summary on `(3)`.
+    format writes `3 resolved since last review` where it once closed the summary on `(3)`. It is
+    found by `LEADING_COUNT`, the rule `heading_count` reads the count by.
     """
-    unbadged = SEVERITY_BADGE.sub(badge_text, text)
-    ascii_only = "".join(c for c in EMPHASIS.sub("", unbadged) if ord(c) < 128)
-    spaced = re.sub(r"\s+", " ", re.sub(r"\(\d+\)", "(N)", ascii_only)).strip()
-    return re.sub(r"^\d+(?= )", "(N)", spaced)
+    return LEADING_COUNT.sub(r"\1(N)", re.sub(r"\([0-9]+\)", "(N)", spaced(text)))
 
 
 def finding_entry(marker: str) -> bool:
@@ -3675,7 +3688,10 @@ def unrecognized_in(body: str) -> list[str]:
 
     A previously-missed summary that no reader finds as a section is reported too. Its spelling is
     vetted wherever it appears, while the reader keys on how its line opens. A layout the reader
-    misses would otherwise hand its findings to nobody under `shapes=ok`.
+    misses would otherwise hand its findings to nobody under `shapes=ok`. The check compares which
+    summaries the blocks hold rather than how many blocks there are, since one region yields one
+    block, and a bare `(N)` line read in one region otherwise stood in for a summary missed in
+    another.
 
     A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
@@ -3699,13 +3715,19 @@ def unrecognized_in(body: str) -> list[str]:
         for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
         if unvetted(marker, VETTED_SUMMARIES) and not finding_entry(marker)
     ]
-    missed = [
+    missed = Counter(
         marker
         for marker in (normal(s) for s in SUMMARY.findall(plain))
         if not unvetted(marker, PREVIOUSLY_MISSED_SUMMARIES)
-    ]
-    if len(missed) > len(previously_missed_blocks(body)):
-        found.append(f"summary: {missed[0]}, vetted while no reader found its section")
+    )
+    read = Counter(
+        normal(s)
+        for block in previously_missed_blocks(body)
+        for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(block)))
+    )
+    unread = missed - read
+    if unread:
+        found.append(f"summary: {next(iter(unread))}, vetted while no reader found its section")
     found += [
         f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
     ]
@@ -4313,13 +4335,15 @@ def heading_count(heading: str) -> int | None:
     It takes the heading itself rather than the block, and reads all of it. Cut to its first line,
     a summary split as `Open` and then `(2)` lost the count its role was vetted with.
 
-    The badge and the emphasis are reduced first, as `normal` reduces them before vetting. The
-    count is then read from the same text the role was vetted on. A badge reduces to its word, which is
-    what keeps an entry titled `2 low confidence results` from stating a count.
+    The count is read from `spaced`, the text `normal` vets the role on, through the same
+    `LEADING_COUNT`. A badge reduces to its word, which is what keeps an entry titled
+    `2 low confidence results` from stating a count.
     """
-    text = EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, heading))
-    m = COUNT.search(text) or LEADING_COUNT.match(text)
-    return counted(m.group(1)) if m else None
+    text = spaced(heading)
+    closing = COUNT.search(text)
+    opening = LEADING_COUNT.match(text)
+    digits = closing.group(1) if closing else opening.group(2) if opening else None
+    return counted(digits) if digits is not None else None
 
 
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
@@ -4447,6 +4471,18 @@ def mask_quotations(body: str, span: str = " ") -> str:
 SECTION_MARKERS = (SUPPRESSED, PREVIOUSLY_MISSED)
 
 
+def entry_heading(line: str) -> bool:
+    """Whether this line is a finding entry's own heading, which opens on a severity badge.
+
+    A finding entry is never a section heading, whatever words its title carries. `SUPPRESSED`
+    matches anywhere in a line, and `PREVIOUSLY_MISSED` reads past the badge as heading markup, so
+    an entry titled `2 low confidence results are dropped` otherwise opened a section of its own.
+    A summary opening on a severity and stating a count is still reported by `unrecognized_in`,
+    as an unvetted spelling.
+    """
+    return bool(SEVERITY_TEXT.match(spaced(TAGS.sub("", heading_of(line)))))
+
+
 def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = False) -> list[str]:
     """Return the review body's sections whose own heading matches `marker`, each sliced from
     that heading through to the end of its own region.
@@ -4478,7 +4514,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
             scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
         for i, line in enumerate(scan_lines):
             bare = COUNT.search(line) and not OPENING_COUNT.match(line)
-            if marker.search(line) and (HEADING.match(line) or bare):
+            if marker.search(line) and (HEADING.match(line) or bare) and not entry_heading(line):
                 blocks.append("\n".join(raw_lines[i : sibling_heading(scan_lines, i, marker)]))
                 break
     return blocks
@@ -4536,7 +4572,8 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     opposite triage about them, while both counts come out wrong.
 
     A stated count is what separates them, the same signal `finding_entry` reads: every section
-    heading here states one and a finding's own title does not. Requiring it also keeps this off
+    heading here states one and a finding's own title does not. A title can still state one, so an
+    entry opening on its severity badge never bounds, per `entry_heading`. Requiring it also keeps this off
     the CodeRabbit blocks, whose own marker is in neither of the two and which were never bounded
     before this.
 
@@ -4549,6 +4586,8 @@ def sibling_heading(scan_lines: list[str], start: int, marker: re.Pattern[str]) 
     for j in range(start + 1, len(scan_lines)):
         line = scan_lines[j]
         if not (HEADING.match(line) and heading_count(heading_of(line)) is not None):
+            continue
+        if entry_heading(line):
             continue
         if any(o is not marker and o.search(line) for o in SECTION_MARKERS):
             return j
@@ -4571,7 +4610,7 @@ def unwrap(block: str) -> str:
     nothing, and a severity badge says one word wrapped in two versioned icon URLs that bury the
     title following them. The word is kept and the markup is not.
     """
-    return TAGS.sub("", EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, block)))
+    return TAGS.sub("", reduced(block))
 
 
 def previously_missed_blocks(body: str) -> list[str]:
