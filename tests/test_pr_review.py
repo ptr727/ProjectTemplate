@@ -12147,14 +12147,57 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertFalse(os.path.exists(path))
         self.assertNotIn(CLEANUP_BRANCH, self.branches())
 
-    def test_the_shell_directory_inside_a_removed_worktree_is_noted(self) -> None:
+    def test_the_shell_directory_inside_a_removed_worktree_is_handled_per_platform(self) -> None:
         path, tip = self.worktree(CLEANUP_BRANCH)
         self.wire_merged(tip)
         before = os.getcwd()
         self.addCleanup(os.chdir, before)
         os.chdir(path)
+        if pr_review.ON_WINDOWS:
+            self.assertEqual(1, self.run_local())
+            self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+            self.assertTrue(os.path.isdir(path))
+        else:
+            self.assertEqual(0, self.run_local())
+            self.assertIn("note: the shell's directory", self.out.getvalue())
+            self.assertFalse(os.path.exists(path))
+
+    def test_a_shell_inside_the_worktree_refuses_on_windows(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        os.chdir(path)
+        with mock.patch.object(pr_review, "ON_WINDOWS", True):
+            self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_a_worktree_with_submodules_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        Path(path, ".gitmodules").write_text("", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        self.assertIn("status=WORKTREE_KEPT", self.out.getvalue())
+        self.assertTrue(os.path.isdir(path))
+
+    def test_a_rerun_with_the_primary_elsewhere_is_done_with_the_base_kept(self) -> None:
+        run_git(self.primary, "checkout", "-b", "elsewhere")
+        self.wire(cleanup_pr(headRefOid=CLEANUP_HEAD), refs=[CLEANUP_HEAD, None])
         self.assertEqual(0, self.run_local())
-        self.assertIn("note: the shell's directory", self.out.getvalue())
+        out = self.out.getvalue()
+        self.assertIn("is already gone", out)
+        self.assertIn("base=kept", out)
+
+    def test_a_tip_that_moves_before_the_delete_is_a_refusal_after_the_removals(self) -> None:
+        _, tip = self.worktree(CLEANUP_BRANCH)
+        self.wire_merged(tip)
+        with mock.patch.object(pr_review, "cleanup_tip", side_effect=[tip, "b" * 40]):
+            self.assertEqual(1, self.run_local())
+        out = self.out.getvalue()
+        self.assertLess(out.index("removed worktree"), out.index("status=LOCAL_TIP_MOVED"))
+        self.assertIn(CLEANUP_BRANCH, self.branches())
 
     def test_an_unconfirmed_branch_delete_is_exit_2(self) -> None:
         path, tip = self.worktree(CLEANUP_BRANCH)
@@ -12393,6 +12436,32 @@ class TestCleanupSweep(LocalCleanupCase):
         self.wire_sweep()
         self.assertEqual(0, self.sweep("--apply"))
         self.assertIn("primary-work", self.branches())
+        for line in self.out.getvalue().splitlines():
+            if "primary-work" in line:
+                self.assertTrue(line.startswith("keep base-not-on-develop"), line)
+
+    def test_a_worktree_with_submodules_is_kept(self) -> None:
+        path, tip = self.worktree("modular-work")
+        self.merged_pr("modular-work", tip)
+        Path(path, ".gitmodules").write_text("", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep submodules", self.out.getvalue())
+        self.assertIn(path, self.listed())
+
+    def test_a_shell_inside_a_worktree_keeps_it_on_windows(self) -> None:
+        path, tip = self.worktree("held-work")
+        self.merged_pr("held-work", tip)
+        self.age(path, 48)
+        self.wire_sweep()
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        os.chdir(path)
+        with mock.patch.object(pr_review, "ON_WINDOWS", True):
+            self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn("keep cwd-inside", self.out.getvalue())
+        self.assertIn(path, self.listed())
 
     def test_a_worktree_mid_operation_is_kept(self) -> None:
         path, tip = self.worktree("paused-work")

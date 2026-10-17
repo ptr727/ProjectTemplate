@@ -51,8 +51,7 @@ Subcommands
            still names that commit. Then it fast-forwards the clone to current `develop`, never
            a reset, stash, or force. The clone must be a primary checkout whose origin is
            `--repo`. A locked, moved, dirty, or mid-operation worktree refuses before anything
-           local is removed. A clone left behind is reported and does not fail a run whose
-           removals landed. `cleanup --sweep --checkout <primary clone>` takes no pull request.
+           local is removed. A clone left behind is reported and does not fail the run. `cleanup --sweep --checkout <primary clone>` takes no pull request.
            It reports what is provably finished, one `would-remove` or `keep <reason>` line per
            worktree or branch, and removes it only with `--apply`. An item must sit untouched for
            `--min-age-hours` (default 24) and be clean. It must also be merged by a pull request
@@ -6456,6 +6455,9 @@ def cleanup(owner: str, repo: str, num: int, checkout: str | None = None) -> int
         return 2
 
 
+ON_WINDOWS = os.name == "nt"
+
+
 class CleanupRefused(Exception):
     """A local check refused, carrying the `status=` name to print, reported at exit 1."""
 
@@ -6601,17 +6603,23 @@ def cleanup_in_progress(path: str) -> bool:
     return admin is not None and any(os.path.exists(os.path.join(admin, n)) for n in IN_PROGRESS)
 
 
+def cleanup_cwd_inside(path: str) -> bool:
+    """Whether this process's working directory is the worktree at `path` or inside it."""
+    try:
+        here = os.path.realpath(os.getcwd())
+    except OSError:
+        return False
+    return here == path or here.startswith(path + os.sep)
+
+
 def cleanup_remove_worktree(primary: str, path: str) -> bool:
     """Remove the worktree at `path` without force and read the list back for it.
 
     Returns whether this process was standing inside it. The process moves to the primary
-    checkout first, because a directory in use cannot be removed on every platform.
+    checkout first. Windows cannot free a directory the parent shell holds, so callers refuse
+    there before the first removal.
     """
-    try:
-        here = os.path.realpath(os.getcwd())
-    except OSError:
-        here = ""
-    inside = here == path or here.startswith(path + os.sep)
+    inside = cleanup_cwd_inside(path)
     if inside:
         os.chdir(primary)
     cleanup_git(primary, "worktree", "remove", path)
@@ -6633,7 +6641,9 @@ def cleanup_delete_branch(primary: str, branch: str, tip: str) -> None:
     ref = f"refs/heads/{branch}"
     now = cleanup_tip(primary, ref)
     if now != tip:
-        raise CleanupUnread(f"{ref} reads {now} just before its delete, not {tip}")
+        raise CleanupRefused(
+            "LOCAL_TIP_MOVED", f"{ref} reads {now} just before its delete, and {tip} was expected"
+        )
     proc = cleanup_git(primary, "branch", "-D", "--", branch, ok=(0, 1))
     if proc.returncode != 0:
         raise CleanupRefused("WORKTREE_KEPT", f"git kept {ref}: {proc.stderr.strip()}")
@@ -6645,23 +6655,32 @@ def cleanup_base(primary: str) -> bool:
     """Fast-forward the primary checkout to current `develop`, never reset, stash, or force.
 
     Returns whether the clone is current, printing a status line for each way it is not. A clone
-    on another branch or with tracked changes is left alone, and so is one that cannot fast-forward.
+    on another branch, with tracked changes, or that cannot fast-forward is left alone. No
+    outcome here is an error, so callers report it and never fail a run on it.
     """
-    current = cleanup_git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", ok=(0, 1))
-    on = current.stdout.strip()
-    if on != "develop":
-        print(f"keep base-not-on-develop {primary} is on {on or 'a detached head'}")
+    try:
+        current = cleanup_git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", ok=(0, 1))
+        on = current.stdout.strip()
+        if on != "develop":
+            print(f"keep base-not-on-develop {primary} is on {on or 'a detached head'}")
+            return False
+        if cleanup_dirty(primary, False):
+            print(f"status=BASE_DIRTY {primary} has tracked changes, so it was left where it is")
+            return False
+        behind = cleanup_git(
+            primary, "merge-base", "--is-ancestor", "HEAD", "origin/develop", ok=(0, 1)
+        )
+        if behind.returncode == 1:
+            print(f"status=BASE_NOT_FF develop in {primary} cannot fast-forward to origin/develop")
+            return False
+        try:
+            cleanup_git(primary, "merge", "--ff-only", "origin/develop")
+        except CleanupUnread:
+            if cleanup_tip(primary, "HEAD") != cleanup_tip(primary, "refs/remotes/origin/develop"):
+                raise
+    except CleanupUnread as exc:
+        print(f"status=BASE_UNREAD develop in {primary} could not be brought current: {exc}")
         return False
-    if cleanup_dirty(primary, False):
-        print(f"status=BASE_DIRTY {primary} has tracked changes, so it was left where it is")
-        return False
-    behind = cleanup_git(
-        primary, "merge-base", "--is-ancestor", "HEAD", "origin/develop", ok=(0, 1)
-    )
-    if behind.returncode == 1:
-        print(f"status=BASE_NOT_FF develop in {primary} cannot fast-forward to origin/develop")
-        return False
-    cleanup_git(primary, "merge", "--ff-only", "origin/develop")
     print(f"  develop in {primary} is at origin/develop")
     return True
 
@@ -6670,7 +6689,7 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
     """Remove the finished branch's worktrees and local branch, then return the base clone.
 
     Every refusal is decided before the first removal, so a refused run leaves all of it in
-    place. The base clone's return is reported and never fails a run whose removals landed.
+    place. The base clone's return is reported and never fails the run.
     `head` is the commit the merged pull request carried, read live by the remote half. The
     local branch is only deleted while it still names exactly that commit.
     """
@@ -6700,6 +6719,10 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
             if w.locked
             else "a rebase, bisect, merge, cherry-pick, or revert is in progress in it"
             if cleanup_in_progress(w.path)
+            else "it holds submodules, which only git's own check may remove"
+            if os.path.exists(os.path.join(w.path, ".gitmodules"))
+            else "run from a directory outside it, such as the base clone"
+            if ON_WINDOWS and cleanup_cwd_inside(w.path)
             else None
         )
         if why is not None:
@@ -6709,35 +6732,24 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
                 "WORKTREE_DIRTY", f"nothing local was removed: {w.path} has uncommitted changes"
             )
         linked.append(w)
-    removed = 0
     for w in linked:
         moved = cleanup_remove_worktree(primary, w.path)
-        removed += 1
         print(f"  removed worktree {w.path}")
         if moved:
             cleanup_moved_note()
     if any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
         cleanup_git(primary, "checkout", "develop")
         print(f"  switched {primary} off {branch} to develop")
-        removed += 1
     if tip is None:
         print(f"  local branch {branch} is already gone")
     else:
         try:
             cleanup_delete_branch(primary, branch, tip)
-        except CleanupRefused as exc:
-            if not removed:
-                raise
-            print(f"status=LOCAL_DELETE_NOT_CONFIRMED {exc}")
-            return 2
         except CleanupUnread as exc:
             print(f"status=LOCAL_DELETE_NOT_CONFIRMED {exc}")
             return 2
-        removed += 1
         print(f"  deleted local branch {branch} at {tip}, confirmed by reading the ref back")
     current = cleanup_base(primary)
-    if not current and not removed:
-        return 1
     first = cleanup_git(primary, "status", "--short", "--branch").stdout.splitlines()[:1]
     print(f"  {first[0] if first else 'status unavailable'}")
     print(f"  worktrees listed: {len(cleanup_worktrees(primary))}")
@@ -6919,10 +6931,10 @@ class CleanupSweep:
             return 0.0
         for name in names:
             try:
-                target = Path(base, name, "gitdir").read_text(encoding="utf-8").strip()
+                text = Path(base, name, "gitdir").read_text(encoding="utf-8").strip()
             except OSError:
                 continue
-            if os.path.realpath(os.path.dirname(target)) == w.path:
+            if os.path.realpath(os.path.dirname(os.path.join(base, name, text))) == w.path:
                 return self.newest_hours([os.path.join(base, name, "index")])
         return 0.0
 
@@ -6934,6 +6946,12 @@ class CleanupSweep:
                 return
             if cleanup_in_progress(w.path):
                 self.keep("in-progress-operation", what)
+                return
+            if os.path.exists(os.path.join(w.path, ".gitmodules")):
+                self.keep("submodules", what)
+                return
+            if ON_WINDOWS and cleanup_cwd_inside(w.path):
+                self.keep("cwd-inside", what)
                 return
             if w.branch in self.permanent:
                 self.keep("permanent-branch", what)
@@ -6967,11 +6985,13 @@ class CleanupSweep:
             if cleanup_remove_worktree(self.primary, w.path):
                 cleanup_moved_note()
             print(f"removed worktree {w.path}")
-            cleanup_delete_branch(self.primary, w.branch, tip)
+            try:
+                cleanup_delete_branch(self.primary, w.branch, tip)
+            except CleanupRefused as exc:
+                print(f"kept branch {w.branch} after removing its worktree: {exc}")
+                return
             print(f"removed branch {w.branch} tip={tip} evidence={evidence}")
             self.remote(num, w.branch)
-        except CleanupRefused as exc:
-            self.keep("checked-out-elsewhere", f"{what}: {exc}")
         except CleanupUnread as exc:
             self.failed(what, exc)
 
@@ -7021,11 +7041,8 @@ class CleanupSweep:
             self.failed(what, exc)
 
     def base(self) -> None:
-        """Fast-forward the primary checkout, reporting and never failing on a base left behind."""
-        try:
-            cleanup_base(self.primary)
-        except CleanupUnread as exc:
-            self.failed(f"base {self.primary}", exc)
+        """Return the primary checkout to current `develop`, reporting what it could not do."""
+        cleanup_base(self.primary)
 
 
 def cleanup_sweep(owner: str, repo: str, checkout: str, apply: bool, min_age: float) -> int:
