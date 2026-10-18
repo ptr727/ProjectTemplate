@@ -856,7 +856,9 @@ HUB = "ptr727/ProjectTemplate"
 # `<summary class="x">` read as no summary at all missed a section while reporting no shape.
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
-SUMMARY = re.compile(r"<summary(?:\s+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
+SUMMARY = re.compile(
+    r"<summary(?:[ \t\n\f\r]+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE
+)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
@@ -866,7 +868,8 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-HEADING = re.compile(r"\s*(?:#{1,6}\s|<summary)", re.IGNORECASE)
+DETAILS_OPENER = re.compile(r"<details(?:[ \t\n\f\r][^>]*)?>[ \t]*", re.IGNORECASE)
+HEADING = re.compile(rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?<summary)", re.IGNORECASE)
 
 # How many of the newest reviews and comments both queries read.
 # A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
@@ -4369,8 +4372,14 @@ def heading_of(block: str) -> str:
     A block starts at its heading, so the heading is the first line whatever markup it carries.
     Reading further would let a finding's own text supply a count the heading never carried, and
     a wrong count reads exactly like a right one.
+
+    A `<details>` opener ahead of the summary on that line is read past, as `HEADING` reads past
+    it. Kept, it hid the summary, so a count opening the heading went unread.
     """
     head = block.lstrip()
+    opener = DETAILS_OPENER.match(head)
+    if opener and head[opener.end() :].lower().startswith("<summary"):
+        head = head[opener.end() :]
     m = SUMMARY.search(head)
     return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
 
@@ -4577,8 +4586,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     return blocks
 
 
-FOLD_OPENER = re.compile(r"[>\s]*<summary(?=[\s>]|$)", re.IGNORECASE)
-FOLD_STOP = re.compile(r"\s*<(?:details|summary)(?=[\s>/]|$)", re.IGNORECASE)
+FOLD_OPENER = re.compile(r"[>\s]*<summary(?=[ \t\n\f\r>]|$)", re.IGNORECASE)
+FOLD_STOP = re.compile(r"\s*<(?:details|summary)(?=[ \t\n\f\r>/]|$)", re.IGNORECASE)
 
 
 def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[str], list[str]]:
@@ -4635,6 +4644,12 @@ def sibling_heading(scan_lines: list[str], start: int) -> int:
 
     A section of the same kind that follows directly bounds too, so each is its own block with
     its own count. Read as one block, the digest counted only the first heading's findings.
+
+    A `<summary>` sharing its line with the `<details>` that opens it is a heading as well, its
+    count read past the opener per `heading_of`. Read as prose, a sibling opened that way never
+    bounded. A suppressed block then ran on into the previously-missed section after it and
+    printed its findings twice. Each kind's own reader still found its own section, so the
+    vetted-but-unread check had nothing to report.
 
     The cost is named rather than hidden. A sibling heading stating no count does not bound, so a
     block runs into it, which is where this started before the bound existed at all. It is strictly

@@ -1757,6 +1757,58 @@ class TestPreviouslyMissed(GqlCase):
             ["summary: Suppressed comments (N), vetted while no reader found its section"], found
         )
 
+    def test_a_section_opening_on_its_details_line_bounds_the_one_before(self) -> None:
+        """A `<summary>` on the line of the `<details>` opening it is that section's heading.
+
+        Unbounded, the suppressed block held the previously-missed section after it. That
+        section's own reader still found it, so its findings printed twice and nothing reported
+        the shape.
+        """
+
+        def one_line(heading: str, *titles: str) -> str:
+            entries = "".join(
+                f"<details><summary>{BADGE} {title}</summary>\n\n`a.py:10`\n\n"
+                "A constructed paragraph.\n</details>\n"
+                for title in titles
+            )
+            return f"<details><summary>{heading}</summary>\n\n{entries}</details>\n"
+
+        missed_headings = {
+            "count closing": ("Previously missed (2)", 2),
+            "count opening": ("<strong>2 previously missed issues</strong>", 2),
+        }
+        for name, (heading, count) in missed_headings.items():
+            with self.subTest(name):
+                body = (
+                    f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
+                    + one_line("Suppressed comments (1)", "Constructed suppressed finding")
+                    + one_line(heading, "Constructed missed finding", "Constructed missed 2")
+                    + "</details>\n"
+                )
+                suppressed = pr_review.suppressed_blocks(body)
+                missed = pr_review.previously_missed_blocks(body)
+                self.assertEqual([1], [pr_review.finding_count(b) for b in suppressed])
+                self.assertNotIn("Constructed missed finding", suppressed[0])
+                self.assertEqual([count], [pr_review.finding_count(b) for b in missed])
+                self.assertNotIn("Constructed suppressed finding", missed[0])
+                self.assertEqual([], pr_review.unrecognized_in(body))
+
+    def test_a_tag_opener_separates_attributes_on_html_whitespace_alone(self) -> None:
+        """Python's `\\s` is wider than the whitespace HTML separates a tag's attributes on.
+
+        A no-break space after the tag name leaves the text no `<details>` or `<summary>` tag.
+        """
+        nbsp = chr(0xA0)
+        self.assertIsNotNone(pr_review.HEADING.match("<details\topen><summary>Open (1)</summary>"))
+        self.assertIsNone(
+            pr_review.HEADING.match(f"<details{nbsp}open><summary>Open (1)</summary>")
+        )
+        self.assertEqual(["x"], pr_review.SUMMARY.findall("<summary\fid='a'>x</summary>"))
+        self.assertEqual([], pr_review.SUMMARY.findall(f"<summary{nbsp}id='a'>x</summary>"))
+        for pattern in (pr_review.FOLD_OPENER, pr_review.FOLD_STOP):
+            self.assertIsNotNone(pattern.match("<summary\tid='a'>"))
+            self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
+
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
         title exactly as one in a previously-missed block does.
