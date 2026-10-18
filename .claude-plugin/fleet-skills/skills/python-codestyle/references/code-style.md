@@ -64,7 +64,8 @@
 
 ## Naming
 
-- `snake_case` for functions, methods, variables, modules, package directories.
+- `snake_case` for functions, methods, variables, modules, package directories. A module's file
+  name follows CODESTYLE.md's "Script and Utility File Names".
 - `PascalCase` for classes, type aliases, type vars, enum members.
 - `UPPER_SNAKE_CASE` for module-level constants.
 - Single leading underscore for module-private, double leading underscore for name-mangled (rare,
