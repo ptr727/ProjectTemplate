@@ -41,6 +41,29 @@ A command-line script is one a person or an agent runs by name. A hook its host 
 - **Every command-line script answers `--help` and `-h`** with the same text on stdout, then exits 0, changing nothing. That text opens on a usage line naming the script. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted.
 - **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. An unrecognized first argument is never taken as a default mode or as a target.
 
+### Script and Utility File Names
+
+A script or utility file is named by its type, so a repository never mixes conventions for one kind of file.
+
+| Type | Rule | Basis |
+| --- | --- | --- |
+| Python `.py` | lowercase snake_case | [PEP 8][pep8-names] module naming. A hyphenated module also cannot be imported |
+| Shell `.sh` and PowerShell `.ps1` | lowercase-hyphenated | The Linux command convention. A cross-platform pair keeps one name, `sync-tools.sh` beside `sync-tools.ps1` |
+| Windows batch `.cmd` and `.bat` | lowercase-hyphenated | The same convention as shell and PowerShell. A shim that puts a command on `PATH` takes the name of the command it provides, `sync-tools.cmd` launching `sync-tools.ps1` |
+| PowerShell functions inside a `.ps1` | Verb-Noun with an approved verb (`Get-Verb`) | PSScriptAnalyzer `PSUseApprovedVerbs`. This is a command rule, not a file rule |
+| Env and secret files | lowercase snake_case stem | `mail_relay.env`, `db_root_password` |
+| Env variable names and CI secret names | UPPER_SNAKE_CASE | The POSIX and GitHub convention |
+
+- **Installed commands.** An extensionless executable placed on `PATH` or into a system slot (systemd, cron, run-parts, motd) is named as a command: lowercase-hyphenated with no extension, whatever language it is written in.
+- **Wrapper exemption.** A thin launcher whose only job is to run a Python tool keeps that tool's stem, so `fetch_report.py`, `fetch_report.sh`, and `fetch_report.ps1` stay grouped together.
+- **Externally fixed names are exempt.** That covers Git hook names, `__init__.py`, `conftest.py`, and Pester's `.Tests.ps1` suffix, whose stem mirrors the script under test. It covers a PowerShell data file (`.psd1`) whose name a tool fixes, such as a module manifest named for its module or `PSScriptAnalyzerSettings.psd1`, which PSScriptAnalyzer finds by that name. It also covers any name a platform defines.
+- **Directories are out of scope.**
+
+Departures, stated on purpose so a reader does not "fix" them back:
+
+- The [Google Shell Style Guide][google-shell] asks for underscores in shell file names. The fleet uses hyphens instead, matching installed Linux commands and the existing scripts.
+- Microsoft's [approved verbs][ps-approved-verbs] govern command names. A `.ps1` run by path is a file rather than an exported command, so the file takes the shell convention and its functions take Verb-Noun.
+
 ### Markdown and Spelling
 
 These apply repo-wide, in every directory: Markdown lints clean via `markdownlint-cli2` against the shared config, spelling is US English via CSpell against the shared `cspell.json`, the CI spelling gate covers `README.md` and `HISTORY.md` only, `HISTORY.md` mirrors the README's opening, and "Markdown" is a proper noun in prose. A repo excluding a subtree of its own that it does not treat as authored prose, a committed data archive, a vendored theme, or a hand-maintained record, puts a `.markdownlint-cli2.jsonc` carrying its own `ignores` beside that content rather than editing the shared root config, whose contents are fleet-fixed. Those `ignores` patterns resolve against the directory holding them rather than against the repo root, so a repo-root-relative entry there matches nothing and reports no error saying so, and excluding through the CI workflow's own negated Markdown glob input instead is a CI-only fix that leaves the same files flagged for anyone running the linter locally. The full rules are in the `comment-and-doc-style` Skill referenced above.
@@ -67,7 +90,10 @@ Bash, and only where a program cannot be Python: a bootstrap that installs the i
 
 <!-- Repo -->
 
+[google-shell]: https://google.github.io/styleguide/shellguide.html
 [governance]: ./GOVERNANCE.md
 [governance-verification-discipline]: ./GOVERNANCE.md#verification-discipline
+[pep8-names]: https://peps.python.org/pep-0008/#package-and-module-names
+[ps-approved-verbs]: https://learn.microsoft.com/en-us/powershell/scripting/developer/cmdlet/approved-verbs-for-windows-powershell-commands
 [readme]: ./README.md
 [root]: ./.editorconfig
