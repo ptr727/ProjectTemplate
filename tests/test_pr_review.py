@@ -1708,7 +1708,7 @@ class TestPreviouslyMissed(GqlCase):
     def test_a_vetted_suppressed_summary_its_reader_misses_is_reported(self) -> None:
         """The suppressed spellings are vetted wherever they appear, as the previously missed are.
 
-        A layout that `suppressed_blocks` misses therefore read as `shapes=ok` while `suppressed=`
+        A layout that `suppressed_blocks` misses therefore reported `shapes=ok` while `suppressed=`
         came out short. Each case reads correctly first, so the stub dropping a block is what
         changes the answer.
         """
