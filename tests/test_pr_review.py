@@ -1805,6 +1805,9 @@ class TestPreviouslyMissed(GqlCase):
         )
         self.assertEqual(["x"], pr_review.SUMMARY.findall("<summary\fid='a'>x</summary>"))
         self.assertEqual([], pr_review.SUMMARY.findall(f"<summary{nbsp}id='a'>x</summary>"))
+        for pattern in (pr_review.FOLD_OPENER, pr_review.FOLD_STOP):
+            self.assertIsNotNone(pattern.match("<summary\tid='a'>"))
+            self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
