@@ -1757,6 +1757,34 @@ class TestPreviouslyMissed(GqlCase):
             ["summary: Suppressed comments (N), vetted while no reader found its section"], found
         )
 
+    def test_a_section_opening_on_its_details_line_bounds_the_one_before(self) -> None:
+        """A `<summary>` on the line of the `<details>` opening it is that section's heading.
+
+        Unbounded, the suppressed block held the previously-missed section after it. That
+        section's own reader still found it, so its findings printed twice and nothing reported
+        the shape.
+        """
+
+        def one_line(heading: str, title: str) -> str:
+            return (
+                f"<details><summary>{heading}</summary>\n\n<details><summary>{BADGE} {title}"
+                "</summary>\n\n`a.py:10`\n\nA constructed paragraph.\n</details>\n</details>\n"
+            )
+
+        body = (
+            f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
+            + one_line("Suppressed comments (1)", "Constructed suppressed finding")
+            + one_line("Previously missed (1)", "Constructed missed finding")
+            + "</details>\n"
+        )
+        suppressed = pr_review.suppressed_blocks(body)
+        missed = pr_review.previously_missed_blocks(body)
+        self.assertEqual([1], [pr_review.finding_count(b) for b in suppressed])
+        self.assertNotIn("Constructed missed finding", suppressed[0])
+        self.assertEqual([1], [pr_review.finding_count(b) for b in missed])
+        self.assertNotIn("Constructed suppressed finding", missed[0])
+        self.assertEqual([], pr_review.unrecognized_in(body))
+
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
         title exactly as one in a previously-missed block does.
