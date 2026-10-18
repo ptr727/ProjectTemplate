@@ -856,7 +856,9 @@ HUB = "ptr727/ProjectTemplate"
 # `<summary class="x">` read as no summary at all missed a section while reporting no shape.
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
-SUMMARY = re.compile(r"<summary(?:\s+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE)
+SUMMARY = re.compile(
+    r"<summary(?:[ \t\n\f\r]+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE
+)
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
@@ -866,7 +868,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(r"<details(?:\s[^>]*)?>[ \t]*", re.IGNORECASE)
+DETAILS_OPENER = re.compile(r"<details(?:[ \t\n\f\r][^>]*)?>[ \t]*", re.IGNORECASE)
 HEADING = re.compile(rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?<summary)", re.IGNORECASE)
 
 # How many of the newest reviews and comments both queries read.
@@ -4584,8 +4586,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     return blocks
 
 
-FOLD_OPENER = re.compile(r"[>\s]*<summary(?=[\s>]|$)", re.IGNORECASE)
-FOLD_STOP = re.compile(r"\s*<(?:details|summary)(?=[\s>/]|$)", re.IGNORECASE)
+FOLD_OPENER = re.compile(r"[>\s]*<summary(?=[ \t\n\f\r>]|$)", re.IGNORECASE)
+FOLD_STOP = re.compile(r"\s*<(?:details|summary)(?=[ \t\n\f\r>/]|$)", re.IGNORECASE)
 
 
 def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[str], list[str]]:

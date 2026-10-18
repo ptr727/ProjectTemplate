@@ -1793,6 +1793,19 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertNotIn("Constructed suppressed finding", missed[0])
                 self.assertEqual([], pr_review.unrecognized_in(body))
 
+    def test_a_tag_opener_separates_attributes_on_html_whitespace_alone(self) -> None:
+        """Python's `\\s` is wider than the whitespace HTML separates a tag's attributes on.
+
+        A no-break space after the tag name leaves the text no `<details>` or `<summary>` tag.
+        """
+        nbsp = chr(0xA0)
+        self.assertIsNotNone(pr_review.HEADING.match("<details\topen><summary>Open (1)</summary>"))
+        self.assertIsNone(
+            pr_review.HEADING.match(f"<details{nbsp}open><summary>Open (1)</summary>")
+        )
+        self.assertEqual(["x"], pr_review.SUMMARY.findall("<summary\fid='a'>x</summary>"))
+        self.assertEqual([], pr_review.SUMMARY.findall(f"<summary{nbsp}id='a'>x</summary>"))
+
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
         title exactly as one in a previously-missed block does.
