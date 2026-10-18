@@ -1738,8 +1738,8 @@ class TestPreviouslyMissed(GqlCase):
     def test_a_block_running_into_the_next_section_does_not_stand_in_for_it(self) -> None:
         """Unbounded, the first section's block holds every section after it in the wrapper.
 
-        Counted by every summary a block holds, the sections it ran into read as found, so the
-        alternating-sections defect reported `shapes=ok`. Only the summary opening a block counts.
+        Counted by every summary a block holds, the sections it ran into read as found, so an
+        unbounded block reported `shapes=ok`. Only the summary opening a block counts.
         """
         body = (
             f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
