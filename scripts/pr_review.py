@@ -4534,7 +4534,7 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     """Return the review body's sections whose own heading matches `marker`.
 
     Each is sliced from its heading to the next sibling heading or the end of its own region.
-    Past a region's first section, only the sibling heading it ends at can open another.
+    Past a region's first section, only a sibling heading some section ends at can open another.
 
     Shared by `suppressed_blocks`, `previously_missed_blocks`, and `outside_diff_blocks`.
     `strip_blockquote` affects heading detection only, never the returned content. A summary split
@@ -4565,9 +4565,10 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
             bare = COUNT.search(line) and not OPENING_COUNT.match(line)
             if marker.search(line) and (HEADING.match(line) or bare) and not entry_heading(line):
                 start = i
-                while start < len(scan_lines) and marker.search(scan_lines[start]):
+                while start < len(scan_lines):
                     end = sibling_heading(scan_lines, start)
-                    blocks.append("\n".join(raw_lines[start:end]))
+                    if marker.search(scan_lines[start]):
+                        blocks.append("\n".join(raw_lines[start:end]))
                     start = end
                 break
     return blocks
