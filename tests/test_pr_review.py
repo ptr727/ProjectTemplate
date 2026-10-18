@@ -1765,25 +1765,33 @@ class TestPreviouslyMissed(GqlCase):
         the shape.
         """
 
-        def one_line(heading: str, title: str) -> str:
-            return (
-                f"<details><summary>{heading}</summary>\n\n<details><summary>{BADGE} {title}"
-                "</summary>\n\n`a.py:10`\n\nA constructed paragraph.\n</details>\n</details>\n"
+        def one_line(heading: str, *titles: str) -> str:
+            entries = "".join(
+                f"<details><summary>{BADGE} {title}</summary>\n\n`a.py:10`\n\n"
+                "A constructed paragraph.\n</details>\n"
+                for title in titles
             )
+            return f"<details><summary>{heading}</summary>\n\n{entries}</details>\n"
 
-        body = (
-            f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
-            + one_line("Suppressed comments (1)", "Constructed suppressed finding")
-            + one_line("Previously missed (1)", "Constructed missed finding")
-            + "</details>\n"
-        )
-        suppressed = pr_review.suppressed_blocks(body)
-        missed = pr_review.previously_missed_blocks(body)
-        self.assertEqual([1], [pr_review.finding_count(b) for b in suppressed])
-        self.assertNotIn("Constructed missed finding", suppressed[0])
-        self.assertEqual([1], [pr_review.finding_count(b) for b in missed])
-        self.assertNotIn("Constructed suppressed finding", missed[0])
-        self.assertEqual([], pr_review.unrecognized_in(body))
+        missed_headings = {
+            "count closing": ("Previously missed (2)", 2),
+            "count opening": ("<strong>2 previously missed issues</strong>", 2),
+        }
+        for name, (heading, count) in missed_headings.items():
+            with self.subTest(name):
+                body = (
+                    f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
+                    + one_line("Suppressed comments (1)", "Constructed suppressed finding")
+                    + one_line(heading, "Constructed missed finding", "Constructed missed 2")
+                    + "</details>\n"
+                )
+                suppressed = pr_review.suppressed_blocks(body)
+                missed = pr_review.previously_missed_blocks(body)
+                self.assertEqual([1], [pr_review.finding_count(b) for b in suppressed])
+                self.assertNotIn("Constructed missed finding", suppressed[0])
+                self.assertEqual([count], [pr_review.finding_count(b) for b in missed])
+                self.assertNotIn("Constructed suppressed finding", missed[0])
+                self.assertEqual([], pr_review.unrecognized_in(body))
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
