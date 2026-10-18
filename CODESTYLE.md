@@ -43,8 +43,6 @@ A command-line script is one a person or an agent runs by name. A hook its host 
 
 ### Script and Utility File Names
 
-A script or utility file is named by its type, so a repository never mixes conventions for one kind of file.
-
 | Type | Rule | Basis |
 | --- | --- | --- |
 | Python `.py` | lowercase snake_case | [PEP 8][pep8-names-link] module naming. A hyphenated module also cannot be imported |
