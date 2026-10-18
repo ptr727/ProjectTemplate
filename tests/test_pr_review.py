@@ -1705,6 +1705,58 @@ class TestPreviouslyMissed(GqlCase):
             pr_review.unrecognized_in(stand_in),
         )
 
+    def test_a_vetted_suppressed_summary_its_reader_misses_is_reported(self) -> None:
+        """The suppressed spellings are vetted wherever they appear, as the previously missed are.
+
+        A layout that `suppressed_blocks` misses therefore reported `shapes=ok` while `suppressed=`
+        came out short. Each case reads correctly first, so the stub dropping a block is what
+        changes the answer.
+        """
+        both = (
+            f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
+            + entries_section("Suppressed comments (1)", "Constructed finding 1")
+            + entries_section("Previously missed (1)", "Constructed finding 2")
+            + entries_section("Suppressed comments (2)", "Constructed finding 3", "Constructed 4")
+            + "</details>\n"
+        )
+        cases = {
+            "low confidence": collapsed(),
+            "suppressed": collapsed(heading="Suppressed comments (2)"),
+            "alternating in one wrapper": both,
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                blocks = pr_review.suppressed_blocks(body)
+                self.assertEqual([], pr_review.unrecognized_in(body))
+                with mock.patch.object(pr_review, "suppressed_blocks", return_value=blocks[:-1]):
+                    found = pr_review.unrecognized_in(body)
+                self.assertEqual(1, len(found))
+                self.assertIn("vetted while no reader found its section", found[0])
+                self.assertTrue(found[0].startswith("summary: "))
+                self.assertIn("uppressed", found[0])
+
+    def test_a_block_running_into_the_next_section_does_not_stand_in_for_it(self) -> None:
+        """Unbounded, the first section's block holds every section after it in the wrapper.
+
+        Counted by every summary a block holds, the sections it ran into read as found, so an
+        unbounded block reported `shapes=ok`. Only the summary opening a block counts.
+        """
+        body = (
+            f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
+            + entries_section("Suppressed comments (1)", "Constructed finding 1")
+            + entries_section("Suppressed comments (2)", "Constructed finding 2", "Constructed 3")
+            + "</details>\n"
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        with mock.patch.object(
+            pr_review, "sibling_heading", side_effect=lambda lines, _: len(lines)
+        ):
+            self.assertEqual(1, len(pr_review.suppressed_blocks(body)))
+            found = pr_review.unrecognized_in(body)
+        self.assertEqual(
+            ["summary: Suppressed comments (N), vetted while no reader found its section"], found
+        )
+
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
         title exactly as one in a previously-missed block does.
