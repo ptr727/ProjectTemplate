@@ -834,6 +834,23 @@ COUNT_DIGITS = 4
 # Bounded by a lookahead rather than by `\b`, since `_` is a word character.
 # `_None_` then ended on no boundary at all, reading an italicized stated zero as none stated.
 STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
+
+
+def tag_opener(*names: str) -> str:
+    """The pattern opening a tag of one of these names, up to where its name ends.
+
+    Markdown hands HTML a tag only where its name ends on whitespace, the end of a line, `>`, or
+    `/>`, so `<summaryx>` names another tag, `<details/x>` shows as text, and `<summary/>` opens a
+    summary. Python's `\\s` is wider than that whitespace, so a no-break space after the name
+    leaves no tag at all.
+
+    Every reader of a `<details>` or `<summary>` opener builds on this one boundary. Each kept a
+    rule of its own before, so a fix at one had to be repeated by hand at its siblings, and one
+    of them had no boundary at all.
+    """
+    return rf"<(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
+
+
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -841,7 +858,7 @@ STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 # Bounded as `DETAILS_TAG`'s opener is, so `<details/>` ends the preamble and `<detailsfoo>` does not.
 # Matched anywhere instead, a round naming `<details>` in its overview prose ended the preamble.
 # That threw its stated total away, printing `?` and no shortfall over a round withholding findings.
-DETAILS_OPEN = re.compile(r"^ {0,3}<details(?=[ \t\n\f\r]|/?>)", re.IGNORECASE | re.MULTILINE)
+DETAILS_OPEN = re.compile(rf"^ {{0,3}}{tag_opener('details')}", re.IGNORECASE | re.MULTILINE)
 # A login that reads as this reviewer without being the spelling every query here filters on.
 # A rename leaves every filter matching nothing, so a review that landed reads as none at all.
 # A wait then polls out its whole timeout against a review sitting in plain sight.
@@ -857,7 +874,8 @@ HUB = "ptr727/ProjectTemplate"
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
 SUMMARY = re.compile(
-    r"<summary(?:[ \t\n\f\r]+[A-Za-z][^>]*)?>(.*?)</summary>", re.DOTALL | re.IGNORECASE
+    rf"{tag_opener('summary')}(?:[ \t\n\f\r]+[A-Za-z][^>]*)?/?>(.*?)</summary>",
+    re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
 COUNT = re.compile(r"\((\d+)\)")
@@ -868,8 +886,11 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(r"<details(?:[ \t\n\f\r][^>]*)?>[ \t]*", re.IGNORECASE)
-HEADING = re.compile(rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?<summary)", re.IGNORECASE)
+DETAILS_OPENER = re.compile(rf"{tag_opener('details')}[^>]*>[ \t]*", re.IGNORECASE)
+SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
+HEADING = re.compile(
+    rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
+)
 
 # How many of the newest reviews and comments both queries read.
 # A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
@@ -4378,10 +4399,10 @@ def heading_of(block: str) -> str:
     """
     head = block.lstrip()
     opener = DETAILS_OPENER.match(head)
-    if opener and head[opener.end() :].lower().startswith("<summary"):
+    if opener and SUMMARY_OPENER.match(head, opener.end()):
         head = head[opener.end() :]
     m = SUMMARY.search(head)
-    return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
+    return m.group(1) if m and SUMMARY_OPENER.match(head) else head.split("\n", 1)[0]
 
 
 def heading_count(heading: str) -> int | None:
@@ -4408,7 +4429,7 @@ def heading_count(heading: str) -> int | None:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    r"(?P<open><details(?:[ \t\n\f\r][^<>]*|/)?>)"
+    rf"(?P<open>{tag_opener('details')}[^<>]*>)"
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"
@@ -4586,8 +4607,8 @@ def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = F
     return blocks
 
 
-FOLD_OPENER = re.compile(r"[>\s]*<summary(?=[ \t\n\f\r>]|$)", re.IGNORECASE)
-FOLD_STOP = re.compile(r"\s*<(?:details|summary)(?=[ \t\n\f\r>/]|$)", re.IGNORECASE)
+FOLD_OPENER = re.compile(rf"[>\s]*{SUMMARY_OPENER.pattern}", re.IGNORECASE)
+FOLD_STOP = re.compile(rf"\s*{tag_opener('details', 'summary')}", re.IGNORECASE)
 
 
 def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[str], list[str]]:

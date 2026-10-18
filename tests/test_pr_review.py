@@ -1809,6 +1809,39 @@ class TestPreviouslyMissed(GqlCase):
             self.assertIsNotNone(pattern.match("<summary\tid='a'>"))
             self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
 
+    def test_every_opener_reader_ends_a_tag_name_where_html_does(self) -> None:
+        """Each reader kept its own rule for where the name ends, and `HEADING` had none at all.
+
+        So `<summaryx>` opened a heading line while every sibling read it as another tag.
+        """
+        nbsp = chr(0xA0)
+        summary = {
+            "SUMMARY": lambda t: (
+                pr_review.SUMMARY.findall(f"{t}Open (1)</summary>") == ["Open (1)"]
+            ),
+            "HEADING": lambda t: bool(pr_review.HEADING.match(f"{t}Open (1)</summary>")),
+            "heading_of": lambda t: pr_review.heading_of(f"{t}Open (1)</summary>\nx") == "Open (1)",
+            "heading_of past details": lambda t: (
+                pr_review.heading_of(f"<details>{t}Open (1)</summary>") == "Open (1)"
+            ),
+            "FOLD_OPENER": lambda t: bool(pr_review.FOLD_OPENER.match(t)),
+            "FOLD_STOP": lambda t: bool(pr_review.FOLD_STOP.match(t)),
+        }
+        details = {
+            "DETAILS_OPEN": lambda t: bool(pr_review.DETAILS_OPEN.search(t)),
+            "DETAILS_OPENER": lambda t: bool(pr_review.DETAILS_OPENER.match(f"{t}<summary>")),
+            "DETAILS_TAG": lambda t: bool((m := pr_review.DETAILS_TAG.match(t)) and m["open"]),
+            "FOLD_STOP": lambda t: bool(pr_review.FOLD_STOP.match(t)),
+        }
+        for name, readers in (("summary", summary), ("details", details)):
+            for reader, opens in readers.items():
+                for tag in (f"<{name}>", f'<{name}\tid="a">', f"<{name}/>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertTrue(opens(tag))
+                for tag in (f"<{name}x>", f"<{name}{nbsp}x>", f"<{name}/x>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertFalse(opens(tag))
+
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
         title exactly as one in a previously-missed block does.
