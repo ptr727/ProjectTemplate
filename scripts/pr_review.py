@@ -734,6 +734,7 @@ PREVIOUSLY_MISSED_SUMMARIES = {
     "(N) previously missed issues",
     "(N) previously missed issue",
 }
+SUPPRESSED_SUMMARIES = {"Suppressed comments (N)", "Comments suppressed due to low confidence (N)"}
 VETTED_SUMMARIES = (
     set(OVERVIEW_SECTIONS)
     | {
@@ -742,9 +743,8 @@ VETTED_SUMMARIES = (
         "Show a summary per file",
         "File summaries",
         "Review details",
-        "Suppressed comments (N)",
-        "Comments suppressed due to low confidence (N)",
     }
+    | SUPPRESSED_SUMMARIES
     | PREVIOUSLY_MISSED_SUMMARIES
 )
 VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", "Review effort"}
@@ -3734,11 +3734,12 @@ def unrecognized_in(body: str) -> list[str]:
     quoting a heading is not a review carrying one, and this script's own pull requests quote
     these lists in full.
 
-    A previously-missed summary that no reader finds as a section is reported too. Its spelling is
-    vetted wherever it appears, while the reader keys on how its line opens. A layout the reader
-    misses would otherwise hand its findings to nobody under `shapes=ok`. The check compares which
-    summaries the blocks hold rather than how many blocks there are. Compared by count, a bare
-    `(N)` line read in one region stood in for a summary missed in another.
+    A previously-missed or suppressed summary that its reader does not find as a section is
+    reported too. Its spelling is vetted wherever it appears, while the reader keys on how its line
+    opens and where the section around it ends. A layout the reader misses would otherwise hand its
+    findings to nobody under `shapes=ok`. The check compares which summaries the blocks hold rather
+    than how many blocks there are. Compared by count, a bare `(N)` line read in one region stood in
+    for a summary missed in another.
 
     A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
@@ -3762,19 +3763,20 @@ def unrecognized_in(body: str) -> list[str]:
         for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
         if unvetted(marker, VETTED_SUMMARIES) and not finding_entry(marker)
     ]
-    missed = Counter(
-        marker
-        for marker in (normal(s) for s in SUMMARY.findall(plain))
-        if not unvetted(marker, PREVIOUSLY_MISSED_SUMMARIES)
-    )
-    read = Counter(
-        normal(s)
-        for block in previously_missed_blocks(body)
-        for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(block)))
-    )
-    unread = missed - read
-    if unread:
-        found.append(f"summary: {next(iter(unread))}, vetted while no reader found its section")
+    summaries = [normal(s) for s in SUMMARY.findall(plain)]
+    for vetted, reader in (
+        (PREVIOUSLY_MISSED_SUMMARIES, previously_missed_blocks),
+        (SUPPRESSED_SUMMARIES, suppressed_blocks),
+    ):
+        expected = Counter(marker for marker in summaries if not unvetted(marker, vetted))
+        read = Counter(
+            normal(s)
+            for block in reader(body)
+            for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(block)))
+        )
+        unread = expected - read
+        if unread:
+            found.append(f"summary: {next(iter(unread))}, vetted while no reader found its section")
     found += [
         f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
     ]
