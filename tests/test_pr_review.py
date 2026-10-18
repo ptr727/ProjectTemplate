@@ -1709,8 +1709,8 @@ class TestPreviouslyMissed(GqlCase):
         """The suppressed spellings are vetted wherever they appear, as the previously missed are.
 
         A layout that `suppressed_blocks` misses therefore read as `shapes=ok` while `suppressed=`
-        came out short, which is the alternating-sections defect, silent rather than reported.
-        Each case reads correctly first, so the stub dropping a block is what changes the answer.
+        came out short. Each case reads correctly first, so the stub dropping a block is what
+        changes the answer.
         """
         both = (
             f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
@@ -1734,6 +1734,28 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertIn("vetted while no reader found its section", found[0])
                 self.assertTrue(found[0].startswith("summary: "))
                 self.assertIn("uppressed", found[0])
+
+    def test_a_block_running_into_the_next_section_does_not_stand_in_for_it(self) -> None:
+        """Unbounded, the first section's block holds every section after it in the wrapper.
+
+        Counted by every summary a block holds, the sections it ran into read as found, so the
+        alternating-sections defect reported `shapes=ok`. Only the summary opening a block counts.
+        """
+        body = (
+            f"{OVERVIEW}\n{COVERED}\n\n<details>\n<summary>Review details</summary>\n\n"
+            + entries_section("Suppressed comments (1)", "Constructed finding 1")
+            + entries_section("Suppressed comments (2)", "Constructed finding 2", "Constructed 3")
+            + "</details>\n"
+        )
+        self.assertEqual([], pr_review.unrecognized_in(body))
+        with mock.patch.object(
+            pr_review, "sibling_heading", side_effect=lambda lines, _: len(lines)
+        ):
+            self.assertEqual(1, len(pr_review.suppressed_blocks(body)))
+            found = pr_review.unrecognized_in(body)
+        self.assertEqual(
+            ["summary: Suppressed comments (N), vetted while no reader found its section"], found
+        )
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its

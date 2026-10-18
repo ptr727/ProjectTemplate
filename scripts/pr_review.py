@@ -3737,9 +3737,10 @@ def unrecognized_in(body: str) -> list[str]:
     A previously-missed or suppressed summary that its reader does not find as a section is
     reported too. Its spelling is vetted wherever it appears, while the reader keys on how its line
     opens and where the section around it ends. A layout the reader misses would otherwise hand its
-    findings to nobody under `shapes=ok`. The check compares which summaries the blocks hold rather
+    findings to nobody under `shapes=ok`. The check compares which summaries open the blocks rather
     than how many blocks there are. Compared by count, a bare `(N)` line read in one region stood in
-    for a summary missed in another.
+    for a summary missed in another. Compared by every summary a block holds, a block that ran on
+    into the next section stood in for that section.
 
     A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
@@ -3772,7 +3773,7 @@ def unrecognized_in(body: str) -> list[str]:
         read = Counter(
             normal(s)
             for block in reader(body)
-            for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(block)))
+            for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(block)).split("\n", 1)[0])[:1]
         )
         unread = expected - read
         if unread:
