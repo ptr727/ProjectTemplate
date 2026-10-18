@@ -1810,9 +1810,9 @@ class TestPreviouslyMissed(GqlCase):
             self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
 
     def test_every_opener_reader_ends_a_tag_name_where_html_does(self) -> None:
-        """Each reader kept its own rule for where the name ends, and `HEADING` had none at all.
+        """Each reader kept its own rule for where the name ends, and three had none at all.
 
-        So `<summaryx>` opened a heading line while every sibling read it as another tag.
+        So `<summaryx>` opened a heading line through `HEADING`.
         """
         nbsp = chr(0xA0)
         summary = {
@@ -1841,6 +1841,19 @@ class TestPreviouslyMissed(GqlCase):
                 for tag in (f"<{name}x>", f"<{name}{nbsp}x>", f"<{name}/x>"):
                     with self.subTest(reader=reader, tag=tag):
                         self.assertFalse(opens(tag))
+        for pattern, line in (
+            (pr_review.DETAILS_OPEN, "<details"),
+            (pr_review.HEADING, "<summary"),
+            (pr_review.FOLD_OPENER, "<summary"),
+            (pr_review.FOLD_STOP, "<details"),
+        ):
+            with self.subTest(pattern=pattern.pattern, line=line):
+                self.assertIsNotNone(pattern.search(line))
+
+    def test_a_heading_the_summary_reader_rejects_is_not_read_from_a_nested_entry(self) -> None:
+        """`heading_of` asked two readers one question, so a nested entry's summary became the heading."""
+        block = "<summary >Open (1)</summary>\n<details><summary>Nit (5)</summary>x</details>"
+        self.assertEqual("<summary >Open (1)</summary>", pr_review.heading_of(block))
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its

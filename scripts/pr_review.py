@@ -839,14 +839,13 @@ STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 def tag_opener(*names: str) -> str:
     """The pattern opening a tag of one of these names, up to where its name ends.
 
-    Markdown hands HTML a tag only where its name ends on whitespace, the end of a line, `>`, or
-    `/>`, so `<summaryx>` names another tag, `<details/x>` shows as text, and `<summary/>` opens a
-    summary. Python's `\\s` is wider than that whitespace, so a no-break space after the name
-    leaves no tag at all.
+    A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
+    another tag and `<summary/>` opens a summary. A `<details/x>` shows as text, since Markdown
+    hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
+    after the name leaves no tag.
 
-    Every reader of a `<details>` or `<summary>` opener builds on this one boundary. Each kept a
-    rule of its own before, so a fix at one had to be repeated by hand at its siblings, and one
-    of them had no boundary at all.
+    Each pattern here that finds such an opener builds on this boundary, `TAGS` aside, which
+    strips only a bare tag. A rule kept per site had to be fixed by hand at each of its siblings.
     """
     return rf"<(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
 
@@ -4399,10 +4398,10 @@ def heading_of(block: str) -> str:
     """
     head = block.lstrip()
     opener = DETAILS_OPENER.match(head)
-    if opener and SUMMARY_OPENER.match(head, opener.end()):
+    if opener and SUMMARY.match(head, opener.end()):
         head = head[opener.end() :]
-    m = SUMMARY.search(head)
-    return m.group(1) if m and SUMMARY_OPENER.match(head) else head.split("\n", 1)[0]
+    m = SUMMARY.match(head)
+    return m.group(1) if m else head.split("\n", 1)[0]
 
 
 def heading_count(heading: str) -> int | None:
