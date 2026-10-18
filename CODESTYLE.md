@@ -53,7 +53,7 @@ A command-line script is one a person or an agent runs by name. A hook its host 
 | Env variable names and CI secret names | UPPER_SNAKE_CASE | The POSIX and GitHub convention |
 
 - **Installed commands.** An extensionless executable placed on `PATH` or into a system slot (systemd, cron, run-parts, motd) is named as a command. That name is lowercase-hyphenated with no extension, whatever language it is written in.
-- **Wrapper exemption.** A thin launcher whose only job is to run a Python tool keeps that tool's stem, so `fetch_report.py`, `fetch_report.sh`, and `fetch_report.ps1` stay grouped together. It covers only a launcher that keeps its extension. An extensionless launcher installed onto `PATH` or into a system slot is an installed command, so it is `fetch-report` rather than `fetch_report`.
+- **Wrapper exemption.** A thin launcher whose only job is to run a Python tool keeps that tool's stem, so `fetch_report.py`, `fetch_report.sh`, and `fetch_report.ps1` stay grouped together. It covers only a launcher run by its path. A launcher installed onto `PATH` or into a system slot is an installed command, so it is `fetch-report`, or `fetch-report.cmd` for a Windows shim, rather than `fetch_report`.
 - **Externally fixed names are exempt.** That covers Git hook names, `__init__.py`, `conftest.py`, and Pester's `.Tests.ps1` suffix, whose stem mirrors the script under test. It covers a PowerShell data file (`.psd1`) whose name a tool fixes, such as a module manifest named for its module. `PSScriptAnalyzerSettings.psd1` is another, since PSScriptAnalyzer finds it by that name. It also covers any name a platform defines.
 - **Directories are out of scope.**
 
