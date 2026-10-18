@@ -1809,7 +1809,7 @@ class TestPreviouslyMissed(GqlCase):
             self.assertIsNotNone(pattern.match("<summary\tid='a'>"))
             self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
 
-    def test_every_opener_reader_ends_a_tag_name_where_html_does(self) -> None:
+    def test_every_opener_reader_ends_a_tag_name_where_markdown_does(self) -> None:
         """Each reader kept its own rule for where the name ends, and three had none at all.
 
         So `<summaryx>` opened a heading line through `HEADING`.
@@ -1854,6 +1854,7 @@ class TestPreviouslyMissed(GqlCase):
         """`heading_of` asked two readers one question, so a nested entry's summary became the heading."""
         block = "<summary >Open (1)</summary>\n<details><summary>Nit (5)</summary>x</details>"
         self.assertEqual("<summary >Open (1)</summary>", pr_review.heading_of(block))
+        self.assertEqual("<summary>Open", pr_review.heading_of("<details open><summary>Open\n(1)"))
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its

@@ -844,8 +844,8 @@ def tag_opener(*names: str) -> str:
     hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
     after the name leaves no tag.
 
-    Each pattern here that finds such an opener builds on this boundary, `TAGS` aside, which
-    strips only a bare tag. A rule kept per site had to be fixed by hand at each of its siblings.
+    One boundary serves every opener reader here that admits an attribute, since a rule kept per
+    site had to be fixed by hand at each of its siblings.
     """
     return rf"<(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
 
@@ -4398,7 +4398,7 @@ def heading_of(block: str) -> str:
     """
     head = block.lstrip()
     opener = DETAILS_OPENER.match(head)
-    if opener and SUMMARY.match(head, opener.end()):
+    if opener and SUMMARY_OPENER.match(head, opener.end()):
         head = head[opener.end() :]
     m = SUMMARY.match(head)
     return m.group(1) if m else head.split("\n", 1)[0]
