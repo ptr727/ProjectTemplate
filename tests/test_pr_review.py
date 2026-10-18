@@ -1793,22 +1793,6 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertNotIn("Constructed suppressed finding", missed[0])
                 self.assertEqual([], pr_review.unrecognized_in(body))
 
-    def test_a_tag_opener_separates_attributes_on_html_whitespace_alone(self) -> None:
-        """Python's `\\s` is wider than the whitespace HTML separates a tag's attributes on.
-
-        A no-break space after the tag name leaves the text no `<details>` or `<summary>` tag.
-        """
-        nbsp = chr(0xA0)
-        self.assertIsNotNone(pr_review.HEADING.match("<details\topen><summary>Open (1)</summary>"))
-        self.assertIsNone(
-            pr_review.HEADING.match(f"<details{nbsp}open><summary>Open (1)</summary>")
-        )
-        self.assertEqual(["x"], pr_review.SUMMARY.findall("<summary\fid='a'>x</summary>"))
-        self.assertEqual([], pr_review.SUMMARY.findall(f"<summary{nbsp}id='a'>x</summary>"))
-        for pattern in (pr_review.FOLD_OPENER, pr_review.FOLD_STOP):
-            self.assertIsNotNone(pattern.match("<summary\tid='a'>"))
-            self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
-
     def test_every_opener_reader_ends_a_tag_name_where_markdown_does(self) -> None:
         """Each reader kept its own rule for where the name ends, and three had none at all.
 
@@ -1831,11 +1815,12 @@ class TestPreviouslyMissed(GqlCase):
             "DETAILS_OPEN": lambda t: bool(pr_review.DETAILS_OPEN.search(t)),
             "DETAILS_OPENER": lambda t: bool(pr_review.DETAILS_OPENER.match(f"{t}<summary>")),
             "DETAILS_TAG": lambda t: bool((m := pr_review.DETAILS_TAG.match(t)) and m["open"]),
+            "HEADING": lambda t: bool(pr_review.HEADING.match(f"{t}<summary>Open (1)</summary>")),
             "FOLD_STOP": lambda t: bool(pr_review.FOLD_STOP.match(t)),
         }
         for name, readers in (("summary", summary), ("details", details)):
             for reader, opens in readers.items():
-                for tag in (f"<{name}>", f'<{name}\tid="a">', f"<{name}/>"):
+                for tag in (f"<{name}>", f'<{name}\tid="a">', f'<{name}\fid="a">', f"<{name}/>"):
                     with self.subTest(reader=reader, tag=tag):
                         self.assertTrue(opens(tag))
                 for tag in (f"<{name}x>", f"<{name}{nbsp}x>", f"<{name}/x>"):

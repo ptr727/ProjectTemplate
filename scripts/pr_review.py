@@ -844,8 +844,8 @@ def tag_opener(*names: str) -> str:
     hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
     after the name leaves no tag.
 
-    One boundary serves every opener reader here that admits an attribute, since a rule kept per
-    site had to be fixed by hand at each of its siblings.
+    One boundary serves every opener reader here that admits an attribute. A rule kept per site
+    had to be fixed by hand at each of its siblings.
     """
     return rf"<(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
 
