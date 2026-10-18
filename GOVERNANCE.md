@@ -109,6 +109,7 @@ Line-ending governance for an operational repo is in [Line Endings](#line-ending
 A repo whose own stacks or scripts read local runtime credentials from disk, most commonly an operational repo's Docker Compose stack, keeps them in a dotted `.secrets/` directory at the repo root. This is the repo-scoped counterpart to the host-scoped `~/.secrets/` convention a repo's own `OPERATIONS.md` may document, and it is a different thing from `spec/secrets.json`, the CI/GitHub Actions secret-name registry `spec/audit.py` cross-checks. `spec/secrets.json` governs what a workflow reads from GitHub Actions. This convention governs what a repo's own process reads from its own checkout.
 
 - **The directory is named `.secrets/`, dotted, never a bare `secrets/`.**
+- **A secret file's stem is lowercase snake_case** (`homeassistant_db_password`, `mail_relay.env`), per [`CODESTYLE.md` "Script and Utility File Names"](./CODESTYLE.md#script-and-utility-file-names).
 - **A single opaque credential file carries no extension** (`homeassistant_db_password`, not `homeassistant_db_password.txt`), the same reason `README` and `LICENSE` carry none. It is a security property, read but never sourced, not a formatting preference.
 - **A structured credential keeps its format's extension** (`.json` for structured config).
 - **The shared env file is named for what it configures**, not a bare `.env` (`docker.env` for a repo whose stacks are Docker Compose), so a second env-shaped file added later stays unambiguous.
