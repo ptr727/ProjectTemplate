@@ -1840,6 +1840,8 @@ class TestPreviouslyMissed(GqlCase):
         block = "<summary >Open (1)</summary>\n<details><summary>Nit (5)</summary>x</details>"
         self.assertEqual("<summary >Open (1)</summary>", pr_review.heading_of(block))
         self.assertEqual("<summary>Open", pr_review.heading_of("<details open><summary>Open\n(1)"))
+        line = "<details><summaryx>Open (1)</summary>"
+        self.assertEqual(line, pr_review.heading_of(line))
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
