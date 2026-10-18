@@ -866,7 +866,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(r"<details(?:\s[^>]*)?>\s*", re.IGNORECASE)
+DETAILS_OPENER = re.compile(r"<details(?:\s[^>]*)?>[ \t]*", re.IGNORECASE)
 HEADING = re.compile(rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?<summary)", re.IGNORECASE)
 
 # How many of the newest reviews and comments both queries read.
@@ -4376,7 +4376,8 @@ def heading_of(block: str) -> str:
     """
     head = block.lstrip()
     opener = DETAILS_OPENER.match(head)
-    head = head[opener.end() :] if opener else head
+    if opener and head[opener.end() :].lower().startswith("<summary"):
+        head = head[opener.end() :]
     m = SUMMARY.search(head)
     return m.group(1) if m and head.lower().startswith("<summary") else head.split("\n", 1)[0]
 
