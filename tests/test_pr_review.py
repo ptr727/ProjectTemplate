@@ -1793,21 +1793,55 @@ class TestPreviouslyMissed(GqlCase):
                 self.assertNotIn("Constructed suppressed finding", missed[0])
                 self.assertEqual([], pr_review.unrecognized_in(body))
 
-    def test_a_tag_opener_separates_attributes_on_html_whitespace_alone(self) -> None:
-        """Python's `\\s` is wider than the whitespace HTML separates a tag's attributes on.
+    def test_every_opener_reader_ends_a_tag_name_where_markdown_does(self) -> None:
+        """Each reader kept its own rule for where the name ends, and three had none at all.
 
-        A no-break space after the tag name leaves the text no `<details>` or `<summary>` tag.
+        So `<summaryx>` opened a heading line through `HEADING`.
         """
         nbsp = chr(0xA0)
-        self.assertIsNotNone(pr_review.HEADING.match("<details\topen><summary>Open (1)</summary>"))
-        self.assertIsNone(
-            pr_review.HEADING.match(f"<details{nbsp}open><summary>Open (1)</summary>")
-        )
-        self.assertEqual(["x"], pr_review.SUMMARY.findall("<summary\fid='a'>x</summary>"))
-        self.assertEqual([], pr_review.SUMMARY.findall(f"<summary{nbsp}id='a'>x</summary>"))
-        for pattern in (pr_review.FOLD_OPENER, pr_review.FOLD_STOP):
-            self.assertIsNotNone(pattern.match("<summary\tid='a'>"))
-            self.assertIsNone(pattern.match(f"<summary{nbsp}id='a'>"))
+        summary = {
+            "SUMMARY": lambda t: (
+                pr_review.SUMMARY.findall(f"{t}Open (1)</summary>") == ["Open (1)"]
+            ),
+            "HEADING": lambda t: bool(pr_review.HEADING.match(f"{t}Open (1)</summary>")),
+            "heading_of": lambda t: pr_review.heading_of(f"{t}Open (1)</summary>\nx") == "Open (1)",
+            "heading_of past details": lambda t: (
+                pr_review.heading_of(f"<details>{t}Open (1)</summary>") == "Open (1)"
+            ),
+            "FOLD_OPENER": lambda t: bool(pr_review.FOLD_OPENER.match(t)),
+            "FOLD_STOP": lambda t: bool(pr_review.FOLD_STOP.match(t)),
+        }
+        details = {
+            "DETAILS_OPEN": lambda t: bool(pr_review.DETAILS_OPEN.search(t)),
+            "DETAILS_OPENER": lambda t: bool(pr_review.DETAILS_OPENER.match(f"{t}<summary>")),
+            "DETAILS_TAG": lambda t: bool((m := pr_review.DETAILS_TAG.match(t)) and m["open"]),
+            "HEADING": lambda t: bool(pr_review.HEADING.match(f"{t}<summary>Open (1)</summary>")),
+            "FOLD_STOP": lambda t: bool(pr_review.FOLD_STOP.match(t)),
+        }
+        for name, readers in (("summary", summary), ("details", details)):
+            for reader, opens in readers.items():
+                for tag in (f"<{name}>", f'<{name}\tid="a">', f'<{name}\fid="a">', f"<{name}/>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertTrue(opens(tag))
+                for tag in (f"<{name}x>", f"<{name}{nbsp}x>", f"<{name}/x>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertFalse(opens(tag))
+        for pattern, line in (
+            (pr_review.DETAILS_OPEN, "<details"),
+            (pr_review.HEADING, "<summary"),
+            (pr_review.FOLD_OPENER, "<summary"),
+            (pr_review.FOLD_STOP, "<details"),
+        ):
+            with self.subTest(pattern=pattern.pattern, line=line):
+                self.assertIsNotNone(pattern.search(line))
+
+    def test_a_heading_the_summary_reader_rejects_is_not_read_from_a_nested_entry(self) -> None:
+        """`heading_of` asked two readers one question, so a nested entry's summary became the heading."""
+        block = "<summary >Open (1)</summary>\n<details><summary>Nit (5)</summary>x</details>"
+        self.assertEqual("<summary >Open (1)</summary>", pr_review.heading_of(block))
+        self.assertEqual("<summary>Open", pr_review.heading_of("<details open><summary>Open\n(1)"))
+        line = "<details><summaryx>Open (1)</summary>"
+        self.assertEqual(line, pr_review.heading_of(line))
 
     def test_every_no_thread_render_drops_the_same_presentation_markup(self) -> None:
         """All of these sections come from one format, so a badge in a suppressed block buries its
