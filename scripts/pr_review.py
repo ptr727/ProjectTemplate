@@ -3737,8 +3737,22 @@ def reduced(text: str) -> str:
 
     The one reduction `normal`, `unwrap`, and `heading_count` share, so a heading is vetted,
     printed, and counted from the same text.
+
+    An emphasis tag a finding quotes in code is the finding's text, so it is kept.
     """
-    return EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, text))
+    return unquoted_dropped(EMPHASIS, SEVERITY_BADGE.sub(badge_text, text))
+
+
+def unquoted_dropped(pattern: re.Pattern[str], text: str) -> str:
+    """The text with each match of `pattern` dropped, except one inside a quotation.
+
+    The matches are found in a copy with every quotation masked, which keeps their offsets.
+    """
+    kept, end = [], 0
+    for tag in pattern.finditer(mask_quotations(text, MARKUP_MASK)):
+        kept.append(text[end : tag.start()])
+        end = tag.end()
+    return "".join(kept) + text[end:]
 
 
 def spaced(text: str) -> str:
@@ -4755,14 +4769,8 @@ def unwrap(block: str) -> str:
     title following them. The word is kept and the markup is not.
 
     A `<details>` or `<summary>` tag a finding quotes in code is the finding's text, so it is kept.
-    The tags are found in a copy with every quotation masked, which keeps their offsets.
     """
-    text = reduced(block)
-    kept, end = [], 0
-    for tag in TAGS.finditer(mask_quotations(text, MARKUP_MASK)):
-        kept.append(text[end : tag.start()])
-        end = tag.end()
-    return "".join(kept) + text[end:]
+    return unquoted_dropped(TAGS, reduced(block))
 
 
 def previously_missed_blocks(body: str) -> list[str]:

@@ -5210,6 +5210,21 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
         self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
 
+    def test_an_emphasis_tag_quoted_in_code_survives_every_reading(self) -> None:
+        """`reduced` dropped every emphasis tag, so a finding quoting one lost it from its own text.
+
+        `normal`, `unwrap`, and `heading_count` share that reduction, so all three keep it.
+        """
+        text = "Prefer `<strong>` over `<b>`."
+        self.assertEqual(text, pr_review.unwrap(text))
+        self.assertEqual(text, pr_review.normal(text))
+        fenced = "Use\n```\n<em>x</em>\n```\nhere."
+        self.assertEqual(fenced, pr_review.unwrap(fenced))
+        mixed = "<strong>Keep `<i>` (3)</strong>"
+        self.assertEqual("Keep `<i>` (3)", pr_review.unwrap(mixed))
+        self.assertEqual("Keep `<i>` (N)", pr_review.normal(mixed))
+        self.assertEqual(3, pr_review.heading_count(mixed))
+
     def test_a_phrase_rewrapped_across_comment_lines_reads_as_one_sentence(self) -> None:
         """Collapsing whitespace alone would leave the second line's marker inside the phrase."""
         wrapped = (
