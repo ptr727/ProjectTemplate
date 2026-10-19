@@ -36,7 +36,8 @@ from pathlib import Path
 
 UNCOVERED_SHOWN = 10
 # The catalog's hook snippets carry this helper into repos of every language, so it is fleet tooling rather than the repo's own Python.
-CARRIED_HELPERS = {"hub-fetch-run.py"}
+# A repo that copied it before the rename keeps the hyphenated name until it is next resynced.
+CARRIED_HELPERS = {"hub_fetch_run.py", "hub-fetch-run.py"}
 
 
 def escape_command(value: str) -> str:

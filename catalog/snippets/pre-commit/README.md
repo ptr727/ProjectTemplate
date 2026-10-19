@@ -19,7 +19,7 @@ the Husky.Net shape judges all of them. The pull request gate reads every line t
 `ruff-check` and `type-check` hooks and keeps the doc gates, which is what a Docker, config, or
 docs repo wires.
 
-Copy `../hub-fetch-run.py` alongside `.pre-commit-config.yaml` (repo root) for the doc gates
+Copy `../hub_fetch_run.py` alongside `.pre-commit-config.yaml` (repo root) for the doc gates
 to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main` branch and
 runs them, rather than vendoring or pinning a copy. A pin that no tool keeps current goes
 stale by construction, and CI (this repo's own, and the hub's) is the backstop for a change

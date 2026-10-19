@@ -120,7 +120,7 @@ NO_REQUIRED_ARGUMENT = frozenset(
 )
 
 REFUSES_A_LEADING_FLAG = {
-    "catalog/snippets/hub-fetch-run.py": "forwards every argument after its hub path",
+    "catalog/snippets/hub_fetch_run.py": "forwards every argument after its hub path",
 }
 
 REFUSED_AS_OPTION = re.compile(
@@ -509,7 +509,7 @@ class EntryPointCase(unittest.TestCase):
             "repo-config/configure.sh",
             "scripts/handoff.py",
             "scripts/prose_lint.py",
-            "catalog/snippets/hub-fetch-run.py",
+            "catalog/snippets/hub_fetch_run.py",
             "host-setup/bootstrap.ps1",
             *BEFORE_FLAG,
         ):

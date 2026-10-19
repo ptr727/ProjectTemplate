@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive hub-fetch-run.py's unborn-HEAD rewrite, probe-failure path, and provenance handoff.
+"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, and provenance handoff.
 
 The git cases run in constructed temp repositories, and the snippet bounds its own git probe with
 a timeout. The network is stubbed, so nothing here reaches GitHub.
@@ -25,7 +25,7 @@ from typing import Self
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
-SNIPPET = ROOT / "catalog" / "snippets" / "hub-fetch-run.py"
+SNIPPET = ROOT / "catalog" / "snippets" / "hub_fetch_run.py"
 TIMEOUT = 30
 SHA = "0123456789abcdef0123456789abcdef01234567"
 

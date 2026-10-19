@@ -23,6 +23,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github/actions/python-directories"))
 import python_directories as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
+import audit
+
 
 class ResolveTests(unittest.TestCase):
     def test_empty_declaration_takes_the_root_project(self) -> None:
@@ -117,8 +120,17 @@ class UncoveredTests(unittest.TestCase):
         self.assertEqual(pd.uncovered(["Tools"], tracked), ["Other/b.py", "ToolsX/c.py"])
 
     def test_the_carried_hook_helper_is_not_the_repo_s_python(self) -> None:
-        tracked = ["hub-fetch-run.py", ".husky/hub-fetch-run.py", "Tools/a.py"]
+        tracked = [
+            "hub_fetch_run.py",
+            ".husky/hub_fetch_run.py",
+            "hub-fetch-run.py",
+            ".husky/hub-fetch-run.py",
+            "Tools/a.py",
+        ]
         self.assertEqual(pd.uncovered(["Tools"], tracked), [])
+
+    def test_the_audit_exempts_the_same_helper_names(self) -> None:
+        self.assertEqual(pd.CARRIED_HELPERS, audit.CARRIED_PYTHON_HELPERS)
 
     def test_no_directory_leaves_every_python_file_uncovered(self) -> None:
         self.assertEqual(pd.uncovered([], ["a.py", "b.txt"]), ["a.py"])
