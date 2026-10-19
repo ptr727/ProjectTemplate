@@ -3031,12 +3031,31 @@ class TestUnrecognizedShapes(GqlCase):
             "Quote the ` character.\n\n\nLow severity Rename `x` here\n", pr_review.unwrap(block)
         )
         starts = ("</details>", "   <div>", "<DETAILS open>", "<p/>", "<PRE>", "<!-- x", "<?x")
-        for line in (*starts, "<!DOCTYPE html>", "<![CDATA[x"):
+        for line in (*starts, "<source>", "<textarea>", "<!DOCTYPE html>", "<![CDATA[x"):
             with self.subTest(line=line):
                 self.assertIsNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
-        for line in ("<span>", "    <div>", "<detailsx>", "<preview>", "<!doctype html>", "text"):
+        inline = ("<span>", "    <div>", "<detailsx>", "<preview>", "<search>", "<!doctype html>")
+        for line in (*inline, "text"):
             with self.subTest(line=line):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
+
+    def test_the_html_block_names_match_the_prose_gate_s(self) -> None:
+        """Both tools model which lines end a paragraph on GitHub, so their lists cannot differ.
+
+        The prose gate sits in a composite action this script cannot import, so this test is
+        what holds the two to one list. A line opening `<source>` once ended a paragraph for one
+        tool and not the other, and `<search>` the reverse.
+        """
+        prose_gate = Path(__file__).resolve().parent.parent / ".github/actions/prose-gate"
+        sys.path.insert(0, str(prose_gate))
+        try:
+            import prose_lint
+        finally:
+            sys.path.remove(str(prose_gate))
+        names = set(pr_review.HTML_BLOCK_NAMES.split("|"))
+        self.assertEqual(names, set(prose_lint.INTERRUPTING_TAGS.split("|")))
+        raw_text = set(pr_review.HTML_RAW_TEXT_NAMES.split("|"))
+        self.assertEqual(raw_text, set(prose_lint.RAW_TEXT_TAGS.split("|")))
 
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""
@@ -5209,6 +5228,24 @@ class TestSecondOverviewFormat(GqlCase):
             with self.subTest(tag=tag):
                 self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
         self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
+
+    def test_markup_quoted_in_code_survives_every_reading(self) -> None:
+        """`reduced` rewrote every emphasis tag and badge, so a finding quoting one lost it.
+
+        `normal` and `unwrap` keep quoted markup, and `heading_count` reads the count past it.
+        """
+        text = "Prefer `<strong>` over `<b>`."
+        self.assertEqual(text, pr_review.unwrap(text))
+        self.assertEqual(text, pr_review.normal(text))
+        fenced = "Use\n```\n<em>x</em>\n```\nhere."
+        self.assertEqual(fenced, pr_review.unwrap(fenced))
+        mixed = "<strong>Keep `<i>` (3)</strong>"
+        self.assertEqual("Keep `<i>` (3)", pr_review.unwrap(mixed))
+        self.assertEqual("Keep `<i>` (N)", pr_review.normal(mixed))
+        self.assertEqual(3, pr_review.heading_count(mixed))
+        quoted_badge = f"Quoted:\n```\nbadge = '{BADGE}'\n```\nand `<b>` kept"
+        self.assertEqual(quoted_badge, pr_review.unwrap(quoted_badge))
+        self.assertEqual("Low severity `<b>`", pr_review.unwrap(f"{BADGE} `<b>`"))
 
     def test_a_phrase_rewrapped_across_comment_lines_reads_as_one_sentence(self) -> None:
         """Collapsing whitespace alone would leave the second line's marker inside the phrase."""

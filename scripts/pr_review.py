@@ -695,8 +695,9 @@ HTML_BLOCK_NAMES = (
     "hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|"
     "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 )
+HTML_RAW_TEXT_NAMES = "pre|script|style|textarea"
 HTML_BLOCK_START = (
-    rf"(?:(?i:<(?:script|pre|style)(?={HTML_SPACE}|>|$)"
+    rf"(?:(?i:<(?:{HTML_RAW_TEXT_NAMES})(?={HTML_SPACE}|>|$)"
     rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
 )
@@ -3737,8 +3738,27 @@ def reduced(text: str) -> str:
 
     The one reduction `normal`, `unwrap`, and `heading_count` share, so a heading is vetted,
     printed, and counted from the same text.
+
+    A badge or an emphasis tag a finding quotes in code is the finding's text, so it is kept.
     """
-    return EMPHASIS.sub("", SEVERITY_BADGE.sub(badge_text, text))
+    badges = unquoted_sub(SEVERITY_BADGE, badge_text, text)
+    return unquoted_sub(EMPHASIS, lambda m: "", badges)
+
+
+def unquoted_sub(pattern: re.Pattern[str], repl: Callable[[re.Match[str]], str], text: str) -> str:
+    """The text with each match of `pattern` replaced by `repl`, except one inside a quotation.
+
+    The matches are found in a copy with every quotation masked, which keeps their offsets, and
+    `repl` reads each one from the text itself. A match whose span the text does not match whole
+    has a quotation inside it, so it is kept.
+    """
+    kept, end = [], 0
+    for hit in pattern.finditer(mask_quotations(text, MARKUP_MASK)):
+        own = pattern.fullmatch(text, hit.start(), hit.end())
+        if own:
+            kept += [text[end : hit.start()], repl(own)]
+            end = hit.end()
+    return "".join(kept) + text[end:]
 
 
 def spaced(text: str) -> str:
@@ -4755,14 +4775,8 @@ def unwrap(block: str) -> str:
     title following them. The word is kept and the markup is not.
 
     A `<details>` or `<summary>` tag a finding quotes in code is the finding's text, so it is kept.
-    The tags are found in a copy with every quotation masked, which keeps their offsets.
     """
-    text = reduced(block)
-    kept, end = [], 0
-    for tag in TAGS.finditer(mask_quotations(text, MARKUP_MASK)):
-        kept.append(text[end : tag.start()])
-        end = tag.end()
-    return "".join(kept) + text[end:]
+    return unquoted_sub(TAGS, lambda m: "", reduced(block))
 
 
 def previously_missed_blocks(body: str) -> list[str]:

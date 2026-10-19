@@ -1802,13 +1802,16 @@ INTERRUPTING_TAGS = (
     "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details"
     "|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head"
     "|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p"
-    "|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+    "|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 )
 RAW_TEXT_TAGS = "pre|script|style|textarea"
-STANDALONE_TAGS = "br|img|picture|source"
+STANDALONE_TAGS = "br|img|picture"
+BLOCK_SPACE = r"[ \t\n\v\f\r]"
 TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
 OPENING_TAG = re.compile(
-    rf"^\s*(?:</?({INTERRUPTING_TAGS})|<({RAW_TEXT_TAGS})|</?(?:{STANDALONE_TAGS}))\b",
+    rf"^\s*(?:</?({INTERRUPTING_TAGS})(?={BLOCK_SPACE}|/?>|$)"
+    rf"|<({RAW_TEXT_TAGS})(?={BLOCK_SPACE}|>|$)"
+    rf"|</?(?:{STANDALONE_TAGS})\b)",
     re.IGNORECASE,
 )
 YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
