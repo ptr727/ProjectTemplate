@@ -2467,12 +2467,12 @@ class TestSentenceLength(BaitCase):
     def test_a_line_github_opens_no_block_on_does_not_interrupt(self) -> None:
         """GitHub's renderer reads `<search>` as no block name, though CommonMark 0.31 lists it.
 
-        A custom element such as `<source-x>` is no block name either, though one opens its name,
-        and a vertical tab is not the HTML whitespace that ends a name.
+        A custom element such as `<source-x>` is no block name either, though one opens its name.
+        A no-break space does not end a name, though a vertical tab does.
         """
         a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
         tags = ("<search>", "</style>", "</pre>", "</textarea>", "<source-x>", "<div-x>")
-        for tag in (*tags, "<div\vclass=x>"):
+        for tag in (*tags, "<div\xa0class=x>"):
             with self.subTest(tag=tag):
                 self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
 
@@ -2485,7 +2485,7 @@ class TestSentenceLength(BaitCase):
         """GitHub's renderer reads `<source>` as a block name, though CommonMark 0.31 drops it."""
         a = " ".join(["word"] * 15)
         tags = ("<dl>", "<figure>", "<style>", "<nav>", "<source>", "<textarea>", "</div>")
-        for tag in (*tags, "<hr/>", "<div\tclass=x>"):
+        for tag in (*tags, "<hr/>", "<div\tclass=x>", "<div\vclass=x>"):
             with self.subTest(tag=tag):
                 self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 

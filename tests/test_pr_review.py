@@ -3056,7 +3056,6 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertEqual(names, set(prose_lint.INTERRUPTING_TAGS.split("|")))
         raw_text = set(pr_review.HTML_RAW_TEXT_NAMES.split("|"))
         self.assertEqual(raw_text, set(prose_lint.RAW_TEXT_TAGS.split("|")))
-        self.assertEqual(pr_review.HTML_SPACE, prose_lint.HTML_SPACE)
 
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""
