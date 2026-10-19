@@ -1806,9 +1806,11 @@ INTERRUPTING_TAGS = (
 )
 RAW_TEXT_TAGS = "pre|script|style|textarea"
 STANDALONE_TAGS = "br|img|picture"
+HTML_SPACE = r"[ \t\n\f\r]"
 TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
 OPENING_TAG = re.compile(
-    rf"^\s*(?:</?({INTERRUPTING_TAGS})(?=\s|/?>|$)|<({RAW_TEXT_TAGS})(?=\s|>|$)"
+    rf"^\s*(?:</?({INTERRUPTING_TAGS})(?={HTML_SPACE}|/?>|$)"
+    rf"|<({RAW_TEXT_TAGS})(?={HTML_SPACE}|>|$)"
     rf"|</?(?:{STANDALONE_TAGS})\b)",
     re.IGNORECASE,
 )
