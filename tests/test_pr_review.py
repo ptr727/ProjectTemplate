@@ -1847,6 +1847,9 @@ class TestPreviouslyMissed(GqlCase):
             with self.subTest(tag=tag):
                 self.assertEqual(f"{tag}Open (1)", pr_review.unwrap(f"{tag}Open (1)</summary>"))
         self.assertEqual("<details\nopen>Open", pr_review.unwrap("<details\nopen>Open"))
+        for text in ("The pattern `<details [^>]*>` reads.", "Write `<summary ` then `a > b`."):
+            with self.subTest(text=text):
+                self.assertEqual(text, pr_review.unwrap(text))
         self.assertTrue(pr_review.entry_heading(f'<summary class="x">{BADGE} Title'))
 
     def test_a_heading_the_summary_reader_rejects_is_not_read_from_a_nested_entry(self) -> None:
