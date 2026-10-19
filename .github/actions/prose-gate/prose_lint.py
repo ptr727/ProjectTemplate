@@ -1808,7 +1808,8 @@ RAW_TEXT_TAGS = "pre|script|style|textarea"
 STANDALONE_TAGS = "br|img|picture"
 TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
 OPENING_TAG = re.compile(
-    rf"^\s*(?:</?({INTERRUPTING_TAGS})|<({RAW_TEXT_TAGS})|</?(?:{STANDALONE_TAGS}))\b",
+    rf"^\s*(?:</?({INTERRUPTING_TAGS})(?=\s|/?>|$)|<({RAW_TEXT_TAGS})(?=\s|>|$)"
+    rf"|</?(?:{STANDALONE_TAGS})\b)",
     re.IGNORECASE,
 )
 YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")

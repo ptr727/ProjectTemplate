@@ -2464,10 +2464,13 @@ class TestSentenceLength(BaitCase):
         self.assertEqual([], self.found(fenced))
         self.assertEqual([], self.found(table))
 
-    def test_search_and_a_closing_raw_text_tag_do_not_interrupt(self) -> None:
-        """GitHub's renderer reads `<search>` as no block name, though CommonMark 0.31 lists it."""
+    def test_a_line_github_opens_no_block_on_does_not_interrupt(self) -> None:
+        """GitHub's renderer reads `<search>` as no block name, though CommonMark 0.31 lists it.
+
+        A custom element such as `<source-x>` is no block name either, though one opens its name.
+        """
         a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
-        for tag in ("<search>", "</style>", "</pre>", "</textarea>"):
+        for tag in ("<search>", "</style>", "</pre>", "</textarea>", "<source-x>", "<div-x>"):
             with self.subTest(tag=tag):
                 self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
 
