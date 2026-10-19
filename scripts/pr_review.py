@@ -624,15 +624,17 @@ def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     an opener quoted as `<details [^>]*>` is not one. A `spanning` reader takes a line break where
     HTML does, between attributes and inside a quoted value, and any other reads one line.
 
-    Without `lone_space`, whitespace must lead to an attribute. That is how a reader refuses the
-    `<summary >` a code span masked to a space leaves, and it refuses `<summary />` with it.
+    Without `lone_space`, whitespace must lead to an attribute, and its name to a letter. That is
+    how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
+    and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
 
     One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
     and not at its siblings.
     """
     space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
     value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
-    attribute = rf"{space}+[A-Za-z][\w.:-]*(?:{space}*={space}*(?:{value}))?"
+    lead = "[A-Za-z_:]" if lone_space else "[A-Za-z]"
+    attribute = rf"{space}+{lead}[\w.:-]*(?:{space}*={space}*(?:{value}))?"
     if lone_space:
         return rf"(?:{attribute})*{space}*/?>"
     return rf"(?:(?:{attribute})+{space}*)?/?>"

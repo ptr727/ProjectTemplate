@@ -1877,6 +1877,9 @@ class TestPreviouslyMissed(GqlCase):
         for tag in ("<summary >", "<summary />", "<summary _y>"):
             with self.subTest(reader="SUMMARY", tag=tag):
                 self.assertFalse(summary["SUMMARY"](tag))
+        for tag in ("<summary :open>", '<summary _id="a">', "<summary />"):
+            with self.subTest(reader="TAGS", tag=tag):
+                self.assertTrue(summary["TAGS"](tag))
 
     def test_a_render_strips_an_attributed_opener_as_it_strips_a_bare_one(self) -> None:
         """`TAGS` matched a bare tag alone, so `<details open>` printed raw in the digest.
