@@ -610,9 +610,8 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-HTML_TAG = re.compile(
-    r"</?[A-Za-z][\w-]*(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
-)
+ATTRIBUTES = r"(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
 LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
@@ -876,7 +875,9 @@ SUMMARY = re.compile(
     rf"{tag_opener('summary')}(?:[ \t\n\f\r]+[A-Za-z][^>]*)?/?>(.*?)</summary>",
     re.DOTALL | re.IGNORECASE,
 )
-TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
+TAGS = re.compile(
+    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}{ATTRIBUTES}", re.IGNORECASE
+)
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
 OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
@@ -4703,8 +4704,16 @@ def unwrap(block: str) -> str:
     place its findings are read. The wrapper tags say nothing, emphasis around a heading says
     nothing, and a severity badge says one word wrapped in two versioned icon URLs that bury the
     title following them. The word is kept and the markup is not.
+
+    A `<details>` or `<summary>` tag a finding quotes in code is the finding's text, so it is kept.
+    The tags are found in a copy with every quotation masked, which keeps their offsets.
     """
-    return TAGS.sub("", reduced(block))
+    text = reduced(block)
+    kept, end = [], 0
+    for tag in TAGS.finditer(mask_quotations(text, MARKUP_MASK)):
+        kept.append(text[end : tag.start()])
+        end = tag.end()
+    return "".join(kept) + text[end:]
 
 
 def previously_missed_blocks(body: str) -> list[str]:
