@@ -2489,6 +2489,31 @@ class TestSentenceLength(BaitCase):
             with self.subTest(tag=tag):
                 self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 
+    def test_a_tag_line_indented_past_its_container_continues_the_paragraph(self) -> None:
+        """Four columns past the paragraph's container, a tag line is lazy text on GitHub."""
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n    <div>\n{half}.\n"))
+        self.assertEqual([], self.found(f"{half}\n   <div>\n{half}.\n"))
+        self.assertEqual(
+            [(1, "sentence-length")], self.found(f"- {half}\n      <div>\n  {half}.\n")
+        )
+        self.assertEqual([], self.found(f"- {half}\n     <div>\n  {half}.\n"))
+        self.assertEqual([], self.found(f"- {half}\nlazy\n    <div>\n  {half}.\n"))
+        self.assertEqual([], self.found(f"-   {half}\n      <div>\n    {half}.\n"))
+        for empty in ("-", "- "):
+            with self.subTest(empty=empty):
+                self.assertEqual([], self.found(f"{empty}\n  {half}\n    <div>\n  {half}.\n"))
+        for empty, pad in (("*", "  "), ("+", "  "), ("1.", "   "), ("1)", "   ")):
+            with self.subTest(empty=empty):
+                text = f"{empty}\n{pad}{half}\n{pad}  <div>\n{pad}{half}.\n"
+                self.assertEqual([], self.found(text))
+        self.assertEqual([], self.found(f"-\t{half}\n      <div>\n    {half}.\n"))
+        for head in (f"{half}\n*\n", f"{half}\n+\n", f"{half}\n1)\n", f"- {half}\n  *\n  "):
+            with self.subTest(head=head):
+                self.assertEqual([(1, "sentence-length")], self.found(f"{head}{half}.\n"))
+        wide = f"-   {half}\n        <div>\n    {half}.\n"
+        self.assertEqual([(1, "sentence-length")], self.found(wide))
+
     def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
         self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n2) {half}\n"))
