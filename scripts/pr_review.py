@@ -5867,8 +5867,9 @@ def attestation(pr: dict) -> str | None:
 
     Read over every comment rather than the reviewer's own, since an attestation is the
     maintainer's account speaking. The association is what keeps a passer-by's comment carrying
-    the same marker from vouching for anything. The marker counts only as a line of its own
-    outside a fence, so a comment quoting it in a span or a code block vouches for nothing.
+    the same marker from vouching for anything. The marker counts only as a line of its own outside
+    a fence. So a comment quoting it inline or in a code block vouches for nothing. A tick on each
+    side of that line opens no span, since the line ends the paragraph, so the marker still counts.
     """
     head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
     for node in (pr.get("comments") or {}).get("nodes") or []:
