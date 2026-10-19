@@ -610,9 +610,8 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-HTML_TAG = re.compile(
-    r"</?[A-Za-z][\w-]*(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
-)
+ATTRIBUTES = r"(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
 LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
@@ -877,8 +876,7 @@ SUMMARY = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(
-    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}(?:[ \t\f]+(?:[A-Za-z][^>\r\n]*)?)?/?>",
-    re.IGNORECASE,
+    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}{ATTRIBUTES}", re.IGNORECASE
 )
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
@@ -4707,8 +4705,8 @@ def unwrap(block: str) -> str:
     nothing, and a severity badge says one word wrapped in two versioned icon URLs that bury the
     title following them. The word is kept and the markup is not.
 
-    A tag a finding quotes in code is the finding's text rather than markup, so it is kept. The
-    tags are found in a copy with every quotation masked, which keeps their offsets in the text.
+    A `<details>` or `<summary>` tag a finding quotes in code is the finding's text, so it is kept.
+    The tags are found in a copy with every quotation masked, which keeps their offsets.
     """
     text = reduced(block)
     kept, end = [], 0

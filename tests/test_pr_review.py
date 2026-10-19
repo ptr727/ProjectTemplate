@@ -1850,9 +1850,11 @@ class TestPreviouslyMissed(GqlCase):
         self.assertEqual("<details\nopen>Open", pr_review.unwrap("<details\nopen>Open"))
         quoted = ("Keep `<details open>` here.", "Keep `<summary>` here.", "```\n<details>\n```")
         split = ("The pattern `<details [^>]*>` reads.", "Write `<summary ` then `a > b`.")
-        for text in (*quoted, *split):
+        prose = "The <details element's open attribute -> false."
+        for text in (*quoted, *split, prose):
             with self.subTest(text=text):
                 self.assertEqual(text, pr_review.unwrap(text))
+        self.assertEqual("A  c", pr_review.unwrap("A <summary title='a>b'> c"))
         self.assertTrue(pr_review.entry_heading(f'<summary class="x">{BADGE} Title'))
 
     def test_a_heading_the_summary_reader_rejects_is_not_read_from_a_nested_entry(self) -> None:
