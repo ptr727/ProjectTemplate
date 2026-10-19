@@ -1997,6 +1997,8 @@ def sentence_length_findings(
             block.clear()
             continue
         if THEMATIC_BREAK.match(line) or SETEXT_UNDERLINE.match(line):
+            if not block and line.strip() == "-":
+                in_list, item_offset = True, indent + 2
             flush()
             continue
         span = line.strip()

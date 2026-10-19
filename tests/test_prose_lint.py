@@ -2500,6 +2500,9 @@ class TestSentenceLength(BaitCase):
         self.assertEqual([], self.found(f"- {half}\n     <div>\n  {half}.\n"))
         self.assertEqual([], self.found(f"- {half}\nlazy\n    <div>\n  {half}.\n"))
         self.assertEqual([], self.found(f"-   {half}\n      <div>\n    {half}.\n"))
+        for empty in ("-", "- "):
+            with self.subTest(empty=empty):
+                self.assertEqual([], self.found(f"{empty}\n  {half}\n    <div>\n  {half}.\n"))
         wide = f"-   {half}\n        <div>\n    {half}.\n"
         self.assertEqual([(1, "sentence-length")], self.found(wide))
 
