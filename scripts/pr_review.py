@@ -612,7 +612,28 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-ATTRIBUTES = r"(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+
+
+def attributes(space: str = r"[ \t\f]", lone_space: bool = True) -> str:
+    """The pattern for a tag's attributes after its name, through the `>` that closes it.
+
+    A quoted value may hold a `>`, and anything else that is not an attribute ends the tag unread,
+    so an opener quoted as `<details [^>]*>` is not one. `space` is what may separate them, one
+    line's whitespace for a reader that reads one line. Without `lone_space`, whitespace must lead
+    to an attribute or a `/>`, which is how a reader refuses the `<summary >` a masked code span
+    leaves.
+
+    One tail serves every opener reader here. A tail kept per site was fixed at one and not at its
+    siblings.
+    """
+    attribute = rf"{space}+[\w:-]+(?:{space}*={space}*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?"
+    if lone_space:
+        return rf"(?:{attribute})*{space}*/?>"
+    return rf"(?:(?:{attribute})+{space}*|{space}+(?=/))?/?>"
+
+
+ATTRIBUTES = attributes()
+SPANNING_SPACE = r"[ \t\n\f\r]"
 HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
@@ -889,7 +910,7 @@ HUB = "ptr727/ProjectTemplate"
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
 SUMMARY = re.compile(
-    rf"{tag_opener('summary')}(?:[ \t\n\f\r]+[A-Za-z][^>]*)?/?>(.*?)</summary>",
+    rf"{tag_opener('summary')}{attributes(SPANNING_SPACE, lone_space=False)}(.*?)</summary>",
     re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(
@@ -903,7 +924,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(rf"{tag_opener('details')}[^>]*>[ \t]*", re.IGNORECASE)
+DETAILS_OPENER = re.compile(rf"{tag_opener('details')}{ATTRIBUTES}[ \t]*", re.IGNORECASE)
 SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
 HEADING = re.compile(
     rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
@@ -4450,7 +4471,7 @@ def heading_count(heading: str) -> int | None:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    rf"(?P<open>{tag_opener('details')}[^<>]*>)"
+    rf"(?P<open>{tag_opener('details')}{attributes(SPANNING_SPACE)})"
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"

@@ -1835,6 +1835,34 @@ class TestPreviouslyMissed(GqlCase):
             with self.subTest(pattern=pattern.pattern, line=line):
                 self.assertIsNotNone(pattern.search(line))
 
+    def test_every_opener_reader_ends_an_attribute_tail_alike(self) -> None:
+        """Each reader spelled its own tail after the name, so an opener quoted in code as
+        `<details [^>]*>` was a tag to one reader, eating the text after it up to the next `>`."""
+        summary = {
+            "SUMMARY": lambda t: (
+                pr_review.SUMMARY.findall(f"{t}Open (1)</summary>") == ["Open (1)"]
+            ),
+            "heading_of": lambda t: pr_review.heading_of(f"{t}Open (1)</summary>\nx") == "Open (1)",
+            "TAGS": lambda t: pr_review.unwrap(f"{t}Open (1)</summary>") == "Open (1)",
+        }
+        details = {
+            "DETAILS_OPENER": lambda t: bool(pr_review.DETAILS_OPENER.match(f"{t}<summary>")),
+            "DETAILS_TAG": lambda t: bool((m := pr_review.DETAILS_TAG.match(t)) and m["open"]),
+            "TAGS": lambda t: pr_review.unwrap(f"{t}Open") == "Open",
+            "heading_of past details": lambda t: (
+                pr_review.heading_of(f"{t}<summary>Open (1)</summary>") == "Open (1)"
+            ),
+        }
+        for name, readers in (("summary", summary), ("details", details)):
+            read = (f'<{name} class="x">', f"<{name} title='a>b'>", f"<{name}/>", f"<{name} />")
+            for reader, opens in readers.items():
+                for tag in read:
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertTrue(opens(tag))
+                for tag in (f"<{name} [^>]*>", f"<{name} ` x>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertFalse(opens(tag))
+
     def test_a_render_strips_an_attributed_opener_as_it_strips_a_bare_one(self) -> None:
         """`TAGS` matched a bare tag alone, so `<details open>` printed raw in the digest.
 
