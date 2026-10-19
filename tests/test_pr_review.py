@@ -5548,9 +5548,39 @@ class TestOverviewSections(GqlCase):
                 self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)])))
 
     def test_a_clean_verdict_counting_no_finding_exits_zero(self) -> None:
+        """Its headline names a finding, so it prints as advisory and the exit stays clean."""
         self.answer(payload([review(body=self.headline("### Approval recommended"))]))
         self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
-        self.assertNotIn("VERDICT WITH NO COUNTED FINDING", self.out.getvalue())
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertNotIn("VERDICT WITH NO COUNTED FINDING", printed)
+        self.assertIn("CLEAN VERDICT HEADLINE", printed)
+        self.assertIn("Resolve the two outstanding parser-retry", printed)
+
+    def test_a_clean_headline_naming_an_answered_thread_still_reads_clean(self) -> None:
+        """Nothing tells an answered thread from a new nit, so both print and neither gates."""
+        body = self.headline("### Ready to approve").replace(
+            "Resolve the two outstanding parser-retry and timeout-handling findings.",
+            "The earlier retry-loop finding is answered in its thread.",
+        )
+        self.answer(payload([review(body=body)], [thread("T1", resolved=True)]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertIn("The earlier retry-loop finding is answered", self.out.getvalue())
+
+    def test_a_clean_verdict_with_no_headline_prose_prints_no_advisory(self) -> None:
+        body = self.headline("### Approval recommended").replace(
+            "Resolve the two outstanding parser-retry and timeout-handling findings.", ""
+        )
+        self.answer(payload([review(body=body)]))
+        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertNotIn("CLEAN VERDICT HEADLINE", self.out.getvalue())
+
+    def test_a_flagging_verdict_prints_no_advisory(self) -> None:
+        """The flagging reading already prints that headline, and gates on it."""
+        self.answer(payload([review(body=self.headline())]))
+        self.assertEqual(50, pr_review.main(["status", "7", "--repo", "o/r"]))
+        self.assertNotIn("CLEAN VERDICT HEADLINE", self.out.getvalue())
 
     def test_a_flagging_verdict_with_counted_findings_is_not_this_reading(self) -> None:
         rd = review(body=revised_with(open_section(("6000000001",))), rid="PRR_head")

@@ -138,6 +138,8 @@ Subcommands
            and over `wait`'s 44.
            The headline is owed the triage a suppressed finding gets, and the code repeats on that
            head after it is answered, since nothing here reads an answer.
+           A clean verdict on the same terms exits 0 and prints its headline under
+           `CLEAN VERDICT HEADLINE`, advisory, since it may name a nit new or already answered.
            A refusal naming the account quota still reads as absent here, exit 0, since a refusal
            covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
            `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
@@ -3070,7 +3072,7 @@ def unthreaded_narrative_findings(pr: dict) -> int:
     return unmatched(len(entries), len(threads), fits)
 
 
-def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
+def uncounted_verdict(pr: dict, verdicts: set[str] = FLAGGING_VERDICTS) -> tuple[str, str] | None:
     """The head round's verdict and headline, where the verdict flags what nothing counts.
 
     A round opening on a flagging verdict that states no open finding, lists none in an open
@@ -3082,13 +3084,17 @@ def uncounted_verdict(pr: dict) -> tuple[str, str] | None:
 
     An open thread defers the reading rather than cancelling it, since the headline may name that
     thread and the loop already waits on it, and once it is resolved the reading returns.
+
+    Passed `CLEAN_VERDICTS`, it reads a clean round on the same terms, whose headline named a
+    remaining nit in about a quarter of the rounds measured. That reading is printed and never
+    gated, since nothing in the body says whether the nit is new or an answered thread.
     """
     newest = second_format_head(pr)
     if newest is None:
         return None
     body = newest.get("body") or ""
     verdict, headline, sections = read_overview(body)
-    if not verdict or unvetted(verdict, FLAGGING_VERDICTS):
+    if not verdict or unvetted(verdict, verdicts):
         return None
     listed = any(role != RESOLVED and (count or ids) for role, count, ids, _ in sections)
     if listed or stated_total(body) or round_threads(pr, newest):
@@ -4955,6 +4961,7 @@ def digest(
         max(headlined - headline_listed, 0),
     )
     flagged = uncounted_verdict(pr)
+    advisory = uncounted_verdict(pr, CLEAN_VERDICTS)
 
     answer = answered_outside_review(pr)
     refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
@@ -5171,6 +5178,14 @@ def digest(
             "flags is named. Give the headline the triage a suppressed finding gets"
         )
         lines.append(f"    {flagged[1] or '(the headline carries no prose)'}")
+    if advisory and advisory[1]:
+        lines.append(
+            f"  CLEAN VERDICT HEADLINE: the round covering the head opens on `{advisory[0]}` and "
+            "counts no finding. Its headline may name a remaining nit, new or already answered, "
+            "which nothing here tells apart, so this is advisory and changes no exit code. Read "
+            "it before closing the review loop"
+        )
+        lines.append(f"    {advisory[1]}")
     if carried is not None:
         # Printed whatever the carried state is, the provenance being the same question either way.
         # A carried partial then prints its own block under this one.
