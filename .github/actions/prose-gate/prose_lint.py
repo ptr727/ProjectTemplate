@@ -1958,8 +1958,11 @@ def sentence_length_findings(
             continue
         marker = ITEM_MARKER.match(line)
         number = marker.group(1) if marker else None
+        empty = marker is not None and not line[marker.end() :].strip()
         is_item = bool(
-            marker and (number is None or in_list or not block or number.lstrip("0") == "1")
+            marker
+            and (number is None or in_list or not block or number.lstrip("0") == "1")
+            and (not empty or not block or indent < block_offset)
         )
         if not block and was_blank:
             code_indent = INDENT_BLOCK + (item_offset if in_list else 0)
@@ -2010,7 +2013,7 @@ def sentence_length_findings(
             flush()
             in_list = True
             item_offset = content_offset(line, marker) if marker else 0
-            if marker and not line[marker.end() :].strip():
+            if empty:
                 continue
             block_is_item = True
             span = strip_list_marker(span)
