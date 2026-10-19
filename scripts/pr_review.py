@@ -612,7 +612,35 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-ATTRIBUTES = r"(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+
+
+HTML_SPACE = r"[ \t\n\f\r]"
+
+
+def attributes(spanning: bool = False, lone_space: bool = True) -> str:
+    """The pattern for a tag's attributes after its name, through the `>` that closes it.
+
+    A quoted value may hold a `>`. Anything else that is not an attribute ends the tag unread, so
+    an opener quoted as `<details [^>]*>` is not one. A `spanning` reader takes a line break where
+    HTML does, between attributes and inside a quoted value, and any other reads one line.
+
+    Without `lone_space`, whitespace must lead to an attribute, and its name to a letter. That is
+    how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
+    and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
+
+    One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
+    and not at its siblings.
+    """
+    space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
+    value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
+    lead = "[A-Za-z_:]" if lone_space else "[A-Za-z]"
+    attribute = rf"{space}+{lead}[\w.:-]*(?:{space}*={space}*(?:{value}))?"
+    if lone_space:
+        return rf"(?:{attribute})*{space}*/?>"
+    return rf"(?:(?:{attribute})+{space}*)?/?>"
+
+
+ATTRIBUTES = attributes()
 HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
@@ -647,12 +675,41 @@ def strip_fences(
     )
 
 
+def tag_opener(*names: str, closer: bool = False) -> str:
+    """The pattern opening a tag of one of these names, up to where its name ends.
+
+    A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
+    another tag and `<summary/>` opens a summary. A `<details/x>` shows as text, since Markdown
+    hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
+    after the name leaves no tag.
+
+    One boundary serves every opener reader here that admits an attribute. A rule kept per site
+    had to be fixed by hand at each of its siblings. With `closer`, a closing tag matches too.
+    """
+    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?={HTML_SPACE}|/?>|$)"
+
+
+HTML_BLOCK_NAMES = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|"
+    "dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|"
+    "hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|"
+    "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+)
+HTML_BLOCK_START = (
+    rf"(?:(?i:<(?:script|pre|style)(?={HTML_SPACE}|>|$)"
+    rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
+    r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
+)
+
+
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
 # Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = re.compile(r"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
+CODE_SPAN = re.compile(
+    rf"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n| {{0,3}}{HTML_BLOCK_START}))*?(?<!`)\1(?!`)"
+)
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.
@@ -837,20 +894,6 @@ COUNT_DIGITS = 4
 STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
 
 
-def tag_opener(*names: str) -> str:
-    """The pattern opening a tag of one of these names, up to where its name ends.
-
-    A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
-    another tag and `<summary/>` opens a summary. A `<details/x>` shows as text, since Markdown
-    hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
-    after the name leaves no tag.
-
-    One boundary serves every opener reader here that admits an attribute. A rule kept per site
-    had to be fixed by hand at each of its siblings.
-    """
-    return rf"<(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
-
-
 # The first section opener on a line of its own, which is where the overview preamble ends.
 # Read case-insensitively as every other tag reader in this file is, since a body spelling it
 # `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
@@ -874,7 +917,7 @@ HUB = "ptr727/ProjectTemplate"
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
 SUMMARY = re.compile(
-    rf"{tag_opener('summary')}(?:[ \t\n\f\r]+[A-Za-z][^>]*)?/?>(.*?)</summary>",
+    rf"{tag_opener('summary')}{attributes(spanning=True, lone_space=False)}(.*?)</summary>",
     re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(
@@ -888,7 +931,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(rf"{tag_opener('details')}[^>]*>[ \t]*", re.IGNORECASE)
+DETAILS_OPENER = re.compile(rf"{tag_opener('details')}{ATTRIBUTES}[ \t]*", re.IGNORECASE)
 SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
 HEADING = re.compile(
     rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
@@ -4435,7 +4478,7 @@ def heading_count(heading: str) -> int | None:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    rf"(?P<open>{tag_opener('details')}[^<>]*>)"
+    rf"(?P<open>{tag_opener('details')}{attributes(spanning=True)})"
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"
@@ -5824,14 +5867,15 @@ def attestation(pr: dict) -> str | None:
 
     Read over every comment rather than the reviewer's own, since an attestation is the
     maintainer's account speaking. The association is what keeps a passer-by's comment carrying
-    the same marker from vouching for anything. The marker counts only as a line of its own
-    outside a fence, so a comment quoting it in a span or a code block vouches for nothing.
+    the same marker from vouching for anything. The marker counts only as a line of its own outside
+    a fence. So a comment quoting it inline or in a code block vouches for nothing. A tick on each
+    side of that line opens no span, since the line ends the paragraph, so the marker still counts.
     """
     head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
     for node in (pr.get("comments") or {}).get("nodes") or []:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
-        body = CODE_SPAN.sub(" ", strip_fences(node.get("body") or "", to_end=True))
+        body = strip_fences(node.get("body") or "", to_end=True)
         for m in ATTESTATION.finditer(body):
             if m.group(1) == head and m.group(2) == base:
                 return m.group(3)

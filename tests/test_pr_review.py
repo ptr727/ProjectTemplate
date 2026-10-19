@@ -1835,6 +1835,52 @@ class TestPreviouslyMissed(GqlCase):
             with self.subTest(pattern=pattern.pattern, line=line):
                 self.assertIsNotNone(pattern.search(line))
 
+    def test_every_attribute_tail_reader_ends_a_tag_alike(self) -> None:
+        """Each reader spelled its own tail after the name.
+
+        So an opener quoted in code as `<details [^>]*>` was a tag to one of them, eating the text
+        after it up to the next `>`. The two readers spanning lines read a line break where HTML
+        does, between attributes and inside a quoted value.
+        """
+        summary = {
+            "SUMMARY": lambda t: (
+                pr_review.SUMMARY.findall(f"{t}Open (1)</summary>") == ["Open (1)"]
+            ),
+            "heading_of": lambda t: pr_review.heading_of(f"{t}Open (1)</summary>\nx") == "Open (1)",
+            "TAGS": lambda t: pr_review.unwrap(f"{t}Open (1)</summary>") == "Open (1)",
+        }
+        details = {
+            "DETAILS_OPENER": lambda t: bool(pr_review.DETAILS_OPENER.match(f"{t}<summary>")),
+            "DETAILS_TAG": lambda t: bool((m := pr_review.DETAILS_TAG.match(t)) and m["open"]),
+            "TAGS": lambda t: pr_review.unwrap(f"{t}Open") == "Open",
+            "heading_of past details": lambda t: (
+                pr_review.heading_of(f"{t}<summary>Open (1)</summary>") == "Open (1)"
+            ),
+        }
+        for name, readers in (("summary", summary), ("details", details)):
+            read = (f'<{name} class="x">', f"<{name} title='a>b'>", f"<{name} data.x=1>")
+            for reader, opens in readers.items():
+                for tag in (*read, f"<{name}/>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertTrue(opens(tag))
+                for tag in (f"<{name} [^>]*>", f"<{name} ` x>", f"<{name} 2>"):
+                    with self.subTest(reader=reader, tag=tag):
+                        self.assertFalse(opens(tag))
+        for reader, opens in (
+            ("SUMMARY", summary["SUMMARY"]),
+            ("DETAILS_TAG", details["DETAILS_TAG"]),
+        ):
+            name = "summary" if reader == "SUMMARY" else "details"
+            for tag in (f'<{name}\n  class="x">', f'<{name} title="a\nb">'):
+                with self.subTest(reader=reader, tag=tag):
+                    self.assertTrue(opens(tag))
+        for tag in ("<summary >", "<summary />", "<summary _y>"):
+            with self.subTest(reader="SUMMARY", tag=tag):
+                self.assertFalse(summary["SUMMARY"](tag))
+        for tag in ("<summary :open>", '<summary _id="a">', "<summary />"):
+            with self.subTest(reader="TAGS", tag=tag):
+                self.assertTrue(summary["TAGS"](tag))
+
     def test_a_render_strips_an_attributed_opener_as_it_strips_a_bare_one(self) -> None:
         """`TAGS` matched a bare tag alone, so `<details open>` printed raw in the digest.
 
@@ -2973,6 +3019,24 @@ class TestUnrecognizedShapes(GqlCase):
             "Also the ` character.\n"
         )
         self.assertEqual(["summary: Bogus Section"], pr_review.unrecognized_in(body))
+
+    def test_a_stray_backtick_does_not_pair_across_an_html_block_line(self) -> None:
+        """A line opening an HTML block ends the paragraph, so a tick before it pairs with nothing.
+
+        Paired across one, the wrappers between the two ticks read as quoted and printed raw.
+        """
+        entry = "<details>\n<summary>Low severity Rename `x` here</summary>\n"
+        block = f"Quote the ` character.\n</details>\n{entry}"
+        self.assertEqual(
+            "Quote the ` character.\n\n\nLow severity Rename `x` here\n", pr_review.unwrap(block)
+        )
+        starts = ("</details>", "   <div>", "<DETAILS open>", "<p/>", "<PRE>", "<!-- x", "<?x")
+        for line in (*starts, "<!DOCTYPE html>", "<![CDATA[x"):
+            with self.subTest(line=line):
+                self.assertIsNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
+        for line in ("<span>", "    <div>", "<detailsx>", "<preview>", "<!doctype html>", "text"):
+            with self.subTest(line=line):
+                self.assertIsNotNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
 
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""
@@ -4514,11 +4578,16 @@ class TestSecondOverviewFormat(GqlCase):
 
     def test_a_multi_line_code_span_is_masked_before_either_reading(self) -> None:
         """The mask's own case, isolated. A one-line span is refused by the line anchor with or
-        without it, so only a span spelled across lines tells the two apart."""
+        without it, so only a span spelled across lines tells the two apart.
+
+        A `<details>` line ends the paragraph, so no span crosses one. The opener is still found in
+        masked text, which keeps its offset in step with the text the preamble is cut from."""
         spanned = f"{CCR_MARKER}\n\n`quoted\n**Findings:** 40\nend`\n\n**Findings:** 3\n"
         self.assertEqual(3, pr_review.stated_total(spanned))
-        opener = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
-        self.assertEqual(3, pr_review.stated_total(opener))
+        opener = f"{spanned}\n<details>\n\n**Findings:** 9\n</details>\n"
+        self.assertEqual(3, pr_review.stated_total(opener, preamble_only=True))
+        crossed = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
+        self.assertIsNone(pr_review.stated_total(crossed))
 
     def test_the_stated_total_comes_from_the_overview_preamble(self) -> None:
         """A total inside a collapsed section is that section's own, and reading one as the round's
@@ -11633,7 +11702,7 @@ class TestAttestationReadings(unittest.TestCase):
             ),
             ([self.comment(f"Attest posts `{marker}` as its last line.")], False),
             ([self.comment(f"Quoted:\n\n```\n{marker}\n```\n")], False),
-            ([self.comment(f"A span `\n{marker}\n` across lines.")], False),
+            ([self.comment(f"A tick `\n{marker}\n` on each side.")], True),
             ([], False),
         ):
             with self.subTest(nodes=nodes):
