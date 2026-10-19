@@ -1,7 +1,7 @@
 # Reference pre-commit (pre-commit.com) config for a fleet repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers this runner.
 # Husky.Net is a dotnet tool, so the discriminator is the toolchain rather than the repo's languages.
 # Drop the ruff and type-check hooks in a repo with no Python, keeping the two doc gates every repo owes.
-# Copy into the repo root alongside ../hub-fetch-run.py.
+# Copy into the repo root alongside ../hub_fetch_run.py.
 # Adapt the type-check hook to match this repo's own CI checker (pyright or mypy, per python-codestyle).
 # Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
 # The type checker and ruff hooks run via uvx, native tooling, no Docker.
@@ -10,7 +10,7 @@
 # A pip-form repo whose root the validator's `python-directories` input declares may swap an entry for `.venv/bin/python -m <tool>` where its requirements install that tool, matching CI.
 # Run that way, pyright also takes `--pythonpath .venv/bin/python`.
 # On Windows each of those interpreter paths is `.venv\Scripts\python.exe` instead.
-# The prose/EOL hooks fetch their scripts fresh from ptr727/ProjectTemplate's `main` branch via hub-fetch-run.py, rather than vendoring or pinning a copy.
+# The prose/EOL hooks fetch their scripts fresh from ptr727/ProjectTemplate's `main` branch via hub_fetch_run.py, rather than vendoring or pinning a copy.
 # See that file's docstring for why.
 # A fetch failure fails the commit, and it never silently skips the gate.
 repos:
@@ -33,11 +33,11 @@ repos:
         pass_filenames: false
       - id: prose-gate
         name: prose/comment-style gate (diff-scoped, fetched fresh from ProjectTemplate@main)
-        entry: uv run --no-project python hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+        entry: uv run --no-project python hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
         language: system
         pass_filenames: false
       - id: eol-gate
         name: line-ending consistency gate (fetched fresh from ProjectTemplate@main)
-        entry: uv run --no-project python hub-fetch-run.py .github/actions/repo-gate/repo_gate.py --check eol
+        entry: uv run --no-project python hub_fetch_run.py .github/actions/repo-gate/repo_gate.py --check eol
         language: system
         pass_filenames: false
