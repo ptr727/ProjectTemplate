@@ -3,8 +3,8 @@
 Never pinned or vendored: a pin nothing keeps current goes stale by construction, and CI
 (this repo's own, and the hub's) is the backstop for a change that lands broken on `main`.
 A fetch failure fails the caller loudly rather than silently skipping the gate it guards.
-Usage: hub-fetch-run.py <hub-relative-path> [script-args...]
-Example: hub-fetch-run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+Usage: hub_fetch_run.py <hub-relative-path> [script-args...]
+Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
 """
 
 import os
@@ -50,7 +50,7 @@ def resolve_main_commit() -> str | None:
             return sha
         reason = "unexpected response body"
     print(
-        f"hub-fetch-run: could not resolve the main commit ({reason}), using main.",
+        f"hub_fetch_run: could not resolve the main commit ({reason}), using main.",
         file=sys.stderr,
     )
     return None
@@ -73,14 +73,14 @@ def head_is_unborn() -> bool:
             timeout=PROBE_TIMEOUT,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"hub-fetch-run: could not run git to probe HEAD: {exc}", file=sys.stderr)
+        print(f"hub_fetch_run: could not run git to probe HEAD: {exc}", file=sys.stderr)
         sys.exit(1)
     if probe.returncode == 1 and not probe.stderr:
         return True
     if probe.returncode == 0:
         return False
     print(
-        f"hub-fetch-run: git rev-parse --verify -q HEAD failed unexpectedly "
+        f"hub_fetch_run: git rev-parse --verify -q HEAD failed unexpectedly "
         f"(exit {probe.returncode}): {probe.stderr.decode(errors='replace').strip()}",
         file=sys.stderr,
     )
@@ -102,7 +102,7 @@ def resolve_unborn_head(argv: list[str]) -> list[str]:
     return out
 
 
-USAGE = "usage: hub-fetch-run.py <hub-relative-path> [script-args...]"
+USAGE = "usage: hub_fetch_run.py <hub-relative-path> [script-args...]"
 
 
 def main(argv: list[str]) -> int:
@@ -111,7 +111,7 @@ def main(argv: list[str]) -> int:
         return 0
     if not argv or argv[0].startswith("-"):
         problem = f"unknown option {argv[0]!r}, " if argv else ""
-        print(f"hub-fetch-run: {problem}{USAGE}", file=sys.stderr)
+        print(f"hub_fetch_run: {problem}{USAGE}", file=sys.stderr)
         return 2
     hub_path, script_args = argv[0], resolve_unborn_head(argv[1:])
     is_prose_gate = hub_path == PROSE_GATE_PATH
@@ -122,8 +122,8 @@ def main(argv: list[str]) -> int:
         with urllib.request.urlopen(url, timeout=30) as response:
             content = response.read()
     except (urllib.error.URLError, OSError) as exc:
-        print(f"hub-fetch-run: could not fetch {url}: {exc}", file=sys.stderr)
-        print("hub-fetch-run: the gate did not run.", file=sys.stderr)
+        print(f"hub_fetch_run: could not fetch {url}: {exc}", file=sys.stderr)
+        print("hub_fetch_run: the gate did not run.", file=sys.stderr)
         return 1
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as handle:
         handle.write(content)
@@ -132,9 +132,9 @@ def main(argv: list[str]) -> int:
     old_provenance = os.environ.get(PROVENANCE_VAR)
     if is_prose_gate and not (old_provenance or "").strip():
         if commit:
-            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub-fetch-run main)"
+            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub_fetch_run main)"
         else:
-            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
+            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub_fetch_run, commit unresolved)"
     try:
         sys.argv = [str(tmp_path), *script_args]
         try:

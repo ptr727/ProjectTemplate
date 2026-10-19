@@ -4,13 +4,13 @@
 set -eu
 
 # Local pre-commit: language formatting/lint, plus the fleet's shared doc gates.
-# The doc gates run via hub-fetch-run.py, copied alongside this file.
+# The doc gates run via hub_fetch_run.py, copied alongside this file.
 # It fetches them fresh from ptr727/ProjectTemplate's `main` branch rather than vendoring or pinning them.
-# See hub-fetch-run.py's own docstring, and catalog/snippets/husky/README.md, for why.
+# See hub_fetch_run.py's own docstring, and catalog/snippets/husky/README.md, for why.
 # Full doc-lint set (Markdown, spelling, workflow YAML, EditorConfig) stays in CI and the VS Code Lint tasks, since those need Docker.
 
 # The absolute path is captured before the cd below, since $0 resolves against the original directory.
-hub_fetch_run="$(cd "$(dirname "$0")" && pwd)/hub-fetch-run.py"
+hub_fetch_run="$(cd "$(dirname "$0")" && pwd)/hub_fetch_run.py"
 
 # Git already runs a hook from the top level, but this is belt and braces for an invocation that does not.
 # The doc gates below take a relative scan root, which would otherwise resolve against whatever directory the caller stood in.

@@ -29,12 +29,12 @@ the canonical shape: Husky.Net
 `pre-commit` framework (`catalog/snippets/pre-commit/`, for a repo without one and for any repo
 that prefers it). Both carry the
 same shared doc gates, the diff-scoped prose/comment-style gate and the whole-tree line-ending
-check, fetched fresh from the hub's `main` branch at run time via `hub-fetch-run.py` rather than
+check, fetched fresh from the hub's `main` branch at run time via `hub_fetch_run.py` rather than
 vendored or pinned.
 
 ## Per-Repo Conversion
 
-Copy and adapt the applicable catalog snippet plus `catalog/snippets/hub-fetch-run.py`.
+Copy and adapt the applicable catalog snippet plus `catalog/snippets/hub_fetch_run.py`.
 Enable it (`git config core.hooksPath .husky`, or `uv tool install pre-commit` once then
 `pre-commit install`). For the Husky.Net snippet specifically, also run `dotnet tool restore`
 then `dotnet husky install`, which generates `.husky/_/husky.sh`, the file the hook sources.

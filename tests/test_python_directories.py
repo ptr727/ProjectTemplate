@@ -117,7 +117,13 @@ class UncoveredTests(unittest.TestCase):
         self.assertEqual(pd.uncovered(["Tools"], tracked), ["Other/b.py", "ToolsX/c.py"])
 
     def test_the_carried_hook_helper_is_not_the_repo_s_python(self) -> None:
-        tracked = ["hub-fetch-run.py", ".husky/hub-fetch-run.py", "Tools/a.py"]
+        tracked = [
+            "hub_fetch_run.py",
+            ".husky/hub_fetch_run.py",
+            "hub-fetch-run.py",
+            ".husky/hub-fetch-run.py",
+            "Tools/a.py",
+        ]
         self.assertEqual(pd.uncovered(["Tools"], tracked), [])
 
     def test_no_directory_leaves_every_python_file_uncovered(self) -> None:

@@ -174,10 +174,10 @@
             "label": "Lint: Prose",
             "type": "process",
             "command": "python3",
-            "args": [ "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
+            "args": [ "${workspaceFolder}/.husky/hub_fetch_run.py", ".github/actions/prose-gate/prose_lint.py", "." ],
             "windows": {
                 "command": "py",
-                "args": [ "-3", "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/prose-gate/prose_lint.py", "." ]
+                "args": [ "-3", "${workspaceFolder}/.husky/hub_fetch_run.py", ".github/actions/prose-gate/prose_lint.py", "." ]
             },
             "problemMatcher": [],
             "presentation": {
@@ -189,10 +189,10 @@
             "label": "Lint: EOL",
             "type": "process",
             "command": "python3",
-            "args": [ "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
+            "args": [ "${workspaceFolder}/.husky/hub_fetch_run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ],
             "windows": {
                 "command": "py",
-                "args": [ "-3", "${workspaceFolder}/.husky/hub-fetch-run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ]
+                "args": [ "-3", "${workspaceFolder}/.husky/hub_fetch_run.py", ".github/actions/repo-gate/repo_gate.py", "--check", "eol" ]
             },
             "problemMatcher": [],
             "presentation": {

@@ -314,7 +314,8 @@ def expected_python_directories(entry, tree):
 
 
 # The catalog's hook snippets carry this helper into repos of every language, so it is fleet tooling rather than the repo's own Python.
-CARRIED_PYTHON_HELPERS = {"hub-fetch-run.py"}
+# A repo that copied it before the rename keeps the hyphenated name until it is next resynced.
+CARRIED_PYTHON_HELPERS = {"hub_fetch_run.py", "hub-fetch-run.py"}
 
 
 def declared_types(entry):
@@ -6437,9 +6438,15 @@ def _selftest():
         ({"types": None}, {"tools/script.py"}, 1, "a malformed types value reads as untyped"),
         (
             {"types": ["docs"]},
-            {".husky/hub-fetch-run.py"},
+            {".husky/hub_fetch_run.py"},
             0,
             "the carried hook helper is not the repo's Python",
+        ),
+        (
+            {"types": ["docs"]},
+            {".husky/hub-fetch-run.py"},
+            0,
+            "the carried hook helper under its former name is not the repo's Python",
         ),
         (
             {
@@ -6536,7 +6543,7 @@ def _selftest():
     python_directory_cases.append(
         (
             {"pythonDirectories": ["Tools"]},
-            {"Tools/a.py", "hub-fetch-run.py"},
+            {"Tools/a.py", "hub_fetch_run.py"},
             0,
             "the carried hook helper sits outside every directory",
         )
