@@ -647,12 +647,41 @@ def strip_fences(
     )
 
 
+def tag_opener(*names: str, closer: bool = False) -> str:
+    """The pattern opening a tag of one of these names, up to where its name ends.
+
+    A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
+    another tag and `<summary/>` opens a summary. A `<details/x>` shows as text, since Markdown
+    hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
+    after the name leaves no tag.
+
+    One boundary serves every opener reader here that admits an attribute. A rule kept per site
+    had to be fixed by hand at each of its siblings. With `closer`, a closing tag matches too.
+    """
+    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
+
+
+HTML_BLOCK_NAMES = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|"
+    "dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|"
+    "hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|"
+    "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+)
+HTML_BLOCK_START = (
+    r"(?:(?i:<(?:script|pre|style)(?=[ \t\n\f\r>]|$)"
+    rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
+    r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
+)
+
+
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
 # Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = re.compile(r"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
+CODE_SPAN = re.compile(
+    rf"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n| {{0,3}}{HTML_BLOCK_START}))*?(?<!`)\1(?!`)"
+)
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.
@@ -835,20 +864,6 @@ COUNT_DIGITS = 4
 # Bounded by a lookahead rather than by `\b`, since `_` is a word character.
 # `_None_` then ended on no boundary at all, reading an italicized stated zero as none stated.
 STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
-
-
-def tag_opener(*names: str) -> str:
-    """The pattern opening a tag of one of these names, up to where its name ends.
-
-    A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
-    another tag and `<summary/>` opens a summary. A `<details/x>` shows as text, since Markdown
-    hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
-    after the name leaves no tag.
-
-    One boundary serves every opener reader here that admits an attribute. A rule kept per site
-    had to be fixed by hand at each of its siblings.
-    """
-    return rf"<(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
 
 
 # The first section opener on a line of its own, which is where the overview preamble ends.
@@ -5831,7 +5846,7 @@ def attestation(pr: dict) -> str | None:
     for node in (pr.get("comments") or {}).get("nodes") or []:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
-        body = CODE_SPAN.sub(" ", strip_fences(node.get("body") or "", to_end=True))
+        body = strip_fences(node.get("body") or "", to_end=True)
         for m in ATTESTATION.finditer(body):
             if m.group(1) == head and m.group(2) == base:
                 return m.group(3)

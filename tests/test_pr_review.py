@@ -2974,6 +2974,24 @@ class TestUnrecognizedShapes(GqlCase):
         )
         self.assertEqual(["summary: Bogus Section"], pr_review.unrecognized_in(body))
 
+    def test_a_stray_backtick_does_not_pair_across_an_html_block_line(self) -> None:
+        """A line opening an HTML block ends the paragraph, so a tick before it pairs with nothing.
+
+        Paired across one, the wrappers between the two ticks read as quoted and printed raw.
+        """
+        entry = "<details>\n<summary>Low severity Rename `x` here</summary>\n"
+        block = f"Quote the ` character.\n</details>\n{entry}"
+        self.assertEqual(
+            "Quote the ` character.\n\n\nLow severity Rename `x` here\n", pr_review.unwrap(block)
+        )
+        starts = ("</details>", "   <div>", "<DETAILS open>", "<p/>", "<PRE>", "<!-- x", "<?x")
+        for line in (*starts, "<!DOCTYPE html>", "<![CDATA[x"):
+            with self.subTest(line=line):
+                self.assertIsNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
+        for line in ("<span>", "    <div>", "<detailsx>", "<preview>", "<!doctype html>", "text"):
+            with self.subTest(line=line):
+                self.assertIsNotNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
+
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""
         body = (
@@ -4514,11 +4532,16 @@ class TestSecondOverviewFormat(GqlCase):
 
     def test_a_multi_line_code_span_is_masked_before_either_reading(self) -> None:
         """The mask's own case, isolated. A one-line span is refused by the line anchor with or
-        without it, so only a span spelled across lines tells the two apart."""
+        without it, so only a span spelled across lines tells the two apart.
+
+        A `<details>` line ends the paragraph, so no span crosses one. The opener is still found in
+        masked text, which keeps its offset in step with the text the preamble is cut from."""
         spanned = f"{CCR_MARKER}\n\n`quoted\n**Findings:** 40\nend`\n\n**Findings:** 3\n"
         self.assertEqual(3, pr_review.stated_total(spanned))
-        opener = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
-        self.assertEqual(3, pr_review.stated_total(opener))
+        opener = f"{spanned}\n<details>\n\n**Findings:** 9\n</details>\n"
+        self.assertEqual(3, pr_review.stated_total(opener, preamble_only=True))
+        crossed = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
+        self.assertIsNone(pr_review.stated_total(crossed))
 
     def test_the_stated_total_comes_from_the_overview_preamble(self) -> None:
         """A total inside a collapsed section is that section's own, and reading one as the round's
@@ -11633,7 +11656,7 @@ class TestAttestationReadings(unittest.TestCase):
             ),
             ([self.comment(f"Attest posts `{marker}` as its last line.")], False),
             ([self.comment(f"Quoted:\n\n```\n{marker}\n```\n")], False),
-            ([self.comment(f"A span `\n{marker}\n` across lines.")], False),
+            ([self.comment(f"A tick `\n{marker}\n` on each side.")], True),
             ([], False),
         ):
             with self.subTest(nodes=nodes):
