@@ -3056,7 +3056,7 @@ class TestUnrecognizedShapes(GqlCase):
         ends = (
             *("- item", "* item", "+\titem", "- -", "1. item", "1) item", "0001. item"),
             *("# heading", "#", "######\th", "---", "* * *", "___", "```js", "~~~"),
-            *("   - item", "  1. item", "<div\vclass=x>", "> - item", "> > # h", ">  1. item"),
+            *("   - item", "  1. item", "<div\vclass=x>", "> - item", "> > # h", ">    - item"),
         )
         for line in ends:
             with self.subTest(line=line):
@@ -3072,8 +3072,9 @@ class TestUnrecognizedShapes(GqlCase):
     def test_a_span_split_across_quoted_lines_still_pairs(self) -> None:
         """A quotation's next line continues its paragraph, so the span across them is one."""
         self.assertEqual("> a   d", pr_review.CODE_SPAN.sub(" ", "> a `b\n> c` d"))
-        # Each reads as lazy text under a list item or a quotation, the containers bots write in.
-        for body in ("- a `b\n=\nc` d", "- a `b\n--\nc` d", "> a `b\n===\nc` d"):
+        # Each reads as text under a list item or a quotation, the containers bots write in.
+        bodies = ("- a `b\n=\nc` d", "- a `b\n--\nc` d", "> a `b\n===\nc` d")
+        for body in (*bodies, "> a `b\n>     - c` d"):
             with self.subTest(body=body):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
 
