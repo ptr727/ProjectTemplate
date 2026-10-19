@@ -183,8 +183,8 @@ class FakeResponse:
 
 SHA_BODY = SHA.encode()
 PROSE_PATH = hub.PROSE_GATE_PATH
-RESOLVED = f"ptr727/ProjectTemplate@{SHA} (hub_fetch_run main)"
-UNRESOLVED = "ptr727/ProjectTemplate@main (hub_fetch_run, commit unresolved)"
+RESOLVED = f"ptr727/ProjectTemplate@{SHA} (hub-fetch-run main)"
+UNRESOLVED = "ptr727/ProjectTemplate@main (hub-fetch-run, commit unresolved)"
 RECORD = (
     b"import os, sys\n"
     b"with open(sys.argv[1], 'w') as out:\n"

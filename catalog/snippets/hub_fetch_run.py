@@ -132,9 +132,9 @@ def main(argv: list[str]) -> int:
     old_provenance = os.environ.get(PROVENANCE_VAR)
     if is_prose_gate and not (old_provenance or "").strip():
         if commit:
-            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub_fetch_run main)"
+            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub-fetch-run main)"
         else:
-            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub_fetch_run, commit unresolved)"
+            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
     try:
         sys.argv = [str(tmp_path), *script_args]
         try:
