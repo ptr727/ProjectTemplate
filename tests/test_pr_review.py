@@ -2984,10 +2984,11 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertEqual(
             "Quote the ` character.\n\n\nLow severity Rename `x` here\n", pr_review.unwrap(block)
         )
-        for line in ("</details>", "   <div>", "<DETAILS open>", "<p/>", "<pre>", "<!-- x"):
+        starts = ("</details>", "   <div>", "<DETAILS open>", "<p/>", "<PRE>", "<!-- x", "<?x")
+        for line in (*starts, "<!DOCTYPE html>", "<![CDATA[x"):
             with self.subTest(line=line):
                 self.assertIsNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
-        for line in ("<span>", "    <div>", "<detailsx>", "<preview>", "text"):
+        for line in ("<span>", "    <div>", "<detailsx>", "<preview>", "<!doctype html>", "text"):
             with self.subTest(line=line):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
 
@@ -4533,12 +4534,14 @@ class TestSecondOverviewFormat(GqlCase):
         """The mask's own case, isolated. A one-line span is refused by the line anchor with or
         without it, so only a span spelled across lines tells the two apart.
 
-        A `<details>` line ends the paragraph, so no span crosses it and it opens a section, which
-        ends the preamble before the total."""
+        A `<details>` line ends the paragraph, so no span crosses one. The opener is still found in
+        masked text, which keeps its offset in step with the text the preamble is cut from."""
         spanned = f"{CCR_MARKER}\n\n`quoted\n**Findings:** 40\nend`\n\n**Findings:** 3\n"
         self.assertEqual(3, pr_review.stated_total(spanned))
-        opener = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
-        self.assertIsNone(pr_review.stated_total(opener))
+        opener = f"{spanned}\n<details>\n\n**Findings:** 9\n</details>\n"
+        self.assertEqual(3, pr_review.stated_total(opener, preamble_only=True))
+        crossed = f"{CCR_MARKER}\n\n`quoted\n<details>\nend`\n\n**Findings:** 3\n"
+        self.assertIsNone(pr_review.stated_total(crossed))
 
     def test_the_stated_total_comes_from_the_overview_preamble(self) -> None:
         """A total inside a collapsed section is that section's own, and reading one as the round's
