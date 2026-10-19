@@ -4706,8 +4706,16 @@ def unwrap(block: str) -> str:
     place its findings are read. The wrapper tags say nothing, emphasis around a heading says
     nothing, and a severity badge says one word wrapped in two versioned icon URLs that bury the
     title following them. The word is kept and the markup is not.
+
+    A tag a finding quotes in code is the finding's text rather than markup, so it is kept. The
+    tags are found in a copy with every quotation masked, which keeps their offsets in the text.
     """
-    return TAGS.sub("", reduced(block))
+    text = reduced(block)
+    kept, end = [], 0
+    for tag in TAGS.finditer(mask_quotations(text, MARKUP_MASK)):
+        kept.append(text[end : tag.start()])
+        end = tag.end()
+    return "".join(kept) + text[end:]
 
 
 def previously_missed_blocks(body: str) -> list[str]:
