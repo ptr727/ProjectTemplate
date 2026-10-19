@@ -2489,6 +2489,16 @@ class TestSentenceLength(BaitCase):
             with self.subTest(tag=tag):
                 self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 
+    def test_a_tag_line_indented_past_its_container_continues_the_paragraph(self) -> None:
+        """Four columns past the paragraph's container, a tag line is lazy text on GitHub."""
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n    <div>\n{half}.\n"))
+        self.assertEqual([], self.found(f"{half}\n   <div>\n{half}.\n"))
+        self.assertEqual(
+            [(1, "sentence-length")], self.found(f"- {half}\n      <div>\n  {half}.\n")
+        )
+        self.assertEqual([], self.found(f"- {half}\n     <div>\n  {half}.\n"))
+
     def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
         self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n2) {half}\n"))

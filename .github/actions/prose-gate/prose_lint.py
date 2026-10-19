@@ -1972,6 +1972,8 @@ def sentence_length_findings(
             in_comment = "-->" not in line
             continue
         tag = OPENING_TAG.match(line)
+        if tag and block and indented_past(indent, item_offset if in_list else 0):
+            tag = None
         if tag and TAGS_ONLY.match(line):
             if tag.group(1) or tag.group(2):
                 flush()
