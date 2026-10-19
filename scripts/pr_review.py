@@ -3738,20 +3738,25 @@ def reduced(text: str) -> str:
     The one reduction `normal`, `unwrap`, and `heading_count` share, so a heading is vetted,
     printed, and counted from the same text.
 
-    An emphasis tag a finding quotes in code is the finding's text, so it is kept.
+    A badge or an emphasis tag a finding quotes in code is the finding's text, so it is kept.
     """
-    return unquoted_dropped(EMPHASIS, SEVERITY_BADGE.sub(badge_text, text))
+    badges = unquoted_sub(SEVERITY_BADGE, badge_text, text)
+    return unquoted_sub(EMPHASIS, lambda m: "", badges)
 
 
-def unquoted_dropped(pattern: re.Pattern[str], text: str) -> str:
-    """The text with each match of `pattern` dropped, except one inside a quotation.
+def unquoted_sub(pattern: re.Pattern[str], repl: Callable[[re.Match[str]], str], text: str) -> str:
+    """The text with each match of `pattern` replaced by `repl`, except one inside a quotation.
 
-    The matches are found in a copy with every quotation masked, which keeps their offsets.
+    The matches are found in a copy with every quotation masked, which keeps their offsets, and
+    `repl` reads each one from the text itself. A match whose span the text does not match whole
+    has a quotation inside it, so it is kept.
     """
     kept, end = [], 0
-    for tag in pattern.finditer(mask_quotations(text, MARKUP_MASK)):
-        kept.append(text[end : tag.start()])
-        end = tag.end()
+    for hit in pattern.finditer(mask_quotations(text, MARKUP_MASK)):
+        own = pattern.fullmatch(text, hit.start(), hit.end())
+        if own:
+            kept += [text[end : hit.start()], repl(own)]
+            end = hit.end()
     return "".join(kept) + text[end:]
 
 
@@ -4770,7 +4775,7 @@ def unwrap(block: str) -> str:
 
     A `<details>` or `<summary>` tag a finding quotes in code is the finding's text, so it is kept.
     """
-    return unquoted_dropped(TAGS, reduced(block))
+    return unquoted_sub(TAGS, lambda m: "", reduced(block))
 
 
 def previously_missed_blocks(body: str) -> list[str]:

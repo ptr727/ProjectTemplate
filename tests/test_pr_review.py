@@ -5224,6 +5224,9 @@ class TestSecondOverviewFormat(GqlCase):
         self.assertEqual("Keep `<i>` (3)", pr_review.unwrap(mixed))
         self.assertEqual("Keep `<i>` (N)", pr_review.normal(mixed))
         self.assertEqual(3, pr_review.heading_count(mixed))
+        quoted_badge = f"Quoted:\n```\nbadge = '{BADGE}'\n```\nand `<b>` kept"
+        self.assertEqual(quoted_badge, pr_review.unwrap(quoted_badge))
+        self.assertEqual("Low severity `<b>`", pr_review.unwrap(f"{BADGE} `<b>`"))
 
     def test_a_phrase_rewrapped_across_comment_lines_reads_as_one_sentence(self) -> None:
         """Collapsing whitespace alone would leave the second line's marker inside the phrase."""
