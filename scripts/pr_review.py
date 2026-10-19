@@ -695,8 +695,9 @@ HTML_BLOCK_NAMES = (
     "hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|"
     "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 )
+HTML_RAW_TEXT_NAMES = "pre|script|style|textarea"
 HTML_BLOCK_START = (
-    rf"(?:(?i:<(?:script|pre|style)(?={HTML_SPACE}|>|$)"
+    rf"(?:(?i:<(?:{HTML_RAW_TEXT_NAMES})(?={HTML_SPACE}|>|$)"
     rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
 )
