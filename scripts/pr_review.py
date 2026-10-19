@@ -138,8 +138,8 @@ Subcommands
            and over `wait`'s 44.
            The headline is owed the triage a suppressed finding gets, and the code repeats on that
            head after it is answered, since nothing here reads an answer.
-           A clean verdict on the same terms exits 0 and prints its headline under
-           `CLEAN VERDICT HEADLINE`, advisory, since it may name a nit new or already answered.
+           A clean verdict on the same terms prints its headline under `CLEAN VERDICT HEADLINE`.
+           That line is advisory and changes no exit code, since it may name an answered nit.
            A refusal naming the account quota still reads as absent here, exit 0, since a refusal
            covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
            `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
@@ -3073,7 +3073,7 @@ def unthreaded_narrative_findings(pr: dict) -> int:
 
 
 def uncounted_verdict(pr: dict, verdicts: set[str] = FLAGGING_VERDICTS) -> tuple[str, str] | None:
-    """The head round's verdict and headline, where the verdict flags what nothing counts.
+    """The head round's verdict, one of `verdicts`, and its headline, where the round counts none.
 
     A round opening on a flagging verdict that states no open finding, lists none in an open
     section, opens no thread, and collapses no suppressed or previously-missed finding names

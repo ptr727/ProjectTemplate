@@ -5548,15 +5548,17 @@ class TestOverviewSections(GqlCase):
                 self.assertIsNone(pr_review.uncounted_verdict(payload([review(body=body)])))
 
     def test_a_clean_verdict_counting_no_finding_exits_zero(self) -> None:
-        """Its headline names a finding, so it prints as advisory and the exit stays clean."""
+        """Any clean headline prints as advisory, here one naming findings, and the exit stays 0."""
         self.answer(payload([review(body=self.headline("### Approval recommended"))]))
-        self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
-        with mock.patch.object(pr_review.time, "sleep"):
-            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r"]))
-        printed = self.out.getvalue()
-        self.assertNotIn("VERDICT WITH NO COUNTED FINDING", printed)
-        self.assertIn("CLEAN VERDICT HEADLINE", printed)
-        self.assertIn("Resolve the two outstanding parser-retry", printed)
+        for command in ("status", "wait"):
+            with self.subTest(command=command), mock.patch.object(pr_review.time, "sleep"):
+                self.out.seek(0)
+                self.out.truncate()
+                self.assertEqual(0, pr_review.main([command, "7", "--repo", "o/r"]))
+                printed = self.out.getvalue()
+                self.assertNotIn("VERDICT WITH NO COUNTED FINDING", printed)
+                self.assertIn("CLEAN VERDICT HEADLINE", printed)
+                self.assertIn("Resolve the two outstanding parser-retry", printed)
 
     def test_a_clean_headline_naming_an_answered_thread_still_reads_clean(self) -> None:
         """Nothing tells an answered thread from a new nit, so both print and neither gates."""
