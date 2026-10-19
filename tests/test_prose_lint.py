@@ -2464,9 +2464,10 @@ class TestSentenceLength(BaitCase):
         self.assertEqual([], self.found(fenced))
         self.assertEqual([], self.found(table))
 
-    def test_source_and_a_closing_raw_text_tag_do_not_interrupt(self) -> None:
+    def test_search_and_a_closing_raw_text_tag_do_not_interrupt(self) -> None:
+        """GitHub's renderer reads `<search>` as no block name, though CommonMark 0.31 lists it."""
         a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
-        for tag in ("<source>", "</style>", "</pre>"):
+        for tag in ("<search>", "</style>", "</pre>", "</textarea>"):
             with self.subTest(tag=tag):
                 self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
 
@@ -2476,8 +2477,9 @@ class TestSentenceLength(BaitCase):
         self.assertEqual([(57, "sentence-length")], self.found(text))
 
     def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
+        """GitHub's renderer reads `<source>` as a block name, though CommonMark 0.31 drops it."""
         a = " ".join(["word"] * 15)
-        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<search>", "</div>"):
+        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<source>", "<textarea>", "</div>"):
             with self.subTest(tag=tag):
                 self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 
