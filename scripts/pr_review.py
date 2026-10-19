@@ -647,12 +647,27 @@ def strip_fences(
     )
 
 
+HTML_BLOCK_NAMES = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|"
+    "dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|"
+    "hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|"
+    "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+)
+HTML_BLOCK_START = (
+    r"(?:(?i:<(?:script|pre|style)(?=[ \t\n\f\r>]|$)"
+    rf"|</?(?:{HTML_BLOCK_NAMES})(?=[ \t\n\f\r]|/?>|$))"
+    r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
+)
+
+
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
 # Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = re.compile(r"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n))*?(?<!`)\1(?!`)")
+CODE_SPAN = re.compile(
+    rf"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n| {{0,3}}{HTML_BLOCK_START}))*?(?<!`)\1(?!`)"
+)
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.
