@@ -615,6 +615,8 @@ EMPHASIS_MARK = re.compile(r"[*_`]")
 
 
 HTML_SPACE = r"[ \t\n\f\r]"
+# A block start ends a tag's name on cmark's whitespace, which a vertical tab joins.
+BLOCK_SPACE = r"[ \t\n\v\f\r]"
 
 
 def attributes(spanning: bool = False, lone_space: bool = True) -> str:
@@ -675,7 +677,7 @@ def strip_fences(
     )
 
 
-def tag_opener(*names: str, closer: bool = False) -> str:
+def tag_opener(*names: str, closer: bool = False, space: str = HTML_SPACE) -> str:
     """The pattern opening a tag of one of these names, up to where its name ends.
 
     A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
@@ -685,8 +687,9 @@ def tag_opener(*names: str, closer: bool = False) -> str:
 
     One boundary serves every opener reader here that admits an attribute. A rule kept per site
     had to be fixed by hand at each of its siblings. With `closer`, a closing tag matches too.
+    A block start's reader passes `BLOCK_SPACE` as `space`.
     """
-    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?={HTML_SPACE}|/?>|$)"
+    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?={space}|/?>|$)"
 
 
 HTML_BLOCK_NAMES = (
@@ -697,9 +700,17 @@ HTML_BLOCK_NAMES = (
 )
 HTML_RAW_TEXT_NAMES = "pre|script|style|textarea"
 HTML_BLOCK_START = (
-    rf"(?:(?i:<(?:{HTML_RAW_TEXT_NAMES})(?={HTML_SPACE}|>|$)"
-    rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
+    rf"(?:(?i:<(?:{HTML_RAW_TEXT_NAMES})(?={BLOCK_SPACE}|>|$)"
+    rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True, space=BLOCK_SPACE)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
+)
+LINE_END = r"[ \t]*\r?(?=\n|\Z)"
+# What a line opens, after at most three spaces, to end the paragraph above it as GitHub renders it.
+# A bare blockquote marker is left to each reader, since one line cannot tell a quotation's next line from one opening under a paragraph.
+INTERRUPTS_PARAGRAPH = (
+    rf"{HTML_BLOCK_START}|[-+*][ \t]+\S|0{{0,8}}1[.)][ \t]+\S|#{{1,6}}(?:[ \t]|{LINE_END})"
+    rf"|(?:(?:\*[ \t]*){{3,}}|(?:-[ \t]*){{3,}}|(?:_[ \t]*){{3,}}){LINE_END}"
+    r"|`{3,}[^`\n]*(?=\n|\Z)|~{3,}"
 )
 
 
@@ -709,7 +720,9 @@ HTML_BLOCK_START = (
 # Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
 CODE_SPAN = re.compile(
-    rf"(?<![\\`])(`+)(?!`)(?:[^\n]|\n(?!\s*\n| {{0,3}}{HTML_BLOCK_START}))*?(?<!`)\1(?!`)"
+    r"(?<![\\`])(`+)(?!`)"
+    rf"(?:[^\n]|\n(?!\s*\n|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH})))*?"
+    r"(?<!`)\1(?!`)"
 )
 
 
@@ -869,11 +882,9 @@ COUNT_MARKUP = re.compile(
 # Markdown's lazy continuation carries paragraph text only, which of the three coverage spellings is the reviewer's own sentence alone.
 # The bullet spelling and the marker each open a block, so each is the round's own line again however the lines above it are quoted.
 # Read as continuations they reported `unstated` over a round stating full coverage, which blocks a merge on a satisfied item.
-# A bare `<` is not one of these, an inline tag opening a line of prose leaving that line paragraph text.
-# A tag standing alone is not one either, though it looks like it should be: only some tag names open a block that can interrupt a paragraph, and a lone `</span>` is not among them, so accepting any of them read a quoted line as this round's own.
-# No coverage spelling opens with a tag in any case, the bullet opening on its marker and the sentence on the reviewer's name, so the alternative bought nothing and is dropped rather than narrowed to a list of tag names.
+# A setext underline is not one, since it cannot underline a lazy line and so continues the quotation as text.
 # The caller also holds the four-space bound, an indented line being a code block, which cannot interrupt a paragraph and so cannot end a quotation either.
-STARTS_BLOCK = re.compile(r"[-*+]\s|#{1,6}\s|<!--")
+STARTS_BLOCK = re.compile(INTERRUPTS_PARAGRAPH)
 # A control character, so no body can carry one of its own and be read as having a count here.
 MARKUP_MASK = "\x00"
 # Every integer the markup did not swallow, which is how this format states each severity.
