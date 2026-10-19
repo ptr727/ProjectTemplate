@@ -5210,10 +5210,10 @@ class TestSecondOverviewFormat(GqlCase):
                 self.assertEqual("Open (N)", pr_review.normal(f"<{tag}>Open (2)</{tag}>"))
         self.assertEqual("Open (N)", pr_review.normal("<STRONG>Open (2)</STRONG>"))
 
-    def test_an_emphasis_tag_quoted_in_code_survives_every_reading(self) -> None:
-        """`reduced` dropped every emphasis tag, so a finding quoting one lost it from its own text.
+    def test_markup_quoted_in_code_survives_every_reading(self) -> None:
+        """`reduced` rewrote every emphasis tag and badge, so a finding quoting one lost it.
 
-        `normal`, `unwrap`, and `heading_count` share that reduction, so all three keep it.
+        `normal` and `unwrap` keep the quotation whole, and `heading_count` reads the count past it.
         """
         text = "Prefer `<strong>` over `<b>`."
         self.assertEqual(text, pr_review.unwrap(text))
