@@ -614,26 +614,31 @@ LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", r
 EMPHASIS_MARK = re.compile(r"[*_`]")
 
 
-def attributes(space: str = r"[ \t\f]", lone_space: bool = True) -> str:
+HTML_SPACE = r"[ \t\n\f\r]"
+
+
+def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     """The pattern for a tag's attributes after its name, through the `>` that closes it.
 
-    A quoted value may hold a `>`, and anything else that is not an attribute ends the tag unread,
-    so an opener quoted as `<details [^>]*>` is not one. `space` is what may separate them, one
-    line's whitespace for a reader that reads one line. Without `lone_space`, whitespace must lead
-    to an attribute or a `/>`, which is how a reader refuses the `<summary >` a masked code span
-    leaves.
+    A quoted value may hold a `>`. Anything else that is not an attribute ends the tag unread, so
+    an opener quoted as `<details [^>]*>` is not one. A `spanning` reader takes a line break where
+    HTML does, between attributes and inside a quoted value, and any other reads one line.
 
-    One tail serves every opener reader here. A tail kept per site was fixed at one and not at its
-    siblings.
+    Without `lone_space`, whitespace must lead to an attribute. That is how a reader refuses the
+    `<summary >` a code span masked to a space leaves, and it refuses `<summary />` with it.
+
+    One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
+    and not at its siblings.
     """
-    attribute = rf"{space}+[\w:-]+(?:{space}*={space}*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?"
+    space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
+    value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
+    attribute = rf"{space}+[A-Za-z][\w.:-]*(?:{space}*={space}*(?:{value}))?"
     if lone_space:
         return rf"(?:{attribute})*{space}*/?>"
-    return rf"(?:(?:{attribute})+{space}*|{space}+(?=/))?/?>"
+    return rf"(?:(?:{attribute})+{space}*)?/?>"
 
 
 ATTRIBUTES = attributes()
-SPANNING_SPACE = r"[ \t\n\f\r]"
 HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
@@ -679,7 +684,7 @@ def tag_opener(*names: str, closer: bool = False) -> str:
     One boundary serves every opener reader here that admits an attribute. A rule kept per site
     had to be fixed by hand at each of its siblings. With `closer`, a closing tag matches too.
     """
-    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
+    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?={HTML_SPACE}|/?>|$)"
 
 
 HTML_BLOCK_NAMES = (
@@ -689,7 +694,7 @@ HTML_BLOCK_NAMES = (
     "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 )
 HTML_BLOCK_START = (
-    r"(?:(?i:<(?:script|pre|style)(?=[ \t\n\f\r>]|$)"
+    rf"(?:(?i:<(?:script|pre|style)(?={HTML_SPACE}|>|$)"
     rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
 )
@@ -910,7 +915,7 @@ HUB = "ptr727/ProjectTemplate"
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
 SUMMARY = re.compile(
-    rf"{tag_opener('summary')}{attributes(SPANNING_SPACE, lone_space=False)}(.*?)</summary>",
+    rf"{tag_opener('summary')}{attributes(spanning=True, lone_space=False)}(.*?)</summary>",
     re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(
@@ -4471,7 +4476,7 @@ def heading_count(heading: str) -> int | None:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    rf"(?P<open>{tag_opener('details')}{attributes(SPANNING_SPACE)})"
+    rf"(?P<open>{tag_opener('details')}{attributes(spanning=True)})"
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"

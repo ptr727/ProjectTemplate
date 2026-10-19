@@ -1835,9 +1835,13 @@ class TestPreviouslyMissed(GqlCase):
             with self.subTest(pattern=pattern.pattern, line=line):
                 self.assertIsNotNone(pattern.search(line))
 
-    def test_every_opener_reader_ends_an_attribute_tail_alike(self) -> None:
-        """Each reader spelled its own tail after the name, so an opener quoted in code as
-        `<details [^>]*>` was a tag to one reader, eating the text after it up to the next `>`."""
+    def test_every_attribute_tail_reader_ends_a_tag_alike(self) -> None:
+        """Each reader spelled its own tail after the name.
+
+        So an opener quoted in code as `<details [^>]*>` was a tag to one of them, eating the text
+        after it up to the next `>`. The two readers spanning lines read a line break where HTML
+        does, between attributes and inside a quoted value.
+        """
         summary = {
             "SUMMARY": lambda t: (
                 pr_review.SUMMARY.findall(f"{t}Open (1)</summary>") == ["Open (1)"]
@@ -1854,14 +1858,25 @@ class TestPreviouslyMissed(GqlCase):
             ),
         }
         for name, readers in (("summary", summary), ("details", details)):
-            read = (f'<{name} class="x">', f"<{name} title='a>b'>", f"<{name}/>", f"<{name} />")
+            read = (f'<{name} class="x">', f"<{name} title='a>b'>", f"<{name} data.x=1>")
             for reader, opens in readers.items():
-                for tag in read:
+                for tag in (*read, f"<{name}/>"):
                     with self.subTest(reader=reader, tag=tag):
                         self.assertTrue(opens(tag))
-                for tag in (f"<{name} [^>]*>", f"<{name} ` x>"):
+                for tag in (f"<{name} [^>]*>", f"<{name} ` x>", f"<{name} 2>"):
                     with self.subTest(reader=reader, tag=tag):
                         self.assertFalse(opens(tag))
+        for reader, opens in (
+            ("SUMMARY", summary["SUMMARY"]),
+            ("DETAILS_TAG", details["DETAILS_TAG"]),
+        ):
+            name = "summary" if reader == "SUMMARY" else "details"
+            for tag in (f'<{name}\n  class="x">', f'<{name} title="a\nb">'):
+                with self.subTest(reader=reader, tag=tag):
+                    self.assertTrue(opens(tag))
+        for tag in ("<summary >", "<summary />", "<summary _y>"):
+            with self.subTest(reader="SUMMARY", tag=tag):
+                self.assertFalse(summary["SUMMARY"](tag))
 
     def test_a_render_strips_an_attributed_opener_as_it_strips_a_bare_one(self) -> None:
         """`TAGS` matched a bare tag alone, so `<details open>` printed raw in the digest.
