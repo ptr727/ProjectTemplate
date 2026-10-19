@@ -877,7 +877,7 @@ SUMMARY = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(
-    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}(?:[ \t\f]+[A-Za-z][^>\r\n]*)?/?>",
+    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}(?:[ \t\f]+(?:[A-Za-z][^>\r\n]*)?)?/?>",
     re.IGNORECASE,
 )
 COUNT = re.compile(r"\((\d+)\)")

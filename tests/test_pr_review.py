@@ -1840,7 +1840,8 @@ class TestPreviouslyMissed(GqlCase):
 
         A heading with no closer reaches `entry_heading` as its raw line, so `TAGS` reads it there.
         """
-        for tag in ("<details open>", '<summary class="x">', "<summary/>", "<DETAILS>"):
+        tags = ("<details open>", '<summary class="x">', "<summary/>", "<summary />", "<details >")
+        for tag in (*tags, "<DETAILS>"):
             with self.subTest(tag=tag):
                 self.assertEqual("Open (1)", pr_review.unwrap(f"{tag}Open (1)</summary>"))
         for tag in ("<summaryx>", "<details/x>"):
