@@ -3073,7 +3073,7 @@ def unthreaded_narrative_findings(pr: dict) -> int:
 
 
 def uncounted_verdict(pr: dict, verdicts: set[str] = FLAGGING_VERDICTS) -> tuple[str, str] | None:
-    """The head round's verdict, one of `verdicts`, and its headline, where the round counts none.
+    """The head round's verdict in `verdicts` and its headline, where that round counts no finding.
 
     A round opening on a flagging verdict that states no open finding, lists none in an open
     section, opens no thread, and collapses no suppressed or previously-missed finding names
