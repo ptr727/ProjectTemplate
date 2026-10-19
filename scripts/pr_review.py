@@ -612,7 +612,35 @@ COVERAGE_COUNTS = re.compile(
 )
 LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
 EMPHASIS_MARK = re.compile(r"[*_`]")
-ATTRIBUTES = r"(?:[ \t]+[\w:-]+(?:[ \t]*=[ \t]*(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<>]+))?)*[ \t]*/?>"
+
+
+HTML_SPACE = r"[ \t\n\f\r]"
+
+
+def attributes(spanning: bool = False, lone_space: bool = True) -> str:
+    """The pattern for a tag's attributes after its name, through the `>` that closes it.
+
+    A quoted value may hold a `>`. Anything else that is not an attribute ends the tag unread, so
+    an opener quoted as `<details [^>]*>` is not one. A `spanning` reader takes a line break where
+    HTML does, between attributes and inside a quoted value, and any other reads one line.
+
+    Without `lone_space`, whitespace must lead to an attribute, and its name to a letter. That is
+    how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
+    and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
+
+    One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
+    and not at its siblings.
+    """
+    space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
+    value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
+    lead = "[A-Za-z_:]" if lone_space else "[A-Za-z]"
+    attribute = rf"{space}+{lead}[\w.:-]*(?:{space}*={space}*(?:{value}))?"
+    if lone_space:
+        return rf"(?:{attribute})*{space}*/?>"
+    return rf"(?:(?:{attribute})+{space}*)?/?>"
+
+
+ATTRIBUTES = attributes()
 HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
 MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
 MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
@@ -658,7 +686,7 @@ def tag_opener(*names: str, closer: bool = False) -> str:
     One boundary serves every opener reader here that admits an attribute. A rule kept per site
     had to be fixed by hand at each of its siblings. With `closer`, a closing tag matches too.
     """
-    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?=[ \t\n\f\r]|/?>|$)"
+    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?={HTML_SPACE}|/?>|$)"
 
 
 HTML_BLOCK_NAMES = (
@@ -668,7 +696,7 @@ HTML_BLOCK_NAMES = (
     "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
 )
 HTML_BLOCK_START = (
-    r"(?:(?i:<(?:script|pre|style)(?=[ \t\n\f\r>]|$)"
+    rf"(?:(?i:<(?:script|pre|style)(?={HTML_SPACE}|>|$)"
     rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
 )
@@ -889,7 +917,7 @@ HUB = "ptr727/ProjectTemplate"
 # An attribute name opens on a letter, which is what tells one from whitespace alone.
 # Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
 SUMMARY = re.compile(
-    rf"{tag_opener('summary')}(?:[ \t\n\f\r]+[A-Za-z][^>]*)?/?>(.*?)</summary>",
+    rf"{tag_opener('summary')}{attributes(spanning=True, lone_space=False)}(.*?)</summary>",
     re.DOTALL | re.IGNORECASE,
 )
 TAGS = re.compile(
@@ -903,7 +931,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 # A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
 # The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
 # A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(rf"{tag_opener('details')}[^>]*>[ \t]*", re.IGNORECASE)
+DETAILS_OPENER = re.compile(rf"{tag_opener('details')}{ATTRIBUTES}[ \t]*", re.IGNORECASE)
 SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
 HEADING = re.compile(
     rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
@@ -4450,7 +4478,7 @@ def heading_count(heading: str) -> int | None:
 # `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
 # CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
 DETAILS_TAG = re.compile(
-    rf"(?P<open>{tag_opener('details')}[^<>]*>)"
+    rf"(?P<open>{tag_opener('details')}{attributes(spanning=True)})"
     r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
     r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
     r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"
