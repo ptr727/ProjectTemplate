@@ -2482,7 +2482,8 @@ class TestSentenceLength(BaitCase):
     def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
         """GitHub's renderer reads `<source>` as a block name, though CommonMark 0.31 drops it."""
         a = " ".join(["word"] * 15)
-        for tag in ("<dl>", "<figure>", "<style>", "<nav>", "<source>", "<textarea>", "</div>"):
+        tags = ("<dl>", "<figure>", "<style>", "<nav>", "<source>", "<textarea>", "</div>")
+        for tag in (*tags, "<hr/>", "<div\tclass=x>"):
             with self.subTest(tag=tag):
                 self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
 
