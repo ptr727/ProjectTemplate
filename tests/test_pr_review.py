@@ -5213,7 +5213,7 @@ class TestSecondOverviewFormat(GqlCase):
     def test_markup_quoted_in_code_survives_every_reading(self) -> None:
         """`reduced` rewrote every emphasis tag and badge, so a finding quoting one lost it.
 
-        `normal` and `unwrap` keep the quotation whole, and `heading_count` reads the count past it.
+        `normal` and `unwrap` keep quoted markup, and `heading_count` reads the count past it.
         """
         text = "Prefer `<strong>` over `<b>`."
         self.assertEqual(text, pr_review.unwrap(text))
