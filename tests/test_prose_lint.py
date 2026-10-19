@@ -2498,6 +2498,10 @@ class TestSentenceLength(BaitCase):
             [(1, "sentence-length")], self.found(f"- {half}\n      <div>\n  {half}.\n")
         )
         self.assertEqual([], self.found(f"- {half}\n     <div>\n  {half}.\n"))
+        self.assertEqual([], self.found(f"- {half}\nlazy\n    <div>\n  {half}.\n"))
+        self.assertEqual([], self.found(f"-   {half}\n      <div>\n    {half}.\n"))
+        wide = f"-   {half}\n        <div>\n    {half}.\n"
+        self.assertEqual([(1, "sentence-length")], self.found(wide))
 
     def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
