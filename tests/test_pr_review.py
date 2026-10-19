@@ -1835,6 +1835,20 @@ class TestPreviouslyMissed(GqlCase):
             with self.subTest(pattern=pattern.pattern, line=line):
                 self.assertIsNotNone(pattern.search(line))
 
+    def test_a_render_strips_an_attributed_opener_as_it_strips_a_bare_one(self) -> None:
+        """`TAGS` matched a bare tag alone, so `<details open>` printed raw in the digest.
+
+        A heading with no closer reaches `entry_heading` as its raw line, so `TAGS` reads it there.
+        """
+        for tag in ("<details open>", '<summary class="x">', "<summary/>", "<DETAILS>"):
+            with self.subTest(tag=tag):
+                self.assertEqual("Open (1)", pr_review.unwrap(f"{tag}Open (1)</summary>"))
+        for tag in ("<summaryx>", "<details/x>"):
+            with self.subTest(tag=tag):
+                self.assertEqual(f"{tag}Open (1)", pr_review.unwrap(f"{tag}Open (1)</summary>"))
+        self.assertEqual("<details\nopen>Open", pr_review.unwrap("<details\nopen>Open"))
+        self.assertTrue(pr_review.entry_heading(f'<summary class="x">{BADGE} Title'))
+
     def test_a_heading_the_summary_reader_rejects_is_not_read_from_a_nested_entry(self) -> None:
         """`heading_of` asked two readers one question, so a nested entry's summary became the heading."""
         block = "<summary >Open (1)</summary>\n<details><summary>Nit (5)</summary>x</details>"

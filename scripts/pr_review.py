@@ -876,7 +876,9 @@ SUMMARY = re.compile(
     rf"{tag_opener('summary')}(?:[ \t\n\f\r]+[A-Za-z][^>]*)?/?>(.*?)</summary>",
     re.DOTALL | re.IGNORECASE,
 )
-TAGS = re.compile(r"</?(?:details|summary)>", re.IGNORECASE)
+TAGS = re.compile(
+    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}[^>\r\n]*>", re.IGNORECASE
+)
 COUNT = re.compile(r"\((\d+)\)")
 # A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
 OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
