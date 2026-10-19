@@ -139,7 +139,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    clean one that counts no finding prints its headline under `VERDICT WITH NO COUNTED FINDING`,
    and `status` and `wait` exit `50`. The
    headline is the one place that round names what it flags, so answer it as a suppressed finding.
-   The exit code repeats on that head after the answer.
+   The exit code repeats on that head after the answer. A clean verdict on the same terms prints
+   its headline under `CLEAN VERDICT HEADLINE`, which changes no exit code. Read that headline,
+   since it can name a nit no thread carries, and answer any such nit with `comment`.
    The body read in that format so far carried no `Suppressed comments` heading, so `suppressed=`
    finds nothing in it and there is no collapsed block to quote a count from: the digest's
    shortfall and the body's own prose are what an answer cites instead. A later body that does
