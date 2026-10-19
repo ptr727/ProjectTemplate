@@ -2822,6 +2822,14 @@ class TestCoverage(GqlCase):
                 body = f"> [!NOTE]\n> Reviewed with Copilot.\n{line}\n"
                 self.assertEqual([line], pr_review.coverage_statements(body))
                 self.assertEqual(pr_review.FULL, pr_review.coverage_of({"body": body})[0])
+        for line in ("1. item", "---", "# Heading", "<div>"):
+            with self.subTest(line=line):
+                body = f"> Quoting the reviewer:\n{line}\n{sentence}\n"
+                self.assertEqual([sentence], pr_review.coverage_statements(body))
+        for line in ("===", "--"):
+            with self.subTest(line=line):
+                body = f"> Quoting the reviewer:\n{line}\n{sentence}\n"
+                self.assertEqual([], pr_review.coverage_statements(body))
         # A marker carrying its own `>` is still the quotation rather than a block of its own.
         self.assertEqual([], pr_review.coverage_statements(f"> {MARKER}\n"))
         # An indented line is a code block, so its `>` is text rather than a quotation's marker.
@@ -3039,6 +3047,36 @@ class TestUnrecognizedShapes(GqlCase):
             with self.subTest(line=line):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
 
+    def test_a_stray_backtick_does_not_pair_across_a_paragraph_ending_line(self) -> None:
+        """Every line GitHub's renderer reads as ending the paragraph ends a span's reach too.
+
+        Paired across a list item, the next item's text read as quoted and its own span did not.
+        Each shape here was rendered both ways, so a line pairing on GitHub pairs here too.
+        """
+        ends = (
+            *("- item", "* item", "+\titem", "- -", "1. item", "1) item", "0001. item"),
+            *("# heading", "#", "######\th", "---", "* * *", "___", "```js", "~~~"),
+            *("   - item", "  1. item", "<div\vclass=x>", "> - item", "> > # h", ">  1. item"),
+        )
+        for line in ends:
+            with self.subTest(line=line):
+                self.assertIsNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
+        pairs = (
+            *("2. item", "1.", "* ", "+ ", "####### h", "#h", "**", "= =", "``"),
+            *("    - item", "\t- item", "-\vitem", "#\vh", "<div\xa0x>"),
+        )
+        for line in pairs:
+            with self.subTest(line=line):
+                self.assertIsNotNone(pr_review.CODE_SPAN.search(f"a `b\n{line}\nc` d"))
+
+    def test_a_span_split_across_quoted_lines_still_pairs(self) -> None:
+        """A quotation's next line continues its paragraph, so the span across them is one."""
+        self.assertEqual("> a   d", pr_review.CODE_SPAN.sub(" ", "> a `b\n> c` d"))
+        # Each reads as lazy text under a list item or a quotation, the containers bots write in.
+        for body in ("- a `b\n=\nc` d", "- a `b\n--\nc` d", "> a `b\n===\nc` d"):
+            with self.subTest(body=body):
+                self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
+
     def test_the_html_block_names_match_the_prose_gate_s(self) -> None:
         """Both tools model which lines end a paragraph on GitHub, so their lists cannot differ.
 
@@ -3056,6 +3094,7 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertEqual(names, set(prose_lint.INTERRUPTING_TAGS.split("|")))
         raw_text = set(pr_review.HTML_RAW_TEXT_NAMES.split("|"))
         self.assertEqual(raw_text, set(prose_lint.RAW_TEXT_TAGS.split("|")))
+        self.assertEqual(pr_review.BLOCK_SPACE, prose_lint.BLOCK_SPACE)
 
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""
@@ -3075,9 +3114,12 @@ class TestUnrecognizedShapes(GqlCase):
 
         The fence arm already excluded a quoted line, and a span is the same quotation, so a
         review whose prose quotes a coverage line was reported as stating an invalid one.
+        A bullet would open a list item and end the span, so the quoted line is the sentence.
         """
-        body = OVERVIEW + "\n\nQuoting `a\n- **Files reviewed:** invalid` here.\n"
+        sentence = "Copilot reviewed 4 out of 9 changed files in this pull request."
+        body = OVERVIEW + f"\n\nQuoting `a\n{sentence}` here.\n"
         self.assertEqual([], pr_review.coverage_statements(body))
+        self.assertEqual([sentence], pr_review.coverage_statements(OVERVIEW + f"\n\n{sentence}\n"))
 
     def test_a_real_coverage_line_survives_the_code_span_mask(self) -> None:
         """The mask must not cost the reader the statement it exists to find."""
