@@ -1776,6 +1776,7 @@ def sentences(span: str) -> list[str]:
 
 
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+ITEM_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}(?:\s|$)")
 INDENT_BLOCK = 4
 
 
@@ -1955,7 +1956,7 @@ def sentence_length_findings(
             in_code = False
         if in_table:
             continue
-        marker = LIST_MARKER.match(line)
+        marker = ITEM_MARKER.match(line)
         number = marker.group(1) if marker else None
         is_item = bool(
             marker and (number is None or in_list or not block or number.lstrip("0") == "1")
@@ -2008,7 +2009,9 @@ def sentence_length_findings(
         if is_item:
             flush()
             in_list = True
-            item_offset = content_offset(line, marker.end()) if marker else 0
+            item_offset = content_offset(line, marker) if marker else 0
+            if marker and not line[marker.end() :].strip():
+                continue
             block_is_item = True
             span = strip_list_marker(span)
         if not block:
@@ -2910,14 +2913,16 @@ def indent_past_blank(texts: list[str], idx: int) -> int:
     return -1
 
 
-def content_offset(line: str, marker_end: int) -> int:
+def content_offset(line: str, marker: re.Match[str]) -> int:
     """The column a list item's text starts at, the marker's run of up to four spaces included.
 
-    Five or more spaces leave the item's text an indented code block one space past the marker.
+    Five or more spaces, or none before the line ends, leave the text one column past the marker.
+    Columns count a tab to its next stop, as `leading_indent` does.
     """
-    rest = line[marker_end:]
+    width = len(line[: marker.end()].rstrip().expandtabs(4))
+    rest = line.expandtabs(4)[width:]
     spaces = len(rest) - len(rest.lstrip(" "))
-    return marker_end + spaces if spaces < INDENT_BLOCK and rest.strip() else marker_end
+    return width + spaces if 0 < spaces <= INDENT_BLOCK and rest.strip() else width + 1
 
 
 def leading_indent(line: str) -> int:
