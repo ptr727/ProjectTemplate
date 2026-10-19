@@ -721,7 +721,7 @@ INTERRUPTS_PARAGRAPH = (
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
 CODE_SPAN = re.compile(
     r"(?<![\\`])(`+)(?!`)"
-    rf"(?:[^\n]|\n(?!\s*\n|(?:(?: {{0,3}}>)+ {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH})))*?"
+    rf"(?:[^\n]|\n(?!\s*\n|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH})))*?"
     r"(?<!`)\1(?!`)"
 )
 
