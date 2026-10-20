@@ -75,7 +75,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    case "Which Reviewers a Repository Actually Has" below states. Exit `47` is that same account
    state read from the reviewer's activity elsewhere when this head carries none of its own, and
    exit `41` holding across several heads with no cause its body names reaches it the slower way.
-   Those three are `wait`'s alone: `status` exits 0 over a refusal, carrying it as `refusal=` in
+   Those exits are `wait`'s alone: `status` exits 0 over a refusal, carrying it as `refusal=` in
    the digest line instead, so reading that exit code as the absence of one would falsely satisfy
    this item on the exact state it exists to catch. That is where the
    unsatisfied item goes to the maintainer, with the coverage the other reviewers gave that head
@@ -84,8 +84,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 
    One further case satisfies this item where no coverage reaches the head, and it is the only
    such case. The maintainer adopted it as a standing rule. It applies to a develop -> main
-   promotion on which `pr_review.py` exits `45`. That promotion satisfies item 2 where all three
-   of these hold on the live head:
+   promotion on which `pr_review.py` exits `45`. That promotion satisfies item 2 where each
+   of these holds on the live head:
 
    - Every change it carries had full coverage on its own feature -> develop pull request. That
      pull request met item 2 at its merged head by coverage, not by permission. Failing that,
@@ -117,7 +117,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    in the review body investigated and answered. Those appear in no thread, so polling threads
    alone reports a clean pass while they stand. The same holds for CodeRabbit's own
    "outside diff range" comments (`cr_outside_diff` in `pr_review.py`'s digest) and for Qodo's
-   comment-only findings (`qodo_open`): neither opens a `reviewThreads` entry either, so
+   comment-only findings (`qodo_open`): these open no `reviewThreads` entry either, so
    give each one the same triage the low-confidence findings above already get. Copilot's own
    section for findings against code the pull request did not change, `Previously missed` in the
    review body and `previously_missed` in the digest, is a fourth such class and takes that same
@@ -151,8 +151,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
    canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
    `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
-   local pass, applied here to a PR-hosted finding, is outcome 4 of "Every finding ends in one
-   of five outcomes" below applied once per unit rather than once per finding: the round gathers
+   local pass, applied here to a PR-hosted finding, is outcome 4 of "Every finding ends in a
+   listed outcome" below applied once per unit rather than once per finding: the round gathers
    that unit's such findings onto the unit's tracker, an open hub issue whose title carries the
    unit key, retitled by the change that moves the key and filed by whichever round first needs
    it, and answers each finding with that issue's link, resolving a thread on that reply, so a
@@ -166,7 +166,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    remark on untouched text included, takes its own outcome in that section.
 
    A finding the pull request's own body lists also needs an outcome before merge, under
-   "Every finding ends in one of five outcomes" below. Per the `local-strict-review` section
+   "Every finding ends in a listed outcome" below. Per the `local-strict-review` section
    "Disposing of Findings", the body lists each one still open once a push's edit budget is spent.
    It needs that outcome whichever head it was found on and whether or not a reviewer raises it
    again. `pr_review.py status` and `wait` do not read the pull request's body, so read the body
@@ -212,9 +212,9 @@ must have done.
   local pass, and the loop's own request step below is where a missing one is answered, on the
   terms stated there. A refusal naming the account quota is its own case rather
   than a review, and so is one saying only that Copilot encountered an error, which is what the
-  weekly rate limit posts. Either covers no head, so the gate stays unsatisfied, and nothing the
+  weekly rate limit posts. Each covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
-  reviewer's run log names a reset time `pr_review.py` reports it. Either refusal goes to the
+  reviewer's run log names a reset time `pr_review.py` reports it. Each refusal goes to the
   maintainer, rather than into a wait.
 
 Where a reviewer's behavior still surprises you after reading what it posted, the hub's
@@ -277,7 +277,7 @@ monitor or drive its review.
 
 After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. For a merge into `develop` that procedure is `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`, run from a hub checkout. The pull request loop is incomplete while its finished worktree or local task branch remains, except a promotion branch merged into `main`, which `repo-worktree` leaves for its sweep. It is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
 
-## Every finding ends in one of five outcomes
+## Every finding ends in a listed outcome
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying and fix each one sitting
@@ -328,7 +328,7 @@ on a sibling repo or PR, even within one batch or one session, gets its own outc
 evidence-backed decline (outcome 2) or its own explicit maintainer answer (outcome 3). A prior
 instance's outcome is context for the new one, never a standing answer to reuse in its place.
 
-`pr-review-conduct` "Every finding ends in one of five outcomes" keeps the full rule, and the
+`pr-review-conduct` "Every finding ends in a listed outcome" keeps the full rule, and the
 `drive-pr` Skill carries it whole as a generated include, applying it while driving.
 
 ## Triaging findings

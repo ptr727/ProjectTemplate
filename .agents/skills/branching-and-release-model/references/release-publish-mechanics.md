@@ -22,7 +22,7 @@ publisher passes `branch: ${{ github.ref_name }}`, which the tasks forward and r
 target by setting its `enable_<target>: false` at the caller stub rather than deleting a job: the
 hub task carries the full job graph for every repo, and the caller stub's `with:` block is where
 the target list is expressed. A repo still curates, in `test-pull-request.yml`, its
-path-filter entry, that filter's output, and the `smoke-build` enable-forward, all three together
+path-filter entry, that filter's output, and the `smoke-build` enable-forward, together
 per D6.4, since an entry nothing consumes never smoke-builds the target. And, for a package
 target, the `publish-nuget` or `publish-pypi` job in its own `publish-release.yml`, since
 `id-token: write` belongs at that one entry point. CodeGen, versioning, merge-bot, and Dependabot
@@ -49,7 +49,7 @@ Pick by where each artifact *goes*, not by language:
   repo's own output (e.g. a symbol library) is a file target, which the `build-release-asset` hook
   builds when the caller sets `enable_release_asset: true`. The hook has no hub default, so the caller provides
   `.github/actions/build-release-asset/action.yml` and the task fails without it.
-- **Package-registry pushes** (NuGet.org, PyPI): both are split, and the push never sits in the
+- **Package-registry pushes** (NuGet.org, PyPI): each is split, and the push never sits in the
   hook. OIDC trusted publishing validates the token's `job_workflow_ref` claim, which names the
   workflow the job actually ran from, so a push from a hub-hosted task is rejected at the token
   exchange, NuGet.org answering `HTTP 401` and PyPI under its own code. And because D7.2 has a callee
@@ -98,7 +98,7 @@ version/tag, which is heavyweight but expected even for a non-.NET repo, and acc
 A scheduled or push publish where NBGV `SemVer2` is **unchanged** (no new commit since the last
 publish) re-pushes **nothing** to GitHub Releases (the `github-release` job's `release-exists`
 check skips the create step, and a dispatch refreshes the release instead of skipping), NuGet (`dotnet nuget push --skip-duplicate`), or PyPI
-(`gh-action-pypi-publish` `skip-existing: true`), since all three key on the version string.
+(`gh-action-pypi-publish` `skip-existing: true`), since each keys on the version string.
 **Docker always re-pushes** by design: it picks up upstream base-image refreshes (e.g.
 `ubuntu:rolling`) that aren't visible in the repo. Boundary: `version.json` has **no
 `pathFilters`**, so *any* commit, including a CI/workflow-only or docs-only change, advances the

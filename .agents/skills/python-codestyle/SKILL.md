@@ -168,7 +168,7 @@ A repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers
 `pre-commit` framework, wires its local hook from the canonical `catalog/snippets/pre-commit/`
 directory, hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent
 hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That
-path and `.pre-commit-config.yaml` are the two the audit reads. The runner is bounded by the
+path and `.pre-commit-config.yaml` are the ones the audit reads. The runner is bounded by the
 toolchain the repo already keeps rather than by the languages the hook checks, so a repo keeping a
 Husky.Net manifest may run these same Python checks from the `catalog/snippets/husky/` shape
 instead. Each shape carries whichever language checks its own repo keeps. The `pre-commit`

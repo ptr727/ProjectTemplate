@@ -133,7 +133,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    <worktree> origin/main` at a new path in the fleet worktree layout, and from that worktree run
    `python3 scripts/skills_install.py --snapshot-only`, then `python3 scripts/skills_install.py
    --report`, and confirm its snapshot reads current. A fresh worktree holds nothing uncommitted
-   or ignored under `.agents/skills/` or `.claude-plugin/`, the two paths the installer reads, so
+   or ignored under `.agents/skills/` or `.claude-plugin/`, the paths the installer reads, so
    the copy holds exactly the promoted commit. `--snapshot-only` leaves the Claude Code
    registration untouched, and that channel needs no refresh here: it loads the registered
    directory in place, the one `--report` names under `live`, and serves whatever it holds at

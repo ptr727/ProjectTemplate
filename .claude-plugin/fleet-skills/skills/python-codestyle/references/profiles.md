@@ -33,7 +33,7 @@ committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile,
 configuration alone marks the lint-only one:
 
 - **Project** (the `build` profile): the Python has third-party runtime dependencies, or is the
-  repo's deliverable. It takes one of two forms. The uv form is a PEP 621 project: `[project]`
+  repo's deliverable. It takes one of these forms. The uv form is a PEP 621 project: `[project]`
   with `dependencies` (dev tools in `[dependency-groups]`, per the dependency-declaration axis
   above), a `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line
   Endings" section). CI runs `uv sync --all-groups --frozen` + `uv run <tool>`, so the lockfile pins

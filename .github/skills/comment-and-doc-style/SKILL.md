@@ -98,7 +98,7 @@ not read as a shared requirement:
 
 ## Markdown formatting
 
-- **Reference-style links everywhere**, except the four files read one section at a time rather
+- **Reference-style links everywhere**, except the files read one section at a time rather
   than end to end: `AGENTS.md`, `GOVERNANCE.md`, `OPERATIONS.md`, `.github/copilot-instructions.md`.
   Those keep inline links so a target resolves where it is read. Every other Markdown file defines
   every URI at the bottom, grouped by type under an HTML-comment header, each group alphabetized
@@ -251,7 +251,7 @@ The reasons follow, and the first decides it.
 - **It pollutes the content.** A rationale block that takes one more citation per round is how a
   file comes to teach a house style the rules forbid, which is what happened here.
 
-The first carve-out is where all three fail at once, which is what makes it one case rather than a
+The first carve-out is where all of them fail at once, which is what makes it one case rather than a
 taxonomy. Another repository's status is not a fact this file can hold, it changes without anyone
 touching this file, and the constraint the citation stands in for is therefore unwritable. The
 lookup is not impossible, that repository being public. And a URL line is not pollution on a surface
