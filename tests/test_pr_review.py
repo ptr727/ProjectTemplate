@@ -400,25 +400,36 @@ def check(
     workflow: int | None = None,
     slug: str = "github-actions",
     app_id: int = 15368,
+    suite_status: str = "COMPLETED",
+    run: int | None = None,
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
+
+    The run's `databaseId` is carried only where a case names one.
 
     The starved case this exists for was read off run 31118675530 in this repository: an aggregator
     job dispatched the instant its dependency finished, left `QUEUED` with an empty runner name and
     a `startedAt` stamped equal to its creation, which sat fifteen minutes and never ran. Its
     healthy sibling on the next run wore `IN_PROGRESS` with a runner inside two minutes.
     """
+    workflow_run: dict | None = None
+    if workflow is not None:
+        workflow_run = {"workflow": {"databaseId": workflow}}
+        if run is not None:
+            workflow_run["databaseId"] = run
+    check_suite: dict = {
+        "databaseId": suite,
+        "app": {"slug": slug, "databaseId": app_id},
+        "workflowRun": workflow_run,
+        "status": suite_status,
+    }
     return {
         "__typename": "CheckRun",
         "name": name,
         "status": status,
         "conclusion": conclusion,
         "startedAt": ago(60) if started is None else started,
-        "checkSuite": {
-            "databaseId": suite,
-            "app": {"slug": slug, "databaseId": app_id},
-            "workflowRun": None if workflow is None else {"workflow": {"databaseId": workflow}},
-        },
+        "checkSuite": check_suite,
     }
 
 
@@ -2757,6 +2768,9 @@ class TestCoverage(GqlCase):
             ("under a setext underline", f"Overview\n===\n    {MARKER}", "UNSTATED"),
             ("under a setext dash underline", f"Overview\n---\n    {MARKER}", "UNSTATED"),
             ("under a thematic break", f"Prose.\n\n* * *\n    {MARKER}", "UNSTATED"),
+            ("under a tab-spaced thematic break", f"Prose.\n\n*\t*\t*\n    {MARKER}", "UNSTATED"),
+            ("under a setext underline and a tab", f"Overview\n===\t\n    {MARKER}", "UNSTATED"),
+            ("under hashes and a no-break space", f"#{chr(0xA0)}Overview\n    {MARKER}", "FULL"),
             ("under an HTML comment", f"<!-- ccr-overview-v2 -->\n    {MARKER}", "UNSTATED"),
             ("under a code line", f"Prose.\n\n    code\n    {MARKER}", "UNSTATED"),
             ("after a blank line", f"Prose.\n\n    {MARKER}", "UNSTATED"),
@@ -3079,6 +3093,62 @@ class TestUnrecognizedShapes(GqlCase):
             with self.subTest(body=body):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
 
+    def test_a_line_of_only_quote_markers_ends_the_paragraph(self) -> None:
+        """GitHub ends a paragraph at a line holding only blockquote markers, quoted or not.
+
+        A span paired across one, and so did a comment opened above one, hiding a span below it.
+        Indented four spaces, the line is the paragraph's own text and the span still pairs.
+        """
+        for body in (
+            "a `b\n>\nc` d",
+            "> a `b\n>\n> c` d",
+            "> a `b\n> >\n> c` d",
+            "> a `b\n>  \n> c` d",
+        ):
+            with self.subTest(body=body):
+                self.assertIsNone(pr_review.CODE_SPAN.search(body))
+        self.assertIsNotNone(pr_review.CODE_SPAN.search("a `b\n    >\nc` d"))
+        quoted = "> a <!-- b\n>\n> c `x` d -->"
+        self.assertEqual(["`x`"], [m.group() for m in pr_review.CODE_SPAN.finditer(quoted)])
+
+    def test_a_backtick_inside_html_or_an_autolink_opened_first_opens_no_span(self) -> None:
+        """GitHub reads a span, raw inline HTML, and an autolink by which one opens first.
+
+        A backtick inside an HTML comment opened earlier paired with the next one. The live `<b>`
+        between them then read as quoted, and `unwrap` printed it raw. Each opener here was rendered
+        on GitHub. In the first set the trailing span is the only one. In the second the backtick
+        pairs, since GitHub opens no HTML there or closes it before the backtick.
+        """
+        literal = (
+            *("<!-- a ` b -->", "<!-- a -- ` b -->", "<!-- a ` b\n-->", "<!-- a ` b\nc -->"),
+            *("<https://e.example/`a>", "<ht:/`>", "<u`v@e.example>"),
+            *('<a title="`">', "<a _t='`'>", '<A B="`"/>', '<a\n  b="`">', '<a title="\n`">'),
+            *("<? a ` b ?>", "<!X a ` b>", "<![CDATA[ a ` b ]]>", "\\\\<!-- a ` b -->"),
+        )
+        for opener in literal:
+            with self.subTest(opener=opener):
+                body = f"x {opener} <b>B</b> `y`"
+                self.assertEqual(f"x {opener} <b>B</b>  ", pr_review.CODE_SPAN.sub(" ", body))
+        self.assertEqual(
+            "<!-- a ` b --> Open (2) `x`", pr_review.unwrap("<!-- a ` b --> <b>Open (2)</b> `x`")
+        )
+        self.assertEqual("x   <b>B</b>  ", pr_review.CODE_SPAN.sub(" ", "x `<!--` <b>B</b> `-->`"))
+        pairing = (
+            *("<!-- a ` b --->", "<!x a ` b>", "<a b=c`d>", "</a ` >", '<ab:c title="`">'),
+            *("\\<!-- a ` b -->", '<a\n\ntitle="`">', "<!--> `", "<!---> `", "<!----> `"),
+            *("<!-- a --> b --> `", "\\\\\\<!-- a ` b -->"),
+        )
+        self.assertEqual(
+            "x <!-- a ` b ---> c --> <b>B</b>  ",
+            pr_review.CODE_SPAN.sub(" ", "x <!-- a ` b ---> c --> <b>B</b> `y`"),
+        )
+        for opener in pairing:
+            with self.subTest(opener=opener):
+                span = pr_review.CODE_SPAN.search(f"x {opener} <b>B</b> `y`")
+                self.assertIsNotNone(span)
+                assert span is not None
+                self.assertIn("<b>", span.group())
+
     def test_the_html_block_names_match_the_prose_gate_s(self) -> None:
         """Both tools model which lines end a paragraph on GitHub, so their lists cannot differ.
 
@@ -3097,6 +3167,22 @@ class TestUnrecognizedShapes(GqlCase):
         raw_text = set(pr_review.HTML_RAW_TEXT_NAMES.split("|"))
         self.assertEqual(raw_text, set(prose_lint.RAW_TEXT_TAGS.split("|")))
         self.assertEqual(pr_review.BLOCK_SPACE, prose_lint.BLOCK_SPACE)
+
+    def test_a_heading_opens_on_the_whitespace_github_takes_after_its_hashes(self) -> None:
+        """A space, a tab, or the line's end follows a heading's hashes, and nothing else does.
+
+        Python's `\\s` took a no-break space there. A line GitHub renders as text was then read as a
+        heading, by the section reader as well as by the heading vetting.
+        """
+        for line in ("## Overview", "#\tOverview", "#", "###  ", "  ## Overview\r"):
+            with self.subTest(line=line):
+                self.assertTrue(pr_review.MARKDOWN_HEADING.match(line))
+        nbsp = chr(0xA0)
+        for line in (f"#{nbsp}Overview", "#\vOverview", "#\fOverview", "#Overview", "####### X"):
+            with self.subTest(line=line):
+                self.assertFalse(pr_review.MARKDOWN_HEADING.match(line))
+        self.assertTrue(pr_review.HEADING.match("## Suppressed comments (2)"))
+        self.assertFalse(pr_review.HEADING.match(f"#{nbsp}Suppressed comments (2)"))
 
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""
@@ -5667,6 +5753,38 @@ class TestOverviewSections(GqlCase):
         self.assertIn("VERDICT WITH NO COUNTED FINDING", printed)
         self.assertIn("Resolve the two outstanding parser-retry", printed)
         self.assertIn("status=VERDICT_NAMES_UNCOUNTED_FINDINGS", printed)
+        self.assertNotIn("gh pr checks", printed)
+
+    def test_fifty_over_a_check_still_running_names_what_watches_it(self) -> None:
+        """Nothing reads an answer to the headline, so `wait` returns 50 at once on every call.
+
+        A check still running when it does is one `wait` cannot watch. So it names the command that
+        can, and a one-second return no longer reads as a terminal answer.
+        """
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(30))
+        self.answer(payload([review(body=self.headline())], merge="BLOCKED", checks=[running]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(50, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        printed = self.out.getvalue()
+        self.assertIn("status=VERDICT_NAMES_UNCOUNTED_FINDINGS", printed)
+        self.assertIn("`timeout 1800 gh pr checks 7 --repo o/r --watch`", printed)
+
+    def test_fifty_over_concluded_or_stuck_checks_names_no_watch(self) -> None:
+        """A watch has nothing to wait for once every check concluded or sits stuck.
+
+        A BLOCKED merge whose checks all passed is held by a thread or an approval instead.
+        """
+        passed = check()
+        stuck = check(name="gate", status="QUEUED", conclusion="", started=real_ago(900))
+        for label, checks in (("passed", [passed]), ("stuck", [stuck]), ("none", [])):
+            with self.subTest(case=label):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = payload([review(body=self.headline())], merge="BLOCKED", checks=checks)
+                self.answer(pr)
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(50, pr_review.main(["wait", "7", "--repo", "o/r"]))
+                self.assertNotIn("gh pr checks", self.out.getvalue())
 
     def test_partial_coverage_outranks_fifty(self) -> None:
         """A part-reviewed diff is the larger gap, so 42 is what the round reports."""
@@ -7651,11 +7769,138 @@ class TestCheckShapes(unittest.TestCase):
             kept = sorted((n["name"], n["conclusion"]) for n in nodes)
             self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
 
+    def superseded_rollup(self, newer: str) -> list[dict]:
+        """A cancelled run's failed aggregator, beside the jobs of a newer run on the same head."""
+        gate = "Check pull request workflow status job"
+        return [
+            check(
+                name="lint",
+                conclusion="CANCELLED",
+                suite=10,
+                workflow=7,
+                suite_status="COMPLETED",
+                run=100,
+            ),
+            check(
+                name=gate,
+                conclusion="FAILURE",
+                suite=10,
+                workflow=7,
+                suite_status="COMPLETED",
+                run=100,
+            ),
+            check(
+                name="lint",
+                status="IN_PROGRESS",
+                conclusion="",
+                suite=20,
+                workflow=7,
+                suite_status=newer,
+                run=200,
+            ),
+        ]
+
+    def test_an_older_runs_failure_is_superseded_while_the_newer_run_is_in_progress(self) -> None:
+        """The newer run posts its aggregator only once its jobs finish, so the old one waits."""
+        nodes = pr_review.check_nodes(
+            payload([review()], checks=self.superseded_rollup("IN_PROGRESS"))
+        )
+        gate = next(n for n in nodes if n["conclusion"] == "FAILURE")
+        self.assertTrue(gate.get("superseded"))
+        self.assertEqual(200, gate.get("newer_run"))
+        self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
+
+    def test_an_older_runs_failure_stands_once_the_newer_run_completes(self) -> None:
+        """A name the finished newer run never posted is what the merge gate still reads."""
+        rollup = self.superseded_rollup("COMPLETED")
+        rollup[2] = check(name="lint", suite=20, workflow=7, suite_status="COMPLETED", run=200)
+        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+        self.assertEqual(["FAILED"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)])
+
+    def test_a_held_wait_polls_on_a_superseded_failure_until_the_newer_run_posts(self) -> None:
+        """The newer run's gate replaces the superseded one, and only then does the hold release.
+
+        The newer run's job is marked optional, so the superseded gate alone is what holds.
+        """
+        rollup = self.superseded_rollup("IN_PROGRESS")
+        rollup[2]["isRequired"] = False
+        held = payload([review()], merge="BLOCKED", checks=rollup)
+        nodes = pr_review.check_nodes(held)
+        self.assertTrue(pr_review.held_checks_open(held, nodes, NOW, 300, 1800))
+        gate = "Check pull request workflow status job"
+        done = payload(
+            [review()],
+            merge="BLOCKED",
+            checks=[
+                *self.superseded_rollup("COMPLETED")[:2],
+                check(name="lint", suite=20, workflow=7, run=200),
+                check(name=gate, suite=20, workflow=7, run=200),
+            ],
+        )
+        nodes = pr_review.check_nodes(done)
+        self.assertFalse(pr_review.held_checks_open(done, nodes, NOW, 300, 1800))
+
+    def test_a_newer_suite_with_no_check_run_yet_still_supersedes_a_failure(self) -> None:
+        """A run waiting on its concurrency slot has a suite and no check run in the rollup."""
+        pr = payload([review()], merge="BLOCKED", checks=self.superseded_rollup("QUEUED")[:2])
+        waiting = {
+            "databaseId": 20,
+            "status": "QUEUED",
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [waiting]}
+        nodes = pr_review.check_nodes(pr)
+        gate = next(n for n in nodes if n["conclusion"] == "FAILURE")
+        self.assertTrue(gate.get("superseded"))
+        self.assertEqual(200, gate.get("newer_run"))
+        self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
+
+    def test_an_unfinished_check_in_an_older_run_keeps_its_stuck_reading(self) -> None:
+        """A newer run queued behind the older one cannot start, so the older one's shape stands."""
+        starved = check(
+            name="gate", status="QUEUED", conclusion="", started=ago(900), suite=10, workflow=7
+        )
+        pr = payload([review()], merge="BLOCKED", checks=[starved])
+        waiting = {
+            "databaseId": 20,
+            "status": "QUEUED",
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [waiting]}
+        nodes = pr_review.check_nodes(pr)
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+        self.assertEqual(
+            ["NOT_PICKED_UP"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)]
+        )
+
+    def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
+        query = " ".join(pr_review.Q_FULL.split())
+        self.assertIn(
+            "checkSuites(last:50){ nodes{ databaseId status "
+            "workflowRun{ databaseId workflow{ databaseId } } } }",
+            query,
+        )
+
+    def test_a_newer_run_of_another_workflow_does_not_supersede_a_failure(self) -> None:
+        rollup = self.superseded_rollup("IN_PROGRESS")
+        rollup[2] = check(
+            name="lint",
+            status="IN_PROGRESS",
+            conclusion="",
+            suite=20,
+            workflow=8,
+            suite_status="IN_PROGRESS",
+        )
+        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+
     def test_the_rollup_query_asks_for_the_suite_and_workflow_identity(self) -> None:
         """Q_FULL selects the suite and workflow fields the dedup keys on."""
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuite{ databaseId app{ slug databaseId } workflowRun{ workflow{ databaseId } } }",
+            "checkSuite{ databaseId status app{ slug databaseId } "
+            "workflowRun{ databaseId workflow{ databaseId } } }",
             query,
         )
 
@@ -8002,6 +8247,65 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("status=CHECKS_NOT_MERGEABLE", out)
         self.assertIn("CHECK NOT PICKED UP", out)
+
+    def test_wait_does_not_take_forty_four_on_a_superseded_runs_failed_aggregator(self) -> None:
+        """A closed and reopened pull request cancels its first run, whose aggregator then fails.
+
+        The reopen's run on the same head is still going and has not posted its own aggregator.
+        So the failure is not a verdict on the head, and the digest names the newer run instead.
+        """
+        gate = "Check pull request workflow status job"
+        rollup = [
+            check(
+                name=gate,
+                conclusion="FAILURE",
+                suite=10,
+                workflow=7,
+                suite_status="COMPLETED",
+                run=100,
+            ),
+            check(
+                name="lint",
+                status="IN_PROGRESS",
+                conclusion="",
+                started=real_ago(60),
+                suite=20,
+                workflow=7,
+                suite_status="IN_PROGRESS",
+                run=200,
+            ),
+        ]
+        self.answer(payload([review()], merge="BLOCKED", checks=rollup))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        out = self.out.getvalue()
+        self.assertNotIn("status=CHECKS_NOT_MERGEABLE", out)
+        self.assertIn(
+            f"CHECK SUPERSEDED ({gate!r}, COMPLETED/FAILURE in an older run): run 200", out
+        )
+
+    def test_a_superseded_check_that_passed_prints_no_superseded_line(self) -> None:
+        """An older run's green check is no failure to explain away, so nothing names it."""
+        rollup = [
+            check(name="gate", suite=10, workflow=7, run=100),
+            check(
+                name="lint",
+                status="IN_PROGRESS",
+                conclusion="",
+                started=real_ago(60),
+                suite=20,
+                workflow=7,
+                suite_status="IN_PROGRESS",
+                run=200,
+            ),
+        ]
+        pr = payload([review()], merge="BLOCKED", checks=rollup)
+        gate = next(n for n in pr_review.check_nodes(pr) if n["name"] == "gate")
+        self.assertTrue(gate.get("superseded"))
+        self.answer(pr)
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertNotIn("CHECK SUPERSEDED", self.out.getvalue())
 
     def test_a_stuck_check_on_a_clean_merge_does_not_take_forty_four(self) -> None:
         """`CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.

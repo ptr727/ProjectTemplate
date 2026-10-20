@@ -336,8 +336,10 @@ Subcommands
            exits 0, or on a held head is polled while it can still move the merge, which includes
            a context the base branch's rules require and the head has not yet registered. Neither is a
            stuck check its rollup node reads as not required, since the rollup carries checks no
-           ruleset requires, nor any stuck check on a merge that is not BLOCKED. The digest reports
-           the check in every case, so a shape outside 44 is still named rather than lost.
+           ruleset requires, nor any stuck check on a merge that is not BLOCKED. Nor is a failed
+           check from an older run whose workflow has a newer run on the head not yet finished.
+           The digest names that one as superseded. The digest reports the check in every case,
+           so a shape outside 44 is still named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
            printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
@@ -630,8 +632,9 @@ def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
     and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
 
-    One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
-    and not at its siblings.
+    One tail serves every reader here of a tag's attributes, and it stays lenient. A tail kept per
+    site was fixed at one and not at its siblings. `TAG_ATTRIBUTE` is CommonMark's stricter grammar
+    for any inline tag, which is what decides whether a backtick inside one opens a span.
     """
     space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
     value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
@@ -652,12 +655,26 @@ MARKER_REACH = 300
 FILE_ROW = re.compile(
     r"^(?![^\n]*<!--)[ \t]*\|[ \t]*`[^|`\n]*[./][^|`\n]*`[ \t]*\|[^\n]*$", re.MULTILINE
 )
+LINE_END = r"[ \t]*\r?(?=\n|\Z)"
+ATX_HEADING = rf"#{{1,6}}(?:[ \t]|{LINE_END})"
+THEMATIC_BREAK = rf"(?:(?:\*[ \t]*){{3,}}|(?:-[ \t]*){{3,}}|(?:_[ \t]*){{3,}}){LINE_END}"
+
+
+def fence_opener(ticks: str = "`{3,}", tildes: str = "~{3,}") -> str:
+    """The pattern for a fence's opening line after its indent.
+
+    A backtick fence's info string carries no backtick, and a tilde fence's carries anything.
+    `FENCE` passes each run as a capturing group, so its closer can repeat the opener's mark.
+    """
+    return rf"{ticks}[^`\n]*(?=\n|\Z)|{tildes}[^\n]*"
+
+
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
 FENCE = re.compile(
-    r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)(?:\n.*?)??"
-    r"(?:(?P<close>\n {0,3}(?:\1`*|\2~*)[ \t]*\r?(?=\n|\Z))|\Z)",
+    rf"^ {{0,3}}(?:{fence_opener('(`{3,})', '(~{3,})')})(?:\n.*?)??"
+    rf"(?:(?P<close>\n {{0,3}}(?:\1`*|\2~*){LINE_END})|\Z)",
     re.DOTALL | re.MULTILINE,
 )
 
@@ -704,14 +721,71 @@ HTML_BLOCK_START = (
     rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True, space=BLOCK_SPACE)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
 )
-LINE_END = r"[ \t]*\r?(?=\n|\Z)"
 # What a line opens, after at most three spaces, to end the paragraph above it as GitHub renders it.
 # A bare blockquote marker is left to each reader, since one line cannot tell a quotation's next line from one opening under a paragraph.
 INTERRUPTS_PARAGRAPH = (
-    rf"{HTML_BLOCK_START}|[-+*][ \t]+\S|0{{0,8}}1[.)][ \t]+\S|#{{1,6}}(?:[ \t]|{LINE_END})"
-    rf"|(?:(?:\*[ \t]*){{3,}}|(?:-[ \t]*){{3,}}|(?:_[ \t]*){{3,}}){LINE_END}"
-    r"|`{3,}[^`\n]*(?=\n|\Z)|~{3,}"
+    rf"{HTML_BLOCK_START}|[-+*][ \t]+\S|0{{0,8}}1[.)][ \t]+\S|{ATX_HEADING}|{THEMATIC_BREAK}"
+    rf"|{fence_opener()}"
 )
+
+
+PARAGRAPH_BREAK = (
+    rf"\n(?!\s*\n| {{0,3}}>(?: {{0,4}}>)*{LINE_END}"
+    rf"|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH}))"
+)
+IN_PARAGRAPH = rf"(?:[^\n]|{PARAGRAPH_BREAK})"
+TAG_SPACE = rf"[ \t]*(?:\r?{PARAGRAPH_BREAK}[ \t]*)?"
+TAG_ATTRIBUTE = (
+    rf"(?=[ \t\r\n]){TAG_SPACE}[A-Za-z_:][A-Za-z0-9_.:-]*(?:{TAG_SPACE}={TAG_SPACE}"
+    rf"(?:[^ \t\r\n\"'=<>`]+|'(?:[^'\n]|{PARAGRAPH_BREAK})*'|\"(?:[^\"\n]|{PARAGRAPH_BREAK})*\"))?"
+)
+INLINE_HTML = (
+    rf"(?<!\\)(?:\\\\)*(?:<[A-Za-z][A-Za-z0-9-]*(?:{TAG_ATTRIBUTE})*{TAG_SPACE}/?>"
+    rf"|</[A-Za-z][A-Za-z0-9-]*{TAG_SPACE}>"
+    rf"|<!--(?:-?>|(?:{IN_PARAGRAPH}*?(?:[^-\n]|{PARAGRAPH_BREAK}))?-->)"
+    rf"|<\?{IN_PARAGRAPH}*?\?>"
+    rf"|<![A-Z]+(?:[ \t]|\r?{PARAGRAPH_BREAK})(?:[^>\n]|{PARAGRAPH_BREAK})*>"
+    rf"|<!\[CDATA\[{IN_PARAGRAPH}*?\]\]>"
+    r"|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x00-\x20<>]*>"
+    r"|<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>)"
+)
+
+
+class CodeSpans:
+    """The inline code spans in a body, read the way GitHub reads them, left to right.
+
+    A code span, raw inline HTML, and an autolink bind by which one opens first. A backtick inside
+    an HTML comment, a tag's quoted value, or an autolink that opened earlier is literal, so it
+    opens no span. Read alone, that backtick paired with a later one, and a live tag between the two
+    read as quoted.
+
+    So one pattern reads all three, each match consuming its own text, and only a span is
+    reported. A span carries its backtick run as group 1, which is what tells it from the rest.
+    """
+
+    def __init__(self) -> None:
+        self.pattern = re.compile(
+            rf"(?<![\\`])(`+)(?!`){IN_PARAGRAPH}*?(?<!`)\1(?!`)|{INLINE_HTML}"
+        )
+
+    def finditer(self, text: str) -> Iterator[re.Match[str]]:
+        """Every span in `text`, in order."""
+        return (m for m in self.pattern.finditer(text) if m.group(1) is not None)
+
+    def search(self, text: str) -> re.Match[str] | None:
+        """The first span in `text`, or None."""
+        return next(self.finditer(text), None)
+
+    def sub(self, repl: str | Callable[[re.Match[str]], str], text: str) -> str:
+        """`text` with each span replaced by `repl`, and the HTML and autolinks left as they are."""
+
+        def one(m: re.Match[str]) -> str:
+            if m.group(1) is None:
+                return m.group()
+            return repl if isinstance(repl, str) else repl(m)
+
+        return self.pattern.sub(one, text)
 
 
 # An inline code span is a quotation for the same reason a fenced block is.
@@ -719,11 +793,7 @@ INTERRUPTS_PARAGRAPH = (
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
 # Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = re.compile(
-    r"(?<![\\`])(`+)(?!`)"
-    rf"(?:[^\n]|\n(?!\s*\n|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH})))*?"
-    r"(?<!`)\1(?!`)"
-)
+CODE_SPAN = CodeSpans()
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.
@@ -825,7 +895,7 @@ VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", 
 # Vetting the tags along with the text blocks on markup changing under a section that has not.
 # That is the same cheap drift the verdict headings already drop their colored circle for.
 EMPHASIS = re.compile(r"</?(?:strong|b|em|i)>", re.IGNORECASE)
-MARKDOWN_HEADING = re.compile(r"\s*#{1,6}\s")
+MARKDOWN_HEADING = re.compile(rf"\s*{ATX_HEADING}")
 # The `Review details` metadata bullets, of which the coverage line is one.
 # The bullet stays required, so the second format's bare bold metadata lines are not read here.
 # Dropping it reads that format's own `**Changes:**` prose label as metadata and blocks on it.
@@ -946,7 +1016,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 DETAILS_OPENER = re.compile(rf"{tag_opener('details')}{ATTRIBUTES}[ \t]*", re.IGNORECASE)
 SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
 HEADING = re.compile(
-    rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
+    rf"\s*(?:{ATX_HEADING}|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
 )
 
 # How many of the newest reviews and comments both queries read.
@@ -1054,9 +1124,11 @@ HELD_FIELDS = """
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
-          checkSuite{ databaseId app{ slug databaseId } workflowRun{ workflow{ databaseId } } } }
+          checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
-      }}}}}}
+      }}}
+      checkSuites(last:50){ nodes{ databaseId status workflowRun{ databaseId workflow{ databaseId } } } }
+    }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
 query($o:String!,$r:String!,$n:Int!){
@@ -1961,7 +2033,7 @@ def coverage_statements(body: str) -> list[str]:
         indented = code_indented(ln)
         code = indented and not continues
         continues = not code and not re.match(
-            r"#{1,6}(?:\s|$)|([-*_])(?: *\1){2,} *$|(?:=+|-+) *$|<!--", stripped
+            rf"{ATX_HEADING}|{THEMATIC_BREAK}|(?:=+|-+){LINE_END}|<!--", stripped
         )
         # An indented line cannot open a blockquote, being code or a paragraph's continuation, so its `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
@@ -4112,18 +4184,39 @@ def check_nodes(pr: dict) -> list[dict]:
     A name only an older suite carries stays, since the merge gate still reads it.
     The highest suite id decides, since `startedAt` misorders overlapping runs.
     A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
+
+    A finished check whose name only an older suite carries is marked `superseded` while the
+    workflow's newest suite has not completed. That suite's run id rides along as `newer_run`.
+    An unfinished check keeps its own stuck reading. A cancelled run's aggregator fails over its
+    cancelled jobs. Its replacement posts its own aggregator only once its other jobs finish, so
+    until then the failure describes a run nobody waits on. Once the newest suite completes, a name
+    it never posted stands as the merge gate reads it.
+    The head commit's own suites count toward the newest one as well as the rollup's. A run
+    waiting on its concurrency slot has a suite and no check run yet, so the rollup lacks it.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
-    rollup = head_commit(pr).get("statusCheckRollup") or {}
+    commit = head_commit(pr)
+    rollup = commit.get("statusCheckRollup") or {}
     out: list[dict] = []
     newest_suite: dict[tuple, int] = {}
     suites: dict[int, tuple[tuple, int]] = {}
+    newest_run: dict[tuple, tuple[int, str, int | None]] = {}
+
+    def note_run(suite: dict) -> int | None:
+        run = suite.get("workflowRun") or {}
+        workflow = (run.get("workflow") or {}).get("databaseId")
+        key = ("workflow", workflow)
+        suite_id = suite.get("databaseId") or 0
+        if workflow and suite_id > newest_run.get(key, (0, "", None))[0]:
+            newest_run[key] = (suite_id, suite.get("status") or "", run.get("databaseId"))
+        return workflow
+
     for n in (rollup.get("contexts") or {}).get("nodes") or []:
         if n.get("__typename") == "CheckRun":
             suite = n.get("checkSuite") or {}
-            workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
+            workflow = note_run(suite)
             if workflow:
                 origin: tuple = ("workflow", workflow)
             elif (
@@ -4181,7 +4274,15 @@ def check_nodes(pr: dict) -> list[dict]:
                     "unreadable": n.get("__typename") or "an unnamed type",
                 }
             )
+    for suite in (commit.get("checkSuites") or {}).get("nodes") or []:
+        note_run(suite)
     stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
+    for i, (group, sid) in suites.items():
+        suite_id, status, run = newest_run.get(group[0], (0, "", None))
+        finished = out[i]["state"] == "COMPLETED"
+        if finished and sid < suite_id and status != "COMPLETED":
+            out[i]["superseded"] = True
+            out[i]["newer_run"] = run
     return [node for i, node in enumerate(out) if i not in stale]
 
 
@@ -4214,7 +4315,11 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
 
     FAILED is any finished check that did not pass, which is a definite answer rather than a stuck
     one, and it is reported here so that a reader is never left deducing a red check from `BLOCKED`.
+    A check `check_nodes` marks superseded is none of these, since it waits on a newer run.
+    Read as FAILED, it exited 44 while that run was still going.
     """
+    if node.get("superseded"):
+        return ""
     state, conclusion = node.get("state") or "", node.get("conclusion") or ""
     elapsed = age(node.get("since") or "", now)
     if state in NOT_POSTED:
@@ -5378,6 +5483,14 @@ def digest(
                 f"{node.get('conclusion')}): a verdict rather than a stuck check, so "
                 "read the run and fix what failed, since no wait and no re-run clears "
                 "a real failure"
+            )
+    for node in checks:
+        if node.get("superseded") and (node.get("conclusion") or "") not in CHECK_OK:
+            lines.append(
+                f"  CHECK SUPERSEDED ({node.get('name') or 'unnamed'!r}, {node.get('state')}/"
+                f"{node.get('conclusion')} in an older run): run {node.get('newer_run')} of the "
+                "same workflow on this head has not finished, so this is not a verdict on the "
+                "head, and that run's own check replaces it once it posts"
             )
     unread = checks_unread(checks)
     if unread:
@@ -7803,6 +7916,14 @@ def main(argv: list[str] | None = None) -> int:
         or (not halted and head_review_done(final, a.min_rounds))
     ):
         verdict = report_verdict(final, owner, repo)
+        if verdict == 50 and checks_settling(checks, now, a.check_grace, a.check_stall):
+            print(
+                "note: a check on this head has not concluded, and this wait returns 50 at once "
+                "on every call until the head moves, since nothing here reads an answer to the "
+                "headline. Once the headline is answered, watch the checks with a bounded "
+                f"`timeout 1800 gh pr checks {a.number} --repo {owner}/{repo} --watch`, then run "
+                "status"
+            )
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.
         # A partial round means the diff is part-reviewed, which outranks a wedged gate.

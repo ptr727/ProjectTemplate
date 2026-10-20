@@ -37,8 +37,15 @@ class FakeGh:
     audit_repo past the loop under test while still reading as a pass.
     """
 
-    def __init__(self, tree: set[str]) -> None:
+    def __init__(
+        self,
+        tree: set[str],
+        modes: dict[str, str] | None = None,
+        unread: frozenset[str] = frozenset(),
+    ) -> None:
         self.tree = tree
+        self.modes = modes or {}
+        self.unread = unread
         self.paths: list[str] = []
 
     def __call__(self, path: str, ok404: bool = False) -> Any:
@@ -53,15 +60,45 @@ class FakeGh:
         if base.endswith("/secrets"):
             return {"secrets": []}
         if base.startswith(f"repos/{SLUG}/git/trees/"):
-            blobs = [{"path": p, "type": "blob", "sha": "0"} for p in sorted(self.tree)]
+            blobs = [
+                {"path": p, "type": "blob", "sha": "0", "mode": self.modes.get(p, "100644")}
+                for p in sorted(self.tree)
+            ]
             return {"tree": blobs, "truncated": False}
         if base.startswith(f"repos/{SLUG}/contents/"):
             name = base.split("/contents/", 1)[1]
+            if name in self.unread:
+                if ok404:
+                    return None
+                raise RuntimeError(f"gh api {path}: HTTP 404")
             if name in self.tree:
                 return {"encoding": "base64", "content": base64.b64encode(b"x\n").decode()}
             if ok404:
                 return None
         raise AssertionError(f"unexpected gh read: {path}")
+
+
+def run_audit(
+    tree: set[str], modes: dict[str, str] | None = None, unread: frozenset[str] = frozenset()
+) -> tuple[list[tuple[str, str]], FakeGh]:
+    """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
+
+    The hub's tracked paths come from a fetch of its origin. Answering them as empty keeps the
+    run offline and leaves the checkout the suite runs in untouched.
+    """
+    spec = {
+        "registry": {"repos": [ENTRY], "defaults": {}},
+        "settings": audit.load("repo-config/settings.json"),
+        "secrets": audit.load("spec/secrets.json"),
+        "files": {"baseline": [CODECOV]},
+    }
+    fake = FakeGh(tree, modes, unread)
+    with (
+        mock.patch.object(audit, "gh", fake),
+        mock.patch.object(audit, "hub_tracked", lambda rev=None: frozenset()),
+    ):
+        findings, _ = audit.audit_repo(ENTRY, spec)
+    return findings, fake
 
 
 class AuditRepoAlternativesCase(unittest.TestCase):
@@ -72,28 +109,8 @@ class AuditRepoAlternativesCase(unittest.TestCase):
     would read as missing the declared path while that self-test still passed.
     """
 
-    def run_audit(self, tree: set[str]) -> tuple[list[tuple[str, str]], FakeGh]:
-        """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
-
-        The hub's tracked paths come from a fetch of its origin. Answering them as empty keeps the
-        run offline and leaves the checkout the suite runs in untouched.
-        """
-        spec = {
-            "registry": {"repos": [ENTRY], "defaults": {}},
-            "settings": audit.load("repo-config/settings.json"),
-            "secrets": audit.load("spec/secrets.json"),
-            "files": {"baseline": [CODECOV]},
-        }
-        fake = FakeGh(tree)
-        with (
-            mock.patch.object(audit, "gh", fake),
-            mock.patch.object(audit, "hub_tracked", lambda rev=None: frozenset()),
-        ):
-            findings, _ = audit.audit_repo(ENTRY, spec)
-        return findings, fake
-
     def test_a_repository_holding_only_the_alternative_carries_the_file(self) -> None:
-        findings, fake = self.run_audit(CARRIED | {".codecov.yml"})
+        findings, fake = run_audit(CARRIED | {".codecov.yml"})
 
         self.assertIn(f"repos/{SLUG}/contents/.codecov.yml?ref=main", fake.paths)
         absent = [text for _, text in findings if text.startswith("file: codecov.yml")]
@@ -101,7 +118,7 @@ class AuditRepoAlternativesCase(unittest.TestCase):
 
     def test_a_repository_holding_neither_is_reported_under_both_names(self) -> None:
         """The control, showing the loop under test ran and reports an absence it sees."""
-        findings, _ = self.run_audit(CARRIED)
+        findings, _ = run_audit(CARRIED)
 
         self.assertIn(
             (
@@ -113,6 +130,67 @@ class AuditRepoAlternativesCase(unittest.TestCase):
             ),
             findings,
         )
+
+
+class AuditRepoNamingCase(unittest.TestCase):
+    """audit_repo hands the tree it read, modes included, to the file-naming and secret-stem checks.
+
+    Each check's own cases are covered by the engine's --selftest, so what this adds is the call
+    site: the modes reaching the file-naming check, and its shebang read going to the audited branch.
+    """
+
+    def naming_findings(self, findings: list[tuple[str, str]]) -> list[str]:
+        return [
+            text for _, text in findings if text.startswith(("file-naming:", "runtime-secrets:"))
+        ]
+
+    def test_a_conforming_tree_reports_no_naming_finding(self) -> None:
+        tree = CARRIED | {
+            ".codecov.yml",
+            "scripts/sync-tools.sh",
+            ".secrets/db_root_password.example",
+        }
+        findings, fake = run_audit(tree, {"scripts/sync-tools.sh": "100755"})
+
+        self.assertEqual(self.naming_findings(findings), [])
+        self.assertFalse([p for p in fake.paths if "/contents/scripts/" in p])
+
+    def test_each_non_conforming_shape_is_reported(self) -> None:
+        tree = CARRIED | {
+            ".codecov.yml",
+            "scripts/Fetch-Report.py",
+            "bin/Run_Backup",
+            ".secrets/db-root-password.example",
+        }
+        findings, fake = run_audit(tree, {"bin/Run_Backup": "100755"})
+
+        self.assertIn(f"repos/{SLUG}/contents/bin/Run_Backup?ref=main", fake.paths)
+        self.assertEqual(
+            self.naming_findings(findings),
+            [
+                (
+                    'file-naming: 1 file(s) break CODESTYLE.md "Script and Utility File Names". '
+                    "Rename each, or where a tool or platform fixes the name, record a driftNote "
+                    "naming (filenaming.scripts) and the path as a code span: scripts/Fetch-Report.py"
+                ),
+                (
+                    "file-naming: 1 file(s) the per-extension patterns cannot decide, judge each by "
+                    'hand against CODESTYLE.md "Script and Utility File Names": bin/Run_Backup '
+                    "(an executable with no shebang)"
+                ),
+                (
+                    "runtime-secrets: 1 secret file(s) carry a stem that is not lowercase "
+                    "snake_case: .secrets/db-root-password.example"
+                ),
+            ],
+        )
+
+    def test_a_failed_shebang_read_raises_rather_than_reading_as_undecided(self) -> None:
+        """The tree listed the path as a blob, so a 404 reading it is a failed read, not an absent file."""
+        tree = CARRIED | {".codecov.yml", "bin/Run_Backup"}
+
+        with self.assertRaises(RuntimeError):
+            run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
 
 
 if __name__ == "__main__":
