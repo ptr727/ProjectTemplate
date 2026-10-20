@@ -2823,7 +2823,8 @@ def _gh_write_targets(cmd, environ=None):
     read as one. A `GH_REPO` value that reaches a gh word is one too (see `_gh_repo_assignments`), and
     so is a repository a write's positional argument names (see `_gh_positional_repo_words`). Another
     API path naming an owner is one on a `gh api` call (see `_API_OWNER_PATHS`). An owner a write
-    names with an owner flag stands for all its repositories (see `_gh_owner_targets`).
+    names with an owner flag stands for all its repositories (see `_gh_owner_targets`). A
+    repository a write's issue-linking flag names is one too (see `_gh_issue_ref_words`).
     """
     argvs = _all_gh_arg_lists(cmd)
     words = [(w, is_path, a[:1] == ["api"]) for w, is_path, a in _gh_repo_words(argvs)]
@@ -3239,7 +3240,8 @@ def _gh_run_time_target(cmd, environ=None):
     a repository a positional argument names (see `_gh_positional_repo_words`), the owner segment
     or first segment of a `gh api` write's endpoint (see `_gh_api_run_time_owner`), and a word
     before a literal write where gh's command goes (see `_gh_write_past_run_time`). An owner flag's
-    value is one too (see `_gh_owner_words`). A literal owner
+    value is one too (see `_gh_owner_words`), and so is an issue-linking flag's URL (see
+    `_gh_issue_ref_words`). A literal owner
     is all the check compares, so `--repo "example/$R"` is left alone. So is a read naming one, as
     in `gh pr view -R "$T"`, a `GH_REPO` the session's environment holds, and a heredoc body that
     is data, wrapper bodies in it included.
