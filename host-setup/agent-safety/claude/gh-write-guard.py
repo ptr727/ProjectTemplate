@@ -2830,6 +2830,7 @@ def _gh_write_targets(cmd, environ=None):
     words += [(w, False, False) for w, _, _ in _gh_repo_assignments(cmd, environ)]
     targets = [t for w, is_path, api in words for t in _named_targets(w, is_path, api)]
     positional = [w for a in argvs for w, _ in _gh_positional_repo_words(a)]
+    positional += [w for a in argvs if _gh_argv_is_write(a) for w in _gh_issue_ref_words(a)]
     targets += [t for w in positional for t in [_gh_repo_value_reading(w)] if t]
     return targets + _gh_owner_targets(argvs)
 
@@ -3073,8 +3074,8 @@ def _gh_positional_repo_words(args):
     edit stranger/example` does. `gh issue transfer` takes its destination second, and
     `gh issue develop --branch-repo` names the repository its branch goes to. A flag's value is
     passed by `_GH_POSITIONAL_VALUE_FLAGS`, the value-taking flags gh's help lists for each such
-    write, and any other flag is read as a boolean. An issue-linking flag on a `pr` or `issue`
-    write names the repository of the issue it links (see `_issue_ref_repo`).
+    write, and any other flag is read as a boolean. An issue-linking flag's value is skipped here,
+    since `_gh_issue_ref_words` reads it.
     """
     key = tuple(_gh_path(args))
     if len(key) < 2 or key[1] not in _GH_WRITE_SUBS.get(key[0], ()):
@@ -3097,9 +3098,6 @@ def _gh_positional_repo_words(args):
             continue
         if key == ("issue", "develop") and a.partition("=")[0] == "--branch-repo":
             named += [a.partition("=")[2]] if "=" in a else args[i : i + 1]
-        if key[0] in ("pr", "issue") and a.partition("=")[0] in _GH_ISSUE_REF_FLAGS:
-            value = a.partition("=")[2] if "=" in a else "".join(args[i : i + 1])
-            named += [r for v in value.split(",") for r in [_issue_ref_repo(v)] if r]
         if a in takes:
             i += 1
     if key in _GH_REPO_POSITIONAL_SUBS:
@@ -3132,6 +3130,33 @@ def _issue_ref_repo(value):
     return m.group("repo") if m else None
 
 
+def _gh_issue_ref_words(args):
+    """Each repository word an issue-linking flag in a gh argv names (see `_issue_ref_repo`).
+
+    The flags are read wherever they sit, so a run-time command or subcommand word does not hide
+    one, as in `gh issue "$S" 5 --parent <url>`. A text flag's value is skipped, and `--` ends
+    the search. A list such as `--add-blocked-by 3,<url>` is read one item at a time.
+    """
+    out = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            break
+        if a in _GH_CREATE_TEXT_VALUE_FLAGS:
+            i += 1
+            continue
+        name, eq, value = a.partition("=")
+        if name not in _GH_ISSUE_REF_FLAGS:
+            continue
+        if not eq:
+            value = args[i] if i < len(args) else ""
+            i += 1
+        out += [r for v in value.split(",") for r in [_issue_ref_repo(v)] if r]
+    return out
+
+
 _GH_OWNER_FLAGS = frozenset({"--org", "--owner", "--target-owner"})
 _GH_ORG_SHORT_CMDS = frozenset({"secret", "variable", "ruleset"})
 
@@ -3140,14 +3165,15 @@ def _gh_owner_words(args):
     """Each owner word a gh argv names with an owner flag, its value as the next word or attached.
 
     That is `--org`, `--owner`, or `--target-owner`, as in `gh secret set T --org stranger` or `gh
-    project item-add 1 --owner stranger`, and `-o` on a secret, variable, or ruleset command. That
-    `-o` is read in a short-option cluster too, as in `-uo stranger` (see `_cluster_repo_value`).
+    project item-add 1 --owner stranger`. It is also `-o` on a secret, variable, or ruleset command,
+    or on one whose command is a run-time word. That `-o` is read in a short-option cluster too, as
+    in `-uo stranger` (see `_cluster_repo_value`).
     The value of a text flag such as `--body` is skipped, and `--` ends the search.
     """
     if not args or args[0] == "api":
         return []
     path = _gh_path(args)
-    short = bool(path) and path[0] in _GH_ORG_SHORT_CMDS
+    short = bool(path) and (path[0] in _GH_ORG_SHORT_CMDS or _is_run_time_word(path[0]))
     letters = _gh_short_value_letters(args, _GH_CREATE_TEXT_VALUE_FLAGS) if short else ""
     out = []
     i = 0
@@ -3238,6 +3264,9 @@ def _gh_run_time_target(cmd, environ=None):
         for word in _gh_owner_words(args):
             if _is_run_time_word(word):
                 return word
+        for word in _gh_issue_ref_words(args):
+            if any(_is_run_time_word(o) for o in _repo_value_owners(word, exact=True)):
+                return word
     for value, args, from_env in _gh_repo_assignments(cmd, environ):
         owners = [] if from_env else _repo_value_owners(value)
         if any(_is_run_time_word(o) for o in owners) and _gh_argv_is_write(args):
@@ -3291,6 +3320,8 @@ def _gh_repo_unread_export(text):
             continue
         end = next((j for j in range(x + 1, len(toks)) if _is_shell_op(toks[j])), len(toks))
         words = toks[x + 1 : end]
+        if t == "builtin" and words[:1] == ["set"]:
+            t, words = "set", words[1:]
         if t != "set":
             if any(w.partition("=")[0] in ("GH_REPO", "-vGH_REPO") for w in words):
                 return t
@@ -3311,7 +3342,7 @@ def _names_gh_write(text):
 def _eval_payload_texts(texts):
     """The text each `eval` in `texts` runs, wrappers in it included, and any the read's budget left unread."""
     overflow = []
-    return _with_eval_payloads(texts, overflow)[len(texts) :] + overflow
+    return _with_eval_payloads(texts, overflow, executed=True)[len(texts) :] + overflow
 
 
 def _gh_unread_target(cmd, payloads):
@@ -5483,12 +5514,13 @@ def _gh_merge_attached_value(word):
     return len(word) > 2 and word[:2] in _GH_MERGE_TEXT_FLAGS
 
 
-def _with_eval_payloads(texts, overflow):
+def _with_eval_payloads(texts, overflow, executed=False):
     """`texts` plus the text each `eval` in them runs, read as a command, wrappers in it included.
 
     The read has a budget of its own, sized by `_EVAL_READ_BUDGET` and `_EVAL_READ_COST` as the
     push check's is. Once it is spent, the text from the next `eval` on goes to `overflow` unread.
-    A caller searches that text whole, and so fails closed on it.
+    A caller searches that text whole, and so fails closed on it. With `executed`, only an `eval`
+    that runs is read (see `_runs_eval`), so `echo eval ...` adds nothing.
     """
     out = list(texts)
     budget = _EVAL_READ_BUDGET
@@ -5499,7 +5531,7 @@ def _with_eval_payloads(texts, overflow):
         quoted = _quoted_mask(text, toks)
         eval_end = 0
         for k, t in enumerate(toks):
-            if t != "eval" or k < eval_end:
+            if t != "eval" or k < eval_end or (executed and not _runs_eval(toks, k, quoted)):
                 continue
             if budget <= 0:
                 overflow.append(" ".join(toks[k:]))
@@ -8352,6 +8384,25 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "deny",
         "an element assignment to an exported GH_REPO",
+    ),
+    (
+        'gh issue "$S" 5 --parent https://github.com/stranger/example/issues/2',
+        {},
+        "deny",
+        "an issue link behind a run-time subcommand",
+    ),
+    ('gh "$C" set TOKEN -o stranger --body x', {}, "deny", "an -o behind a run-time command"),
+    (
+        "builtin set -a; GH_REPO=stranger/example; gh pr comment 5 -b x",
+        {},
+        "deny",
+        "a set -a run through builtin",
+    ),
+    (
+        "echo eval 'gh pr comment 5 -b x'",
+        {},
+        "allow",
+        "an eval word that is an argument runs nothing",
     ),
 ]
 
