@@ -8192,7 +8192,10 @@ class TestCli(GqlCase):
                 run=200,
             ),
         ]
-        self.answer(payload([review()], merge="BLOCKED", checks=rollup))
+        pr = payload([review()], merge="BLOCKED", checks=rollup)
+        gate = next(n for n in pr_review.check_nodes(pr) if n["name"] == "gate")
+        self.assertTrue(gate.get("superseded"))
+        self.answer(pr)
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(0, self.cli(["wait", "7"]))
         self.assertNotIn("CHECK SUPERSEDED", self.out.getvalue())
