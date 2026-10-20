@@ -337,8 +337,8 @@ Subcommands
            a context the base branch's rules require and the head has not yet registered. Neither is a
            stuck check its rollup node reads as not required, since the rollup carries checks no
            ruleset requires, nor any stuck check on a merge that is not BLOCKED. Nor is a failed
-           check from an older run of a workflow still running on the head, which the digest names
-           as superseded. The digest reports the check in every case, so a shape outside 44 is
+           check from an older run of a workflow whose newer run on the head has not finished,
+           which the digest names as superseded. The digest reports the check in every case, so a shape outside 44 is
            still named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
@@ -1058,7 +1058,9 @@ HELD_FIELDS = """
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
-      }}}}}}
+      }}}
+      checkSuites(last:50){ nodes{ databaseId status workflowRun{ databaseId workflow{ databaseId } } } }
+    }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
 query($o:String!,$r:String!,$n:Int!){
@@ -4120,15 +4122,26 @@ def check_nodes(pr: dict) -> list[dict]:
     aggregator fails over its cancelled jobs. Its replacement posts its own aggregator only once
     its other jobs finish, so until then the failure describes a run nobody waits on.
     Once the newest suite completes, a name it never posted stands as the merge gate reads it.
+    The head commit's own suites count toward the newest one as well as the rollup's. A run
+    waiting on its concurrency slot has a suite and no check run yet, so the rollup lacks it.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
-    rollup = head_commit(pr).get("statusCheckRollup") or {}
+    commit = head_commit(pr)
+    rollup = commit.get("statusCheckRollup") or {}
     out: list[dict] = []
     newest_suite: dict[tuple, int] = {}
     suites: dict[int, tuple[tuple, int]] = {}
     newest_run: dict[tuple, tuple[int, str, int | None]] = {}
+
+    def note_run(suite: dict) -> None:
+        run = suite.get("workflowRun") or {}
+        key = ("workflow", (run.get("workflow") or {}).get("databaseId"))
+        suite_id = suite.get("databaseId") or 0
+        if key[1] and suite_id > newest_run.get(key, (0, "", None))[0]:
+            newest_run[key] = (suite_id, suite.get("status") or "", run.get("databaseId"))
+
     for n in (rollup.get("contexts") or {}).get("nodes") or []:
         if n.get("__typename") == "CheckRun":
             suite = n.get("checkSuite") or {}
@@ -4143,9 +4156,7 @@ def check_nodes(pr: dict) -> list[dict]:
             else:
                 origin = ("app", (suite.get("app") or {}).get("slug"))
             suite_id = suite.get("databaseId") or 0
-            if origin[0] == "workflow" and suite_id > newest_run.get(origin, (0, "", None))[0]:
-                run = (suite.get("workflowRun") or {}).get("databaseId")
-                newest_run[origin] = (suite_id, suite.get("status") or "", run)
+            note_run(suite)
             name = n.get("name") or ""
             group = (origin, name)
             newest_suite[group] = max(newest_suite.get(group, 0), suite_id)
@@ -4193,6 +4204,8 @@ def check_nodes(pr: dict) -> list[dict]:
                     "unreadable": n.get("__typename") or "an unnamed type",
                 }
             )
+    for suite in (commit.get("checkSuites") or {}).get("nodes") or []:
+        note_run(suite)
     stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
     for i, (group, sid) in suites.items():
         suite_id, status, run = newest_run.get(group[0], (0, "", None))

@@ -7734,6 +7734,29 @@ class TestCheckShapes(unittest.TestCase):
         nodes = pr_review.check_nodes(done)
         self.assertFalse(pr_review.held_checks_open(done, nodes, NOW, 300, 1800))
 
+    def test_a_newer_suite_with_no_check_run_yet_still_supersedes_a_failure(self) -> None:
+        """A run waiting on its concurrency slot has a suite and no check run in the rollup."""
+        pr = payload([review()], merge="BLOCKED", checks=self.superseded_rollup("QUEUED")[:2])
+        waiting = {
+            "databaseId": 20,
+            "status": "QUEUED",
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [waiting]}
+        nodes = pr_review.check_nodes(pr)
+        gate = next(n for n in nodes if n["conclusion"] == "FAILURE")
+        self.assertTrue(gate.get("superseded"))
+        self.assertEqual(200, gate.get("newer_run"))
+        self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
+
+    def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
+        query = " ".join(pr_review.Q_FULL.split())
+        self.assertIn(
+            "checkSuites(last:50){ nodes{ databaseId status "
+            "workflowRun{ databaseId workflow{ databaseId } } } }",
+            query,
+        )
+
     def test_a_newer_run_of_another_workflow_does_not_supersede_a_failure(self) -> None:
         rollup = self.superseded_rollup("IN_PROGRESS")
         rollup[2] = check(
