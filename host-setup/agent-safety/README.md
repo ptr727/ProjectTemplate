@@ -78,7 +78,7 @@ text says, because the harm it covers was never in the text.
    `repositories/<id>` endpoint, or one through a `..` segment, which GitHub resolves. It is also
    a write taking its repository from a `GH_REPO` that a builtin other than `export` may set.
    Such builtins include `declare`, `read`, `printf -v`, `builtin export`, an `eval`, and
-   `set -a`. An
+   `set -a`. An append such as `GH_REPO+=...` counts the same way. An
    `export GH_REPO` in a subshell, a loop, or behind `&&` may not run where it sits. Where one
    may not, every value the command sets is read as reaching its gh write. A run-time segment past a
    literal owner in a `gh api` endpoint is compared by that owner, though it may hold a `..`

@@ -2870,8 +2870,8 @@ def _gh_repo_words(argvs):
             i += 1
 
 
-def _cluster_repo_value(tok, letters):
-    """pflag's reading of a short-option cluster for its `R`, as (value, ends).
+def _cluster_repo_value(tok, letters, flag="R"):
+    """pflag's reading of a short-option cluster for its `R`, or its `flag`, as (value, ends).
 
     Each letter is a boolean in turn until one takes a value, which is the rest of the word, past
     one `=`. An `R` there names the repository, and `ends` says it ends the word, so the value is
@@ -2881,11 +2881,11 @@ def _cluster_repo_value(tok, letters):
     """
     for x in range(1, len(tok)):
         c = tok[x]
-        if c != "R" and c not in letters:
+        if c != flag and c not in letters:
             continue
         rest = tok[x + 1 :]
         rest = rest[1:] if len(rest) > 1 and rest[0] == "=" else rest
-        if c != "R":
+        if c != flag:
             return None, False
         return (rest or None), not rest
     return None, False
@@ -3140,13 +3140,15 @@ def _gh_owner_words(args):
     """Each owner word a gh argv names with an owner flag, its value as the next word or attached.
 
     That is `--org`, `--owner`, or `--target-owner`, as in `gh secret set T --org stranger` or `gh
-    project item-add 1 --owner stranger`, and `-o` on a secret, variable, or ruleset command. The
-    value of a text flag such as `--body` is skipped, and `--` ends the search.
+    project item-add 1 --owner stranger`, and `-o` on a secret, variable, or ruleset command. That
+    `-o` is read in a short-option cluster too, as in `-uo stranger` (see `_cluster_repo_value`).
+    The value of a text flag such as `--body` is skipped, and `--` ends the search.
     """
     if not args or args[0] == "api":
         return []
     path = _gh_path(args)
     short = bool(path) and path[0] in _GH_ORG_SHORT_CMDS
+    letters = _gh_short_value_letters(args, _GH_CREATE_TEXT_VALUE_FLAGS) if short else ""
     out = []
     i = 0
     while i < len(args):
@@ -3164,8 +3166,12 @@ def _gh_owner_words(args):
             elif i < len(args):
                 out.append(args[i])
                 i += 1
-        elif short and a.startswith("-o") and len(a) > 2:
-            out.append(a[2:])
+        elif short and a[:1] == "-" and a[1:2] not in ("", "-"):
+            value, ends = _cluster_repo_value(a, letters, "o")
+            if ends and i < len(args):
+                value = args[i]
+                i += 1
+            out += [value] if value else []
     return out
 
 
@@ -3256,6 +3262,7 @@ def _gh_api_unread_path(args):
     return None
 
 
+_GH_REPO_UNREAD_ASSIGN = re.compile(r"^GH_REPO(?:\[[^\]]*\])?\+=|^GH_REPO\[[^\]]*\]=")
 _GH_REPO_SETTERS = frozenset(
     {"declare", "typeset", "local", "readonly", "read", "printf", "mapfile", "readarray"}
     | {"builtin"}
@@ -3267,13 +3274,17 @@ def _gh_repo_unread_export(text):
 
     That is a `_GH_REPO_SETTERS` word naming GH_REPO, as in `declare -x GH_REPO=...`, `read
     GH_REPO`, or `builtin export GH_REPO=...`. Such a builtin may set an exported value without the
-    `export` or plain assignment the reading follows. A `command export` is read as an export
-    already, since `command` keeps its command word in command position. It is also a `set -a` or
-    `set -o allexport` beside a `GH_REPO=` word, which then exports a plain assignment. Each word
-    is read once.
+    `export` or plain assignment the reading follows. A `set -a` or `set -o allexport` beside a
+    `GH_REPO=` word counts too, since it then exports a plain assignment. So does an append or an
+    element assignment the reading does not follow, as in `GH_REPO+=...` or `GH_REPO[0]=...`. A
+    `command export` is read as an export already, since `command` keeps its command word in
+    command position. Each word is read once.
     """
     toks = _shell_tokens(text)
     assigns = any(t.startswith("GH_REPO=") for t in toks)
+    shaped = next((t for t in toks if _GH_REPO_UNREAD_ASSIGN.match(t)), None)
+    if shaped:
+        return shaped.partition("=")[0] + "="
     end = 0
     for x, t in enumerate(toks):
         if x < end or (t not in _GH_REPO_SETTERS and t != "set") or not _opens_command(toks, x):
@@ -8322,6 +8333,25 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "an export run through command is read as an export",
+    ),
+    (
+        "gh secret set TOKEN -uo stranger --body x",
+        {},
+        "deny",
+        "an org -o after a boolean in a cluster",
+    ),
+    ("gh secret set TOKEN -vo stranger --body x", {}, "allow", "an o that is the -v value"),
+    (
+        "set -a; GH_REPO+=stranger/example; gh pr comment 5 -b x",
+        {},
+        "deny",
+        "an append to an exported GH_REPO",
+    ),
+    (
+        "export GH_REPO=example/repo; GH_REPO[0]=stranger/example; gh pr comment 5 -b x",
+        {},
+        "deny",
+        "an element assignment to an exported GH_REPO",
     ),
 ]
 
