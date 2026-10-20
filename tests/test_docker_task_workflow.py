@@ -134,9 +134,10 @@ def with_values(item: list[str]) -> dict[str, str]:
         if re.fullmatch(r"        with:\s*(#.*)?", line):
             in_with = True
         elif in_with:
-            pair = re.match(r"          ([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
+            pair = re.match(r"          [\"']?([A-Za-z0-9_-]+)[\"']?:\s*(.*?)\s*$", line)
             if pair:
-                values[pair.group(1)] = pair.group(2)
+                value = re.sub(r"\s+#.*$", "", pair.group(2)).strip("\"'")
+                values[pair.group(1)] = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", r"${{ \1 }}", value)
             elif line.strip() and not line.startswith("          "):
                 break
     return values
@@ -174,22 +175,45 @@ def is_login(step: Step) -> bool:
             step.with_values.get(key) == f"${{{{ secrets.{name} }}}}"
             for key, name in secrets.items()
         )
-        and step.with_values.get("registry", "docker.io") in ("docker.io", "")
+        and step.with_values.get("registry", "docker.io") in ("docker.io", "index.docker.io", "")
         and ungated(step)
     )
 
 
-PUSHING_RUN = re.compile(
-    r"(?m)^[ \t]*(?![ \t])(?!(?:run:\s*)?echo\b)(?:run:\s*)?[^#\n]*\bdocker\s+(?:(?:image|buildx)\s+)?push\b"
-    r"|^[ \t]*(?![ \t])(?!(?:run:\s*)?echo\b)(?:run:\s*)?[^#\n]*\bdocker\s+(?:buildx\s+)?build\b[^\n]*--push\b"
+PUSH_COMMAND = re.compile(
+    r"\bdocker\s+(?:(?:image|manifest|buildx)\s+)?push\b"
+    r"|\bdocker\s+(?:buildx\s+)?(?:build|bake)\b.*(?:--push\b|type=registry\b)"
 )
+
+
+def run_script(step: Step) -> str:
+    """The step's `run` value with line continuations joined, or empty for a step without one."""
+    lines = step.text.splitlines()
+    for i, line in enumerate(lines):
+        match = re.fullmatch(r"        run:\s*(.*)", line)
+        if match:
+            body = [match.group(1)]
+            body.extend(
+                rest for rest in lines[i + 1 :] if rest.startswith("          ") or not rest.strip()
+            )
+            return re.sub(r"\\\n\s*", " ", "\n".join(body))
+    return ""
+
+
+def runs_push(step: Step) -> bool:
+    """A run command pushes, where a command that only echoes the words does not."""
+    for command in re.split(r"&&|\|\||[;|\n]", run_script(step)):
+        words = command.strip().lstrip("|>-+ ").split(maxsplit=1)
+        if words and words[0] not in ("echo", "printf") and PUSH_COMMAND.search(command):
+            return True
+    return False
 
 
 def can_push(step: Step) -> bool:
     """A step that can push: a `with` push input, a run command that pushes, or a caller build hook."""
     is_build_hook = step.uses.startswith("./.github/actions/") and "build" in step.uses
-    runs_push = not step.uses and bool(PUSHING_RUN.search(step.text))
-    return "push" in step.with_keys or is_build_hook or runs_push
+    pushes_from_run = not step.uses and runs_push(step)
+    return "push" in step.with_keys or is_build_hook or pushes_from_run
 
 
 def violations(workflow: str) -> list[str]:
@@ -458,7 +482,13 @@ class DockerTaskWorkflowCase(unittest.TestCase):
         self.assertIn("build-docker: no login before the first push step", violations(mutated))
 
     def test_run_step_push_before_login_is_caught(self) -> None:
-        for command in ("docker push example/image:tag", "docker buildx build --push ."):
+        for command in (
+            "docker push example/image:tag",
+            "docker buildx build --push .",
+            "echo start && docker push example/image:tag",
+            "docker manifest push example/image:tag",
+            "docker buildx bake --push",
+        ):
             with self.subTest(command=command):
                 early = f"      - name: Early push step\n        run: {command}\n\n"
                 mutated = insert_before_login(self.workflow, "build-docker", early)
@@ -470,6 +500,29 @@ class DockerTaskWorkflowCase(unittest.TestCase):
     def test_run_step_that_only_mentions_push_is_not_a_push(self) -> None:
         quiet = '      - name: Quiet step\n        run: echo "docker push later"\n\n'
         mutated = insert_before_login(self.workflow, "build-docker", quiet)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_continued_run_push_before_login_is_caught(self) -> None:
+        early = (
+            "      - name: Early push step\n        run: |\n"
+            "          docker buildx build \\\n            --push .\n\n"
+        )
+        mutated = insert_before_login(self.workflow, "build-docker", early)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn("build-docker: no login before the first push step", violations(mutated))
+
+    def test_step_name_mentioning_push_is_not_a_push(self) -> None:
+        quiet = "      - name: Verify docker push prerequisites step\n        run: true\n\n"
+        mutated = insert_before_login(self.workflow, "build-docker", quiet)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_login_value_comment_and_default_registry_are_clean(self) -> None:
+        password = "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
+        mutated = self.workflow.replace(
+            password, password + " # token\n          registry: 'index.docker.io'"
+        )
         self.assertNotEqual(self.workflow, mutated)
         self.assertEqual([], violations(mutated))
 
