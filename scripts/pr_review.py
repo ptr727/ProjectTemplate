@@ -654,12 +654,26 @@ MARKER_REACH = 300
 FILE_ROW = re.compile(
     r"^(?![^\n]*<!--)[ \t]*\|[ \t]*`[^|`\n]*[./][^|`\n]*`[ \t]*\|[^\n]*$", re.MULTILINE
 )
+LINE_END = r"[ \t]*\r?(?=\n|\Z)"
+ATX_HEADING = rf"#{{1,6}}(?:[ \t]|{LINE_END})"
+THEMATIC_BREAK = rf"(?:(?:\*[ \t]*){{3,}}|(?:-[ \t]*){{3,}}|(?:_[ \t]*){{3,}}){LINE_END}"
+
+
+def fence_opener(ticks: str = "`{3,}", tildes: str = "~{3,}") -> str:
+    """The pattern for a fence's opening line after its indent.
+
+    A backtick fence's info string carries no backtick, and a tilde fence's carries anything.
+    `FENCE` passes each run as a capturing group, so its closer can repeat the opener's mark.
+    """
+    return rf"{ticks}[^`\n]*(?=\n|\Z)|{tildes}[^\n]*"
+
+
 # A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
 # This change puts both spellings into the source and the runbook, so a review of it quotes them.
 # A quoted count read as this round's own is a coverage figure nobody stated.
 FENCE = re.compile(
-    r"^ {0,3}(?:(`{3,})[^`\n]*|(~{3,})[^\n]*)(?:\n.*?)??"
-    r"(?:(?P<close>\n {0,3}(?:\1`*|\2~*)[ \t]*\r?(?=\n|\Z))|\Z)",
+    rf"^ {{0,3}}(?:{fence_opener('(`{3,})', '(~{3,})')})(?:\n.*?)??"
+    rf"(?:(?P<close>\n {{0,3}}(?:\1`*|\2~*){LINE_END})|\Z)",
     re.DOTALL | re.MULTILINE,
 )
 
@@ -706,13 +720,11 @@ HTML_BLOCK_START = (
     rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True, space=BLOCK_SPACE)})"
     r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
 )
-LINE_END = r"[ \t]*\r?(?=\n|\Z)"
 # What a line opens, after at most three spaces, to end the paragraph above it as GitHub renders it.
 # A bare blockquote marker is left to each reader, since one line cannot tell a quotation's next line from one opening under a paragraph.
 INTERRUPTS_PARAGRAPH = (
-    rf"{HTML_BLOCK_START}|[-+*][ \t]+\S|0{{0,8}}1[.)][ \t]+\S|#{{1,6}}(?:[ \t]|{LINE_END})"
-    rf"|(?:(?:\*[ \t]*){{3,}}|(?:-[ \t]*){{3,}}|(?:_[ \t]*){{3,}}){LINE_END}"
-    r"|`{3,}[^`\n]*(?=\n|\Z)|~{3,}"
+    rf"{HTML_BLOCK_START}|[-+*][ \t]+\S|0{{0,8}}1[.)][ \t]+\S|{ATX_HEADING}|{THEMATIC_BREAK}"
+    rf"|{fence_opener()}"
 )
 
 
@@ -827,7 +839,7 @@ VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", 
 # Vetting the tags along with the text blocks on markup changing under a section that has not.
 # That is the same cheap drift the verdict headings already drop their colored circle for.
 EMPHASIS = re.compile(r"</?(?:strong|b|em|i)>", re.IGNORECASE)
-MARKDOWN_HEADING = re.compile(r"\s*#{1,6}\s")
+MARKDOWN_HEADING = re.compile(rf"\s*{ATX_HEADING}")
 # The `Review details` metadata bullets, of which the coverage line is one.
 # The bullet stays required, so the second format's bare bold metadata lines are not read here.
 # Dropping it reads that format's own `**Changes:**` prose label as metadata and blocks on it.
@@ -1965,7 +1977,7 @@ def coverage_statements(body: str) -> list[str]:
         indented = code_indented(ln)
         code = indented and not continues
         continues = not code and not re.match(
-            r"#{1,6}(?:\s|$)|([-*_])(?: *\1){2,} *$|(?:=+|-+) *$|<!--", stripped
+            rf"{ATX_HEADING}|{THEMATIC_BREAK}|(?:=+|-+){LINE_END}|<!--", stripped
         )
         # An indented line cannot open a blockquote, being code or a paragraph's continuation, so its `>` is text rather than a quotation's own marker.
         # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
