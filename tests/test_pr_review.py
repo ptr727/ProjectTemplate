@@ -400,25 +400,37 @@ def check(
     workflow: int | None = None,
     slug: str = "github-actions",
     app_id: int = 15368,
+    suite_status: str | None = None,
+    run: int | None = None,
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
+
+    The suite's `status` and the run's `databaseId` are carried only where a case names them.
 
     The starved case this exists for was read off run 31118675530 in this repository: an aggregator
     job dispatched the instant its dependency finished, left `QUEUED` with an empty runner name and
     a `startedAt` stamped equal to its creation, which sat fifteen minutes and never ran. Its
     healthy sibling on the next run wore `IN_PROGRESS` with a runner inside two minutes.
     """
+    workflow_run: dict | None = None
+    if workflow is not None:
+        workflow_run = {"workflow": {"databaseId": workflow}}
+        if run is not None:
+            workflow_run["databaseId"] = run
+    check_suite: dict = {
+        "databaseId": suite,
+        "app": {"slug": slug, "databaseId": app_id},
+        "workflowRun": workflow_run,
+    }
+    if suite_status is not None:
+        check_suite["status"] = suite_status
     return {
         "__typename": "CheckRun",
         "name": name,
         "status": status,
         "conclusion": conclusion,
         "startedAt": ago(60) if started is None else started,
-        "checkSuite": {
-            "databaseId": suite,
-            "app": {"slug": slug, "databaseId": app_id},
-            "workflowRun": None if workflow is None else {"workflow": {"databaseId": workflow}},
-        },
+        "checkSuite": check_suite,
     }
 
 
@@ -7651,11 +7663,81 @@ class TestCheckShapes(unittest.TestCase):
             kept = sorted((n["name"], n["conclusion"]) for n in nodes)
             self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
 
+    def superseded_rollup(self, newer: str) -> list[dict]:
+        """A cancelled run's failed aggregator, beside the jobs of a newer run on the same head."""
+        gate = "Check pull request workflow status job"
+        return [
+            check(
+                name="lint",
+                conclusion="CANCELLED",
+                suite=10,
+                workflow=7,
+                suite_status="COMPLETED",
+                run=100,
+            ),
+            check(
+                name=gate,
+                conclusion="FAILURE",
+                suite=10,
+                workflow=7,
+                suite_status="COMPLETED",
+                run=100,
+            ),
+            check(
+                name="lint",
+                status="IN_PROGRESS",
+                conclusion="",
+                suite=20,
+                workflow=7,
+                suite_status=newer,
+                run=200,
+            ),
+        ]
+
+    def test_an_older_runs_failure_is_superseded_while_the_newer_run_is_in_progress(self) -> None:
+        """The newer run posts its aggregator only once its jobs finish, so the old one waits."""
+        nodes = pr_review.check_nodes(
+            payload([review()], checks=self.superseded_rollup("IN_PROGRESS"))
+        )
+        gate = next(n for n in nodes if n["conclusion"] == "FAILURE")
+        self.assertTrue(gate.get("superseded"))
+        self.assertEqual(200, gate.get("newer_run"))
+        self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
+
+    def test_an_older_runs_failure_stands_once_the_newer_run_completes(self) -> None:
+        """A name the finished newer run never posted is what the merge gate still reads."""
+        rollup = self.superseded_rollup("COMPLETED")
+        rollup[2] = check(name="lint", suite=20, workflow=7, suite_status="COMPLETED", run=200)
+        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+        self.assertEqual(["FAILED"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)])
+
+    def test_an_unread_suite_status_does_not_supersede_a_failure(self) -> None:
+        """A missing status is not read as a run in progress, so the failure stays a verdict."""
+        rollup = self.superseded_rollup("IN_PROGRESS")
+        rollup[2]["checkSuite"].pop("status")
+        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+
+    def test_a_newer_run_of_another_workflow_does_not_supersede_a_failure(self) -> None:
+        rollup = self.superseded_rollup("IN_PROGRESS")
+        rollup[2] = check(
+            name="lint",
+            status="IN_PROGRESS",
+            conclusion="",
+            suite=20,
+            workflow=8,
+            suite_status="IN_PROGRESS",
+        )
+        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+
     def test_the_rollup_query_asks_for_the_suite_and_workflow_identity(self) -> None:
         """Q_FULL selects the suite and workflow fields the dedup keys on."""
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuite{ databaseId app{ slug databaseId } workflowRun{ workflow{ databaseId } } }",
+            "checkSuite{ databaseId status app{ slug databaseId } "
+            "workflowRun{ databaseId workflow{ databaseId } } }",
             query,
         )
 
@@ -8002,6 +8084,42 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("status=CHECKS_NOT_MERGEABLE", out)
         self.assertIn("CHECK NOT PICKED UP", out)
+
+    def test_wait_does_not_take_forty_four_on_a_superseded_runs_failed_aggregator(self) -> None:
+        """A closed and reopened pull request cancels its first run, whose aggregator then fails.
+
+        The reopen's run on the same head is still going and has not posted its own aggregator,
+        so the failure is not a verdict on the head, and the digest names the newer run instead.
+        """
+        gate = "Check pull request workflow status job"
+        rollup = [
+            check(
+                name=gate,
+                conclusion="FAILURE",
+                suite=10,
+                workflow=7,
+                suite_status="COMPLETED",
+                run=100,
+            ),
+            check(
+                name="lint",
+                status="IN_PROGRESS",
+                conclusion="",
+                started=real_ago(60),
+                suite=20,
+                workflow=7,
+                suite_status="IN_PROGRESS",
+                run=200,
+            ),
+        ]
+        self.answer(payload([review()], merge="BLOCKED", checks=rollup))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        out = self.out.getvalue()
+        self.assertNotIn("status=CHECKS_NOT_MERGEABLE", out)
+        self.assertIn(
+            f"CHECK SUPERSEDED ({gate!r}, COMPLETED/FAILURE in an older run): run 200", out
+        )
 
     def test_a_stuck_check_on_a_clean_merge_does_not_take_forty_four(self) -> None:
         """`CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
