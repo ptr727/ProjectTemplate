@@ -5402,13 +5402,11 @@ def digest(
             )
     for node in checks:
         if node.get("superseded") and (node.get("conclusion") or "") not in CHECK_OK:
-            run = node.get("newer_run")
             lines.append(
                 f"  CHECK SUPERSEDED ({node.get('name') or 'unnamed'!r}, {node.get('state')}/"
-                f"{node.get('conclusion')} in an older run): "
-                + (f"run {run}" if run else "a newer run")
-                + " of the same workflow on this head is still in progress, so this is not "
-                "a verdict on the head, and that run's own check replaces it once it posts"
+                f"{node.get('conclusion')} in an older run): run {node.get('newer_run')} of the "
+                "same workflow on this head is still in progress, so this is not a verdict on "
+                "the head, and that run's own check replaces it once it posts"
             )
     unread = checks_unread(checks)
     if unread:

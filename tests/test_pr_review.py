@@ -8136,6 +8136,26 @@ class TestCli(GqlCase):
             f"CHECK SUPERSEDED ({gate!r}, COMPLETED/FAILURE in an older run): run 200", out
         )
 
+    def test_a_superseded_check_that_passed_prints_no_superseded_line(self) -> None:
+        """An older run's green check is no failure to explain away, so nothing names it."""
+        rollup = [
+            check(name="gate", suite=10, workflow=7, run=100),
+            check(
+                name="lint",
+                status="IN_PROGRESS",
+                conclusion="",
+                started=real_ago(60),
+                suite=20,
+                workflow=7,
+                suite_status="IN_PROGRESS",
+                run=200,
+            ),
+        ]
+        self.answer(payload([review()], merge="BLOCKED", checks=rollup))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertNotIn("CHECK SUPERSEDED", self.out.getvalue())
+
     def test_a_stuck_check_on_a_clean_merge_does_not_take_forty_four(self) -> None:
         """`CLEAN` proves no required gate is outstanding, whatever else the rollup is doing.
 
