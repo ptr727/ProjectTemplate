@@ -22,6 +22,14 @@ curl -fsSLo bootstrap.sh https://raw.githubusercontent.com/ptr727/ProjectTemplat
 bash bootstrap.sh
 ```
 
+A Debian install given a root password installs no `sudo` and leaves the first account outside the `sudo` group, so the first line stops on a host like that. Clear it once with one root step, then log out and back in so the new group takes effect, and start again from the first line. The login form `su -l` is needed, since plain `su` keeps the account's `PATH` and `usermod` is then not found:
+
+```shell
+su -l root -c 'apt-get update && apt-get install -y sudo curl ca-certificates tar && usermod -aG sudo <account>'
+```
+
+Run the bootstrap as the working account rather than as root, since it sets up git and GitHub for whichever account runs it.
+
 Downloaded and run rather than piped into a shell, for three reasons. Standard input stays a terminal, so the menu can ask. The file is readable before it is executed as root, which matters more here than anywhere else in this repository. And a re-run on a console reached over IPMI costs one line rather than a re-paste.
 
 Piping it is still detected: with no action and no terminal it reports rather than guessing, and prints the three lines above as the remedy.
