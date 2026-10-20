@@ -3093,6 +3093,40 @@ class TestUnrecognizedShapes(GqlCase):
             with self.subTest(body=body):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
 
+    def test_a_backtick_inside_html_or_an_autolink_opened_first_opens_no_span(self) -> None:
+        """GitHub reads a span, raw inline HTML, and an autolink by which one opens first.
+
+        A backtick inside an HTML comment opened earlier paired with the next one. The live `<b>`
+        between them then read as quoted, and `unwrap` printed it raw. Each opener here was rendered
+        on GitHub. In the first set the trailing span is the only one. In the second the backtick
+        pairs, since GitHub opens no HTML there or closes it before the backtick.
+        """
+        literal = (
+            *("<!-- a ` b -->", "<!-- a -- ` b -->", "<!-- a ` b\n-->", "<!-- a ` b\nc -->"),
+            *("<https://e.example/`a>", "<ht:/`>", "<u`v@e.example>"),
+            *('<a title="`">', "<a _t='`'>", '<A B="`"/>', '<a\n  b="`">', '<a title="\n`">'),
+            *("<? a ` b ?>", "<!X a ` b>", "<![CDATA[ a ` b ]]>"),
+        )
+        for opener in literal:
+            with self.subTest(opener=opener):
+                body = f"x {opener} <b>B</b> `y`"
+                self.assertEqual(f"x {opener} <b>B</b>  ", pr_review.CODE_SPAN.sub(" ", body))
+        self.assertEqual(
+            "<!-- a ` b --> Open (2) `x`", pr_review.unwrap("<!-- a ` b --> <b>Open (2)</b> `x`")
+        )
+        self.assertEqual("x   <b>B</b>  ", pr_review.CODE_SPAN.sub(" ", "x `<!--` <b>B</b> `-->`"))
+        pairing = (
+            *("<!-- a ` b --->", "<!x a ` b>", "<a b=c`d>", "</a ` >", '<ab:c title="`">'),
+            *("\\<!-- a ` b -->", '<a\n\ntitle="`">', "<!--> `", "<!---> `", "<!----> `"),
+            "<!-- a --> b --> `",
+        )
+        for opener in pairing:
+            with self.subTest(opener=opener):
+                span = pr_review.CODE_SPAN.search(f"x {opener} <b>B</b> `y`")
+                self.assertIsNotNone(span)
+                assert span is not None
+                self.assertIn("<b>", span.group())
+
     def test_the_html_block_names_match_the_prose_gate_s(self) -> None:
         """Both tools model which lines end a paragraph on GitHub, so their lists cannot differ.
 
