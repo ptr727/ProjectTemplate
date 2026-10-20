@@ -632,9 +632,9 @@ def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
     and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
 
-    One tail serves every reader here of a tag's attributes as HTML reads them. A tail kept per site
-    was fixed at one and not at its siblings. `TAG_ATTRIBUTE` reads CommonMark's inline raw HTML
-    instead, whose stricter grammar is what decides whether a backtick inside a tag opens a span.
+    One tail serves every reader here looking for a named tag, and it stays lenient. A tail kept per
+    site was fixed at one and not at its siblings. `TAG_ATTRIBUTE` is CommonMark's stricter grammar
+    for any inline tag, which is what decides whether a backtick inside one opens a span.
     """
     space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
     value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"

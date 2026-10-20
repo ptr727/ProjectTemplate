@@ -3089,6 +3089,16 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertIsNone(pr_review.CODE_SPAN.search("> a `b\n>    > - c` d"))
         # Each reads as text under a list item or a quotation, the containers bots write in.
         bodies = ("- a `b\n=\nc` d", "- a `b\n--\nc` d", "> a `b\n===\nc` d")
+        for body in (*bodies, "> a `b\n>     - c` d", "> a `b\n>     > - c` d"):
+            with self.subTest(body=body):
+                self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
+
+    def test_a_line_of_only_quote_markers_ends_the_paragraph(self) -> None:
+        """GitHub ends a paragraph at a line holding only blockquote markers, quoted or not.
+
+        A span paired across one, and so did a comment opened above one, hiding a span below it.
+        Indented four spaces, the line is the paragraph's own text and the span still pairs.
+        """
         for body in (
             "a `b\n>\nc` d",
             "> a `b\n>\n> c` d",
@@ -3100,9 +3110,6 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertIsNotNone(pr_review.CODE_SPAN.search("a `b\n    >\nc` d"))
         quoted = "> a <!-- b\n>\n> c `x` d -->"
         self.assertEqual(["`x`"], [m.group() for m in pr_review.CODE_SPAN.finditer(quoted)])
-        for body in (*bodies, "> a `b\n>     - c` d", "> a `b\n>     > - c` d"):
-            with self.subTest(body=body):
-                self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
 
     def test_a_backtick_inside_html_or_an_autolink_opened_first_opens_no_span(self) -> None:
         """GitHub reads a span, raw inline HTML, and an autolink by which one opens first.
