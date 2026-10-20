@@ -61,25 +61,27 @@ text says, because the harm it covers was never in the text.
    `orgs/`, `users/`, or `user/...` path counts, as in `orgs/<owner>/...` or `user/starred/<owner>/<repo>`. A
    `[HOST/]OWNER/REPO` value is read by its middle owner as well as by its first part. An
    `--org`, `--owner`, or `--target-owner` value names an owner the way an `orgs/<owner>` path
-   does, and so does `-o` on a secret, variable, or ruleset command. A URL or `OWNER/REPO#N` value
-   of an issue-linking flag, such as `--parent`, `--add-sub-issue`, or `--duplicate-of`, names a
-   repository. A gh write run through a run-time command word, as in `G=gh; $G pr comment ...`,
-   is read as one. So is one whose command or subcommand is a run-time word beside a literal one
-   some write takes, as in `$G "$C" comment`, or whose path words are all run-time beside a repo
-   flag. One exception departs from that stance. A write whose repository owner is a run-time
-   word fails closed, since it leaves nothing to compare. That covers `--repo "$T"`,
-   `GH_REPO="$T"`, `repos/$O/...`, `--org "$O"`, a run-time repository positional, and a `gh api`
-   write whose endpoint opens with a run-time word. It also covers a run-time word before gh's
-   command that may hold a repo flag, as in `gh "$R" pr comment`. A `--repo "example/$R"` names
-   its owner and is compared as usual. A write whose target the hook does not read fails closed
-   as well, rather than the hook modeling the shell further. That is a gh write an `eval` runs, and
-   a `gh api` write to a `repositories/<id>` endpoint or through a `..` segment, which GitHub
-   resolves after decoding. It is also a write taking its repository from a `GH_REPO` that
-   `declare -x`, `typeset -x`, `local -x`, `set -a`, or an `eval` may set. An `export GH_REPO`
-   that may not run where it sits, as in a subshell, a function, a loop, a branch, or behind
-   `&&`, does not replace the value before it, so every value the command sets is read as
-   reaching its gh write. A run-time segment past a literal owner in a `gh api` endpoint is
-   compared by that owner, though it may hold a `..` segment.
+   does. So does `-o` on a secret, variable, or ruleset command. An issue-linking flag such as
+   `--parent`, `--add-sub-issue`, or `--duplicate-of` names a repository by a URL or
+   `OWNER/REPO#N` value. A gh write run through a run-time command word, as in
+   `G=gh; $G pr comment ...`, is read as one. Behind such a word, a run-time command or
+   subcommand counts as a possible write where a repo flag names a literal `OWNER/REPO`. The words
+   beside it must then be a literal one some write takes, as in `$G "$C" comment`, or a second
+   run-time word. Writes whose target the hook cannot compare depart from that stance and fail
+   closed. A write whose repository owner is a run-time word is one, since it leaves nothing to
+   compare. That covers `--repo "$T"`, `GH_REPO="$T"`, `repos/$O/...`, and `--org "$O"`. It
+   covers a run-time repository positional and a `gh api` write whose endpoint opens with a
+   run-time word. It also covers a run-time word before gh's command that may hold a repo flag,
+   as in `gh "$R" pr comment`. A `--repo "example/$R"` names its owner and is compared as usual.
+   A write whose target the hook does not read is the other, rather than the hook modeling the
+   shell further. That is a gh write an `eval` runs. It is a `gh api` write to a
+   `repositories/<id>` endpoint, or one through a `..` segment, which GitHub resolves. It is also
+   a write taking its repository from a `GH_REPO` that a builtin other than `export` may set. Such
+   builtins are `declare`, `read`, `printf -v`, `builtin export`, an `eval`, and `set -a`. An
+   `export GH_REPO` may not run where it sits, as in a subshell, a loop, or behind `&&`. Then
+   every value the command sets is read as reaching its gh write. A run-time segment past a
+   literal owner in a `gh api` endpoint is compared by that owner, though it may hold a `..`
+   segment.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,

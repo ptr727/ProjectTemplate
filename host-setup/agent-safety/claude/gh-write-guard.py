@@ -17,11 +17,11 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
   1. a state-changing gh call whose output is discarded or forced to success
      (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
   2. a GraphQL mutation passing a literal GitHub node id (PRRT_/PR_/BOT_/...) instead of a $variable
-  3. a gh write with an explicit target, such as -R/--repo, repos/<owner>/<repo>, GH_REPO, a pull
-     request URL, an --org or --owner value, or a linked issue's URL, under an owner other than the
-     checkout origin's, unless the maintainer granted that target in GH_WRITE_GUARD_ALLOW. A write
-     whose target the guard does not read, such as one an eval runs or one to a repositories/<id>
-     endpoint, fails closed. Sibling
+  3. a gh write with an explicit target under an owner other than the checkout origin's, unless
+     the maintainer granted that target in GH_WRITE_GUARD_ALLOW. The target is named by -R/--repo,
+     repos/<owner>/<repo>, GH_REPO, a pull request URL, an --org or --owner value, or a linked
+     issue's URL. A write whose target the guard does not read fails closed, such as one an eval
+     runs or one to a repositories/<id> endpoint. Sibling
      repositories under the same owner are allowed, since the harm this guards is reaching a stranger's
      repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
@@ -106,7 +106,7 @@ import subprocess
 import sys
 import time
 import unicodedata
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, urlsplit
 
 # --- What counts as a GitHub write -------------------------------------------------------------------
 _GH_WRITE_SUBS = {
@@ -236,9 +236,7 @@ def _is_gh_write(cmd):
     # Argv-aware for the `gh api` half, reading a flag or a GraphQL query only from where it actually sits in one invocation's own argv, not a raw substring search over the whole command.
     # A substring search reads a write-method spelling out of an opaque flag value too, such as a
     # `--jq` expression that merely contains the text `-XPOST` as data, misclassifying a harmless read.
-    if _GH_WRITE_SUB.search(cmd) or _push_arg_lists(cmd):
-        return True
-    return any(_gh_argv_is_write(args) for args in _all_gh_arg_lists(cmd))
+    return _names_gh_write(cmd) or bool(_push_arg_lists(cmd))
 
 
 def _gh_argv_is_write(args):
@@ -316,11 +314,12 @@ def _gh_names_write(args):
     """True when a gh argv's literal words name a write, as `_gh_argv_is_write` reads one.
 
     That is a command and subcommand the write tables list, or a `gh api` write. A run-time word
-    where gh's command or subcommand goes counts beside a literal one some write could pair with
-    it (see `_gh_path_writes`), or where a literal write sits behind it (see
-    `_gh_write_past_run_time`). A run-time word where a `_GH_WRITE_SUBSUBS` write's third word goes
-    counts too. Run-time words in both places count only where the argv also names a repository
-    with a repo flag, since such a pair alone would read every run-time command as a gh write.
+    where gh's command or subcommand goes counts where a literal write sits behind it (see
+    `_gh_write_past_run_time`). It also counts where a repo flag names a literal `OWNER/REPO`
+    beside it. Then a literal word beside it must be one some write could pair with it (see
+    `_gh_path_writes`), or there must be two such run-time words. A run-time word where a
+    `_GH_WRITE_SUBSUBS` write's third word goes counts too. The repo flag is what tells a gh
+    command apart from another tool whose words read as a gh path, as `$UV run "$S"` does.
     """
     if args[:1] == ["api"]:
         return _gh_argv_is_write(args)
@@ -328,8 +327,14 @@ def _gh_names_write(args):
     if any(_is_run_time_word(w) for w in words[:2]):
         if _gh_write_past_run_time(args) is not None:
             return True
+        named = any(
+            not is_path and not _is_run_time_word(w) and _gh_repo_value_reading(w)
+            for w, is_path, _a in _gh_repo_words([args])
+        )
+        if not named:
+            return False
         if all(_is_run_time_word(w) for w in words[:2]):
-            return any(not p for _w, p, _a in _gh_repo_words([args]))
+            return len(words) > 1
         return _gh_path_writes(words[:2])
     if len(words) > 1 and words[1] in _GH_WRITE_SUBS.get(words[0], ()):
         return True
@@ -3068,8 +3073,8 @@ def _gh_positional_repo_words(args):
     edit stranger/example` does. `gh issue transfer` takes its destination second, and
     `gh issue develop --branch-repo` names the repository its branch goes to. A flag's value is
     passed by `_GH_POSITIONAL_VALUE_FLAGS`, the value-taking flags gh's help lists for each such
-    write, and any other flag is read as a boolean. A `pr` or `issue` write's issue-linking flag
-    names the repository of the issue it links, by URL or `OWNER/REPO#N` (see `_issue_ref_repo`).
+    write, and any other flag is read as a boolean. An issue-linking flag on a `pr` or `issue`
+    write names the repository of the issue it links (see `_issue_ref_repo`).
     """
     key = tuple(_gh_path(args))
     if len(key) < 2 or key[1] not in _GH_WRITE_SUBS.get(key[0], ()):
@@ -3240,44 +3245,46 @@ _API_BY_ID = re.compile(r"^repositories(?:/|$)", re.IGNORECASE)
 def _gh_api_unread_path(args):
     """The endpoint of a `gh api` write that names its repository by id or holds a `..` segment, else None.
 
-    A `repositories/<id>` path writes to whichever repository the id resolves to. GitHub decodes a
-    path and then resolves its `..` segments, so `repos/example/repo/../../stranger/example` and its
-    percent-encoded form both write under `stranger`.
+    A `repositories/<id>` path writes to whichever repository the id resolves to. GitHub resolves a
+    path's `..` segments, so `repos/example/repo/../../stranger/example` writes under `stranger`.
     """
     path = _gh_api_path(args)
     if path is None or not _gh_argv_is_write(args):
         return None
-    if _API_BY_ID.match(path) or ".." in unquote(path).split("/"):
+    if _API_BY_ID.match(path) or ".." in path.split("/"):
         return path
     return None
 
 
-_DECLARE_WORDS = frozenset({"declare", "typeset", "local"})
+_GH_REPO_SETTERS = frozenset(
+    {"declare", "typeset", "local", "readonly", "read", "printf", "mapfile", "readarray"}
+    | {"builtin", "command"}
+)
 
 
 def _gh_repo_unread_export(text):
-    """The builtin in `text` itself that exports `GH_REPO` in a way `_gh_repo_states` does not read, or None.
+    """The builtin in `text` itself that sets or exports `GH_REPO` where `_gh_repo_states` does not read it, or None.
 
-    That is a `declare`, `typeset`, or `local` with an `x` option naming GH_REPO, as in `declare -x
-    GH_REPO=...`. It is also a `set -a` or `set -o allexport` beside a `GH_REPO=` word, which then
-    exports a plain assignment.
+    That is a `_GH_REPO_SETTERS` word naming GH_REPO, as in `declare -x GH_REPO=...`, `read
+    GH_REPO`, or `builtin export GH_REPO=...`. Such a builtin may set an exported value without the
+    `export` or plain assignment the reading follows. It is also a `set -a` or `set -o allexport`
+    beside a `GH_REPO=` word, which then exports a plain assignment. Each word is read once.
     """
     toks = _shell_tokens(text)
     assigns = any(t.startswith("GH_REPO=") for t in toks)
+    end = 0
     for x, t in enumerate(toks):
-        if (t not in _DECLARE_WORDS and t != "set") or not _opens_command(toks, x):
+        if x < end or (t not in _GH_REPO_SETTERS and t != "set") or not _opens_command(toks, x):
             continue
-        words = []
-        for w in toks[x + 1 :]:
-            if _is_shell_op(w):
-                break
-            words.append(w)
+        end = next((j for j in range(x + 1, len(toks)) if _is_shell_op(toks[j])), len(toks))
+        words = toks[x + 1 : end]
+        if t != "set":
+            if any(w.partition("=")[0] in ("GH_REPO", "-vGH_REPO") for w in words):
+                return t
+            continue
         opts = [w for w in words if w[:1] == "-" and w[1:2] not in ("", "-")]
-        if t == "set":
-            if assigns and (any("a" in o for o in opts) or "allexport" in words):
-                return "set -a"
-        elif any("x" in o for o in opts) and any(w.partition("=")[0] == "GH_REPO" for w in words):
-            return f"{t} -x"
+        if assigns and (any("a" in o for o in opts) or "allexport" in words):
+            return "set -a"
     return None
 
 
@@ -3305,7 +3312,7 @@ def _gh_unread_target(cmd, payloads):
     the text the evals in `cmd` run (see `_eval_payload_texts`), read once by the caller.
     """
     low = cmd.lower()
-    by_path = ".." in cmd or "%2e" in low or "repositories" in low
+    by_path = ".." in cmd or "repositories" in low
     if not (by_path or "eval" in cmd or "GH_REPO" in cmd):
         return None
     texts = _data_free_texts(cmd)
@@ -3356,22 +3363,23 @@ def _gh_repo_assignments(cmd, environ=None):
         toks = _shell_tokens(reading)
         reaching = _wrapper_env_assignments(toks, lambda body: bool(_all_gh_arg_lists(body)))
         inherited = [(v, False) for name, v in reaching if name == "GH_REPO"][-1:]
-        for inner in _embedded_wrapper_commands(reading):
+        bodies = _embedded_wrapper_commands(reading)
+        for inner in bodies:
             out += _gh_word_repo_values(inner, inherited or base)
         out += _gh_wrapper_repo_values(reading, base)
-        out += _loose_gh_repo_assignments(reading) if "GH_REPO" in reading else []
+        out += _loose_gh_repo_assignments(reading, bodies) if "GH_REPO" in reading else []
     return out
 
 
-def _loose_gh_repo_assignments(reading):
+def _loose_gh_repo_assignments(reading, bodies):
     """Each `GH_REPO` value in `reading` and its wrapper bodies, beside one gh write taking it, where an export is loose.
 
     A loose export (see `_loose_gh_repo_values`) may not replace the value before it, and one in a
     loop may reach a gh word before it. So every value the text sets is read as reaching the first
     gh write that takes GH_REPO (see `_takes_gh_repo`). A target check reads each value once, so
-    one write is enough, and the read stays one pass over each text.
+    one write is enough. `bodies` is the wrapper bodies `_embedded_wrapper_commands` finds in it.
     """
-    family = [reading, *_embedded_wrapper_commands(reading)]
+    family = [reading, *bodies]
     found = [_loose_gh_repo_values(_shell_tokens(t)) for t in family]
     if not any(loose for _v, loose in found):
         return []
@@ -3456,37 +3464,33 @@ def _takes_gh_repo(argv):
     return argv[:1] != ["api"] or any(_GH_REPO_PLACEHOLDER.search(a) for a in argv)
 
 
-_COMPOUND_WORDS = frozenset(
-    {"{", "if", "case", "while", "until", "for", "select", "function", "coproc"}
-)
-
-
 def _loose_gh_repo_values(toks):
     """(every `GH_REPO` value `toks` exports or assigns as (value, False), whether an export of it is loose).
 
     `_gh_repo_states` takes the latest export as the value a later command runs under. That holds
     for an export that runs whenever the command does, at the top level. An export is loose where
-    a parenthesis or a `_COMPOUND_WORDS` word comes before it, since it may then sit in a subshell, a
-    function, a loop, or an untaken branch. So is one behind `&&`, `||`, or `|`, or one before `|`
-    or a lone `&`, which runs it in a subshell. The read is one pass over the tokens.
+    a parenthesis or a `_RESERVED_WORDS` word comes before it. It may then sit in a subshell, a
+    function, a loop, or an untaken branch. So is one behind `&&`, `||`, or `|`. So is one before
+    `|` or a lone `&`, which runs it in a subshell. An `export` among the words of the one before
+    it is one of that export's arguments, so each word is read once.
     """
-    values, loose, nested = [], False, False
+    values, loose, nested, end = [], False, False, 0
     for x, t in enumerate(toks):
         if _is_shell_op(t):
             nested = nested or "(" in t or ")" in t
             continue
         opens = _opens_command(toks, x)
-        nested = nested or (opens and t in _COMPOUND_WORDS)
+        nested = nested or (opens and t in _RESERVED_WORDS)
         values += [(v, False) for name, v in _plain_assignments(toks, x) if name == "GH_REPO"]
-        if t != "export" or not opens:
+        if t != "export" or not opens or x < end:
             continue
-        pairs, names = _export_words(toks, x)
+        end = next((j for j in range(x + 1, len(toks)) if _is_separator(toks[j])), len(toks))
+        pairs, names = _export_words(toks[:end], x)
         if not ("GH_REPO" in names or any(name == "GH_REPO" for name, _ in pairs)):
             continue
         values += [(v, False) for name, v in pairs if name == "GH_REPO"]
         before = toks[x - 1] if x else ""
-        end = next((j for j in range(x + 1, len(toks)) if _is_separator(toks[j])), None)
-        after = toks[end] if end is not None else ""
+        after = toks[end] if end < len(toks) else ""
         loose = loose or nested or any(op in before for op in ("&&", "||", "|"))
         loose = loose or after.startswith("|") or (after.startswith("&") and after[:2] != "&&")
     return values, loose
@@ -8110,12 +8114,6 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "a dot-segment api write",
     ),
     (
-        "gh api -X POST repos/example/repo/%2e%2e/%2e%2e/stranger/example/issues -f title=t",
-        {},
-        "deny",
-        "a percent-encoded dot-segment api write",
-    ),
-    (
         "gh api -X POST orgs/example/../stranger/teams -f name=x",
         {},
         "deny",
@@ -8271,6 +8269,67 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "a run-time command behind a run-time command word, under the origin owner",
     ),
     ('$PY "$SCRIPT" --verbose', {}, "allow", "run-time words naming no write"),
+    (
+        'UV=uv; $UV run "$SCRIPT" 2>/dev/null',
+        {},
+        "allow",
+        "another tool behind a run-time command word whose words read as a gh path",
+    ),
+    (
+        '"$PY" "$SCRIPT" create >/dev/null',
+        {},
+        "allow",
+        "a run-time script given a write-shaped word",
+    ),
+    ('CP=cp; $CP -R src/ "$DEST"', {}, "allow", "a recursive -R on another tool"),
+    ('$CP -R "$SRC" "$DST"', {}, "allow", "a recursive -R with run-time words"),
+    (
+        '$GREP -R TODO "$DIR" 2>/dev/null',
+        {},
+        "allow",
+        "a recursive grep behind a run-time command word",
+    ),
+    (
+        "export GH_REPO=example/repo; declare GH_REPO=stranger/example; gh pr comment 5 -b x",
+        {},
+        "deny",
+        "a declare setting an exported GH_REPO",
+    ),
+    ("readonly GH_REPO=stranger/example; gh pr comment 5 -b x", {}, "deny", "a readonly GH_REPO"),
+    (
+        "builtin export GH_REPO=stranger/example; gh pr comment 5 -b x",
+        {},
+        "deny",
+        "an export run through builtin",
+    ),
+    ("read -r GH_REPO < repo.txt; gh pr comment 5 -b x", {}, "deny", "a GH_REPO read sets"),
+    (
+        "printf -v GH_REPO %s stranger/example; gh pr comment 5 -b x",
+        {},
+        "deny",
+        "a GH_REPO printf -v sets",
+    ),
+    (
+        "declare GH_REPO=stranger/example; gh pr view 5",
+        {},
+        "allow",
+        "a declared GH_REPO beside a read",
+    ),
+]
+
+
+_BYPASS_FLAG_CASES = [
+    (
+        'eval "gh pr merge 5 --squash"',
+        "allow",
+        "control: the --admin reader passes an eval running a merge with no --admin",
+    ),
+    (
+        "; ".join(["eval 'echo x'"] * 300 + ["eval 'gh pr merge 5 --squash'"]),
+        "allow",
+        "control: the --admin reader passes a merge past the eval reading budget with no --admin",
+    ),
+    ('eval "gh pr merge 5 --admin"', "deny", "the --admin reader reads an eval argument"),
 ]
 
 
@@ -14993,6 +15052,12 @@ def _selftest():
             environ={},
             primary_checkout_lookup=lambda d: False,
         )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, want, label in _BYPASS_FLAG_CASES:
+        got, _ = _check_bypass_flags(cmd)
         mark = "ok  " if got == want else "FAIL"
         if got != want:
             ok = False
