@@ -7848,6 +7848,16 @@ def main(argv: list[str] | None = None) -> int:
         or (not halted and head_review_done(final, a.min_rounds))
     ):
         verdict = report_verdict(final, owner, repo)
+        if verdict == 50 and held_checks_open(
+            final, checks, now, a.check_grace, a.check_stall, required_for(final, owner, repo)
+        ):
+            print(
+                "note: a check on this head can still move its merge, and this wait returns 50 "
+                "at once on every call until the head moves, since nothing here reads an answer "
+                "to the headline. Once the headline is answered, watch the checks with a bounded "
+                f"`timeout 1800 gh pr checks {a.number} --repo {owner}/{repo} --watch`, then run "
+                "status"
+            )
         # The check reading ranks under both of those, and never replaces either.
         # An unreadable shape means no field here can be believed, this one included.
         # A partial round means the diff is part-reviewed, which outranks a wedged gate.
