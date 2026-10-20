@@ -3930,9 +3930,9 @@ def unrecognized_in(body: str) -> list[str]:
     is the exemption, being a bare paragraph by design and already classified as one.
 
     Two readings differ from GitHub's and stay known limits that tests pin, since no reviewer body
-    has carried either. `str.splitlines` also ends a line at each other separator `QUOTED_CHAR`
-    names, where GitHub does not. And `MARKDOWN_HEADING` and `HEADING` open a heading after any
-    indent, where GitHub's top level takes at most three spaces.
+    has carried either. `str.splitlines` also ends a line at each separator `QUOTED_CHAR` names
+    besides a newline and a carriage return, where GitHub does not. And `MARKDOWN_HEADING` and
+    `HEADING` open a heading after any indent, where GitHub's top level takes at most three spaces.
     """
     # A refusal is a bare paragraph rather than a review body, and `REFUSAL` is its spelling.
     # It carries no marker to check, and its own opening line is not a coverage statement.
