@@ -3114,8 +3114,8 @@ class TestUnrecognizedShapes(GqlCase):
     def test_a_paragraph_end_read_from_its_line_alone_is_a_known_limit(self) -> None:
         """GitHub ends the paragraph at each second line here and renders no span, and these pair.
 
-        Each end depends on the container the paragraph sits in or on the column a tab starts at,
-        which one line does not carry. A top-level setext underline reads here as the lazy text it
+        The paragraph-end reader models neither the container a paragraph sits in nor a tab after
+        a quote marker. A top-level setext underline reads here as the lazy text it
         is inside a container. GitHub renders `x` in the comment body as a span, and none is found.
         A test failing here means the limit moved, so the `CodeSpans` note goes with it.
         """
@@ -3148,18 +3148,20 @@ class TestUnrecognizedShapes(GqlCase):
     def test_a_heading_s_indent_and_a_line_split_are_known_limits(self) -> None:
         """GitHub renders each of these as something other than a heading, and each reads as one.
 
-        At the top level a no-break space and a four-space indent each open no heading on GitHub,
-        and a vertical tab ends no line there. A test failing here means the limit moved, so the
-        `unrecognized_in` note goes with it.
+        At the top level a no-break space and a four-space indent each open no heading on GitHub.
+        Only a newline or a carriage return ends a line there. A test failing here
+        means the limit moved, so the `unrecognized_in` note goes with it.
         """
         for line in ("\xa0## Overview", "    ## Overview"):
             with self.subTest(line=line):
                 self.assertIsNotNone(pr_review.MARKDOWN_HEADING.match(line))
                 self.assertIsNotNone(pr_review.HEADING.match(line))
-        self.assertEqual(
-            ["heading: ## Overview"],
-            pr_review.unrecognized_in("Prose about the change.\v## Overview"),
-        )
+        for separator in "\v\f\x1c\x1d\x1e\x85\u2028\u2029":
+            with self.subTest(separator=separator):
+                self.assertEqual(
+                    ["heading: ## Overview"],
+                    pr_review.unrecognized_in(f"Prose about the change.{separator}## Overview"),
+                )
 
     def test_a_backtick_inside_html_or_an_autolink_opened_first_opens_no_span(self) -> None:
         """GitHub reads a span, raw inline HTML, and an autolink by which one opens first.
