@@ -14,7 +14,7 @@ description: >-
   `audit-a-repo` run checks this file's presence, headings, and a date-based staleness hint
   without judging its content, so content drift in it stays this skill's, and a resync fires it
   beside `resync-a-repo` and `carried-instruction-file-guard`, which guards the other carried
-  files.
+  instruction files.
 ---
 
 # Copilot Instructions Keeper
