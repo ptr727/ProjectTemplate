@@ -76,10 +76,11 @@ text says, because the harm it covers was never in the text.
    A write whose target the hook does not read is the other, rather than the hook modeling the
    shell further. That is a gh write an `eval` runs. It is a `gh api` write to a
    `repositories/<id>` endpoint, or one through a `..` segment, which GitHub resolves. It is also
-   a write taking its repository from a `GH_REPO` that a builtin other than `export` may set. Such
-   builtins are `declare`, `read`, `printf -v`, `builtin export`, an `eval`, and `set -a`. An
-   `export GH_REPO` may not run where it sits, as in a subshell, a loop, or behind `&&`. Then
-   every value the command sets is read as reaching its gh write. A run-time segment past a
+   a write taking its repository from a `GH_REPO` that a builtin other than `export` may set.
+   Such builtins include `declare`, `read`, `printf -v`, `builtin export`, an `eval`, and
+   `set -a`. An
+   `export GH_REPO` in a subshell, a loop, or behind `&&` may not run where it sits. Where one
+   may not, every value the command sets is read as reaching its gh write. A run-time segment past a
    literal owner in a `gh api` endpoint is compared by that owner, though it may hold a `..`
    segment.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a

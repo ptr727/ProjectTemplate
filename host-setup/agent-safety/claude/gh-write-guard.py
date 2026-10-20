@@ -3258,7 +3258,7 @@ def _gh_api_unread_path(args):
 
 _GH_REPO_SETTERS = frozenset(
     {"declare", "typeset", "local", "readonly", "read", "printf", "mapfile", "readarray"}
-    | {"builtin", "command"}
+    | {"builtin"}
 )
 
 
@@ -3267,8 +3267,10 @@ def _gh_repo_unread_export(text):
 
     That is a `_GH_REPO_SETTERS` word naming GH_REPO, as in `declare -x GH_REPO=...`, `read
     GH_REPO`, or `builtin export GH_REPO=...`. Such a builtin may set an exported value without the
-    `export` or plain assignment the reading follows. It is also a `set -a` or `set -o allexport`
-    beside a `GH_REPO=` word, which then exports a plain assignment. Each word is read once.
+    `export` or plain assignment the reading follows. A `command export` is read as an export
+    already, since `command` keeps its command word in command position. It is also a `set -a` or
+    `set -o allexport` beside a `GH_REPO=` word, which then exports a plain assignment. Each word
+    is read once.
     """
     toks = _shell_tokens(text)
     assigns = any(t.startswith("GH_REPO=") for t in toks)
@@ -8314,6 +8316,12 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "a declared GH_REPO beside a read",
+    ),
+    (
+        "command export GH_REPO=example/repo; gh pr comment 5 -b x",
+        {},
+        "allow",
+        "an export run through command is read as an export",
     ),
 ]
 
