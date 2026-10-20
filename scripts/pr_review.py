@@ -765,9 +765,10 @@ class CodeSpans:
 
     Some readings differ from GitHub's and stay known limits that tests pin, since no reviewer
     body has carried any of them. A paragraph's end is read from its line alone. So a span here
-    can pair across a line that ends a list item's or a quotation's paragraph on GitHub. A
-    backtick run after an even run of backslashes opens a span on GitHub and none here. One inside
-    an inline link's destination or title opens none on GitHub and pairs here.
+    can pair across a line ending a list item's or a quotation's paragraph on GitHub. It pairs
+    across a top-level setext underline too. A backtick run after an even run of backslashes opens a
+    span on GitHub and none here. One inside an inline link's destination or title opens none on
+    GitHub and pairs here.
     """
 
     def __init__(self) -> None:
@@ -3927,6 +3928,11 @@ def unrecognized_in(body: str) -> list[str]:
     A body carrying no heading at all is reported rather than passed, since every one of the 333
     measured opens on a heading and a body with none is a format nothing here has seen. A refusal
     is the exemption, being a bare paragraph by design and already classified as one.
+
+    Two readings differ from GitHub's and stay known limits that tests pin, since no reviewer body
+    has carried either. `str.splitlines` also ends a line at a vertical tab or a form feed, where
+    GitHub does not. And a heading opens here after any indent, where GitHub's top level takes at
+    most three spaces.
     """
     # A refusal is a bare paragraph rather than a review body, and `REFUSAL` is its spelling.
     # It carries no marker to check, and its own opening line is not a coverage statement.
