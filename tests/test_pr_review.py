@@ -3089,6 +3089,17 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertIsNone(pr_review.CODE_SPAN.search("> a `b\n>    > - c` d"))
         # Each reads as text under a list item or a quotation, the containers bots write in.
         bodies = ("- a `b\n=\nc` d", "- a `b\n--\nc` d", "> a `b\n===\nc` d")
+        for body in (
+            "a `b\n>\nc` d",
+            "> a `b\n>\n> c` d",
+            "> a `b\n> >\n> c` d",
+            "> a `b\n>  \n> c` d",
+        ):
+            with self.subTest(body=body):
+                self.assertIsNone(pr_review.CODE_SPAN.search(body))
+        self.assertIsNotNone(pr_review.CODE_SPAN.search("a `b\n    >\nc` d"))
+        quoted = "> a <!-- b\n>\n> c `x` d -->"
+        self.assertEqual(["`x`"], [m.group() for m in pr_review.CODE_SPAN.finditer(quoted)])
         for body in (*bodies, "> a `b\n>     - c` d", "> a `b\n>     > - c` d"):
             with self.subTest(body=body):
                 self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
@@ -3119,6 +3130,10 @@ class TestUnrecognizedShapes(GqlCase):
             *("<!-- a ` b --->", "<!x a ` b>", "<a b=c`d>", "</a ` >", '<ab:c title="`">'),
             *("\\<!-- a ` b -->", '<a\n\ntitle="`">', "<!--> `", "<!---> `", "<!----> `"),
             "<!-- a --> b --> `",
+        )
+        self.assertEqual(
+            "x <!-- a ` b ---> c --> <b>B</b>  ",
+            pr_review.CODE_SPAN.sub(" ", "x <!-- a ` b ---> c --> <b>B</b> `y`"),
         )
         for opener in pairing:
             with self.subTest(opener=opener):

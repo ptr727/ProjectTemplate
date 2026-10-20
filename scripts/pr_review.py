@@ -632,8 +632,9 @@ def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
     and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
 
-    One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
-    and not at its siblings.
+    One tail serves every reader here of a tag's attributes as HTML reads them. A tail kept per site
+    was fixed at one and not at its siblings. `TAG_ATTRIBUTE` reads CommonMark's inline raw HTML
+    instead, whose stricter grammar is what decides whether a backtick inside a tag opens a span.
     """
     space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
     value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
@@ -729,7 +730,8 @@ INTERRUPTS_PARAGRAPH = (
 
 
 PARAGRAPH_BREAK = (
-    rf"\n(?!\s*\n|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH}))"
+    rf"\n(?!\s*\n| {{0,3}}>(?: {{0,4}}>)*{LINE_END}"
+    rf"|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH}))"
 )
 IN_PARAGRAPH = rf"(?:[^\n]|{PARAGRAPH_BREAK})"
 TAG_SPACE = rf"[ \t]*(?:\r?{PARAGRAPH_BREAK}[ \t]*)?"
@@ -740,7 +742,7 @@ TAG_ATTRIBUTE = (
 INLINE_HTML = (
     rf"(?<!\\)(?:<[A-Za-z][A-Za-z0-9-]*(?:{TAG_ATTRIBUTE})*{TAG_SPACE}/?>"
     rf"|</[A-Za-z][A-Za-z0-9-]*{TAG_SPACE}>"
-    rf"|<!--(?:-?>|(?:(?:(?!-->){IN_PARAGRAPH})*?(?:[^-\n]|{PARAGRAPH_BREAK}))?-->)"
+    rf"|<!--(?:-?>|(?:{IN_PARAGRAPH}*?(?:[^-\n]|{PARAGRAPH_BREAK}))?-->)"
     rf"|<\?{IN_PARAGRAPH}*?\?>"
     rf"|<![A-Z]+(?:[ \t]|\r?{PARAGRAPH_BREAK})(?:[^>\n]|{PARAGRAPH_BREAK})*>"
     rf"|<!\[CDATA\[{IN_PARAGRAPH}*?\]\]>"
