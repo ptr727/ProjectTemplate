@@ -83,8 +83,7 @@ PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "mis
 # Deliberately unanchored.
 # Both notes this form was introduced for end the sentence after the paren, so an end-anchored pattern matches neither of the two it was written to catch.
 # That is the shape a matcher fails at silently: it reports nothing, and a fleet with no such note in it reports exactly the same.
-# A check id here, named in a driftNote on a repo not declaring its type, is the type model's explicit suppression of a discovery advisory rather than a note about a forgotten type.
-DETECTION_SUPPRESSION_IDS = {"python.directories.declared": "python"}
+DETECTION_SUPPRESSION_IDS = {"python.directories.declared": "python", "filenaming.scripts": None}
 CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
 
 
@@ -467,7 +466,11 @@ def capped_paths(paths):
     return f"{shown}{more}"
 
 
-def file_naming_findings(blobs, read_text):
+FILE_NAMING_NOTE_ID = "(filenaming.scripts)"
+CODE_SPAN = re.compile(r"`([^`]+)`")
+
+
+def file_naming_findings(entry, blobs, read_text):
     """DRIFT for script file names that break CODESTYLE.md "Script and Utility File Names".
 
     `blobs` maps each blob path to its file mode. It is None when the tree could not be read in
@@ -483,9 +486,17 @@ def file_naming_findings(blobs, read_text):
     sits only in another directory. Another is an extensionless launcher beside its `.py`, which
     may be an installed command instead. The last is an extensionless executable with no shebang
     or readable text.
+
+    A name a tool or platform fixes is exempted by a registry driftNote naming (filenaming.scripts)
+    and each exempt path as a code span, so one note cannot silence a later break on another path.
+    An exempt path the check would not report, renamed, deleted, or never a script, is reported as
+    stale, and so is a note naming no path at all.
     """
     if blobs is None:
         return []
+    exempt_notes = [
+        n for n in entry.get("driftNotes") or [] if isinstance(n, str) and FILE_NAMING_NOTE_ID in n
+    ]
     python_stems = {}
     for path in blobs:
         directory, name = posixpath.split(path)
@@ -520,26 +531,63 @@ def file_naming_findings(blobs, read_text):
         if directory in wrapped and dot:
             continue
         if directory in wrapped:
-            undecided.append(f"{path} (an extensionless launcher may be an installed command)")
+            undecided.append((path, "an extensionless launcher may be an installed command"))
             continue
         if wrapped:
-            undecided.append(f"{path} (a {stem}.py sits only in another directory)")
+            undecided.append((path, f"a {stem}.py sits only in another directory"))
             continue
         if dot:
             broken.append(path)
             continue
         text = read_text(path)
         if text is None:
-            undecided.append(f"{path} (unreadable, so its shebang is unknown)")
+            undecided.append((path, "unreadable, so its shebang is unknown"))
         elif text.startswith("#!"):
             broken.append(path)
         else:
-            undecided.append(f"{path} (an executable with no shebang)")
+            undecided.append((path, "an executable with no shebang"))
     rule = 'CODESTYLE.md "Script and Utility File Names"'
     findings = []
+    reported = set(broken) | {path for path, _ in undecided}
+    exempt = set()
+    for note in exempt_notes:
+        paths = CODE_SPAN.findall(note)
+        quoted = f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
+        if not paths:
+            findings.append(
+                (
+                    "DRIFT",
+                    (
+                        f"registry: a driftNote naming {FILE_NAMING_NOTE_ID} names no path as a code "
+                        f"span, so it exempts nothing. Name each exempt path, or delete the note: {quoted}"
+                    ),
+                )
+            )
+        stale = [p for p in paths if p not in reported]
+        if stale:
+            findings.append(
+                (
+                    "DRIFT",
+                    (
+                        f"registry: a driftNote naming {FILE_NAMING_NOTE_ID} exempts {len(stale)} "
+                        "path(s) the file-naming check does not report. Drop each from the note, and "
+                        f"the note once it exempts none: {capped_paths(stale)}"
+                    ),
+                )
+            )
+        exempt.update(paths)
+    broken = [p for p in broken if p not in exempt]
+    undecided = [f"{path} ({why})" for path, why in undecided if path not in exempt]
     if broken:
         findings.append(
-            ("DRIFT", f"file-naming: {len(broken)} file(s) break {rule}: {capped_paths(broken)}")
+            (
+                "DRIFT",
+                (
+                    f"file-naming: {len(broken)} file(s) break {rule}. Rename each, or where a "
+                    f"tool or platform fixes the name, record a driftNote naming "
+                    f"{FILE_NAMING_NOTE_ID} and the path as a code span: {capped_paths(broken)}"
+                ),
+            )
         )
     if undecided:
         findings.append(
@@ -829,6 +877,21 @@ def check_id_owner(spec, cid):
     return None, False
 
 
+def is_suppression_id(entry, cid):
+    """Whether a check id a driftNote names suppresses a finding on this repo, rather than naming a check to judge.
+
+    The note-freshness check skips such a note, and the check it suppresses reports it once stale.
+    DETECTION_SUPPRESSION_IDS maps each id to the type whose declaration ends the suppression, or to
+    None where the note suppresses on every repo. The Python id is the type model's explicit
+    suppression of a discovery advisory rather than a note about a forgotten type. The file-naming id
+    exempts the paths the note names, each a name a tool or platform fixes.
+    """
+    if cid not in DETECTION_SUPPRESSION_IDS:
+        return False
+    ending_type = DETECTION_SUPPRESSION_IDS[cid]
+    return ending_type is None or ending_type not in declared_types(entry)
+
+
 def driftnote_findings(entry, spec, open_count):
     """Freshness findings over one repo's registry driftNotes, given how many findings the audit already has.
 
@@ -847,7 +910,7 @@ def driftnote_findings(entry, spec, open_count):
     for note in entry.get("driftNotes", []):
         quoted = f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
         for cid in CHECK_ID_RE.findall(note):
-            if DETECTION_SUPPRESSION_IDS.get(cid, "") not in ("", *declared_types(entry)):
+            if is_suppression_id(entry, cid):
                 continue
             owner, known = check_id_owner(spec, cid)
             if not known:
@@ -3242,7 +3305,7 @@ def audit_repo(entry, spec, branch=None):
     def read_text(path):
         return contents_text(gh(f"repos/{slug}/contents/{urllib.parse.quote(path)}?ref={ground}"))
 
-    findings.extend(file_naming_findings(blob_field(carried_blobs, 1), read_text))
+    findings.extend(file_naming_findings(entry, blob_field(carried_blobs, 1), read_text))
     findings.extend(secret_stem_findings(tree))
     stores = {}
     # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
@@ -6763,7 +6826,7 @@ def _selftest():
             reads.append(path)
             return texts_in.get(path)
 
-        got = file_naming_findings(blobs_in, read_text)
+        got = file_naming_findings({}, blobs_in, read_text)
         broken_text = next((t for _, t in got if " break " in t), "")
         undecided_text = next((t for _, t in got if "cannot decide" in t), "")
         good = (
@@ -6784,18 +6847,91 @@ def _selftest():
             file_naming_ok = False
             print(f"  FAIL file_naming_findings [{label}] -> {got}, reads {reads}")
     many = {f"scripts/Tool{n}.py": plain for n in range(7)}
-    capped = file_naming_findings(many, lambda path: None)
+    capped = file_naming_findings({}, many, lambda path: None)
     if not (len(capped) == 1 and capped[0][1].endswith(" and 2 more")):
         ok = False
         file_naming_ok = False
         print(f"  FAIL file_naming_findings [past five paths the list is capped] -> {capped}")
-    if file_naming_findings(None, lambda path: None) != []:
+    exempt_note = "A package format fixes `tools/Install.ps1` by that name (filenaming.scripts)."
+    exemption_blobs = {
+        "tools/Install.ps1": plain,
+        "tools/Setup_Host.sh": exe,
+        "bin/Tool_Binary": exe,
+    }
+    exemption_cases = [
+        (
+            "a named path is exempt and an unnamed break still reports",
+            [exempt_note],
+            exemption_blobs,
+            {"tools/Setup_Host.sh"},
+            {"bin/Tool_Binary"},
+            [],
+        ),
+        (
+            "an undecided path can be exempted too",
+            ["An installed command fixed by its vendor, `bin/Tool_Binary` (filenaming.scripts)."],
+            exemption_blobs,
+            {"tools/Install.ps1", "tools/Setup_Host.sh"},
+            set(),
+            [],
+        ),
+        (
+            "a note naming a path that no longer breaks, or no longer exists, is stale",
+            [
+                "Tool-fixed `tools/Install.ps1`, `tools/install-host.sh`, `tools/Gone.ps1` (filenaming.scripts)."
+            ],
+            {"tools/Install.ps1": plain, "tools/install-host.sh": exe},
+            set(),
+            set(),
+            ["exempts 2 path(s)", "tools/install-host.sh, tools/Gone.ps1"],
+        ),
+        (
+            "a note naming no path exempts nothing and is reported",
+            ["Install scripts are named by the package format (filenaming.scripts)."],
+            {"tools/Install.ps1": plain},
+            {"tools/Install.ps1"},
+            set(),
+            ["names no path"],
+        ),
+        (
+            "a path without the parenthesized id exempts nothing",
+            ["A package format fixes `tools/Install.ps1` (filenaming.scripts is pending)."],
+            {"tools/Install.ps1": plain},
+            {"tools/Install.ps1"},
+            set(),
+            [],
+        ),
+    ]
+    for label, notes_in, blobs_in, want_broken, want_undecided, want_notes in exemption_cases:
+        got = file_naming_findings({"driftNotes": notes_in}, blobs_in, lambda path: "\x7fELF")
+        note_texts = [t for _, t in got if t.startswith("registry: ")]
+        broken_text = next((t for _, t in got if " break " in t), "")
+        undecided_text = next((t for _, t in got if "cannot decide" in t), "")
+        good = (
+            all(kind == "DRIFT" for kind, _ in got)
+            and len(got) == len(note_texts) + bool(want_broken) + bool(want_undecided)
+            and len(note_texts) == (1 if want_notes else 0)
+            and all(w in note_texts[0] for w in want_notes)
+            and all(p in broken_text for p in want_broken)
+            and all(p not in broken_text for p in blobs_in.keys() - want_broken)
+            and all(p in undecided_text for p in want_undecided)
+            and all(p not in undecided_text for p in blobs_in.keys() - want_undecided)
+        )
+        if not good:
+            ok = False
+            file_naming_ok = False
+            print(f"  FAIL file_naming_findings [{label}] -> {got}")
+    if driftnote_findings({"types": ["docs"], "driftNotes": [exempt_note]}, note_spec, 0) != []:
+        ok = False
+        file_naming_ok = False
+        print("  FAIL file_naming_findings [an exemption note is not surfaced as a check to judge]")
+    if file_naming_findings({}, None, lambda path: None) != []:
         ok = False
         file_naming_ok = False
         print("  FAIL file_naming_findings [an unreadable tree reports nothing here]")
     if file_naming_ok:
         print(
-            "  ok   file_naming_findings: each script extension takes its stem shape, the wrapper and Pester exemptions hold, and an undecidable file is reported for judgment"
+            "  ok   file_naming_findings: each script extension takes its stem shape, the wrapper, Pester, and recorded per-path exemptions hold, a stale exemption is reported, and an undecidable file is reported for judgment"
         )
 
     secret_stem_cases = [
