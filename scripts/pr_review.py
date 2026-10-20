@@ -7848,13 +7848,11 @@ def main(argv: list[str] | None = None) -> int:
         or (not halted and head_review_done(final, a.min_rounds))
     ):
         verdict = report_verdict(final, owner, repo)
-        if verdict == 50 and held_checks_open(
-            final, checks, now, a.check_grace, a.check_stall, required_for(final, owner, repo)
-        ):
+        if verdict == 50 and checks_settling(checks, now, a.check_grace, a.check_stall):
             print(
-                "note: a check on this head can still move its merge, and this wait returns 50 "
-                "at once on every call until the head moves, since nothing here reads an answer "
-                "to the headline. Once the headline is answered, watch the checks with a bounded "
+                "note: a check on this head has not concluded, and this wait returns 50 at once "
+                "on every call until the head moves, since nothing here reads an answer to the "
+                "headline. Once the headline is answered, watch the checks with a bounded "
                 f"`timeout 1800 gh pr checks {a.number} --repo {owner}/{repo} --watch`, then run "
                 "status"
             )

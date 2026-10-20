@@ -5694,6 +5694,23 @@ class TestOverviewSections(GqlCase):
         self.assertIn("status=VERDICT_NAMES_UNCOUNTED_FINDINGS", printed)
         self.assertIn("`timeout 1800 gh pr checks 7 --repo o/r --watch`", printed)
 
+    def test_fifty_over_concluded_or_stuck_checks_names_no_watch(self) -> None:
+        """A watch has nothing to wait for once every check concluded or sits stuck.
+
+        A BLOCKED merge whose checks all passed is held by a thread or an approval instead.
+        """
+        passed = check()
+        stuck = check(name="gate", status="QUEUED", conclusion="", started=real_ago(900))
+        for label, checks in (("passed", [passed]), ("stuck", [stuck]), ("none", [])):
+            with self.subTest(case=label):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = payload([review(body=self.headline())], merge="BLOCKED", checks=checks)
+                self.answer(pr)
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(50, pr_review.main(["wait", "7", "--repo", "o/r"]))
+                self.assertNotIn("gh pr checks", self.out.getvalue())
+
     def test_partial_coverage_outranks_fifty(self) -> None:
         """A part-reviewed diff is the larger gap, so 42 is what the round reports."""
         body = self.headline().replace(COVERS_ONE, COVERS_ONE.replace("changed=1", "changed=2"))
