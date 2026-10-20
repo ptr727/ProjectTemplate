@@ -490,6 +490,8 @@ def file_naming_findings(entry, blobs, read_text):
     A `.py` stem is lowercase snake_case. A `.sh`, `.ps1`, `.cmd`, or `.bat` stem is lowercase-
     hyphenated once Pester's `.Tests.ps1` suffix is set aside, and so is an extensionless
     executable's name. An extension is recognized whatever its case, so an upper-case one breaks.
+    A name whose text after its last dot is none of those extensions is not judged, whatever its
+    mode, so an executable dotfile and a dotted name such as `Run_Me.v2` are out of scope.
     A snake_case launcher with an extension, beside a `.py` of the same stem in its own directory,
     keeps that stem. Three cases go to judgment rather than breaking. One is a launcher whose `.py`
     sits only in another directory. Another is an extensionless launcher beside its `.py`, which
@@ -6819,6 +6821,13 @@ def _selftest():
         (
             "an extensionless file without the executable bit is out of scope",
             {"docs/Release_Notes": plain},
+            {},
+            set(),
+            set(),
+        ),
+        (
+            "an executable dotfile and a dotted name are out of scope, with no read",
+            {"bin/.Hidden_Hook": exe, "bin/Run_Me.v2": exe},
             {},
             set(),
             set(),
