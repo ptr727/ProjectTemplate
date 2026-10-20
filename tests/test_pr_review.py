@@ -3115,7 +3115,7 @@ class TestUnrecognizedShapes(GqlCase):
     def test_a_heading_opens_on_the_whitespace_github_takes_after_its_hashes(self) -> None:
         """A space, a tab, or the line's end follows a heading's hashes, and nothing else does.
 
-        Python's `\\s` took a no-break space there, so a line GitHub renders as text was read as a
+        Python's `\\s` took a no-break space there. A line GitHub renders as text was then read as a
         heading, by the section reader as well as by the heading vetting.
         """
         for line in ("## Overview", "#\tOverview", "#", "###  ", "  ## Overview\r"):
