@@ -6,7 +6,8 @@ Compares each cataloged registry repo against the ground truth in this repo - ge
 names (spec/secrets.json; values are never read), baseline/per-type file presence and per-scope
 Markdown section presence on the ground-truth branch (spec/files.json, spec/scope-model.md),
 hub-hosted files a repo carries and should delete (git-tracked here and undeclared in the manifest,
-triaged by spec/divergences.json), intent-staleness advisories (a carried intent file whose hub
+triaged by spec/divergences.json), script file names and secret-file stems against CODESTYLE.md
+"Script and Utility File Names", intent-staleness advisories (a carried intent file whose hub
 canonical changed after the copy last did), and branch-model facts (main/develop existence, develop
 behind main), and a fleet-wide membership check (every non-fork repo the registry owner has on
 GitHub carries a registry/repos.json entry, and an 'archived' entry's status agrees with GitHub's
@@ -185,8 +186,8 @@ def gap_dispositions(spec):
     return out
 
 
-def repo_tree_entries(slug, ground_head):
-    """Every blob path and object SHA on a repo branch, or None when it cannot be read in full.
+def repo_tree_blobs(slug, ground_head):
+    """Every blob path on a repo branch mapped to its object SHA and file mode, or None when it cannot be read in full.
 
     The trees endpoint takes a tree sha rather than a ref name, so the branch payload already read is
     resolved to its tree instead of passing the branch name, which 404s.
@@ -199,7 +200,15 @@ def repo_tree_entries(slug, ground_head):
     tree = gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True)
     if not tree or "tree" not in tree or tree.get("truncated"):
         return None
-    return {n["path"]: n.get("sha") for n in tree["tree"] if n.get("type") == "blob"}
+    return {
+        n["path"]: (n.get("sha"), n.get("mode")) for n in tree["tree"] if n.get("type") == "blob"
+    }
+
+
+def repo_tree_entries(slug, ground_head):
+    """Every blob path and object SHA on a repo branch, or None when it cannot be read in full."""
+    blobs = repo_tree_blobs(slug, ground_head)
+    return None if blobs is None else {path: sha for path, (sha, _) in blobs.items()}
 
 
 def repo_tree(slug, ground_head):
@@ -436,6 +445,134 @@ def python_directory_coverage_findings(entry, tree):
             (
                 f"python-directories: {len(missed)} tracked .py file(s) sit outside every expected "
                 f"directory ({', '.join(directories) or 'none'}): {shown}{more}"
+            ),
+        )
+    ]
+
+
+PYTHON_FILE_STEM = re.compile(r"[a-z0-9_]+")
+HYPHENATED_FILE_STEM = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+HYPHENATED_SCRIPT_EXTENSIONS = (".sh", ".ps1", ".cmd", ".bat")
+PESTER_SUFFIX = ".Tests.ps1"
+SECRET_FILE_STEM = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
+SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
+NAMING_SHOWN = 5
+
+
+def capped_paths(paths):
+    shown = ", ".join(paths[:NAMING_SHOWN])
+    more = f" and {len(paths) - NAMING_SHOWN} more" if len(paths) > NAMING_SHOWN else ""
+    return f"{shown}{more}"
+
+
+def file_naming_findings(blobs, read_text):
+    """DRIFT for script file names that break CODESTYLE.md "Script and Utility File Names".
+
+    `blobs` maps each blob path to its file mode, or is None when the tree could not be read in
+    full, in which case nothing is reported here, since the run's one `tree:` finding names the
+    unreadable tree and the checks it leaves undecided. `read_text` returns a path's text, or None where it cannot be read, and is
+    called only for an extensionless executable whose name does not conform, since only its
+    shebang decides whether the rule covers it.
+
+    A `.py` stem is lowercase snake_case, and a `.sh`, `.ps1`, `.cmd`, or `.bat` stem is lowercase-
+    hyphenated, Pester's `.Tests.ps1` suffix set aside. An extension is recognized whatever its
+    case, so an upper-case one is itself a break. A snake_case launcher beside a `.py` of the
+    same stem in its own directory keeps that stem under the wrapper exemption. One whose `.py`
+    sits elsewhere, and an extensionless executable with no shebang or no readable text, are
+    reported for judgment rather than as a break. Every Git hook name and every `__dunder__` Python
+    name already fits its pattern, so neither needs an exemption here.
+    """
+    if blobs is None:
+        return []
+    python_stems = {}
+    for path in blobs:
+        directory, name = posixpath.split(path)
+        if name.endswith(".py"):
+            python_stems.setdefault(name[: -len(".py")], set()).add(directory)
+    broken = []
+    undecided = []
+    for path in sorted(blobs):
+        directory, name = posixpath.split(path)
+        stem, dot, extension = name.rpartition(".")
+        if not dot:
+            if blobs[path] != "100755" or HYPHENATED_FILE_STEM.fullmatch(name):
+                continue
+            text = read_text(path)
+            if text is None:
+                undecided.append(f"{path} (unreadable, so its shebang is unknown)")
+            elif text.startswith("#!"):
+                broken.append(path)
+            else:
+                undecided.append(f"{path} (an executable with no shebang)")
+            continue
+        extension = f".{extension}"
+        lowered = extension.lower()
+        if lowered == ".py":
+            if extension != lowered or not PYTHON_FILE_STEM.fullmatch(stem):
+                broken.append(path)
+            continue
+        if lowered not in HYPHENATED_SCRIPT_EXTENSIONS:
+            continue
+        if extension != lowered:
+            broken.append(path)
+            continue
+        if name.endswith(PESTER_SUFFIX):
+            stem = name[: -len(PESTER_SUFFIX)]
+        if HYPHENATED_FILE_STEM.fullmatch(stem):
+            continue
+        wrapped = python_stems.get(stem, set()) if PYTHON_FILE_STEM.fullmatch(stem) else set()
+        if directory in wrapped:
+            continue
+        if wrapped:
+            undecided.append(f"{path} (a {stem}.py sits only in another directory)")
+        else:
+            broken.append(path)
+    rule = 'CODESTYLE.md "Script and Utility File Names"'
+    findings = []
+    if broken:
+        findings.append(
+            ("DRIFT", f"file-naming: {len(broken)} file(s) break {rule}: {capped_paths(broken)}")
+        )
+    if undecided:
+        findings.append(
+            (
+                "DRIFT",
+                (
+                    f"file-naming: {len(undecided)} file(s) the per-extension patterns cannot "
+                    f"decide, judge each by hand against {rule}: {capped_paths(undecided)}"
+                ),
+            )
+        )
+    return findings
+
+
+def secret_stem_findings(tree):
+    """DRIFT naming each file in a repo-scoped `.secrets/` directory whose stem is not lowercase snake_case.
+
+    The stem is the name before its first dot, so `mail_relay.env.example` and
+    `db_root_password.example` both read as conforming. Real secret
+    files are untracked, so their tracked `.example` files are what the tree shows of them. `tree` is
+    the repo's blob path set, or None when it could not be read in full, in which case nothing is
+    reported here, as in file_naming_findings().
+    """
+    if tree is None:
+        return []
+    broken = []
+    for path in sorted(tree):
+        segments = path.split("/")
+        name = segments[-1]
+        if ".secrets" not in segments[:-1] or name in SECRETS_DIRECTORY_EXEMPT:
+            continue
+        if not SECRET_FILE_STEM.fullmatch(name.split(".", 1)[0]):
+            broken.append(path)
+    if not broken:
+        return []
+    return [
+        (
+            "DRIFT",
+            (
+                f"runtime-secrets: {len(broken)} secret file(s) carry a stem that is not lowercase "
+                f"snake_case: {capped_paths(broken)}"
             ),
         )
     ]
@@ -3077,7 +3214,10 @@ def audit_repo(entry, spec, branch=None):
     # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only where the repo carries tests for that type.
     # A language with no test suite has none, since the validator's leg never runs and the token and the codecov.yml would gate on a report the pipeline cannot produce.
     # The tree is read here rather than at the verbatim-tree section below so one call answers both, and the finding for an unreadable tree stays where it was.
-    carried_entries = repo_tree_entries(slug, ground_head)
+    carried_blobs = repo_tree_blobs(slug, ground_head)
+    carried_entries = (
+        None if carried_blobs is None else {path: sha for path, (sha, _) in carried_blobs.items()}
+    )
     tree = None if carried_entries is None else set(carried_entries)
     coverage_types = coverage_claiming_types(
         coverage_candidate_types(types, entry.get("profiles", {})),
@@ -3091,6 +3231,25 @@ def audit_repo(entry, spec, branch=None):
     findings.extend(python_type_findings(entry, tree))
     findings.extend(python_directory_coverage_findings(entry, tree))
     findings.extend(python_undeclared_root_findings(entry, tree))
+
+    def read_text(path):
+        try:
+            content = gh(
+                f"repos/{slug}/contents/{urllib.parse.quote(path)}?ref={ground}", ok404=True
+            )
+        except RuntimeError:
+            return None
+        return contents_text(content)
+
+    findings.extend(
+        file_naming_findings(
+            None
+            if carried_blobs is None
+            else {path: mode for path, (_, mode) in carried_blobs.items()},
+            read_text,
+        )
+    )
+    findings.extend(secret_stem_findings(tree))
     stores = {}
     # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
     for store, path in [
@@ -3348,7 +3507,7 @@ def audit_repo(entry, spec, branch=None):
         findings.append(
             (
                 "DRIFT",
-                f"tree: could not read the file tree for {slug}@{ground} in full, so verbatim trees are undecided",
+                f"tree: could not read the file tree for {slug}@{ground} in full, so verbatim trees, script file names, and secret-file stems are undecided",
             )
         )
     elif entry.get("name") != hub_repo_name():
@@ -6480,6 +6639,212 @@ def _selftest():
     if python_type_ok:
         print(
             "  ok   python_type_findings: a tracked .py file with no 'python' type is a suppressible advisory, and a stale suppression is reported"
+        )
+
+    plain = "100644"
+    exe = "100755"
+    file_naming_cases = [
+        (
+            "every conforming shape passes",
+            {
+                "scripts/fetch_report.py": plain,
+                "pkg/__init__.py": plain,
+                "tests/conftest.py": plain,
+                "scripts/sync-tools.sh": exe,
+                "scripts/sync-tools.ps1": plain,
+                "scripts/sync-tools.cmd": plain,
+                "scripts/sync-tools.bat": plain,
+                "tests/sync-tools.Tests.ps1": plain,
+                ".husky/pre-commit": exe,
+                "bin/run-backup": exe,
+                "PSScriptAnalyzerSettings.psd1": plain,
+                "Makefile": plain,
+                "README.md": plain,
+                ".envrc": exe,
+            },
+            {},
+            set(),
+            set(),
+        ),
+        (
+            "a hyphenated or capitalized .py breaks",
+            {"scripts/fetch-report.py": plain, "scripts/FetchReport.py": plain, "tool.PY": plain},
+            {},
+            {"scripts/fetch-report.py", "scripts/FetchReport.py", "tool.PY"},
+            set(),
+        ),
+        (
+            "the carried hook helper under its former name breaks, beside the current name or alone",
+            {".husky/hub-fetch-run.py": plain, ".husky/hub_fetch_run.py": plain},
+            {},
+            {".husky/hub-fetch-run.py"},
+            set(),
+        ),
+        (
+            "a snake_case or capitalized shell, PowerShell, or batch name with no wrapped tool breaks",
+            {
+                "scripts/sync_tools.sh": exe,
+                "scripts/Sync-Tools.ps1": plain,
+                "scripts/SYNC.CMD": plain,
+                "scripts/sync-tools.SH": exe,
+                "scripts/sync_tools.bat": plain,
+            },
+            {},
+            {
+                "scripts/sync_tools.sh",
+                "scripts/Sync-Tools.ps1",
+                "scripts/SYNC.CMD",
+                "scripts/sync-tools.SH",
+                "scripts/sync_tools.bat",
+            },
+            set(),
+        ),
+        (
+            "a Pester suffix over a non-conforming stem breaks",
+            {"tests/Sync_Tools.Tests.ps1": plain},
+            {},
+            {"tests/Sync_Tools.Tests.ps1"},
+            set(),
+        ),
+        (
+            "a launcher beside its Python tool keeps the tool's stem",
+            {
+                "scripts/fetch_report.py": plain,
+                "scripts/fetch_report.sh": exe,
+                "scripts/fetch_report.ps1": plain,
+                "scripts/fetch_report.cmd": plain,
+            },
+            {},
+            set(),
+            {},
+        ),
+        (
+            "a launcher whose Python tool sits in another directory is undecided",
+            {"tools/fetch_report.py": plain, "scripts/fetch_report.sh": exe},
+            {},
+            set(),
+            {"scripts/fetch_report.sh"},
+        ),
+        (
+            "an extensionless executable with a shebang and a non-conforming name breaks",
+            {"bin/run_backup": exe, "bin/RunBackup": exe},
+            {"bin/run_backup": "#!/usr/bin/env bash\n", "bin/RunBackup": "#!/bin/sh\n"},
+            {"bin/run_backup", "bin/RunBackup"},
+            set(),
+        ),
+        (
+            "an extensionless executable with no shebang, or no readable text, is undecided",
+            {"bin/Tool_Binary": exe, "bin/Unreadable_Tool": exe},
+            {"bin/Tool_Binary": "\x7fELF"},
+            set(),
+            {"bin/Tool_Binary", "bin/Unreadable_Tool"},
+        ),
+        (
+            "an extensionless file without the executable bit is out of scope",
+            {"docs/Release_Notes": plain},
+            {},
+            set(),
+            set(),
+        ),
+    ]
+    file_naming_ok = True
+    for label, blobs_in, texts_in, want_broken, want_undecided in file_naming_cases:
+        reads = []
+
+        def read_text(path, texts_in=texts_in, reads=reads):
+            reads.append(path)
+            return texts_in.get(path)
+
+        got = file_naming_findings(blobs_in, read_text)
+        broken_text = next((t for _, t in got if " break " in t), "")
+        undecided_text = next((t for _, t in got if "cannot decide" in t), "")
+        good = (
+            all(kind == "DRIFT" for kind, _ in got)
+            and len(got) == bool(want_broken) + bool(want_undecided)
+            and broken_text.startswith(
+                f"file-naming: {len(want_broken)} file(s)" if want_broken else ""
+            )
+            and all(f"{p}," in f"{broken_text}," or f"{p} " in broken_text for p in want_broken)
+            and undecided_text.startswith(
+                f"file-naming: {len(want_undecided)} file(s)" if want_undecided else ""
+            )
+            and all(f"{p} (" in undecided_text for p in want_undecided)
+            and set(reads)
+            <= {p for p, m in blobs_in.items() if m == exe and "." not in p.rsplit("/", 1)[-1]}
+        )
+        if not good:
+            ok = False
+            file_naming_ok = False
+            print(f"  FAIL file_naming_findings [{label}] -> {got}, reads {reads}")
+    many = {f"scripts/Tool{n}.py": plain for n in range(7)}
+    capped = file_naming_findings(many, lambda path: None)
+    if not (len(capped) == 1 and capped[0][1].endswith(" and 2 more")):
+        ok = False
+        file_naming_ok = False
+        print(f"  FAIL file_naming_findings [past five paths the list is capped] -> {capped}")
+    if file_naming_findings(None, lambda path: None) != []:
+        ok = False
+        file_naming_ok = False
+        print("  FAIL file_naming_findings [an unreadable tree reports nothing here]")
+    if file_naming_ok:
+        print(
+            "  ok   file_naming_findings: each script extension takes its stem shape, the wrapper and Pester exemptions hold, and an undecidable file is reported for judgment"
+        )
+
+    secret_stem_cases = [
+        (
+            "conforming stems, examples, and the directory's own files pass",
+            {
+                ".secrets/README.md",
+                ".secrets/.gitignore",
+                ".secrets/db_root_password.example",
+                ".secrets/mail_relay.env.example",
+                "deploy/.secrets/service_account.json.example",
+                "docs/Mixed-Case.md",
+            },
+            set(),
+        ),
+        (
+            "a hyphenated, capitalized, or bare stem breaks",
+            {
+                ".secrets/db-root-password.example",
+                ".secrets/Mail_Relay.env.example",
+                ".secrets/.env.example",
+                "deploy/.secrets/api-token",
+            },
+            {
+                ".secrets/db-root-password.example",
+                ".secrets/Mail_Relay.env.example",
+                ".secrets/.env.example",
+                "deploy/.secrets/api-token",
+            },
+        ),
+        (
+            "a file outside a .secrets directory is out of scope",
+            {"secrets/db-root-password.example", "config/.secrets-notes/Odd-Name"},
+            set(),
+        ),
+    ]
+    secret_stem_ok = True
+    for label, tree_in, want in secret_stem_cases:
+        got = secret_stem_findings(tree_in)
+        good = (not want and got == []) or (
+            len(got) == 1
+            and got[0][0] == "DRIFT"
+            and got[0][1].startswith(f"runtime-secrets: {len(want)} secret file(s)")
+            and all(p in got[0][1] for p in want)
+        )
+        if not good:
+            ok = False
+            secret_stem_ok = False
+            print(f"  FAIL secret_stem_findings [{label}] -> {got}")
+    if secret_stem_findings(None) != []:
+        ok = False
+        secret_stem_ok = False
+        print("  FAIL secret_stem_findings [an unreadable tree reports nothing here]")
+    if secret_stem_ok:
+        print(
+            "  ok   secret_stem_findings: a .secrets/ file stem that is not lowercase snake_case is DRIFT, the name read up to its first dot"
         )
 
     declared_types_cases = [

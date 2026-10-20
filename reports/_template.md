@@ -24,6 +24,7 @@
 | carried-scope | | | | |
 | repo-setup | | | | |
 | runtime-secrets | | | | |
+| file-naming | | | | |
 | verbatim-tree | | | | |
 | linter-parity | | | | |
 | recurring-violations | | | | |
