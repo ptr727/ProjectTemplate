@@ -83,8 +83,8 @@ PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "mis
 # Deliberately unanchored.
 # Both notes this form was introduced for end the sentence after the paren, so an end-anchored pattern matches neither of the two it was written to catch.
 # That is the shape a matcher fails at silently: it reports nothing, and a fleet with no such note in it reports exactly the same.
-DETECTION_SUPPRESSION_IDS = {"python.directories.declared": "python", "filenaming.scripts": None}
 CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
+DETECTION_SUPPRESSION_IDS = {"python.directories.declared": "python", "filenaming.scripts": None}
 
 
 def load(rel):
@@ -344,6 +344,16 @@ def is_repo_python(path):
     return path.endswith(".py") and posixpath.basename(path) not in CARRIED_PYTHON_HELPERS
 
 
+def notes_naming(entry, cid):
+    """The registry driftNotes naming check id `cid` in its parenthesized form."""
+    return [n for n in entry.get("driftNotes", []) if f"({cid})" in n]
+
+
+def quote_note(note):
+    """A driftNote quoted for a finding, cut at 70 characters."""
+    return f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
+
+
 def python_type_findings(entry, tree):
     """The discovery advisory for tracked `.py` files while the registry's `types` omits 'python'.
 
@@ -355,8 +365,7 @@ def python_type_findings(entry, tree):
     """
     if tree is None or "python" in declared_types(entry):
         return []
-    notes = entry.get("driftNotes", [])
-    suppressed = any(isinstance(n, str) and "(python.directories.declared)" in n for n in notes)
+    suppressed = bool(notes_naming(entry, "python.directories.declared"))
     present = any(is_repo_python(p) for p in tree)
     # The note-freshness check skips this note on a repo without the type, so its staleness is reported here, where the tree is.
     if suppressed and not present:
@@ -466,7 +475,7 @@ def capped_paths(paths):
     return f"{shown}{more}"
 
 
-FILE_NAMING_NOTE_ID = "(filenaming.scripts)"
+FILE_NAMING_ID = "filenaming.scripts"
 CODE_SPAN = re.compile(r"`([^`]+)`")
 
 
@@ -487,16 +496,13 @@ def file_naming_findings(entry, blobs, read_text):
     may be an installed command instead. The last is an extensionless executable with no shebang
     or readable text.
 
-    A name a tool or platform fixes is exempted by a registry driftNote naming (filenaming.scripts)
-    and each exempt path as a code span, so one note cannot silence a later break on another path.
-    An exempt path the check would not report, renamed, deleted, or never a script, is reported as
-    stale, and so is a note naming no path at all.
+    A registry driftNote naming (filenaming.scripts) exempts each path it names as a code span, for a
+    name a tool or platform fixes. One note therefore cannot silence a later break on another path.
+    A named path the check would not report is a stale exemption, and so is a note naming no path.
     """
     if blobs is None:
         return []
-    exempt_notes = [
-        n for n in entry.get("driftNotes") or [] if isinstance(n, str) and FILE_NAMING_NOTE_ID in n
-    ]
+    exempt_notes = notes_naming(entry, FILE_NAMING_ID)
     python_stems = {}
     for path in blobs:
         directory, name = posixpath.split(path)
@@ -552,13 +558,13 @@ def file_naming_findings(entry, blobs, read_text):
     exempt = set()
     for note in exempt_notes:
         paths = CODE_SPAN.findall(note)
-        quoted = f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
+        quoted = quote_note(note)
         if not paths:
             findings.append(
                 (
                     "DRIFT",
                     (
-                        f"registry: a driftNote naming {FILE_NAMING_NOTE_ID} names no path as a code "
+                        f"registry: a driftNote naming ({FILE_NAMING_ID}) names no path as a code "
                         f"span, so it exempts nothing. Name each exempt path, or delete the note: {quoted}"
                     ),
                 )
@@ -569,7 +575,7 @@ def file_naming_findings(entry, blobs, read_text):
                 (
                     "DRIFT",
                     (
-                        f"registry: a driftNote naming {FILE_NAMING_NOTE_ID} exempts {len(stale)} "
+                        f"registry: a driftNote naming ({FILE_NAMING_ID}) exempts {len(stale)} "
                         "path(s) the file-naming check does not report. Drop each from the note, and "
                         f"the note once it exempts none: {capped_paths(stale)}"
                     ),
@@ -585,7 +591,7 @@ def file_naming_findings(entry, blobs, read_text):
                 (
                     f"file-naming: {len(broken)} file(s) break {rule}. Rename each, or where a "
                     f"tool or platform fixes the name, record a driftNote naming "
-                    f"{FILE_NAMING_NOTE_ID} and the path as a code span: {capped_paths(broken)}"
+                    f"({FILE_NAMING_ID}) and the path as a code span: {capped_paths(broken)}"
                 ),
             )
         )
@@ -908,7 +914,7 @@ def driftnote_findings(entry, spec, open_count):
     """
     out = []
     for note in entry.get("driftNotes", []):
-        quoted = f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
+        quoted = quote_note(note)
         for cid in CHECK_ID_RE.findall(note):
             if is_suppression_id(entry, cid):
                 continue

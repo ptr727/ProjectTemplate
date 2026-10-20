@@ -169,8 +169,9 @@ class AuditRepoNamingCase(unittest.TestCase):
             self.naming_findings(findings),
             [
                 (
-                    'file-naming: 1 file(s) break CODESTYLE.md "Script and Utility File Names": '
-                    "scripts/Fetch-Report.py"
+                    'file-naming: 1 file(s) break CODESTYLE.md "Script and Utility File Names". '
+                    "Rename each, or where a tool or platform fixes the name, record a driftNote "
+                    "naming (filenaming.scripts) and the path as a code span: scripts/Fetch-Report.py"
                 ),
                 (
                     "file-naming: 1 file(s) the per-extension patterns cannot decide, judge each by "
