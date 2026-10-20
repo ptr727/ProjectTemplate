@@ -552,7 +552,8 @@ def file_naming_findings(blobs, read_text):
 def secret_stem_findings(tree):
     """DRIFT naming each secret file in a repo-scoped `.secrets/` directory whose stem is not lowercase snake_case.
 
-    The directory's own README.md, .gitignore, and .gitkeep are not secret files. The stem is the
+    A secret file sits directly in the directory, as its `**/.secrets/*` ignore rule reads it, and
+    the directory's own README.md, .gitignore, and .gitkeep are not secret files. The stem is the
     name before its first dot, so `mail_relay.env.example` reads as conforming. Real secret
     files are untracked, so their tracked `.example` files are what the tree shows of them. `tree` is
     the repo's blob path set, or None when it could not be read in full. Nothing is reported then,
@@ -564,7 +565,7 @@ def secret_stem_findings(tree):
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        if ".secrets" not in segments[:-1] or name in SECRETS_DIRECTORY_EXEMPT:
+        if segments[-2:-1] != [".secrets"] or name in SECRETS_DIRECTORY_EXEMPT:
             continue
         if not SECRET_FILE_STEM.fullmatch(name.split(".", 1)[0]):
             broken.append(path)
@@ -3234,9 +3235,7 @@ def audit_repo(entry, spec, branch=None):
     findings.extend(python_undeclared_root_findings(entry, tree))
 
     def read_text(path):
-        return contents_text(
-            gh(f"repos/{slug}/contents/{urllib.parse.quote(path)}?ref={ground}", ok404=True)
-        )
+        return contents_text(gh(f"repos/{slug}/contents/{urllib.parse.quote(path)}?ref={ground}"))
 
     findings.extend(file_naming_findings(blob_field(carried_blobs, 1), read_text))
     findings.extend(secret_stem_findings(tree))
@@ -6823,8 +6822,12 @@ def _selftest():
             },
         ),
         (
-            "a file outside a .secrets directory is out of scope",
-            {"secrets/db-root-password.example", "config/.secrets-notes/Odd-Name"},
+            "a file outside a .secrets directory, or nested below one, is out of scope",
+            {
+                "secrets/db-root-password.example",
+                "config/.secrets-notes/Odd-Name",
+                ".secrets/docs/Mixed-Case.md",
+            },
             set(),
         ),
     ]
