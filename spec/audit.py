@@ -479,8 +479,9 @@ def file_naming_findings(blobs, read_text):
     hyphenated once Pester's `.Tests.ps1` suffix is set aside, and so is an extensionless
     executable's name. An extension is recognized whatever its case, so an upper-case one breaks.
     A snake_case launcher beside a `.py` of the same stem in its own directory keeps that stem.
-    Two cases go to judgment rather than breaking. One is a launcher whose `.py` sits only in
-    another directory. The other is an extensionless executable with no shebang or readable text.
+    Three cases go to judgment rather than breaking. One is a launcher whose `.py` sits only in
+    another directory. Another is such a launcher with no extension, which may be an installed
+    command instead. The last is an extensionless executable with no shebang or readable text.
     """
     if blobs is None:
         return []
@@ -515,7 +516,10 @@ def file_naming_findings(blobs, read_text):
         if HYPHENATED_FILE_STEM.fullmatch(stem):
             continue
         wrapped = python_stems.get(stem, set()) if PYTHON_FILE_STEM.fullmatch(stem) else set()
+        if directory in wrapped and dot:
+            continue
         if directory in wrapped:
+            undecided.append(f"{path} (an extensionless launcher may be an installed command)")
             continue
         if wrapped:
             undecided.append(f"{path} (a {stem}.py sits only in another directory)")
@@ -552,8 +556,8 @@ def file_naming_findings(blobs, read_text):
 def secret_stem_findings(tree):
     """DRIFT naming each secret file in a repo-scoped `.secrets/` directory whose stem is not lowercase snake_case.
 
-    A secret file sits directly in the directory, as its `**/.secrets/*` ignore rule reads it, and
-    the directory's own README.md, .gitignore, and .gitkeep are not secret files. The stem is the
+    A secret file sits directly in the directory, as its `**/.secrets/*` ignore rule reads it. The
+    directory's own README.md, .gitignore, and .gitkeep are not secret files. The stem is the
     name before its first dot, so `mail_relay.env.example` reads as conforming. Real secret
     files are untracked, so their tracked `.example` files are what the tree shows of them. `tree` is
     the repo's blob path set, or None when it could not be read in full. Nothing is reported then,
@@ -6715,11 +6719,11 @@ def _selftest():
             {"scripts/fetch_report.sh"},
         ),
         (
-            "an extensionless launcher beside its Python tool keeps the tool's stem, with no read",
+            "an extensionless launcher beside its Python tool may be an installed command, with no read",
             {"scripts/fetch_report.py": plain, "scripts/fetch_report": exe},
             {},
             set(),
-            set(),
+            {"scripts/fetch_report"},
         ),
         (
             "an extensionless launcher whose Python tool sits elsewhere is undecided, with no read",

@@ -37,9 +37,15 @@ class FakeGh:
     audit_repo past the loop under test while still reading as a pass.
     """
 
-    def __init__(self, tree: set[str], modes: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        tree: set[str],
+        modes: dict[str, str] | None = None,
+        unread: frozenset[str] = frozenset(),
+    ) -> None:
         self.tree = tree
         self.modes = modes or {}
+        self.unread = unread
         self.paths: list[str] = []
 
     def __call__(self, path: str, ok404: bool = False) -> Any:
@@ -61,6 +67,10 @@ class FakeGh:
             return {"tree": blobs, "truncated": False}
         if base.startswith(f"repos/{SLUG}/contents/"):
             name = base.split("/contents/", 1)[1]
+            if name in self.unread:
+                if ok404:
+                    return None
+                raise RuntimeError(f"gh api {path}: HTTP 404")
             if name in self.tree:
                 return {"encoding": "base64", "content": base64.b64encode(b"x\n").decode()}
             if ok404:
@@ -69,7 +79,7 @@ class FakeGh:
 
 
 def run_audit(
-    tree: set[str], modes: dict[str, str] | None = None
+    tree: set[str], modes: dict[str, str] | None = None, unread: frozenset[str] = frozenset()
 ) -> tuple[list[tuple[str, str]], FakeGh]:
     """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
 
@@ -82,7 +92,7 @@ def run_audit(
         "secrets": audit.load("spec/secrets.json"),
         "files": {"baseline": [CODECOV]},
     }
-    fake = FakeGh(tree, modes)
+    fake = FakeGh(tree, modes, unread)
     with (
         mock.patch.object(audit, "gh", fake),
         mock.patch.object(audit, "hub_tracked", lambda rev=None: frozenset()),
@@ -173,6 +183,13 @@ class AuditRepoNamingCase(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_a_failed_shebang_read_raises_rather_than_reading_as_undecided(self) -> None:
+        """The tree listed the path as a blob, so a 404 reading it is a failed read, not an absent file."""
+        tree = CARRIED | {".codecov.yml", "bin/Run_Backup"}
+
+        with self.assertRaises(RuntimeError):
+            run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
 
 
 if __name__ == "__main__":
