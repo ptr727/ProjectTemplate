@@ -70,7 +70,7 @@ without trusting the parts of it that have gone stale.
   session. A defect in WSL interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or
   `wslpath` reproduces only inside WSL. So does running a Windows `.exe` from Linux, although WSL
   runs on Windows. Behavior that differs under Windows PowerShell 5.1 or `winget`, or in Windows
-  path and ACL semantics, reproduces only on Windows. A platform-bound issue still goes to the backlog where a Linux
+  path and ACL semantics, reproduces only on Windows. Each of these defects still goes to the backlog where a Linux
   host outside WSL verifies its fix, as a path-translation unit test can. An issue in
   systemd user scopes, apt, a bash script, or a `pwsh` script run in a Linux container gets no lane
   by its topic. The conditions decide it like any other issue. Where only part of an issue needs
