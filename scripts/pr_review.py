@@ -336,10 +336,10 @@ Subcommands
            exits 0, or on a held head is polled while it can still move the merge, which includes
            a context the base branch's rules require and the head has not yet registered. Neither is a
            stuck check its rollup node reads as not required, since the rollup carries checks no
-           ruleset requires, nor any stuck check on a merge that is not BLOCKED, nor a failed check
-           from an older run of a workflow whose newer run on the head is still in progress, which
-           the digest names as superseded. The digest reports the check in every case, so a shape
-           outside 44 is still named rather than lost.
+           ruleset requires, nor any stuck check on a merge that is not BLOCKED. Nor is a failed
+           check from an older run of a workflow still running on the head, which the digest names
+           as superseded. The digest reports the check in every case, so a shape outside 44 is
+           still named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
            printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
@@ -4116,11 +4116,10 @@ def check_nodes(pr: dict) -> list[dict]:
     A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
 
     A name only an older suite carries is marked `superseded` while the workflow's newest suite
-    reads a status other than COMPLETED, with that suite's run id as `newer_run`. A cancelled run's
-    aggregator fails over its cancelled jobs, and the run replacing it posts its own aggregator
-    only once its other jobs finish, so until then the failure describes a run nobody is waiting
-    on. Once the newest suite completes, a name it never posted stands as the merge gate reads it.
-    An unread status is not read as running, so the failure stays the verdict it reads as.
+    has not completed. That suite's run id rides along as `newer_run`. A cancelled run's
+    aggregator fails over its cancelled jobs. Its replacement posts its own aggregator only once
+    its other jobs finish, so until then the failure describes a run nobody waits on.
+    Once the newest suite completes, a name it never posted stands as the merge gate reads it.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
@@ -4197,7 +4196,7 @@ def check_nodes(pr: dict) -> list[dict]:
     stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
     for i, (group, sid) in suites.items():
         suite_id, status, run = newest_run.get(group[0], (0, "", None))
-        if i not in stale and sid < suite_id and status and status != "COMPLETED":
+        if i not in stale and sid < suite_id and status != "COMPLETED":
             out[i]["superseded"] = True
             out[i]["newer_run"] = run
     return [node for i, node in enumerate(out) if i not in stale]
@@ -4232,8 +4231,8 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
 
     FAILED is any finished check that did not pass, which is a definite answer rather than a stuck
     one, and it is reported here so that a reader is never left deducing a red check from `BLOCKED`.
-    A check `check_nodes` marks superseded is none of these, since it waits on its workflow's newer
-    run rather than being stuck, and read as FAILED it exited 44 while that run was still going.
+    A check `check_nodes` marks superseded is none of these, since it waits on a newer run.
+    Read as FAILED, it exited 44 while that run was still going.
     """
     if node.get("superseded"):
         return ""

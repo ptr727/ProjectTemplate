@@ -400,12 +400,12 @@ def check(
     workflow: int | None = None,
     slug: str = "github-actions",
     app_id: int = 15368,
-    suite_status: str | None = None,
+    suite_status: str = "COMPLETED",
     run: int | None = None,
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
 
-    The suite's `status` and the run's `databaseId` are carried only where a case names them.
+    The run's `databaseId` is carried only where a case names one.
 
     The starved case this exists for was read off run 31118675530 in this repository: an aggregator
     job dispatched the instant its dependency finished, left `QUEUED` with an empty runner name and
@@ -421,9 +421,8 @@ def check(
         "databaseId": suite,
         "app": {"slug": slug, "databaseId": app_id},
         "workflowRun": workflow_run,
+        "status": suite_status,
     }
-    if suite_status is not None:
-        check_suite["status"] = suite_status
     return {
         "__typename": "CheckRun",
         "name": name,
@@ -7712,12 +7711,28 @@ class TestCheckShapes(unittest.TestCase):
         self.assertFalse(any(n.get("superseded") for n in nodes))
         self.assertEqual(["FAILED"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)])
 
-    def test_an_unread_suite_status_does_not_supersede_a_failure(self) -> None:
-        """A missing status is not read as a run in progress, so the failure stays a verdict."""
+    def test_a_held_wait_polls_on_a_superseded_failure_until_the_newer_run_posts(self) -> None:
+        """The newer run's gate replaces the superseded one, and only then does the hold release.
+
+        The newer run's job is marked optional, so the superseded gate alone is what holds.
+        """
         rollup = self.superseded_rollup("IN_PROGRESS")
-        rollup[2]["checkSuite"].pop("status")
-        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
-        self.assertFalse(any(n.get("superseded") for n in nodes))
+        rollup[2]["isRequired"] = False
+        held = payload([review()], merge="BLOCKED", checks=rollup)
+        nodes = pr_review.check_nodes(held)
+        self.assertTrue(pr_review.held_checks_open(held, nodes, NOW, 300, 1800))
+        gate = "Check pull request workflow status job"
+        done = payload(
+            [review()],
+            merge="BLOCKED",
+            checks=[
+                *self.superseded_rollup("COMPLETED")[:2],
+                check(name="lint", suite=20, workflow=7, run=200),
+                check(name=gate, suite=20, workflow=7, run=200),
+            ],
+        )
+        nodes = pr_review.check_nodes(done)
+        self.assertFalse(pr_review.held_checks_open(done, nodes, NOW, 300, 1800))
 
     def test_a_newer_run_of_another_workflow_does_not_supersede_a_failure(self) -> None:
         rollup = self.superseded_rollup("IN_PROGRESS")
@@ -8088,8 +8103,8 @@ class TestCli(GqlCase):
     def test_wait_does_not_take_forty_four_on_a_superseded_runs_failed_aggregator(self) -> None:
         """A closed and reopened pull request cancels its first run, whose aggregator then fails.
 
-        The reopen's run on the same head is still going and has not posted its own aggregator,
-        so the failure is not a verdict on the head, and the digest names the newer run instead.
+        The reopen's run on the same head is still going and has not posted its own aggregator.
+        So the failure is not a verdict on the head, and the digest names the newer run instead.
         """
         gate = "Check pull request workflow status job"
         rollup = [
