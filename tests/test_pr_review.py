@@ -3111,6 +3111,52 @@ class TestUnrecognizedShapes(GqlCase):
         quoted = "> a <!-- b\n>\n> c `x` d -->"
         self.assertEqual(["`x`"], [m.group() for m in pr_review.CODE_SPAN.finditer(quoted)])
 
+    def test_a_container_s_paragraph_end_is_a_known_limit(self) -> None:
+        """A line reader cannot know a paragraph's container, so these still pair across its end.
+
+        GitHub ends the item's or the quotation's paragraph at each line here and renders no span.
+        In the last body it renders `x` as a span. A top-level setext underline ends a paragraph
+        too. Here it reads as lazy text, which is right only in a container.
+        A test failing here means the limit moved, so the `CodeSpans` note goes with it.
+        """
+        for body in (
+            "- a `b\n    - c` d",
+            "1. a `b\n2. c` d",
+            "- item `a\n    <div>\n  b` c",
+            "> a `b\n>\t- c` d",
+            "a `b\n===\nc` d",
+            "- a `b\n===\nc` d",
+        ):
+            with self.subTest(body=body):
+                self.assertIsNotNone(pr_review.CODE_SPAN.search(body))
+        self.assertEqual([], list(pr_review.CODE_SPAN.finditer("1. a <!-- b\n2. c `x` -->")))
+
+    def test_an_escaped_escape_and_a_link_title_are_known_limits(self) -> None:
+        """GitHub opens a span after an even backslash run and none inside a link's title.
+
+        Here the first opens none and the second pairs with the later backtick, so the live `<b>`
+        reads as quoted. A test failing here means the limit moved, so the `CodeSpans` note goes.
+        """
+        self.assertIsNone(pr_review.CODE_SPAN.search("x \\\\`y` z"))
+        span = pr_review.CODE_SPAN.search('[a](https://e.example "t ` u") <b>B</b> `y`')
+        assert span is not None
+        self.assertIn("<b>", span.group())
+
+    def test_a_heading_s_indent_and_a_line_split_are_known_limits(self) -> None:
+        """GitHub renders each of these as something other than a heading, and each reads as one.
+
+        A no-break space and a four-space indent each open no heading on GitHub, and a vertical tab
+        ends no line there. No reviewer body has carried either, so both stay known limits.
+        """
+        for line in ("\xa0## Overview", "    ## Overview"):
+            with self.subTest(line=line):
+                self.assertIsNotNone(pr_review.MARKDOWN_HEADING.match(line))
+                self.assertIsNotNone(pr_review.HEADING.match(line))
+        self.assertEqual(
+            ["heading: ## Overview"],
+            pr_review.unrecognized_in("Prose about the change.\v## Overview"),
+        )
+
     def test_a_backtick_inside_html_or_an_autolink_opened_first_opens_no_span(self) -> None:
         """GitHub reads a span, raw inline HTML, and an autolink by which one opens first.
 

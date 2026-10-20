@@ -762,6 +762,12 @@ class CodeSpans:
 
     So one pattern reads all three, each match consuming its own text, and only a span is
     reported. A span carries its backtick run as group 1, which is what tells it from the rest.
+
+    Some readings differ from GitHub's and stay known limits that tests pin, since no reviewer
+    body has carried any of them. A paragraph's end is read from its line alone. So a span here
+    can pair across a line that ends a list item's or a quotation's paragraph on GitHub. A
+    backtick run after an even run of backslashes opens a span on GitHub and none here. One inside
+    an inline link's destination or title opens none on GitHub and pairs here.
     """
 
     def __init__(self) -> None:
