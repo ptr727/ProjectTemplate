@@ -478,10 +478,11 @@ def file_naming_findings(blobs, read_text):
     A `.py` stem is lowercase snake_case. A `.sh`, `.ps1`, `.cmd`, or `.bat` stem is lowercase-
     hyphenated once Pester's `.Tests.ps1` suffix is set aside, and so is an extensionless
     executable's name. An extension is recognized whatever its case, so an upper-case one breaks.
-    A snake_case launcher beside a `.py` of the same stem in its own directory keeps that stem.
-    Three cases go to judgment rather than breaking. One is a launcher whose `.py` sits only in
-    another directory. Another is such a launcher with no extension, which may be an installed
-    command instead. The last is an extensionless executable with no shebang or readable text.
+    A snake_case launcher with an extension, beside a `.py` of the same stem in its own directory,
+    keeps that stem. Three cases go to judgment rather than breaking. One is a launcher whose `.py`
+    sits only in another directory. Another is an extensionless launcher beside its `.py`, which
+    may be an installed command instead. The last is an extensionless executable with no shebang
+    or readable text.
     """
     if blobs is None:
         return []
