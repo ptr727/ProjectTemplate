@@ -2770,6 +2770,7 @@ class TestCoverage(GqlCase):
             ("under a thematic break", f"Prose.\n\n* * *\n    {MARKER}", "UNSTATED"),
             ("under a tab-spaced thematic break", f"Prose.\n\n*\t*\t*\n    {MARKER}", "UNSTATED"),
             ("under a setext underline and a tab", f"Overview\n===\t\n    {MARKER}", "UNSTATED"),
+            ("under hashes and a no-break space", f"#{chr(0xA0)}Overview\n    {MARKER}", "FULL"),
             ("under an HTML comment", f"<!-- ccr-overview-v2 -->\n    {MARKER}", "UNSTATED"),
             ("under a code line", f"Prose.\n\n    code\n    {MARKER}", "UNSTATED"),
             ("after a blank line", f"Prose.\n\n    {MARKER}", "UNSTATED"),
@@ -3112,17 +3113,20 @@ class TestUnrecognizedShapes(GqlCase):
         self.assertEqual(pr_review.BLOCK_SPACE, prose_lint.BLOCK_SPACE)
 
     def test_a_heading_opens_on_the_whitespace_github_takes_after_its_hashes(self) -> None:
-        """A space, a tab, or the line's end follows a heading's hashes, and a vertical tab does not.
+        """A space, a tab, or the line's end follows a heading's hashes, and nothing else does.
 
-        Python's `\\s` took a vertical tab and a form feed there, so a line GitHub renders as text
-        was read as a heading.
+        Python's `\\s` took a no-break space there, so a line GitHub renders as text was read as a
+        heading, by the section reader as well as by the heading vetting.
         """
         for line in ("## Overview", "#\tOverview", "#", "###  ", "  ## Overview\r"):
             with self.subTest(line=line):
                 self.assertTrue(pr_review.MARKDOWN_HEADING.match(line))
-        for line in ("#\vOverview", "#\fOverview", "#Overview", "####### Overview"):
+        nbsp = chr(0xA0)
+        for line in (f"#{nbsp}Overview", "#\vOverview", "#\fOverview", "#Overview", "####### X"):
             with self.subTest(line=line):
                 self.assertFalse(pr_review.MARKDOWN_HEADING.match(line))
+        self.assertTrue(pr_review.HEADING.match("## Suppressed comments (2)"))
+        self.assertFalse(pr_review.HEADING.match(f"#{nbsp}Suppressed comments (2)"))
 
     def test_a_stray_backtick_in_two_paragraphs_does_not_mask_the_headings(self) -> None:
         """The same over-match in the blocking direction, which reads as a body with no heading."""

@@ -960,7 +960,7 @@ LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
 DETAILS_OPENER = re.compile(rf"{tag_opener('details')}{ATTRIBUTES}[ \t]*", re.IGNORECASE)
 SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
 HEADING = re.compile(
-    rf"\s*(?:#{{1,6}}\s|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
+    rf"\s*(?:{ATX_HEADING}|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
 )
 
 # How many of the newest reviews and comments both queries read.
