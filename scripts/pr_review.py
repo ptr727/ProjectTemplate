@@ -632,7 +632,7 @@ def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
     and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
 
-    One tail serves every reader here looking for a named tag, and it stays lenient. A tail kept per
+    One tail serves every reader here of a tag's attributes, and it stays lenient. A tail kept per
     site was fixed at one and not at its siblings. `TAG_ATTRIBUTE` is CommonMark's stricter grammar
     for any inline tag, which is what decides whether a backtick inside one opens a span.
     """
@@ -740,7 +740,7 @@ TAG_ATTRIBUTE = (
     rf"(?:[^ \t\r\n\"'=<>`]+|'(?:[^'\n]|{PARAGRAPH_BREAK})*'|\"(?:[^\"\n]|{PARAGRAPH_BREAK})*\"))?"
 )
 INLINE_HTML = (
-    rf"(?<!\\)(?:<[A-Za-z][A-Za-z0-9-]*(?:{TAG_ATTRIBUTE})*{TAG_SPACE}/?>"
+    rf"(?<!\\)(?:\\\\)*(?:<[A-Za-z][A-Za-z0-9-]*(?:{TAG_ATTRIBUTE})*{TAG_SPACE}/?>"
     rf"|</[A-Za-z][A-Za-z0-9-]*{TAG_SPACE}>"
     rf"|<!--(?:-?>|(?:{IN_PARAGRAPH}*?(?:[^-\n]|{PARAGRAPH_BREAK}))?-->)"
     rf"|<\?{IN_PARAGRAPH}*?\?>"

@@ -3123,7 +3123,7 @@ class TestUnrecognizedShapes(GqlCase):
             *("<!-- a ` b -->", "<!-- a -- ` b -->", "<!-- a ` b\n-->", "<!-- a ` b\nc -->"),
             *("<https://e.example/`a>", "<ht:/`>", "<u`v@e.example>"),
             *('<a title="`">', "<a _t='`'>", '<A B="`"/>', '<a\n  b="`">', '<a title="\n`">'),
-            *("<? a ` b ?>", "<!X a ` b>", "<![CDATA[ a ` b ]]>"),
+            *("<? a ` b ?>", "<!X a ` b>", "<![CDATA[ a ` b ]]>", "\\\\<!-- a ` b -->"),
         )
         for opener in literal:
             with self.subTest(opener=opener):
@@ -3136,7 +3136,7 @@ class TestUnrecognizedShapes(GqlCase):
         pairing = (
             *("<!-- a ` b --->", "<!x a ` b>", "<a b=c`d>", "</a ` >", '<ab:c title="`">'),
             *("\\<!-- a ` b -->", '<a\n\ntitle="`">', "<!--> `", "<!---> `", "<!----> `"),
-            "<!-- a --> b --> `",
+            *("<!-- a --> b --> `", "\\\\\\<!-- a ` b -->"),
         )
         self.assertEqual(
             "x <!-- a ` b ---> c --> <b>B</b>  ",
