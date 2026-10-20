@@ -7749,6 +7749,24 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(200, gate.get("newer_run"))
         self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
 
+    def test_an_unfinished_check_in_an_older_run_keeps_its_stuck_reading(self) -> None:
+        """A newer run queued behind the older one cannot start, so the older one's shape stands."""
+        starved = check(
+            name="gate", status="QUEUED", conclusion="", started=ago(900), suite=10, workflow=7
+        )
+        pr = payload([review()], merge="BLOCKED", checks=[starved])
+        waiting = {
+            "databaseId": 20,
+            "status": "QUEUED",
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [waiting]}
+        nodes = pr_review.check_nodes(pr)
+        self.assertFalse(any(n.get("superseded") for n in nodes))
+        self.assertEqual(
+            ["NOT_PICKED_UP"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)]
+        )
+
     def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
