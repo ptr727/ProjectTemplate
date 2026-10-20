@@ -26,7 +26,7 @@ Downloaded and run rather than piped into a shell, for three reasons. Standard i
 
 Piping it is still detected: with no action and no terminal it reports rather than guessing, and prints the three lines above as the remedy.
 
-A Debian host installed with a root password may have no `sudo`, and its first account is left outside the `sudo` group. The first line stops on such a host. Give the account `sudo` once with one root step. Then log out and back in so the new group takes effect, and start again from the first line. The login form `su -l` is needed, since plain `su` keeps the account's `PATH` and `usermod` is then not found. Replace `<account>` with the login name of the account that will do the work:
+A Debian host installed with a root password may have no `sudo`, and its first account is left outside the `sudo` group. The first line stops on such a host. Give the account `sudo` once with one root step. Then log out and back in so the new group takes effect. Start again from the first line. The login form `su -l` is needed, since plain `su` keeps the account's `PATH` and `usermod` is then not found. Replace `<account>` with the login name of the account that will do the work:
 
 ```shell
 su -l root -c 'apt-get update && apt-get install -y sudo curl ca-certificates tar && usermod -aG sudo <account>'
