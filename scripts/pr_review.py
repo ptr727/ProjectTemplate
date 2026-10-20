@@ -336,8 +336,10 @@ Subcommands
            exits 0, or on a held head is polled while it can still move the merge, which includes
            a context the base branch's rules require and the head has not yet registered. Neither is a
            stuck check its rollup node reads as not required, since the rollup carries checks no
-           ruleset requires, nor any stuck check on a merge that is not BLOCKED. The digest reports
-           the check in every case, so a shape outside 44 is still named rather than lost.
+           ruleset requires, nor any stuck check on a merge that is not BLOCKED. Nor is a failed
+           check from an older run whose workflow has a newer run on the head not yet finished.
+           The digest names that one as superseded. The digest reports the check in every case,
+           so a shape outside 44 is still named rather than lost.
            46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
            refusal naming the account quota, or one saying only that it encountered an error,
            printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
@@ -1054,9 +1056,11 @@ HELD_FIELDS = """
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
-          checkSuite{ databaseId app{ slug databaseId } workflowRun{ workflow{ databaseId } } } }
+          checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
-      }}}}}}
+      }}}
+      checkSuites(last:50){ nodes{ databaseId status workflowRun{ databaseId workflow{ databaseId } } } }
+    }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
 query($o:String!,$r:String!,$n:Int!){
@@ -4112,18 +4116,39 @@ def check_nodes(pr: dict) -> list[dict]:
     A name only an older suite carries stays, since the merge gate still reads it.
     The highest suite id decides, since `startedAt` misorders overlapping runs.
     A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
+
+    A finished check whose name only an older suite carries is marked `superseded` while the
+    workflow's newest suite has not completed. That suite's run id rides along as `newer_run`.
+    An unfinished check keeps its own stuck reading. A cancelled run's aggregator fails over its
+    cancelled jobs. Its replacement posts its own aggregator only once its other jobs finish, so
+    until then the failure describes a run nobody waits on. Once the newest suite completes, a name
+    it never posted stands as the merge gate reads it.
+    The head commit's own suites count toward the newest one as well as the rollup's. A run
+    waiting on its concurrency slot has a suite and no check run yet, so the rollup lacks it.
     """
     # No match reports nothing rather than falling back to another commit's rollup.
     # A fallback is that same stale reading reached by a different route.
     # The absence is not silent either, and `checks_unreadable` is where the digest says it.
-    rollup = head_commit(pr).get("statusCheckRollup") or {}
+    commit = head_commit(pr)
+    rollup = commit.get("statusCheckRollup") or {}
     out: list[dict] = []
     newest_suite: dict[tuple, int] = {}
     suites: dict[int, tuple[tuple, int]] = {}
+    newest_run: dict[tuple, tuple[int, str, int | None]] = {}
+
+    def note_run(suite: dict) -> int | None:
+        run = suite.get("workflowRun") or {}
+        workflow = (run.get("workflow") or {}).get("databaseId")
+        key = ("workflow", workflow)
+        suite_id = suite.get("databaseId") or 0
+        if workflow and suite_id > newest_run.get(key, (0, "", None))[0]:
+            newest_run[key] = (suite_id, suite.get("status") or "", run.get("databaseId"))
+        return workflow
+
     for n in (rollup.get("contexts") or {}).get("nodes") or []:
         if n.get("__typename") == "CheckRun":
             suite = n.get("checkSuite") or {}
-            workflow = ((suite.get("workflowRun") or {}).get("workflow") or {}).get("databaseId")
+            workflow = note_run(suite)
             if workflow:
                 origin: tuple = ("workflow", workflow)
             elif (
@@ -4181,7 +4206,15 @@ def check_nodes(pr: dict) -> list[dict]:
                     "unreadable": n.get("__typename") or "an unnamed type",
                 }
             )
+    for suite in (commit.get("checkSuites") or {}).get("nodes") or []:
+        note_run(suite)
     stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
+    for i, (group, sid) in suites.items():
+        suite_id, status, run = newest_run.get(group[0], (0, "", None))
+        finished = out[i]["state"] == "COMPLETED"
+        if finished and sid < suite_id and status != "COMPLETED":
+            out[i]["superseded"] = True
+            out[i]["newer_run"] = run
     return [node for i, node in enumerate(out) if i not in stale]
 
 
@@ -4214,7 +4247,11 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
 
     FAILED is any finished check that did not pass, which is a definite answer rather than a stuck
     one, and it is reported here so that a reader is never left deducing a red check from `BLOCKED`.
+    A check `check_nodes` marks superseded is none of these, since it waits on a newer run.
+    Read as FAILED, it exited 44 while that run was still going.
     """
+    if node.get("superseded"):
+        return ""
     state, conclusion = node.get("state") or "", node.get("conclusion") or ""
     elapsed = age(node.get("since") or "", now)
     if state in NOT_POSTED:
@@ -5378,6 +5415,14 @@ def digest(
                 f"{node.get('conclusion')}): a verdict rather than a stuck check, so "
                 "read the run and fix what failed, since no wait and no re-run clears "
                 "a real failure"
+            )
+    for node in checks:
+        if node.get("superseded") and (node.get("conclusion") or "") not in CHECK_OK:
+            lines.append(
+                f"  CHECK SUPERSEDED ({node.get('name') or 'unnamed'!r}, {node.get('state')}/"
+                f"{node.get('conclusion')} in an older run): run {node.get('newer_run')} of the "
+                "same workflow on this head has not finished, so this is not a verdict on the "
+                "head, and that run's own check replaces it once it posts"
             )
     unread = checks_unread(checks)
     if unread:
