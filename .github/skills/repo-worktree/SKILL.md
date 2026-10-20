@@ -3,8 +3,8 @@ name: repo-worktree
 description: >-
   Mandates and mechanizes task isolation in ptr727/ProjectTemplate fleet repos: every task,
   including a continuation of a prior session's task, creates its own git worktree on its own
-  feature branch before its first file edit, based on the branch work starts on (develop on both
-  fleet workflow models unless the task is explicitly about main-only content, never whichever
+  feature branch before its first file edit, based on the branch work starts on (develop on every
+  fleet workflow model unless the task is explicitly about main-only content, never whichever
   branch a tool defaulted to), preferring a registered worktree in the fleet layout and using a
   standalone-clone fallback only when the executor cannot write to either the standard worktree
   location or its Git metadata, and no available approval route grants access. Also wraps the
@@ -58,8 +58,8 @@ are this skill's own content.
 ## The Base Branch
 
 Base the worktree on the branch work starts on for the repository's model, not on whichever
-branch a tool defaulted to. GitHub's own "default branch" setting reads `main`, but on both
-fleet workflow models work starts on `develop`, so a worktree defaulted to "the default branch"
+branch a tool defaulted to. GitHub's own "default branch" setting reads `main`, but on every
+fleet workflow model work starts on `develop`, so a worktree defaulted to "the default branch"
 lands on `main` and silently misses everything merged to `develop` but not yet promoted. Branch
 from `develop` unless the task is explicitly about `main`-only content, per `GOVERNANCE.md`
 "Branching Model". Fetch immediately before creating and base on the remote ref, because a clone
@@ -75,8 +75,8 @@ reused a primary checkout as the working directory itself rather than only as th
 worktree is created from. On a machine carrying the hub's agent-safety install, Claude Code also
 makes this a mechanical stop for most of that list. `merge --ff-only`/`pull --ff-only` stay exempt
 even there, and so does a `checkout <ref>`/`switch <ref>` naming exactly one positional that
-resolves as a ref, with no force flag and no `--` separator, which is the shape both of this
-skill's own steps below run. A `checkout -- .` or a `switch -c <new>` is denied, being neither.
+resolves as a ref, with no force flag and no `--` separator, which is the shape this
+skill's own steps below run. A `checkout -- .` or a `switch -c <new>` is denied, not being that shape.
 Prose remains the only enforcement for a non-Claude-Code agent, for a machine without that
 install, and for the shapes the hook itself exempts.
 
@@ -232,7 +232,7 @@ in the new tree.
   runtime in this tree and writes `core.hooksPath` back to the value it already holds. Where the
   setting reads anything else, the install would change it for every checkout, so the
   linked-worktree bullet below applies. In a standalone clone, whose config and hooks are its
-  own, run the same two commands there whatever the setting reads.
+  own, run the same commands there whatever the setting reads.
 - **Python pre-commit:** When `.pre-commit-config.yaml` exists, check for the hook the new tree
   will run before installing anything, from the worktree root, with
   `test -x "$(git rev-parse --git-path hooks)/pre-commit"`. In a linked worktree with no

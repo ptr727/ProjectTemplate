@@ -56,7 +56,7 @@ All builds must complete without warnings, enforced as follows:
   `pre-commit` framework. Each shape carries whichever language checks its own repo keeps. A repo may also wire an equivalent hook of its own at `.husky/pre-commit`,
   enabled with `core.hooksPath` and sourcing nothing, since the husky snippet's own hook sources
   a file only `dotnet husky install` generates. That path and `.pre-commit-config.yaml` are the
-  two the audit reads.
+  ones the audit reads.
   GOVERNANCE.md's hub-only "Running the Linters Locally (Known-Working Invocations)" section
   carries the obligation itself, what the hook must cover, its audit treatment, and the
   per-clone enablement steps.
@@ -87,7 +87,7 @@ in place.
 ### Build tasks
 
 Run these from VS Code's task runner (Terminal -> Run Task) or an agent's task-running tool. The
-three clean-compile tasks are carried unchanged, and a repo adds its own convenience tasks (tool
+clean-compile tasks are carried unchanged, and a repo adds its own convenience tasks (tool
 updates, dependency upgrades, benchmarks) on top:
 
 - `.NET Build`: build with diagnostic verbosity *(clean-compile)*

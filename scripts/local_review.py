@@ -80,7 +80,7 @@ subagent pass, which only a live agent session can run, so the engine records it
 invoking it. `coderabbit-cli` is headless and is the one backend a git hook can execute by itself.
 
 A recorded pass means a review ran over exactly this content. It never means the content is clean.
-Disposing of what a review found is judgment, per `pr-review-conduct`'s five outcomes, so a pass is
+Disposing of what a review found is judgment, per `pr-review-conduct`'s outcomes, so a pass is
 recorded whether the pass raised findings or none.
 
 Usage: python3 scripts/local_review.py status [--target '<branch>']

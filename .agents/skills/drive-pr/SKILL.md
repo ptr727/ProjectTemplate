@@ -149,7 +149,7 @@ regenerated rather than edited here. A drive that cannot reach the maintainer di
 dispatched one being the ordinary case, escalates per `pr-review-conduct` "Escalate to the
 maintainer when".
 
-<!-- include: .agents/skills/pr-review-conduct/SKILL.md > Every finding ends in one of five outcomes -->
+<!-- include: .agents/skills/pr-review-conduct/SKILL.md > Every finding ends in a listed outcome -->
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying and fix each one sitting
@@ -200,7 +200,7 @@ on a sibling repo or PR, even within one batch or one session, gets its own outc
 evidence-backed decline (outcome 2) or its own explicit maintainer answer (outcome 3). A prior
 instance's outcome is context for the new one, never a standing answer to reuse in its place.
 
-`pr-review-conduct` "Every finding ends in one of five outcomes" keeps the full rule, and the
+`pr-review-conduct` "Every finding ends in a listed outcome" keeps the full rule, and the
 `drive-pr` Skill carries it whole as a generated include, applying it while driving.
 
 <!-- /include -->

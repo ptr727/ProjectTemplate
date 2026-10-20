@@ -77,7 +77,7 @@ skip the squash step because the dirty branch "looks clean enough."
 ## The iteration PR is never merged
 
 Merging the iteration PR into the mirror branch looks like the natural finish once it is green, and
-it breaks the fork two ways. The mirror branch then carries a commit upstream does not, so it stops
+it breaks the fork. The mirror branch then carries a commit upstream does not, so it stops
 being a mirror: it can no longer be fast-forwarded from upstream, every later sync has to merge
 upstream into the maintainer's own change, and any sync touching the same lines conflicts. And the
 iteration PR is the place where upstream drift is absorbed and its fallout fixed before the

@@ -36,7 +36,7 @@ The following are banned in the files above:
    publishing as `1.0.(N+1)`, or a dependency bump "from X to Y"), a minimum version by naming the
    manifest or skill that holds it, and a fixed constant by what it is ("the all-zero placeholder
    version"). A two-part language or runtime version, such as a minimum Python minor, stays. The
-   audit flags a three-part version, a full SHA, or an abbreviated one in those four files, outside
+   audit flags a three-part version, a full SHA, or an abbreviated one in those files, outside
    their verbatim sections downstream and across the whole file in the hub.
    `.github/copilot-instructions.md` is outside it, since its disproved-claims records name a
    revision by design, which the revision carve-out in `GOVERNANCE.md` "References" permits.

@@ -31,7 +31,7 @@ itself dies of its own context long before the backlog is empty. And a worker th
 must stop without losing its work, in a state the maintainer's next attended session picks up with
 no reminder.
 
-## The Three Seats
+## The Seats
 
 - **The orchestrator** is the session this skill is invoked in. It resolves the repository once,
   then only dispatches, reads one line back, and dispatches again, waiting out a dispatch that
@@ -213,7 +213,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   promotion closes from. Excluding an issue not yet fixed only delays it until the pull request
   naming it is promoted or closed, while taking a fixed one redoes finished work. No open handoff on
   any track names it in its next steps, and no comment on it claims it for a `backlog-burndown`
-  group, since both mark work that has no pull request yet.
+  group, since each marks work that has no pull request yet.
 
 ## The Picker
 
@@ -281,15 +281,15 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    parked and handed back more than once holds the answer in an older link. A walk step 1 would
    return `STOP` on is a read that cannot run. Where any of them names a decision issue that states
    it blocks the open promotion, whatever that issue's state, the round narrows to develop as well.
-   The worker then merges, opens, and releases no promotion while either holds. It instead brings
+   The worker then merges, opens, and releases no promotion while the round is narrowed. It instead brings
    that promotion's body up to a `Fixes` line for every issue develop fixes, `#<issue>` included,
    per `backlog-burndown` "Assembling the Promotion Body", so each closes when the promotion merges.
-   It then closes the lane out, naming the decision issue in the close-out comment. Where neither
-   holds, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
+   It then closes the lane out, naming the decision issue in the close-out comment. Where the round is not
+   narrowed, continue to the promotion pull request, its body carrying a `Fixes` line for every issue
    develop fixes, assembled per that same section, and hand it to `merge-and-release`, merging only
    under `main` and merging and releasing under `release`. **A read this step names that cannot run
    returns `STOP`** rather than continuing, since a read that did not run shows nothing about
-   whether the promotion is blocked. **Repeat both blocked-promotion reads immediately before each
+   whether the promotion is blocked. **Repeat the blocked-promotion reads immediately before each
    head of the promotion merges**, a head `merge-and-release` re-gates included. Run the `decision`
    read with `--state all` and with `state,closedAt` added to `--json`, never with a `--search`
    query, since search can lag a close. Where a `decision` issue blocking that promotion is open, or
