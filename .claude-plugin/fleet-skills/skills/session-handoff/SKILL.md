@@ -61,7 +61,7 @@ without trusting the parts of it that have gone stale.
 
 - **One open handoff issue per track per repository.** A track is a short kebab-case slug naming a
   lane of work, and a session that names no track uses `default`. Parallel lanes each name their
-  own, so each closes its own predecessor and neither reads the other's state as current.
+  own, so each closes its own predecessor and none reads another's state as current.
 - **A platform lane is for work that needs its platform.** A platform track is one kept for a single
   host platform, such as `wsl` or `windows`. It takes an issue only when its defect reproduces, or
   its fix can be verified, on that platform alone. It also needs that no Linux host outside WSL can
@@ -70,8 +70,8 @@ without trusting the parts of it that have gone stale.
   session. A defect in WSL interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or
   `wslpath` reproduces only inside WSL. So does running a Windows `.exe` from Linux, although WSL
   runs on Windows. Behavior that differs under Windows PowerShell 5.1 or `winget`, or in Windows
-  path and ACL semantics, reproduces only on Windows. Either still goes to the backlog where a Linux
-  host outside WSL verifies its fix, as a plain unit test of a path translation can. An issue in
+  path and ACL semantics, reproduces only on Windows. Each of these defects still goes to the backlog where a Linux
+  host outside WSL verifies its fix, as a path-translation unit test can. An issue in
   systemd user scopes, apt, a bash script, or a `pwsh` script run in a Linux container gets no lane
   by its topic. The conditions decide it like any other issue. Where only part of an issue needs
   a platform, the session finding it files each such part as its own issue for its platform's lane.
@@ -143,7 +143,7 @@ that the per-section rule broke several sections earlier. Neither is the rule.
    line and a link.
 9. **The metadata block**, which `scripts/handoff.py` writes and no author types.
 
-Sections 7 and 8 are what the chain exists for, and they are also the two most likely to be padded.
+Sections 7 and 8 are what the chain exists for, and they are also the most likely to be padded.
 
 A handoff issue outlives the session that wrote it and is readable by everyone who can read the
 repository, which on a public one is everyone, so it quotes no data observed in the maintainer's

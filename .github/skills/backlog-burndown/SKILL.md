@@ -30,9 +30,9 @@ belong in the next round's ranking, so a plan made once is stale by its second r
 prose-heavy repository conflicts on content rather than on syntax, so two agents rewording the
 same section produce a conflict no tool resolves and no reviewer catches early.
 
-## The Two Seats
+## The Seats
 
-Everything below turns on which seat is acting, so both are named once here.
+Everything below turns on which seat is acting, so each is named once here.
 
 - **The orchestrator** is the session this skill runs in. It ranks, groups, dispatches, and drives
   the promotion pull request. It opens no feature branch and fixes no issue itself, which is what
@@ -76,7 +76,7 @@ A round is the unit. Each one runs these steps in order.
 4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
 5. **Collect** each worker's outcome: merged to develop, stopped on a maintainer-only question,
    parked behind another group's file claim, handed back for review, or abandoned.
-   The adjudication in "Grouping and File Claims" and a confirmed-gone worker both produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
+   The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
    finished or been abandoned, per "Dispatching a Worker".
@@ -204,7 +204,7 @@ for, and it binds harder than any throughput target.
   predicted claim that collides with a real one is a group deferred to the next round, never one
   dispatched hoping the overlap stays small.
 - **A branch no claim comment covers still has to yield a file set.** The maintainer's own
-  worktree and a hand-driven task's branch are both enumerated above and neither carries a claim
+  worktree and a hand-driven task's branch are enumerated above and carry no claim
   comment, so reading only the comments records them as holding nothing, which is the collision
   this section exists to prevent rather than the absence of one. Read the branch itself instead:
   `git diff --name-only origin/develop...<branch>` for what it has committed, and, for a
@@ -313,10 +313,10 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 `repo-worktree`'s verify-before-removing step to read, so the check that step gives way to here is
 what it exists to establish, that nothing unmerged is
 being thrown away: confirm the branch carries no commit that is not already on develop, and that
-its worktree is clean. Both hold, and the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read: `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`, which refuses rather than discards where that check was wrong, a refusal stopping the group for the maintainer per "Raising a Blocked Question".
+its worktree is clean. Where every confirmation holds, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read: `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`, which refuses rather than discards where that check was wrong, a refusal stopping the group for the maintainer per "Raising a Blocked Question".
 Its claim comment is released and its issue returns to the next round's ranking.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
-No remote branch is left to report where none was pushed. Either fails, and cleanup stops there and
+No remote branch is left to report where none was pushed. Where a confirmation fails, cleanup stops there and
 the group is stopped for the maintainer per "Raising a Blocked Question", since past that point removal
 discards work.
 Where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
@@ -530,13 +530,13 @@ The run ends at one of the points below, and they are different endings.
   what a later run reads to pick the work up. That later run is a new run, named again, not this
   one continuing.
 
-Report at every round boundary and at either ending: what merged to develop, what the promotion pull
+Report at every round boundary and at each ending: what merged to develop, what the promotion pull
 request carries, what was newly filed, what is stopped and on which question, what was held back and
 on which blocker, and what the next round would pick.
 
 ## Mechanics Live Elsewhere
 
-- The review loop, the Merge Gate, the five finding outcomes, and when a finding is a question:
+- The review loop, the Merge Gate, the finding outcomes, and when a finding is a question:
   `pr-review-conduct`.
 - Driving one pull request, and the promotion-pull-request wrinkle: `drive-pr`.
 - Worktree isolation, the base branch, and the cleanup procedure this skill re-seats:

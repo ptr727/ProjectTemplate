@@ -3,7 +3,7 @@ name: carried-instruction-file-guard
 description: >-
   Stops a blind overwrite of a downstream repo's AGENTS.md, GOVERNANCE.md, CODESTYLE.md, or
   WORKFLOW.md when resyncing or updating it to match the ptr727/ProjectTemplate hub template. Use
-  this whenever about to edit, replace, re-vendor, or sync-to-match-the-hub any of those four
+  this whenever about to edit, replace, re-vendor, or sync-to-match-the-hub any of those
   files in a repository that is not ProjectTemplate itself, or whenever asked to bring a repo's
   instruction set up to date, run a conformance sweep that applies fixes, or fix drift against the
   hub. Triggers even when the request sounds routine, such as copying the hub's AGENTS.md over or
@@ -23,7 +23,7 @@ A downstream repo's `AGENTS.md`/`GOVERNANCE.md`/`CODESTYLE.md`/`WORKFLOW.md` can
 
 The fix is not "be careful." Being careful is what failed the first time. The fix is a mechanical check you run before any overwrite touches one of these files, every time, regardless of how routine the request sounds.
 
-## Before you touch any of these four files
+## Before you touch any of these files
 
 1. **Check whether the file's content is declared `verbatim` or `intent`.** The hub's `spec/section-model.md` (fetch it from a hub checkout, `github.com/ptr727/ProjectTemplate`, if you don't have one) names, section by section, which parts of `AGENTS.md` and `GOVERNANCE.md` are universal fleet law (safe to byte-match against the hub) and which describe the repo itself (never safe to overwrite from another repo). `CODESTYLE.md` and `WORKFLOW.md` are carried whole at `intent` fidelity, judged by meaning, not hashed.
 2. **If any part of the file is `intent`, or if the file predates a clean split into hub-governed sections, do not diff-and-replace. Probe instead.** For each rule or paragraph in the current file that is not obviously boilerplate:

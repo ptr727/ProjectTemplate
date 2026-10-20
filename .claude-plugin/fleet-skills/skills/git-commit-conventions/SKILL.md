@@ -111,7 +111,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   `git add`. Nothing else is contrary evidence: not an unreachable agent, not a config value, not a
   signature type you can't otherwise explain in past history (see below).
 - **A mix of SSH- and GPG-signed commits in history is structural, not a host to track down.**
-  `git log --pretty='%G? %GK'` shows two distinct shapes, not two health states: a commit committed
+  `git log --pretty='%G? %GK'` shows distinct shapes, not health states: a commit committed
   by the PR's own author carries that host's own signature type, while a commit committed by
   `GitHub <noreply@github.com>` is a squash-merge: GitHub creates and signs that commit itself,
   server-side, with GitHub's own GPG key, regardless of what the PR author signed with locally.
@@ -160,7 +160,7 @@ committed by a bot (`dependabot[bot]`, `github-actions[bot]`) or GitHub's own we
 signature will not match the committer and the require-signed-commits rule rejects it. Scope the
 rewrite to only the commits that must change. Set `committer` (and `author`) to the rewriter's
 identity on any non-own commit that must be modified. Verify with `git log --show-signature` after
-any rewrite. See `references/history-rewrite.md` for the full two-gate rule.
+any rewrite. See `references/history-rewrite.md` for the full rule.
 
 ## Never run destructive git commands without being asked
 
