@@ -632,8 +632,9 @@ def attributes(spanning: bool = False, lone_space: bool = True) -> str:
     how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
     and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
 
-    One tail serves every reader here of a tag's attributes. A tail kept per site was fixed at one
-    and not at its siblings.
+    One tail serves every reader here of a tag's attributes, and it stays lenient. A tail kept per
+    site was fixed at one and not at its siblings. `TAG_ATTRIBUTE` is CommonMark's stricter grammar
+    for any inline tag, which is what decides whether a backtick inside one opens a span.
     """
     space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
     value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
@@ -728,16 +729,71 @@ INTERRUPTS_PARAGRAPH = (
 )
 
 
+PARAGRAPH_BREAK = (
+    rf"\n(?!\s*\n| {{0,3}}>(?: {{0,4}}>)*{LINE_END}"
+    rf"|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH}))"
+)
+IN_PARAGRAPH = rf"(?:[^\n]|{PARAGRAPH_BREAK})"
+TAG_SPACE = rf"[ \t]*(?:\r?{PARAGRAPH_BREAK}[ \t]*)?"
+TAG_ATTRIBUTE = (
+    rf"(?=[ \t\r\n]){TAG_SPACE}[A-Za-z_:][A-Za-z0-9_.:-]*(?:{TAG_SPACE}={TAG_SPACE}"
+    rf"(?:[^ \t\r\n\"'=<>`]+|'(?:[^'\n]|{PARAGRAPH_BREAK})*'|\"(?:[^\"\n]|{PARAGRAPH_BREAK})*\"))?"
+)
+INLINE_HTML = (
+    rf"(?<!\\)(?:\\\\)*(?:<[A-Za-z][A-Za-z0-9-]*(?:{TAG_ATTRIBUTE})*{TAG_SPACE}/?>"
+    rf"|</[A-Za-z][A-Za-z0-9-]*{TAG_SPACE}>"
+    rf"|<!--(?:-?>|(?:{IN_PARAGRAPH}*?(?:[^-\n]|{PARAGRAPH_BREAK}))?-->)"
+    rf"|<\?{IN_PARAGRAPH}*?\?>"
+    rf"|<![A-Z]+(?:[ \t]|\r?{PARAGRAPH_BREAK})(?:[^>\n]|{PARAGRAPH_BREAK})*>"
+    rf"|<!\[CDATA\[{IN_PARAGRAPH}*?\]\]>"
+    r"|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x00-\x20<>]*>"
+    r"|<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>)"
+)
+
+
+class CodeSpans:
+    """The inline code spans in a body, read the way GitHub reads them, left to right.
+
+    A code span, raw inline HTML, and an autolink bind by which one opens first. A backtick inside
+    an HTML comment, a tag's quoted value, or an autolink that opened earlier is literal, so it
+    opens no span. Read alone, that backtick paired with a later one, and a live tag between the two
+    read as quoted.
+
+    So one pattern reads all three, each match consuming its own text, and only a span is
+    reported. A span carries its backtick run as group 1, which is what tells it from the rest.
+    """
+
+    def __init__(self) -> None:
+        self.pattern = re.compile(
+            rf"(?<![\\`])(`+)(?!`){IN_PARAGRAPH}*?(?<!`)\1(?!`)|{INLINE_HTML}"
+        )
+
+    def finditer(self, text: str) -> Iterator[re.Match[str]]:
+        """Every span in `text`, in order."""
+        return (m for m in self.pattern.finditer(text) if m.group(1) is not None)
+
+    def search(self, text: str) -> re.Match[str] | None:
+        """The first span in `text`, or None."""
+        return next(self.finditer(text), None)
+
+    def sub(self, repl: str | Callable[[re.Match[str]], str], text: str) -> str:
+        """`text` with each span replaced by `repl`, and the HTML and autolinks left as they are."""
+
+        def one(m: re.Match[str]) -> str:
+            if m.group(1) is None:
+                return m.group()
+            return repl if isinstance(repl, str) else repl(m)
+
+        return self.pattern.sub(one, text)
+
+
 # An inline code span is a quotation for the same reason a fenced block is.
 # A reviewer naming `<summary>` in prose was read as opening one.
 # Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
 # Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
 # Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = re.compile(
-    r"(?<![\\`])(`+)(?!`)"
-    rf"(?:[^\n]|\n(?!\s*\n|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH})))*?"
-    r"(?<!`)\1(?!`)"
-)
+CODE_SPAN = CodeSpans()
 
 
 # The round's own file summary table, whose first column is a path and whose second is prose.
