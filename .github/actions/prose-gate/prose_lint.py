@@ -1776,6 +1776,7 @@ def sentences(span: str) -> list[str]:
 
 
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+ITEM_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}(?:\s|$)")
 INDENT_BLOCK = 4
 
 
@@ -1926,7 +1927,7 @@ def sentence_length_findings(
             block.append((i, span))
             flush()
     in_fence = in_comment = in_table = in_code = in_list = False
-    item_offset = 0
+    item_offset = block_offset = 0
     code_indent = INDENT_BLOCK
     prev_blank = True
     for i, line in enumerate(lines[start:], start + 1):
@@ -1955,10 +1956,13 @@ def sentence_length_findings(
             in_code = False
         if in_table:
             continue
-        marker = LIST_MARKER.match(line)
+        marker = ITEM_MARKER.match(line)
         number = marker.group(1) if marker else None
+        empty = marker is not None and not line[marker.end() :].strip()
         is_item = bool(
-            marker and (number is None or in_list or not block or number.lstrip("0") == "1")
+            marker
+            and (number is None or in_list or not block or number.lstrip("0") == "1")
+            and (not empty or not block or indent < block_offset)
         )
         if not block and was_blank:
             code_indent = INDENT_BLOCK + (item_offset if in_list else 0)
@@ -1972,6 +1976,8 @@ def sentence_length_findings(
             in_comment = "-->" not in line
             continue
         tag = OPENING_TAG.match(line)
+        if tag and block and indented_past(indent, block_offset):
+            tag = None
         if tag and TAGS_ONLY.match(line):
             if tag.group(1) or tag.group(2):
                 flush()
@@ -1995,6 +2001,8 @@ def sentence_length_findings(
             block.clear()
             continue
         if THEMATIC_BREAK.match(line) or SETEXT_UNDERLINE.match(line):
+            if not block and line.strip() == "-":
+                in_list, item_offset = True, indent + 2
             flush()
             continue
         span = line.strip()
@@ -2004,9 +2012,13 @@ def sentence_length_findings(
         if is_item:
             flush()
             in_list = True
-            item_offset = marker.end() if marker else 0
+            item_offset = content_offset(line, marker) if marker else 0
+            if empty:
+                continue
             block_is_item = True
             span = strip_list_marker(span)
+        if not block:
+            block_offset = item_offset if in_list else 0
         block.append((i, span))
     flush()
     return out
@@ -2902,6 +2914,18 @@ def indent_past_blank(texts: list[str], idx: int) -> int:
     if idx + 2 < len(texts) and not texts[idx + 1].strip() and texts[idx + 2].strip():
         return leading_indent(texts[idx + 2])
     return -1
+
+
+def content_offset(line: str, marker: re.Match[str]) -> int:
+    """The column a list item's text starts at, the marker's run of up to four spaces included.
+
+    Five or more spaces, or none before the line ends, leave the text one column past the marker.
+    Columns count a tab to its next stop, as `leading_indent` does.
+    """
+    width = len(line[: marker.end()].rstrip().expandtabs(4))
+    rest = line.expandtabs(4)[width:]
+    spaces = len(rest) - len(rest.lstrip(" "))
+    return width + spaces if 0 < spaces <= INDENT_BLOCK and rest.strip() else width + 1
 
 
 def leading_indent(line: str) -> int:
