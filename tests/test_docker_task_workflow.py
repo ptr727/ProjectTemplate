@@ -23,12 +23,13 @@ CREDENTIAL_NAMES = ("DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN")
 
 
 class Step(NamedTuple):
-    """One step: its name, `uses` value, `with` keys, and raw text."""
+    """One step: its name, `uses` value, `with` keys and values, and raw text."""
 
     name: str
     uses: str
     with_keys: tuple[str, ...]
     text: str
+    with_values: dict[str, str]
 
 
 def job_texts(workflow: str) -> dict[str, str]:
@@ -48,54 +49,109 @@ def job_texts(workflow: str) -> dict[str, str]:
     return {job: "\n".join(body) for job, body in jobs.items()}
 
 
+def split_flow(body: str) -> list[str]:
+    """Split a flow mapping body on its top-level commas, keeping `${{ }}` expressions whole."""
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, char in enumerate(body):
+        if char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(body[start:i])
+            start = i + 1
+    parts.append(body[start:])
+    return [part.strip() for part in parts if part.strip()]
+
+
+def normalize_item(item: list[str]) -> list[str]:
+    """Re-indent one step to the block layout the readers expect and expand a one-line `with` mapping."""
+    shift = 6 - (len(item[0]) - len(item[0].lstrip()))
+    lines = [
+        (" " * shift + line if shift >= 0 else line[min(-shift, len(line) - len(line.lstrip())) :])
+        if line.strip()
+        else line
+        for line in item
+    ]
+    expanded: list[str] = []
+    for line in lines:
+        flow = re.fullmatch(r"        with:\s*\{(.*)\}\s*(#.*)?", line)
+        if flow:
+            expanded.append("        with:")
+            expanded.extend(f"          {pair}" for pair in split_flow(flow.group(1)))
+        else:
+            expanded.append(line)
+    return expanded
+
+
 def job_steps(job: str) -> list[Step]:
-    """The job's steps in order, each bounded to its own sequence item."""
+    """The job's steps in order, each bounded to its own sequence item, compact or indented."""
     items: list[list[str]] = []
-    in_steps = False
+    steps_indent = -1
+    item_indent = -1
     for line in job.splitlines():
-        if re.fullmatch(r"    steps:\s*(#.*)?", line):
-            in_steps = True
-        elif in_steps and line.startswith("      - "):
+        indent = len(line) - len(line.lstrip())
+        if steps_indent < 0:
+            if re.fullmatch(r"    steps:\s*(#.*)?", line):
+                steps_indent = indent
+        elif (
+            line.lstrip().startswith("- ")
+            and indent >= steps_indent
+            and item_indent in (-1, indent)
+        ):
+            item_indent = indent
             items.append([line])
-        elif in_steps and items and (not line.strip() or line.startswith("        ")):
+        elif items and (not line.strip() or indent > item_indent):
             items[-1].append(line)
-        elif in_steps and line.strip() and not line.lstrip().startswith("#"):
+        elif line.strip() and not line.lstrip().startswith("#"):
             break
     steps = []
-    for item in items:
+    for raw in items:
+        item = normalize_item(raw)
         text = "\n".join(item)
         name = re.search(r"(?m)^      - name: (.+)$", text)
         uses = re.search(r"(?m)^        uses: [\"']?([^\s\"']+)", text)
+        values = with_values(item)
         steps.append(
             Step(
                 name.group(1) if name else "",
                 uses.group(1) if uses else "",
-                with_keys(item),
+                tuple(values),
                 text,
+                values,
             )
         )
     return steps
 
 
-def with_keys(item: list[str]) -> tuple[str, ...]:
-    """The keys directly under the step's `with:`, ignoring comments."""
-    keys: list[str] = []
+def with_values(item: list[str]) -> dict[str, str]:
+    """The keys and values directly under the step's `with:`, ignoring comments."""
+    values: dict[str, str] = {}
     in_with = False
     for line in item:
         if re.fullmatch(r"        with:\s*(#.*)?", line):
             in_with = True
         elif in_with:
-            key = re.match(r"          ([A-Za-z0-9_-]+):", line)
-            if key:
-                keys.append(key.group(1))
+            pair = re.match(r"          [\"']?([A-Za-z0-9_-]+)[\"']?:\s*(.*?)\s*$", line)
+            if pair:
+                value = re.sub(r"\s+#.*$", "", pair.group(2)).strip("\"'")
+                values[pair.group(1)] = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", r"${{ \1 }}", value)
             elif line.strip() and not line.startswith("          "):
                 break
-    return tuple(keys)
+    return values
 
 
 def ungated(step: Step) -> bool:
     """The step has no `if` or `continue-on-error`, so it always runs and a failure stops the job."""
     return not re.search(r"(?m)^        (?:if|continue-on-error):", step.text)
+
+
+def empty_tests_joined_by_or(text: str) -> bool:
+    """The check tests the two secrets empty in one condition joined by `||`, in either order."""
+    first, second = (rf'-z "\${name}"' for name in CREDENTIAL_NAMES)
+    return bool(re.search(rf"{first}\s*\|\|\s*{second}|{second}\s*\|\|\s*{first}", text))
 
 
 def is_credential_check(step: Step) -> bool:
@@ -104,25 +160,60 @@ def is_credential_check(step: Step) -> bool:
         not step.uses
         and "        run: |" in step.text
         and all(f"{name}: ${{{{ secrets.{name} }}}}" in step.text for name in CREDENTIAL_NAMES)
-        and all(f'-z "${name}"' in step.text for name in CREDENTIAL_NAMES)
+        and empty_tests_joined_by_or(step.text)
         and "exit 1" in step.text
         and ungated(step)
     )
 
 
 def is_login(step: Step) -> bool:
-    """The Docker login action fed both secrets."""
+    """The Docker login action fed each secret to its own input, against the default registry."""
+    secrets = dict(zip(("username", "password"), CREDENTIAL_NAMES, strict=True))
     return (
         step.uses.startswith(LOGIN_ACTION)
-        and all(f"secrets.{name}" in step.text for name in CREDENTIAL_NAMES)
+        and all(
+            step.with_values.get(key) == f"${{{{ secrets.{name} }}}}"
+            for key, name in secrets.items()
+        )
+        and step.with_values.get("registry", "docker.io") in ("docker.io", "index.docker.io", "")
         and ungated(step)
     )
 
 
+PUSH_COMMAND = re.compile(
+    r"\bdocker\s+(?:(?:image|manifest|buildx)\s+)?push\b"
+    r"|\bdocker\s+(?:buildx\s+)?(?:build|bake)\b.*(?:--push\b|type=registry\b)"
+)
+
+
+def run_script(step: Step) -> str:
+    """The step's `run` value with line continuations joined, or empty for a step without one."""
+    lines = step.text.splitlines()
+    for i, line in enumerate(lines):
+        match = re.fullmatch(r"        run:\s*(.*)", line)
+        if match:
+            body = [match.group(1)]
+            body.extend(
+                rest for rest in lines[i + 1 :] if rest.startswith("          ") or not rest.strip()
+            )
+            return re.sub(r"\\\n\s*", " ", "\n".join(body))
+    return ""
+
+
+def runs_push(step: Step) -> bool:
+    """A run command pushes, where a command that only echoes the words does not."""
+    for command in re.split(r"&&|\|\||[;|\n]", run_script(step)):
+        words = command.strip().lstrip("|>-+ ").split(maxsplit=1)
+        if words and words[0] not in ("echo", "printf") and PUSH_COMMAND.search(command):
+            return True
+    return False
+
+
 def can_push(step: Step) -> bool:
-    """A step that can push: one passing `push`, or a caller build hook even if its push is lost."""
+    """A step that can push: a `with` push input, a run command that pushes, or a caller build hook."""
     is_build_hook = step.uses.startswith("./.github/actions/") and "build" in step.uses
-    return "push" in step.with_keys or is_build_hook
+    pushes_from_run = not step.uses and runs_push(step)
+    return "push" in step.with_keys or is_build_hook or pushes_from_run
 
 
 def violations(workflow: str) -> list[str]:
@@ -153,7 +244,7 @@ def violations(workflow: str) -> list[str]:
                 if missing:
                     found.append(f"{job_id}: hook {step.uses} lacks {', '.join(missing)}")
                 for key in ("push", "ref", "branch"):
-                    if f"          {key}: ${{{{ inputs.{key} }}}}" not in step.text:
+                    if step.with_values.get(key) != f"${{{{ inputs.{key} }}}}":
                         found.append(f"{job_id}: hook {step.uses} does not forward inputs.{key}")
     if pushing < 2:
         found.append(f"expected at least two pushing jobs, found {pushing}")
@@ -184,6 +275,38 @@ def move_step_after(workflow: str, job: str, name: str, anchor: str) -> str:
     end = cut.index(anchor_text) + len(anchor_text)
     head = cut[:end] if cut[:end].endswith("\n") else cut[:end] + "\n"
     return workflow.replace(body, head + moved + cut[end:], 1)
+
+
+def compact(workflow: str) -> str:
+    """The workflow with each job's step sequence written at the same indent as `steps:`."""
+    out: list[str] = []
+    in_steps = False
+    for line in workflow.splitlines():
+        if re.fullmatch(r"    steps:\s*(#.*)?", line):
+            in_steps = True
+        elif re.match(r"  \S", line):
+            in_steps = False
+        elif in_steps and line.startswith("  "):
+            line = line[2:]
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def flowify_with(workflow: str, name: str) -> str:
+    """The workflow with the named step's `with` block written as a one-line flow mapping."""
+    step = step_text(workflow, name)
+    pairs = re.findall(r"(?m)^          ([A-Za-z0-9_-]+): (.+)$", step)
+    block = re.search(r"(?ms)^        with:\n(?:          .*\n?)+", step)
+    assert block
+    flow = ", ".join(f"{key}: {value}" for key, value in pairs)
+    return workflow.replace(step, step.replace(block.group(0), f"        with: {{{flow}}}\n"), 1)
+
+
+def insert_before_login(workflow: str, job: str, step: str) -> str:
+    """The workflow with a step written before the login step of one job."""
+    body = job_texts(workflow)[job]
+    login = step_text(body, "Login to Docker Hub step")
+    return workflow.replace(body, body.replace(login, step + login, 1), 1)
 
 
 class DockerTaskWorkflowCase(unittest.TestCase):
@@ -293,6 +416,115 @@ class DockerTaskWorkflowCase(unittest.TestCase):
                 mutated = self.workflow.replace(hook, "".join(lines), 1)
                 self.assertNotEqual(self.workflow, mutated)
                 self.assertTrue(any(f"lacks {key}" in v for v in violations(mutated)))
+
+    def test_and_joined_credential_check_is_caught(self) -> None:
+        joined = '-z "$DOCKER_HUB_USERNAME" || -z "$DOCKER_HUB_ACCESS_TOKEN"'
+        self.assertIn(joined, self.workflow)
+        mutated = self.workflow.replace(joined, joined.replace("||", "&&"))
+        self.assertNotEqual(self.workflow, mutated)
+        found = violations(mutated)
+        self.assertIn("docker-build-base: no credential check before the first push step", found)
+        self.assertIn("build-docker: no credential check before the first push step", found)
+
+    def test_reversed_credential_check_is_clean(self) -> None:
+        joined = '-z "$DOCKER_HUB_USERNAME" || -z "$DOCKER_HUB_ACCESS_TOKEN"'
+        mutated = self.workflow.replace(
+            joined, '-z "$DOCKER_HUB_ACCESS_TOKEN" || -z "$DOCKER_HUB_USERNAME"'
+        )
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_miswired_login_inputs_are_caught(self) -> None:
+        user = "          username: ${{ secrets.DOCKER_HUB_USERNAME }}"
+        password = "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
+        swapped = self.workflow.replace(user, "@@").replace(
+            password, user.replace("username", "password")
+        )
+        swapped = swapped.replace("@@", password.replace("password", "username"))
+        for label, mutated in (
+            ("swapped inputs", swapped),
+            (
+                "other registry",
+                self.workflow.replace(
+                    password, password + "\n          registry: registry.example.com"
+                ),
+            ),
+        ):
+            with self.subTest(label=label):
+                self.assertNotEqual(self.workflow, mutated)
+                found = violations(mutated)
+                self.assertIn("build-docker: no login before the first push step", found)
+
+    def test_compact_steps_are_parsed(self) -> None:
+        mutated = compact(self.workflow)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+        dropped = compact(drop_step(self.workflow, "Login to Docker Hub step"))
+        self.assertIn("build-docker: no login before the first push step", violations(dropped))
+
+    def test_flow_style_with_is_parsed(self) -> None:
+        hook = "Run caller docker-build-base hook step"
+        mutated = flowify_with(self.workflow, hook)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn("with: {push: ${{ inputs.push }}", mutated)
+        self.assertEqual([], violations(mutated))
+        lacking = mutated.replace(" ref: ${{ inputs.ref }},", "", 1)
+        self.assertNotEqual(mutated, lacking)
+        self.assertIn(
+            "docker-build-base: hook ./.github/actions/docker-build-base lacks ref",
+            violations(lacking),
+        )
+
+    def test_flow_style_push_before_login_is_caught(self) -> None:
+        early = "      - name: Early push step\n        uses: example/push@v1\n        with: {push: true}\n\n"
+        mutated = insert_before_login(self.workflow, "build-docker", early)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn("build-docker: no login before the first push step", violations(mutated))
+
+    def test_run_step_push_before_login_is_caught(self) -> None:
+        for command in (
+            "docker push example/image:tag",
+            "docker buildx build --push .",
+            "echo start && docker push example/image:tag",
+            "docker manifest push example/image:tag",
+            "docker buildx bake --push",
+        ):
+            with self.subTest(command=command):
+                early = f"      - name: Early push step\n        run: {command}\n\n"
+                mutated = insert_before_login(self.workflow, "build-docker", early)
+                self.assertNotEqual(self.workflow, mutated)
+                self.assertIn(
+                    "build-docker: no login before the first push step", violations(mutated)
+                )
+
+    def test_run_step_that_only_mentions_push_is_not_a_push(self) -> None:
+        quiet = '      - name: Quiet step\n        run: echo "docker push later"\n\n'
+        mutated = insert_before_login(self.workflow, "build-docker", quiet)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_continued_run_push_before_login_is_caught(self) -> None:
+        early = (
+            "      - name: Early push step\n        run: |\n"
+            "          docker buildx build \\\n            --push .\n\n"
+        )
+        mutated = insert_before_login(self.workflow, "build-docker", early)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertIn("build-docker: no login before the first push step", violations(mutated))
+
+    def test_step_name_mentioning_push_is_not_a_push(self) -> None:
+        quiet = "      - name: Verify docker push prerequisites step\n        run: true\n\n"
+        mutated = insert_before_login(self.workflow, "build-docker", quiet)
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_login_value_comment_and_default_registry_are_clean(self) -> None:
+        password = "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
+        mutated = self.workflow.replace(
+            password, password + " # token\n          registry: 'index.docker.io'"
+        )
+        self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
 
 
 if __name__ == "__main__":
