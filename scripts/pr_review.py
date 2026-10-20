@@ -4118,10 +4118,11 @@ def check_nodes(pr: dict) -> list[dict]:
     A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
 
     A finished check whose name only an older suite carries is marked `superseded` while the
-    workflow's newest suite has not completed. An unfinished one keeps its own stuck reading. That suite's run id rides along as `newer_run`. A cancelled run's
-    aggregator fails over its cancelled jobs. Its replacement posts its own aggregator only once
-    its other jobs finish, so until then the failure describes a run nobody waits on.
-    Once the newest suite completes, a name it never posted stands as the merge gate reads it.
+    workflow's newest suite has not completed. That suite's run id rides along as `newer_run`.
+    An unfinished check keeps its own stuck reading. A cancelled run's aggregator fails over its
+    cancelled jobs. Its replacement posts its own aggregator only once its other jobs finish, so
+    until then the failure describes a run nobody waits on. Once the newest suite completes, a name
+    it never posted stands as the merge gate reads it.
     The head commit's own suites count toward the newest one as well as the rollup's. A run
     waiting on its concurrency slot has a suite and no check run yet, so the rollup lacks it.
     """
@@ -4211,7 +4212,7 @@ def check_nodes(pr: dict) -> list[dict]:
     for i, (group, sid) in suites.items():
         suite_id, status, run = newest_run.get(group[0], (0, "", None))
         finished = out[i]["state"] == "COMPLETED"
-        if i not in stale and finished and sid < suite_id and status != "COMPLETED":
+        if finished and sid < suite_id and status != "COMPLETED":
             out[i]["superseded"] = True
             out[i]["newer_run"] = run
     return [node for i, node in enumerate(out) if i not in stale]
