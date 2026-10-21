@@ -131,8 +131,8 @@ text says, because the harm it covers was never in the text.
    `GIT_DIR` repository, through a linked worktree's `.git` file as git reads it. A `GIT_DIR` or
    `GIT_WORK_TREE` on a wrapper shell's prefix, or exported before it, reaches the git commands in
    its body. An alias expansion is read past the global options it leads with, such as `-p` or
-   `-c`, and a `-c alias.<name>` among them is followed. An include, a `core.hooksPath`, or a
-   `--config-env` among them is denied. So is a command key whose program the hook does not read
+   `-c`, and a `-c alias.<name>` among them is followed. An include or a `--config-env` among them
+   is denied, and a `core.hooksPath` among them is judged as it is on a command line. So is a command key whose program the hook does not read
    or whose command runs git. A persisted alias read that times out or cannot run is denied
    where the name may be an alias. A git command nested past the wrapper reading cap is denied
    where its subcommand may be an alias. An alias set by `--config-env` for the subcommand it runs is denied too. An `eval`

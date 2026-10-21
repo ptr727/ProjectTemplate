@@ -4012,22 +4012,28 @@ def _config_may_change(toks, end, skip=None):
     """True when something before a push in these tokens may rewrite the remote config the push reads.
 
     That config is a remote's `mirror` key and the origin URL its checkout's rules are read from.
-    A `git config` or `git remote` may rewrite it (see `_git_word_changes_config`). So may a git
-    subcommand that may be an alias, and any `gh` command. A wrapper shell may hold one of those in
-    its command string, and so may a substitution held in one word (see `_names_config_change`).
-    A checkout or a switch changes neither. The scan stops at `end` and passes over the git word at
-    `skip`, as `_head_may_move`'s does.
+    A `git config` or `git remote` may rewrite it, and so may a git subcommand that may be an alias
+    and a `gh` command (see `_config_changing_word`). A wrapper shell counts where its command string
+    holds one of those. It also counts where it has no command string the guard reads, as a script
+    file or a pipe gives it. A substitution counts the same way, held in one word or written with
+    backticks, which the tokens split (see `_names_config_change`). A checkout or a switch changes
+    neither. The scan stops at `end` and passes over the git word at `skip`, as `_head_may_move`'s does.
     """
+    words = [t for k, t in enumerate(toks[:end]) if k != skip]
+    if any("`" in t for t in words) and _names_config_change(" ".join(words)):
+        return True
     for k in range(end):
         t = toks[k]
         if k == skip:
             continue
         found = _shell_bodies_at(toks, k)
+        if found and not found[0] and _command_prefix(toks, k)[0]:
+            return True
         if found and any(_names_config_change(body) for body in found[0]):
             return True
-        if ("$(" in t or "`" in t) and _names_config_change(t):
+        if "$(" in t and _names_config_change(t):
             return True
-        if _is_gh_exe(t) or (_is_git_exe(t) and _git_word_changes_config(toks, k)):
+        if _config_changing_word(toks, k):
             return True
     return False
 
@@ -4037,18 +4043,32 @@ _CONFIG_READ_ACTIONS = frozenset(
 )
 
 
+def _config_changing_word(toks, k):
+    """True when the word at `toks[k]` runs a command `_config_may_change` counts.
+
+    That is a `gh` that is its simple command's command (see `_command_prefix`), or a git word
+    `_git_word_changes_config` names.
+    """
+    if _is_gh_exe(toks[k]):
+        return _command_prefix(toks, k)[0]
+    return _is_git_exe(toks[k]) and _git_word_changes_config(toks, k)
+
+
 def _git_word_changes_config(toks, k):
     """True when the git word at `toks[k]` runs a subcommand `_config_may_change` counts.
 
     A `git config` or `git remote` that only reads is left out. That is a config action such as
     `--get` or `--list`, or a `get` or `list` subcommand. It is a bare `git remote`, with or
-    without `-v`, or its `show` or `get-url`.
+    without `-v`, or its `show` or `get-url`. One whose arguments hold a substitution is not left
+    out, since the guard does not read what the substitution gives.
     """
     j = _git_subcommand_index(toks, k)
     if j >= len(toks) or _is_shell_op(toks[j]):
         return False
     sub = toks[j]
     args, _ = _collect_arglist(toks, j + 1)
+    if sub in ("config", "remote") and any("`" in a or "$(" in a for a in args):
+        return True
     if sub == "config":
         return not (any(a in _CONFIG_READ_ACTIONS for a in args) or args[:1] in (["get"], ["list"]))
     if sub == "remote":
@@ -4058,12 +4078,11 @@ def _git_word_changes_config(toks, k):
 
 
 def _names_config_change(text):
-    """True when `text`, or a command string it embeds, holds a word `_config_may_change` counts, wherever it sits."""
+    """True when `text`, or a command string it embeds, holds a word `_config_changing_word` counts, wherever it sits."""
     for body in [text, *_embedded_wrapper_commands(text)]:
         toks = _shell_tokens(body)
-        for k, t in enumerate(toks):
-            if _is_gh_exe(t) or (_is_git_exe(t) and _git_word_changes_config(toks, k)):
-                return True
+        if any(_config_changing_word(toks, k) for k in range(len(toks))):
+            return True
     return False
 
 
@@ -15264,6 +15283,36 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a git config or git remote that only reads leaves the push's remote config alone",
     ),
+    (
+        [],
+        "echo `git config remote.origin.mirror true`; git push --tags origin",
+        "deny",
+        "a git config in a backtick substitution before the push leaves its remote config unresolved",
+    ),
+    (
+        [],
+        'x="$(git config remote.origin.mirror true)"; git push --tags origin',
+        "deny",
+        "a git config in a quoted substitution before the push leaves its remote config unresolved",
+    ),
+    (
+        [],
+        "gh repo set-default example/x && git push --tags origin",
+        "deny",
+        "a gh command before the push leaves its remote config unresolved",
+    ),
+    (
+        [],
+        "echo 'git config remote.origin.mirror true' | bash; git push --tags origin",
+        "deny",
+        "a shell whose command string the guard does not read leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        "which gh && git push --tags origin",
+        "allow",
+        "control: a gh named as another command's argument does not run gh",
+    ),
 ]
 
 
@@ -15406,6 +15455,16 @@ _PUSH_REPO_CASES = [
         "git switch -q feature/example && git push origin develop",
         "allow",
         "control: a switch before the push leaves its origin alone",
+    ),
+    (
+        "git config remote.origin.url `git config --get remote.beta.url` && git push origin develop",
+        "deny",
+        "a git config whose value is a substitution holding a read is not read as only reading",
+    ),
+    (
+        "git add example/gh && git push origin develop",
+        "allow",
+        "control: a path named gh is not a gh command",
     ),
 ]
 
