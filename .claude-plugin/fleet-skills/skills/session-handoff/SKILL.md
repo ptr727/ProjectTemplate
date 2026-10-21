@@ -72,7 +72,7 @@ without trusting the parts of it that have gone stale.
   runs on Windows. Behavior that differs under Windows PowerShell 5.1 or `winget`, or in Windows
   path and ACL semantics, reproduces only on Windows. Each of these defects still goes to the
   backlog when a Linux host outside WSL can both fix it and verify the fix. A path-translation
-  fix that a unit test verifies is one such case. An issue in
+  fix made and unit-tested on a Linux host outside WSL is one such case. An issue in
   systemd user scopes, apt, a bash script, or a `pwsh` script run in a Linux container gets no lane
   by its topic. The conditions decide it like any other issue. Where only part of an issue needs
   a platform, the session finding it files each such part as its own issue for its platform's lane.
