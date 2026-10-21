@@ -4014,7 +4014,7 @@ def _config_may_change(toks, end, skip=None, mask=None):
     That config is a remote's `mirror` key and the origin URL its checkout's rules are read from.
     A `git config` or `git remote` may rewrite it, and so may a git subcommand that may be an alias
     and a `gh` command (see `_config_changing_word`). So may a run-time command word, which may
-    expand to any of them (see `_is_run_time_command`). A wrapper shell counts where its command
+    expand to any of them (see `_runs_run_time_word`). A wrapper shell counts where its command
     string holds one of those. It also counts where it has no command string, since it then runs
     a script file or its input (see `_shell_reads_unread_script`). A substitution the tokens keep inside one word is
     read by the caller (see `_substitution_bodies`). A checkout or a switch changes neither. The
@@ -4024,7 +4024,7 @@ def _config_may_change(toks, end, skip=None, mask=None):
     for k in range(end):
         if k == skip:
             continue
-        if _is_run_time_command(toks, k, mask):
+        if _runs_run_time_word(toks, k, mask):
             return True
         found = _shell_bodies_at(toks, k)
         if found and _word_runs(toks, k, mask):
@@ -4157,11 +4157,27 @@ def _config_only_reads(args):
     return any(a in _CONFIG_READ_ACTIONS for a in args) or len(positionals) <= 1
 
 
+def _runs_run_time_word(toks, k, mask=None):
+    """True when `toks[k]` is a run-time word the shell runs as its simple command's command, so it may expand to any program.
+
+    That is the command word `_command_prefix` names, or a word right after an unquoted `(`.
+    An argument holding one, as in `mkdir -p "$D"`, runs nothing.
+    An assignment, or a shell operator such as `(`, is no command word.
+    """
+    t = toks[k]
+    if _is_shell_op(t) or not _is_run_time_word(t) or _ENV_ASSIGN_RE.match(t):
+        return False
+    if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
+        return True
+    return _command_prefix(toks, k)[0]
+
+
 def _through_last_push(text):
     """`text` up to the end of its last `push`, in any case, or all of it where none is found.
 
-    A substitution after every push cannot run before one, so it is left out. A `push` word in
-    later text only lengthens what is read, which fails closed.
+    A substitution after every push runs after it, where nothing lets a later command run first,
+    so the caller cuts there only then (see `_push_scan_end`). A `push` word in later text only
+    lengthens what is read, which fails closed.
     """
     found = list(re.finditer("push", text, re.IGNORECASE))
     return text[: found[-1].end()] if found else text
@@ -4172,8 +4188,7 @@ def _names_config_change(text):
     for body in [text, *_embedded_wrapper_commands(text)]:
         toks = _shell_tokens(body)
         if any(
-            _config_changing_word(toks, k) or _is_run_time_command(toks, k, None)
-            for k in range(len(toks))
+            _config_changing_word(toks, k) or _runs_run_time_word(toks, k) for k in range(len(toks))
         ):
             return True
     return False
@@ -5361,8 +5376,11 @@ def _push_invocations(cmd):
         whole_moves = _head_may_move(outer_toks, len(outer_toks))
         quoted = _quoted_mask(text, outer_toks)
         export_dirs = _leading_export_dirs(text)
-        substituted = any(
+        substituted_before = any(
             _names_config_change(s) for s in _substitution_bodies(_through_last_push(text))
+        )
+        substituted_anywhere = substituted_before or any(
+            _names_config_change(s) for s in _substitution_bodies(text)
         )
         batches = [(text, outer_cd, outer_extra, False)]
         for inner in _embedded_wrapper_commands(text):
@@ -5384,6 +5402,11 @@ def _push_invocations(cmd):
                     if body is text:
                         scan = _push_scan_end(outer_toks, quoted, word)
                         head_moves = _head_may_move(outer_toks, *scan)
+                        substituted = (
+                            substituted_anywhere
+                            if scan[0] >= len(outer_toks)
+                            else substituted_before
+                        )
                         config_moves = substituted or _config_may_change(outer_toks, *scan, quoted)
                     else:
                         head_moves = whole_moves
@@ -15469,6 +15492,24 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a substitution after the push does not change what it reads",
     ),
+    (
+        [],
+        'git push --tags origin & echo "$(git config remote.origin.mirror true)"',
+        "deny",
+        "a substitution after a backgrounded push may run before it, so it is read",
+    ),
+    (
+        [],
+        'for i in 1 2; do git push --tags origin; echo "$(git config remote.origin.mirror true)"; done',
+        "deny",
+        "a substitution after the push in a loop may run before a later push, so it is read",
+    ),
+    (
+        [],
+        'mkdir -p "$HOME/example" && touch "$F"; git push --tags origin 2>&1 | tee "$TMPDIR/push.log"',
+        "allow",
+        "control: a run-time word that is only another command's argument runs nothing",
+    ),
 ]
 
 
@@ -15666,6 +15707,11 @@ _PUSH_REPO_CASES = [
         "gh -R example/alpha pr view 3 && gh repo view && git push origin develop",
         "allow",
         "control: gh reads past a repository flag stay reads",
+    ),
+    (
+        'rm -f "$TMPDIR/example.txt"; [ -n "$X" ] && git push origin develop',
+        "allow",
+        "control: a run-time argument of a command before the push leaves its origin alone",
     ),
 ]
 

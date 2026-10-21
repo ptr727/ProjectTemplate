@@ -184,8 +184,9 @@ text says, because the harm it covers was never in the text.
    may rewrite its remote config. One is a `git config` or `git remote` that does not only read.
    A lone key or `--get` reads, unless a write action such as `--unset` names it. A value, or an
    argument holding a substitution, writes.
-   Others are a git subcommand that may be an alias and a `gh` command whose group can touch git
-   config. That is `gh pr checkout`, or a `gh repo` other than a read like `gh repo view`. So is a
+   Others are a git subcommand that may be an alias and a `gh` command whose group may touch git
+   config. That is any group outside a list of reads such as `gh issue`. A `gh pr` counts only for
+   `checkout`, and a `gh repo` for anything but a read like `view`. So is a
    run-time command word, which may expand to any of them. A wrapper shell or a substitution
    running one counts, and so does a shell running a script file or its input.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
