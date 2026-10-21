@@ -16362,7 +16362,7 @@ _PUSH_TARGET_CASES = [
     ),
     (
         [],
-        "git push C:example/beta develop",
+        "git push C:example/alpha develop",
         "deny",
         "a drive-relative Windows path is a local path, not a repository it seems to name",
     ),
