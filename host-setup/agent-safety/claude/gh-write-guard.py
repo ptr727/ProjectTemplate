@@ -2380,14 +2380,17 @@ def _cd_dot_dot(cmd):
 
 
 def _cd_argument(cmd, test):
-    """The first argument of any `cd`/`pushd`/`popd`/`chdir` in the command or its wrapper bodies that `test(name, arg)` accepts."""
+    """The first argument of any `cd`/`pushd`/`popd`/`chdir` in the command or its wrapper bodies that `test(name, arg)` accepts.
+
+    One given no argument is tested once with an empty one.
+    """
     for text in [cmd, *_embedded_wrapper_commands(cmd)]:
         toks = _shell_tokens(text)
         for k, t in enumerate(toks):
             name = t.rsplit("/", 1)[-1]
             if name in _CD_BUILTINS:
                 args, _ = _collect_arglist(toks, k + 1)
-                found = next((a for a in args if test(name, a)), None)
+                found = next((a for a in args or [""] if test(name, a)), None)
                 if found is not None:
                     return found
     return None
@@ -2404,16 +2407,17 @@ def _names_dir_stack(value):
 def _cd_dir_stack(cmd):
     """The first `cd`/`pushd`/`popd` argument in the command or its wrapper bodies naming a stack directory.
 
-    That is `cd -`, a `~-`/`~+` tilde word, or a `pushd` or `popd` stack index such as `+1`.
-    The shell reads each from its own state, which the guard cannot see.
+    That is `cd -`, a `~-`/`~+` tilde word, a `pushd` or `popd` stack index such as `+1`, or a
+    bare `pushd` or `popd`. The shell reads each from its own state, which the guard cannot see.
     """
 
     def stacked(name, a):
-        if name in ("pushd", "popd") and re.fullmatch(r"[+-]\d+", a):
+        if name in ("pushd", "popd") and (a == "" or re.fullmatch(r"[+-]\d+", a)):
             return True
         return (name in ("cd", "chdir") and a == "-") or _names_dir_stack(a)
 
-    return _cd_argument(cmd, stacked)
+    found = _cd_argument(cmd, stacked)
+    return "a bare pushd or popd" if found == "" else found
 
 
 _GIT_COMMAND_NAMES: list[set[str]] = []
@@ -6034,7 +6038,7 @@ def _push_targets(cmd, cwd=None, current_branch=None):
                 if t == "--repo" and i + 1 < len(args):
                     repo_opt = args[i + 1]
                 i += 1  # skip this flag's value
-            elif t.startswith("--repo="):
+            elif "=" in t and _spells_long_option(t, ("repo",)):
                 repo_opt = t.partition("=")[2]
             elif t.startswith("-"):
                 pass  # some other flag (e.g. -u, --no-verify)
@@ -12868,6 +12872,30 @@ _PRIMARY_CHECKOUT_CASES = [
         "a pushd stack index moves to a directory the guard cannot see",
     ),
     (
+        "popd && git reset --hard",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a bare popd moves to a directory the guard cannot see",
+    ),
+    (
+        "pushd && git commit -m x",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "deny",
+        "a bare pushd swaps to a directory the guard cannot see",
+    ),
+    (
+        "popd && git status",
+        "/repos/task",
+        {"/repos/task": False},
+        None,
+        "allow",
+        "control: a read-only builtin after a bare popd is allowed",
+    ),
+    (
         "bash -c 'cd - && git reset --hard'",
         "/repos/task",
         {"/repos/task": False},
@@ -16383,6 +16411,12 @@ _PUSH_TARGET_CASES = [
         "git push --repo=upstream",
         "deny",
         "a bare push reads the repository its --repo option names",
+    ),
+    (
+        _UPSTREAM_DEVELOP,
+        "git push --rep=upstream",
+        "deny",
+        "a --repo option cut short still names the push's remote",
     ),
     (
         [

@@ -339,7 +339,7 @@ text says, because the harm it covers was never in the text.
    told from a pathspec. So is a subcommand git neither ships nor finds on `PATH`, which may be an
    alias defined there. An absolute path with no `..` is the workaround. A directory the shell
    reads from its own directory stack is denied the same way, leading or not. That is `cd -`, a
-   `~-` or `~+` tilde word, or a `pushd`/`popd` index such as `+1`. The hook cannot see that
+   `~-` or `~+` tilde word, a `pushd`/`popd` index such as `+1`, or a bare `pushd`/`popd`. The hook cannot see that
    stack. On Windows, a Git Bash drive spelling such as
    `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
    the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
