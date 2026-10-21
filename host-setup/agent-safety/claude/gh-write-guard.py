@@ -7406,7 +7406,7 @@ def classify(
     # `_gh_write_targets` reads argv position within each real `gh` invocation, so a compound command carrying one target per invocation still has every one read (the write after `&&` is not skipped).
     # A --repo/repos/<owner>/<repo> mention living inside an unrelated --body/--title/-f value, or in a non-gh command entirely, is not read as a target.
     targets = _gh_write_targets(cmd, environ)
-    # The owner comparison and the run-time-word check run only when origin resolves, meaning a git checkout, since with no project context there is no owner to compare against.
+    # The owner comparison and the run-time-word check run only in a git checkout, since with no origin there is no owner to compare against.
     # The unread-target check after this block runs either way, since a target the guard does not read is unknown with or without an origin.
     # A node-id target is invisible here regardless, which is what rule 2 guards.
     if origin:
@@ -15127,10 +15127,10 @@ def _push_repo_selftest():
 
 
 def _no_origin_selftest():
-    """Run `_NO_ORIGIN_CASES` with the origin read pinned to resolve nothing, as outside any checkout.
+    """Run `_NO_ORIGIN_CASES` with the origin read pinned to resolve nothing.
 
-    An unread target fails closed there, while a literal or run-time target is allowed, since
-    there is no owner to compare it against. The pin replaces `_origin_owner_repo` rather than passing a directory, so no case depends on
+    That is the read outside any checkout. An unread target fails closed there, while a literal
+    or run-time target is allowed, since there is no owner to compare it against. The pin replaces `_origin_owner_repo` rather than passing a directory, so no case depends on
     where the self-test runs or on a git spawn.
     """
     saved = globals()["_origin_owner_repo"]
