@@ -7,17 +7,16 @@ from. The job and step sets are read from the workflow, so a reordered, renamed,
 judged by the same rule rather than by a hard-coded index.
 
 The reader is an indentation reader on the standard library alone, not a YAML or shell parser.
-Its remaining limits are pinned by the `KnownLimitsCase` cases below, so a change that alters one is noticed.
+Its remaining limits are listed here, and all but the last two have a `KnownLimitsCase` case below, so a change that alters one is noticed.
 A push inside a heredoc body, after a quoted separator, or in a trailing shell comment is read as a push.
 A `type=registry` cache source is read as a push.
 A command folded across lines without a backslash is not joined.
 A flow-style `with` mapping spanning lines is not read.
 A block-scalar login value is not read as the secret.
 An inverted credential check is accepted, and the secret names and `-z` tests are matched anywhere in the step.
-A bare `-` sequence item ends the step list, so later steps go unread.
-A push by `docker compose push`, `imagetools create`, `--output type=image,push=true`, or a `uses:` step with `outputs: type=registry` is missed.
-A `run` body indented less than ten spaces is not read.
+A push by `docker compose push`, `imagetools create`, `--output type=image,push=true`, or a buildx-level option before `build` is missed.
 `with: push: false` is read as a push, and only lowercase `--push=false` and `--push=0` are read as no push.
+Two further limits have no case: a bare `-` sequence item ends the step list, and a `run` body less than two columns deeper than its key is not read.
 """
 
 from __future__ import annotations
@@ -565,7 +564,6 @@ class ReaderFixCase(unittest.TestCase):
     def test_first_key_run_or_uses_push_is_caught(self) -> None:
         for step in (
             "      - run: docker push example/image:tag\n        name: Early push step\n",
-            "      - uses: ./.github/actions/docker-build-example\n        with: {push: true}\n",
             "      - uses: ./.github/actions/docker-build-example\n        name: Early hook step\n",
         ):
             with self.subTest(step=step):
@@ -640,6 +638,23 @@ class KnownLimitsCase(unittest.TestCase):
     def test_limit_multiline_flow_with_push_is_missed(self) -> None:
         step = "      - name: Flow step\n        uses: example/push@v1\n        with: {\n          push: true}\n"
         self.assertEqual([], violations(before_login(step)))
+
+    def test_limit_other_push_forms_are_missed(self) -> None:
+        for command in (
+            "docker compose push",
+            "docker buildx imagetools create -t example/image:tag example/image:src",
+            "docker buildx build --output type=image,name=x,push=true .",
+            "docker buildx --builder b build --push .",
+        ):
+            with self.subTest(command=command):
+                step = f"      - name: Early step\n        run: {command}\n"
+                self.assertEqual([], violations(before_login(step)))
+
+    def test_limit_push_false_input_is_read_as_a_push(self) -> None:
+        step = "      - name: Local step\n        uses: example/build@v1\n        with:\n          push: false\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
 
     def test_limit_block_scalar_login_value_is_not_read(self) -> None:
         password = "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
