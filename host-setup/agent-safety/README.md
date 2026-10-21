@@ -100,7 +100,7 @@ text says, because the harm it covers was never in the text.
    `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. Of `--force`, `--delete`, `--all`, `--mirror`, `--tags`, or `--prune` and its `--no-` form, the later one wins. `--no-force` leaves a `--force-with-lease` in place, as git does. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
    every branch protected by default. It is also read as each branch it maps a local ref to in the
-   push's checkout, so a branch under a ruleset such as `release/*` is checked. A lone `:` is read
+   push's checkout. So a branch under a ruleset such as `release/*` is checked. A lone `:` is read
    the same way, as each local branch with a same-named remote-tracking ref of its remote. `--all`
    is read as every local branch too, and `--mirror` as every local and remote-tracking branch.
    With `--prune`, a pattern or a lone `:` also deletes each remote-tracking branch it matches.
@@ -335,9 +335,9 @@ text says, because the harm it covers was never in the text.
    one is denied wherever it points. So is a bare `checkout`/`switch` argument, which cannot then be
    told from a pathspec. So is a subcommand git neither ships nor finds on `PATH`, which may be an
    alias defined there. An absolute path with no `..` is the workaround. A directory the shell
-   reads from its own directory stack is denied the same way, leading or not: `cd -`, a `~-` or
-   `~+` tilde word, and a `pushd`/`popd` index such as `+1`. The hook cannot see the shell's
-   previous directory. On Windows, a Git Bash drive spelling such as
+   reads from its own directory stack is denied the same way, leading or not. That is `cd -`, a
+   `~-` or `~+` tilde word, or a `pushd`/`popd` index such as `+1`. The hook cannot see that
+   stack. On Windows, a Git Bash drive spelling such as
    `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
    the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
    maps it under the Git install root, which the hook cannot see without executing something. Fail open (allow) when no git repository
