@@ -364,7 +364,7 @@ jobs:
       smoke: true
       github: false
       dockerhub: false
-      # Every enable_* input defaults true on the task, so this one-target caller turns off the three it does not build and leaves its own on that default, the same set its publish-release.yml passes.
+      # Every enable_* input except enable_release_asset defaults true on the task, so this one-target caller turns off the three it does not build and leaves its own on that default, the same set its publish-release.yml passes.
       enable_docker: false
       enable_pypi: false
       enable_dotnet_publish: false
