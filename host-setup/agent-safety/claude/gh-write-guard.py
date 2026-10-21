@@ -15552,12 +15552,29 @@ _SELFTEST_GIT = (
 )
 
 
+_GIT_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+)
+
+
 def _build_selftest_repo(repo, steps):
     """Create a repository at `repo` on `develop` with one empty commit, then run `steps` in it.
 
     Each step is the arguments after `git -C <repo>`. It answers True only when every command exits
-    0, so a caller skips rather than fails on a host that cannot build the repository.
+    0, so a caller skips rather than fails on a host that cannot build the repository. Each command
+    runs without the variables that name a repository, since an ambient `GIT_DIR`, as a git hook
+    sets, would otherwise send every step to the caller's repository instead of `repo`.
     """
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
     commands = [
         [*_SELFTEST_GIT, "init", "-q", "-b", "develop", repo],
         [*_SELFTEST_GIT, "-C", repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
@@ -15565,7 +15582,7 @@ def _build_selftest_repo(repo, steps):
     ]
     for command in commands:
         try:
-            if subprocess.run(command, capture_output=True, check=False).returncode != 0:
+            if subprocess.run(command, capture_output=True, check=False, env=env).returncode != 0:
                 return False
         except OSError:
             return False
@@ -18445,18 +18462,7 @@ def _is_primary_checkout_selftest():
         # An ambient GIT_DIR points `git init` at that repository rather than at this temp one, and `_is_primary_checkout` then resolves both of its answers to it and reports a pass the decode never reached, leaving a repository behind outside the temp tree.
         # Cleared around both spawns rather than passed to either, since `_is_primary_checkout` reads the environment it inherits and honoring GIT_DIR is deliberate there.
         cleared = {}
-        for name in (
-            "GIT_DIR",
-            "GIT_COMMON_DIR",
-            "GIT_WORK_TREE",
-            "GIT_INDEX_FILE",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-            "GIT_CEILING_DIRECTORIES",
-            "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-            "GIT_NAMESPACE",
-            "GIT_PREFIX",
-        ):
+        for name in _GIT_LOCATION_VARS:
             if name in os.environ:
                 cleared[name] = os.environ.pop(name)
         try:

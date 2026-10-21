@@ -2125,6 +2125,47 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
         self.assertEqual(status, 0, "\n".join(fails))
 
 
+class TestSelftestRepoIgnoresAmbientGitDir(unittest.TestCase):
+    """A self-test repository is built where it is asked for, even under an ambient `GIT_DIR`.
+
+    A git hook running the self-test sets `GIT_DIR`, and every `git -C` the builder runs would
+    otherwise write its config and refs into the hook's own repository.
+    """
+
+    def test_build_leaves_the_ambient_repository_alone(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        spec = importlib.util.spec_from_file_location("guard_gitdir", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+        def git(*args):
+            return subprocess.run(
+                ["git", *args], capture_output=True, text=True, check=False, env=clean
+            ).stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ambient = os.path.join(tmp, "ambient")
+            repo = os.path.join(tmp, "repo")
+            git("init", "-q", ambient)
+
+            def state():
+                return git("-C", ambient, "config", "--local", "--list"), git(
+                    "-C", ambient, "for-each-ref"
+                )
+
+            before = state()
+            steps = [["config", "push.default", "upstream"], ["branch", "-q", "release/1"]]
+            with mock.patch.dict(os.environ, {"GIT_DIR": os.path.join(ambient, ".git")}):
+                built = guard._build_selftest_repo(repo, steps)
+            self.assertTrue(built)
+            self.assertEqual(state(), before)
+            self.assertEqual(git("-C", repo, "config", "push.default").strip(), "upstream")
+
+
 class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
     """A rooted directory with no drive segment is unresolved where Git Bash and Windows Python disagree.
 
