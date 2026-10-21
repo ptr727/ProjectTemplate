@@ -5,6 +5,18 @@ Every job that can push to Docker Hub must check the credentials and log in befo
 that pushes, the caller's hook step included, and the hook step must receive the inputs it builds
 from. The job and step sets are read from the workflow, so a reordered, renamed, or added job is
 judged by the same rule rather than by a hard-coded index.
+
+The reader is an indentation reader on the standard library alone, not a YAML or shell parser.
+Its remaining limits are listed here, and all but the last two have a `KnownLimitsCase` case below, so a change that alters one is noticed.
+A push inside a heredoc body, after a quoted separator, or in a trailing shell comment is read as a push.
+A `type=registry` cache source is read as a push.
+A command folded across lines without a backslash is not joined.
+A flow-style `with` mapping spanning lines is not read.
+A block-scalar login value is not read as the secret.
+An inverted credential check is accepted, and the secret assignments and `-z` tests are matched as text anywhere in the step.
+A push by `docker compose push`, `imagetools create`, `--output type=image,push=true`, or a buildx-level option before `build` is missed.
+`with: push: false` is read as a push, and only lowercase `--push=false` and `--push=0` are read as no push.
+Two further limits have no case: a bare `-` sequence item ends the step list, and a `run` body less than two columns deeper than its key is not read.
 """
 
 from __future__ import annotations
@@ -68,6 +80,9 @@ def split_flow(body: str) -> list[str]:
 
 def normalize_item(item: list[str]) -> list[str]:
     """Re-indent one step to the block layout the readers expect and expand a one-line `with` mapping."""
+    first = re.fullmatch(r"(\s*)- +((?!name:)[A-Za-z0-9_-]+:.*)", item[0])
+    if first:
+        item = [f"{first.group(1)}-", f"{first.group(1)}  {first.group(2)}", *item[1:]]
     shift = 6 - (len(item[0]) - len(item[0].lstrip()))
     lines = [
         (" " * shift + line if shift >= 0 else line[min(-shift, len(line) - len(line.lstrip())) :])
@@ -130,15 +145,24 @@ def with_values(item: list[str]) -> dict[str, str]:
     """The keys and values directly under the step's `with:`, ignoring comments."""
     values: dict[str, str] = {}
     in_with = False
+    child = ""
     for line in item:
         if re.fullmatch(r"        with:\s*(#.*)?", line):
             in_with = True
         elif in_with:
-            pair = re.match(r"          [\"']?([A-Za-z0-9_-]+)[\"']?:\s*(.*?)\s*$", line)
+            if not child and line.strip() and not line.lstrip().startswith("#"):
+                child = line[: len(line) - len(line.lstrip())]
+                if len(child) <= 8:
+                    break
+            pair = (
+                re.match(rf"{child}[\"']?([A-Za-z0-9_-]+)[\"']?:\s*(.*?)\s*$", line)
+                if child
+                else None
+            )
             if pair:
                 value = re.sub(r"\s+#.*$", "", pair.group(2)).strip("\"'")
                 values[pair.group(1)] = re.sub(r"\$\{\{\s*(.*?)\s*\}\}", r"${{ \1 }}", value)
-            elif line.strip() and not line.startswith("          "):
+            elif line.strip() and not line.startswith(child):
                 break
     return values
 
@@ -180,9 +204,10 @@ def is_login(step: Step) -> bool:
     )
 
 
+DOCKER = r"\bdocker(?:\s+--?[A-Za-z][\w-]*(?:=\S+|\s+[^-\s]\S*)?)*?"
 PUSH_COMMAND = re.compile(
-    r"\bdocker\s+(?:(?:image|manifest|buildx)\s+)?push\b"
-    r"|\bdocker\s+(?:buildx\s+)?(?:build|bake)\b.*(?:--push\b|type=registry\b)"
+    rf"{DOCKER}\s+(?:(?:image|manifest|buildx)\s+)?push\b"
+    rf"|{DOCKER}\s+(?:buildx\s+)?(?:build|bake)\b.*(?:--push\b(?!=(?:false|0)\b)|type=registry\b)"
 )
 
 
@@ -193,9 +218,10 @@ def run_script(step: Step) -> str:
         match = re.fullmatch(r"        run:\s*(.*)", line)
         if match:
             body = [match.group(1)]
-            body.extend(
-                rest for rest in lines[i + 1 :] if rest.startswith("          ") or not rest.strip()
-            )
+            for rest in lines[i + 1 :]:
+                if rest.strip() and not rest.startswith("          "):
+                    break
+                body.append(rest)
             return re.sub(r"\\\n\s*", " ", "\n".join(body))
     return ""
 
@@ -524,6 +550,148 @@ class DockerTaskWorkflowCase(unittest.TestCase):
             password, password + " # token\n          registry: 'index.docker.io'"
         )
         self.assertNotEqual(self.workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+
+def before_login(step: str) -> str:
+    """The workflow with the step text written before the login step of the build-docker job."""
+    return insert_before_login(DockerTaskWorkflowCase.workflow, "build-docker", step + "\n")
+
+
+class ReaderFixCase(unittest.TestCase):
+    """Shapes the reader once missed or misjudged and now reads correctly."""
+
+    def test_first_key_run_or_uses_push_is_caught(self) -> None:
+        for step in (
+            "      - run: docker push example/image:tag\n        name: Early push step\n",
+            "      - uses: ./.github/actions/docker-build-example\n        name: Early hook step\n",
+        ):
+            with self.subTest(step=step):
+                found = violations(before_login(step))
+                self.assertIn("build-docker: no login before the first push step", found)
+
+    def test_docker_global_options_before_push_are_caught(self) -> None:
+        for command in (
+            "docker --config /tmp/example push example/image:tag",
+            "docker -H tcp://example:2375 image push example/image:tag",
+            "docker --debug buildx build --push .",
+        ):
+            with self.subTest(command=command):
+                step = f"      - name: Early push step\n        run: {command}\n"
+                found = violations(before_login(step))
+                self.assertIn("build-docker: no login before the first push step", found)
+
+    def test_with_child_indented_deeper_than_ten_is_read(self) -> None:
+        step = "      - name: Early push step\n        uses: example/push@v1\n        with:\n            push: true\n"
+        found = violations(before_login(step))
+        self.assertIn("build-docker: no login before the first push step", found)
+
+    def test_push_false_is_not_a_push(self) -> None:
+        for command in ("docker buildx build --push=false .", "docker buildx build --push=0 ."):
+            with self.subTest(command=command):
+                step = f"      - name: Local build step\n        run: {command}\n"
+                self.assertEqual([], violations(before_login(step)))
+
+    def test_env_value_after_run_is_not_part_of_the_script(self) -> None:
+        step = (
+            "      - name: Quiet step\n        run: true\n"
+            "        env:\n          NOTE: docker push later\n"
+        )
+        self.assertEqual([], violations(before_login(step)))
+
+
+class KnownLimitsCase(unittest.TestCase):
+    """Each case asserts the reader's CURRENT behavior for a shape it does not judge correctly."""
+
+    def test_limit_heredoc_body_push_is_flagged(self) -> None:
+        step = "      - name: Doc step\n        run: |\n          cat <<EOF\n          docker push example/image\n          EOF\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
+    def test_limit_quoted_separator_before_push_words_is_flagged(self) -> None:
+        step = '      - name: Echo step\n        run: echo "a; docker push example/image"\n'
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
+    def test_limit_trailing_shell_comment_push_is_flagged(self) -> None:
+        step = "      - name: Comment step\n        run: true # docker push example/image\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
+    def test_limit_registry_cache_source_is_flagged(self) -> None:
+        step = "      - name: Cache step\n        run: docker buildx build --cache-from type=registry,ref=example/cache .\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
+    def test_limit_folded_run_push_is_missed(self) -> None:
+        step = "      - name: Folded step\n        run: >\n          docker\n          push example/image\n"
+        self.assertEqual([], violations(before_login(step)))
+
+    def test_limit_plain_multiline_run_push_is_missed(self) -> None:
+        step = "      - name: Plain step\n        run: docker\n          push example/image\n"
+        self.assertEqual([], violations(before_login(step)))
+
+    def test_limit_multiline_flow_with_push_is_missed(self) -> None:
+        step = "      - name: Flow step\n        uses: example/push@v1\n        with: {\n          push: true}\n"
+        self.assertEqual([], violations(before_login(step)))
+
+    def test_limit_other_push_forms_are_missed(self) -> None:
+        for command in (
+            "docker compose push",
+            "docker buildx imagetools create -t example/image:tag example/image:src",
+            "docker buildx build --output type=image,name=x,push=true .",
+            "docker buildx --builder b build --push .",
+        ):
+            with self.subTest(command=command):
+                step = f"      - name: Early step\n        run: {command}\n"
+                self.assertEqual([], violations(before_login(step)))
+
+    def test_limit_uppercase_push_false_is_read_as_a_push(self) -> None:
+        step = "      - name: Local step\n        run: docker buildx build --push=FALSE .\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
+    def test_limit_push_false_input_is_read_as_a_push(self) -> None:
+        step = "      - name: Local step\n        uses: example/build@v1\n        with:\n          push: false\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
+    def test_limit_secret_assignment_held_in_another_value_is_accepted(self) -> None:
+        workflow = DockerTaskWorkflowCase.workflow
+        mutated = workflow
+        for name in CREDENTIAL_NAMES:
+            line = f"          {name}: ${{{{ secrets.{name} }}}}"
+            mutated = mutated.replace(line, f'          NOTE_{name}: "{line.strip()}"')
+        self.assertNotEqual(workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_limit_block_scalar_login_value_is_not_read(self) -> None:
+        password = "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
+        workflow = DockerTaskWorkflowCase.workflow
+        mutated = workflow.replace(
+            password, "          password: >-\n            ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
+        )
+        self.assertNotEqual(workflow, mutated)
+        self.assertIn("build-docker: no login before the first push step", violations(mutated))
+
+    def test_limit_inverted_credential_check_is_accepted(self) -> None:
+        joined = '-z "$DOCKER_HUB_USERNAME" || -z "$DOCKER_HUB_ACCESS_TOKEN"'
+        workflow = DockerTaskWorkflowCase.workflow
+        mutated = workflow.replace(f"[[ {joined} ]]", f"! [[ {joined} ]]")
+        self.assertNotEqual(workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
+    def test_limit_check_tests_inside_an_echo_are_accepted(self) -> None:
+        joined = '-z "$DOCKER_HUB_USERNAME" || -z "$DOCKER_HUB_ACCESS_TOKEN"'
+        workflow = DockerTaskWorkflowCase.workflow
+        mutated = workflow.replace(f"if [[ {joined} ]]; then", f"echo '{joined}'; if false; then")
+        self.assertNotEqual(workflow, mutated)
         self.assertEqual([], violations(mutated))
 
 
