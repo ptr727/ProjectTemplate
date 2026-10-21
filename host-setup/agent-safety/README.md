@@ -49,9 +49,11 @@ text says, because the harm it covers was never in the text.
    allowed only when named in a grant read from the environment the session was launched with --
    never a channel the agent itself can set (an inline `VAR=x cmd` prefix or an `export` inside the
    same call must not satisfy this). **When no `origin` resolves at all** (a non-git directory, or a
-   checkout whose remote can't be read), this requirement has nothing to compare the target against
-   and does not fire -- requirements 1 and 2 still apply regardless, and this is the same
-   precision-over-recall stance every requirement but 4 takes. A write is recognized by its command
+   checkout whose remote can't be read), this requirement has no owner to compare a target against.
+   Its owner comparison and its run-time-word check then do not fire, while requirements 1 and 2
+   still apply. This is the same precision-over-recall stance every requirement but 4 takes. A write
+   whose target the hook does not read, described below, still fails closed there, since that target
+   is unknown with or without an origin. A write is recognized by its command
    and subcommand as gh's own parser finds them, past the flags before each. So a repo flag before
    the command or between `pr` and its subcommand still names the target. The target is also the
    `R` in a short-option cluster such as `-dR`, and a `GH_REPO` value that reaches the gh word,

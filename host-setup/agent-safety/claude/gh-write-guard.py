@@ -7406,7 +7406,8 @@ def classify(
     # `_gh_write_targets` reads argv position within each real `gh` invocation, so a compound command carrying one target per invocation still has every one read (the write after `&&` is not skipped).
     # A --repo/repos/<owner>/<repo> mention living inside an unrelated --body/--title/-f value, or in a non-gh command entirely, is not read as a target.
     targets = _gh_write_targets(cmd, environ)
-    # This only runs when origin resolves, meaning a git checkout, since with no project context there is nothing to compare an explicit target against, so the check is skipped and rules 1 and 2 still apply.
+    # The owner comparison and the run-time-word check run only when origin resolves, meaning a git checkout, since with no project context there is no owner to compare against.
+    # The unread-target check after this block runs either way, since a target the guard does not read is unknown with or without an origin.
     # A node-id target is invisible here regardless, which is what rule 2 guards.
     if origin:
         granted = _granted_targets(environ)
@@ -7431,12 +7432,12 @@ def classify(
                 "it writes to. Failing closed. Write the repository out, as in --repo owner/repo, "
                 "GH_REPO=owner/repo, or repos/owner/repo." + _handoff(cmd)
             )
-        unread = _gh_unread_target(cmd, payloads)
-        if unread:
-            return "deny", (
-                f"This gh write {unread[0]}, so the guard cannot tell which repository it writes "
-                f"to. Failing closed. {unread[1]}" + _handoff(cmd)
-            )
+    unread = _gh_unread_target(cmd, payloads)
+    if unread:
+        return "deny", (
+            f"This gh write {unread[0]}, so the guard cannot tell which repository it writes "
+            f"to. Failing closed. {unread[1]}" + _handoff(cmd)
+        )
 
     # 5. Hand-rolled reply/resolve for a review thread, bypassing scripts/pr_review.py's one-call helper.
     dec, reason = _check_reply_resolve_helper(cmd, environ)
@@ -8421,6 +8422,44 @@ _BYPASS_FLAG_CASES = [
         "control: the --admin reader passes a merge past the eval reading budget with no --admin",
     ),
     ('eval "gh pr merge 5 --admin"', "deny", "the --admin reader reads an eval argument"),
+]
+
+
+_NO_ORIGIN_CASES = [
+    ("eval 'gh pr comment 5 -b x'", "deny", "no origin: a gh write an eval runs"),
+    (
+        "gh api -X POST repositories/12345/issues -f title=t",
+        "deny",
+        "no origin: an api write naming its repository by id",
+    ),
+    (
+        "gh api -X POST repos/example/repo/../../stranger/example/issues -f title=t",
+        "deny",
+        "no origin: a dot-segment api write",
+    ),
+    (
+        "declare -x GH_REPO=stranger/example; gh pr comment 5 -b x",
+        "deny",
+        "no origin: a write taking a GH_REPO a declare -x sets",
+    ),
+    (
+        "gh api -X POST repos/stranger/repo/issues",
+        "allow",
+        "no origin: a literal api target under another owner",
+    ),
+    ("gh pr comment 5 -b x", "allow", "no origin: a write naming no target"),
+    (
+        "gh pr comment 5 --repo stranger/example -b x",
+        "allow",
+        "no origin: a literal repo flag under another owner",
+    ),
+    (
+        'gh pr comment 5 --repo "$R" -b x',
+        "allow",
+        "no origin: a run-time repo flag, which only the origin branch reads",
+    ),
+    ("gh api repositories/12345", "allow", "no origin: an api read by repository id"),
+    ("eval 'gh pr view 5'", "allow", "no origin: a gh read an eval runs"),
 ]
 
 
@@ -15087,6 +15126,32 @@ def _push_repo_selftest():
     return ok
 
 
+def _no_origin_selftest():
+    """Run `_NO_ORIGIN_CASES` with the origin read pinned to resolve nothing, as outside any checkout.
+
+    An unread target fails closed there, while a literal or run-time target is allowed, since
+    there is no owner to compare it against. The pin replaces `_origin_owner_repo` rather than passing a directory, so no case depends on
+    where the self-test runs or on a git spawn.
+    """
+    saved = globals()["_origin_owner_repo"]
+    globals()["_origin_owner_repo"] = lambda _cwd: None
+    ok = True
+    try:
+        for cmd, want, label in _NO_ORIGIN_CASES:
+            got, _ = classify(
+                cmd,
+                current_branch="feature/x",
+                rules_lookup=lambda br: set(),
+                environ={},
+                primary_checkout_lookup=lambda d: False,
+            )
+            ok = ok and got == want
+            print(f"  {'ok  ' if got == want else 'FAIL'} [{got:5}] want={want:5} {label}")
+    finally:
+        globals()["_origin_owner_repo"] = saved
+    return ok
+
+
 def _selftest():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
@@ -15612,6 +15677,8 @@ def _selftest():
     if not _push_config_selftest(origin):
         ok = False
     if not _push_repo_selftest():
+        ok = False
+    if not _no_origin_selftest():
         ok = False
     if not _alias_push_selftest(origin):
         ok = False
