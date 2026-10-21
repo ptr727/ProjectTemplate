@@ -163,8 +163,8 @@ text says, because the harm it covers was never in the text.
    `branch.<name>.merge`. A push is denied, with an explicit refspec as the fix, where such a
    config or branch list cannot be read. That covers a matching push to a URL, which has no
    remote-tracking refs to list. It also covers a pattern, a lone `:`, `--all`, or `--mirror`
-   after a command that may move a ref, such as `git branch`. The hook lists
-   the branches before that command runs. A word the shell rewrites or drops before git reads it is denied where it can
+   after a command that may create or switch a branch, such as `git branch`. A `gh` command or a
+   wrapper shell before the push counts too. The hook lists the branches before that command runs. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
    command it is denied among the global options where word splitting may split it. A

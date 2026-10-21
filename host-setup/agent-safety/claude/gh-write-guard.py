@@ -5590,14 +5590,15 @@ def _remote_mirrors(cwd, remote):
 _REMOTE_UNRESOLVED = object()
 
 _SCP_LIKE_URL = re.compile(r"^[^/]+:")
-_DOS_DRIVE_PATH = re.compile(r"^[A-Za-z]:(?:[\\/]|$)")
+_DOS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
 
 
 def _url_owner_repo(url):
     """The (owner, repo) a push URL names, or None for a local path, a `file://` URL, or no match.
 
     Git reads a URL with `://` as a transport URL and a word whose first colon comes before any
-    slash as an scp-like one, `host:path`. Any other word is a local path, and so is a DOS drive.
+    slash as an scp-like one, `host:path`. Any other word is a local path. So is a word starting
+    with a drive letter and a colon, as Git for Windows reads `C:x/y`, even where it is not absolute.
     """
     if "://" in url:
         if url.lower().startswith("file://"):
@@ -16358,6 +16359,12 @@ _PUSH_TARGET_CASES = [
         "git push ../elsewhere feature/example",
         "allow",
         "control: a path leaves an unprotected branch alone",
+    ),
+    (
+        [],
+        "git push C:example/beta develop",
+        "deny",
+        "a drive-relative Windows path is a local path, not a repository it seems to name",
     ),
     (
         [["config", "branch.feature/example.pushRemote", "upstream"], *_UPSTREAM_DEVELOP],
