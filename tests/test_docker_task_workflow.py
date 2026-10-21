@@ -656,6 +656,15 @@ class KnownLimitsCase(unittest.TestCase):
             "build-docker: no login before the first push step", violations(before_login(step))
         )
 
+    def test_limit_secret_assignment_held_in_another_value_is_accepted(self) -> None:
+        workflow = DockerTaskWorkflowCase.workflow
+        mutated = workflow
+        for name in CREDENTIAL_NAMES:
+            line = f"          {name}: ${{{{ secrets.{name} }}}}"
+            mutated = mutated.replace(line, f"          NOTE_{name}: {line.strip()}")
+        self.assertNotEqual(workflow, mutated)
+        self.assertEqual([], violations(mutated))
+
     def test_limit_block_scalar_login_value_is_not_read(self) -> None:
         password = "          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}"
         workflow = DockerTaskWorkflowCase.workflow
