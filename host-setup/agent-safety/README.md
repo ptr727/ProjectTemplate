@@ -132,8 +132,8 @@ text says, because the harm it covers was never in the text.
    `GIT_WORK_TREE` on a wrapper shell's prefix, or exported before it, reaches the git commands in
    its body. An alias expansion is read past the global options it leads with, such as `-p` or
    `-c`, and a `-c alias.<name>` among them is followed. An include or a `--config-env` among them
-   is denied, and a `core.hooksPath` among them is judged as it is on a command line. So is a command key whose program the hook does not read
-   or whose command runs git. A persisted alias read that times out or cannot run is denied
+   is denied. So is a command key whose program the hook does not read or whose command runs
+   git. A `core.hooksPath` among them is judged as it is on a command line. A persisted alias read that times out or cannot run is denied
    where the name may be an alias. A git command nested past the wrapper reading cap is denied
    where its subcommand may be an alias. An alias set by `--config-env` for the subcommand it runs is denied too. An `eval`
    argument holding an include key is read as the command it runs. It also covers a bare push or a
@@ -182,8 +182,10 @@ text says, because the harm it covers was never in the text.
    commit, a push, or a subcommand that may be an alias, where it skips the hooks. An empty value
    is denied, since git then looks for hooks in the filesystem root. Some commands before a push
    may rewrite its remote config. One is a `git config` or `git remote` that does not only read.
-   Others are a git subcommand that may be an alias, a `gh` command, and a wrapper shell running
-   one.
+   A lone key or `--get` reads, while a value or an argument holding a substitution writes.
+   Others are a git subcommand that may be an alias and a `gh` command whose group can touch git
+   config, such as `gh repo` or `gh pr checkout`. A wrapper shell or a substitution running one
+   counts, and so does a shell running a script file, its input, or a run-time command string.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
    undetermined. The hook reads both before the command runs, and a checkout or a switch changes
    neither.

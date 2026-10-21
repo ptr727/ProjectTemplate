@@ -4014,53 +4014,83 @@ def _config_may_change(toks, end, skip=None):
     That config is a remote's `mirror` key and the origin URL its checkout's rules are read from.
     A `git config` or `git remote` may rewrite it, and so may a git subcommand that may be an alias
     and a `gh` command (see `_config_changing_word`). A wrapper shell counts where its command string
-    holds one of those. It also counts where it has no command string the guard reads, as a script
-    file or a pipe gives it. A substitution counts the same way, held in one word or written with
-    backticks, which the tokens split (see `_names_config_change`). A checkout or a switch changes
-    neither. The scan stops at `end` and passes over the git word at `skip`, as `_head_may_move`'s does.
+    holds one of those or starts with a run-time word. A shell that reads a script file or its input
+    counts too, since the guard reads neither. A substitution the tokens keep inside one word is
+    read by the caller (see `_substitution_bodies`). A checkout or a switch changes neither. The scan
+    stops at `end` and passes over the git word at `skip`, as `_head_may_move`'s does.
     """
-    words = [t for k, t in enumerate(toks[:end]) if k != skip]
-    if any("`" in t for t in words) and _names_config_change(" ".join(words)):
-        return True
     for k in range(end):
-        t = toks[k]
         if k == skip:
             continue
         found = _shell_bodies_at(toks, k)
-        if found and not found[0] and _command_prefix(toks, k)[0]:
-            return True
-        if found and any(_names_config_change(body) for body in found[0]):
-            return True
-        if "$(" in t and _names_config_change(t):
-            return True
+        if found and _command_prefix(toks, k)[0]:
+            bodies = found[0]
+            if not bodies and _shell_reads_unread_script(toks, k):
+                return True
+            if any(_names_config_change(body) or _starts_run_time(body) for body in bodies):
+                return True
         if _config_changing_word(toks, k):
             return True
     return False
 
 
+def _shell_reads_unread_script(toks, k):
+    """True when the shell at `toks[k]`, which has no command string, runs a script file or reads its input.
+
+    That is a shell given a word that is no option, or one given no word at all. A shell given only options, as `bash --version` is, runs nothing.
+    """
+    args, _ = _collect_arglist(toks, k + 1)
+    return not args or any(not a.startswith("-") for a in args)
+
+
+def _starts_run_time(body):
+    """True when a command string's first word is one the shell rewrites, as `"$CMD"` is, so the guard does not read what it runs."""
+    words = _shell_tokens(body)
+    return bool(words) and _is_run_time_word(words[0])
+
+
 _CONFIG_READ_ACTIONS = frozenset(
     {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l", "--list"}
+)
+_CONFIG_WRITE_ACTIONS = frozenset(
+    {"--add", "--replace-all", "--unset", "--unset-all", "--rename-section", "--remove-section"}
+    | {"-e", "--edit"}
+)
+_CONFIG_VALUE_OPTS = frozenset(
+    {"-f", "--file", "--blob", "--type", "--default", "--comment", "--value", "--url"}
+)
+_GH_CONFIG_READ_GROUPS = frozenset(
+    {"api", "attestation", "browse", "cache", "codespace", "completion", "gist", "gpg-key"}
+    | {"help", "issue", "label", "org", "project", "release", "ruleset", "run", "search"}
+    | {"secret", "ssh-key", "status", "variable", "version", "workflow"}
 )
 
 
 def _config_changing_word(toks, k):
-    """True when the word at `toks[k]` runs a command `_config_may_change` counts.
+    """True when the word at `toks[k]` runs a command `_config_may_change` counts, as its simple command's command.
 
-    That is a `gh` that is its simple command's command (see `_command_prefix`), or a git word
-    `_git_word_changes_config` names.
+    A `gh` counts unless its command group cannot touch git config, and `gh pr` counts only for `checkout` or `co`.
+    A git word counts where `_git_word_changes_config` names it.
     """
-    if _is_gh_exe(toks[k]):
-        return _command_prefix(toks, k)[0]
-    return _is_git_exe(toks[k]) and _git_word_changes_config(toks, k)
+    t = toks[k]
+    if not (_is_gh_exe(t) or _is_git_exe(t)) or not _command_prefix(toks, k)[0]:
+        return False
+    if _is_git_exe(t):
+        return _git_word_changes_config(toks, k)
+    args = [a for a in _collect_arglist(toks, k + 1)[0] if not a.startswith("-")]
+    if not args:
+        return False
+    if args[0] == "pr":
+        return args[1:2] in (["checkout"], ["co"])
+    return args[0] not in _GH_CONFIG_READ_GROUPS
 
 
 def _git_word_changes_config(toks, k):
     """True when the git word at `toks[k]` runs a subcommand `_config_may_change` counts.
 
-    A `git config` or `git remote` that only reads is left out. That is a config action such as
-    `--get` or `--list`, or a `get` or `list` subcommand. It is a bare `git remote`, with or
-    without `-v`, or its `show` or `get-url`. One whose arguments hold a substitution is not left
-    out, since the guard does not read what the substitution gives.
+    A `git config` or `git remote` that only reads is left out (see `_config_only_reads`). It is a
+    bare `git remote`, with or without `-v`, or its `show` or `get-url`. One whose arguments hold a
+    substitution is not left out, since the guard does not read what the substitution gives.
     """
     j = _git_subcommand_index(toks, k)
     if j >= len(toks) or _is_shell_op(toks[j]):
@@ -4070,11 +4100,35 @@ def _git_word_changes_config(toks, k):
     if sub in ("config", "remote") and any("`" in a or "$(" in a for a in args):
         return True
     if sub == "config":
-        return not (any(a in _CONFIG_READ_ACTIONS for a in args) or args[:1] in (["get"], ["list"]))
+        return not _config_only_reads(args)
     if sub == "remote":
         rest = [a for a in args if a not in ("-v", "--verbose")]
         return bool(rest) and rest[0] not in ("show", "get-url")
     return _may_be_alias(sub)
+
+
+def _config_only_reads(args):
+    """True when a `git config`'s arguments only read.
+
+    A write action such as `--unset`, or a `set`, `unset`, or `edit` subcommand, writes.
+    A read action such as `--get`, or a `get` or `list` subcommand, reads.
+    Otherwise a lone key reads, and a key with a value writes. An option's value is not a key.
+    """
+    if any(a.split("=", 1)[0] in _CONFIG_WRITE_ACTIONS for a in args):
+        return False
+    positionals, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in _CONFIG_VALUE_OPTS:
+            skip = True
+        elif not a.startswith("-"):
+            positionals.append(a)
+    if positionals[:1] in (["get"], ["list"]):
+        return True
+    if positionals[:1] in (["set"], ["unset"], ["rename-section"], ["remove-section"], ["edit"]):
+        return False
+    return any(a in _CONFIG_READ_ACTIONS for a in args) or len(positionals) <= 1
 
 
 def _names_config_change(text):
@@ -5268,6 +5322,7 @@ def _push_invocations(cmd):
         whole_moves = _head_may_move(outer_toks, len(outer_toks))
         quoted = _quoted_mask(text, outer_toks)
         export_dirs = _leading_export_dirs(text)
+        substituted = any(_names_config_change(s) for s in _substitution_bodies(text))
         batches = [(text, outer_cd, outer_extra, False)]
         for inner in _embedded_wrapper_commands(text):
             batches.append((inner, outer_cd, outer_extra, True))
@@ -5288,7 +5343,7 @@ def _push_invocations(cmd):
                     if body is text:
                         scan = _push_scan_end(outer_toks, quoted, word)
                         head_moves = _head_may_move(outer_toks, *scan)
-                        config_moves = _config_may_change(outer_toks, *scan)
+                        config_moves = substituted or _config_may_change(outer_toks, *scan)
                     else:
                         head_moves = whole_moves
                     repo_unreliable = (
@@ -15313,6 +15368,24 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a gh named as another command's argument does not run gh",
     ),
+    (
+        [],
+        "git commit -q --allow-empty -m 'Read the `gh` word' && git push --tags origin",
+        "allow",
+        "control: a backtick inside single quotes is literal text, not a substitution",
+    ),
+    (
+        [],
+        'bash -c "$CMD"; git push --tags origin',
+        "deny",
+        "a wrapper shell whose command string is a run-time word leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        "bash --version && git push --tags origin",
+        "allow",
+        "control: a shell given only options runs no script",
+    ),
 ]
 
 
@@ -15465,6 +15538,26 @@ _PUSH_REPO_CASES = [
         "git add example/gh && git push origin develop",
         "allow",
         "control: a path named gh is not a gh command",
+    ),
+    (
+        "git add example/git && echo git remote add x y && git push origin develop",
+        "allow",
+        "control: a path or an argument named git is not a git command",
+    ),
+    (
+        "git config user.email && git config --global get user.email && git push origin develop",
+        "allow",
+        "control: a git config naming a lone key, or its get subcommand, only reads",
+    ),
+    (
+        "gh pr view 3 && git push origin develop",
+        "allow",
+        "control: a gh command group that cannot touch git config leaves the origin alone",
+    ),
+    (
+        "gh pr checkout 3 && git push origin develop",
+        "deny",
+        "a gh pr checkout before the push may add a remote, so the push's origin is unresolved",
     ),
 ]
 
