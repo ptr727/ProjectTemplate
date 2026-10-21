@@ -347,7 +347,7 @@ jobs:
   # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: read
 
@@ -356,7 +356,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: read
     # A Docker repo maps DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN by name here, since the task logs in to Docker Hub on every build for the higher rate limit.
@@ -548,7 +548,7 @@ jobs:
   # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -559,7 +559,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: read
     secrets:
@@ -571,7 +571,7 @@ jobs:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@6c88850128629bb449fd73c7fbf82968c6cd1557 # 2.0.587
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: write
       actions: write
