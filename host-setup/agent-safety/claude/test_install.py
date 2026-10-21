@@ -2125,14 +2125,14 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
         self.assertEqual(status, 0, "\n".join(fails))
 
 
-class TestSelftestRepoIgnoresAmbientGitDir(unittest.TestCase):
-    """A self-test repository is built where it is asked for, even under an ambient `GIT_DIR`.
+class TestSelftestIgnoresAmbientGitDir(unittest.TestCase):
+    """The self-test builds and reads its repositories where it asks, even under an ambient `GIT_DIR`.
 
-    A git hook running the self-test sets `GIT_DIR`, and every `git -C` the builder runs would
-    otherwise write its config and refs into the hook's own repository.
+    A git hook running the self-test sets `GIT_DIR`. Each `git -C` a case runs would otherwise
+    write into the hook's own repository and read its answers back from there.
     """
 
-    def test_build_leaves_the_ambient_repository_alone(self):
+    def test_cases_run_without_the_ambient_repository(self):
         if shutil.which("git") is None:
             self.skipTest("git is not installed")
         spec = importlib.util.spec_from_file_location("guard_gitdir", HERE / "gh-write-guard.py")
@@ -2151,19 +2151,28 @@ class TestSelftestRepoIgnoresAmbientGitDir(unittest.TestCase):
             ambient = os.path.join(tmp, "ambient")
             repo = os.path.join(tmp, "repo")
             git("init", "-q", ambient)
+            ambient_dir = os.path.join(ambient, ".git")
 
             def state():
                 return git("-C", ambient, "config", "--local", "--list"), git(
                     "-C", ambient, "for-each-ref"
                 )
 
-            before = state()
-            steps = [["config", "push.default", "upstream"], ["branch", "-q", "release/1"]]
-            with mock.patch.dict(os.environ, {"GIT_DIR": os.path.join(ambient, ".git")}):
+            def case():
+                steps = [["config", "push.default", "upstream"], ["branch", "-q", "release/1"]]
                 built = guard._build_selftest_repo(repo, steps)
-            self.assertTrue(built)
+                return built, guard._git_stdout(repo, ["config", "push.default"])
+
+            before = state()
+            with (
+                mock.patch.dict(os.environ, {"GIT_DIR": ambient_dir}),
+                mock.patch.object(guard, "_selftest_cases", case),
+            ):
+                result = guard._selftest()
+                restored = os.environ.get("GIT_DIR")
+            self.assertEqual(result, (True, "upstream"))
             self.assertEqual(state(), before)
-            self.assertEqual(git("-C", repo, "config", "push.default").strip(), "upstream")
+            self.assertEqual(restored, ambient_dir)
 
 
 class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):

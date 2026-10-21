@@ -98,6 +98,7 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
 
+import contextlib
 import json
 import os
 import posixpath
@@ -15566,15 +15567,22 @@ _GIT_LOCATION_VARS = (
 )
 
 
+@contextlib.contextmanager
+def _git_location_cleared():
+    """Remove each variable that names a repository from the environment, restoring them on exit."""
+    cleared = {name: os.environ.pop(name) for name in _GIT_LOCATION_VARS if name in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(cleared)
+
+
 def _build_selftest_repo(repo, steps):
     """Create a repository at `repo` on `develop` with one empty commit, then run `steps` in it.
 
     Each step is the arguments after `git -C <repo>`. It answers True only when every command exits
-    0, so a caller skips rather than fails on a host that cannot build the repository. Each command
-    runs without the variables that name a repository, since an ambient `GIT_DIR`, as a git hook
-    sets, would otherwise send every step to the caller's repository instead of `repo`.
+    0, so a caller skips rather than fails on a host that cannot build the repository.
     """
-    env = {k: v for k, v in os.environ.items() if k not in _GIT_LOCATION_VARS}
     commands = [
         [*_SELFTEST_GIT, "init", "-q", "-b", "develop", repo],
         [*_SELFTEST_GIT, "-C", repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "init"],
@@ -15582,7 +15590,7 @@ def _build_selftest_repo(repo, steps):
     ]
     for command in commands:
         try:
-            if subprocess.run(command, capture_output=True, check=False, env=env).returncode != 0:
+            if subprocess.run(command, capture_output=True, check=False).returncode != 0:
                 return False
         except OSError:
             return False
@@ -16668,6 +16676,16 @@ def _no_origin_selftest():
 
 
 def _selftest():
+    """Run every self-test case with no variable naming a repository in the environment.
+
+    A git hook sets `GIT_DIR`. A case building a temporary repository would otherwise build it
+    inside the hook's own repository and read its answers back from there.
+    """
+    with _git_location_cleared():
+        return _selftest_cases()
+
+
+def _selftest_cases():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
@@ -18461,11 +18479,7 @@ def _is_primary_checkout_selftest():
             return "skip"
         # An ambient GIT_DIR points `git init` at that repository rather than at this temp one, and `_is_primary_checkout` then resolves both of its answers to it and reports a pass the decode never reached, leaving a repository behind outside the temp tree.
         # Cleared around both spawns rather than passed to either, since `_is_primary_checkout` reads the environment it inherits and honoring GIT_DIR is deliberate there.
-        cleared = {}
-        for name in _GIT_LOCATION_VARS:
-            if name in os.environ:
-                cleared[name] = os.environ.pop(name)
-        try:
+        with _git_location_cleared():
             try:
                 r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
             except OSError:
@@ -18473,8 +18487,6 @@ def _is_primary_checkout_selftest():
             if r.returncode != 0:
                 return "skip"
             return _is_primary_checkout(target)
-        finally:
-            os.environ.update(cleared)
 
 
 # --- Hook entrypoint (PreToolUse) --------------------------------------------------------------------
