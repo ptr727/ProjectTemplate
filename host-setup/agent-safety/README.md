@@ -182,10 +182,12 @@ text says, because the harm it covers was never in the text.
    commit, a push, or a subcommand that may be an alias, where it skips the hooks. An empty value
    is denied, since git then looks for hooks in the filesystem root. Some commands before a push
    may rewrite its remote config. One is a `git config` or `git remote` that does not only read.
-   A lone key or `--get` reads, while a value or an argument holding a substitution writes.
+   A lone key or `--get` reads, unless a write action such as `--unset` names it. A value, or an
+   argument holding a substitution, writes.
    Others are a git subcommand that may be an alias and a `gh` command whose group can touch git
-   config, such as `gh repo` or `gh pr checkout`. A wrapper shell or a substitution running one
-   counts, and so does a shell running a script file, its input, or a run-time command string.
+   config. That is `gh pr checkout`, or a `gh repo` other than a read like `gh repo view`. So is a
+   run-time command word, which may expand to any of them. A wrapper shell or a substitution
+   running one counts, and so does a shell running a script file or its input.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
    undetermined. The hook reads both before the command runs, and a checkout or a switch changes
    neither.
