@@ -62,8 +62,9 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      running result. Checkout/switch force flags (`-b`/`-B` for checkout, `-c`/`-C` for switch,
      `-f`/`--force`/`--discard-changes`/`--orphan` for either) are recognized bundled or attached into a
      short-option cluster (`-qf`, `-Bname`, `-Cother`), not only as an exact token. A subcommand this
-     rule does not recognize is resolved through a bounded chain of git aliases (inline `-c
-     alias.<name>=`, then the target's own persisted config) before falling through to allow. A
+     rule does not recognize is resolved through a bounded chain of git aliases before falling
+     through to allow. An inline `-c alias.<name>=` comes first, then the target's own persisted
+     config, and a name whose read timed out or could not run is denied. A
      `!`-prefixed shell alias is denied outright rather than interpreted. Exempt: `worktree
      add/list/prune` and an unforced `worktree remove` (the
      documented way to use a primary checkout at all), `merge --ff-only`/`pull --ff-only` (can never
@@ -1826,10 +1827,10 @@ def _all_git_invocations(cmd):
     must not fail open just because the redirect came from `export` rather than from `-C`, an
     inline prefix, or a flag.
 
-    A `GIT_WORK_TREE`/`GIT_DIR` that reaches a wrapper shell, as its prefix or an earlier `export`,
-    reaches the git commands in its command string too (see `_wrapper_dir_prefixes`). Each inner
-    invocation that sets neither itself is read a second time under each such pair, since the guard
-    does not pair a body with the wrapper that runs it.
+    A `GIT_WORK_TREE`/`GIT_DIR` may reach a wrapper shell, as its prefix or an earlier `export`.
+    It then reaches the git commands in its command string too (see `_wrapper_dir_prefixes`). Each
+    inner invocation that sets neither itself is read again under each such pair. The guard does
+    not pair a body with the wrapper that runs it.
     """
     outer_leading_cd = _leading_cd_dir(cmd)
     outer_export_wt, outer_export_gd = _leading_export_dirs(cmd)
@@ -1862,24 +1863,12 @@ def _all_git_invocations(cmd):
 def _wrapper_dir_prefixes(text):
     """The (work tree, git dir) a `GIT_WORK_TREE`/`GIT_DIR` gives each shell in `text` whose command string runs git.
 
-    That is the shell's own prefix and each `export` before it, as `_wrapper_env_assignments` reads them.
+    That is the shell's own prefix and each `export` before it (see `_wrapper_env_groups`).
     A shell that is given neither is left out.
     """
-    toks = _shell_tokens(text)
-    out, exported = [], []
-    for x, t in enumerate(toks):
-        if t == "export" and _opens_command(toks, x):
-            exported.extend(_export_assignments(toks, x))
-            continue
-        found = _shell_bodies_at(toks, x)
-        if not found or not any(_runs_git(body) for body in found[0]):
-            continue
-        reached, prefix = _command_prefix(toks, x)
-        if not reached:
-            reached, prefix = _launcher_prefix(toks, x)
-        if not reached:
-            continue
-        values = dict(exported + prefix)
+    out = []
+    for group in _wrapper_env_groups(_shell_tokens(text)):
+        values = dict(group)
         pair = (values.get(_GIT_ENV_WORK_TREE_VAR), values.get(_GIT_ENV_GIT_DIR_VAR))
         if pair != (None, None):
             out.append(pair)
@@ -2257,21 +2246,22 @@ def _alias_options_config(words):
 
 
 def _resolve_alias(sub, args, inline_aliases, target_dir, config_lookup=None, git_dir=False):
-    """Expand `sub` through a chain of git aliases -- an inline `-c alias.<name>=<value>` override
-    on this invocation first, then the target checkout's own persisted config, matching real
-    git's own override order -- up to `_MAX_ALIAS_DEPTH` levels, so a subcommand this rule does
-    not otherwise recognize is not silently allowed just because it is spelled as a custom alias
-    rather than the built-in name it actually expands to. Returns `(sub, args, opaque)`: `opaque`
-    is `"shell"` the moment any alias in the chain is a `!`-prefixed shell command rather than a git
-    subcommand alias, since that shape hands git an arbitrary shell string this function does not
-    and must not execute to interpret -- the caller denies that shape outright against a primary
-    checkout rather than either running it or letting it fall through to an ordinary allow, one
-    of two places this rule departs from its usual fail-open stance (the other is a `..` component
-    in a directory value), because the alias definition itself is concrete, positive evidence of
-    an attempt to run something via git in exactly the directory this rule exists to protect.
-    It is `"unread"` where the read of a name that may be an alias times out or cannot run, and
-    `False` otherwise. An expansion's subcommand is read past its leading global options, and a
-    `-c alias.<name>=<value>` among them is followed as an inline alias.
+    """Expand `sub` through a chain of git aliases, up to `_MAX_ALIAS_DEPTH` levels.
+
+    An inline `-c alias.<name>=<value>` override on this invocation comes first, then the target
+    checkout's own persisted config, matching real git's own override order. So a subcommand this
+    rule does not recognize is not allowed just because it is spelled as a custom alias. Returns
+    `(sub, args, opaque)`.
+
+    `opaque` is `"shell"` the moment any alias in the chain is a `!`-prefixed shell command rather
+    than a git subcommand alias. That shape hands git an arbitrary shell string this function does
+    not and must not execute to interpret. The caller denies it outright against a primary
+    checkout, rather than running it or letting it fall through to an ordinary allow. The alias
+    definition itself is concrete evidence of an attempt to run something via git in exactly the
+    directory this rule exists to protect. `opaque` is `"unread"` where the read of a name that
+    may be an alias times out or cannot run, and `False` otherwise. An expansion's subcommand is
+    read past its leading global options. A `-c alias.<name>=<value>` among them is followed as
+    an inline alias.
     """
     seen = set()
     depth = 0
@@ -4018,18 +4008,15 @@ def _head_may_move(toks, end, skip=None):
     return False
 
 
-_CONFIG_WRITING_SUBS = frozenset({"config", "remote"})
-
-
 def _config_may_change(toks, end, skip=None):
     """True when something before a push in these tokens may rewrite the remote config the push reads.
 
     That config is a remote's `mirror` key and the origin URL its checkout's rules are read from.
-    A `git config` or `git remote` may rewrite it, and so may a git subcommand that may be an alias
-    or that the shell rewrites, and any `gh` command. A wrapper shell, or a substitution held in one
-    word, whose command string holds one of those counts too (see `_names_config_change`). A checkout
-    or a switch changes neither. The scan stops at `end` and passes over the git word at `skip`, as
-    `_head_may_move`'s does.
+    A `git config` or `git remote` may rewrite it (see `_git_word_changes_config`). So may a git
+    subcommand that may be an alias, and any `gh` command. A wrapper shell may hold one of those in
+    its command string, and so may a substitution held in one word (see `_names_config_change`).
+    A checkout or a switch changes neither. The scan stops at `end` and passes over the git word at
+    `skip`, as `_head_may_move`'s does.
     """
     for k in range(end):
         t = toks[k]
@@ -4045,13 +4032,29 @@ def _config_may_change(toks, end, skip=None):
     return False
 
 
+_CONFIG_READ_ACTIONS = frozenset(
+    {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l", "--list"}
+)
+
+
 def _git_word_changes_config(toks, k):
-    """True when the git word at `toks[k]` runs a subcommand `_config_may_change` counts."""
+    """True when the git word at `toks[k]` runs a subcommand `_config_may_change` counts.
+
+    A `git config` or `git remote` that only reads is left out. That is a config action such as
+    `--get` or `--list`, or a `get` or `list` subcommand. It is a bare `git remote`, with or
+    without `-v`, or its `show` or `get-url`.
+    """
     j = _git_subcommand_index(toks, k)
     if j >= len(toks) or _is_shell_op(toks[j]):
         return False
     sub = toks[j]
-    return sub in _CONFIG_WRITING_SUBS or _may_name_alias(sub) or _is_run_time_word(sub)
+    args, _ = _collect_arglist(toks, j + 1)
+    if sub == "config":
+        return not (any(a in _CONFIG_READ_ACTIONS for a in args) or args[:1] in (["get"], ["list"]))
+    if sub == "remote":
+        rest = [a for a in args if a not in ("-v", "--verbose")]
+        return bool(rest) and rest[0] not in ("show", "get-url")
+    return _may_be_alias(sub)
 
 
 def _names_config_change(text):
@@ -4448,16 +4451,22 @@ def _alias_runs_push(expansion):
 def _alias_options_hide(words):
     """True when an alias expansion's leading options set config the guard does not follow.
 
-    That is a `--config-env` value, an include, or a `core.hooksPath`.
+    That is a `--config-env` value or an include.
+    It is a `core.hooksPath` that `_hooks_path_reason` names for the subcommand the expansion runs, as it would on a command line.
     It is also a value for a key `_is_command_config_key` names whose program `_command_value` cannot read, or whose command runs git.
     An alias `-c alias.<name>` is followed instead (see `_alias_chain_hides_push`).
     """
+    start = _alias_subcommand_index(words)
+    sub = words[start] if start < len(words) else ""
     for value, from_env in _alias_options_config(words):
         key = _config_key(value)
-        if from_env or _includes_config_file(value) or key == "core.hookspath":
+        setting = value.partition("=")[2]
+        if from_env or _includes_config_file(value):
+            return True
+        if key == "core.hookspath" and _hooks_path_reason("c", setting, sub):
             return True
         if _is_command_config_key(key):
-            text, readable = _command_value(key, value.partition("=")[2])
+            text, readable = _command_value(key, setting)
             if not readable or (text and _runs_git(text)):
                 return True
     return False
@@ -4476,7 +4485,8 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
     - a `--config-env` alias for the subcommand it runs
     - a value for such a key, or for one of `_COMMAND_ENV_VARS`, whose program `_command_value` cannot read
     - an alias from the environment, or one persisted in the checkout's config, that runs a push
-    - a `!` shell alias such a chain reaches, a persisted alias read that timed out, or an expansion setting config the guard does not follow (see `_alias_chain_hides_push`)
+    - a `!` shell alias such a chain reaches, or a persisted alias read that timed out (see `_alias_chain_hides_push`)
+    - an expansion in such a chain that sets config the guard does not follow
     - a setting `_wrapper_env_reason` names, on a shell whose command string runs git (see `_runs_git`)
     - a git command past the wrapper reading cap that `_may_run_alias` says may run an alias
 
@@ -4574,7 +4584,8 @@ def _hidden_command(cmd, cwd=None, config_lookup=None):
 def _hooks_path_reason(source, setting, sub):
     """Name what a `core.hooksPath` override on `git <sub>` hides, else None.
 
-    Every git command that updates a ref, the index, or the checked-out branch runs hooks, so a directory the guard does not read may hold one that runs anything.
+    Every git command that updates a ref, the index, or the checked-out branch runs hooks.
+    So a directory the guard does not read may hold one that runs anything.
     Only `/dev/null` holds no hook, while an empty value makes git look in the filesystem root.
     A `/dev/null` value still skips a commit's or a push's hooks, and a subcommand that may be an alias may be either.
     A `--config-env` value is not read at all.
@@ -4583,7 +4594,7 @@ def _hooks_path_reason(source, setting, sub):
         return "a `--config-env` value for `core.hooksPath`, whose hooks directory the guard does not read"
     if setting.strip() != "/dev/null":
         return "a `core.hooksPath` override naming a hooks directory the guard does not read"
-    if not sub or sub in ("commit", "push") or _may_name_alias(sub) or _is_run_time_word(sub):
+    if not sub or sub in ("commit", "push") or _may_be_alias(sub):
         return (
             f"a `core.hooksPath` override on `git {sub}`, which may skip its commit or push hooks"
         )
@@ -4656,7 +4667,7 @@ def _may_run_alias(text):
     for k, t in enumerate(toks):
         if _is_git_exe(t):
             j = _git_subcommand_index(toks, k)
-            if j < len(toks) and (_may_name_alias(toks[j]) or _is_run_time_word(toks[j])):
+            if j < len(toks) and _may_be_alias(toks[j]):
                 return True
     return False
 
@@ -4685,6 +4696,11 @@ def _wrapper_env_assignments(toks, runs=None):
     Behind a launcher `_command_prefix` does not know, it is the assignments before that launcher (see `_launcher_prefix`).
     Its command string is read as a command of its own, which these do not reach.
     """
+    return [pair for group in _wrapper_env_groups(toks, runs) for pair in group]
+
+
+def _wrapper_env_groups(toks, runs=None):
+    """`_wrapper_env_assignments`, as one list of (name, value) per shell, in the order the shells appear."""
     out, exported = [], []
     for x, t in enumerate(toks):
         if t == "export" and _opens_command(toks, x):
@@ -4696,7 +4712,7 @@ def _wrapper_env_assignments(toks, runs=None):
             if not reached:
                 reached, prefix = _launcher_prefix(toks, x)
             if reached:
-                out.extend(exported + prefix)
+                out.append(exported + prefix)
     return out
 
 
@@ -4743,6 +4759,11 @@ def _wrapper_env_reason(assignments):
 
 
 _ALIAS_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+
+
+def _may_be_alias(word):
+    """True when a git subcommand word may run an alias: one `_may_name_alias` accepts, or one the shell may rewrite."""
+    return _may_name_alias(word) or _is_run_time_word(word)
 
 
 def _may_name_alias(name):
@@ -15231,6 +15252,18 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a git config after the push does not change what it reads",
     ),
+    (
+        [],
+        "git config user.name Example; git push --tags origin",
+        "deny",
+        "a git config that sets any key before the push leaves its remote config unresolved",
+    ),
+    (
+        [],
+        "git config --get remote.origin.url && git remote -v && git push --tags origin",
+        "allow",
+        "control: a git config or git remote that only reads leaves the push's remote config alone",
+    ),
 ]
 
 
@@ -16987,6 +17020,24 @@ _ALIAS_PUSH_CASES = [
         {"q": "-c core.pager=less log"},
         "allow",
         "control: an expansion setting a command key to a plain program that runs no git is allowed",
+    ),
+    (
+        "git q",
+        {"q": "-c core.hooksPath=/example/hooks status"},
+        "deny",
+        "an expansion setting core.hooksPath to a directory is denied, as on a command line",
+    ),
+    (
+        "git q -m x",
+        {"q": "-c core.hooksPath=/dev/null commit"},
+        "deny",
+        "an expansion setting a /dev/null core.hooksPath on a commit is denied, as on a command line",
+    ),
+    (
+        "git q",
+        {"q": "-c core.hooksPath=/dev/null status"},
+        "allow",
+        "control: an expansion setting a /dev/null core.hooksPath on status is allowed, as on a command line",
     ),
     (
         "git p origin develop",

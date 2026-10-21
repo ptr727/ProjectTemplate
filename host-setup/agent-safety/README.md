@@ -180,10 +180,13 @@ text says, because the harm it covers was never in the text.
    denied on any git command, since a checkout, a branch, and any other command that updates a
    ref run hooks too. A `/dev/null` value holds no hook and is allowed. It is still denied on a
    commit, a push, or a subcommand that may be an alias, where it skips the hooks. An empty value
-   is denied, since git then looks for hooks in the filesystem root. A push after a `git config`,
-   a `git remote`, a git subcommand that may be an alias, a `gh` command, or a wrapper shell
-   running one reads its remote's `mirror` setting and its checkout's origin as undetermined. The
-   hook reads both before the command runs, and a checkout or a switch changes neither.
+   is denied, since git then looks for hooks in the filesystem root. Some commands before a push
+   may rewrite its remote config. One is a `git config` or `git remote` that does not only read.
+   Others are a git subcommand that may be an alias, a `gh` command, and a wrapper shell running
+   one.
+   After one, the push reads its remote's `mirror` setting and its checkout's origin as
+   undetermined. The hook reads both before the command runs, and a checkout or a switch changes
+   neither.
    A shell whose command string runs git is denied where its prefix or an earlier `export` sets
    such a file, or config through `GIT_CONFIG_COUNT`. A variable git runs as a command, set
    there, counts too, unless it names a plain program that runs no git. The hook reads that
@@ -267,14 +270,14 @@ text says, because the harm it covers was never in the text.
    custom alias that expands to a denied builtin (`git -c alias.wipe='reset --hard' wipe`, or the
    same `wipe` alias persisted in the checkout's own config) is denied exactly as the builtin itself
    would be. A `!`-prefixed alias hands git an arbitrary shell string rather than naming another git
-   subcommand, and this requirement does not and cannot safely interpret one, so it denies that
-   shape outright against a primary checkout. This is one of two places this requirement departs
-   from its own fail-open stance. The alias definition itself is concrete evidence of an attempt to
-   run something via git in exactly the directory this requirement protects. The other place is a
-   directory value holding a `..` component, below. The persisted alias is read from the
-   repository git runs in, which a `--work-tree` does not move, and from the work tree as well.
-   An expansion is read past its leading global options, such as `-p`, to the subcommand it runs.
-   An alias read that times out or cannot run is denied too, where the name may be an alias.
+   subcommand. This requirement does not and cannot safely interpret one, so it denies that shape
+   outright against a primary checkout. That departs from this requirement's own fail-open
+   stance. The alias definition itself is concrete evidence of an attempt to run something via
+   git in exactly the directory this requirement protects. A directory value holding a `..`
+   component departs from it too, below. The persisted alias is read from the repository git runs
+   in, which a `--work-tree` does not move, and from the work tree as well. An expansion is read
+   past its leading global options, such as `-p`, to the subcommand it runs. An alias read that
+   times out or cannot run is denied too, where the name may be an alias.
 
    Resolve the target directory the way real git itself does, not by a last-option-wins scan across
    every directory-naming option: any `-C <dir>` options on the invocation compose sequentially (an
