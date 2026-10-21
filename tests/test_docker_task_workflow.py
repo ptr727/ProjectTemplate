@@ -13,7 +13,7 @@ A `type=registry` cache source is read as a push.
 A command folded across lines without a backslash is not joined.
 A flow-style `with` mapping spanning lines is not read.
 A block-scalar login value is not read as the secret.
-An inverted credential check is accepted, and the secret names and `-z` tests are matched anywhere in the step.
+An inverted credential check is accepted, and the secret assignments and `-z` tests are matched as text anywhere in the step.
 A push by `docker compose push`, `imagetools create`, `--output type=image,push=true`, or a buildx-level option before `build` is missed.
 `with: push: false` is read as a push, and only lowercase `--push=false` and `--push=0` are read as no push.
 Two further limits have no case: a bare `-` sequence item ends the step list, and a `run` body less than two columns deeper than its key is not read.
@@ -650,6 +650,12 @@ class KnownLimitsCase(unittest.TestCase):
                 step = f"      - name: Early step\n        run: {command}\n"
                 self.assertEqual([], violations(before_login(step)))
 
+    def test_limit_uppercase_push_false_is_read_as_a_push(self) -> None:
+        step = "      - name: Local step\n        run: docker buildx build --push=FALSE .\n"
+        self.assertIn(
+            "build-docker: no login before the first push step", violations(before_login(step))
+        )
+
     def test_limit_push_false_input_is_read_as_a_push(self) -> None:
         step = "      - name: Local step\n        uses: example/build@v1\n        with:\n          push: false\n"
         self.assertIn(
@@ -661,7 +667,7 @@ class KnownLimitsCase(unittest.TestCase):
         mutated = workflow
         for name in CREDENTIAL_NAMES:
             line = f"          {name}: ${{{{ secrets.{name} }}}}"
-            mutated = mutated.replace(line, f"          NOTE_{name}: {line.strip()}")
+            mutated = mutated.replace(line, f'          NOTE_{name}: "{line.strip()}"')
         self.assertNotEqual(workflow, mutated)
         self.assertEqual([], violations(mutated))
 
