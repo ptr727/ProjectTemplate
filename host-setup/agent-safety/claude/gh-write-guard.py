@@ -5690,8 +5690,9 @@ def _rewritten_git_words(cmd):
     - an unquoted pathname pattern in a directory value, since it may match several names
     - a push or a commit that `xargs` runs, since it appends words the guard does not read
 
-    The text an `eval` runs is read too. Where a word of an `eval`'s arguments expands outside
-    single quotes, the payload is text the shell has already expanded (see `_ExpandedText`). So is a wrapper body the outer shell expanded.
+    The text an `eval` runs is read too. A word of any `eval`'s arguments in a text may expand
+    outside single quotes. Each payload that text's evals run is then text the shell has already
+    expanded (see `_ExpandedText`). So is a wrapper body the outer shell expanded.
 
     The form comes back as a string.
     For a directory value it cannot read as quoted, it comes back as a (form, fix) pair.
@@ -8634,18 +8635,20 @@ def classify(
     The current_branch seam also stands in for the persisted mirror read a push with no refspec
     makes. It stands in for the remote, push config, and branch-list reads `_push_targets` makes too.
     """
-    if "\r" in cmd and _names_git_or_gh(cmd):
+    if "\r" in cmd and (_names_git_or_gh(cmd) or _names_push(cmd)):
         return "deny", (
             "This command holds a carriage return, which the shell reads as part of a word rather "
             "than as a space or a line break, so the guard cannot tell where its words end. "
             "Failing closed. Write the command with plain newlines." + _handoff(cmd)
         )
-    if (_SPLIT_WORD.search(cmd) or _ESCAPED_LINE_BREAK.search(cmd)) and _names_git_or_gh(cmd):
+    if (_SPLIT_WORD.search(cmd) or _ESCAPED_LINE_BREAK.search(cmd)) and (
+        _names_git_or_gh(cmd) or _names_push(cmd)
+    ):
         return "deny", (
             "This command has a word split by a backslash-newline, or an escaped backslash before "
             "a line break. The shell joins the first into one word the guard cannot read. It reads "
             "the second as a line break where the guard joins the lines, and as a continuation "
-            "inside a wrapper body. A hidden cd could redirect a push, or a split value add a "
+            "inside a double-quoted wrapper body. A hidden cd could redirect a push, or a split value add a "
             "subcommand. Write each word whole on one line." + _handoff(cmd)
         )
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
@@ -10441,6 +10444,13 @@ _GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a push in a flock -c string is read",
+    ),
+    (
+        "/usr/lib/git-core/git-push ori\\\ngin develop",
+        None,
+        {"develop": _CODE_RULES},
+        "deny",
+        "a dashed git binary still names a push whose word a backslash-newline splits",
     ),
     (
         "env -S 'git push origin develop'",
