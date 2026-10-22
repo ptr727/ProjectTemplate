@@ -45,4 +45,6 @@ def git_location_cleared() -> Iterator[None]:
     try:
         yield
     finally:
+        for name in GIT_LOCATION_VARS:
+            os.environ.pop(name, None)
         os.environ.update(cleared)

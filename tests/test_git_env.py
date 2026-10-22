@@ -48,6 +48,15 @@ class TestLocationList(unittest.TestCase):
             self.assertEqual(os.environ["GIT_DIR"], "sentinel")
 
 
+class TestSetInsideTheContext(unittest.TestCase):
+    def test_a_variable_set_inside_the_context_does_not_outlive_it(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("GIT_INDEX_FILE", None)
+            with git_env.git_location_cleared():
+                os.environ["GIT_INDEX_FILE"] = "inside"
+            self.assertNotIn("GIT_INDEX_FILE", os.environ)
+
+
 class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
     def test_the_selftest_leaves_the_ambient_repository_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
