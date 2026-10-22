@@ -151,6 +151,7 @@ _GH_WRITE_SUB = re.compile(
 )
 _GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
 _GH_API_OR_WRITE = re.compile(_GH_WRITE_SUB.pattern + r"|\bgh(?:\.exe)?\s+api\b")
+_NAMES_GH = re.compile(r"(?<![\w.-])gh(?:\.exe)?(?![\w-])|\$", re.IGNORECASE)
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
@@ -1508,6 +1509,8 @@ _PRECOMMAND_VALUE_OPTS = {
     "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
     "nice": frozenset({"-n", "--adjustment"}),
     "exec": frozenset({"-a"}),
+    "flock": frozenset({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}),
+    "watch": frozenset({"-n", "--interval", "-q", "--equexit"}),
     "ionice": frozenset({"-c", "-n", "-p", "--class", "--classdata", "--pid"}),
     "stdbuf": frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
     "xargs": frozenset(
@@ -1530,14 +1533,7 @@ _PRECOMMAND_VALUE_OPTS = {
 }
 
 
-_LAUNCHER_ARITY = {
-    "flock": (frozenset({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}), 1),
-    "watch": (frozenset({"-n", "--interval", "-q", "--equexit"}), 0),
-    "winpty": (frozenset(), 0),
-    "coproc": (frozenset(), 0),
-    "while": (frozenset(), 0),
-    "until": (frozenset(), 0),
-}
+_LAUNCHER_POSITIONALS = {"flock": 1, "watch": 0, "winpty": 0, "coproc": 0, "while": 0, "until": 0}
 
 
 def _base_name(tok):
@@ -1568,7 +1564,7 @@ def _command_prefix(toks, k):
     The command is read forward from its start.
     An assignment is collected, and a redirection is passed with its target.
     A precommand is passed with its options, their values, and a duration.
-    A launcher `_LAUNCHER_ARITY` names is passed with its options and its positional words.
+    A launcher `_LAUNCHER_POSITIONALS` names is passed with its options and its positional words.
     The first other word is the command, so the word at `k` is the command only where it is that word.
     """
     i, out = _prefix_walk(toks, k)
@@ -1600,8 +1596,9 @@ def _prefix_walk(toks, k):
             i += 1
             while i < k and (toks[i].startswith("-") or _DURATION_WORD.fullmatch(toks[i])):
                 i += 2 if _option_takes_next(toks[i], takes) else 1
-        elif _base_name(toks[i]) in _LAUNCHER_ARITY:
-            takes, positionals = _LAUNCHER_ARITY[_base_name(toks[i])]
+        elif _base_name(toks[i]) in _LAUNCHER_POSITIONALS:
+            takes = _PRECOMMAND_VALUE_OPTS.get(_base_name(toks[i]), frozenset())
+            positionals = _LAUNCHER_POSITIONALS[_base_name(toks[i])]
             i += 1
             while i < k and toks[i].startswith("-"):
                 i += 2 if _option_takes_next(toks[i], takes) else 1
@@ -1839,29 +1836,65 @@ def _git_invocations_at(cmd):
     return out
 
 
-def _git_dir_rereading(toks, word, invocation):
-    """The invocation read again under the `GIT_WORK_TREE`/`GIT_DIR` its own options and prefix leave unread, or nothing.
+_EXPORTING_BUILTINS = {"export": None, "declare": "-x", "typeset": "-x"}
 
-    That is a value from any `export` before the git word at `toks[word]`, not only a leading one,
-    and from its whole prefix past a precommand or launcher (see `_git_word_assignments`). The
-    invocation's own value wins, as git reads it. The first reading is kept as well, since an
-    `export` in a subshell or a pipeline does not reach a later command.
+
+def _exported_states(toks, word):
+    """The exported variables before the git word at `toks[word]`, as one dict after each export.
+
+    An `export`, or a `declare`/`typeset` given `-x`, exports each `NAME=value` it names. One naming
+    a bare `NAME` exports the value the last plain `NAME=value` command before it set.
+    """
+    shell, current, states = {}, {}, []
+    for x in range(word):
+        t = toks[x]
+        if not _opens_command(toks, x):
+            continue
+        m = _ENV_ASSIGN_RE.match(t)
+        if m and (x + 1 == len(toks) or _is_separator(toks[x + 1])):
+            shell[m.group(1)] = m.group(2)
+            continue
+        if t not in _EXPORTING_BUILTINS:
+            continue
+        words = []
+        for w in toks[x + 1 : word]:
+            if _is_shell_op(w):
+                break
+            words.append(w)
+        flag = _EXPORTING_BUILTINS[t]
+        if flag and not any(w.startswith("-") and flag[1] in w for w in words):
+            continue
+        for w in words:
+            m = _ENV_ASSIGN_RE.match(w)
+            if m:
+                current[m.group(1)] = m.group(2)
+            elif w in shell:
+                current[w] = shell[w]
+        states.append(dict(current))
+    return states
+
+
+def _git_dir_rereading(toks, word, invocation):
+    """The invocation read again under each `GIT_WORK_TREE`/`GIT_DIR` its own options and prefix leave unread.
+
+    Each state an export before the git word at `toks[word]` leaves is a reading of its own (see
+    `_exported_states`). The prefix past a precommand or launcher sits on top of each (see
+    `_git_word_assignments`). The invocation's own value wins, as git reads it. The first reading
+    is kept as well. An `export` in a subshell or a pipeline does not reach a later command.
     """
     c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd = invocation
-    exported = [
-        pair
-        for x in range(word)
-        if toks[x] == "export" and _opens_command(toks, x)
-        for pair in _export_assignments(toks, x)
-    ]
-    values = dict(exported + _git_word_assignments(toks, word))
-    carried = (
-        work_tree if work_tree is not None else values.get(_GIT_ENV_WORK_TREE_VAR),
-        git_dir if git_dir is not None else values.get(_GIT_ENV_GIT_DIR_VAR),
-    )
-    if carried == (work_tree, git_dir):
-        return []
-    return [(c_dirs, *carried, inline_aliases, sub, args, leading_cd)]
+    prefix = _git_word_assignments(toks, word)
+    out = []
+    for state in [{}, *_exported_states(toks, word)]:
+        values = {**state, **dict(prefix)}
+        carried = (
+            work_tree if work_tree is not None else values.get(_GIT_ENV_WORK_TREE_VAR),
+            git_dir if git_dir is not None else values.get(_GIT_ENV_GIT_DIR_VAR),
+        )
+        reading = (c_dirs, *carried, inline_aliases, sub, args, leading_cd)
+        if carried != (work_tree, git_dir) and reading not in out:
+            out.append(reading)
+    return out
 
 
 def _all_git_invocations(cmd, overflow=None):
@@ -2355,16 +2388,17 @@ def _resolve_alias(sub, args, inline_aliases, target_dir, config_lookup=None, gi
     return sub, args, False
 
 
+_VERDICT_SUBS = _ALWAYS_DENY_SUBS | {
+    "checkout",
+    "switch",
+    "merge",
+    "pull",
+    "stash",
+    "clean",
+    "worktree",
+}
 _MUTATING_SUB_WORD = re.compile(
-    r"(?<![\w-])(?:"
-    + "|".join(
-        re.escape(w)
-        for w in sorted(
-            _ALWAYS_DENY_SUBS
-            | {"checkout", "switch", "merge", "pull", "stash", "clean", "worktree"}
-        )
-    )
-    + r")(?![\w-])"
+    r"(?<![\w-])(?:" + "|".join(re.escape(w) for w in sorted(_VERDICT_SUBS)) + r")(?![\w-])"
 )
 
 
@@ -2374,7 +2408,10 @@ def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
     subcommand this rule concerns itself with, allowed by falling through). `target_dir` and
     `ref_resolver` are used only by the `checkout`/`switch` case, to disambiguate a bare argument
     from a live git call; every other case is pure text/argv classification.
+    This rule never denies a subcommand outside `_VERDICT_SUBS`, and the nesting-cap check relies on that.
     """
+    if sub not in _VERDICT_SUBS:
+        return None
     if sub == "worktree":
         # `add`/`list`/`prune` are always allowed, the documented way to use a primary checkout from an agent session.
         # `remove` is allowed too unless forced: git itself already refuses to remove a worktree carrying uncommitted changes without --force, so only the forced form reproduces the harm this rule exists to catch.
@@ -3959,6 +3996,10 @@ def _opaque_cd(toks):
 
 _REPO_ENV_PREFIXES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_COMMON_DIR=")
 _DIR_OPTION_PREFIXES = ("-C", "-D", "--chdir", "-execdir")
+_STAYING_LAUNCHERS = frozenset(
+    {"timeout", "gtimeout", "nice", "nohup", "command", "builtin", "exec", "stdbuf", "ionice"}
+    | {"env", "sudo", "xargs", "setsid", "time", "flock", "winpty"}
+)
 
 
 def _repo_may_move(toks, word, leading_cd, quoted=None):
@@ -3970,7 +4011,8 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
     `_reruns`). In the command that runs git, a directory option such as `sudo -D` or `env -C`
     moves it. So does any command word in front of git that `_prefix_walk` does not pass, such as
     `uv`, that runs git as its argument. Each launcher in front of git is read, not only the
-    first, so `timeout 60 uv run git push` moves too.
+    first, so `timeout 60 uv run git push` moves too. So does a first command word outside
+    `_STAYING_LAUNCHERS`, such as `watch`, which hands git to a shell.
     """
     end = len(toks) if _reruns(toks, quoted, subshells=False) else word
     cds, prev = 0, None
@@ -3996,7 +4038,20 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
     own = toks[start:word]
     if any(t.startswith(_DIR_OPTION_PREFIXES) for t in own):
         return True
-    return _prefix_walk(toks, word)[0] != word
+    if _prefix_walk(toks, word)[0] != word:
+        return True
+    runners, k = [], 0
+    while k < len(own):
+        t = own[k]
+        if _is_redir_op(t):
+            k += 2
+            continue
+        if not (
+            _ENV_ASSIGN_RE.match(t) or t in _COND_PRECEDERS or t.startswith("-") or t.isdigit()
+        ):
+            runners.append(t)
+        k += 1
+    return bool(runners) and runners[0].rsplit("/", 1)[-1] not in _STAYING_LAUNCHERS
 
 
 def _attached_c(body):
@@ -4141,6 +4196,8 @@ def _config_may_change(toks, end, skip=None, mask=None):
         if found and _word_runs(toks, k, mask):
             if not found[0] and _shell_reads_unread_script(toks, k):
                 return True
+            if found[0] and _string_read_elsewhere(toks, k):
+                return True
             if any(_names_config_change(body) for body in found[0]):
                 return True
         if _config_changing_word(toks, k, mask):
@@ -4167,14 +4224,40 @@ def _shell_reads_unread_script(toks, k):
     """True when the shell at `toks[k]` names no command string, so it runs a script file or reads its input.
 
     Only a shell given nothing but `--version` or `--help` runs nothing.
-    A command string option with no word after it counts too, since `xargs` may supply the string.
+    A shell given a command string option counts where `_string_read_elsewhere` says so.
     """
     exe = _command_string_exe(toks[k])
     args, _ = _collect_arglist(toks, k + 1)
     ci = _command_string_index(exe, args) if exe else None
     if ci is not None:
-        return ci + 1 >= len(args)
+        return _string_read_elsewhere(toks, k)
     return not (args and all(a in ("--version", "--help") for a in args))
+
+
+def _string_read_elsewhere(toks, k):
+    """True when the shell at `toks[k]` has a command string option but may not run the word after it.
+
+    That is where no word follows the option or the word after it is an option, as in `bash -c --`.
+    The shell then takes its string from a later word. It is also any such shell an `xargs`
+    runs, since the words `xargs` reads may be its string.
+    """
+    exe = _command_string_exe(toks[k])
+    args, _ = _collect_arglist(toks, k + 1)
+    ci = _command_string_index(exe, args) if exe else None
+    if ci is None:
+        return False
+    return _xargs_runs(toks, k) or ci + 1 >= len(args) or args[ci + 1].startswith("-")
+
+
+def _xargs_runs(toks, k, mask=None):
+    """True when an `xargs` runs the command at `toks[k]`, so words it reads from its input join that command.
+
+    That is an unquoted `xargs` anywhere in front of it in its run.
+    """
+    start = k
+    while start > 0 and not (_is_separator(toks[start - 1]) and not (mask and mask[start - 1])):
+        start -= 1
+    return any(_base_name(toks[x]) == "xargs" and not (mask and mask[x]) for x in range(start, k))
 
 
 _CONFIG_READ_ACTIONS = frozenset(
@@ -4311,7 +4394,10 @@ def _names_config_change(text):
         if any(
             _config_changing_word(toks, k)
             or _runs_run_time_word(toks, k)
-            or (toks[k] in ("source", ".") and _command_prefix(toks, k)[0])
+            or (
+                toks[k] in ("source", ".")
+                and (_command_prefix(toks, k)[0] or (k > 0 and toks[k - 1] == "builtin"))
+            )
             for k in range(len(toks))
         ):
             return True
@@ -8299,10 +8385,14 @@ def classify(
     if dec == "deny":
         return dec, reason
 
-    if _GH_API_OR_WRITE.search(cmd):
+    if _NAMES_GH.search(cmd):
         nested = []
         _embedded_wrapper_commands(cmd, overflow=nested)
-        if any(_GH_API_OR_WRITE.search(t) for t in nested):
+        if any(
+            _GH_API_OR_WRITE.search(r) or _names_gh_write(r)
+            for t in nested
+            for r in (t, _unquoted(t))
+        ):
             return "deny", (
                 "This runs a gh write or a gh api call inside wrapper shells or substitutions "
                 "nested deeper than the guard reads, so it cannot read the call's target, output "
@@ -8390,6 +8480,13 @@ def classify(
 
 
 # --- Self-test ---------------------------------------------------------------------------------------
+def _nested_wrapper(body, depth):
+    """`body` wrapped in `depth` levels of `bash -c`, each quoted for the level outside it."""
+    for _ in range(depth):
+        body = "bash -c " + shlex.quote(body)
+    return body
+
+
 _CASES = [
     # (command, expected_decision, label)
     (
@@ -8513,6 +8610,31 @@ _CASES = [
         "gh api graphql -f query='mutation{resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -F t=\"TODO_fixit\"",
         "deny",
         "not a node id, but still a hand-rolled resolve: denied by rule 5",
+    ),
+    (
+        _nested_wrapper("gh pr comment 5 --body x", 6),
+        "deny",
+        "a gh write in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        _nested_wrapper("gh -R stranger/example pr comment 5 --body x", 6),
+        "deny",
+        "a gh write with a repo flag before its command, past the nesting cap, fails closed",
+    ),
+    (
+        _nested_wrapper("GH=gh; $GH pr comment 5 --body x", 6),
+        "deny",
+        "a gh write through a run-time command word past the nesting cap fails closed",
+    ),
+    (
+        _nested_wrapper("gh api repos/example/repo/issues/5/comments -f body=x", 6),
+        "deny",
+        "a gh api call in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        _nested_wrapper("gh pr view 5", 6),
+        "allow",
+        "control: a gh read past the nesting cap is allowed",
     ),
 ]
 
@@ -12688,6 +12810,54 @@ _PRIMARY_CHECKOUT_CASES = [
         "the reading without an export is kept, since one in a subshell does not reach the git after it",
     ),
     (
+        "cd /worktree && export GIT_DIR=/primary/.git && (export GIT_DIR=/worktree/.git) && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "each export is a reading of its own, so a later one in a subshell does not replace it",
+    ),
+    (
+        "GIT_DIR=/primary/.git; export GIT_DIR; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "an export naming a variable set before it exports that value",
+    ),
+    (
+        "cd /worktree && declare -x GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "declare -x exports as export does",
+    ),
+    (
+        "cd /worktree && declare GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "allow",
+        "control: declare without -x sets a shell variable git does not see",
+    ),
+    (
+        _nested_wrapper("git reset --hard", 6),
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "a mutating git command in a wrapper body past the nesting cap fails closed wherever it runs",
+    ),
+    (
+        _nested_wrapper("git status", 6),
+        "/primary",
+        {"/primary": True},
+        None,
+        "allow",
+        "control: a read-only git command past the nesting cap names no subcommand rule 6 denies",
+    ),
+    (
         "git --git-dir=/primary/.git --work-tree=/primary -C /worktree reset --hard",
         "/somewhere-else",
         {"/primary/.git": True, "/worktree": False},
@@ -15150,52 +15320,6 @@ def _fixture_dir(key):
     return key.replace("\\", "/") if key else key
 
 
-def _nested_wrapper(body, depth):
-    """`body` wrapped in `depth` levels of `bash -c`, each quoted for the level outside it."""
-    for _ in range(depth):
-        body = "bash -c " + shlex.quote(body)
-    return body
-
-
-_NESTING_CAP_CASES = [
-    (
-        _nested_wrapper("git reset --hard", 6),
-        "/primary",
-        {"/primary": True},
-        "deny",
-        "a mutating git command in a wrapper body past the nesting cap fails closed in a primary checkout",
-    ),
-    (
-        _nested_wrapper("git status", 6),
-        "/primary",
-        {"/primary": True},
-        "allow",
-        "control: a read-only git command past the nesting cap names no subcommand rule 6 denies",
-    ),
-    (
-        _nested_wrapper("gh pr comment 5 --body x", 6),
-        "/worktree",
-        {"/worktree": False},
-        "deny",
-        "a gh write in a wrapper body past the nesting cap fails closed",
-    ),
-    (
-        _nested_wrapper("gh api repos/example/repo/issues/5/comments -f body=x", 6),
-        "/worktree",
-        {"/worktree": False},
-        "deny",
-        "a gh api call in a wrapper body past the nesting cap fails closed",
-    ),
-    (
-        _nested_wrapper("gh pr view 5", 6),
-        "/worktree",
-        {"/worktree": False},
-        "allow",
-        "control: a gh read past the nesting cap is allowed",
-    ),
-]
-
-
 _PUSH_DIR_CASES = [
     (
         "@wt " + _nested_wrapper("git commit --no-verify -m x", 6),
@@ -16353,6 +16477,24 @@ _PUSH_CONFIG_CASES = [
         "deny",
         "a -c wrapper whose command string xargs supplies leaves the push's remote config unresolved",
     ),
+    (
+        [],
+        "echo 'git config remote.origin.mirror true' | xargs -I{} sh -c '{}'; git push --tags origin",
+        "deny",
+        "a -c wrapper xargs runs may take its string from xargs's input",
+    ),
+    (
+        [],
+        "printf '%s\\n' example | xargs bash -c --; git push --tags origin",
+        "deny",
+        "a -c wrapper whose next word is an option takes its string from a later word",
+    ),
+    (
+        [],
+        "bash -c 'builtin source /example/setup.sh'; git push --tags origin",
+        "deny",
+        "a script builtin sources inside a wrapper body leaves the push's remote config unresolved",
+    ),
 ]
 
 
@@ -16445,6 +16587,11 @@ _PUSH_REPO_CASES = [
         "sudo -u root flock -w 5 /example/lock timeout 60 git push origin develop",
         "allow",
         "control: a chain of launchers that each keep their directory leaves the push in place",
+    ),
+    (
+        "watch -n 60 git push origin develop",
+        "deny",
+        "watch hands the push to a shell, so its repository stays undetermined",
     ),
     (
         "for r in a b; do git push origin develop; cd {beta}; done",
@@ -17053,22 +17200,6 @@ def _selftest_cases():
             rules_lookup=lambda br, _m=rmap: _m.get(br),
             environ={},
             primary_checkout_lookup=lambda d: False,
-        )
-        mark = "ok  " if got == want else "FAIL"
-        if got != want:
-            ok = False
-        print(f"  {mark} [{got:5}] want={want:5} {label}")
-    for cmd, cwd, pmap, want, label in _NESTING_CAP_CASES:
-        got, _ = classify(
-            cmd,
-            cwd=cwd,
-            origin=origin,
-            current_branch="feature/x",
-            rules_lookup=lambda br: set(),
-            environ={},
-            primary_checkout_lookup=_fixture_lookup(pmap),
-            ref_resolver=lambda _d, _r: True,
-            config_lookup=lambda _d, _n: None,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:

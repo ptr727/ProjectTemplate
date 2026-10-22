@@ -84,8 +84,8 @@ text says, because the harm it covers was never in the text.
    `export GH_REPO` in a subshell, a loop, or behind `&&` may not run where it sits. Where one
    may not, every value the command sets is read as reaching its gh write. A run-time segment past a
    literal owner in a `gh api` endpoint is compared by that owner, though it may hold a `..`
-   segment. A gh write or a `gh api` call in a wrapper body nested past the reading cap is denied,
-   since none of requirements 1 to 3 can read it there.
+   segment. A gh write or a `gh api` call nested in wrappers past the reading cap is denied.
+   None of requirements 1 to 3 can read it there.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
@@ -128,8 +128,8 @@ text says, because the harm it covers was never in the text.
    branch's `pushRemote`, `remote.pushDefault`, or the branch's `remote`, in git's order. A URL
    naming no repository, such as a local path, leaves that push's rules undetermined. The hook may not name the checkout a push runs in or that checkout's origin.
    That holds under `sudo -D` or `env -C`, in a wrapper shell, and in a directory that does not
-   exist. It holds for git run by a command that may change its directory, such as `uv run`, even
-   behind a launcher that keeps it, such as `timeout 60` or `flock <file>`. That push's rules then count as undetermined. Apart from
+   exist. It holds for git that a command such as `uv run` or `watch` may run elsewhere. A
+   launcher in front of that command, such as `timeout 60` or `flock <file>`, does not change it. That push's rules then count as undetermined. Apart from
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
    That covers a push in text the hook does not parse and a push carrying a `-c`/`--config-env`
    override. Config set through `GIT_CONFIG_COUNT` counts as one. It covers a push in
@@ -215,10 +215,10 @@ text says, because the harm it covers was never in the text.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
    undetermined. The hook reads both before the command runs, and a checkout or a switch changes
    neither.
-   A git command is read under the prefix of a launcher in front of it too, such as `flock
-   <file>`, and under an `env` after that launcher. A launcher the hook does not know counts
-   unless it only names its arguments, as `grep` does. A shell such as `pwsh` behind such a
-   launcher is read as well.
+   A launcher in front of a git command, such as `flock <file>`, passes its prefix to that git.
+   An `env` after the launcher does too. A launcher the hook does not know counts unless it only
+   names its arguments, as `grep` does. A shell such as `pwsh` behind such a launcher is read as
+   well.
    A shell whose command string runs git is denied where its prefix or an earlier `export` sets
    such a file, or config through `GIT_CONFIG_COUNT`. A variable git runs as a command, set
    there, counts too, unless it names a plain program that runs no git. The hook reads that
@@ -325,12 +325,13 @@ text says, because the harm it covers was never in the text.
    redirects the invocation the same way an inline `VAR=x git ...` prefix already does, since a
    real shell export persists into the following command exactly as effectively, confirmed live
    with a real reset that discards a tracked local modification with no redirect at all on the `git`
-   invocation itself, a shape an inline-prefix scan alone cannot see. An `export` anywhere before
-   the git command is read too, and so is a `GIT_DIR`/`GIT_WORK_TREE` prefix behind a precommand or
-   a launcher such as `timeout 60` or `flock <file>`. Each is a second reading beside the one
-   without it, since an `export` in a subshell does not reach a later command. A subcommand this
-   requirement denies, named in a wrapper body nested past the reading cap, is denied wherever it
-   runs. `--git-dir`/`GIT_DIR=` alone,
+   invocation itself, a shape an inline-prefix scan alone cannot see.
+   An `export` anywhere before the git command is read too, as is a `declare -x`. An `export` of
+   a bare name exports the value set before it. A `GIT_DIR`/`GIT_WORK_TREE` prefix behind a
+   precommand or a launcher such as `timeout 60` or `flock <file>` is read as well. Each export
+   gives a reading of its own beside the one without it. An `export` in a subshell does not reach
+   a later command. A subcommand this requirement denies, named in wrappers nested past the
+   reading cap, is denied wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
    target, matching git's own documented fallback.
 
