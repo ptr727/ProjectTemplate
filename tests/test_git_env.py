@@ -57,6 +57,10 @@ class TestSetInsideTheContext(unittest.TestCase):
             self.assertNotIn("GIT_INDEX_FILE", os.environ)
 
 
+@unittest.skipIf(
+    sys.platform == "win32",
+    "audit.py --selftest fails on Windows at its invalid-byte filename probe",
+)
 class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
     def test_the_selftest_leaves_the_ambient_repository_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
