@@ -6401,9 +6401,9 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         )
 
     def test_the_promotion_stands_down_only_on_the_release_model(self) -> None:
-        """An operational promotion is that model's review point, so the rule runs there.
+        """An operational promotion may be the first review its lines get, so the rule runs there.
 
-        Each row varies one fact from the release promotion that stands down, so dropping any one
+        Each row after the first varies the release promotion that stands down, so dropping any one
         term of the test, the workflow model's above all, turns a row green that must stay red.
         """
         promotion = {
@@ -6432,7 +6432,7 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
                 self.assertIn(f"Workflow model: {model}", log)
 
     def test_only_the_release_model_stands_the_promotion_down(self) -> None:
-        """A value other than `release` runs the rule, which fails loudly rather than silently."""
+        """A value other than `release` runs the rule, so a misspelling reports comments rather than hiding them."""
         promotion = {"HEAD_REPOSITORY": "example/widget", "HEAD_REF": "develop", "BASE_REF": "main"}
         for model in ("", "Release", "release ", "operational"):
             with self.subTest(model=model):
