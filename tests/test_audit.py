@@ -240,26 +240,30 @@ class TestSelftestInvalidByteProbe(unittest.TestCase):
         self.assertIn("skip hub_tracked: non-UTF-8 filename (git cannot add it)", text)
         self.assertEqual(result, 0, text)
 
-    def test_a_failing_add_of_the_probe_file_fails_loudly_elsewhere(self) -> None:
-        with self.assertRaises(subprocess.CalledProcessError):
-            self._selftest(_probe_run(_fail), windows=False)
-
-    def test_another_git_failure_still_fails_loudly(self) -> None:
-        run = _probe_run(
-            lambda cmd: subprocess.CompletedProcess(cmd, 0), commit=lambda cmd: _fail(cmd)
-        )
+    def _error_of(self, run: Any, windows: bool) -> subprocess.CalledProcessError:
         out = io.StringIO()
         with (
-            mock.patch.object(audit, "_IS_WINDOWS", True),
+            mock.patch.object(audit, "_IS_WINDOWS", windows),
             mock.patch.object(subprocess, "run", run),
             contextlib.redirect_stdout(out),
         ):
             try:
                 audit._selftest()
-            except subprocess.CalledProcessError:
-                return
+            except subprocess.CalledProcessError as error:
+                return error
         self._require_probe_file(out.getvalue())
-        self.fail("the commit failure did not propagate")
+        self.fail("the git failure did not propagate")
+
+    def test_a_failing_add_of_the_probe_file_fails_loudly_elsewhere(self) -> None:
+        error = self._error_of(_probe_run(_fail), windows=False)
+        self.assertEqual(error.cmd, ["git", "add", "-A"])
+
+    def test_another_git_failure_still_fails_loudly(self) -> None:
+        run = _probe_run(
+            lambda cmd: subprocess.CompletedProcess(cmd, 0), commit=lambda cmd: _fail(cmd)
+        )
+        error = self._error_of(run, windows=True)
+        self.assertEqual(error.cmd[:2], ["git", "commit"])
 
 
 if __name__ == "__main__":
