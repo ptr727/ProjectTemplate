@@ -116,6 +116,38 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
     return str(result.returncode), written, result.stdout + result.stderr, called
 
 
+def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str, str, str]:
+    """Run the workflow's own stand-down step with the caller's model and the event's facts.
+
+    Returns the exit code, the step output written, and the log.
+    """
+    script = step_script(VALIDATE_TASK_WORKFLOW, "Resolve comment stand-down step")
+    with tempfile.TemporaryDirectory() as scratch:
+        output = Path(scratch) / "output"
+        env = (
+            os.environ
+            | {
+                "BASE_REF": "",
+                "DEFAULT_BRANCH": "main",
+                "HEAD_REF": "",
+                "HEAD_REPOSITORY": "",
+                "REPOSITORY": "example/widget",
+            }
+            | facts
+            | {"GITHUB_OUTPUT": str(output), "WORKFLOW_MODEL": model}
+        )
+        result = subprocess.run(
+            [bash_or_skip(), "-c", script],
+            env=env,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        written = output.read_text(encoding="utf-8").strip() if output.exists() else ""
+    return str(result.returncode), written, result.stdout + result.stderr
+
+
 # Bait assembled from two literals, so this module never holds the pattern it feeds the gate.
 # A file full of rejected input would otherwise report itself.
 DUP = "the " + "the"
@@ -6367,10 +6399,77 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Check prose step")
         self.assertEqual(
             "${{ steps.comments-label.outputs.labeled == 'true' || "
-            "(github.event.pull_request.head.repo.full_name == github.repository && "
-            "github.head_ref == 'develop' && "
-            "github.base_ref == github.event.repository.default_branch) }}",
+            "steps.comment-stand-down.outputs.stand-down == 'true' }}",
             yaml_value(step, "with", "allow-comments"),
+        )
+
+    def test_the_promotion_stands_down_only_on_the_release_model(self) -> None:
+        """An operational promotion is that model's review point, so the rule runs there.
+
+        Each row varies one fact from the release promotion that stands down, so dropping any one
+        term of the test, the workflow model's above all, turns a row green that must stay red.
+        """
+        promotion = {
+            "HEAD_REPOSITORY": "example/widget",
+            "REPOSITORY": "example/widget",
+            "HEAD_REF": "develop",
+            "BASE_REF": "main",
+            "DEFAULT_BRANCH": "main",
+        }
+        for label, model, changed, expected in (
+            ("release promotion", "release", {}, "true"),
+            ("operational promotion", "operational", {}, "false"),
+            ("feature branch into main", "release", {"HEAD_REF": "feature/widget"}, "false"),
+            ("fork branch named develop", "release", {"HEAD_REPOSITORY": "fork/widget"}, "false"),
+            ("develop into another base", "release", {"BASE_REF": "next"}, "false"),
+            (
+                "a push, carrying no pull request",
+                "release",
+                {"HEAD_REPOSITORY": "", "HEAD_REF": "", "BASE_REF": ""},
+                "false",
+            ),
+        ):
+            with self.subTest(label):
+                code, output, log = run_comment_stand_down_step(model, promotion | changed)
+                self.assertEqual(("0", f"stand-down={expected}"), (code, output), log)
+                self.assertIn(f"Workflow model: {model}", log)
+
+    def test_the_stand_down_step_refuses_an_unknown_workflow_model(self) -> None:
+        """A misspelled model would otherwise read as operational and run the rule on every promotion.
+
+        The rejected value is escaped, so a newline in it cannot start a workflow command.
+        """
+        for model in ("", "Release", "operational ", "release\n::warning::forged"):
+            with self.subTest(model=model):
+                code, output, log = run_comment_stand_down_step(model, {})
+                self.assertEqual(("1", ""), (code, output), log)
+                self.assertIn(
+                    "::error::The workflow-model input must be release or operational", log
+                )
+                self.assertNotIn("\n::warning::", log)
+
+    def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
+        """The harness feeds the variables, so nothing else reads the step's own wiring.
+
+        The default is pinned too, since a caller declaring nothing is a release repository by the
+        registry's own default, and flipping it would run the rule on every such promotion.
+        """
+        text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+        step = yaml_step(text, "Resolve comment stand-down step")
+        self.assertEqual("comment-stand-down", yaml_value(step, "id"))
+        self.assertIsNone(yaml_value(step, "if"))
+        for name, expression in (
+            ("WORKFLOW_MODEL", "inputs.workflow-model"),
+            ("HEAD_REPOSITORY", "github.event.pull_request.head.repo.full_name"),
+            ("REPOSITORY", "github.repository"),
+            ("HEAD_REF", "github.head_ref"),
+            ("BASE_REF", "github.base_ref"),
+            ("DEFAULT_BRANCH", "github.event.repository.default_branch"),
+        ):
+            self.assertEqual(f"${{{{ {expression} }}}}", yaml_value(step, "env", name), name)
+        self.assertEqual(
+            "release",
+            yaml_value(text, "on", "workflow_call", "inputs", "workflow-model", "default"),
         )
 
     def test_the_structure_reader_sees_only_a_live_entry_under_its_own_step(self) -> None:

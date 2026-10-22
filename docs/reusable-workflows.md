@@ -299,6 +299,15 @@ A downstream repo replaces its own `validate-task.yml` job bodies and its `test-
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles: a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance), and a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory.
 
+An operational repo also names its model in the `workflow-model` input, which defaults to `release`. On that default the prose gate's `comment-added` rule stands down on a `develop -> main` promotion, since each promoted line was reviewed on its own pull request. An operational repo commits to `develop` directly, so its promotion is where those lines are reviewed, and the rule runs there:
+
+```yaml
+    with:
+      workflow-model: operational
+```
+
+The value is the registry's `workflowModel`, and the `lint` job refuses any value other than `release` or `operational`. A caller reaches the input only from a release carrying it, so the no-build caller snippet does not pass it while its pin predates that release, and an operational repo adds it when its own pin advances past one.
+
 **Release repos with a smoke build** carry the standard `pull_request` trigger, a `changes` paths-filter job (WORKFLOW.md D1.1: each of the repo's own targets gets an entry listing that target's own paths, which leaves both docs and `.github/workflows/**` matching nothing and satisfies D1.4 without naming a workflow path at all), and a `smoke-build` job. The smoke build reaches the hub's `build-release-task.yml` by pin, the same task the repo's own `publish-release.yml` calls, so the repo deletes its copy of `build-release-task.yml` per the `retire` disposition in `spec/divergences.json` rather than keeping one for the smoke leg, per [Adopting the Release Chain][adopting-the-release-chain].
 
 ```yaml
