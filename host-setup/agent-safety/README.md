@@ -174,21 +174,34 @@ text says, because the harm it covers was never in the text.
    redirection where the subcommand goes or among the global options is denied too, a numbered
    one such as `2>` included. The exception is a git whose first word is an option such as
    `--version` that ends git there. A redirection target spanning several words on a push or a
-   commit is denied, and so is a comment among a push's words. Some words are read as they
+   commit is denied, and so is a comment among a push's words. A push, a commit, or a
+   `gh pr merge` that `xargs` runs is denied, since `xargs` appends words the hook does not read.
+   A command naming git or gh that holds a carriage return is denied, since the shell reads one
+   as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
+   an escaped backslash before a line break. The shell reads that as a line break where the hook
+   would join the lines, and as a continuation inside a double-quoted wrapper body. Two comments whose
+   apostrophes pair up as one quoted span are read as the shell reads them, as comments. The
+   lines between them are then read as commands. Some words are read as they
    stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
    commit path after `--`, and a redirection target held in one word. A directory value or a
    commit option's value holding a double-quoted list expansion, such as `"$@"` or `"${a[@]}"`,
    or an indirect `"${!name}"`, is denied instead. Each may give several words. A `-C`, `--git-dir`, or `--work-tree` value that word
    splitting may split, or that holds a brace expansion, is denied on every git subcommand,
    because the split value may add options or a subcommand the guard cannot see. So is a value holding an
-   expansion whose quoting the guard cannot read. The deny for an unquoted variable names quoting it or writing
+   expansion whose quoting the guard cannot read. So is one holding a pathname pattern such as
+   `*`, which may match several names. The deny for an unquoted variable names quoting it or writing
    the directory out as the fix. A command word holding a `$` or a backtick is denied
    where its subcommand word past git's global options is `push` or `commit`, because the shell
    decides what git runs. The body of a double-quoted `$(...)` or backtick substitution, and of
    an unquoted backtick substitution, is read as a command. This requirement's checks apply
    inside it. A substitution inside a double-quoted `${...}` is read too. So is one inside a heredoc
    whose delimiter is unquoted. A command string another shell runs is read as a wrapper shell's
-   body. That shell may be `pwsh`, `fish`, `script`, or `cmd`, among others. A config value or an
+   body. That shell may be `pwsh`, `fish`, `script`, or `cmd`, among others. So is the string a
+   `flock -c` or a `watch` hands a shell, and the string an `env -S` splits into a command. These
+   word checks also read the text an `eval` runs. Where such a body, `watch` command, or `eval`
+   payload was written outside single quotes, the outer shell has already expanded its `$` and
+   backtick words. Such a word may hold the inner shell's own quotes, so it is read as one that
+   word splitting may split. A config value or an
    environment variable git runs as a command is read that way too. Examples are `core.pager`,
    `core.fsmonitor`, and `GIT_EDITOR`. Such a value is denied where it names its program by a
    path or an expansion, or comes from `--config-env`. The hook does not read that program. An
