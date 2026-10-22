@@ -4279,7 +4279,9 @@ def _xargs_replace_string(toks, k):
             return w[2:]
         if w.startswith("--replace="):
             return w.partition("=")[2] or "{}"
-        if w.startswith("-i") or w == "--replace":
+        if w == "--replace":
+            return "{}"
+        if w.startswith("-i"):
             return w[2:] or "{}"
     return None
 
@@ -4400,7 +4402,7 @@ def _runs_run_time_word(toks, k, mask=None):
         return False
     if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
         return True
-    return _command_prefix(toks, k)[0] or (k > 0 and toks[k - 1] == "{")
+    return _command_prefix(toks, k)[0]
 
 
 def _through_last_push(text):
@@ -16602,9 +16604,9 @@ _PUSH_CONFIG_CASES = [
     ),
     (
         [],
-        'coproc example { "$CMD"; }; git push --tags origin',
+        "echo 'git config remote.origin.mirror true' | xargs --replace sh -c '{}'; git push --tags origin",
         "deny",
-        "a run-time command word opening a command in a named coproc leaves the remote config unresolved",
+        "a bare --replace replaces the default {} in a -c string xargs runs",
     ),
     (
         [],
