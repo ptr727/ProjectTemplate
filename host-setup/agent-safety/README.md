@@ -178,8 +178,8 @@ text says, because the harm it covers was never in the text.
    `gh pr merge` that `xargs` runs is denied, since `xargs` appends words the hook does not read.
    A command naming git or gh that holds a carriage return is denied, since the shell reads one
    as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
-   an escaped backslash before a line break, which a wrapper body's shell reads as a line
-   continuation. Two comments whose
+   an escaped backslash before a line break. The shell reads that as a line break where the hook
+   would join the lines, and as a continuation inside a wrapper body. Two comments whose
    apostrophes pair up as one quoted span are read as the shell reads them, as comments. The
    lines between them are then read as commands. Some words are read as they
    stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
