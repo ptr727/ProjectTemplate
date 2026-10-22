@@ -2108,8 +2108,8 @@ def _leading_cd_dir(cmd):
 def _leading_export_dirs(cmd):
     """The `GIT_WORK_TREE`/`GIT_DIR` values from a single leading `export NAME=value ... &&`/`;`
     prefix, as a `(work_tree, git_dir)` pair, either of which may be `None` -- the same narrow,
-    tractable scope `_leading_cd_dir` already takes (only a leading prefix is read, one appearing
-    after the first command in a chain is the accepted gap), extended to the one other shell shape
+    tractable scope `_leading_cd_dir` already takes (only a leading prefix is read here, and
+    `_exported_states` reads one after the first command), extended to the one other shell shape
     that redirects a git invocation carrying no `-C`/`--work-tree`/`--git-dir`/inline-prefix of its
     own: a real shell `export` makes an assignment persist into every later command in the same
     session, unlike the inline `VAR=x git ...` prefix `_env_prefix_dirs` already reads, which

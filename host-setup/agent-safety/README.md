@@ -330,8 +330,8 @@ text says, because the harm it covers was never in the text.
    An `export` anywhere before the git command is read too, as is a `declare -x`. An `export` of
    a bare name exports the value set before it. A `GIT_DIR`/`GIT_WORK_TREE` prefix behind a
    precommand or a launcher such as `timeout 60` or `flock <file>` is read as well. Each export
-   gives a reading of its own beside the one without it. An `export` in a subshell does not reach
-   a later command. A subcommand this requirement denies, named in wrappers nested past the
+   after the first command gives a reading of its own beside the one without it. An `export` in
+   a subshell does not reach a later command. A leading one is read as above. A subcommand this requirement denies, named in wrappers nested past the
    reading cap, is denied wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
    target, matching git's own documented fallback.
