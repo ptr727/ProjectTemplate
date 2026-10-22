@@ -3764,6 +3764,9 @@ def audit_repo(entry, spec, branch=None):
     return findings, audited_sha
 
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
 def _selftest():
     """Run the self-test with no variable naming a repository in the environment.
 
@@ -4746,6 +4749,8 @@ def _selftest_cases():
                         ["git", "add", "-A"], cwd=tmp_root_path, check=True, capture_output=True
                     )
                 except subprocess.CalledProcessError:
+                    if not _IS_WINDOWS:
+                        raise
                     print("  skip hub_tracked: non-UTF-8 filename (git cannot add it)")
                 else:
                     added = True
