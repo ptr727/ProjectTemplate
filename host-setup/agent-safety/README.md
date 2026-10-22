@@ -176,8 +176,10 @@ text says, because the harm it covers was never in the text.
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. A push, a commit, or a
    `gh pr merge` that `xargs` runs is denied, since `xargs` appends words the hook does not read.
-   A git or gh command holding a carriage return is denied, since the shell reads one as part of
-   a word. So is one holding a word that a backslash-newline splits. Two comments whose
+   A command naming git or gh that holds a carriage return is denied, since the shell reads one
+   as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
+   an escaped backslash before a line break, which a wrapper body's shell reads as a line
+   continuation. Two comments whose
    apostrophes pair up as one quoted span are read as the shell reads them, as comments. The
    lines between them are then read as commands. Some words are read as they
    stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
@@ -196,9 +198,10 @@ text says, because the harm it covers was never in the text.
    whose delimiter is unquoted. A command string another shell runs is read as a wrapper shell's
    body. That shell may be `pwsh`, `fish`, `script`, or `cmd`, among others. So is the string a
    `flock -c` or a `watch` hands a shell, and the string an `env -S` splits into a command. These
-   word checks also read the text an `eval` runs. The outer shell has already expanded a `$` or
-   backtick word in a double-quoted body, a `watch` command, or an `eval` payload. Such a word may
-   hold the inner shell's own quotes, so it is read as one that word splitting may split. A config value or an
+   word checks also read the text an `eval` runs. Where such a body, `watch` command, or `eval`
+   payload was written outside single quotes, the outer shell has already expanded its `$` and
+   backtick words. Such a word may hold the inner shell's own quotes, so it is read as one that
+   word splitting may split. A config value or an
    environment variable git runs as a command is read that way too. Examples are `core.pager`,
    `core.fsmonitor`, and `GIT_EDITOR`. Such a value is denied where it names its program by a
    path or an expansion, or comes from `--config-env`. The hook does not read that program. An
