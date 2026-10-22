@@ -179,7 +179,12 @@ text says, because the harm it covers was never in the text.
    A command naming git or gh that holds a carriage return is denied, since the shell reads one
    as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
    an escaped backslash before a line break. The shell reads that as a line break where the hook
-   would join the lines, and as a continuation inside a double-quoted wrapper body. Two comments whose
+   would join the lines, and as a continuation inside a double-quoted wrapper body. Each is read
+   only where the shell joins the lines: unquoted, inside double quotes, and in an unquoted
+   heredoc. A continuation directly after a command separator such as `&&` or `|` splits no word.
+   Inside single quotes or a quoted heredoc's data, the shell keeps a backslash-newline as text,
+   such as a Markdown hard line break. The command is then read again with those
+   joined, as a shell running that text reads it, and denied where that reading is. Two comments whose
    apostrophes pair up as one quoted span are read as the shell reads them, as comments. The
    lines between them are then read as commands. Some words are read as they
    stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a
