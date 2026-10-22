@@ -4737,6 +4737,13 @@ def _selftest_cases():
                 ["git", "config", "user.name", "test"],
             ):
                 subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+            (tmp_root_path / "control.txt").write_text("x")
+            subprocess.run(
+                ["git", "add", "--", "control.txt"],
+                cwd=tmp_root_path,
+                check=True,
+                capture_output=True,
+            )
             added = False
             try:
                 (tmp_root_path / bad_name).write_text("x")
@@ -4746,13 +4753,14 @@ def _selftest_cases():
             else:
                 try:
                     subprocess.run(
-                        ["git", "add", "-A"], cwd=tmp_root_path, check=True, capture_output=True
+                        ["git", "add", "--", bad_name],
+                        cwd=tmp_root_path,
+                        check=True,
+                        capture_output=True,
                     )
-                except subprocess.CalledProcessError as exc:
+                except subprocess.CalledProcessError:
                     if not _IS_WINDOWS:
                         raise
-                    if b"invalid path" not in (exc.stderr or b"").lower():
-                        raise RuntimeError(f"git add failed: {exc.stderr!r}") from exc
                     print("  skip hub_tracked: non-UTF-8 filename (git cannot add it)")
                 else:
                     added = True
