@@ -15,7 +15,7 @@ inputs:
       Anything else runs the rule. A caller that computes this per pull request gets an
       override reapplied per change, which is what a hard-coded 'true' would give up. The fleet's
       own caller computes it from the pull request's own labels and from whether the pull request
-      is a promotion.
+      is a promotion on the release workflow model.
     required: false
     default: 'false'
 runs:
