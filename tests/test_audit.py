@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import io
 import pathlib
+import subprocess
 import sys
 import unittest
 from typing import Any
@@ -191,6 +194,76 @@ class AuditRepoNamingCase(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
+
+
+def _probe_run(add: Any, commit: Any = None) -> Any:
+    """A subprocess.run stand-in whose answer to the invalid-byte probe's own git add is `add`."""
+    real_run = subprocess.run
+
+    def run(cmd: list[str], *args: Any, **kwargs: Any) -> Any:
+        cwd = kwargs.get("cwd")
+        if (
+            cmd == ["git", "add", "-A"]
+            and cwd
+            and any(p.name.startswith("bad-") for p in pathlib.Path(cwd).iterdir())
+        ):
+            return add(cmd)
+        if commit is not None and cmd[:2] == ["git", "commit"] and "add invalid-utf8 name" in cmd:
+            return commit(cmd)
+        return real_run(cmd, *args, **kwargs)
+
+    return run
+
+
+def _fail(cmd: list[str]) -> Any:
+    raise subprocess.CalledProcessError(128, cmd)
+
+
+class TestSelftestInvalidByteProbe(unittest.TestCase):
+    def _selftest(self, run: Any, windows: bool) -> tuple[int, str]:
+        out = io.StringIO()
+        with (
+            mock.patch.object(audit, "_IS_WINDOWS", windows),
+            mock.patch.object(subprocess, "run", run),
+            contextlib.redirect_stdout(out),
+        ):
+            result = audit._selftest()
+        return result, out.getvalue()
+
+    def _require_probe_file(self, text: str) -> None:
+        if "host cannot create it" in text or "no candidate byte" in text:
+            self.skipTest("this host cannot exercise the invalid-byte probe")
+
+    def test_a_failing_add_of_the_probe_file_skips_on_windows(self) -> None:
+        result, text = self._selftest(_probe_run(_fail), windows=True)
+        self._require_probe_file(text)
+        self.assertIn("skip hub_tracked: non-UTF-8 filename (git cannot add it)", text)
+        self.assertEqual(result, 0, text)
+
+    def _error_of(self, run: Any, windows: bool) -> subprocess.CalledProcessError:
+        out = io.StringIO()
+        with (
+            mock.patch.object(audit, "_IS_WINDOWS", windows),
+            mock.patch.object(subprocess, "run", run),
+            contextlib.redirect_stdout(out),
+        ):
+            try:
+                audit._selftest()
+            except subprocess.CalledProcessError as error:
+                return error
+        self._require_probe_file(out.getvalue())
+        self.fail("the git failure did not propagate")
+
+    def test_a_failing_add_of_the_probe_file_fails_loudly_elsewhere(self) -> None:
+        error = self._error_of(_probe_run(_fail), windows=False)
+        self.assertEqual(error.cmd, ["git", "add", "-A"])
+
+    def test_another_git_failure_still_fails_loudly(self) -> None:
+        run = _probe_run(
+            lambda cmd: subprocess.CompletedProcess(cmd, 0), commit=lambda cmd: _fail(cmd)
+        )
+        error = self._error_of(run, windows=True)
+        self.assertEqual(error.cmd[:2], ["git", "commit"])
 
 
 if __name__ == "__main__":
