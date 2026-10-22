@@ -2125,6 +2125,61 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
         self.assertEqual(status, 0, "\n".join(fails))
 
 
+class TestSelftestIgnoresAmbientGitDir(unittest.TestCase):
+    """The self-test builds and reads its repositories where it asks, even under an ambient `GIT_DIR`.
+
+    A git hook running the self-test sets `GIT_DIR`. Each `git -C` a case runs would otherwise
+    write into the hook's own repository and read its answers back from there.
+    """
+
+    def test_cases_run_without_the_ambient_repository(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        spec = importlib.util.spec_from_file_location("guard_gitdir", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+        def git(*args):
+            return subprocess.run(
+                ["git", *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                env=clean,
+            ).stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ambient = os.path.join(tmp, "ambient")
+            repo = os.path.join(tmp, "repo")
+            git("init", "-q", ambient)
+            ambient_dir = os.path.join(ambient, ".git")
+
+            def state():
+                return git("-C", ambient, "config", "--local", "--list"), git(
+                    "-C", ambient, "for-each-ref"
+                )
+
+            def case():
+                steps = [["config", "push.default", "upstream"], ["branch", "-q", "release/1"]]
+                built = guard._build_selftest_repo(repo, steps)
+                return built, guard._git_stdout(repo, ["config", "push.default"])
+
+            before = state()
+            with (
+                mock.patch.dict(os.environ, {"GIT_DIR": ambient_dir}),
+                mock.patch.object(guard, "_selftest_cases", case),
+            ):
+                result = guard._selftest()
+                restored = os.environ.get("GIT_DIR")
+            self.assertEqual(result, (True, "upstream"))
+            self.assertEqual(state(), before)
+            self.assertEqual(restored, ambient_dir)
+
+
 class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
     """A rooted directory with no drive segment is unresolved where Git Bash and Windows Python disagree.
 

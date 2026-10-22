@@ -98,6 +98,7 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
 Run `gh-write-guard.py --selftest` to verify the decision matrix without Claude Code.
 """
 
+import contextlib
 import json
 import os
 import posixpath
@@ -15552,6 +15553,30 @@ _SELFTEST_GIT = (
 )
 
 
+_GIT_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+)
+
+
+@contextlib.contextmanager
+def _git_location_cleared():
+    """Remove each variable that names a repository from the environment, restoring them on exit."""
+    cleared = {name: os.environ.pop(name) for name in _GIT_LOCATION_VARS if name in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(cleared)
+
+
 def _build_selftest_repo(repo, steps):
     """Create a repository at `repo` on `develop` with one empty commit, then run `steps` in it.
 
@@ -16651,6 +16676,16 @@ def _no_origin_selftest():
 
 
 def _selftest():
+    """Run every self-test case with no variable naming a repository in the environment.
+
+    A git hook sets `GIT_DIR`. A case building a temporary repository would otherwise build it
+    inside the hook's own repository and read its answers back from there.
+    """
+    with _git_location_cleared():
+        return _selftest_cases()
+
+
+def _selftest_cases():
     # A deterministic offline run, pinning origin to ptr727/PlexCleaner, the incident repo, so the cross-origin case resolves without touching a real checkout.
     # The gh-write cases inject empty rules and a feature current-branch so no case reaches the live branch-rules query.
     origin = ("ptr727", "plexcleaner")
@@ -18442,33 +18477,13 @@ def _is_primary_checkout_selftest():
             os.mkdir(target)
         except (OSError, UnicodeError):
             return "skip"
-        # An ambient GIT_DIR points `git init` at that repository rather than at this temp one, and `_is_primary_checkout` then resolves both of its answers to it and reports a pass the decode never reached, leaving a repository behind outside the temp tree.
-        # Cleared around both spawns rather than passed to either, since `_is_primary_checkout` reads the environment it inherits and honoring GIT_DIR is deliberate there.
-        cleared = {}
-        for name in (
-            "GIT_DIR",
-            "GIT_COMMON_DIR",
-            "GIT_WORK_TREE",
-            "GIT_INDEX_FILE",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-            "GIT_CEILING_DIRECTORIES",
-            "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-            "GIT_NAMESPACE",
-            "GIT_PREFIX",
-        ):
-            if name in os.environ:
-                cleared[name] = os.environ.pop(name)
         try:
-            try:
-                r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
-            except OSError:
-                return "skip"
-            if r.returncode != 0:
-                return "skip"
-            return _is_primary_checkout(target)
-        finally:
-            os.environ.update(cleared)
+            r = subprocess.run(["git", "init", "-q", target], capture_output=True, check=False)
+        except OSError:
+            return "skip"
+        if r.returncode != 0:
+            return "skip"
+        return _is_primary_checkout(target)
 
 
 # --- Hook entrypoint (PreToolUse) --------------------------------------------------------------------
