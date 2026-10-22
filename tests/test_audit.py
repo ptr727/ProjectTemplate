@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import io
 import pathlib
+import subprocess
 import sys
 import unittest
 from typing import Any
@@ -191,6 +194,42 @@ class AuditRepoNamingCase(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
+
+
+class TestSelftestInvalidByteProbe(unittest.TestCase):
+    def test_a_failing_add_of_the_probe_file_skips_the_probe(self) -> None:
+        real_run = subprocess.run
+
+        def run(cmd: list[str], *args: Any, **kwargs: Any) -> Any:
+            cwd = kwargs.get("cwd")
+            if (
+                cmd == ["git", "add", "-A"]
+                and cwd
+                and any(p.name.startswith("bad-") for p in pathlib.Path(cwd).iterdir())
+            ):
+                raise subprocess.CalledProcessError(128, cmd)
+            return real_run(cmd, *args, **kwargs)
+
+        out = io.StringIO()
+        with mock.patch.object(subprocess, "run", run), contextlib.redirect_stdout(out):
+            result = audit._selftest()
+        self.assertIn("skip hub_tracked: non-UTF-8 filename (git cannot add it)", out.getvalue())
+        self.assertEqual(result, 0, out.getvalue())
+
+    def test_another_git_failure_still_fails_loudly(self) -> None:
+        real_run = subprocess.run
+
+        def run(cmd: list[str], *args: Any, **kwargs: Any) -> Any:
+            if cmd[:2] == ["git", "commit"] and "add invalid-utf8 name" in cmd:
+                raise subprocess.CalledProcessError(1, cmd)
+            return real_run(cmd, *args, **kwargs)
+
+        with (
+            mock.patch.object(subprocess, "run", run),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            audit._selftest()
 
 
 if __name__ == "__main__":
