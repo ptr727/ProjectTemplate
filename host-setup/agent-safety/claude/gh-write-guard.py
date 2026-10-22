@@ -4124,7 +4124,7 @@ def _line_break_contexts(cmd):
     A data line followed by its delimiter line is left unmapped, since joining the two would hide the delimiter.
     It is `command` in unquoted command text, `quoted` inside double quotes, and `comment` where a comment ends.
     A newline inside `$'...'`, a backtick, a `${...}`, a `$((...))`, or an unquoted heredoc is left unmapped.
-    Raises ValueError where a quote or group never closes, or a heredoc delimiter is only partly quoted.
+    Raises ValueError where a quote or group never closes, or a heredoc delimiter is one the scan does not read whole.
     """
     ctx = {}
     n = len(cmd)
@@ -4229,12 +4229,13 @@ def _line_break_contexts(cmd):
 
 
 def _line_break_reading(cmd):
-    """Read each backslash-newline in `cmd`, returning (denied, joined).
+    """Read each backslash-newline in `cmd`, returning (denied, readings).
 
     `denied` is True where one in a context the shell joins splits a word, or follows an escaped backslash.
-    A split directly after an unquoted command separator such as `&&` or `|` splits no word, and is joined instead.
-    `joined` is `cmd` with each joined one and each `literal` one removed, as a shell running that text reads it, or None.
-    An escaped backslash before a `literal` newline is removed and the newline kept, since a shell reads that as a line break.
+    A split directly after an unquoted command separator such as `&&` or `|` splits no word, so it is left to the fold.
+    `readings` holds `cmd` read as a shell running a `literal` text may read it, or is empty where `cmd` holds none.
+    One reading joins each `literal` backslash-newline, and the other reads it as a line break, as a comment it ends does.
+    An escaped backslash before a `literal` newline is a line break in both.
     A scan that does not finish leaves every backslash-newline in a context the shell joins.
     """
     try:
@@ -4247,10 +4248,10 @@ def _line_break_reading(cmd):
         odd = (nl - m.start()) % 2 == 1
         kind = ctx.get(nl)
         if kind == "literal":
-            edits.append((nl - 1, nl + 1) if odd else (m.start(), nl))
+            edits.append((m.start(), nl + 1, cmd[m.start() : nl - 1] if odd else "\n"))
             continue
         if not odd:
-            return True, None
+            return True, ()
         before, after = cmd[nl - 2 : nl - 1], cmd[nl + 1 : nl + 2]
         if not before.strip() or not after.strip():
             continue
@@ -4265,15 +4266,15 @@ def _line_break_reading(cmd):
             and after not in _SHELL_OP_CHARS
         )
         if not glued:
-            return True, None
-        edits.append((nl - 1, nl + 1))
+            return True, ()
     if not edits:
-        return False, None
-    out, at = [], 0
-    for start, end in edits:
-        out.append(cmd[at:start])
-        at = end
-    return False, "".join(out) + cmd[at:]
+        return False, ()
+    joined, broken, at = [], [], 0
+    for start, stop, kept in edits:
+        joined.append(cmd[at:start] + kept)
+        broken.append(cmd[at:start] + "\n")
+        at = stop
+    return False, tuple(dict.fromkeys(("".join(joined) + cmd[at:], "".join(broken) + cmd[at:])))
 
 
 def _opaque_cd(toks):
@@ -8804,10 +8805,10 @@ def classify(
             "than as a space or a line break, so the guard cannot tell where its words end. "
             "Failing closed. Write the command with plain newlines." + _handoff(cmd)
         )
-    denied, joined = (
+    denied, readings = (
         _line_break_reading(cmd)
         if _LINE_BREAK_RUN.search(cmd) and (_names_git_or_gh(cmd) or _names_push(cmd))
-        else (False, None)
+        else (False, ())
     )
     if denied:
         return "deny", (
@@ -8817,9 +8818,9 @@ def classify(
             "inside a double-quoted wrapper body. A hidden cd could redirect a push, or a split value add a "
             "subcommand. Write each word whole on one line." + _handoff(cmd)
         )
-    if joined is not None:
+    for reading in readings:
         dec, reason = classify(
-            joined,
+            reading,
             cwd,
             origin,
             current_branch,
@@ -8831,8 +8832,8 @@ def classify(
         )
         if dec == "deny":
             return "deny", (
-                "Read with its backslash-newlines joined, as a shell running the quoted text "
-                "joins them, this command is denied. " + reason
+                "Read as a shell running its quoted text reads it, with a backslash-newline there "
+                "joined or read as a line break, this command is denied. " + reason
             )
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
@@ -14132,6 +14133,22 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a single-quoted shell body joins a directory value its backslash-newline splits",
+    ),
+    (
+        "bash -c 'git status # ok\\\ngit -C /example/primary commit -m y'",
+        "/example/wt",
+        {"/example/primary": True, "/example/wt": False},
+        None,
+        "deny",
+        "a backslash-newline ending a comment in a shell body is a line break to the inner shell",
+    ),
+    (
+        "bash <<'EOF'\ngit status # ok \\\ngit -C /example/primary commit -m y\nEOF",
+        "/example/wt",
+        {"/example/primary": True, "/example/wt": False},
+        None,
+        "deny",
+        "a spaced backslash-newline ending a comment in a heredoc fed to a shell is a line break there",
     ),
 ]
 
