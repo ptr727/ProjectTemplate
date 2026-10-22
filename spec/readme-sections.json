@@ -63,7 +63,7 @@
                 { "label": "build status", "match": "/github/actions/workflow/status/", "in": "Build and Distribution > Build Status" },
                 { "label": "last commit", "match": "/github/last-commit/", "in": "Build and Distribution > Build Status" },
                 { "label": "GitHub release version", "match": "/github/v/release/", "forbidQuery": "include_prereleases", "in": "Build and Distribution > Releases" },
-                { "label": "GitHub pre-release version", "match": "/github/v/release/", "requireQuery": "include_prereleases", "in": "Build and Distribution > Releases" },
+                { "label": "GitHub pre-release version", "match": "/github/v/release/", "requireQuery": ["include_prereleases", "filter=*-g*"], "in": "Build and Distribution > Releases" },
                 { "label": "license", "match": "/github/license/", "in": "License", "exclusive": true }
             ]
         },

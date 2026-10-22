@@ -1400,7 +1400,7 @@ def shield_matches(url, shield):
     """True where a rendered URL is the shield the model describes, by endpoint plus its query discriminators."""
     return (
         shield["match"] in url
-        and (shield.get("requireQuery") is None or shield["requireQuery"] in url)
+        and all(q in url for q in shield.get("requireQuery", []))
         and (shield.get("forbidQuery") is None or shield["forbidQuery"] not in url)
     )
 
@@ -1924,10 +1924,13 @@ def readme_shield_findings(text, model, entry):
         if region is None:
             continue
         if not any(shield_matches(u, sh) for u in shield_endpoints(region, defs)):
+            queries = "".join(f" with `{q}`" for q in sh.get("requireQuery", []))
+            if sh.get("forbidQuery") is not None:
+                queries += f" without `{sh['forbidQuery']}`"
             findings.append(
                 (
                     "LETTER",
-                    f"readme: `{sh['in']}` carries no {sh['label']} shield ({sh['match']}), which this repo's deliverables require (spec/readme-structure.md)",
+                    f"readme: `{sh['in']}` carries no {sh['label']} shield ({sh['match']}{queries}), which this repo's deliverables require (spec/readme-structure.md)",
                 )
             )
         if not sh.get("exclusive"):
@@ -5486,7 +5489,7 @@ def _selftest():
         "[a]: https://img.shields.io/github/actions/workflow/status/o/r/publish-release.yml?label=Releases%20Build\n"
         "[b]: https://img.shields.io/github/last-commit/o/r\n"
         "[c]: https://img.shields.io/github/v/release/o/r?label=GitHub%20Release\n"
-        "[d]: https://img.shields.io/github/v/release/o/r?include_prereleases&label=GitHub%20Pre-Release\n"
+        "[d]: https://img.shields.io/github/v/release/o/r?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release\n"
         "[license-shield]: https://img.shields.io/github/license/o/r\n"
     )
     # The four repos that suffix every heading for the ToC extension must read identically to the plain form.
@@ -5736,10 +5739,25 @@ def _selftest():
         (
             "the pre-release shield is told from the release shield by its query",
             conformant.replace(
-                "?include_prereleases&label=GitHub%20Pre-Release", "?label=Another%20Release"
+                "?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release",
+                "?label=Another%20Release",
             ),
             {},
             1,
+        ),
+        (
+            "a pre-release shield without the prerelease filter is a finding",
+            conformant.replace("&filter=*-g*&", "&"),
+            {},
+            1,
+            "with `filter=*-g*`",
+        ),
+        (
+            "a missing release shield names the query it forbids",
+            conformant.replace("[![GitHub Release][c]][x]\\\n", ""),
+            {},
+            1,
+            "without `include_prereleases`",
         ),
         # The license shield is an ordinary member of the base class, addressed to a different section.
         ("the license shield in the closing License section", conformant, {}, 0),
@@ -5771,7 +5789,7 @@ def _selftest():
             inline_all.replace("PLACEHOLDER-a", "github/actions/workflow/status/o/r")
             .replace("PLACEHOLDER-b", "github/last-commit/o/r")
             .replace("PLACEHOLDER-c", "github/v/release/o/r")
-            .replace("PLACEHOLDER-d", "github/v/release/o/r?include_prereleases")
+            .replace("PLACEHOLDER-d", "github/v/release/o/r?include_prereleases&filter=*-g*")
             .replace("PLACEHOLDER-license-shield", "github/license/o/r"),
             {},
             0,
