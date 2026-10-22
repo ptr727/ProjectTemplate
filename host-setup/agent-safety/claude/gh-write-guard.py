@@ -4239,12 +4239,13 @@ _NESTED_QUOTING = ("'", '"', "`", "<<")
 
 
 def _literal_span_kept(cmd, start, stop, word, inner):
-    """True where a shell running the `literal` text `cmd[start:stop]` reads each backslash-newline in it as `inner` places it.
+    """True where the readings of the `literal` text `cmd[start:stop]` show what a shell running it runs.
 
-    A span in a word with any other quoted or expanded part is never kept, since the shell runs the whole word.
-    A span naming no git or gh, however its backslash-newlines are read, is kept, since its readings show what it runs.
+    A span in a word with any other quoted, escaped, or expanded part is never kept, since the shell runs the whole word.
+    Nor is one with an escaped word break just before it.
+    A span naming no git, gh, or push, as written, joined, or with line breaks, is kept whatever its own scan found.
     Any other span is kept only where its own scan finished and it holds no quoting a further shell would unwrap.
-    Each backslash-newline in it must then sit in command text or end a comment there.
+    Each backslash-newline in it must then sit in command text or end a comment there, as `inner` places it.
     """
     if word:
         head = cmd.rfind(" ", 0, start - 1) + 1
@@ -4280,7 +4281,8 @@ def _line_break_reading(cmd):
     One reading takes each kept backslash-newline as the span's own scan places it.
     A shell running the span reads one ending a comment there as a line break, and joins any other.
     The other readings join each one, or read each one as a line break.
-    An escaped backslash before a kept newline is a line break in all of them.
+    Each escaped backslash pair before a kept newline stays in all of them, read as one literal backslash.
+    A space parts those pairs from a line break, so no reading holds a backslash-newline to read again.
     A scan that does not finish leaves every backslash-newline in a context the shell joins.
     """
     try:
@@ -4304,9 +4306,13 @@ def _line_break_reading(cmd):
                 spans[start, stop] = (inner or {}) if kept else None
             inner = spans[start, stop]
             if inner is not None:
-                joined = cmd[m.start() : nl - 1] if odd else "\n"
+                pairs = cmd[m.start() : nl - 1 if odd else nl]
+                broken = f"{pairs} \n" if pairs else "\n"
+                joined = pairs if odd else broken
                 ends_comment = inner.get(nl - start) == "comment"
-                edits.append((m.start(), nl + 1, joined, "\n" if ends_comment else joined))
+                edits.append(
+                    (m.start(), nl + 1, joined, broken if ends_comment else joined, broken)
+                )
                 continue
             kind = None
         if not odd:
@@ -4329,10 +4335,10 @@ def _line_break_reading(cmd):
     if not edits:
         return False, ()
     readings = []
-    for pick in (3, 2, None):
+    for pick in (3, 2, 4):
         out, at = [], 0
         for edit in edits:
-            out.append(cmd[at : edit[0]] + ("\n" if pick is None else edit[pick]))
+            out.append(cmd[at : edit[0]] + edit[pick])
             at = edit[1]
         readings.append("".join(out) + cmd[at:])
     return False, tuple(dict.fromkeys(readings))
@@ -9324,6 +9330,31 @@ _CASES = [
         "sh -c 'echo \\\\\ngit push --no-verify origin feature/x'",
         "deny",
         "an escaped backslash before a newline in a single-quoted body is a line break to the inner shell",
+    ),
+    (
+        "bash -c 'git push origin main\\\\\necho hi'",
+        "allow",
+        "an escaped backslash pair before a line break in a shell body stays a literal backslash on the word",
+    ),
+    (
+        "bash <<'EOF'\ngit push origin main\\\\\necho hi\nEOF",
+        "allow",
+        "a quoted heredoc fed to a shell keeps the literal backslash an escaped pair leaves before a line break",
+    ),
+    (
+        "bash -c 'git push origin HEAD:main\\\\\\\n'",
+        "allow",
+        "an escaped pair before a backslash-newline in a shell body stays a literal backslash in every reading",
+    ),
+    (
+        "bash -c 'gh\\\\\npr merge 5 --admin'",
+        "allow",
+        "an escaped backslash pair after gh in a shell body names a command other than gh",
+    ),
+    (
+        "bash -c 'git push origin feature/x\\\\\ngit push origin main'",
+        "deny",
+        "control: the line after an escaped backslash pair in a shell body is still read",
     ),
     (
         "bash -c 'true # x\\\ngh pr merge 5 --ad\\\nmin'",

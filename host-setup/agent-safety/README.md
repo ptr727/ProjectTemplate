@@ -185,11 +185,14 @@ text says, because the harm it covers was never in the text.
    text in a `$(...)` substitution. It is also one ending a quoted heredoc's data line, unless the
    delimiter line follows. It is not one inside `$'...'`, or single quotes within double quotes, a
    backquote, or `${...}`. A Markdown hard line break in a quoted heredoc or a single-quoted body
-   is one. The single-quoted part must be its word's only quoted part. Where the text names git or
-   gh, it must also hold no further quoting. Each backslash-newline in it must then sit in its
-   command text or end a comment there. The command is then read again as a shell running that text reads it,
-   joining the lines except where one ends a comment. It is also read with each one joined and with
-   each one a line break, and denied where any reading is. Nor does either read a single unquoted
+   is one. The single-quoted part must be its word's only quoted, escaped, or expanded part, with no
+   escaped word break just before it. Where the text names git, gh, or a push, it must also hold no
+   further quoting. Those names are read in the text as written, with its lines joined, and with
+   each one a line break. Each backslash-newline in that text must then sit in its command text or
+   end a comment there. The command is then read again as a shell running that text reads it,
+   joining the lines except where one ends a comment. It is also read with each one joined and with each one a line break, and denied where
+   any reading is. Every reading keeps each escaped backslash pair before a line break, which the
+   shell reads as one literal backslash. Nor does either read a single unquoted
    backslash-newline between a command separator such as `&&` or `|` and a non-operator character,
    which splits no word. Two comments whose
    apostrophes pair up as one quoted span are read as the shell reads them, as comments. The
