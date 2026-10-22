@@ -210,8 +210,9 @@ text says, because the harm it covers was never in the text.
    run-time command word, which may expand to any of them. That holds behind a launcher such as
    `flock` or `watch`, and after `while`, `until`, or `coproc`. A wrapper shell or a substitution
    running one counts, and so does a shell running a script file or its input. A `-c` shell given
-   no command string counts as one, since `xargs` may supply it. So does an `eval` or a `source`
-   inside a wrapper body or a substitution.
+   no command string counts as one, since `xargs` may supply it. So does a `-c` shell an `xargs -I`
+   runs, or one whose next word is an option, as in `bash -c --`. So does an `eval`, a `source`,
+   or a shell running a script file inside a wrapper body or a substitution.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
    undetermined. The hook reads both before the command runs, and a checkout or a switch changes
    neither.
