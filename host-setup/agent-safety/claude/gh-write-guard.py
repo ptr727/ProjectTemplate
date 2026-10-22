@@ -2836,13 +2836,20 @@ def _foreign_shell_at(toks, i):
     """The base name of a shell `_FOREIGN_SHELL_FLAGS` names that `toks[i]` runs as a command, or None.
 
     The word must be its simple command's command, past any assignment or precommand such as `sudo -u root` (see `_command_prefix`).
-    A launcher `_command_prefix` does not know runs it too, unless `_NAMES_ITS_ARGUMENTS` names it (see `_launcher_prefix`).
-    So a `cmd` or `script` directory named as an argument of `ls` is not read as a shell.
+    So a `cmd` or `script` directory named as an argument is not read as a shell.
+    Behind a launcher `_command_prefix` does not know, it counts where that launcher may run it (see `_launcher_prefix`).
+    It must then also be given its command string option, so `go build ./cmd` reads no shell.
     """
     exe = _command_string_exe(toks[i])
     if exe is None or exe in _SHELL_WRAPPER_EXE:
         return None
-    return exe if _command_prefix(toks, i)[0] or _launcher_prefix(toks, i)[0] else None
+    if _command_prefix(toks, i)[0]:
+        return exe
+    if not _launcher_prefix(toks, i)[0]:
+        return None
+    args, _ = _collect_arglist(toks, i + 1)
+    named = _command_string_index(exe, args) is not None
+    return exe if named or any(a.lower().startswith("--command=") for a in args) else None
 
 
 def _foreign_shell_bodies(exe, args):
@@ -5077,12 +5084,14 @@ def _launcher_prefix(toks, k):
 
     Such a launcher, as `uv run` is, passes its environment to the command it runs.
     The launcher is the first word `_prefix_walk` does not pass, and runs `toks[k]` unless `_NAMES_ITS_ARGUMENTS` names it, as `grep`.
-    An assignment among the words after it is read too, since an `env` there passes it on.
+    An assignment after an `env` among the words after it is read too, since that `env` passes it on.
+    Any other assignment there is the launcher's own argument, as `find -name A=b` holds.
     """
     i, out = _prefix_walk(toks, k)
     if i >= k or _base_name(toks[i]) in _NAMES_ITS_ARGUMENTS:
         return False, []
-    return True, out + [m.groups() for t in toks[i:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
+    env = next((x for x in range(i, k) if _base_name(toks[x]) == "env"), k)
+    return True, out + [m.groups() for t in toks[env:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
 
 
 def _runs_git(text):
@@ -8652,6 +8661,11 @@ _CASES = [
         _nested_wrapper("gh pr view 5", 6),
         "allow",
         "control: a gh read past the nesting cap is allowed",
+    ),
+    (
+        "export GH_REPO=stranger/example; find . -name GH_REPO=ptr727/plexcleaner -exec gh pr comment 5 --body x \\;",
+        "deny",
+        "an assignment-shaped argument of a launcher does not replace the GH_REPO a gh write runs under",
     ),
 ]
 
@@ -16562,6 +16576,18 @@ _PUSH_CONFIG_CASES = [
         "deny",
         "a run-time command word opening a command in a named coproc leaves the remote config unresolved",
     ),
+    (
+        [],
+        "go build ./cmd && git push --tags origin",
+        "allow",
+        "control: a shell name another command takes as an argument with no command string is no shell",
+    ),
+    (
+        [],
+        "chmod +x script && git push --tags origin",
+        "allow",
+        "control: a script file another command names is no shell running it",
+    ),
 ]
 
 
@@ -16658,7 +16684,7 @@ _PUSH_REPO_CASES = [
     (
         "watch -n 60 git push origin develop",
         "deny",
-        "watch hands the push to a shell, so its repository stays undetermined",
+        "control: a watch first in front of a push already leaves its repository undetermined",
     ),
     (
         "timeout 60 watch -n 5 git push origin develop",
