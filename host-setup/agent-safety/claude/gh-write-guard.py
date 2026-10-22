@@ -4123,7 +4123,7 @@ def _line_break_contexts(cmd):
     The context is `literal` inside single quotes or a quoted heredoc's data, where the shell keeps a backslash-newline.
     A data line followed by its delimiter line is left unmapped, since joining the two would hide the delimiter.
     It is `command` in unquoted command text, `quoted` inside double quotes, and `comment` where a comment ends.
-    A newline inside `$'...'`, a backtick, a `${...}`, arithmetic, or an unquoted heredoc is left unmapped.
+    A newline inside `$'...'`, a backtick, a `${...}`, a `$((...))`, or an unquoted heredoc is left unmapped.
     Raises ValueError where a quote or group never closes, or a heredoc delimiter is only partly quoted.
     """
     ctx = {}
