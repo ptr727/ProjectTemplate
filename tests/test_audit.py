@@ -259,8 +259,14 @@ class TestSelftestInvalidByteProbe(unittest.TestCase):
         self.fail("the git failure did not propagate")
 
     def test_an_unrelated_add_failure_fails_loudly_on_windows(self) -> None:
-        error = self._error_of(_probe_run(_fail_unrelated), windows=True)
-        self.assertEqual(error.cmd, ["git", "add", "-A"])
+        out = io.StringIO()
+        with (
+            mock.patch.object(audit, "_IS_WINDOWS", True),
+            mock.patch.object(subprocess, "run", _probe_run(_fail_unrelated)),
+            contextlib.redirect_stdout(out),
+            self.assertRaisesRegex(RuntimeError, "index.lock"),
+        ):
+            audit._selftest()
 
     def test_a_failing_add_of_the_probe_file_fails_loudly_elsewhere(self) -> None:
         error = self._error_of(_probe_run(_fail), windows=False)
