@@ -99,7 +99,12 @@ text says, because the harm it covers was never in the text.
    git reads them. A short-option cluster such as `-uf` or `-ud` forces or deletes. A long option cut short, such as `--del`,
    `--al`, or `--mirr`, is the option it starts, and `--branches` is `--all`. Of `--force`, `--delete`, `--all`, `--mirror`, `--tags`, or `--prune` and its `--no-` form, the later one wins. `--no-force` leaves a `--force-with-lease` in place, as git does. A refspec pattern
    whose destination can match under `refs/heads/`, such as `refs/*:refs/*`, is read as pushing
-   every branch protected by default. Beside such a pattern, a lone `:`
+   every branch protected by default. It is also read as each branch it maps a local ref to in the
+   push's checkout. So a branch under a ruleset such as `release/*` is checked. A lone `:` is read
+   the same way, as each local branch with a same-named remote-tracking ref of its remote. `--all`
+   is read as every local branch too, and `--mirror` as every local and remote-tracking branch.
+   With `--prune`, a pattern or a lone `:` also deletes each remote-tracking branch it matches.
+   Beside such a pattern, a lone `:`
    refspec, `--all`, or a bare push, a `--prune` is read as deleting every branch protected by
    default. A `--mirror` push with no refspec is read as forcing and deleting every branch
    protected by default. So is a push with no refspec whose remote has a persisted
@@ -116,7 +121,11 @@ text says, because the harm it covers was never in the text.
    maintainer's own admin bypass. A push to any other branch whose rules cannot be determined
    passes this requirement instead, since there is nothing yet on record to bypass. A push that
    `-C` or a leading `cd` runs in another checkout is judged against that checkout's origin as well
-   as the session's. The hook may not name the checkout a push runs in or that checkout's origin.
+   as the session's. A push is also judged against the repository its remote writes. That is read
+   from the remote's push URLs, `pushurl` and `pushInsteadOf` included, or from a URL the push
+   names, rewritten as git rewrites it. A push naming no remote takes it from `--repo`, the
+   branch's `pushRemote`, `remote.pushDefault`, or the branch's `remote`, in git's order. A URL
+   naming no repository, such as a local path, leaves that push's rules undetermined. The hook may not name the checkout a push runs in or that checkout's origin.
    That holds under `sudo -D` or `env -C`, in a wrapper shell, and in a directory that does not
    exist. That push's rules then count as undetermined. Apart from
    that case, a push whose target the hook cannot read at all is denied whatever branch it names.
@@ -147,7 +156,16 @@ text says, because the harm it covers was never in the text.
    That is its own name under a `push.default` of `current` or `simple`, and each
    `branch.<name>.merge` branch under `upstream`. An unset `push.default` is read as `simple`. Both are
    read where `push.default` holds a value git does not define, or where its read exits with any other error. A bare push is denied
-   where any read of its branch, its push target, or `push.default` times out or cannot run. A word the shell rewrites or drops before git reads it is denied where it can
+   where any read of its branch, its push target, or `push.default` times out or cannot run. A
+   bare push also reads its remote's `remote.<name>.push` refspecs as if the command named them,
+   and a `push.default` of `matching` as a lone `:`. A source-only refspec is also read as the
+   destination a `remote.<name>.push` refspec maps it to, and under `upstream` as its
+   `branch.<name>.merge`. A push is denied, with an explicit refspec as the fix, where such a
+   config or branch list cannot be read. That covers a matching push to a URL, which has no
+   remote-tracking refs to list. It also covers a pattern, a lone `:`, `--all`, or `--mirror`
+   after a `gh` command, a wrapper shell, or most git subcommands. The git subcommands that do
+   not count leave `HEAD` and the push config alone, such as `add`, `commit`, `fetch`, or
+   `status`. The hook lists the branches before that command runs. A word the shell rewrites or drops before git reads it is denied where it can
    change what git runs. Such a word is a `$`, backtick, or brace-expansion word. It is denied
    where any git command's subcommand goes, and among a push's words or a commit's. On any git
    command it is denied among the global options where word splitting may split it. A
@@ -319,7 +337,10 @@ text says, because the harm it covers was never in the text.
    join folds it logically, so the two can name different checkouts. A mutating invocation naming
    one is denied wherever it points. So is a bare `checkout`/`switch` argument, which cannot then be
    told from a pathspec. So is a subcommand git neither ships nor finds on `PATH`, which may be an
-   alias defined there. An absolute path with no `..` is the workaround. On Windows, a Git Bash drive spelling such as
+   alias defined there. An absolute path with no `..` is the workaround. A directory the shell
+   reads from its own directory stack is denied the same way, leading or not. That is `cd -`, a
+   `~-` or `~+` tilde word, a `pushd`/`popd` index such as `+1`, or a bare `pushd`/`popd`. The hook cannot see that
+   stack. On Windows, a Git Bash drive spelling such as
    `/c/repos/x`, in any of those values or in the hook's own reported cwd, reads as `C:/repos/x`,
    the path MSYS hands `git.exe`. A rooted path with no drive segment stays unconverted, since MSYS
    maps it under the Git install root, which the hook cannot see without executing something. Fail open (allow) when no git repository
