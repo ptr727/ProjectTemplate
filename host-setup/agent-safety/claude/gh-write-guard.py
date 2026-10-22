@@ -4251,8 +4251,10 @@ def _literal_span_kept(cmd, start, stop, word, inner):
         for c in "\t\n;&|<>(":
             head = max(head, cmd.rfind(c, 0, start - 1) + 1)
         tail = _PLAIN_WORD_PART.match(cmd, stop + 1).end()
-        if not _PLAIN_WORD_PART.fullmatch(cmd, head, start - 1) or (
-            tail < len(cmd) and cmd[tail] not in " \t\n;&|<>()"
+        if (
+            not _PLAIN_WORD_PART.fullmatch(cmd, head, start - 1)
+            or cmd[head - 2 : head - 1] == "\\"
+            or (tail < len(cmd) and cmd[tail] not in " \t\n;&|<>()")
         ):
             return False
     text = cmd[start:stop]
@@ -9342,6 +9344,11 @@ _CASES = [
         "bash -c 'echo \"'\\''x\" # c\\\ngh pr merge 5 --ad\\\nmin # \"'",
         "deny",
         "a single-quoted span joined to other quoted parts of its word is not read as text",
+    ),
+    (
+        "bash -c \\#\\ 'x\\\ngh pr merge 5 --ad\\\nmin'",
+        "deny",
+        "a single-quoted span after an escaped word break is joined to the word before it",
     ),
     (
         "gh pr create --title x --body \"$(cat <<'EOF'\n## Summary\nline one\\\nline two\n- it's done\nEOF\n)\"",
