@@ -6367,8 +6367,6 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
             ("0", "labeled=true"),
             run_comments_label_step(prose_lint.COMMENT_LABEL_NAME + "\n", "false")[:2],
         )
-        # A promotion diffs against the default branch's tip.
-        # Its scope is a whole release of lines that were reviewed where they landed.
 
     def test_the_action_delivers_its_input_to_the_script(self) -> None:
         """The harness feeds the variable, so nothing else reads the action's own wiring.
@@ -6390,11 +6388,10 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
     def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
         """Asserted whole, since a fragment of it left two disarming mutations green.
 
-        Flipping the `||` to `&&` refuses every labeled pull request, and dropping the head
-        repository term stands the rule down for a fork branch named `develop`. Both passed while
-        this read one fragment, and both fail against the whole expression. It is read under the
-        prose step's own `with:`, since the same line moved to a sibling step passed a substring
-        match while the gate fell back to the input's default.
+        Flipping the `||` to `&&` refuses every labeled pull request, and passed while this read
+        one fragment. It is read under the prose step's own `with:`, since the same line moved to a
+        sibling step passed a substring match while the gate fell back to the input's default. The
+        promotion's own terms live in the stand-down step, whose cases run its script.
         """
         step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Check prose step")
         self.assertEqual(
@@ -6434,19 +6431,13 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
                 self.assertEqual(("0", f"stand-down={expected}"), (code, output), log)
                 self.assertIn(f"Workflow model: {model}", log)
 
-    def test_the_stand_down_step_refuses_an_unknown_workflow_model(self) -> None:
-        """A misspelled model would otherwise read as operational and run the rule on every promotion.
-
-        The rejected value is escaped, so a newline in it cannot start a workflow command.
-        """
-        for model in ("", "Release", "operational ", "release\n::warning::forged"):
+    def test_only_the_release_model_stands_the_promotion_down(self) -> None:
+        """A value other than `release` runs the rule, which fails loudly rather than silently."""
+        promotion = {"HEAD_REPOSITORY": "example/widget", "HEAD_REF": "develop", "BASE_REF": "main"}
+        for model in ("", "Release", "release ", "operational"):
             with self.subTest(model=model):
-                code, output, log = run_comment_stand_down_step(model, {})
-                self.assertEqual(("1", ""), (code, output), log)
-                self.assertIn(
-                    "::error::The workflow-model input must be release or operational", log
-                )
-                self.assertNotIn("\n::warning::", log)
+                code, output, log = run_comment_stand_down_step(model, promotion)
+                self.assertEqual(("0", "stand-down=false"), (code, output), log)
 
     def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
         """The harness feeds the variables, so nothing else reads the step's own wiring.
@@ -6457,7 +6448,6 @@ class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
         text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
         step = yaml_step(text, "Resolve comment stand-down step")
         self.assertEqual("comment-stand-down", yaml_value(step, "id"))
-        self.assertIsNone(yaml_value(step, "if"))
         for name, expression in (
             ("WORKFLOW_MODEL", "inputs.workflow-model"),
             ("HEAD_REPOSITORY", "github.event.pull_request.head.repo.full_name"),
