@@ -1875,8 +1875,9 @@ def _git_dir_rereading(toks, word, invocation, inherited=()):
     export before the git word at `toks[word]` leaves is a reading of its own (see
     `_exported_states`). So is each state in `inherited`, from the text running this one. The
     prefix past a precommand or launcher sits on top of each (see `_git_word_assignments`). The
-    invocation's own value wins, as git reads it. The caller keeps the first reading as well. An
-    `export` in a subshell or a pipeline does not reach a later command.
+    invocation's own value wins, as git reads it. The caller keeps the first reading as well,
+    since an `export` in a subshell or a pipeline does not reach a later command. Such an export
+    is still read, as one that may.
     """
     c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd = invocation
     prefix = _git_word_assignments(toks, word)
@@ -3810,7 +3811,7 @@ def _gh_word_repo_values(text, inherited):
             continue
         reached, pairs = _command_prefix(toks, x)
         if not reached:
-            reached, pairs = _launcher_prefix(toks, x)
+            reached, pairs = _launcher_prefix(toks, x, env_args=False)
         if not reached:
             continue
         prefix = [(v, False) for name, v in pairs if name == "GH_REPO"]
@@ -3837,7 +3838,7 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
             continue
         reached, pairs = _command_prefix(toks, x)
         if not reached:
-            reached, pairs = _launcher_prefix(toks, x)
+            reached, pairs = _launcher_prefix(toks, x, env_args=False)
         prefix = [(v, False) for name, v in pairs if name == "GH_REPO"] if reached else []
         reach = prefix or states[x]
         for body in found[0]:
@@ -4201,10 +4202,10 @@ def _config_may_change(toks, end, skip=None, mask=None):
             continue
         if _runs_run_time_word(toks, k, mask):
             return True
+        if _runs_unread_script(toks, k, mask):
+            return True
         found = _shell_bodies_at(toks, k)
         if found and _word_runs(toks, k, mask):
-            if not found[0] and _shell_reads_unread_script(toks, k):
-                return True
             if found[0] and _string_read_elsewhere(toks, k):
                 return True
             if any(_names_config_change(body) for body in found[0]):
@@ -4247,23 +4248,40 @@ def _string_read_elsewhere(toks, k):
     """True when the shell at `toks[k]` has a command string option but may not run the word after it.
 
     That is where no word follows the option or the word after it is an option, as in `bash -c --`.
-    The shell then takes its string from a later word. It is also any such shell an `xargs` runs
-    with `-I`, `-i`, or `--replace`, since a word `xargs` reads may then replace its string.
+    The shell then takes its string from a later word. It is also a string holding the string an
+    `xargs` running the shell replaces with each word it reads (see `_xargs_replace_string`).
     """
     exe = _command_string_exe(toks[k])
     args, _ = _collect_arglist(toks, k + 1)
     ci = _command_string_index(exe, args) if exe else None
     if ci is None:
         return False
-    return _xargs_replaces(toks, k) or ci + 1 >= len(args) or args[ci + 1].startswith("-")
+    if ci + 1 >= len(args) or args[ci + 1].startswith("-"):
+        return True
+    replaced = _xargs_replace_string(toks, k)
+    return bool(replaced) and replaced in args[ci + 1]
 
 
-def _xargs_replaces(toks, k):
-    """True when an `xargs` that replaces words it reads, by `-I`, `-i`, or `--replace`, runs `toks[k]`."""
+def _xargs_replace_string(toks, k):
+    """The string an `xargs` running `toks[k]` replaces with each word it reads, or None.
+
+    That is the value of `-I`, attached or the next word, or of `-i` or `--replace`, `{}` where
+    they name none.
+    """
     if not _xargs_runs(toks, k):
-        return False
+        return None
     start = max(x for x in range(k) if _base_name(toks[x]) == "xargs")
-    return any(w.startswith(("-I", "-i", "--replace")) for w in toks[start + 1 : k])
+    for x in range(start + 1, k):
+        w = toks[x]
+        if w == "-I":
+            return toks[x + 1] if x + 1 < k else None
+        if w.startswith("-I"):
+            return w[2:]
+        if w.startswith("--replace="):
+            return w.partition("=")[2] or "{}"
+        if w.startswith("-i") or w == "--replace":
+            return w[2:] or "{}"
+    return None
 
 
 def _xargs_runs(toks, k, mask=None):
@@ -4382,7 +4400,7 @@ def _runs_run_time_word(toks, k, mask=None):
         return False
     if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
         return True
-    return _command_prefix(toks, k)[0] or _opens_command(toks, k)
+    return _command_prefix(toks, k)[0] or (k > 0 and toks[k - 1] == "{")
 
 
 def _through_last_push(text):
@@ -4396,11 +4414,14 @@ def _through_last_push(text):
     return text[: found[-1].end()] if found else text
 
 
-def _runs_unread_script(toks, k):
-    """True when the word at `toks[k]` runs a shell given no command string (see `_shell_reads_unread_script`)."""
+def _runs_unread_script(toks, k, mask=None):
+    """True when the word at `toks[k]` runs a shell given no command string (see `_shell_reads_unread_script`).
+
+    A word `mask` marks as quoted is not syntax (see `_word_runs`).
+    """
     found = _shell_bodies_at(toks, k)
     return bool(
-        found and not found[0] and _word_runs(toks, k) and _shell_reads_unread_script(toks, k)
+        found and not found[0] and _word_runs(toks, k, mask) and _shell_reads_unread_script(toks, k)
     )
 
 
@@ -5079,17 +5100,21 @@ def _wrapper_env_groups(toks, runs=None):
     return out
 
 
-def _launcher_prefix(toks, k):
+def _launcher_prefix(toks, k, env_args=True):
     """(whether a launcher `_command_prefix` does not know may run `toks[k]`, the assignments before that launcher).
 
     Such a launcher, as `uv run` is, passes its environment to the command it runs.
     The launcher is the first word `_prefix_walk` does not pass, and runs `toks[k]` unless `_NAMES_ITS_ARGUMENTS` names it, as `grep`.
-    An assignment after an `env` among the words after it is read too, since that `env` passes it on.
-    Any other assignment there is the launcher's own argument, as `find -name A=b` holds.
+    With `env_args`, an assignment after an `env` among the words after it is read too, since
+    that `env` passes it on. Any other assignment there is the launcher's own argument, as
+    `find -name A=b` holds. Without it, only the assignments before the launcher are read. A
+    reader that takes them in place of a shell's state then never loses that state to an argument.
     """
     i, out = _prefix_walk(toks, k)
     if i >= k or _base_name(toks[i]) in _NAMES_ITS_ARGUMENTS:
         return False, []
+    if not env_args:
+        return True, out
     env = next((x for x in range(i, k) if _base_name(toks[x]) == "env"), k)
     return True, out + [m.groups() for t in toks[env:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
 
@@ -8666,6 +8691,11 @@ _CASES = [
         "export GH_REPO=stranger/example; find . -name GH_REPO=ptr727/plexcleaner -exec gh pr comment 5 --body x \\;",
         "deny",
         "an assignment-shaped argument of a launcher does not replace the GH_REPO a gh write runs under",
+    ),
+    (
+        "export GH_REPO=stranger/example; find ./env -name GH_REPO=ptr727/plexcleaner -exec gh pr comment 5 --body x \\;",
+        "deny",
+        "an env-named path among a launcher's words does not replace the GH_REPO a gh write runs under",
     ),
 ]
 
@@ -16588,6 +16618,18 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a script file another command names is no shell running it",
     ),
+    (
+        [],
+        'docker exec "$C" ls; git push --tags origin',
+        "allow",
+        "control: a run-time word after a command-position word that is another command's argument runs nothing",
+    ),
+    (
+        [],
+        "git ls-files '*.sh' | xargs -I{} sh -c 'shellcheck \"$1\"' _ {}; git push --tags origin",
+        "allow",
+        "control: a -c string an xargs -I runs without its replace string is read as written",
+    ),
 ]
 
 
@@ -18478,6 +18520,13 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a pwsh body behind a launcher the guard does not know is read",
+    ),
+    (
+        "uv run fish --command='git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a fish --command=<body> behind a launcher the guard does not know is read",
     ),
     (
         "timeout 5 grep pwsh -Command 'git push origin develop'",

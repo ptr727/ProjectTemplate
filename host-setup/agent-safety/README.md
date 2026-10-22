@@ -210,9 +210,10 @@ text says, because the harm it covers was never in the text.
    run-time command word, which may expand to any of them. That holds behind a launcher such as
    `flock` or `watch`, and after `while`, `until`, or `coproc`. A wrapper shell or a substitution
    running one counts, and so does a shell running a script file or its input. A `-c` shell given
-   no command string counts as one, since `xargs` may supply it. So does a `-c` shell an `xargs -I`
-   runs, or one whose next word is an option, as in `bash -c --`. So does an `eval`, a `source`,
-   or a shell running a script file inside a wrapper body or a substitution.
+   no command string counts as one, since `xargs` may supply it. So does one whose next word is an
+   option, as in `bash -c --`, and one whose string holds the string an `xargs -I` replaces. So
+   does an `eval`, a `source`, or a shell running a script file inside a wrapper body or a
+   substitution.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
    undetermined. The hook reads both before the command runs, and a checkout or a switch changes
    neither.
@@ -330,9 +331,10 @@ text says, because the harm it covers was never in the text.
    An `export` anywhere before the git command is read too, as is a `declare -x`. An `export` of
    a bare name exports the value set before it. A `GIT_DIR`/`GIT_WORK_TREE` prefix behind a
    precommand or a launcher such as `timeout 60` or `flock <file>` is read as well. Each export
-   after the first command gives a reading of its own beside the one without it. An `export` in
-   a subshell does not reach a later command. A leading one is read as above. A subcommand this requirement denies, named in wrappers nested past the
-   reading cap, is denied wherever it runs. `--git-dir`/`GIT_DIR=` alone,
+   after the first command gives a reading of its own beside the one without it. An `export` in a
+   subshell does not reach a later command, though one there is still read as one that may.
+   A leading one is read as above. A subcommand this requirement denies, named in wrappers nested
+   past the reading cap, is denied wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
    target, matching git's own documented fallback.
 
