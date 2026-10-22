@@ -4748,8 +4748,8 @@ def _selftest_cases():
                     subprocess.run(
                         ["git", "add", "-A"], cwd=tmp_root_path, check=True, capture_output=True
                     )
-                except subprocess.CalledProcessError:
-                    if not _IS_WINDOWS:
+                except subprocess.CalledProcessError as exc:
+                    if not _IS_WINDOWS or b"invalid path" not in (exc.stderr or b"").lower():
                         raise
                     print("  skip hub_tracked: non-UTF-8 filename (git cannot add it)")
                 else:
