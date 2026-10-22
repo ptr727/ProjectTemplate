@@ -5752,6 +5752,13 @@ def _selftest():
             1,
             "with `filter=*-g*`",
         ),
+        (
+            "a missing release shield names the query it forbids",
+            conformant.replace("[![GitHub Release][c]][x]\\\n", ""),
+            {},
+            1,
+            "without `include_prereleases`",
+        ),
         # The license shield is an ordinary member of the base class, addressed to a different section.
         ("the license shield in the closing License section", conformant, {}, 0),
         (
