@@ -4282,7 +4282,7 @@ def _line_break_reading(cmd):
     A shell running the span reads one ending a comment there as a line break, and joins any other.
     The other readings join each one, or read each one as a line break.
     Each escaped backslash pair before a kept newline stays in all of them, read as one literal backslash.
-    A space parts those pairs from a line break, so no reading holds a backslash-newline to read again.
+    A space parts those pairs from each line break a reading puts after them, so that break is not read again.
     A scan that does not finish leaves every backslash-newline in a context the shell joins.
     """
     try:
@@ -9355,6 +9355,16 @@ _CASES = [
         "bash -c 'git push origin feature/x\\\\\ngit push origin main'",
         "deny",
         "control: the line after an escaped backslash pair in a shell body is still read",
+    ),
+    (
+        "bash -c 'true # x\\\\\ngit push origin main'",
+        "deny",
+        "control: an escaped backslash pair ending a comment in a shell body leaves the next line read",
+    ),
+    (
+        "bash -c 'true # x\\\\\\\ngit push origin main'",
+        "deny",
+        "control: an escaped pair before a comment-ending backslash-newline leaves the next line read",
     ),
     (
         "bash -c 'true # x\\\ngh pr merge 5 --ad\\\nmin'",
