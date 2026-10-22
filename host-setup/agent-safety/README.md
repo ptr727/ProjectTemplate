@@ -180,11 +180,13 @@ text says, because the harm it covers was never in the text.
    as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
    an escaped backslash before a line break. The shell reads that as a line break where the hook
    would join the lines, and as a continuation inside a double-quoted wrapper body. Neither deny
-   reads a backslash-newline the outer shell keeps as text. That is one inside single quotes outside
-   any double quotes, backquote, or `${...}`. It is also one ending a quoted heredoc's data line,
+   reads a backslash-newline the outer shell keeps as text. That is one inside single quotes in command
+   text, including command text in a `$(...)` substitution. It is not one inside `$'...'`, or
+   single quotes within double quotes, a backquote, or `${...}`. It is also one ending a quoted heredoc's data line,
    unless the delimiter line follows. A Markdown hard line break in a pull request body is one. A shell that runs such text
-   may join the lines or, where the line ends in a comment, read a line break. So the command is
-   read again each way and denied where either reading is. Nor does either read a single unquoted
+   joins the lines, except where the line ends in a comment, where it reads a line break. So the
+   command is read again that way, and also with each one joined and with each one a line break.
+   It is denied where any reading is. Nor does either read a single unquoted
    backslash-newline between a command separator such as `&&` or `|` and a non-operator character,
    which splits no word. Two comments whose
    apostrophes pair up as one quoted span are read as the shell reads them, as comments. The

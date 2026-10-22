@@ -4121,6 +4121,7 @@ def _line_break_contexts(cmd):
     """Map the index of each newline the scan reaches in `cmd` to the context it sits in.
 
     The context is `literal` inside single quotes or a quoted heredoc's data, where the shell keeps a backslash-newline.
+    A `literal` newline maps to `("literal", start, end)`, the span of the quoted text a shell may run as a script.
     A data line followed by its delimiter line is left unmapped, since joining the two would hide the delimiter.
     It is `command` in unquoted command text, `quoted` inside double quotes, and `comment` where a comment ends.
     A newline inside `$'...'`, a backtick, a `${...}`, a `$((...))`, or an unquoted heredoc is left unmapped.
@@ -4132,17 +4133,19 @@ def _line_break_contexts(cmd):
     def heredoc_bodies(i, pending):
         for tag, dash, quoted in pending:
             joined = False
+            start, kept = i, []
             while i < n:
                 end = cmd.find("\n", i)
                 end = n if end < 0 else end
                 line = cmd[i:end]
                 if not joined and (line.lstrip("\t") if dash else line) == tag:
+                    ctx.update((k, ("literal", start, i)) for k in kept)
                     i = end + 1
                     break
                 nxt = cmd.find("\n", end + 1)
                 following = cmd[end + 1 : n if nxt < 0 else nxt]
                 if quoted and end < n and (following.lstrip("\t") if dash else following) != tag:
-                    ctx[end] = "literal"
+                    kept.append(end)
                 joined = not quoted and (len(line) - len(line.rstrip("\\"))) % 2 == 1
                 i = end + 1
         return min(i, n)
@@ -4188,7 +4191,9 @@ def _line_break_contexts(cmd):
                 end = cmd.find("'", i + 1)
                 if end < 0:
                     raise ValueError("unterminated quote")
-                ctx.update((k, "literal") for k in range(i + 1, end) if cmd[k] == "\n")
+                ctx.update(
+                    (k, ("literal", i + 1, end)) for k in range(i + 1, end) if cmd[k] == "\n"
+                )
                 i = end + 1
             elif ch == '"' or cmd.startswith('$"', i):
                 i = double(i + (1 if ch == '"' else 2))
@@ -4234,22 +4239,36 @@ def _line_break_reading(cmd):
     `denied` is True where one in a context the shell joins splits a word, or follows an escaped backslash.
     A split directly after an unquoted command separator such as `&&` or `|` splits no word, so it is left to the fold.
     `readings` holds `cmd` read as a shell running a `literal` text may read it, or is empty where `cmd` holds none.
-    One reading joins each `literal` backslash-newline, and the other reads it as a line break, as a comment it ends does.
-    An escaped backslash before a `literal` newline is a line break in both.
+    One reading takes each `literal` backslash-newline as that text's own scan places it.
+    A shell running the text reads one ending a comment there as a line break, and joins any other.
+    The other readings join each one, or read each one as a line break.
+    An escaped backslash before a `literal` newline is a line break in all of them.
     A scan that does not finish leaves every backslash-newline in a context the shell joins.
+    A `literal` text whose own scan does not finish leaves each backslash-newline in it to the deny.
     """
     try:
         ctx = _line_break_contexts(cmd)
     except (ValueError, RecursionError):
         ctx = {}
+    inner = {}
     edits = []
     for m in _LINE_BREAK_RUN.finditer(cmd):
         nl = m.end() - 1
         odd = (nl - m.start()) % 2 == 1
         kind = ctx.get(nl)
-        if kind == "literal":
-            edits.append((m.start(), nl + 1, cmd[m.start() : nl - 1] if odd else "\n"))
-            continue
+        if isinstance(kind, tuple):
+            _, start, stop = kind
+            if (start, stop) not in inner:
+                try:
+                    inner[start, stop] = _line_break_contexts(cmd[start:stop])
+                except (ValueError, RecursionError):
+                    inner[start, stop] = None
+            if inner[start, stop] is not None:
+                joined = cmd[m.start() : nl - 1] if odd else "\n"
+                ends_comment = inner[start, stop].get(nl - start) == "comment"
+                edits.append((m.start(), nl + 1, joined, "\n" if ends_comment else joined))
+                continue
+            kind = None
         if not odd:
             return True, ()
         before, after = cmd[nl - 2 : nl - 1], cmd[nl + 1 : nl + 2]
@@ -4269,12 +4288,14 @@ def _line_break_reading(cmd):
             return True, ()
     if not edits:
         return False, ()
-    joined, broken, at = [], [], 0
-    for start, stop, kept in edits:
-        joined.append(cmd[at:start] + kept)
-        broken.append(cmd[at:start] + "\n")
-        at = stop
-    return False, tuple(dict.fromkeys(("".join(joined) + cmd[at:], "".join(broken) + cmd[at:])))
+    readings = []
+    for pick in (3, 2, None):
+        out, at = [], 0
+        for edit in edits:
+            out.append(cmd[at : edit[0]] + ("\n" if pick is None else edit[pick]))
+            at = edit[1]
+        readings.append("".join(out) + cmd[at:])
+    return False, tuple(dict.fromkeys(readings))
 
 
 def _opaque_cd(toks):
@@ -9265,6 +9286,16 @@ _CASES = [
         "an escaped backslash before a newline in a single-quoted body is a line break to the inner shell",
     ),
     (
+        "bash -c 'true # x\\\ngh pr merge 5 --ad\\\nmin'",
+        "deny",
+        "a shell body ending a comment with one backslash-newline and splitting a word with another reads each as the inner shell does",
+    ),
+    (
+        "bash <<'EOF'\ntrue # x\\\ngh pr merge 5 --ad\\\nmin\nEOF",
+        "deny",
+        "a quoted heredoc fed to a shell reads each backslash-newline by its own context",
+    ),
+    (
         'eval git -C "$W" status',
         "deny",
         "eval reparses a quoted directory value without its quotes, so it may split",
@@ -14149,6 +14180,14 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a spaced backslash-newline ending a comment in a heredoc fed to a shell is a line break there",
+    ),
+    (
+        "bash -c 'git status # x\\\ngit -C /example/prim\\\nary commit -m y'",
+        "/example/wt",
+        {"/example/primary": True, "/example/prim": False, "/example/wt": False},
+        None,
+        "deny",
+        "a shell body's comment-ending backslash-newline does not hide a directory value another one splits",
     ),
 ]
 
