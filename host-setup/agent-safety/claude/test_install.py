@@ -2244,7 +2244,13 @@ class TestAliasReadThroughLinkedWorktreeGitfile(unittest.TestCase):
             self.fail("the guard did not load as a module")
         guard = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(guard)
-        dropped = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
+        dropped = (
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_INDEX_FILE",
+        )
         env = {
             k: v
             for k, v in os.environ.items()

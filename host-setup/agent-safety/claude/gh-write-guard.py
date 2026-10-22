@@ -150,6 +150,7 @@ _GH_WRITE_SUB = re.compile(
     + r")\b"
 )
 _GRAPHQL = re.compile(r"\bgh(?:\.exe)?\s+api\b.*\bgraphql\b", re.DOTALL)
+_GH_API_OR_WRITE = re.compile(_GH_WRITE_SUB.pattern + r"|\bgh(?:\.exe)?\s+api\b")
 _MUTATION = re.compile(r"\bmutation\b")
 # Loose pre-filter only: matches `git` before `push` even with global options between them
 # (git -C <dir> push). _push_arg_lists is the accurate arbiter that confirms an executable push.
@@ -1506,6 +1507,7 @@ _PRECOMMAND_VALUE_OPTS = {
     "gtimeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
     "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
     "nice": frozenset({"-n", "--adjustment"}),
+    "exec": frozenset({"-a"}),
     "ionice": frozenset({"-c", "-n", "-p", "--class", "--classdata", "--pid"}),
     "stdbuf": frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
     "xargs": frozenset(
@@ -1528,6 +1530,16 @@ _PRECOMMAND_VALUE_OPTS = {
 }
 
 
+_LAUNCHER_ARITY = {
+    "flock": (frozenset({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}), 1),
+    "watch": (frozenset({"-n", "--interval", "-q", "--equexit"}), 0),
+    "winpty": (frozenset(), 0),
+    "coproc": (frozenset(), 0),
+    "while": (frozenset(), 0),
+    "until": (frozenset(), 0),
+}
+
+
 def _base_name(tok):
     """The lowercased base name of a command word, with any directory and an `.exe` suffix removed."""
     return tok.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower().removesuffix(".exe")
@@ -1540,8 +1552,13 @@ def _is_precommand(tok):
 
 
 def _git_word_assignments(toks, k):
-    """The assignments in the prefix of the simple command that runs the git word at `toks[k]` (see `_command_prefix`)."""
+    """The assignments in the prefix of the simple command that runs the git word at `toks[k]` (see `_command_prefix`).
+
+    Behind a launcher `_command_prefix` does not know, they are the ones `_launcher_prefix` reads.
+    """
     reached, out = _command_prefix(toks, k)
+    if not reached:
+        reached, out = _launcher_prefix(toks, k)
     return out if reached else []
 
 
@@ -1551,6 +1568,7 @@ def _command_prefix(toks, k):
     The command is read forward from its start.
     An assignment is collected, and a redirection is passed with its target.
     A precommand is passed with its options, their values, and a duration.
+    A launcher `_LAUNCHER_ARITY` names is passed with its options and its positional words.
     The first other word is the command, so the word at `k` is the command only where it is that word.
     """
     i, out = _prefix_walk(toks, k)
@@ -1582,6 +1600,12 @@ def _prefix_walk(toks, k):
             i += 1
             while i < k and (toks[i].startswith("-") or _DURATION_WORD.fullmatch(toks[i])):
                 i += 2 if _option_takes_next(toks[i], takes) else 1
+        elif _base_name(toks[i]) in _LAUNCHER_ARITY:
+            takes, positionals = _LAUNCHER_ARITY[_base_name(toks[i])]
+            i += 1
+            while i < k and toks[i].startswith("-"):
+                i += 2 if _option_takes_next(toks[i], takes) else 1
+            i += positionals
         else:
             return i, out
     return i, out
@@ -1815,7 +1839,32 @@ def _git_invocations_at(cmd):
     return out
 
 
-def _all_git_invocations(cmd):
+def _git_dir_rereading(toks, word, invocation):
+    """The invocation read again under the `GIT_WORK_TREE`/`GIT_DIR` its own options and prefix leave unread, or nothing.
+
+    That is a value from any `export` before the git word at `toks[word]`, not only a leading one,
+    and from its whole prefix past a precommand or launcher (see `_git_word_assignments`). The
+    invocation's own value wins, as git reads it. The first reading is kept as well, since an
+    `export` in a subshell or a pipeline does not reach a later command.
+    """
+    c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd = invocation
+    exported = [
+        pair
+        for x in range(word)
+        if toks[x] == "export" and _opens_command(toks, x)
+        for pair in _export_assignments(toks, x)
+    ]
+    values = dict(exported + _git_word_assignments(toks, word))
+    carried = (
+        work_tree if work_tree is not None else values.get(_GIT_ENV_WORK_TREE_VAR),
+        git_dir if git_dir is not None else values.get(_GIT_ENV_GIT_DIR_VAR),
+    )
+    if carried == (work_tree, git_dir):
+        return []
+    return [(c_dirs, *carried, inline_aliases, sub, args, leading_cd)]
+
+
+def _all_git_invocations(cmd, overflow=None):
     """`_git_invocations` for `cmd` itself, plus for every command string a `sh -c`/`bash -c`-style
     wrapper embeds in it, the same expansion `_all_gh_arg_lists` gives the GitHub-write rules, so a
     mutating git command hidden behind such a wrapper is scanned exactly like a bare one. Each
@@ -1834,26 +1883,34 @@ def _all_git_invocations(cmd):
     A `GIT_WORK_TREE`/`GIT_DIR` may reach a wrapper shell, as its prefix or an earlier `export`.
     It then reaches the git commands in its command string too (see `_wrapper_dir_prefixes`). Each
     inner invocation that sets neither itself is read again under each such pair. The guard does
-    not pair a body with the wrapper that runs it.
+    not pair a body with the wrapper that runs it. A git command is also read again under an
+    `export` anywhere before it and its prefix past a precommand or launcher (see
+    `_git_dir_rereading`). A wrapper body past the nesting cap goes to `overflow`, when given.
     """
     outer_leading_cd = _leading_cd_dir(cmd)
     outer_export_wt, outer_export_gd = _leading_export_dirs(cmd)
     out = []
-    for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(cmd):
+    outer_toks = _shell_tokens(cmd)
+    for word, inv in _git_invocations_at(cmd):
+        c_dirs, work_tree, git_dir, inline_aliases, sub, args = inv
         work_tree = work_tree if work_tree is not None else outer_export_wt
         git_dir = git_dir if git_dir is not None else outer_export_gd
         out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, outer_leading_cd))
-    inners = _embedded_wrapper_commands(cmd)
+        out.extend(_git_dir_rereading(outer_toks, word, out[-1]))
+    inners = _embedded_wrapper_commands(cmd, overflow=overflow)
     wrapper_dirs = [pair for text in [cmd, *inners] for pair in _wrapper_dir_prefixes(text)]
     for inner in inners:
         leading_cd = _leading_cd_dir(inner) or outer_leading_cd
         inner_export_wt, inner_export_gd = _leading_export_dirs(inner)
         export_wt = inner_export_wt if inner_export_wt is not None else outer_export_wt
         export_gd = inner_export_gd if inner_export_gd is not None else outer_export_gd
-        for c_dirs, work_tree, git_dir, inline_aliases, sub, args in _git_invocations(inner):
+        inner_toks = _shell_tokens(inner)
+        for word, inv in _git_invocations_at(inner):
+            c_dirs, work_tree, git_dir, inline_aliases, sub, args = inv
             work_tree = work_tree if work_tree is not None else export_wt
             git_dir = git_dir if git_dir is not None else export_gd
             out.append((c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd))
+            out.extend(_git_dir_rereading(inner_toks, word, out[-1]))
             for wrapper_wt, wrapper_gd in dict.fromkeys(wrapper_dirs):
                 carried = (
                     work_tree if work_tree is not None else wrapper_wt,
@@ -2298,6 +2355,19 @@ def _resolve_alias(sub, args, inline_aliases, target_dir, config_lookup=None, gi
     return sub, args, False
 
 
+_MUTATING_SUB_WORD = re.compile(
+    r"(?<![\w-])(?:"
+    + "|".join(
+        re.escape(w)
+        for w in sorted(
+            _ALWAYS_DENY_SUBS
+            | {"checkout", "switch", "merge", "pull", "stash", "clean", "worktree"}
+        )
+    )
+    + r")(?![\w-])"
+)
+
+
 def _primary_checkout_verdict(sub, args, target_dir=None, ref_resolver=None):
     """Whether this `(subcommand, args)` pair is a mutating operation requirement 6 denies against
     a primary checkout: `True` (deny), `False` (exempt, explicitly allowed), or `None` (not a
@@ -2494,9 +2564,16 @@ def _check_primary_checkout_mutation(
     file_cache = {}
     cd_dotted = _cd_dot_dot(cmd)
     cd_stacked = _cd_dir_stack(cmd)
-    for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in _all_git_invocations(
-        cmd
-    ):
+    overflow = []
+    invocations = _all_git_invocations(cmd, overflow)
+    if any(_GIT_WORD.search(text) and _MUTATING_SUB_WORD.search(text) for text in overflow):
+        return "deny", (
+            "This runs git inside wrapper shells or substitutions nested deeper than the guard "
+            "reads, and names a subcommand this rule denies against a primary checkout, so the "
+            "guard cannot tell whether it mutates one. Failing closed. Run the git command with "
+            "fewer levels of nesting."
+        )
+    for c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd in invocations:
         dir_values = (leading_cd, *c_dirs, work_tree, git_dir)
         stacked = cd_stacked or next((v for v in dir_values if _names_dir_stack(v)), None)
         dotted = cd_dotted or next((v for v in dir_values if v and _has_dot_dot(v)), None)
@@ -2720,12 +2797,13 @@ def _foreign_shell_at(toks, i):
     """The base name of a shell `_FOREIGN_SHELL_FLAGS` names that `toks[i]` runs as a command, or None.
 
     The word must be its simple command's command, past any assignment or precommand such as `sudo -u root` (see `_command_prefix`).
-    So a `cmd` or `script` directory named as an argument is not read as a shell.
+    A launcher `_command_prefix` does not know runs it too, unless `_NAMES_ITS_ARGUMENTS` names it (see `_launcher_prefix`).
+    So a `cmd` or `script` directory named as an argument of `ls` is not read as a shell.
     """
     exe = _command_string_exe(toks[i])
     if exe is None or exe in _SHELL_WRAPPER_EXE:
         return None
-    return exe if _command_prefix(toks, i)[0] else None
+    return exe if _command_prefix(toks, i)[0] or _launcher_prefix(toks, i)[0] else None
 
 
 def _foreign_shell_bodies(exe, args):
@@ -3881,10 +3959,6 @@ def _opaque_cd(toks):
 
 _REPO_ENV_PREFIXES = ("GIT_DIR=", "GIT_WORK_TREE=", "GIT_COMMON_DIR=")
 _DIR_OPTION_PREFIXES = ("-C", "-D", "--chdir", "-execdir")
-_STAYING_LAUNCHERS = frozenset(
-    {"timeout", "gtimeout", "nice", "nohup", "command", "builtin", "exec", "stdbuf", "ionice"}
-    | {"env", "sudo", "xargs", "setsid", "time", "flock", "winpty"}
-)
 
 
 def _repo_may_move(toks, word, leading_cd, quoted=None):
@@ -3894,8 +3968,9 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
     `source`, `.`, or `trap` in command position may too. The scan covers the words before the
     push. Where a loop or a function may run a later word first, it covers the whole command (see
     `_reruns`). In the command that runs git, a directory option such as `sudo -D` or `env -C`
-    moves it. So does a first command word outside `_STAYING_LAUNCHERS`, such as `uv`, that runs
-    git as its argument. Options, redirections, and assignments are not command words.
+    moves it. So does any command word in front of git that `_prefix_walk` does not pass, such as
+    `uv`, that runs git as its argument. Each launcher in front of git is read, not only the
+    first, so `timeout 60 uv run git push` moves too.
     """
     end = len(toks) if _reruns(toks, quoted, subshells=False) else word
     cds, prev = 0, None
@@ -3921,18 +3996,7 @@ def _repo_may_move(toks, word, leading_cd, quoted=None):
     own = toks[start:word]
     if any(t.startswith(_DIR_OPTION_PREFIXES) for t in own):
         return True
-    runners, k = [], 0
-    while k < len(own):
-        t = own[k]
-        if _is_redir_op(t):
-            k += 2
-            continue
-        if not (
-            _ENV_ASSIGN_RE.match(t) or t in _COND_PRECEDERS or t.startswith("-") or t.isdigit()
-        ):
-            runners.append(t)
-        k += 1
-    return bool(runners) and runners[0].rsplit("/", 1)[-1] not in _STAYING_LAUNCHERS
+    return _prefix_walk(toks, word)[0] != word
 
 
 def _attached_c(body):
@@ -4103,11 +4167,13 @@ def _shell_reads_unread_script(toks, k):
     """True when the shell at `toks[k]` names no command string, so it runs a script file or reads its input.
 
     Only a shell given nothing but `--version` or `--help` runs nothing.
+    A command string option with no word after it counts too, since `xargs` may supply the string.
     """
     exe = _command_string_exe(toks[k])
     args, _ = _collect_arglist(toks, k + 1)
-    if exe and _command_string_index(exe, args) is not None:
-        return False
+    ci = _command_string_index(exe, args) if exe else None
+    if ci is not None:
+        return ci + 1 >= len(args)
     return not (args and all(a in ("--version", "--help") for a in args))
 
 
@@ -4231,11 +4297,22 @@ def _through_last_push(text):
 
 
 def _names_config_change(text):
-    """True when `text`, or a command string it embeds, holds a word `_config_changing_word` counts, wherever it sits."""
-    for body in [text, *_embedded_wrapper_commands(text)]:
+    """True when `text`, or a command string it embeds, holds a word `_config_changing_word` counts, wherever it sits.
+
+    A run-time command word counts (see `_runs_run_time_word`), and so does the text an `eval`
+    runs (see `_eval_payload_texts`). A `source` or `.` in a command's position counts too, since
+    the guard does not read the script it runs.
+    """
+    bodies = [text, *_embedded_wrapper_commands(text)]
+    if "eval" in text:
+        bodies += _eval_payload_texts(bodies)
+    for body in bodies:
         toks = _shell_tokens(body)
         if any(
-            _config_changing_word(toks, k) or _runs_run_time_word(toks, k) for k in range(len(toks))
+            _config_changing_word(toks, k)
+            or _runs_run_time_word(toks, k)
+            or (toks[k] in ("source", ".") and _command_prefix(toks, k)[0])
+            for k in range(len(toks))
         ):
             return True
     return False
@@ -4893,13 +4970,14 @@ def _wrapper_env_groups(toks, runs=None):
 def _launcher_prefix(toks, k):
     """(whether a launcher `_command_prefix` does not know may run `toks[k]`, the assignments before that launcher).
 
-    Such a launcher, as `flock <file>` is, passes its environment to the command it runs.
+    Such a launcher, as `uv run` is, passes its environment to the command it runs.
     The launcher is the first word `_prefix_walk` does not pass, and runs `toks[k]` unless `_NAMES_ITS_ARGUMENTS` names it, as `grep`.
+    An assignment among the words after it is read too, since an `env` there passes it on.
     """
     i, out = _prefix_walk(toks, k)
     if i >= k or _base_name(toks[i]) in _NAMES_ITS_ARGUMENTS:
         return False, []
-    return True, out
+    return True, out + [m.groups() for t in toks[i:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
 
 
 def _runs_git(text):
@@ -8221,6 +8299,16 @@ def classify(
     if dec == "deny":
         return dec, reason
 
+    if _GH_API_OR_WRITE.search(cmd):
+        nested = []
+        _embedded_wrapper_commands(cmd, overflow=nested)
+        if any(_GH_API_OR_WRITE.search(t) for t in nested):
+            return "deny", (
+                "This runs a gh write or a gh api call inside wrapper shells or substitutions "
+                "nested deeper than the guard reads, so it cannot read the call's target, output "
+                "handling, or ids. Failing closed. Run the gh command with fewer levels of nesting."
+                + _handoff(cmd)
+            )
     payloads = _eval_payload_texts(_data_free_texts(cmd)) if "eval" in cmd else []
     eval_write = any(_names_gh_write(t) for t in payloads)
     if not eval_write and not _is_gh_write(cmd):
@@ -12548,13 +12636,56 @@ _PRIMARY_CHECKOUT_CASES = [
         "/somewhere-else",
         {"/primary/.git": True, "/somewhere-else": False},
         None,
+        "deny",
+        "an export after the first command still reaches the reset --hard after it, as a shell applies it",
+    ),
+    (
+        "cd /worktree && export GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False, "/somewhere-else": False},
+        None,
+        "deny",
+        "an export after a leading cd reaches the reset --hard after it",
+    ),
+    (
+        "GIT_DIR=/primary/.git timeout 60 git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a GIT_DIR prefix before timeout reaches the git it runs",
+    ),
+    (
+        "GIT_DIR=/primary/.git flock /example/lock git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a GIT_DIR prefix before flock and its lock file reaches the git it runs",
+    ),
+    (
+        "GIT_WORK_TREE=/primary uv run git reset --hard",
+        "/somewhere-else",
+        {"/primary": True, "/somewhere-else": False},
+        None,
+        "deny",
+        "a GIT_WORK_TREE prefix before a launcher the guard does not know reaches its git",
+    ),
+    (
+        "GIT_DIR=/primary/.git timeout 60 git status",
+        "/somewhere-else",
+        {"/primary/.git": True, "/somewhere-else": False},
+        None,
         "allow",
-        (
-            "only a leading export is read, matching the same accepted-gap scope leading cd "
-            "already has: export here is not the first token of the command (git status is), so "
-            "it has no effect under this rule's narrow scope even though a real shell would still "
-            "apply it to the following reset --hard"
-        ),
+        "control: a GIT_DIR prefix before timeout on a read-only git command is allowed",
+    ),
+    (
+        "cd /primary && (export GIT_DIR=/worktree/.git) && git reset --hard",
+        "/somewhere-else",
+        {"/primary": True, "/worktree/.git": False, "/somewhere-else": False},
+        None,
+        "deny",
+        "the reading without an export is kept, since one in a subshell does not reach the git after it",
     ),
     (
         "git --git-dir=/primary/.git --work-tree=/primary -C /worktree reset --hard",
@@ -15026,6 +15157,45 @@ def _nested_wrapper(body, depth):
     return body
 
 
+_NESTING_CAP_CASES = [
+    (
+        _nested_wrapper("git reset --hard", 6),
+        "/primary",
+        {"/primary": True},
+        "deny",
+        "a mutating git command in a wrapper body past the nesting cap fails closed in a primary checkout",
+    ),
+    (
+        _nested_wrapper("git status", 6),
+        "/primary",
+        {"/primary": True},
+        "allow",
+        "control: a read-only git command past the nesting cap names no subcommand rule 6 denies",
+    ),
+    (
+        _nested_wrapper("gh pr comment 5 --body x", 6),
+        "/worktree",
+        {"/worktree": False},
+        "deny",
+        "a gh write in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        _nested_wrapper("gh api repos/example/repo/issues/5/comments -f body=x", 6),
+        "/worktree",
+        {"/worktree": False},
+        "deny",
+        "a gh api call in a wrapper body past the nesting cap fails closed",
+    ),
+    (
+        _nested_wrapper("gh pr view 5", 6),
+        "/worktree",
+        {"/worktree": False},
+        "allow",
+        "control: a gh read past the nesting cap is allowed",
+    ),
+]
+
+
 _PUSH_DIR_CASES = [
     (
         "@wt " + _nested_wrapper("git commit --no-verify -m x", 6),
@@ -16123,6 +16293,66 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a run-time word that is only another command's argument runs nothing",
     ),
+    (
+        [],
+        'while "$CMD"; do :; done; git push --tags origin',
+        "deny",
+        "a run-time command word a while loop runs leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        'flock /example/lock "$CMD"; git push --tags origin',
+        "deny",
+        "a run-time command word flock runs leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        'watch -n 5 "$CMD"; git push --tags origin',
+        "deny",
+        "a run-time command word watch runs leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        'coproc "$CMD"; git push --tags origin',
+        "deny",
+        "a run-time command word coproc runs leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        'flock /example/lock mkdir -p "$D"; git push --tags origin',
+        "allow",
+        "control: a run-time word that is an argument of the command flock runs runs nothing",
+    ),
+    (
+        [],
+        "bash -c 'eval \"$CMD\"'; git push --tags origin",
+        "deny",
+        "an eval inside a wrapper body leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        "echo \"$(eval 'git config remote.origin.mirror true')\"; git push --tags origin",
+        "deny",
+        "an eval inside a substitution that writes config leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        "bash -c 'eval echo example'; git push --tags origin",
+        "allow",
+        "control: an eval inside a wrapper body that changes no config is read and allowed",
+    ),
+    (
+        [],
+        "bash -c 'source /example/setup.sh'; git push --tags origin",
+        "deny",
+        "a script sourced inside a wrapper body leaves the push's remote config unresolved",
+    ),
+    (
+        [],
+        "echo 'git config remote.origin.mirror true' | xargs -0 bash -c; git push --tags origin",
+        "deny",
+        "a -c wrapper whose command string xargs supplies leaves the push's remote config unresolved",
+    ),
 ]
 
 
@@ -16195,6 +16425,26 @@ _PUSH_REPO_CASES = [
         "uv run --directory {beta} git push origin develop",
         "deny",
         "git run by a command not known to keep its directory fails closed on a protected default",
+    ),
+    (
+        "timeout 60 uv run --directory {beta} git push origin develop",
+        "deny",
+        "a launcher that keeps its directory in front of one that moves it does not hide the move",
+    ),
+    (
+        "sudo uv run --directory {beta} git push origin develop",
+        "deny",
+        "sudo in front of a launcher that moves the push does not hide the move",
+    ),
+    (
+        "flock /example/lock uv run --directory {beta} git push origin develop",
+        "deny",
+        "flock and its lock file in front of a launcher that moves the push does not hide the move",
+    ),
+    (
+        "sudo -u root flock -w 5 /example/lock timeout 60 git push origin develop",
+        "allow",
+        "control: a chain of launchers that each keep their directory leaves the push in place",
     ),
     (
         "for r in a b; do git push origin develop; cd {beta}; done",
@@ -16803,6 +17053,22 @@ def _selftest_cases():
             rules_lookup=lambda br, _m=rmap: _m.get(br),
             environ={},
             primary_checkout_lookup=lambda d: False,
+        )
+        mark = "ok  " if got == want else "FAIL"
+        if got != want:
+            ok = False
+        print(f"  {mark} [{got:5}] want={want:5} {label}")
+    for cmd, cwd, pmap, want, label in _NESTING_CAP_CASES:
+        got, _ = classify(
+            cmd,
+            cwd=cwd,
+            origin=origin,
+            current_branch="feature/x",
+            rules_lookup=lambda br: set(),
+            environ={},
+            primary_checkout_lookup=_fixture_lookup(pmap),
+            ref_resolver=lambda _d, _r: True,
+            config_lookup=lambda _d, _n: None,
         )
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -17920,6 +18186,76 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a GIT_CONFIG_GLOBAL file env sets before flock reaches the git in the wrapper body",
+    ),
+    (
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push flock /example/lock git p origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a push alias set before flock reaches the git flock runs directly",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config flock /example/lock git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file set before flock reaches the git flock runs directly",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config uv run git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file set before a launcher the guard does not know reaches its git",
+    ),
+    (
+        "flock /example/lock env GIT_CONFIG_GLOBAL=/example/config bash -c 'git status'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file an env after flock sets reaches the git in the wrapper body",
+    ),
+    (
+        "uv run env GIT_CONFIG_GLOBAL=/example/config git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a GIT_CONFIG_GLOBAL file an env after an unknown launcher sets reaches its git",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config grep git status.txt",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a git word grep searches for is not a git command its prefix reaches",
+    ),
+    (
+        "winpty pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh body behind winpty is read",
+    ),
+    (
+        "flock /example/lock pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh body behind flock and its lock file is read",
+    ),
+    (
+        "uv run pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a pwsh body behind a launcher the guard does not know is read",
+    ),
+    (
+        "timeout 5 grep pwsh -Command 'git push origin develop'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: a pwsh word grep searches for behind timeout is not a shell",
     ),
     (
         "GIT_CONFIG_GLOBAL=/example/config grep bash -c 'git status'",
