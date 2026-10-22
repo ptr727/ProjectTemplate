@@ -2144,7 +2144,12 @@ class TestSelftestIgnoresAmbientGitDir(unittest.TestCase):
 
         def git(*args):
             return subprocess.run(
-                ["git", *args], capture_output=True, text=True, check=False, env=clean
+                ["git", *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                env=clean,
             ).stdout
 
         with tempfile.TemporaryDirectory() as tmp:
