@@ -54,6 +54,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import validate  # sibling, import-safe (its main is guarded)
+from git_env import git_location_cleared
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -3764,6 +3765,15 @@ def audit_repo(entry, spec, branch=None):
 
 
 def _selftest():
+    """Run the self-test with no variable naming a repository in the environment.
+
+    A git hook sets `GIT_DIR`. A case building a temporary repository would otherwise build it inside the hook's own repository.
+    """
+    with git_location_cleared():
+        return _selftest_cases()
+
+
+def _selftest_cases():
     """Exercise the interface engine on synthetic fixtures, no network - verify the mechanism, not the fleet."""
     pr_check = "  check-workflow-status:\n    name: Check pull request workflow status job\n    needs: [changes]\n    runs-on: ubuntu-latest\n"
     pr_head = "name: Test\non: pull_request\njobs:\n  changes:\n    runs-on: ubuntu-latest\n"
