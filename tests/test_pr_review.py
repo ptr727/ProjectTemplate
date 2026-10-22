@@ -11474,8 +11474,8 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         """The caller's environment minus every channel the probe itself drops.
 
         A fixture that left them in place would build its repositories under the same influence
-        the cases exist to rule out, and the two halves have to match for that reason rather
-        than because the setup commands are known to read each one.
+        the cases exist to rule out, so it drops at least what the probe drops, and every other
+        repository-local variable git names besides.
         """
         return {k: v for k, v in without_git_location().items() if not k.startswith("GIT_CONFIG")}
 

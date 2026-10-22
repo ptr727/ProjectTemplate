@@ -4,8 +4,7 @@ A git hook sets some of them (`GIT_DIR`, `GIT_INDEX_FILE`, and the like). A scri
 builds a temporary repository with `git -C <tmp>` or `cwd=<tmp>` and inherits them builds it
 inside the hook's own repository instead, and reads its answers back from there.
 
-The list is what `git rev-parse --local-env-vars` prints, plus the three names that steer
-discovery without being local to a repository.
+The list is what `git rev-parse --local-env-vars` prints.
 """
 
 from __future__ import annotations
@@ -30,9 +29,6 @@ GIT_LOCATION_VARS = (
     "GIT_PREFIX",
     "GIT_SHALLOW_FILE",
     "GIT_COMMON_DIR",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    "GIT_NAMESPACE",
 )
 
 

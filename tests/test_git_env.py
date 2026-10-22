@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "spec"))
@@ -41,13 +42,10 @@ class TestLocationList(unittest.TestCase):
         self.assertEqual(git_env.without_git_location(env), {"GIT_AUTHOR_NAME": "n", "PATH": "p"})
 
     def test_the_context_manager_restores_the_environment(self) -> None:
-        os.environ["GIT_DIR"] = "sentinel"
-        try:
+        with mock.patch.dict(os.environ, {"GIT_DIR": "sentinel"}):
             with git_env.git_location_cleared():
                 self.assertNotIn("GIT_DIR", os.environ)
             self.assertEqual(os.environ["GIT_DIR"], "sentinel")
-        finally:
-            del os.environ["GIT_DIR"]
 
 
 class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
@@ -70,7 +68,7 @@ class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
             env = dict(os.environ)
             env["GIT_DIR"] = str(scratch / ".git")
             env["GIT_WORK_TREE"] = str(scratch)
-            subprocess.run(
+            proc = subprocess.run(
                 [sys.executable, str(REPO / "spec" / "audit.py"), "--selftest"],
                 env=env,
                 capture_output=True,
@@ -80,6 +78,8 @@ class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
                 timeout=600,
             )
 
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("SELFTEST PASS", proc.stdout)
             self.assertEqual(state(), before)
 
 

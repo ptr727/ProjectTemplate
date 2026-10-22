@@ -22,9 +22,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
-from git_env import without_git_location
-
 REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / ".husky" / "pre-commit"
 GATE_ENTRY = REPO / "scripts" / "prose_lint.py"
@@ -51,11 +48,7 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         uvx = stubs / "uvx"
         uvx.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         uvx.chmod(0o755)
-        self.env = {
-            k: v
-            for k, v in without_git_location().items()
-            if not k.startswith(("GIT_CONFIG", "GIT_AUTHOR", "GIT_COMMITTER"))
-        }
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         self.env.pop("PROSE_ALLOW_COMMENTS", None)
         self.env["GIT_CONFIG_GLOBAL"] = str(empty)
         self.env["GIT_CONFIG_SYSTEM"] = str(empty)
