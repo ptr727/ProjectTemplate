@@ -329,7 +329,7 @@ Licensed under the [MIT License][license]\
 
 <!-- Shields -->
 
-[github-pre-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&label=GitHub%20Pre-Release&logo=github
+[github-pre-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release&logo=github
 [github-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
 [last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
 [license-shield]: https://img.shields.io/github/license/ptr727/ProjectTemplate?label=License

@@ -119,6 +119,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
+from git_env import GIT_LOCATION_VARS
+
 RECEIPT_VERSION = 1
 RECEIPT_NAME = "local-review-receipt.json"
 # Kept in the git directory rather than the working tree, so staging the tree does not stage these.
@@ -216,7 +219,7 @@ class CannotRun(Exception):
 # A git hook runs with GIT_INDEX_FILE pointing at the commit it is gating, measured on a real pre-commit hook.
 # A partial commit points it at a pending index rather than the real one.
 # Inheriting that would silently read a different index than the one this branch would push.
-INHERITED_REDIRECTS = ("GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+INHERITED_REDIRECTS = GIT_LOCATION_VARS
 
 
 def git(*args: str, root: Path | None = None, env: dict[str, str] | None = None) -> str:

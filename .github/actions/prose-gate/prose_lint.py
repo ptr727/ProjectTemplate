@@ -3373,8 +3373,8 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"note: comment-added stood down by {named}. In CI the composite action passes "
                 "that flag from its own input instead, which the fleet's caller computes from the "
-                f"{COMMENT_LABEL_NAME!r} label and from the run being a promotion, and it clears "
-                f"{COMMENT_ENV_NAME} so a runner cannot decide one.",
+                f"{COMMENT_LABEL_NAME!r} label and from the run being a release-model promotion, "
+                f"and it clears {COMMENT_ENV_NAME} so a runner cannot decide one.",
                 file=sys.stderr,
             )
         elif a.diff is None:

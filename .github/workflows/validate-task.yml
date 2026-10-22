@@ -10,7 +10,7 @@ name: Validate task
 # The validate job is the validate hook, a repo's own domain checks.
 # Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions and test-matrix are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions, test-matrix and workflow-model are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
 # Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
@@ -44,6 +44,12 @@ on:
         required: false
         type: string
         default: ''
+      # Read by the lint job's Resolve comment stand-down step, where any value but release runs the rule on a promotion.
+      workflow-model:
+        description: The caller's workflow model, release or operational, as registry/repos.json declares it. A release caller's develop into default-branch promotion stands the comment-added prose rule down, since each promoted line was reviewed on its own pull request. Any other value runs the rule there, since an operational caller may commit to develop directly and its promotion is then the first review those lines get.
+        required: false
+        type: string
+        default: release
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -486,6 +492,35 @@ jobs:
           fi
           echo "labeled=$labeled" >> "$GITHUB_OUTPUT"
 
+      # A promotion runs develop into the default branch, and it diffs against that branch's tip.
+      # Its scope is therefore every line promoted since the last one.
+      # On the release model all of it was reviewed where it landed.
+      # So the comment rule stands down there, rather than reporting a whole release's comments as this change's.
+      # On the operational model any of it may have landed by direct commit, so the promotion is its first review and the rule runs.
+      # The head branch is tested as well as the base, since a feature branch may target the default branch directly and that one carries new lines.
+      # The head repository is tested too, since a fork's branch may be named `develop` and its lines were reviewed nowhere.
+      - name: Resolve comment stand-down step
+        id: comment-stand-down
+        env:
+          WORKFLOW_MODEL: ${{ inputs.workflow-model }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -Eeuo pipefail
+          promotion=false
+          if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$HEAD_REF" == develop && "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
+            promotion=true
+          fi
+          stand_down=false
+          if [[ "$promotion" == true && "$WORKFLOW_MODEL" == release ]]; then
+            stand_down=true
+          fi
+          echo "Workflow model: $WORKFLOW_MODEL, a promotion of develop into the default branch: $promotion, so comment-added stands down for it: $stand_down."
+          echo "stand-down=$stand_down" >> "$GITHUB_OUTPUT"
+
       - name: Resolve prose base step
         id: prose-base
         if: github.event.pull_request != null
@@ -508,12 +543,7 @@ jobs:
           base: ${{ steps.prose-base.outputs.base }}
           # The label is read off the pull request rather than passed as an input a caller sets.
           # A repository cannot then leave the override on, since it is reapplied per change by hand.
-          # A promotion runs develop into the default branch, and it diffs against that branch's tip.
-          # Its scope is therefore every line promoted since the last one, all of it already reviewed where it landed.
-          # So the comment rule stands down there, rather than reporting a whole release's comments as this change's.
-          # The head branch is tested as well as the base, since a feature branch may target the default branch directly and that one carries new lines.
-          # The head repository is tested too, since a fork's branch may be named `develop` and its lines were reviewed nowhere.
-          allow-comments: ${{ steps.comments-label.outputs.labeled == 'true' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'develop' && github.base_ref == github.event.repository.default_branch) }}
+          allow-comments: ${{ steps.comments-label.outputs.labeled == 'true' || steps.comment-stand-down.outputs.stand-down == 'true' }}
 
       # An empty repo-gate-exclude-globs leaves the action's own input at its default, so the default caller excludes nothing.
       - name: Check repo gates step
