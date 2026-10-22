@@ -1396,20 +1396,11 @@ def shield_endpoints(region, defs):
     return urls + [m.group(1) for m in _MD_IMAGE_INLINE.finditer(region)]
 
 
-def required_queries(shield):
-    """The substrings a shield's URL must all carry, from a `requireQuery` written as one string or as a list.
-
-    A bare string is wrapped rather than iterated, since iterating it would require each of its characters.
-    """
-    want = shield.get("requireQuery", [])
-    return [want] if isinstance(want, str) else want
-
-
 def shield_matches(url, shield):
     """True where a rendered URL is the shield the model describes, by endpoint plus its query discriminators."""
     return (
         shield["match"] in url
-        and all(q in url for q in required_queries(shield))
+        and all(q in url for q in shield.get("requireQuery", []))
         and (shield.get("forbidQuery") is None or shield["forbidQuery"] not in url)
     )
 
@@ -1933,7 +1924,9 @@ def readme_shield_findings(text, model, entry):
         if region is None:
             continue
         if not any(shield_matches(u, sh) for u in shield_endpoints(region, defs)):
-            queries = "".join(f" with `{q}`" for q in required_queries(sh))
+            queries = "".join(f" with `{q}`" for q in sh.get("requireQuery", []))
+            if sh.get("forbidQuery") is not None:
+                queries += f" without `{sh['forbidQuery']}`"
             findings.append(
                 (
                     "LETTER",

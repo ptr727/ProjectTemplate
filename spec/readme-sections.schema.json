@@ -137,13 +137,7 @@
                     "match": { "type": "string", "minLength": 1 },
                     "in": { "type": "string", "minLength": 1, "description": "The section the shield belongs in, as `Heading` or `Heading > Sub-heading`." },
                     "exclusive": { "type": "boolean", "description": "The shield must appear nowhere outside the section it names." },
-                    "requireQuery": {
-                        "description": "Every listed substring must appear in the shield URL. A single string is one such substring.",
-                        "anyOf": [
-                            { "type": "string", "minLength": 1 },
-                            { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
-                        ]
-                    },
+                    "requireQuery": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "Every listed substring must appear in the shield URL." },
                     "forbidQuery": { "type": "string", "minLength": 1 }
                 }
             }
