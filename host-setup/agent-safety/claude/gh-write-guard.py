@@ -4121,7 +4121,8 @@ def _line_break_contexts(cmd):
     """Map the index of each newline the scan reaches in `cmd` to the context it sits in.
 
     The context is `literal` inside single quotes or a quoted heredoc's data, where the shell keeps a backslash-newline.
-    A `literal` newline maps to `("literal", start, end)`, the span of the quoted text a shell may run as a script.
+    A `literal` newline maps to `("literal", start, end, word)`, the span of the quoted text a shell may run as a script.
+    `word` is True for a single-quoted span, which is one part of a shell word, and False for a heredoc body.
     A data line followed by its delimiter line is left unmapped, since joining the two would hide the delimiter.
     It is `command` in unquoted command text, `quoted` inside double quotes, and `comment` where a comment ends.
     A newline inside `$'...'`, a backtick, a `${...}`, a `$((...))`, or an unquoted heredoc is left unmapped.
@@ -4139,7 +4140,7 @@ def _line_break_contexts(cmd):
                 end = n if end < 0 else end
                 line = cmd[i:end]
                 if not joined and (line.lstrip("\t") if dash else line) == tag:
-                    ctx.update((k, ("literal", start, i)) for k in kept)
+                    ctx.update((k, ("literal", start, i, False)) for k in kept)
                     i = end + 1
                     break
                 nxt = cmd.find("\n", end + 1)
@@ -4192,7 +4193,7 @@ def _line_break_contexts(cmd):
                 if end < 0:
                     raise ValueError("unterminated quote")
                 ctx.update(
-                    (k, ("literal", i + 1, end)) for k in range(i + 1, end) if cmd[k] == "\n"
+                    (k, ("literal", i + 1, end, True)) for k in range(i + 1, end) if cmd[k] == "\n"
                 )
                 i = end + 1
             elif ch == '"' or cmd.startswith('$"', i):
@@ -4233,39 +4234,76 @@ def _line_break_contexts(cmd):
     return ctx
 
 
+_PLAIN_WORD_PART = re.compile(r"[\w./:=@%+,-]*")
+_NESTED_QUOTING = ("'", '"', "`", "<<")
+
+
+def _literal_span_kept(cmd, start, stop, word, inner):
+    """True where a shell running the `literal` text `cmd[start:stop]` reads each backslash-newline in it as `inner` places it.
+
+    A span in a word with any other quoted or expanded part is never kept, since the shell runs the whole word.
+    A span naming no git or gh, however its backslash-newlines are read, is kept, since its readings show what it runs.
+    Any other span is kept only where its own scan finished and it holds no quoting a further shell would unwrap.
+    Each backslash-newline in it must then sit in command text or end a comment there.
+    """
+    if word:
+        head = cmd.rfind(" ", 0, start - 1) + 1
+        for c in "\t\n;&|<>(":
+            head = max(head, cmd.rfind(c, 0, start - 1) + 1)
+        tail = _PLAIN_WORD_PART.match(cmd, stop + 1).end()
+        if not _PLAIN_WORD_PART.fullmatch(cmd, head, start - 1) or (
+            tail < len(cmd) and cmd[tail] not in " \t\n;&|<>()"
+        ):
+            return False
+    text = cmd[start:stop]
+    if not any(
+        _names_git_or_gh(t) or _names_push(t)
+        for t in (text, text.replace("\\\n", ""), text.replace("\\\n", "\n"))
+    ):
+        return True
+    if inner is None or any(q in text for q in _NESTED_QUOTING):
+        return False
+    return all(
+        inner.get(m.end() - 1) in ("command", "comment") for m in _LINE_BREAK_RUN.finditer(text)
+    )
+
+
 def _line_break_reading(cmd):
     """Read each backslash-newline in `cmd`, returning (denied, readings).
 
     `denied` is True where one in a context the shell joins splits a word, or follows an escaped backslash.
     A split directly after an unquoted command separator such as `&&` or `|` splits no word, so it is left to the fold.
-    `readings` holds `cmd` read as a shell running a `literal` text may read it, or is empty where `cmd` holds none.
-    One reading takes each `literal` backslash-newline as that text's own scan places it.
-    A shell running the text reads one ending a comment there as a line break, and joins any other.
+    A `literal` one is not denied where `_literal_span_kept` keeps its span, and is read as any other one otherwise.
+    `readings` holds `cmd` read as a shell running a kept span may read it, or is empty where `cmd` holds none.
+    One reading takes each kept backslash-newline as the span's own scan places it.
+    A shell running the span reads one ending a comment there as a line break, and joins any other.
     The other readings join each one, or read each one as a line break.
-    An escaped backslash before a `literal` newline is a line break in all of them.
+    An escaped backslash before a kept newline is a line break in all of them.
     A scan that does not finish leaves every backslash-newline in a context the shell joins.
-    A `literal` text whose own scan does not finish leaves each backslash-newline in it to the deny.
     """
     try:
         ctx = _line_break_contexts(cmd)
     except (ValueError, RecursionError):
         ctx = {}
-    inner = {}
+    spans = {}
     edits = []
     for m in _LINE_BREAK_RUN.finditer(cmd):
         nl = m.end() - 1
         odd = (nl - m.start()) % 2 == 1
         kind = ctx.get(nl)
         if isinstance(kind, tuple):
-            _, start, stop = kind
-            if (start, stop) not in inner:
+            _, start, stop, word = kind
+            if (start, stop) not in spans:
                 try:
-                    inner[start, stop] = _line_break_contexts(cmd[start:stop])
+                    inner = _line_break_contexts(cmd[start:stop])
                 except (ValueError, RecursionError):
-                    inner[start, stop] = None
-            if inner[start, stop] is not None:
+                    inner = None
+                kept = _literal_span_kept(cmd, start, stop, word, inner)
+                spans[start, stop] = (inner or {}) if kept else None
+            inner = spans[start, stop]
+            if inner is not None:
                 joined = cmd[m.start() : nl - 1] if odd else "\n"
-                ends_comment = inner[start, stop].get(nl - start) == "comment"
+                ends_comment = inner.get(nl - start) == "comment"
                 edits.append((m.start(), nl + 1, joined, "\n" if ends_comment else joined))
                 continue
             kind = None
@@ -9294,6 +9332,21 @@ _CASES = [
         "bash <<'EOF'\ntrue # x\\\ngh pr merge 5 --ad\\\nmin\nEOF",
         "deny",
         "a quoted heredoc fed to a shell reads each backslash-newline by its own context",
+    ),
+    (
+        "bash <<'EOF'\nbash -c 'true # x\\\ngh pr merge 5 --ad\\\nmin'\nEOF",
+        "deny",
+        "a quoted span holding a further level of quoting is not read as text when it names gh",
+    ),
+    (
+        "bash -c 'echo \"'\\''x\" # c\\\ngh pr merge 5 --ad\\\nmin # \"'",
+        "deny",
+        "a single-quoted span joined to other quoted parts of its word is not read as text",
+    ),
+    (
+        "gh pr create --title x --body \"$(cat <<'EOF'\n## Summary\nline one\\\nline two\n- it's done\nEOF\n)\"",
+        "allow",
+        "a Markdown hard line break in a quoted heredoc naming neither git nor gh is data",
     ),
     (
         'eval git -C "$W" status',
