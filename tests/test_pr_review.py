@@ -34,6 +34,9 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_review
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
+from git_env import without_git_location
+
 REPO = Path(__file__).resolve().parent.parent
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
@@ -11467,9 +11470,6 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     covered here.
     """
 
-    # The same four discovery names origin_owner() strips, kept local rather than imported from production.
-    _DISCOVERY_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
-
     def _clean_env(self) -> dict[str, str]:
         """The caller's environment minus every channel the probe itself drops.
 
@@ -11477,11 +11477,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         the cases exist to rule out, and the two halves have to match for that reason rather
         than because the setup commands are known to read each one.
         """
-        return {
-            k: v
-            for k, v in os.environ.items()
-            if k not in self._DISCOVERY_VARS and not k.startswith("GIT_CONFIG")
-        }
+        return {k: v for k, v in without_git_location().items() if not k.startswith("GIT_CONFIG")}
 
     def make_repo(self, parent: Path, name: str, owner_slash_repo: str) -> Path:
         """Build one throwaway repo under `parent`, immune to the caller's own git environment.
