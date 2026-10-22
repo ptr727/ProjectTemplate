@@ -6942,8 +6942,8 @@ def _check_bypass_flags(cmd):
         )
     if any(_xargs_merge(t) for t in admin_texts):
         return "deny", (
-            "This runs `gh pr merge` under `xargs`, which appends the words it reads from its "
-            "input, such as `--admin`, where the guard cannot read them. Failing closed. Write "
+            "This runs or may run `gh pr merge` under `xargs`, which appends the words it reads "
+            "from its input, such as `--admin`, where the guard cannot read them. Failing closed. Write "
             "every word of the merge out." + _handoff(cmd)
         )
     # The --no-verify flag and `commit -n` skip the git hooks, so they only matter as an actual argument to a git commit or push.
@@ -9138,6 +9138,11 @@ _CASES = [
         "flock /example/lock -c 'gh pr view 5'",
         "allow",
         "control: a flock -c string holding a gh read is allowed",
+    ),
+    (
+        'printf 5 | xargs gh pr "$S"',
+        "deny",
+        "a gh whose subcommand a run-time word may make merge, under xargs, may get --admin from its input",
     ),
     (
         "printf 5 | xargs gh pr comment 5 --body merge",
