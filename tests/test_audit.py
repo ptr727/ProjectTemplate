@@ -196,17 +196,15 @@ class AuditRepoNamingCase(unittest.TestCase):
             run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
 
 
-def _probe_run(add: Any, commit: Any = None) -> Any:
-    """A subprocess.run stand-in whose answer to the invalid-byte probe's own git add is `add`."""
+def _probe_run(add: Any, commit: Any = None, control: Any = None) -> Any:
+    """A subprocess.run stand-in answering the invalid-byte probe's own git add of the bad name with `add`."""
     real_run = subprocess.run
 
     def run(cmd: list[str], *args: Any, **kwargs: Any) -> Any:
         cwd = kwargs.get("cwd")
-        if (
-            cmd == ["git", "add", "-A"]
-            and cwd
-            and any(p.name.startswith("bad-") for p in pathlib.Path(cwd).iterdir())
-        ):
+        if control is not None and cmd == ["git", "add", "--", "control.txt"]:
+            return control(cmd)
+        if cmd[:3] == ["git", "add", "--"] and cwd and cmd[3].startswith("bad-"):
             return add(cmd)
         if commit is not None and cmd[:2] == ["git", "commit"] and "add invalid-utf8 name" in cmd:
             return commit(cmd)
@@ -254,9 +252,16 @@ class TestSelftestInvalidByteProbe(unittest.TestCase):
         self._require_probe_file(out.getvalue())
         self.fail("the git failure did not propagate")
 
+    def test_a_failing_control_add_fails_loudly_on_windows(self) -> None:
+        error = self._error_of(
+            _probe_run(lambda cmd: subprocess.CompletedProcess(cmd, 0), control=_fail),
+            windows=True,
+        )
+        self.assertEqual(error.cmd, ["git", "add", "--", "control.txt"])
+
     def test_a_failing_add_of_the_probe_file_fails_loudly_elsewhere(self) -> None:
         error = self._error_of(_probe_run(_fail), windows=False)
-        self.assertEqual(error.cmd, ["git", "add", "-A"])
+        self.assertEqual(error.cmd[:3], ["git", "add", "--"])
 
     def test_another_git_failure_still_fails_loudly(self) -> None:
         run = _probe_run(
