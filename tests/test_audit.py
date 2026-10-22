@@ -216,7 +216,11 @@ def _probe_run(add: Any, commit: Any = None) -> Any:
 
 
 def _fail(cmd: list[str]) -> Any:
-    raise subprocess.CalledProcessError(128, cmd)
+    raise subprocess.CalledProcessError(128, cmd, stderr=b"error: invalid path 'bad-name.txt'\n")
+
+
+def _fail_unrelated(cmd: list[str]) -> Any:
+    raise subprocess.CalledProcessError(128, cmd, stderr=b"fatal: Unable to create index.lock\n")
 
 
 class TestSelftestInvalidByteProbe(unittest.TestCase):
@@ -253,6 +257,10 @@ class TestSelftestInvalidByteProbe(unittest.TestCase):
                 return error
         self._require_probe_file(out.getvalue())
         self.fail("the git failure did not propagate")
+
+    def test_an_unrelated_add_failure_fails_loudly_on_windows(self) -> None:
+        error = self._error_of(_probe_run(_fail_unrelated), windows=True)
+        self.assertEqual(error.cmd, ["git", "add", "-A"])
 
     def test_a_failing_add_of_the_probe_file_fails_loudly_elsewhere(self) -> None:
         error = self._error_of(_probe_run(_fail), windows=False)
