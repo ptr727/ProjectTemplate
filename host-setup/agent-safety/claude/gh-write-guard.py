@@ -5648,15 +5648,19 @@ def _unquoted_pattern(raw):
 
 
 def _xargs_merge(text):
-    """True when `text` runs a `gh pr merge` that an `xargs` runs (see `_xargs_runs`)."""
+    """True when `text` runs a `gh pr merge` that an `xargs` runs (see `_xargs_runs`).
+
+    The merge is read by its command path (see `_runs_gh_pr_merge`), or as one a run-time word
+    may name (see `_gh_may_merge`). A `merge` that is another option's value is no merge.
+    """
     toks = _shell_tokens(text)
-    return any(
-        _is_gh_exe(t)
-        and _runs_as_command(toks, k)
-        and _is_gh_pr_merge(_collect_arglist(toks, k + 1)[0])
-        and _xargs_runs(toks, k)
-        for k, t in enumerate(toks)
-    )
+    for k, t in enumerate(toks):
+        if not (_is_gh_exe(t) and _runs_as_command(toks, k) and _xargs_runs(toks, k)):
+            continue
+        args = _collect_arglist(toks, k + 1)[0]
+        if _runs_gh_pr_merge(args) or _gh_may_merge(args):
+            return True
+    return False
 
 
 def _rewritten_git_words(cmd):
@@ -9134,6 +9138,11 @@ _CASES = [
         "flock /example/lock -c 'gh pr view 5'",
         "allow",
         "control: a flock -c string holding a gh read is allowed",
+    ),
+    (
+        "printf 5 | xargs gh pr comment 5 --body merge",
+        "allow",
+        "control: a merge word that is another option's value under xargs runs no merge",
     ),
     (
         "printf 5 | xargs gh pr view",
