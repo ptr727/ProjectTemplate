@@ -179,7 +179,22 @@ text says, because the harm it covers was never in the text.
    A command naming git or gh that holds a carriage return is denied, since the shell reads one
    as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
    an escaped backslash before a line break. The shell reads that as a line break where the hook
-   would join the lines, and as a continuation inside a double-quoted wrapper body. Two comments whose
+   would join the lines, and as a continuation inside a double-quoted wrapper body. Neither deny
+   reads a backslash-newline the outer shell keeps as text, where the hook can read it as a shell
+   running that text would. That is one inside single quotes in command text, including command
+   text in a `$(...)` substitution. It is also one ending a quoted heredoc's data line, unless the
+   delimiter line follows. It is not one inside `$'...'`, or single quotes within double quotes, a
+   backquote, or `${...}`. A Markdown hard line break in a quoted heredoc or a single-quoted body
+   is one. The single-quoted part must be its word's only quoted, escaped, or expanded part, with no
+   escaped word break just before it. Where the text names git, gh, or a push, it must also hold no
+   further quoting. Those names are read in the text as written, with its lines joined, and with
+   each one a line break. Each backslash-newline in that text must then sit in its command text or
+   end a comment there. The command is then read again as a shell running that text reads it,
+   joining the lines except where one ends a comment. It is also read with each one joined and with each one a line break, and denied where
+   any reading is. Every reading keeps each escaped backslash pair before a line break, which the
+   shell reads as one literal backslash. Nor does either read a single unquoted
+   backslash-newline between a command separator such as `&&` or `|` and a non-operator character,
+   which splits no word. Two comments whose
    apostrophes pair up as one quoted span are read as the shell reads them, as comments. The
    lines between them are then read as commands. Some words are read as they
    stand. They are a directory option's literal or double-quoted value where the guard can read its quoting, a commit option's double-quoted value, a

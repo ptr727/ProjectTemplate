@@ -4107,14 +4107,241 @@ def _push_arg_lists(cmd):
 
 _CD_BUILTINS = ("cd", "pushd", "popd", "chdir")
 _UNRESOLVED = object()
-_SPLIT_WORD = re.compile(r"(?<=\S)\\\r?\n(?=\S)")
-_ESCAPED_LINE_BREAK = re.compile(r"(?<!\\)(?:\\\\)+\r?\n")
+_LINE_BREAK_RUN = re.compile(r"\\+\n")
+_GLUED_SEPARATORS = frozenset({"&&", "||", "|", "|&", ";", "&"})
 _GIT_OR_GH_WORD = re.compile(r"(?<![\w.-])(?:git|gh)(?:\.exe)?(?![\w-])", re.IGNORECASE)
 
 
 def _names_git_or_gh(text):
     """True when `text` names git or gh as a word, read with its quoting removed too, as `_names_push` reads a push."""
     return bool(_GIT_OR_GH_WORD.search(text) or _GIT_OR_GH_WORD.search(_unquoted(text)))
+
+
+def _line_break_contexts(cmd):
+    """Map the index of each newline the scan reaches in `cmd` to the context it sits in.
+
+    The context is `literal` inside single quotes or a quoted heredoc's data, where the shell keeps a backslash-newline.
+    A `literal` newline maps to `("literal", start, end, word)`, the span of the quoted text a shell may run as a script.
+    `word` is True for a single-quoted span, which is one part of a shell word, and False for a heredoc body.
+    A data line followed by its delimiter line is left unmapped, since joining the two would hide the delimiter.
+    It is `command` in unquoted command text, `quoted` inside double quotes, and `comment` where a comment ends.
+    A newline inside `$'...'`, a backtick, a `${...}`, a `$((...))`, or an unquoted heredoc is left unmapped.
+    Raises ValueError where a quote or group never closes, or a heredoc delimiter is one the scan does not read whole.
+    """
+    ctx = {}
+    n = len(cmd)
+
+    def heredoc_bodies(i, pending):
+        for tag, dash, quoted in pending:
+            joined = False
+            start, kept = i, []
+            while i < n:
+                end = cmd.find("\n", i)
+                end = n if end < 0 else end
+                line = cmd[i:end]
+                if not joined and (line.lstrip("\t") if dash else line) == tag:
+                    ctx.update((k, ("literal", start, i, False)) for k in kept)
+                    i = end + 1
+                    break
+                nxt = cmd.find("\n", end + 1)
+                following = cmd[end + 1 : n if nxt < 0 else nxt]
+                if quoted and end < n and (following.lstrip("\t") if dash else following) != tag:
+                    kept.append(end)
+                joined = not quoted and (len(line) - len(line.rstrip("\\"))) % 2 == 1
+                i = end + 1
+        return min(i, n)
+
+    def double(i):
+        while i < n:
+            ch = cmd[i]
+            if ch == "\\":
+                if cmd[i + 1 : i + 2] == "\n":
+                    ctx[i + 1] = "quoted"
+                i += 2
+            elif ch == '"':
+                return i + 1
+            elif ch == "\n":
+                ctx[i] = "quoted"
+                i += 1
+            elif cmd.startswith("$(", i) and not cmd.startswith("$((", i):
+                i = command(i + 2, ")")
+            elif ch == "`" or cmd.startswith(("${", "$((", "$$"), i):
+                i = _skip_nested(cmd, i)
+            else:
+                i += 1
+        raise ValueError("unterminated quote")
+
+    def command(i, closer):
+        depth = cases = 0
+        pending = []
+        while i < n:
+            ch = cmd[i]
+            word_start = i == 0 or cmd[i - 1] in _WORD_BREAK_CHARS
+            heredoc = _HEREDOC_IN_GROUP.match(cmd, i) if ch == "<" else None
+            if ch == "\n":
+                ctx.setdefault(i, "command")
+                i += 1
+                if pending:
+                    i = heredoc_bodies(i, pending)
+                    pending = []
+            elif ch == "\\":
+                if cmd[i + 1 : i + 2] == "\n":
+                    ctx[i + 1] = "command"
+                i += 2
+            elif ch == "'":
+                end = cmd.find("'", i + 1)
+                if end < 0:
+                    raise ValueError("unterminated quote")
+                ctx.update(
+                    (k, ("literal", i + 1, end, True)) for k in range(i + 1, end) if cmd[k] == "\n"
+                )
+                i = end + 1
+            elif ch == '"' or cmd.startswith('$"', i):
+                i = double(i + (1 if ch == '"' else 2))
+            elif cmd.startswith("$(", i) and not cmd.startswith("$((", i):
+                i = command(i + 2, ")")
+            elif ch == "`" or cmd.startswith(("${", "$((", "$$", "$'"), i):
+                i = _skip_nested(cmd, i)
+            elif heredoc:
+                if cmd[heredoc.end() : heredoc.end() + 1] not in ("", *" \t\n;&|<>()"):
+                    raise ValueError("partly quoted heredoc delimiter")
+                tag = next(t for t in heredoc.group(2, 3, 4) if t is not None)
+                quoted = heredoc.group(4) is None or "\\" in heredoc.group(0)
+                pending.append((tag, bool(heredoc.group(1)), quoted))
+                i = heredoc.end()
+            elif ch == "#" and word_start:
+                end = cmd.find("\n", i)
+                if end < 0:
+                    return n
+                ctx[end] = "comment"
+                i = end
+            elif word_start and _CASE_KEYWORD.match(cmd, i):
+                cases += 1 if cmd.startswith("case", i) else -1 if cases else 0
+                i += 4
+            else:
+                if ch == "(":
+                    depth += 1
+                elif ch == ")" and depth:
+                    depth -= 1
+                elif ch == ")" and closer and not cases:
+                    return i + 1
+                i += 1
+        if closer:
+            raise ValueError("unterminated group")
+        return n
+
+    command(0, None)
+    return ctx
+
+
+_PLAIN_WORD_PART = re.compile(r"[\w./:=@%+,-]*")
+_NESTED_QUOTING = ("'", '"', "`", "<<")
+
+
+def _literal_span_kept(cmd, start, stop, word, inner):
+    """True where the readings of the `literal` text `cmd[start:stop]` show what a shell running it runs.
+
+    A span in a word with any other quoted, escaped, or expanded part is never kept, since the shell runs the whole word.
+    Nor is one with an escaped word break just before it.
+    A span naming no git, gh, or push, as written, joined, or with line breaks, is kept whatever its own scan found.
+    Any other span is kept only where its own scan finished and it holds no quoting a further shell would unwrap.
+    Each backslash-newline in it must then sit in command text or end a comment there, as `inner` places it.
+    """
+    if word:
+        head = cmd.rfind(" ", 0, start - 1) + 1
+        for c in "\t\n;&|<>(":
+            head = max(head, cmd.rfind(c, 0, start - 1) + 1)
+        tail = _PLAIN_WORD_PART.match(cmd, stop + 1).end()
+        if (
+            not _PLAIN_WORD_PART.fullmatch(cmd, head, start - 1)
+            or cmd[head - 2 : head - 1] == "\\"
+            or (tail < len(cmd) and cmd[tail] not in " \t\n;&|<>()")
+        ):
+            return False
+    text = cmd[start:stop]
+    if not any(
+        _names_git_or_gh(t) or _names_push(t)
+        for t in (text, text.replace("\\\n", ""), text.replace("\\\n", "\n"))
+    ):
+        return True
+    if inner is None or any(q in text for q in _NESTED_QUOTING):
+        return False
+    return all(
+        inner.get(m.end() - 1) in ("command", "comment") for m in _LINE_BREAK_RUN.finditer(text)
+    )
+
+
+def _line_break_reading(cmd):
+    """Read each backslash-newline in `cmd`, returning (denied, readings).
+
+    `denied` is True where one in a context the shell joins splits a word, or follows an escaped backslash.
+    A split directly after an unquoted command separator such as `&&` or `|` splits no word, so it is left to the fold.
+    A `literal` one is not denied where `_literal_span_kept` keeps its span, and is read as any other one otherwise.
+    `readings` holds `cmd` read as a shell running a kept span may read it, or is empty where `cmd` holds none.
+    One reading takes each kept backslash-newline as the span's own scan places it.
+    A shell running the span reads one ending a comment there as a line break, and joins any other.
+    The other readings join each one, or read each one as a line break.
+    Each escaped backslash pair before a kept newline stays in all of them, read as one literal backslash.
+    A space parts those pairs from each line break a reading puts after them, so that break is not read again.
+    A scan that does not finish leaves every backslash-newline in a context the shell joins.
+    """
+    try:
+        ctx = _line_break_contexts(cmd)
+    except (ValueError, RecursionError):
+        ctx = {}
+    spans = {}
+    edits = []
+    for m in _LINE_BREAK_RUN.finditer(cmd):
+        nl = m.end() - 1
+        odd = (nl - m.start()) % 2 == 1
+        kind = ctx.get(nl)
+        if isinstance(kind, tuple):
+            _, start, stop, word = kind
+            if (start, stop) not in spans:
+                try:
+                    inner = _line_break_contexts(cmd[start:stop])
+                except (ValueError, RecursionError):
+                    inner = None
+                kept = _literal_span_kept(cmd, start, stop, word, inner)
+                spans[start, stop] = (inner or {}) if kept else None
+            inner = spans[start, stop]
+            if inner is not None:
+                pairs = cmd[m.start() : nl - 1 if odd else nl]
+                broken = f"{pairs} \n" if pairs else "\n"
+                joined = pairs if odd else broken
+                ends_comment = inner.get(nl - start) == "comment"
+                edits.append(
+                    (m.start(), nl + 1, joined, broken if ends_comment else joined, broken)
+                )
+                continue
+            kind = None
+        if not odd:
+            return True, ()
+        before, after = cmd[nl - 2 : nl - 1], cmd[nl + 1 : nl + 2]
+        if not before.strip() or not after.strip():
+            continue
+        k = nl - 1
+        while k and cmd[k - 1] in "();<>|&":
+            k -= 1
+        glued = (
+            kind == "command"
+            and m.start() == nl - 1
+            and cmd[k : nl - 1] in _GLUED_SEPARATORS
+            and cmd[k - 1 : k] != "\\"
+            and after not in _SHELL_OP_CHARS
+        )
+        if not glued:
+            return True, ()
+    if not edits:
+        return False, ()
+    readings = []
+    for pick in (3, 2, 4):
+        out, at = [], 0
+        for edit in edits:
+            out.append(cmd[at : edit[0]] + edit[pick])
+            at = edit[1]
+        readings.append("".join(out) + cmd[at:])
+    return False, tuple(dict.fromkeys(readings))
 
 
 def _opaque_cd(toks):
@@ -8645,9 +8872,12 @@ def classify(
             "than as a space or a line break, so the guard cannot tell where its words end. "
             "Failing closed. Write the command with plain newlines." + _handoff(cmd)
         )
-    if (_SPLIT_WORD.search(cmd) or _ESCAPED_LINE_BREAK.search(cmd)) and (
-        _names_git_or_gh(cmd) or _names_push(cmd)
-    ):
+    denied, readings = (
+        _line_break_reading(cmd)
+        if _LINE_BREAK_RUN.search(cmd) and (_names_git_or_gh(cmd) or _names_push(cmd))
+        else (False, ())
+    )
+    if denied:
         return "deny", (
             "This command has a word split by a backslash-newline, or an escaped backslash before "
             "a line break. The shell joins the first into one word the guard cannot read. It reads "
@@ -8655,6 +8885,23 @@ def classify(
             "inside a double-quoted wrapper body. A hidden cd could redirect a push, or a split value add a "
             "subcommand. Write each word whole on one line." + _handoff(cmd)
         )
+    for reading in readings:
+        dec, reason = classify(
+            reading,
+            cwd,
+            origin,
+            current_branch,
+            rules_lookup,
+            environ,
+            primary_checkout_lookup,
+            ref_resolver,
+            config_lookup,
+        )
+        if dec == "deny":
+            return "deny", (
+                "Read as a shell running its quoted text reads it, with a backslash-newline there "
+                "joined or read as a line break, this command is denied. " + reason
+            )
     # Fold shell line-continuations so a multi-line Bash invocation, such as `gh pr merge 5 \<newline> --admin`, parses as one command.
     # Only backslash-newline is joined, so a real newline between commands still separates them.
     cmd = re.sub(r"\\\r?\n", " ", cmd)
@@ -9003,6 +9250,151 @@ _CASES = [
         "echo \\\\\n git -C $D status",
         "deny",
         "an escaped backslash before a newline is no line continuation, so the next line is read",
+    ),
+    (
+        "gh pr comment 5 --body 'a\\\nb'",
+        "allow",
+        "a backslash-newline inside single quotes is literal, so it splits no word",
+    ),
+    (
+        "gh pr comment 5 --body 'a\\\\\nb'",
+        "allow",
+        "an escaped backslash before a newline inside single quotes is literal too",
+    ),
+    (
+        "gh pr create --title x --body \"$(cat <<'EOF'\nline one\\\nline two\nEOF\n)\"",
+        "allow",
+        "a Markdown hard line break in a quoted heredoc inside a substitution is data",
+    ),
+    (
+        "git commit -F- <<'EOF'\nsubject\n\nline one\\\nline two\nEOF",
+        "allow",
+        "a line ending in a backslash in a quoted heredoc is data",
+    ),
+    (
+        'git commit -F- <<"EOF"\nline one\\\\\nline two\nEOF',
+        "allow",
+        "an escaped backslash ending a line in a double-quoted-delimiter heredoc is data",
+    ),
+    (
+        "git add x &&\\\ngit commit -m y",
+        "allow",
+        "a line continuation glued to && splits no word",
+    ),
+    (
+        "git log --oneline |\\\nhead -5",
+        "allow",
+        "a line continuation glued to a pipe splits no word",
+    ),
+    (
+        "git add x &\\\n& git commit -m y",
+        "deny",
+        "a line continuation inside && joins the operator the guard reads apart",
+    ),
+    (
+        "git status 2>\\\n&1",
+        "deny",
+        "a line continuation after a redirection operator still fails closed",
+    ),
+    (
+        'git commit -m "a\\\nb" --no-verify',
+        "deny",
+        "a backslash-newline inside double quotes splits a word, as the shell joins it there",
+    ),
+    (
+        "git commit -F- <<EOF\nline one\\\nline two\nEOF",
+        "deny",
+        "a backslash-newline in an unquoted heredoc splits a word, as the shell joins it there",
+    ),
+    (
+        "git commit -F- <<'EOF'\nmsg\\\nEOF\ngit status",
+        "deny",
+        "a quoted heredoc line continuing onto its delimiter is not read as data",
+    ),
+    (
+        "gh pr comment 5 --body $'a\\\nb'",
+        "deny",
+        "a backslash-newline inside an ANSI-C quote still fails closed",
+    ),
+    (
+        "bash -c 'gh pr merge 5 --ad\\\nmin'",
+        "deny",
+        "a single-quoted shell body is read with its backslash-newlines joined, as the inner shell reads it",
+    ),
+    (
+        "bash <<'EOF'\ngh pr merge 5 --ad\\\nmin\nEOF",
+        "deny",
+        "a quoted heredoc fed to a shell is read with its backslash-newlines joined",
+    ),
+    (
+        "sh -c 'echo \\\\\ngit push --no-verify origin feature/x'",
+        "deny",
+        "an escaped backslash before a newline in a single-quoted body is a line break to the inner shell",
+    ),
+    (
+        "bash -c 'git push origin main\\\\\necho hi'",
+        "allow",
+        "an escaped backslash pair before a line break in a shell body stays a literal backslash on the word",
+    ),
+    (
+        "bash <<'EOF'\ngit push origin main\\\\\necho hi\nEOF",
+        "allow",
+        "a quoted heredoc fed to a shell keeps the literal backslash an escaped pair leaves before a line break",
+    ),
+    (
+        "bash -c 'git push origin HEAD:main\\\\\\\n'",
+        "allow",
+        "an escaped pair before a backslash-newline in a shell body stays a literal backslash in every reading",
+    ),
+    (
+        "bash -c 'gh\\\\\npr merge 5 --admin'",
+        "allow",
+        "an escaped backslash pair after gh in a shell body names a command other than gh",
+    ),
+    (
+        "bash -c 'git push origin feature/x\\\\\ngit push origin main'",
+        "deny",
+        "control: the line after an escaped backslash pair in a shell body is still read",
+    ),
+    (
+        "bash -c 'true # x\\\\\ngit push origin main'",
+        "deny",
+        "control: an escaped backslash pair ending a comment in a shell body leaves the next line read",
+    ),
+    (
+        "bash -c 'true # x\\\\\\\ngit push origin main'",
+        "deny",
+        "control: an escaped pair before a comment-ending backslash-newline leaves the next line read",
+    ),
+    (
+        "bash -c 'true # x\\\ngh pr merge 5 --ad\\\nmin'",
+        "deny",
+        "a shell body ending a comment with one backslash-newline and splitting a word with another reads each as the inner shell does",
+    ),
+    (
+        "bash <<'EOF'\ntrue # x\\\ngh pr merge 5 --ad\\\nmin\nEOF",
+        "deny",
+        "a quoted heredoc fed to a shell reads each backslash-newline by its own context",
+    ),
+    (
+        "bash <<'EOF'\nbash -c 'true # x\\\ngh pr merge 5 --ad\\\nmin'\nEOF",
+        "deny",
+        "a quoted span holding a further level of quoting is not read as text when it names gh",
+    ),
+    (
+        "bash -c 'echo \"'\\''x\" # c\\\ngh pr merge 5 --ad\\\nmin # \"'",
+        "deny",
+        "a single-quoted span joined to other quoted parts of its word is not read as text",
+    ),
+    (
+        "bash -c \\#\\ 'x\\\ngh pr merge 5 --ad\\\nmin'",
+        "deny",
+        "a single-quoted span after an escaped word break is joined to the word before it",
+    ),
+    (
+        "gh pr create --title x --body \"$(cat <<'EOF'\n## Summary\nline one\\\nline two\n- it's done\nEOF\n)\"",
+        "allow",
+        "a Markdown hard line break in a quoted heredoc naming neither git nor gh is data",
     ),
     (
         'eval git -C "$W" status',
@@ -13865,6 +14257,38 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "allow",
         "control: a wrapper shell's GIT_WORK_TREE on a read-only command is allowed",
+    ),
+    (
+        "sh -c 'git -C /example/prim\\\nary commit -m x'",
+        "/example/wt",
+        {"/example/primary": True, "/example/prim": False, "/example/wt": False},
+        None,
+        "deny",
+        "a single-quoted shell body joins a directory value its backslash-newline splits",
+    ),
+    (
+        "bash -c 'git status # ok\\\ngit -C /example/primary commit -m y'",
+        "/example/wt",
+        {"/example/primary": True, "/example/wt": False},
+        None,
+        "deny",
+        "a backslash-newline ending a comment in a shell body is a line break to the inner shell",
+    ),
+    (
+        "bash <<'EOF'\ngit status # ok \\\ngit -C /example/primary commit -m y\nEOF",
+        "/example/wt",
+        {"/example/primary": True, "/example/wt": False},
+        None,
+        "deny",
+        "a spaced backslash-newline ending a comment in a heredoc fed to a shell is a line break there",
+    ),
+    (
+        "bash -c 'git status # x\\\ngit -C /example/prim\\\nary commit -m y'",
+        "/example/wt",
+        {"/example/primary": True, "/example/prim": False, "/example/wt": False},
+        None,
+        "deny",
+        "a shell body's comment-ending backslash-newline does not hide a directory value another one splits",
     ),
 ]
 

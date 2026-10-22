@@ -3764,6 +3764,9 @@ def audit_repo(entry, spec, branch=None):
     return findings, audited_sha
 
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
 def _selftest():
     """Run the self-test with no variable naming a repository in the environment.
 
@@ -4734,15 +4737,34 @@ def _selftest_cases():
                 ["git", "config", "user.name", "test"],
             ):
                 subprocess.run(cmd, cwd=tmp_root_path, check=True, capture_output=True)
+            (tmp_root_path / "control.txt").write_text("x")
+            subprocess.run(
+                ["git", "add", "--", "control.txt"],
+                cwd=tmp_root_path,
+                check=True,
+                capture_output=True,
+            )
+            added = False
             try:
                 (tmp_root_path / bad_name).write_text("x")
             except OSError:
                 # This host's filesystem cannot represent the byte: skip rather than aborting the whole --selftest run over an environment limitation, not a code fault.
                 print("  skip hub_tracked: non-UTF-8 filename (host cannot create it)")
             else:
-                subprocess.run(
-                    ["git", "add", "-A"], cwd=tmp_root_path, check=True, capture_output=True
-                )
+                try:
+                    subprocess.run(
+                        ["git", "add", "--", bad_name],
+                        cwd=tmp_root_path,
+                        check=True,
+                        capture_output=True,
+                    )
+                except subprocess.CalledProcessError:
+                    if not _IS_WINDOWS:
+                        raise
+                    print("  skip hub_tracked: non-UTF-8 filename (git cannot add it)")
+                else:
+                    added = True
+            if added:
                 subprocess.run(
                     ["git", "commit", "-q", "-m", "add invalid-utf8 name"],
                     cwd=tmp_root_path,
