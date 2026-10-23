@@ -172,21 +172,21 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    a heading that outcome 4 of that section names is not on that list. It is already its
    finding's outcome, and owes only the pointer that outcome names.
 4. Every part of a round covering the head that the tooling could not place is answered. The
-   digest prints each such part's text under `UNPLACED ON THE HEAD` with a fingerprint for the
-   set and reads `shapes=HELD`, and `status` and `wait` exit `50`.
-   - Read each excerpt and give every item in it item 3's outcome: fixed with its SHA, declined
-     with evidence, or listed as pre-existing in the pull request body.
-   - Post the outcomes as the acknowledgment, with `pr_review.py comment <number> --repo
-     <owner>/<repo> --fingerprint <fp> --body <outcomes>`. One from an owner, member, or
-     collaborator clears the hold, `shapes=ACKNOWLEDGED`. A new head carrying new unplaced text
-     has a new fingerprint and owes a new acknowledgment.
+   digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
+   It reads `shapes=HELD`, and `status` and `wait` exit `50`.
+   - Read each part whole in the review body, since the excerpt only locates it. Give every item
+     in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
+     in the pull request body.
+   - Post the outcomes with `pr_review.py comment <number> --repo <owner>/<repo> --fingerprint
+     <fp> --body <outcomes>`. One from an owner, member, or collaborator clears the hold,
+     `shapes=ACKNOWLEDGED`. New unplaced text on a new head owes a new acknowledgment.
    - The spelling is a data edit to the matching `scripts/reviewers/*.json` in the hub plus one
-     fixture, in a pull request of its own by whoever acknowledged the part, never an issue.
+     fixture. Whoever acknowledged the part makes it in a pull request of its own, never an issue.
    - An item that reads as neither a finding nor not one goes to the maintainer with its raw text
      quoted, per "Escalate to the maintainer when" below.
 
    A part on an earlier round prints under `REVIEWER OUTPUT NOTED`, `shapes=NOTED`, and decides
-   no exit code, so it is read by hand and any finding in it takes item 3's outcome.
+   no exit code. Read it by hand, and give any finding in it item 3's outcome.
 5. The maintainer has given **explicit** permission to merge.
 
 The agent never merges on its own. A green or CLEAN PR with one open finding is not mergeable,

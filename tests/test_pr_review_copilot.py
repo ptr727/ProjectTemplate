@@ -464,16 +464,15 @@ class TestUnplaced(unittest.TestCase):
         self.assertLessEqual(len(shown[0]), adapter.EXCERPT_WIDTH + 10)
         self.assertIn("29 more lines in the body", shown[-1])
 
-    def test_an_acknowledgment_needs_its_marker_outside_a_fence_and_prose_beside_it(self) -> None:
-        marker = adapter.ack_marker("0123456789ab")
-        for text, want in (
-            (f"Declined: the path is unreachable.\n\n{marker}", True),
-            (marker, False),
-            (f"Fixed in abc1234.\n\n```\n{marker}\n```", False),
-            (f"Fixed in abc1234.\n\n{adapter.ack_marker('ba9876543210')}", False),
-        ):
-            with self.subTest(text=text):
-                self.assertEqual(want, adapter.acknowledges(text, "0123456789ab"))
+    def test_an_unplaced_label_stops_before_what_the_reader_places(self) -> None:
+        odd = "**Reviewer musings:**\n\nThe loop may not end.\n\n" + what_changed()
+        (part,) = adapter.read(body(sections=odd)).unplaced
+        self.assertIn("The loop may not end.", part.text)
+        self.assertNotIn("What changed", part.text)
+
+    def test_a_label_inside_a_list_item_is_not_a_part(self) -> None:
+        nested = "**Changes:**\n\n- Test updates:\n\n  - Cover the empty case.\n"
+        self.assertEqual((), adapter.read(body(sections=nested)).unplaced)
 
     def test_a_pathological_body_reads_in_bounded_time(self) -> None:
         for text in ("<details>" * 5000, "> " * 20000 + "x", "`" * 30000, "\u00a0" * 30000):

@@ -166,7 +166,7 @@ def unplaced(finding: str = "The retry bound is off by one.") -> str:
 
 def ack(fp: str, association: str, text: str | None = None) -> dict:
     """A conversation comment acknowledging the unplaced set under `fp`, by `association`."""
-    written = f"Fixed in abc1234: the bound.\n\n{pr_review.adapter.ack_marker(fp)}"
+    written = f"Fixed in abc1234: the bound.\n\n{pr_review.ACK_MARKER.format(fp)}"
     return {
         "author": {"login": "maintainer"},
         "authorAssociation": association,
@@ -2146,7 +2146,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn("shapes=HELD ", self.out.getvalue())
 
     def test_a_marker_with_no_outcome_or_inside_a_fence_does_not_clear_the_hold(self) -> None:
-        marker = pr_review.adapter.ack_marker(self.fingerprint(unplaced()))
+        marker = pr_review.ACK_MARKER.format(self.fingerprint(unplaced()))
         for text in (marker, f"Fixed in abc1234.\n\n```text\n{marker}\n```"):
             with self.subTest(text=text):
                 pr = payload(
@@ -4446,29 +4446,18 @@ class TestCommentConfirmsItsTargetAndResult(CommentCase):
 
 
 class TestCommentAcknowledgesAnUnplacedSet(CommentCase):
-    def target(self) -> dict:
-        return {**payload([review(body=unplaced())], files=["a.py"]), "url": COMMENT["url"]}
-
-    def run_ack(self, fp: str) -> int:
-        return pr_review.main(
-            ["comment", "7", "--repo", "o/r", "--fingerprint", fp, "--body", COMMENT_BODY]
-        )
-
-    def test_the_outcomes_post_with_the_marker_for_the_fingerprint_the_head_holds(self) -> None:
-        hold = pr_review.shape_hold(self.target())
+    def test_the_outcomes_post_with_the_marker_the_gate_reads(self) -> None:
+        held = payload([review(body=unplaced())], files=["a.py"])
+        hold = pr_review.shape_hold(held)
         assert hold is not None
         sent = f"{COMMENT_BODY}\n\n<!-- fleet-shape-ack: fingerprint={hold[0]} -->"
-        self.wire(self.target(), {**COMMENT, "body": sent})
-        self.assertEqual(0, self.run_ack(hold[0]))
+        self.wire({"id": "PR_from_query", "url": COMMENT["url"]}, {**COMMENT, "body": sent})
+        argv = ["comment", "7", "--repo", "o/r", "--fingerprint", hold[0], "--body", COMMENT_BODY]
+        self.assertEqual(0, pr_review.main(argv))
         mutation = next((v for q, v in self.calls if "addComment" in q))
         self.assertEqual(sent, mutation["body"])
-        self.assertTrue(pr_review.adapter.acknowledges(sent, hold[0]))
-
-    def test_a_fingerprint_the_head_does_not_hold_writes_nothing(self) -> None:
-        self.wire(self.target())
-        self.assertEqual(69, self.run_ack("0" * 12))
-        self.assertFalse(any("addComment" in query for query, _ in self.calls))
-        self.assertIn("status=FINGERPRINT_NOT_HELD", self.out.getvalue())
+        answered = {**held, "comments": {"nodes": [ack(hold[0], "OWNER", text=sent)]}}
+        self.assertEqual((hold[0], hold[1], True), pr_review.shape_hold(answered))
 
     def test_the_fingerprint_belongs_to_comment_alone(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

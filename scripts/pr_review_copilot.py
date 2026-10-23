@@ -8,9 +8,8 @@
 The reviewer's wording and layout change without notice and with no programmatic API, so every
 spelling this reads lives in `reviewers/<name>.json` rather than here. A changed spelling is a
 data edit plus one fixture. A part of a body this cannot place is a one-line note carrying the
-part's own text, and `read` never raises: a body it trips on reads as no refusal, `unknown`
-coverage and verdict, and the whole body unplaced, so a new shape reaches the gate as text to
-read rather than as a crash.
+part's own text. `read` never raises. A body it trips on reads as no refusal, `unknown` coverage
+and verdict, and the whole body unplaced. A new shape reaches the gate as text, never a crash.
 
 The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
 of its own and never reads as markup. Only Copilot's current overview format, the one carrying the
@@ -421,6 +420,16 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     def inside(token: Token) -> bool:
         return any(a <= (token.map or [0])[0] < b for a, b in claimed)
 
+    stops = sorted(
+        {a for a, _ in claimed}
+        | {
+            (t.map or [0])[0]
+            for n, t in enumerate(tokens)
+            if t.type in ("heading_open", "table_open")
+            or (t.type == "paragraph_open" and not t.level and is_label(tokens[n + 1]))
+        }
+    )
+
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -431,7 +440,9 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 verdict, verdict_heading = kind, name
                 headline = headline_after(tokens, i + 3, lines, vocab["coverage_prose"])
             elif not kind and vet and not matched(vocab["headings"], name):
-                unread(f"a heading this reader has no spelling for: `{name}`", *span(tokens, i))
+                unread(
+                    f"a heading this reader has no spelling for: `{name}`", *span(tokens, i, stops)
+                )
         elif token.type == "paragraph_open":
             inline = tokens[i + 1]
             name = label(inline_text(inline))
@@ -450,8 +461,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                     open_count = (open_count or 0) + stated(found_kind[1])
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
-            elif vet and is_label(inline) and not matched(vocab["labels"], name):
-                unread(f"a label this reader has no spelling for: `{name}`", *span(tokens, i))
+            elif vet and is_label(inline) and not token.level and not inside(token):
+                if not matched(vocab["labels"], name):
+                    unread(
+                        f"a label this reader has no spelling for: `{name}`",
+                        *span(tokens, i, stops),
+                    )
         elif (
             token.type == "table_open"
             and vocab["table_header"]
@@ -509,15 +524,10 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     )
 
 
-def span(tokens: list[Token], start: int) -> tuple[int, int]:
-    """The lines from the block opening at `start` to the next heading, the part a note names."""
+def span(tokens: list[Token], start: int, stops: list[int]) -> tuple[int, int]:
+    """The lines from the block opening at `start` to the next stop, the part a note names."""
     first = (tokens[start].map or [0])[0]
-    after = (
-        (t.map or [first])[0]
-        for t in tokens[start + 1 :]
-        if t.type == "heading_open" and (t.map or [0])[0] > first
-    )
-    return first, next(after, sys.maxsize)
+    return first, next((s for s in stops if s > first), sys.maxsize)
 
 
 def fingerprint(parts: list[Unplaced]) -> str:
@@ -526,17 +536,6 @@ def fingerprint(parts: list[Unplaced]) -> str:
     for text in sorted({p.text for p in parts}):
         digest.update(text.encode("utf-8") + b"\0")
     return digest.hexdigest()[:FINGERPRINT_HEX]
-
-
-def ack_marker(fp: str) -> str:
-    """The line an acknowledgment of the unplaced set under `fp` carries beneath its outcomes."""
-    return f"<!-- fleet-shape-ack: fingerprint={fp} -->"
-
-
-def acknowledges(body: str, fp: str) -> bool:
-    """Whether a comment answers the set under `fp`, its marker outside a fence beside prose."""
-    rest = [ln for ln in body.splitlines() if ln.strip() and ln.strip() != ack_marker(fp)]
-    return ack_marker(fp) in html_lines(body) and bool(rest)
 
 
 def excerpt(text: str) -> list[str]:
