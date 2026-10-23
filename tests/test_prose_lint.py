@@ -4819,6 +4819,8 @@ class TestOverrideMerge(BaitCase):
             {"charset": {}},
             {"dupword_allow": "x"},
             {"dupword_allow": [1]},
+            {"tool_directives": [""]},
+            {"hub_hosted": ["  "]},
             [],
             "{",
         )
@@ -5455,7 +5457,7 @@ class TestCli(unittest.TestCase):
     def test_the_local_shim_offers_the_gate_s_own_command_line(self) -> None:
         """The shim builds its parser from the same data, and answers `--help` without uv."""
         shim = REPO / "scripts" / "prose_lint.py"
-        env = dict(os.environ) | {"COLUMNS": "100"}
+        env = dict(os.environ) | {"COLUMNS": "100", "NO_COLOR": "1"}
         shown = subprocess.run(
             [sys.executable, str(shim), "--help"],
             capture_output=True,

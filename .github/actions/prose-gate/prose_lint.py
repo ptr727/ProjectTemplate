@@ -147,10 +147,10 @@ def merged(base: dict[str, Any], override: object) -> dict[str, Any]:
     if unknown:
         raise OverrideError(f"holds keys it may not: {quoted(unknown)}")
     out = json.loads(json.dumps(base))
-    for key, values in override.items():
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise OverrideError(f"holds {key!r} as something other than a list of strings")
-        add = [re.escape(v) for v in values] if key == "tool_directives" else values
+    for key, vals in override.items():
+        if not isinstance(vals, list) or not all(isinstance(v, str) and v.strip() for v in vals):
+            raise OverrideError(f"holds {key!r} as other than a list of nonblank strings")
+        add = [re.escape(v) for v in vals] if key == "tool_directives" else vals
         out["exemptions"][key] = [*out["exemptions"][key], *add]
     return out
 
