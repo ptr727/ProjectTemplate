@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Render a weekly backlog and review-cost report for the fleet's repositories.
 
-Why this exists: a weekly count of issues filed against closed, issues per merged pull request,
-and review cost per merged pull request. The report shows the backlog's direction without a hand count.
+Why this exists: a weekly count of issues filed against closed and of issues per merged pull
+request shows the backlog's direction without a hand count. Copilot review runs and the month's
+Copilot gross sit beside the merged pull requests, so review cost per merged pull request is read
+from the same report.
 
 The report goes to stdout only, so a server timer can mail it. Nothing here runs from a workflow.
 Counting and rendering are pure functions over parsed `gh` output, and `run_gh` is the one place
