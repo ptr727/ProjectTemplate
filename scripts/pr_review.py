@@ -92,8 +92,9 @@ Subcommands
            that other reviewer on that head is its own ordinary "reviewed, nothing to flag"
            shape, the same reading an empty-bodied Copilot round already gets, not a gap.
            `review_on_head=local` reads a head no Copilot round covers on a pull request into a
-           branch other than the default, where an attestation vouches for it and no round on
-           record states or appears to state partial coverage, with `coverage=local` beside it.
+           branch other than the default, with `coverage=local` beside it. That reading needs an
+           attestation vouching for the head, and no round on record stating or appearing to state
+           partial coverage.
            A promotion re-reviews content its feature pull requests already carried, so the hosted
            review runs once per change, at the promotion. On a pull request into any other branch,
            the attested local pass alone covers every head. Under the same conditions the
@@ -299,17 +300,16 @@ Subcommands
            every head an attested local pass covers. An attested head is covered at once. The wait
            then polls its checks instead, only while they can still move its merge, as 30 below
            lists. One with no attestation exits 49 naming the `attest` step.
-           --request asks for a round anyway. A pull request into the default branch is requested
-           as before. So is one with a partial on record or a review history past the window. The
-           comment also carries the findings count the pass recorded, shown and not gated. It
-           reads the Copilot reviewer's bot id from the repository's own most recently updated PRs
-           rather than a fixed id: the last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where
-           that narrow window carries no Copilot activity at all, since an outage that outlasts
-           HISTORY_PRS PRs would otherwise empty it on every call for as long as the outage runs.
-           Requests nothing (falling back to
-           polling only) where both windows come up empty, since a repository with no Copilot review
-           in either has nothing to read the id from and a fabricated one is never an option. The
-           loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
+           --request asks for a round anyway. The request goes out unasked into the default branch,
+           and where a partial or a review history past the window is on record. The attestation
+           comment also carries the findings count the pass recorded, shown and not gated. It reads
+           the Copilot reviewer's bot id from the repository's own most recently updated PRs rather
+           than a fixed id: the last HISTORY_PRS, widened once to HISTORY_PRS_WIDE where that narrow
+           window carries no Copilot activity at all, since an outage that outlasts HISTORY_PRS PRs
+           would otherwise empty it on every call for as long as the outage runs. Requests nothing
+           (falling back to polling only) where both windows come up empty, since a repository with
+           no Copilot review in either has nothing to read the id from and a fabricated one is never
+           an option. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
            checks settled as far as the rollup window reads them, with the merge reading CLEAN,
            UNSTABLE, or HAS_HOOKS, or with the pull request closed, 30 = still pending at timeout
@@ -6044,7 +6044,7 @@ def promotion(pr: dict) -> bool:
 
 
 def holds(pr: dict) -> bool:
-    """Whether the local pass covers this head, so `wait` requests no round for it.
+    """Whether a local pass rather than a Copilot round is to cover this head, attested or not.
 
     Read again on the payload the verdict is graded on, since a push between two reads moves the
     head the hold was decided for.
