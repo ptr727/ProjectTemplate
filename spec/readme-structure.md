@@ -52,7 +52,7 @@ A **retired badge service** is the one exception to that floor, and the audit re
 - Write in the current state, present tense, so the reader needs no knowledge beyond what they are reading (GOVERNANCE.md Documentation Style).
 - One logical paragraph per line, with no hard-wrap.
 - Title-case headings with lowercase short bind words.
-- US English and straight quotes. Judge a non-ASCII character against the three tiers in GOVERNANCE.md "Character Set", and restructure a sentence rather than joining its clauses with an em dash or with a spaced hyphen, which that section bans in the same terms.
+- US English and straight quotes. Judge a non-ASCII character against the tiers in the `comment-and-doc-style` Skill's "Character set" section, and restructure a sentence rather than joining its clauses with an em dash or with a spaced hyphen, which that section bans in the same terms.
 - Verify every quantitative claim (counts, versions, supported platforms) against current code.
 - A project README describes only that project, with no cross-repo references and no template or inheritance framing.
 - Reference-style links only: every URI is a reference link defined at the bottom of the file, grouped and named per "Reference Links" below. The auto-generated Table of Contents is the one exception, keeping inline anchor links.
