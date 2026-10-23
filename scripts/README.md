@@ -288,7 +288,7 @@ python3 scripts/backlog_metrics.py
 python3 scripts/backlog_metrics.py --days 14 --format html --repo Example
 ```
 
-The table has a row per repository and a totals row. Its columns are issues opened and closed in the window, handoff issues created, issues open now, pull requests merged, issues opened per merged pull request (`n/a` without a merge), workflow runs, and runs of the `Running Copilot Code Review` workflow. Every issue count except the handoff column leaves out issues labeled `handoff`.
+The table has a row per repository and a totals row. The columns are issues opened and closed in the window, handoff issues created, and issues open now. Next come pull requests merged, issues opened per merged pull request (`n/a` without a merge), workflow runs, and runs named `Running Copilot Code Review`. Every issue count except the handoff column leaves out issues labeled `handoff`.
 
 A line per repository follows with its open issues by label, and an issue with several labels counts under each. The month's Actions minutes per repository and Copilot gross come from the user billing usage endpoint. A failed call prints one line saying billing was unavailable rather than a zero. A list that reaches the item limit is noted in the report. A failed issue, pull request, or run call exits `1` with no report.
 
