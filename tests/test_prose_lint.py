@@ -4747,6 +4747,9 @@ class TestMarkdown(BaitCase):
     def test_an_inline_comment_keeps_its_line_after_a_wrapped_code_span(self) -> None:
         text = "Run `make\nbuild` now. <!-- check this later. -->\n"
         self.assertEqual([(2, "check this later.", False)], self.comments("a.md", text))
+        text = "One. <!-- check this later. -->\nTwo. <!-- check this later. -->\n"
+        found = [(1, "check this later.", False), (2, "check this later.", False)]
+        self.assertEqual(found, self.comments("a.md", text))
 
 
 class TestOverrideMerge(BaitCase):
@@ -5430,7 +5433,7 @@ class TestCli(unittest.TestCase):
             env=env,
             check=True,
         ).stdout
-        with mock.patch.dict(os.environ, {"COLUMNS": "100"}):
+        with mock.patch.dict(os.environ, {"COLUMNS": "100", "NO_COLOR": "1"}):
             expected = prose_lint.argument_parser(prose_lint.BASE).format_help()
         self.assertEqual(expected, shown)
 

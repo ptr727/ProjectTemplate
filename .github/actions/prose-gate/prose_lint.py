@@ -834,14 +834,17 @@ def extract_markdown(lines: list[str]) -> Extracted:
 def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     """The HTML comments inside one inline token, numbered by the source line each opens on."""
     out: list[Line] = []
-    number, last = (tok.map or [0, 1])[0] + 1, (tok.map or [0, 1])[1]
+    number, col = (tok.map or [0, 1])[0] + 1, 0
     for child in tok.children or ():
         if child.type == "html_inline" and child.content.startswith("<!--"):
-            # The source line is found by the comment's own text, a wrapped code span holding none.
+            # The source line is found by the comment's own text, searched on from the last one.
             head = child.content.split("\n")[0]
-            number = next((n for n in range(number, last + 1) if head in lines[n - 1]), number)
-            source = lines[number - 1]
-            before = source[: max(source.find(head), 0)]
+            for n in range(number, (tok.map or [0, 1])[1] + 1):
+                at = lines[n - 1].find(head, col if n == number else 0)
+                if at >= 0:
+                    number, col = n, at + len(head)
+                    break
+            before = lines[number - 1][: max(col - len(head), 0)]
             for line, _ in comment_lines(child.content, "html", HTML, number - 1):
                 out.append(line._replace(leading=line.number > number or not before.strip()))
     return out
