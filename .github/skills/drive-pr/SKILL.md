@@ -249,5 +249,5 @@ instance's outcome is context for the new one, never a standing answer to reuse 
 
 - A genuine design trade-off, a recurring finding pattern, or an architectural redesign proposal
   each escalate per pr-review-conduct's own list, restated there, not duplicated here.
-- An unrecognized review shape blocks the gate on its own, file an issue naming it and ask, never
-  guess what new wording probably meant.
+- A review shape the digest notes under `shapes=NOTED` is read by hand per pr-review-conduct's
+  Merge Gate item 4, never guessed at from what the new wording probably meant.

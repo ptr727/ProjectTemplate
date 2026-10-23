@@ -16,9 +16,9 @@ files = ["spec", "host-setup", "scripts", "tests"]
 mypy_path = [".github/actions/prose-gate", ".github/actions/python-directories", ".github/actions/repo-gate"]
 exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
-# The prose gate declares these in its own script block, and the generic validator gives mypy none of a script's packages.
+# A script declaring a library inline runs through uv, and a type check run with no environment of its own does not install it.
 [[tool.mypy.overrides]]
-module = ["markdown_it.*", "pygments.*"]
+module = ["markdown_it", "markdown_it.*", "pygments", "pygments.*"]
 ignore_missing_imports = true
 
 [tool.pyright]
