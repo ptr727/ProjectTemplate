@@ -42,8 +42,7 @@ def step_script(path: Path, name: str) -> str:
 def yaml_step(text: str, name: str) -> str:
     """The one sequence item named `name`, its dash blanked so its keys read as a mapping.
 
-    Read by indentation, as `spec/audit.py`'s workflow readers are, since the suite runs on the
-    standard library alone. The item ends at the first line at or left of its dash, so a key under
+    Read by indentation. The item ends at the first line at or left of its dash, so a key under
     a sibling step is never this step's.
     """
     lines = text.splitlines()

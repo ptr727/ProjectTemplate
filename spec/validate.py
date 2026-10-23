@@ -120,6 +120,7 @@ CONTRACT_KEYS = {
 # A driftNote names a check as a parenthesized id, "(hugo.generator.pinned)", anywhere in the note.
 CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
 CHECK_SCOPES = ("repo", "baseline", "file")
+CHECK_KEYS = {"id", "family", "description", "spec", "hub", "scope", "ground", "suppression"}
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
@@ -423,6 +424,11 @@ def check_registry_errors(registry, types, repos):
             errors.append(f"{where} scope must be one of {', '.join(CHECK_SCOPES)}")
         if not isinstance(check.get("ground", True), bool):
             errors.append(f"{where} ground must be true or false")
+        elif check.get("ground") is False and check.get("scope") != "repo":
+            errors.append(f"{where} ground false applies only to a repo check")
+        unknown = sorted(set(check) - CHECK_KEYS)
+        if unknown:
+            errors.append(f"{where} carries unknown key(s) {', '.join(unknown)}")
         suppression = check.get("suppression")
         ending = suppression.get("endsWithType", 0) if isinstance(suppression, dict) else 0
         if "suppression" in check and not (ending is None or ending in types.get("types", {})):

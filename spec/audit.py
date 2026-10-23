@@ -2254,7 +2254,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     w(
         f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
         f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
-        f"`spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
+        f"`uv run --no-project --script spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
         f"This lists what the audit mechanically detects. No check belonging to a project type in `spec/project-types.json` is run "
         f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict lives in AUDIT.md section 4."
     )

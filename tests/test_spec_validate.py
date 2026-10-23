@@ -67,6 +67,12 @@ class CheckRegistryCase(unittest.TestCase):
             ),
             ("a check that is no object", ["a.b"], "must be an object"),
             ("a file check with nothing read", [self.check(scope="file")], "no baseline check"),
+            ("a misspelled key", [self.check(grond=False)], "unknown key(s) grond"),
+            (
+                "ground false on a file check",
+                [self.check(scope="baseline"), self.check(id="c.d", scope="file", ground=False)],
+                "applies only to a repo check",
+            ),
         ]
         for label, checks, needle in cases:
             with self.subTest(label):
