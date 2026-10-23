@@ -22,8 +22,8 @@ uvx ruff@latest check .
 uvx ruff@latest format --check .
 uvx mypy@latest
 uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests
-uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
-uvx coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
+uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
+uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/gh-write-guard.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
 uvx coverage@latest report
