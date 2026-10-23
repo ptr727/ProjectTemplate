@@ -185,8 +185,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - An item that reads as neither a finding nor not one goes to the maintainer with its raw text
      quoted, per "Escalate to the maintainer when" below.
 
-   A part on an earlier round, or a label nested in a placed part, prints under `REVIEWER OUTPUT
-   NOTED` and decides no exit code. Read that block rather than the `shapes=` field, which names a
+   A part on an earlier round prints under `REVIEWER OUTPUT NOTED` and decides no exit code. So
+   does a label nested in a list, a quote, or a placed part. Read that block rather than the `shapes=` field, which names a
    head hold first. Read each such part by hand, and give any finding in it item 3's outcome.
 5. The maintainer has given **explicit** permission to merge.
 

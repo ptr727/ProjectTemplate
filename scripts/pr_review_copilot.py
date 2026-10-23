@@ -7,8 +7,8 @@
 
 The reviewer's wording and layout change without notice and with no programmatic API, so every
 spelling this reads lives in `reviewers/<name>.json` rather than here. A changed spelling is a
-data edit plus one fixture. A part of a body this cannot place is a one-line note carrying the
-part's own text. `read` never raises. A body it trips on reads as no refusal, `unknown` coverage
+data edit plus one fixture. A part of a body this cannot place is a one-line note. One that can
+hold a finding also carries its own text as an unplaced part. `read` never raises. A body it trips on reads as no refusal, `unknown` coverage
 and verdict, and the whole body unplaced. A new shape reaches the gate as text, never a crash.
 
 The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
@@ -294,7 +294,6 @@ def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None =
     """
     try:
         return _read(body or "", reviewer, threads)
-    # A shape the reader trips on is a note in the digest, never a crash in the gate.
     except Exception as exc:  # noqa: BLE001
         failed = f"the reader failed on this body ({type(exc).__name__})"
         part = Unplaced(failed, (body or "").replace("\r\n", "\n").strip())
@@ -370,6 +369,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     found = details(tokens)
     sections: list[Section] = []
     claimed: list[tuple[int, int]] = []
+    opaque: list[tuple[int, int]] = []
     counted: list[tuple[int, int]] = []
     open_count: int | None = None
     entries = linked = 0
@@ -385,6 +385,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         )
         if match is None:
             if vet and node.parent is None:
+                opaque.append((node.start, end + 1))
                 unread(
                     f"a collapsed section this reader has no spelling for: `{name}`",
                     node.start,
@@ -417,32 +418,39 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     table: list[str] | None = None
     listed = 0
 
-    def inside(token: Token) -> bool:
-        return any(a <= (token.map or [0])[0] < b for a, b in claimed)
+    def inside(token: Token, ranges: list[tuple[int, int]] = claimed) -> bool:
+        return any(a <= (token.map or [0])[0] < b for a, b in ranges)
 
-    def placed(inline: Token) -> bool:
-        said = " ".join(inline_text(inline).split())
+    def placed(n: int, t: Token) -> bool:
+        if t.type == "heading_open":
+            return True
+        if t.level:
+            return False
+        if t.type == "table_open":
+            return bool(vocab["table_header"]) and (
+                table_paths(tokens, n, vocab["table_header"]) is not None
+            )
+        if t.type == "html_block":
+            return bool(FLEET_REVIEW.search(t.content))
+        if t.type != "paragraph_open":
+            return False
+        said = " ".join(inline_text(tokens[n + 1]).split())
         return (
-            is_label(inline)
+            is_label(tokens[n + 1])
             or bool(vocab["effort"].fullmatch(label(said)))
             or any(p.match(said) for p in vocab["coverage_prose"])
+            or any(matched(ps, label(said)) for ps in vocab["sections"].values())
         )
 
     stops = sorted(
-        {a for a, _ in claimed}
-        | {
-            (t.map or [0])[0]
-            for n, t in enumerate(tokens)
-            if t.type in ("heading_open", "table_open")
-            or (t.type == "html_block" and not t.level)
-            or (t.type == "paragraph_open" and not t.level and placed(tokens[n + 1]))
-        }
+        {a for a, _ in claimed + opaque}
+        | {(t.map or [0])[0] for n, t in enumerate(tokens) if placed(n, t)}
     )
 
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        if token.type == "heading_open" and not inside(token):
+        if token.type == "heading_open" and not inside(token) and not inside(token, opaque):
             name = label(tokens[i + 1].content)
             kind = next((k for k, ps in vocab["verdicts"].items() if matched(ps, name)), "")
             if kind and verdict == "unknown":
@@ -470,7 +478,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                     open_count = (open_count or 0) + stated(found_kind[1])
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
-            elif vet and is_label(inline) and not matched(vocab["labels"], name):
+            elif (
+                vet
+                and is_label(inline)
+                and not matched(vocab["labels"], name)
+                and not inside(token, opaque)
+            ):
                 note = f"a label this reader has no spelling for: `{name}`"
                 if token.level or inside(token):
                     notes.append(note)

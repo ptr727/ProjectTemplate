@@ -2135,8 +2135,8 @@ def attestation(pr: dict) -> str | None:
     None where no attestation vouches for the head against the pull request's current base, and
     "unknown" where the pass recorded no count.
 
-    Read over every comment, with the author association keeping a passer-by's marker from
-    vouching. The marker counts only as a line of its own outside a fence.
+    Read over every comment not hidden, with the author association keeping a passer-by's marker
+    from vouching. The marker counts only as a line of its own outside a fence.
     """
     head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
     for _, lines in trusted_comments(pr):

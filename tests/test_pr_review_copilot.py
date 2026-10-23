@@ -427,6 +427,11 @@ class TestNotes(unittest.TestCase):
         self.assertEqual(("the reader failed on this body (ValueError)",), found.notes)
         self.assertEqual(("anything",), tuple(p.text for p in found.unplaced))
 
+    def test_a_pathological_body_reads_in_bounded_time(self) -> None:
+        for text in ("<details>" * 5000, "> " * 20000 + "x", "`" * 30000, "\u00a0" * 30000):
+            with self.subTest(text=text[:10]):
+                adapter.read(text)
+
 
 class TestUnplaced(unittest.TestCase):
     def test_each_unplaced_part_carries_its_own_text(self) -> None:
@@ -483,10 +488,27 @@ class TestUnplaced(unittest.TestCase):
         ]
         self.assertEqual(["**Risk level:**\n\nLow."] * 2, texts)
 
-    def test_a_pathological_body_reads_in_bounded_time(self) -> None:
-        for text in ("<details>" * 5000, "> " * 20000 + "x", "`" * 30000, "\u00a0" * 30000):
-            with self.subTest(text=text[:10]):
-                adapter.read(text)
+    def test_a_count_line_ends_a_trailing_part(self) -> None:
+        texts = [
+            adapter.read(body(sections=f"**Risk level:**\n\nLow.\n\n{count}")).unplaced[0].text
+            for count in ("**0 open findings**", "**No open findings**")
+        ]
+        self.assertEqual(["**Risk level:**\n\nLow."] * 2, texts)
+
+    def test_an_other_table_or_html_line_stays_inside_the_part(self) -> None:
+        for middle in ("| Area | Note |\n|---|---|\n| retry | off by one |", "<!-- aside -->"):
+            with self.subTest(middle=middle):
+                odd = f"### Risk notes\n\n{middle}\n\nThe loop may not end."
+                (part,) = adapter.read(body(sections=odd)).unplaced
+                self.assertIn("The loop may not end.", part.text)
+
+    def test_a_heading_inside_an_unknown_section_is_not_a_second_part(self) -> None:
+        odd = (
+            "<details>\n<summary>Confidence notes (1)</summary>\n\n### Inner\n\n"
+            "**Odd label:**\n\nText.\n</details>"
+        )
+        (part,) = adapter.read(body(sections=odd)).unplaced
+        self.assertIn("### Inner", part.text)
 
 
 class TestOtherReviewers(unittest.TestCase):
