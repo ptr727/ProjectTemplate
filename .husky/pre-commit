@@ -35,6 +35,11 @@ else
     echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
     exit 1
 fi
+if ! uv --version >/dev/null 2>&1; then
+    echo "pre-commit: 'uv --version' did not run, so the doc gates did not run." >&2
+    echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
+    exit 1
+fi
 
 # The prose gate is scoped to what changed, which is the policy for prose.
 # The base is HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
@@ -47,7 +52,7 @@ base=HEAD
 if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
     base=MERGE_HEAD
 fi
-run_py scripts/prose_lint.py . --diff "$base"
+uv run --no-project --script .github/actions/prose-gate/prose_lint.py . --diff "$base"
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.

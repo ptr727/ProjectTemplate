@@ -90,7 +90,7 @@ This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codes
 ### Tests and Script Dependencies
 
 - **A test lives under the repository's `tests/` tree, never inside the production file it tests.** A deployed script may keep a `--selftest` that runs a small smoke check in seconds, and the case matrix lives in `tests/`. A self-test shipped inside the file it tests grows the file every reviewer reads. One such file reached 21,000 lines that way, 11,600 of them cases.
-- **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --script <path>`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. A script with no such block runs under `python3`. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
+- **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --no-project --script <path>`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. `--no-project` keeps uv from syncing the project around a script that has no block yet, where it would write a lockfile and a virtual environment. A script with no such block runs under `python3` and uv alike. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
 
 ## Shell
 

@@ -21,6 +21,11 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup uv step
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      with:
+        enable-cache: false
+
     # The caller checks out with fetch-depth 0, because a diff against the base needs its history.
     - name: Check prose step
       shell: bash
@@ -111,4 +116,4 @@ runs:
         # Options first, then `--`, so every remaining token is read as a literal path.
         # A path-shaped token beginning with a dash would otherwise parse as an option, and
         # `--list-files` in that position turns the gate into a file listing that exits 0.
-        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${allow_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"
+        uv run --no-project --script "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${allow_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"
