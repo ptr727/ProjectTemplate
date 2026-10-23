@@ -324,7 +324,8 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         return Reading(refusal=refusal, coverage="none", marked=marked)
 
     coverage, coverage_line = "none", ""
-    rank = {"full": 0, "partial": 1, "unknown": 2}
+    # Partial ranks worst, being the reading that blocks, so nothing beside it can hide it.
+    rank = {"full": 0, "unknown": 1, "partial": 2}
     for h in html:
         for m in FLEET_REVIEW.finditer(h):
             got, of = m.group(1), m.group(2)
@@ -334,14 +335,6 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 state = "full" if got == of else "partial"
             if coverage == "none" or rank[state] > rank[coverage]:
                 coverage, coverage_line = state, m.group(0)
-    # A count stated in prose is no marker, and read as nothing it would let a table stand in.
-    for token in tokens:
-        said = " ".join(inline_text(token).split()) if token.type == "inline" else ""
-        if said and any(p.search(said) for p in vocab["coverage_prose"]):
-            coverage, coverage_line = "unknown", said
-            notes.append(f"a coverage statement outside the fleet-review marker: `{said}`")
-            break
-
     # A body in another layout is one note, rather than one note per part of it.
     vet = vocab["vetted"] and (marked or not vocab["format_marker"])
     if vocab["vetted"] and vocab["format_marker"]:
@@ -433,6 +426,22 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             if (rows := table_paths(tokens, i, vocab["table_header"])) is not None:
                 table = (table or []) + rows
         i += 1
+
+    # A count stated in prose outside any section, read from its text alone, never from code.
+    for n, token in enumerate(tokens[1:], start=1):
+        if token.type != "inline" or tokens[n - 1].type != "paragraph_open" or inside(token):
+            continue
+        said = " ".join(
+            "".join(c.content for c in token.children or [] if c.type == "text").split()
+        )
+        m = next((m for p in vocab["coverage_prose"] if (m := p.search(said))), None)
+        if m is None:
+            continue
+        got, of = int(m.group("got")[:COUNT_DIGITS]), int(m.group("of")[:COUNT_DIGITS])
+        state = "partial" if got < of else "full" if got == of else "unknown"
+        notes.append(f"a coverage statement outside the fleet-review marker: `{said}`")
+        if coverage == "none" or rank[state] > rank[coverage]:
+            coverage, coverage_line = state, said
 
     named = max(open_count or 0, listed)
     return Reading(

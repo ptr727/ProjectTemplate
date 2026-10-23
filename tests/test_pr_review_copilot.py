@@ -5,7 +5,8 @@ Every body here is built from the current format's own markers, with titles, pat
 invented for the case, per GOVERNANCE.md "Representative Data in Agent-Authored Text". A new
 spelling the reviewer adopts is a vocabulary edit in `scripts/reviewers/` plus one case here.
 
-Run as `python3 tests/test_pr_review_copilot.py`, or under `python3 -m unittest discover -s tests`.
+Run under `uv run --no-project --with-requirements tests/requirements.txt`, as
+`python tests/test_pr_review_copilot.py` or `python -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -168,15 +169,33 @@ class TestCoverage(unittest.TestCase):
                 found = adapter.read(body(tail=f"Lead.\n\n{quoted}"))
                 self.assertEqual("none", found.coverage)
 
-    def test_a_count_stated_in_prose_reads_unknown_with_a_note(self) -> None:
-        for line in (
-            "**Files reviewed:** 3/4 changed files",
-            "Copilot reviewed 3 out of 4 changed files.",
+    def test_a_count_stated_in_prose_is_read_with_a_note(self) -> None:
+        for line, state in (
+            ("**Files reviewed:** 3/4 changed files", "partial"),
+            ("Copilot reviewed 4 out of 4 changed files.", "full"),
         ):
             with self.subTest(line=line):
                 found = adapter.read(body(headline=line))
-                self.assertEqual("unknown", found.coverage)
+                self.assertEqual(state, found.coverage)
                 self.assertTrue(any("outside the fleet-review marker" in n for n in found.notes))
+
+    def test_a_partial_wins_over_any_reading_beside_it(self) -> None:
+        tail = (
+            "<!-- fleet-review: reviewed=4 changed=4 findings=0 -->\n\n"
+            "<!-- fleet-review: reviewed=5 changed=4 findings=0 -->\n\n"
+            "Copilot reviewed 3 out of 4 changed files."
+        )
+        self.assertEqual("partial", adapter.read(body(tail=tail)).coverage)
+
+    def test_a_count_quoted_in_code_or_a_finding_states_nothing(self) -> None:
+        quoted = "A fixture reads `Copilot reviewed 3 out of 4 changed files` here."
+        self.assertEqual("none", adapter.read(body(headline=quoted)).coverage)
+        inside = body(
+            sections=collapsed(
+                "1 previously missed issue", "Copilot reviewed 3 out of 4 changed files."
+            )
+        )
+        self.assertEqual("none", adapter.read(inside).coverage)
 
     def test_no_marker_states_none(self) -> None:
         self.assertEqual("none", adapter.read(body()).coverage)

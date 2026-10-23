@@ -1312,7 +1312,7 @@ def coverage(pr: dict) -> tuple[str, str]:
     a file table stands in under `table_cover`, then an attested local pass under `local_cover`.
     """
     rounds = head_reviews(pr)
-    rank = ("full", "partial", "unknown")
+    rank = ("full", "unknown", "partial")
     stated = [(r.coverage, r.coverage_line) for n in rounds if (r := reading(n)).coverage != "none"]
     if stated:
         return max(stated, key=lambda s: rank.index(s[0]))

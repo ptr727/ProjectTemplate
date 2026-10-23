@@ -6,7 +6,8 @@ answer rather than a crash: a review attributed to the wrong login, a review cou
 stale head, or a wait that returns success while nothing landed. Each case below feeds a crafted
 GraphQL payload and asserts the reading, with `gql` replaced so no case reaches the network.
 
-Run as `python3 tests/test_pr_review.py`, or under `python3 -m unittest discover -s tests`.
+Run under `uv run --no-project --with-requirements tests/requirements.txt`, as
+`python tests/test_pr_review.py` or `python -m unittest discover -s tests`.
 """
 
 from __future__ import annotations
@@ -1926,6 +1927,14 @@ class TestReadingsThroughTheAdapter(GqlCase):
     def test_an_earlier_partial_carries_to_a_head_stating_none(self) -> None:
         part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
         rounds = [review(oid=OLD, body=part, rid="A"), review(body=OVERVIEW, rid="B")]
+        self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
+
+    def test_a_prose_partial_on_an_earlier_round_keeps_a_table_from_standing_in(self) -> None:
+        part = f"{OVERVIEW}\nCopilot reviewed 1 out of 2 changed files.\n"
+        rounds = [
+            review(oid=OLD, body=part, rid="A"),
+            review(body=summarized(["a.py"], covers=""), rid="B"),
+        ]
         self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
 
     def test_a_table_naming_exactly_the_changed_files_covers_the_head(self) -> None:
