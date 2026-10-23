@@ -468,6 +468,16 @@ function Invoke-HubPython {
     return $LASTEXITCODE
 }
 
+function Invoke-HubUvScript {
+    param([Parameter(Mandatory)][string]$ScriptPath, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        fail 'uv is required for this task. host-setup\windows\install-tools.ps1 provides it.'
+        return 127
+    }
+    & uv run --no-project --script (Join-Path $script:HUB_ROOT $ScriptPath) @Arguments | Out-Host
+    return $LASTEXITCODE
+}
+
 # --- Actions ---
 
 function Invoke-AuditRepo {
@@ -475,10 +485,10 @@ function Invoke-AuditRepo {
     $default = $default.Split('/')[-1]
     $name = Read-Host "Repo to audit [$default]"
     if (-not $name) { $name = $default }
-    # Confirm-HubRoot and the Invoke-HubPython call it gates both run inside the same Invoke-WithHubLock span, matching Invoke-HostTool, so nothing reads $HUB_ROOT unlocked.
+    # Confirm-HubRoot and the Invoke-HubUvScript call it gates both run inside the same Invoke-WithHubLock span, matching Invoke-HostTool, so nothing reads $HUB_ROOT unlocked.
     return (Invoke-WithHubLock {
             if (-not (Confirm-HubRoot)) { return 1 }
-            return (Invoke-HubPython -ScriptPath 'spec/audit.py' -Arguments $name)
+            return (Invoke-HubUvScript -ScriptPath 'spec/audit.py' -Arguments $name)
         })
 }
 

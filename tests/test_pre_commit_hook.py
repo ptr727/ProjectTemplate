@@ -24,13 +24,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / ".husky" / "pre-commit"
-GATE_ENTRY = REPO / "scripts" / "prose_lint.py"
 GATE = REPO / ".github" / "actions" / "prose-gate" / "prose_lint.py"
 
 COMMENT = "# The value is read once, since the second read can disagree.\n"
 
 
 @unittest.skipUnless(sys.platform == "linux", "runs a POSIX shell hook with executable stubs")
+@unittest.skipUnless(shutil.which("uv"), "the hook runs the prose gate through uv")
 class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
     """A merge of develop brings in lines the branch never wrote, and the hook must not read them.
 
@@ -61,12 +61,12 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         self.git("config", "core.hooksPath", ".husky")
         for source, dest in (
             (HOOK, ".husky/pre-commit"),
-            (GATE_ENTRY, "scripts/prose_lint.py"),
             (GATE, ".github/actions/prose-gate/prose_lint.py"),
         ):
             target = self.root / dest
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+        (self.root / "scripts").mkdir()
         (self.root / "scripts" / "repo_gate.py").write_text(
             "import sys\nsys.exit(0)\n", encoding="utf-8"
         )

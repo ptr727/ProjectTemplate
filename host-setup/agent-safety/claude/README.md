@@ -21,7 +21,7 @@ Into `~/.claude/` (or `%USERPROFILE%\.claude\` on Windows):
   - A local file that cannot be read, is not a regular file, or is not UTF-8 stops the install before anything changes. So does one carrying this kit's own markers, since appending it would duplicate a block.
   - The `agent-safety` block carries restrictions alone, so nothing in it can widen a permission. `Repository Boundaries and Write Safety` mirrors the committed `GOVERNANCE.md` section of the same name, carrying as behavioral guidance its write rules and its rules that a task works in its own checkout and isolates into its own worktree before its first file edit. `Data in Agent-Authored Text` mirrors `GOVERNANCE.md` "Representative Data in Agent-Authored Text", so an agent illustrates with constructed data rather than data observed on the machine. `Authorization Scope and Memory Hygiene` bounds how a granted permission is recorded and read. Each mirrors a rule that otherwise reaches fleet repos only.
   - The `fleet-bootstrap` block carries `Fleet Governance Entry Point`, which names the template repository and routes by the state a repository is actually in. It is separate precisely because it enables rather than restricts, and the safety block's own text says nothing in it widens a permission, so merging the two would contradict that. It is host-wide rather than per repository because the repositories that most need it are the ones carrying no instruction set to point the way, and it mirrors the byte-locked `AGENTS.md` "Fleet Bootstrap" section that a conformant repository carries.
-- **The permission rules this kit owns, merged into `settings.json`** beside the hook registration. Each is declared as a prefix and a rule, and a re-run drops every rule the prefix owns before adding the current one, so a rule whose spelling changes updates in place rather than accumulating beside the version it replaced. Ownership requires a rule-syntax delimiter after the prefix, since the prefix ends at the script name and a bare prefix test would also claim a longer path such as `pr_review.py-custom`, so a rule written by hand for a different script is never touched. These widen rather than restrict, which is why they are their own component for the same reason the `fleet-bootstrap` block is separate from the `agent-safety` one. Today the list holds one rule, for `scripts/pr_review.py`, which covers the review loop's `reply` and resolve and the `cleanup` delete of a merged pull request's head branch. Driving that loop by hand needs a raw GraphQL mutation carrying a node id, which is the shape that reached a stranger's repository, where the script queries the id itself and takes no argument an id fits in. The `:*` rule approves any arguments, so it approves any `cleanup` call. Every check the delete makes therefore lives inside the subcommand rather than in the rule. What the rule decides is which command runs without a prompt, and it matches the command text rather than the directory the command runs in, so it reaches a `scripts/pr_review.py` in any checkout that carries one. An absolute path would not narrow that, since the hub is reached as a checkout of the caller's own and its location differs per task, so pinning one path would name a checkout the next task does not use. What bounds it is the rule that an agent reaches the hub as a checkout of its own, fetched immediately before it is read, rather than a copy it happens to find on disk, which the `fleet-bootstrap` block beside this carries and [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states in full.
+- **The permission rules this kit owns, merged into `settings.json`** beside the hook registration. Each is declared as a prefix and a rule, and a re-run drops every rule the prefix owns before adding the current one, so a rule whose spelling changes updates in place rather than accumulating beside the version it replaced. Ownership requires a rule-syntax delimiter after the prefix, since the prefix ends at the script name and a bare prefix test would also claim a longer path such as `pr_review.py-custom`, so a rule written by hand for a different script is never touched. These widen rather than restrict, which is why they are their own component for the same reason the `fleet-bootstrap` block is separate from the `agent-safety` one. Today the list holds the rules for `scripts/pr_review.py`, one for each spelling it runs under, `python3` and `uv run --no-project --script`. They cover the review loop's `reply` and resolve and the `cleanup` delete of a merged pull request's head branch. Driving that loop by hand needs a raw GraphQL mutation carrying a node id, which is the shape that reached a stranger's repository, where the script queries the id itself and takes no argument an id fits in. The `:*` rule approves any arguments, so it approves any `cleanup` call. Every check the delete makes therefore lives inside the subcommand rather than in the rule. What the rule decides is which command runs without a prompt, and it matches the command text rather than the directory the command runs in, so it reaches a `scripts/pr_review.py` in any checkout that carries one. An absolute path would not narrow that, since the hub is reached as a checkout of the caller's own and its location differs per task, so pinning one path would name a checkout the next task does not use. What bounds it is the rule that an agent reaches the hub as a checkout of its own, fetched immediately before it is read, rather than a copy it happens to find on disk, which the `fleet-bootstrap` block beside this carries and [`GOVERNANCE.md`][governance] "Hub-Hosted Tooling" states in full.
 
 See [`../README.md`][spec] "Requirements" for which of these each rule implements, and "Auditing an
 Implementation Against This Spec" for how to check this hook still satisfies them after a change.
@@ -57,6 +57,7 @@ grep -c CLAUDE_CODE_SHELL_PREFIX ~/.claude/settings.json      # expect 1 where t
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
 grep -c 'fleet-bootstrap v' ~/.claude/CLAUDE.md         # expect 2 (start + end marker)
 grep -cF 'Bash(python3 scripts/pr_review.py:*)' ~/.claude/settings.json   # expect 1 (never duplicated)
+grep -cF 'Bash(uv run --no-project --script scripts/pr_review.py:*)' ~/.claude/settings.json   # expect 1
 ```
 
 On Windows PowerShell:
@@ -68,6 +69,7 @@ py -3 "$env:USERPROFILE\.claude\hooks\tool-containment.py" --selftest     # all 
 (Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count      # expect 2
 (Select-String 'fleet-bootstrap v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
 (Select-String -SimpleMatch 'Bash(python3 scripts/pr_review.py:*)' "$env:USERPROFILE\.claude\settings.json").Count   # expect 1
+(Select-String -SimpleMatch 'Bash(uv run --no-project --script scripts/pr_review.py:*)' "$env:USERPROFILE\.claude\settings.json").Count   # expect 1
 ```
 
 Live end-to-end (in any repo): attempt a discarded-output write and confirm the Bash tool is blocked:
@@ -121,13 +123,14 @@ Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it,
 
 ## Manual settings.json Shape (for Reference)
 
-The installer writes this. It is here so you can inspect it, not as a template to hand-place: the
-literal `"python3"` shown for `command` is what the installer writes when a `python3` launcher is
-available, but it substitutes `sys.executable`'s own absolute path instead when it is not (a
-Windows host with no `python3` shim, most commonly), while `permissions.allow`'s own
-`Bash(python3 scripts/pr_review.py:*)` rule always names `python3` literally regardless, since it
-matches the command Claude Code itself runs `pr_review.py` under, not the hook's own launcher.
+The installer writes this. It is here so you can inspect it, not as a template to hand-place.
+The literal `"python3"` shown for `command` is what the installer writes when a `python3` launcher
+is available. It substitutes `sys.executable`'s own absolute path when it is not, most commonly on a
+Windows host with no `python3` shim. The `Bash(python3 scripts/pr_review.py:*)` rule in
+`permissions.allow` always names `python3` literally, since it matches a command line rather than
+the hook's own launcher.
 Run the installer rather than hand-copying this block on a host where the two might differ.
+The `uv run --no-project --script` rule beside it matches the spelling the fleet's skills print.
 
 ```json
 {
@@ -143,7 +146,10 @@ Run the installer rather than hand-copying this block on a host where the two mi
     ]
   },
   "permissions": {
-    "allow": [ "Bash(python3 scripts/pr_review.py:*)" ]
+    "allow": [
+      "Bash(python3 scripts/pr_review.py:*)",
+      "Bash(uv run --no-project --script scripts/pr_review.py:*)"
+    ]
   }
 }
 ```
