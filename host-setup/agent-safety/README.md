@@ -269,8 +269,8 @@ text says, because the harm it covers was never in the text.
    as its own command.
    A launcher in front of a git command, such as `flock <file>`, passes its prefix to that git.
    An `env` or a `sudo` after the launcher does too. A launcher the hook does not know counts
-   unless it only names its arguments, as `grep` does. A shell such as `pwsh` behind such a launcher is read as
-   well.
+   unless it only names its arguments, as `grep` does. A shell such as `pwsh` behind such a
+   launcher is read as well.
    A shell whose command string runs git is denied where its prefix or an earlier `export` sets
    such a file, or config through `GIT_CONFIG_COUNT`. A variable git runs as a command, set
    there, counts too, unless it names a plain program that runs no git. The hook reads that
@@ -392,8 +392,9 @@ text says, because the harm it covers was never in the text.
    a subshell does not reach a later command, though one there is still read as one that may.
    A leading one is read as above. A value of `GIT_DIR`, `GIT_WORK_TREE`, `--git-dir`, or
    `--work-tree` may hold a run-time word other than `$HOME`. A subcommand this requirement
-   denies is then denied, since that value names no checkout the hook can resolve. A subcommand this requirement denies, named in wrappers nested
-   past the reading cap, is denied wherever it runs. `--git-dir`/`GIT_DIR=` alone,
+   denies is then denied, since that value names no checkout the hook can resolve. A
+   subcommand this requirement denies, named in wrappers nested past the reading cap, is denied
+   wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
    target, matching git's own documented fallback.
 

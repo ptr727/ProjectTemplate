@@ -1868,18 +1868,25 @@ def _export_events(toks):
     """Each place in `toks` where the shell exports variables, as (index, the (name, value) pairs it exports).
 
     An `export`, or a `declare`, `typeset`, or `local` given `-x`, exports each `NAME=value` it
-    names, read by `_export_words`. One naming a bare `NAME` exports the value the last command
-    of plain assignments, or the `declare`, `typeset`, `local`, or `readonly` before it, set (see
-    `_plain_assignments`). A `builtin` or `command` before it counts. A plain assignment standing as its own command exports its value too, where the
-    name was exported before it or a `set -a` or `set -o allexport` came before it, and so does a
-    `declare` after one. The readers of an exported git variable read these, so each form reaches
-    every rule that reads one. `GH_REPO` keeps its own reader (see `_gh_repo_states`), which fails
-    closed on the forms it does not follow (see `_gh_repo_unread_export`).
+    names, read by `_export_words`. One naming a bare `NAME` exports each value a plain
+    assignment, a `declare`, a `typeset`, a `local`, or a `readonly` before it gave that name (see
+    `_plain_assignments`). Each is read, since a function or a branch may hold the one set last.
+    A `builtin` or `command` before it counts. A plain assignment standing as its own command
+    exports its value too. It does where the name was exported before it, or a `set -a` or
+    `set -o allexport` came before it, and so does a `declare` after one. The readers of an
+    exported git variable read these, so each form reaches every rule that reads one. `GH_REPO`
+    keeps its own reader (see `_gh_repo_states`). That reader fails closed on the forms it does
+    not follow (see `_gh_repo_unread_export`).
     """
     shell, marked, allexport, out = {}, set(), False, []
+
+    def remember(pairs):
+        for name, value in pairs:
+            shell.setdefault(name, []).append(value)
+
     for x, t in enumerate(toks):
         plain = _plain_assignments(toks, x)
-        shell.update(plain)
+        remember(plain)
         reached = [(name, value) for name, value in plain if allexport or name in marked]
         if reached:
             out.append((x, reached))
@@ -1898,7 +1905,7 @@ def _export_events(toks):
         if t not in _EXPORTING_BUILTINS and t != "readonly":
             continue
         pairs, names = _export_words(toks, x)
-        shell.update(pairs)
+        remember(pairs)
         flag = _EXPORTING_BUILTINS.get(t, "-x")
         if flag and not any(w.startswith("-") and flag[1] in w for w in options):
             if allexport and pairs:
@@ -1906,14 +1913,16 @@ def _export_events(toks):
             continue
         marked.update(names)
         marked.update(name for name, _value in pairs)
-        out.append((x, [(name, shell[name]) for name in names if name in shell] + pairs))
+        named = [(name, v) for name in names for v in dict.fromkeys(shell.get(name, ()))]
+        out.append((x, named + pairs))
     return out
 
 
 def _exported_states(toks, word):
     """The exported variables the git word at `toks[word]` may run under, as one dict after each export.
 
-    Each export is read from `_export_events`, in order. Those before the git word are read. Where
+    Each export is read from `_export_events`, in order. Those before the git word are read, and
+    an export giving one name several values gives a state for each. Where
     a loop or a function may run the git word after a later export, as in `f() { git ...; };
     export ...; f`, every export in the command is read (see `_reruns`).
     """
@@ -1922,8 +1931,11 @@ def _exported_states(toks, word):
     for x, pairs in _export_events(toks):
         if x >= end:
             break
+        base = dict(current)
         current.update(pairs)
         states.append(dict(current))
+        alternates = [(n, v) for n, v in pairs if current[n] != v]
+        states.extend({**base, **dict(pairs), n: v} for n, v in alternates)
     return states
 
 
@@ -4732,6 +4744,9 @@ def _xargs_replace_strings(toks, k, parsed=False):
     x = start + 1
     while x < k and toks[x].startswith("-") and toks[x] != "--":
         w, x = toks[x], x + 1
+        if w.startswith("--replace"):
+            out.append(w.partition("=")[2] or "{}")
+            continue
         if w.startswith("--"):
             x += "=" not in w and w in _PRECOMMAND_VALUE_OPTS["xargs"]
             continue
@@ -6066,7 +6081,8 @@ def _xargs_gh_unread(text):
         replaced = _xargs_replace_strings(toks, k)
         if len(path) < 2 or (tuple(path[:2]) in _GH_WRITE_SUBSUBS and len(path3) < 3):
             return True
-        if args[0] != "api" and any(r in w for w in path3 for r in replaced):
+        words = path3 if tuple(path[:2]) in _GH_WRITE_SUBSUBS else path
+        if args[0] != "api" and any(r in w for w in words for r in replaced):
             return True
         if _gh_argv_is_write(args):
             xargs = max(x for x in range(k) if _base_name(toks[x]) == "xargs")
@@ -6194,8 +6210,8 @@ def _rewritten_git_words(cmd):
     - an unquoted pathname pattern in a directory value, since it may match several names
     - a push or a commit that `xargs` runs, since it appends words the guard does not read
     - a git word with no subcommand that `xargs` runs, since its input gives the subcommand
-    - an `xargs` replace string in git's subcommand, or among the global options of a git command
-      that may mutate, since each word xargs reads takes its place
+    - an `xargs` replace string in git's subcommand or a `-c` value, or among the global options
+      of a git command that may mutate, since each word xargs reads takes its place
 
     The text an `eval` runs is read too. A word of any `eval`'s arguments in a text may expand
     outside single quotes. Each payload that text's evals run is then text the shell has already
@@ -6278,6 +6294,13 @@ def _rewritten_git_words(cmd):
             sub = toks[j]
             reps = _xargs_replace_strings(toks, k) if _xargs_command(toks, k, mask) else []
             held = next((r for r in reps if r in sub), None)
+            configured = any(
+                r in toks[x]
+                and (toks[x - 1] in ("-c", "--config-env") or toks[x].startswith("--config-env"))
+                for x in range(k + 1, j)
+                for r in reps
+            )
+            held = held or (next(iter(reps)) if configured else None)
             if held is None and any(r in toks[x] for x in range(k + 1, j) for r in reps):
                 verdict = _primary_checkout_verdict(
                     sub, _collect_arglist(toks, j + 1)[0], None, lambda _d, _r: False
@@ -10846,6 +10869,24 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "allow",
         "control: a gh api read whose endpoint alone holds the replace string is read",
     ),
+    (
+        "gh pr list --json number -q '.[].number' | xargs -I{} gh pr view {}",
+        {},
+        "allow",
+        "control: a gh read whose target alone holds the replace string is read",
+    ),
+    (
+        "printf 5 | xargs -I{} gh pr comment {} --body x",
+        {},
+        "allow",
+        "control: a written-out gh write whose target an inert replace fills is read",
+    ),
+    (
+        "echo 5 | xargs --replace gh api repos/example/repo/pulls/{}",
+        {},
+        "allow",
+        "control: a long --replace is read as xargs's own replace option",
+    ),
 ]
 
 
@@ -14870,6 +14911,22 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "an xargs replace string in a mutating git command's directory options fails closed",
+    ),
+    (
+        "GIT_DIR=/primary/.git; f() { local GIT_DIR=/worktree/.git; }; export GIT_DIR; git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export reads every value a name was given, a function's local beside the outer one",
+    ),
+    (
+        "GIT_DIR=/primary/.git; if false; then declare GIT_DIR=/worktree/.git; fi; export GIT_DIR; git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export reads a value an untaken branch's declare gave beside the earlier one",
     ),
 ]
 
@@ -20453,6 +20510,13 @@ _HIDDEN_GIT_CASES = [
         {},
         "allow",
         "control: a replace string among a read-only git command's options is allowed",
+    ),
+    (
+        "echo 'core.fsmonitor=git push origin develop' | xargs -I{} git -c {} status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a -c value an xargs replace string fills may set any config, whatever the subcommand",
     ),
 ]
 
