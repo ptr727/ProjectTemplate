@@ -108,7 +108,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    checked out, and `gh pr merge --delete-branch` needs to switch that worktree to the base branch
    to delete it, which fails when `develop` is already checked out somewhere else, the ordinary
    case in this layout. Instead run repo-worktree's post-merge cleanup with
-   `python3 scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
    primary clone. It deletes the remote branch, then removes the task's worktree and local branch.
    It decides its local refusals before the remote delete, and `repo-worktree` "Listing and
@@ -122,7 +122,7 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    than deleting by hand: `1` is a refusal, a moved tip among them, `2` a read that did not answer
    or a delete it could not confirm, and `64` a target under an owner other than the hub
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
-   under the host-safety installer's `Bash(python3 scripts/pr_review.py:*)` allow rule,
+   under the host-safety installer's `Bash(uv run --no-project --script scripts/pr_review.py:*)` allow rule,
    which is what lets auto mode complete it.
    It also refuses while another open pull request in the repository has the branch as its head or base.
    It names each, since the delete would close or retarget it.

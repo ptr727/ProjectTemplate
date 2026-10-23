@@ -54,4 +54,4 @@ runs:
     - name: Report unclassified characters step
       shell: bash
       continue-on-error: true
-      run: python3 scripts/prose_lint.py . --check charset-unknown --summary
+      run: uv run --no-project --script .github/actions/prose-gate/prose_lint.py . --check charset-unknown --summary

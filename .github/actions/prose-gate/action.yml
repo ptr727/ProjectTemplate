@@ -21,12 +21,11 @@ inputs:
 runs:
   using: composite
   steps:
-    # The caller checks out with fetch-depth 0, because a diff against the base needs its history.
-    - name: Check prose step
+    # Read before the nested setup-uv step, so the gate's own location and pin are not that action's.
+    - name: Locate gate step
+      id: gate
       shell: bash
       env:
-        BASE: ${{ inputs.base }}
-        PATHS: ${{ inputs.paths }}
         # A caller reaches this gate at whatever hub commit its workflow pins, and only the action knows which one that is, since a checked-out action carries no history to read it from.
         # Unnamed, a finding from a stale pin reproduces against no local run and reads as a gate defect rather than as a version gap.
         # Both the context and the default environment variable are read, because the context's value for a repository-relative reference is undocumented and the two are populated by different paths.
@@ -35,6 +34,28 @@ runs:
         # What each form populates is read off a real run rather than predicted here, since predicting it is what a verdict naming its own copy exists to stop anyone having to do.
         ACTION_REPOSITORY: ${{ github.action_repository }}
         ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -Eeuo pipefail
+        {
+          echo "path=$GITHUB_ACTION_PATH"
+          echo "repository=${ACTION_REPOSITORY:-${GITHUB_ACTION_REPOSITORY:-}}"
+          echo "ref=${ACTION_REF:-${GITHUB_ACTION_REF:-}}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Setup uv step
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      with:
+        enable-cache: false
+
+    # The caller checks out with fetch-depth 0, because a diff against the base needs its history.
+    - name: Check prose step
+      shell: bash
+      env:
+        BASE: ${{ inputs.base }}
+        PATHS: ${{ inputs.paths }}
+        GATE_PATH: ${{ steps.gate.outputs.path }}
+        ACTION_REPOSITORY: ${{ steps.gate.outputs.repository }}
+        ACTION_REF: ${{ steps.gate.outputs.ref }}
         ALLOW_COMMENTS: ${{ inputs.allow-comments }}
       run: |
         set -Eeuo pipefail
@@ -88,11 +109,10 @@ runs:
           inert_excludes="${inert_excludes//$'\r'/'\x0d'}"
           echo "Excluding ${#excluded_paths[@]} path(s) from $exclude_file: ${inert_excludes//'##['/'##\x5b'}"
         fi
-        # The context is preferred and the default environment variable is the fallback, so a reference form that populates only one of them still names the pin.
         # Naming a repository with no ref, or a ref with no repository, would be worse than naming nothing, since the value exists to identify one commit.
         # Defaulted rather than read bare, since `set -u` makes an unset variable fatal and a harness that runs this block outside Actions sets neither.
-        action_repository="${ACTION_REPOSITORY:-${GITHUB_ACTION_REPOSITORY:-}}"
-        action_ref="${ACTION_REF:-${GITHUB_ACTION_REF:-}}"
+        action_repository="${ACTION_REPOSITORY:-}"
+        action_ref="${ACTION_REF:-}"
         # Compared against the one value that stands the rule down, so anything else runs the gate.
         # A misspelled input, an empty one, and a label expression that matched nothing all reach here.
         # Each of them is a change nobody labeled, which is a change the gate reads.
@@ -111,4 +131,4 @@ runs:
         # Options first, then `--`, so every remaining token is read as a literal path.
         # A path-shaped token beginning with a dash would otherwise parse as an option, and
         # `--list-files` in that position turns the gate into a file listing that exits 0.
-        python3 "$GITHUB_ACTION_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${allow_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"
+        uv run --no-project --script "$GATE_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${allow_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"
