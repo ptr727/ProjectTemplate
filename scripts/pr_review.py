@@ -270,7 +270,7 @@ HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
-    comments(last:100){ nodes{ author{login} authorAssociation createdAt body } pageInfo{ hasPreviousPage } }
+    comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
@@ -1265,9 +1265,11 @@ def shape_hold(pr: dict) -> tuple[str, list[adapter.Unplaced], bool] | None:
 
 
 def trusted_comments(pr: dict) -> Iterator[tuple[str, list[str]]]:
-    """Each owner's, member's, or collaborator's comment body, with its HTML lines outside code."""
+    """Each owner's, member's, or collaborator's shown comment body, with its HTML lines outside code."""
     for node in (pr.get("comments") or {}).get("nodes") or []:
-        if (node.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS:
+        if (node.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS and not node.get(
+            "isMinimized"
+        ):
             body = node.get("body") or ""
             yield body, adapter.html_lines(body)
 

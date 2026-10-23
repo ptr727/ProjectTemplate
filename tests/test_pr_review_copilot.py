@@ -438,8 +438,8 @@ class TestUnplaced(unittest.TestCase):
         self.assertEqual(3, len(parts))
         texts = list(parts.values())
         self.assertTrue(any("Hidden finding." in t and "<summary>" in t for t in texts))
-        self.assertTrue(any(t.startswith("### Confidence assessment") for t in texts))
-        self.assertTrue(any("The loop may not end." in t for t in texts))
+        self.assertIn("### Confidence assessment\n\nThe loop may not end.", texts)
+        self.assertIn("**Risk level:**\n\nLow.", texts)
 
     def test_a_body_in_another_layout_is_unplaced_whole(self) -> None:
         text = "## Pull request overview\n\nThe change is narrow."
@@ -470,9 +470,18 @@ class TestUnplaced(unittest.TestCase):
         self.assertIn("The loop may not end.", part.text)
         self.assertNotIn("What changed", part.text)
 
-    def test_a_label_inside_a_list_item_is_not_a_part(self) -> None:
+    def test_a_label_inside_a_list_item_is_a_note_and_not_a_part(self) -> None:
         nested = "**Changes:**\n\n- Test updates:\n\n  - Cover the empty case.\n"
-        self.assertEqual((), adapter.read(body(sections=nested)).unplaced)
+        found = adapter.read(body(sections=nested))
+        self.assertEqual((), found.unplaced)
+        self.assertTrue(any("test updates:" in n for n in found.notes))
+
+    def test_the_effort_tail_stays_out_of_a_trailing_part(self) -> None:
+        texts = [
+            adapter.read(body(sections="**Risk level:**\n\nLow.", tail=tail)).unplaced[0].text
+            for tail in ("<sub>Review effort: Lite</sub>", "<sub>Review effort: Balanced</sub>")
+        ]
+        self.assertEqual(["**Risk level:**\n\nLow."] * 2, texts)
 
     def test_a_pathological_body_reads_in_bounded_time(self) -> None:
         for text in ("<details>" * 5000, "> " * 20000 + "x", "`" * 30000, "\u00a0" * 30000):

@@ -2168,6 +2168,21 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn(f"round {OLD[:8]}: a collapsed section", out)
         self.assertNotEqual(self.fingerprint(old), self.fingerprint(new))
 
+    def test_the_same_unplaced_text_on_a_new_head_keeps_its_acknowledgment(self) -> None:
+        def trailing(effort: str) -> str:
+            return f"{OVERVIEW}\n**Risk level:**\n\nLow.\n\n<sub>Review effort: {effort}</sub>"
+
+        old, new = trailing("Lite"), trailing("Balanced")
+        rounds = [review(oid=OLD, body=old, rid="A"), review(body=new, rid="B")]
+        pr = payload(rounds, comments=[ack(self.fingerprint(old), "OWNER")], files=["a.py"])
+        self.status(pr)
+        self.assertIn("shapes=ACKNOWLEDGED ", self.out.getvalue())
+
+    def test_a_hidden_acknowledgment_does_not_clear_the_hold(self) -> None:
+        hidden = {**ack(self.fingerprint(unplaced()), "OWNER"), "isMinimized": True}
+        pr = payload([review(body=unplaced())], comments=[hidden], files=["a.py"])
+        self.assertEqual(50, self.status(pr))
+
     def fingerprint(self, text: str) -> str:
         hold = pr_review.shape_hold(payload([review(body=text)]))
         assert hold is not None

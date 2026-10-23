@@ -420,13 +420,22 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     def inside(token: Token) -> bool:
         return any(a <= (token.map or [0])[0] < b for a, b in claimed)
 
+    def placed(inline: Token) -> bool:
+        said = " ".join(inline_text(inline).split())
+        return (
+            is_label(inline)
+            or bool(vocab["effort"].fullmatch(label(said)))
+            or any(p.match(said) for p in vocab["coverage_prose"])
+        )
+
     stops = sorted(
         {a for a, _ in claimed}
         | {
             (t.map or [0])[0]
             for n, t in enumerate(tokens)
             if t.type in ("heading_open", "table_open")
-            or (t.type == "paragraph_open" and not t.level and is_label(tokens[n + 1]))
+            or (t.type == "html_block" and not t.level)
+            or (t.type == "paragraph_open" and not t.level and placed(tokens[n + 1]))
         }
     )
 
@@ -461,12 +470,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                     open_count = (open_count or 0) + stated(found_kind[1])
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
-            elif vet and is_label(inline) and not token.level and not inside(token):
-                if not matched(vocab["labels"], name):
-                    unread(
-                        f"a label this reader has no spelling for: `{name}`",
-                        *span(tokens, i, stops),
-                    )
+            elif vet and is_label(inline) and not matched(vocab["labels"], name):
+                note = f"a label this reader has no spelling for: `{name}`"
+                if token.level or inside(token):
+                    notes.append(note)
+                else:
+                    unread(note, *span(tokens, i, stops))
         elif (
             token.type == "table_open"
             and vocab["table_header"]
