@@ -384,6 +384,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             )
 
     verdict, verdict_heading, headline = "unknown", "", ""
+    headline_at = -1
     effort, effort_source = "unknown", "unknown"
     table: list[str] | None = None
     listed = 0
@@ -399,6 +400,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             kind = next((k for k, ps in vocab["verdicts"].items() if matched(ps, name)), "")
             if kind and verdict == "unknown":
                 verdict, verdict_heading = kind, name
+                headline_at = i + 3
                 headline = headline_after(tokens, i + 3, lines)
             elif not kind and vet and not matched(vocab["headings"], name):
                 notes.append(f"a heading this reader has no spelling for: `{name}`")
@@ -439,7 +441,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         ]
         said = " ".join("".join(parts).split())
         m = next((m for p in vocab["coverage_prose"] if (m := p.match(said))), None)
-        if m is None or said == headline:
+        if m is None or n - 1 == headline_at:
             continue
         got, of = int(m.group("got")[:COUNT_DIGITS]), int(m.group("of")[:COUNT_DIGITS])
         state = "partial" if got < of else "full" if got == of else "unknown"

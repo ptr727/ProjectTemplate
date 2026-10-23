@@ -185,6 +185,7 @@ class TestCoverage(unittest.TestCase):
         for text in (
             body(headline="The reader treats Copilot reviewed 1 of 2 changed files as partial."),
             body(headline="Copilot reviewed 1 of 2 changed files is the shape read here."),
+            body(headline="Copilot reviewed 1 of 2 changed files is the shape `x` reads."),
             body(sections="This round reads that Copilot reviewed 1 of 2 changed files."),
         ):
             with self.subTest(text=text[40:90]):
