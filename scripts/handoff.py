@@ -11,9 +11,9 @@ a hub checkout rather than carried.
 
 A track holds one issue, created when the track starts and closed when its work is complete. Each
 session close replaces the body in place and bumps the round, after first appending the outgoing
-body to the same issue as a comment, so the track's history stays on one issue in order. An issue filed per
-session costs a create, a comment, and a close every round, and those links crowd out the issues
-that describe work.
+body to the same issue as a comment, so the track's history stays on one issue in order. An issue
+filed per session costs a create, a comment, and a close every round, and those links crowd out
+the issues that describe work.
 
 The issue is machine-readable from one HTML comment on the body's last line, so a retitled or
 hand-edited issue still reads:
@@ -30,8 +30,8 @@ The title is for humans and nothing parses it. The invariant a reader checks is 
 open issue carries the `handoff` label for a given track in a given repository, read from the
 metadata block rather than from the label, since an issue carrying the label and no block belongs
 to no readable track. Zero open is two states rather than one: a track that has never had a
-handoff, and a lane closed out whose newest issue is closed. `new` continues from the newest issue
-either way. Two or more open on one track is a defect to report, never one to resolve by picking,
+handoff, and a lane closed out whose newest issue is closed. `new` continues from that closed
+issue where one exists. Two or more open on one track is a defect to report, never one to resolve by picking,
 so every command that would have to choose refuses and names both.
 
 A head resolved that way can still be one the track has moved past, where another issue already
@@ -112,6 +112,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as graphql
+from carry import normalize_eol
 
 # The label is the chain's index.
 # Finding a link by label rather than by title search is what frees the title.
@@ -506,10 +507,14 @@ def round_text(body: str) -> str:
     return MARKER.sub("", body or "").strip()
 
 
-def archive(body: str, track: str, round_: int, closed: str) -> str:
-    """The comment that keeps an outgoing round on the issue once its body is replaced."""
+def archive(body: str, track: str, round_: int, closed: str, subject: str) -> str:
+    """The comment that keeps an outgoing round on the issue once its body is replaced.
+
+    The heading keeps the round's own subject, since `new` replaces the title with the next one.
+    """
     mark = f"<!-- handoff-round: v1 track={track} round={round_} closed={closed} -->"
-    return f"## Round {round_}, closed {closed}\n\n{round_text(body)}\n\n{mark}\n"
+    heading = f"## Round {round_}, closed {closed}: {subject}"
+    return f"{heading}\n\n{round_text(body)}\n\n{mark}\n"
 
 
 def archived_text(comment_body: str) -> str:
@@ -519,17 +524,32 @@ def archived_text(comment_body: str) -> str:
     return rest.strip() if first.startswith("## Round ") else text
 
 
+def subject_of(title: str, track: str) -> str:
+    """The human half of a handoff title, the part a session wrote."""
+    return title.removeprefix(TITLE.format(track=track, subject=""))
+
+
+WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
 def rounds_of(comments: list[dict], track: str) -> list[dict]:
     """The archived rounds on `track` among an issue's comments, newest first.
 
     A comment carrying no mark is an ordinary comment, such as a parking note, and is not a
-    round. One carrying several is not a round either, since its round cannot be read.
+    round. One carrying several is not a round either, since its round cannot be read. On a public
+    repository anyone can comment, so a mark counts only from an account with write access and
+    only on a comment nobody has hidden, which keeps an outsider from writing a round into the
+    track's history or blocking `new` with a conflicting one.
     """
     found = []
     for row in comments:
+        if row.get("authorAssociation") not in WRITERS or row.get("isMinimized"):
+            continue
         marks = list(ROUND_MARK.finditer(row.get("body") or ""))
         if len(marks) == 1 and marks[0]["track"] == track:
-            found.append({**row, "mark": marks[0].groupdict()})
+            heading = (row.get("body") or "").strip().partition("\n")[0]
+            _, _, subject = heading.partition(": ")
+            found.append({**row, "mark": marks[0].groupdict(), "subject": subject})
     found.reverse()
     return found
 
@@ -764,7 +784,7 @@ def walk(
             links.append(
                 {
                     "number": data["number"],
-                    "title": data["title"],
+                    "title": row["subject"],
                     "state": "ROUND",
                     "createdAt": row["mark"]["closed"],
                     "url": row.get("url"),
@@ -887,10 +907,15 @@ def create(repo: str, title: str, body: str, dry_run: bool) -> int | None:
 
 
 def comment(repo: str, number: int, text: str, dry_run: bool) -> None:
-    """Post one comment and confirm it by the URL the write returns."""
-    out = gh(
-        ["issue", "comment", str(number), "--repo", repo, "--body", text], dry_run=dry_run
-    ).strip()
+    """Post one comment and confirm it by the URL the write returns.
+
+    The text goes through a file, since an archived round can exceed a Windows command line.
+    """
+    with body_arg(text, dry_run) as path:
+        out = gh(
+            ["issue", "comment", str(number), "--repo", repo, "--body-file", path],
+            dry_run=dry_run,
+        ).strip()
     if dry_run:
         return
     if "/issues/" not in out:
@@ -916,7 +941,7 @@ def close(repo: str, number: int, dry_run: bool) -> None:
 
 def same_text(left: str, right: str) -> bool:
     """Whether two bodies read alike once line endings and surrounding blank space are set aside."""
-    return left.replace("\r\n", "\n").strip() == right.replace("\r\n", "\n").strip()
+    return normalize_eol(left).strip() == normalize_eol(right).strip()
 
 
 def edit_issue(repo: str, number: int, title: str, body: str, dry_run: bool) -> None:
@@ -1199,11 +1224,11 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     marker = parse_marker(outgoing, number)
     if marker is None or marker["track"] != a.track:
         raise Refusal(
-            f"#{number}'s body no longer carries a block on track {a.track!r}, so its round "
+            f"#{number}'s body carries no block on track {a.track!r} when read again, so its round "
             "cannot be read. Restore the block by hand before writing the next round."
         )
     round_ = int(marker["round"])
-    if round_text(outgoing) == body.strip():
+    if same_text(round_text(outgoing), body):
         print(f"#{number} already holds this body as round {round_}, so nothing is written")
         print(f"#{number}")
         return 0
@@ -1211,7 +1236,9 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     kept = [
         row for row in rounds_of(fresh["comments"], a.track) if row["mark"]["round"] == str(round_)
     ]
-    if kept and any(archived_text(row["body"]) != round_text(outgoing) for row in kept):
+    if kept and any(
+        not same_text(archived_text(row["body"]), round_text(outgoing)) for row in kept
+    ):
         raise Refusal(
             f"#{number} already archives a round {round_} whose text differs from its body, at "
             f"{kept[0].get('url')}. Two texts for one round is not something this can decide "
@@ -1222,9 +1249,10 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     else:
         stamp = head.get("lastEditedAt") or head.get("createdAt") or fresh.get("createdAt")
         print(f"1. archive round {round_} as a comment on #{number}")
-        comment(a.repo, number, archive(outgoing, a.track, round_, day(stamp)), a.dry_run)
+        subject = subject_of(fresh.get("title") or "", a.track)
+        comment(a.repo, number, archive(outgoing, a.track, round_, day(stamp), subject), a.dry_run)
     print(f"2. write round {round_ + 1} over the body of #{number}")
-    if not a.dry_run and (issue(a.repo, number).get("body") or "") != outgoing:
+    if not a.dry_run and not same_text(issue(a.repo, number).get("body") or "", outgoing):
         raise Refusal(
             f"#{number}'s body changed since this run archived it, and the next round replaces "
             "the whole body. Re-run to work from the current text."
@@ -1234,15 +1262,27 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     return 0
 
 
+def outcome_from(path: Path) -> str:
+    """The closing comment `close` posts, refused where it is empty or over the hard cap."""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise Refusal(f"could not read the outcome file {path}: {exc}") from exc
+    if not text:
+        raise Refusal("the outcome file is empty, and a track closes with its outcome stated.")
+    size = len(text.encode("utf-8"))
+    if size > MAX_BYTES:
+        raise Refusal(f"the outcome is {size} bytes, over the {MAX_BYTES}-byte cap.")
+    return text
+
+
 def cmd_close(a: argparse.Namespace) -> int:
     """Comment the track's outcome on its issue, then close it, which is how a track ends.
 
     A rerun after the comment landed and the close did not finds the same text as the newest
     comment and goes straight to the close rather than posting it twice.
     """
-    text = body_from(Path(a.body_file)).strip()
-    if not text:
-        raise Refusal("the closing comment is empty, and a track closes with its outcome stated.")
+    text = outcome_from(Path(a.body_file))
     found, doubts = current_or_refuse(a.repo, a.track)
     if doubts:
         raise Refusal(
@@ -1253,7 +1293,7 @@ def cmd_close(a: argparse.Namespace) -> int:
         )
     number = int(found["number"])
     comments = issue(a.repo, number, comments=True)["comments"]
-    if comments and (comments[-1].get("body") or "").strip() == text:
+    if comments and same_text(comments[-1].get("body") or "", text):
         print(f"1. #{number}'s newest comment is this outcome already, so not again")
     else:
         print(f"1. comment the outcome on #{number}")

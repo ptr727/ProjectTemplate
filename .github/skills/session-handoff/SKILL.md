@@ -62,8 +62,8 @@ without trusting the parts of it that have gone stale.
 
 - **One open handoff issue per track per repository.** A track is a short kebab-case slug naming a
   lane of work, and a session that names no track uses `default`. Parallel lanes each name their
-  own, so none reads another's state as current. The issue is created once, when the track starts,
-  and closed once, when its work is complete. It is never closed and replaced per session.
+  own, so none reads another's state as current. The issue is created when the track starts and
+  closed when its work is complete. It is never closed and replaced per session.
 - **A platform lane is for work that needs its platform.** A platform track is one kept for a single
   host platform, such as `wsl` or `windows`. It takes an issue only when its defect reproduces, or
   its fix can be verified, on that platform alone. It also needs that no Linux host outside WSL can
@@ -104,9 +104,10 @@ without trusting the parts of it that have gone stale.
   issue carrying the label and no block belongs to no readable track and blocks the count rather
   than joining it. Two or more on one track is a defect to report, never one to resolve by picking.
 - **Zero open on a track is two different states.** The track has never had a handoff, or it was
-  closed when its work was complete. `new` continues from the newest closed issue on the track
-  either way, naming it as `previous=` and starting one round above it, because starting a second
-  chain beside one that exists orphans every round already written.
+  closed when its work was complete. In the second state `new` continues from the newest closed
+  issue on the track, naming it as `previous=` and starting one round above it, because starting a
+  second chain beside one that exists orphans every round already written. In the first it starts
+  at round 1 with `previous=none`.
 - **Whatever open issue a track holds is its standing issue**, including one whose body has never
   been replaced in place and whose `previous=` names a chain of closed issues behind it. `new`
   archives its body and edits it like any other, since it is the one open `handoff` issue on the
@@ -172,9 +173,11 @@ section is the pointer to what to read rather than the answer, and `AGENTS.md` "
 already says stale context is worse than absent. A handoff is context by construction, so this is
 that rule applied to the one artifact built to outlive the session that wrote it.
 
-Read the issue's other comments too, with `gh issue view "<n>" --repo OWNER/NAME --comments`, since
-`resume` prints only the body and an index of the archived rounds, and a parking comment or a
-closing session's answers land in the comments between them.
+Read the issue's other comments too, since `resume` prints only the body and an index of the
+archived rounds, and a parking comment or a closing session's answers land in the comments between
+them. Leave the archived rounds out of that read, since a long track holds many of them in full:
+`gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select(.body |
+contains("<!-- handoff-round:") | not) | .body'`.
 
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
 archived rounds behind it, and `chain --grep` searches every round it walks for a regular

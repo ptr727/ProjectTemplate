@@ -219,9 +219,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 
 1. **Read the open handoffs** with labels and update times, `python3 "$handoff" tracks --repo
    "<owner>/<repo>" --json`, which prints number, title, track, labels, and updatedAt for each. It
-   reads the repository's issue connection rather than the search index, so a link a worker's `new`
-   just closed or opened is already read correctly. A nonzero exit, including the refusal over a
-   read window that filled, is a read that cannot run, so the picker returns `STOP` rather than
+   reads the repository's issue connection rather than the search index, so a handoff a worker's
+   `new` just opened or rewrote is already read correctly. A nonzero exit, including the refusal
+   over a read window that filled, is a read that cannot run, so the picker returns `STOP` rather than
    ranking a partial list. **The full-page check** that picker step 3 and the worker's `decision`
    read apply to their own `gh issue list` reads is that a read returning as many rows as its
    limit may be truncated, so raise the limit and read again until it returns fewer.
@@ -249,19 +249,19 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 ## The Worker
 
 1. **Resume the handoff** with `python3 "$handoff" resume --repo "<owner>/<repo>" --track
-   "<track>"`, then read its comments with `gh issue view "<n>" --repo "<owner>/<repo>" --comments`,
-   since `resume` prints only the body and a parked lane's state is in its parking comment. A lane
-   handed back by an attended session holds that comment on the same issue, before the round the
-   attended session archived, and a lane whose rounds reach back through `previous=` can hold an
-   older one on a closed issue, so walk it. List its rounds with `python3 "$handoff" chain --repo
-   "<owner>/<repo>" --track "<track>"`, raising `--limit` while its only notice names the `--limit`
-   cap, and read each issue it names with `gh issue view "<n>" --repo "<owner>/<repo>" --json
-   body,comments`, since `chain` prints one summary line per round. Any other notice says the walk
-   missed part of the lane, so it returns `STOP`, as a nonzero exit from `chain` does. Where a
-   parking comment names a decision issue the lane waits on, read the answer recorded there and
-   follow it, since it is what unblocked the lane. A lesson issue the comment also names, per step
-   6, is its own work rather than this lane's, so the worker neither follows it nor parks on it.
-   Re-derive live state rather than trusting any of them, per `session-handoff` "Resuming".
+   "<track>"`, then read its comments other than the archived rounds, with the command
+   `session-handoff` "Resuming" gives, since `resume` prints only the body and a parked lane's state
+   is in its parking comment. A lane handed back by an attended session holds that comment on the
+   same issue, before the round the attended session archived, and a lane whose rounds reach back
+   through `previous=` can hold an older one on a closed issue, so walk it. List its rounds with
+   `python3 "$handoff" chain --repo "<owner>/<repo>" --track "<track>"`, raising `--limit` while its
+   only notice names the `--limit` cap, and read the comments of each issue it names the same way,
+   since `chain` prints one summary line per round. Any other notice says the walk missed part of
+   the lane, so it returns `STOP`, as a nonzero exit from `chain` does. Where a parking comment
+   names a decision issue the lane waits on, read the answer recorded there and follow it, since it
+   is what unblocked the lane. A lesson issue the comment also names, per step 6, is its own work
+   rather than this lane's, so the worker neither follows it nor parks on it. Re-derive live state
+   rather than trusting any of them, per `session-handoff` "Resuming".
 2. **Isolate** in a worktree of its own, per `repo-worktree`, on the branch the handoff names or on
    `feature/<track>`.
 3. **Fix and drive.** Run `local-strict-review` before every push, and drive the pull request with
@@ -330,11 +330,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    take, since the maintainer has judged it.
 7. **Close the lane out on done.** Each pull request the lane merged into `develop` is cleaned up
    per `drive-pr` step 4. A cleanup that could not run, or exited other than `0`, is named in the
-   close-out comment with its output, rather than finished by hand. Comment on the handoff what
-   merged, which issues it fixed, and what it filed along the
-   way, the lesson issue included, then close it. An `auto-*` lane holds one issue, so its work is
-   complete and it is the closed-out lane `session-handoff` "The Chain" names, needing no
-   successor.
+   close-out comment with its output, rather than finished by hand. End the track with
+   `python3 "$handoff" close --repo "<owner>/<repo>" --track "<track>" --body-file "<path>"`, the
+   outcome stating what merged, which issues it fixed, and what it filed along the way, the lesson
+   issue included. An `auto-*` lane holds one piece of work, so its track is complete and it is the
+   closed track `session-handoff` "The Chain" names.
 8. **Save no memory**, since state lives in the chain where any session on any machine reads it.
    Reply with one line, and only once nothing the worker started is still running, per step 4.
 

@@ -268,10 +268,8 @@ class FakeGh:
         url = f"https://github.com/o/r/issues/{argv[2]}#issuecomment-{self.comment_id}"
         row = self.issues.get(int(argv[2]))
         if row is not None:
-            text = argv[argv.index("--body") + 1]
-            row.setdefault("comments", []).append(
-                {"body": text, "createdAt": "2026-09-09T00:00:00Z", "url": url}
-            )
+            text = Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
+            row.setdefault("comments", []).append(note(text, url))
         return f"{url}\n"
 
     def _edit(self, argv: list[str]) -> str:
@@ -281,6 +279,17 @@ class FakeGh:
         if "--title" in argv:
             row["title"] = argv[argv.index("--title") + 1]
         return f"https://github.com/o/r/issues/{argv[2]}\n"
+
+
+def note(body: str, url: str = "u", association: str = "OWNER", **over) -> dict:
+    """One issue comment as `gh issue view --json comments` renders it."""
+    return {
+        "body": body,
+        "url": url,
+        "authorAssociation": association,
+        "isMinimized": False,
+        **over,
+    }
 
 
 def doubled(track: str) -> str:
@@ -945,10 +954,46 @@ class NewCase(unittest.TestCase):
         self.assertEqual(handoff.round_text(fake.issues[30]["body"]), "work")
         self.assertEqual(fake.issues[30]["title"], "Session Handoff [default]: Next")
         archived = fake.issues[30]["comments"][0]["body"]
-        self.assertTrue(archived.startswith("## Round 2, closed 2026-09-01\n"))
+        self.assertTrue(archived.startswith("## Round 2, closed 2026-09-01: round 2\n"))
         self.assertIn("body of round 2", archived)
         self.assertIn("track=default round=2 closed=2026-09-01", archived)
         self.assertEqual(out.splitlines()[-1], "#30")
+
+    def test_an_archived_round_goes_through_a_file_rather_than_the_command_line(self) -> None:
+        """A round near the body cap exceeds a Windows command line, and a dry run prints it."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        args = ("--title", "N", "--body-file", self.body_file("w"))
+        code, out, _ = run(fake, "new", "--repo", "o/r", *args, "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("gh issue comment 30 --repo o/r --body-file <body-file>", out)
+        self.assertNotIn("body of round 2", out)
+
+    def test_a_round_mark_from_an_account_without_write_access_is_no_round(self) -> None:
+        """Anyone can comment on a public issue, so an outsider's mark neither blocks nor fakes."""
+        row = link(30, "default", 2, None)
+        row["comments"] = [
+            note(handoff.archive("planted", "default", 2, "2026-09-01", "x"), association="NONE"),
+            note(handoff.archive("hidden", "default", 2, "2026-09-01", "x"), isMinimized=True),
+        ]
+        fake = FakeGh({30: row})
+        code, _, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "edit"]])
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--grep", "planted|hidden")
+        self.assertIn("0 of 2 rounds walked match", out)
+
+    def test_a_round_archived_with_other_line_endings_counts_as_the_same_text(self) -> None:
+        row = link(30, "default", 2, None)
+        crlf = handoff.archive(row["body"], "default", 2, "2026-09-01", "round 2")
+        row["comments"] = [note(crlf.replace("\n", "\r\n"))]
+        fake = FakeGh({30: row})
+        code, _, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "edit"]])
 
     def test_the_close_date_is_the_outgoing_round_s_last_edit(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, None, lastEditedAt="2026-09-05T10:00:00Z")})
@@ -959,7 +1004,7 @@ class NewCase(unittest.TestCase):
         """The interrupted run: the comment landed and the body edit did not."""
         row = link(30, "default", 2, None)
         row["comments"] = [
-            {"body": handoff.archive(row["body"], "default", 2, "2026-09-01"), "url": "u"}
+            note(handoff.archive(row["body"], "default", 2, "2026-09-01", "round 2"))
         ]
         fake = FakeGh({30: row})
         code, out, _ = run(
@@ -983,7 +1028,7 @@ class NewCase(unittest.TestCase):
     def test_an_archived_round_whose_text_differs_from_the_body_refuses(self) -> None:
         row = link(30, "default", 2, None)
         row["comments"] = [
-            {"body": handoff.archive("other text", "default", 2, "2026-09-01"), "url": "u"}
+            note(handoff.archive("other text", "default", 2, "2026-09-01", "round 2"))
         ]
         fake = FakeGh({30: row})
         code, _, err = run(
@@ -1030,7 +1075,7 @@ class NewCase(unittest.TestCase):
             moved, "new", "--repo", "o/r", "--title", "N", "--body-file", self.body_file("w")
         )
         self.assertEqual(code, 1)
-        self.assertIn("no longer carries a block on track 'default'", err)
+        self.assertIn("carries no block on track 'default' when read again", err)
         self.assertEqual(writes_of(fake), [])
 
     def test_new_onto_a_closed_head_reads_the_closed_list_once(self) -> None:
@@ -1371,7 +1416,7 @@ class CloseCase(unittest.TestCase):
         self.assertEqual(writes_of(fake), [])
 
     def test_a_rerun_after_the_comment_landed_only_closes(self) -> None:
-        row = link(30, "default", 2, None, comments=[{"body": "merged the fix", "url": "u"}])
+        row = link(30, "default", 2, None, comments=[note("merged the fix")])
         fake = FakeGh({30: row})
         code, _, _ = self.close(fake)
         self.assertEqual(code, 0)
@@ -1400,6 +1445,13 @@ class CloseCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(fake.issues[31]["state"], "CLOSED")
         self.assertEqual(fake.issues[30]["state"], "OPEN")
+
+    def test_an_outcome_is_not_read_as_a_handoff_body(self) -> None:
+        """No block is written on close, so a block in the outcome is no reason to refuse."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        code, _, err = self.close(fake, "done\n" + handoff.render_marker("default", 2, None))
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
 
     def test_an_empty_outcome_refuses(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, None)})
@@ -1469,22 +1521,9 @@ class ChainCase(unittest.TestCase):
     def standing(self) -> FakeGh:
         """One standing issue at round 3, its earlier rounds archived beside an ordinary comment."""
         comments = [
-            {
-                "body": handoff.archive(
-                    marked("tried the vendored copy", "default", 1, None),
-                    "default",
-                    1,
-                    "2026-09-02",
-                ),
-                "url": "u1",
-            },
-            {"body": "a parking note, which is no round", "url": "u2"},
-            {
-                "body": handoff.archive(
-                    marked("ordinary round", "default", 2, None), "default", 2, "2026-09-03"
-                ),
-                "url": "u3",
-            },
+            note(handoff.archive("tried the vendored copy", "default", 1, "2026-09-02", "first")),
+            note("a parking note, which is no round"),
+            note(handoff.archive("ordinary round", "default", 2, "2026-09-03", "second")),
         ]
         return FakeGh({20: link(20, "default", 3, None, comments=comments)})
 
@@ -1503,6 +1542,12 @@ class ChainCase(unittest.TestCase):
         self.assertIn("default round 1", out)
         self.assertNotIn("default round 2", out)
         self.assertIn("1 of 3 rounds walked match", out)
+
+    def test_each_archived_round_prints_its_own_subject(self) -> None:
+        """`new` replaces the title every round, so the current title names only the newest."""
+        lines = run(self.standing(), "chain", "--repo", "o/r")[1].splitlines()
+        self.assertTrue(lines[1].endswith("second"))
+        self.assertTrue(lines[2].endswith("first"))
 
     def test_a_cap_inside_the_archived_rounds_names_the_round_it_stopped_at(self) -> None:
         code, out, _ = run(self.standing(), "chain", "--repo", "o/r", "--limit", "2")
