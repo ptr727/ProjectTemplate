@@ -77,6 +77,7 @@ BEFORE_FLAG = {
     "scripts/carry.py": ("check", "Example", "--target", "."),
     "scripts/handoff.py": ("current", "--repo", "Example/Example"),
     "scripts/local_review.py": ("status",),
+    "scripts/pr_cleanup.py": ("--repo", "Example/Example", "1"),
     "scripts/pr_review.py": ("--repo", "Example/Example", "status", "1"),
     "spec/resolve_description.py": ("registry/repos.json", "Example"),
 }
@@ -108,6 +109,7 @@ NO_REQUIRED_ARGUMENT = frozenset(
         "scripts/build_dist.py",
         "scripts/docker_lint.py",
         "scripts/host_gate.py",
+        "scripts/pr_review_copilot.py",
         "scripts/prose_lint.py",
         "scripts/repo_gate.py",
         "scripts/skills_install.ps1",

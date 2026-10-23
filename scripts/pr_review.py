@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4"]
+# ///
 """Consolidated Copilot-review status for a PR - one command, one compact digest.
 
 Why this exists: 4,513 of the measured `gh` invocations were one call per agent turn, and
@@ -7,279 +11,80 @@ each turn re-bills the whole session context. The bytes `gh` returns are trivial
 invocation whose output is a few hundred bytes. See GOVERNANCE.md "Context and Delegation
 Discipline" for the rule this implements.
 
+This file is the gate: the plumbing, the checks, the verdict, the wait loop, and the writes.
+What a reviewer's body says is read by `pr_review_copilot.py`, whose vocabulary lives in
+`reviewers/<name>.json`, so a change in the reviewer's wording is a data edit there and never
+an edit here. A shape the adapter cannot place prints as a note under `shapes=NOTED` and decides
+no exit code.
+
 Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
            `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
-           `wait` read, an attestation counting only against the base it names. The comment outlives
-           the receipt, which removing the worktree deletes. A promotion reads the comment only in
-           its Merge Gate's per-file fallback, per pr-review-conduct. `attest` reads the receipt
-           `local_review.py` keeps in the checkout's git directory, which nothing on GitHub can, and
-           refuses unless the checkout (--checkout, default the current directory) is at the pull
-           request's head with no change beyond it, its merge base with the base branch is the pull
-           request's own, and `local_review.py status` reports a covering pass against the base,
-           read once for the coverage and the findings count alike. Exit 0 = posted, 64 = the write
-           scope could not be established or excludes the target, 65 = the pull request could not be
-           read, 66 = the response did not confirm the comment, 67 = the checkout is not the head,
-           holds changes, or measures another merge base, or that merge base could not be read, 68 =
-           no current local pass covers the content.
+           `wait` read, an attestation counting only against the base it names. It reads the
+           receipt `local_review.py` keeps in the checkout's git directory and refuses unless the
+           checkout (--checkout, default the current directory) is at the pull request's head with
+           no change beyond it, its merge base with the base branch is the pull request's own, and
+           `local_review.py status` reports a covering pass against the base. Exit 0 = posted,
+           64 = the write scope could not be established or excludes the target, 65 = the pull
+           request could not be read, 66 = the response did not confirm the comment, 67 = the
+           checkout is not the head, holds changes, or measures another merge base, or that merge
+           base could not be read, 68 = no current local pass covers the content.
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
            write. Exit 0 = done, 64 = write scope could not be established or excludes the
            target, 65 = the PR could not be read, 66 = the response did not confirm the comment.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure caught by a
-           reviewer or not at all, and three stale descriptions in one session generated six
-           review findings between them. Read-only. Exit 0 = every reference resolves, 70 = one
-           does not, 71 = there were references and none could be read, so nothing was decided.
-  cleanup  Delete a merged pull request's head branch, the verify-then-delete `drive-pr` and
-           `merge-and-release` prescribe, done here so it runs under the one allow rule the
-           host-safety installer registers for this script rather than as a hand-typed delete.
-           That rule approves any arguments, so every check lives here. It takes the pull request
-           number, never a branch name, and reads the branch from the pull request. It refuses
-           unless the pull request is merged into `develop` from a head in `--repo` itself, and
-           the head branch is none of `develop`, `main`, or the default branch read live. The
-           owner is bound to `registry/repos.json`, and the repository must be registered or a
-           fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or
-           branch protection covers, since the write guard's per-branch check never sees a delete
-           made in here. It refuses a branch an open pull request in `--repo` has as its head or
-           base, naming each. The ref is read exactly, its tip is checked against the pull request's
-           `headRefOid` before the delete is sent, and the delete is confirmed by reading the ref
-           back. The delete itself carries no expected tip, so this is verify-then-delete rather
-           than a compare-and-swap. With `--checkout <primary clone>`, a local half follows a
-           remote half that exited 0, on the pull request's own branch and head commit. Every
-           refusal is decided before anything is deleted, the remote branch included. A re-check
-           after the delete can still refuse when a concurrent session changed the branch or a
-           worktree in between. The output then names what already happened. A locked, dirty, or
-           mid-operation worktree refuses. So does a branch tip that is neither the merged head nor
-           behind it. So does a rebase or bisect paused on the branch in any worktree, the primary
-           included. A worktree entry whose directory is gone is removed. The primary leaves the
-           merged branch before the remote delete, and a failed checkout refuses. The local half
-           removes the worktrees holding the branch. It deletes the local branch only at the merged
-           head or an ancestor of it, after a tip re-read shows it unchanged. Then it fast-forwards
-           the clone to current `develop`, never a reset, stash, or force. A clone left behind is
-           reported and does not fail the run. The clone must be a primary checkout whose origin is
-           `--repo`. `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports
-           what is provably finished, one `would-remove` or `keep <reason>` line per worktree or
-           branch, and removes it only with `--apply`. The report fetches and prunes the
-           remote-tracking refs of `origin` and writes nothing else. An item must sit untouched for
-           `--min-age-hours` (default 24) and be clean. A branch is finished when a pull request
-           from `--repo` merged it at its exact tip or past it. It is also finished when
-           `origin/develop` or `origin/main` contains it. A detached worktree is finished when any
-           `origin` ref contains its commit. For a merged develop pull request the sweep also
-           deletes the remote head branch through the same checks as `cleanup <n>`. The report runs
-           those checks and names the result. The sweep never touches the primary checkout except
-           to fast-forward a tracked-clean `develop` to `origin/develop`, and the report names that
-           step. Permanent branches, locked worktrees, and worktrees mid-operation are never
-           touched. Exit 0 = deleted
-           and confirmed gone, or already gone, or a sweep that completed. Exit 1 = refused,
-           a moved tip naming both commits among them. Exit 2 = a read did not answer, a
-           partial one included. A delete or removal that could not be confirmed also exits 2,
-           as does argparse's own usage error. Exit 64 = the write scope could not be
-           established or excludes the target, checked before the registry and before any read.
-  status   One digest line, any unresolved threads, and any suppressed findings. Read-only.
-           Exit 0 = no Copilot review covers the head yet, or every output shape is recognized
-           and full diff coverage is stated for this head, by the round covering it or by the
-           carry below, or where nothing states or carries any, a round covering the head names
-           exactly the changed files in its own file table, `coverage=table` in the digest, or
-           where no round covering the head carries a table, the newest round that does names
-           them under the same change-set bound, `coverage=carried:table`, or an attested local
-           pass covers the head as described below, `coverage=local`.
-           `review_on_head` and `rounds=`
-           in the digest name Copilot's own coverage specifically, the reviewer this script
-           requests and waits for, never "no review of any kind covers this head": a
-           tracked other reviewer, named under `other_reviewed` below, can carry the exact head
-           commit while Copilot's own `review_on_head` still reads `NO`, and an empty body from
-           that other reviewer on that head is its own ordinary "reviewed, nothing to flag"
-           shape, the same reading an empty-bodied Copilot round already gets, not a gap.
-           `review_on_head=local` reads a head no Copilot round covers on a pull request into a
-           branch other than the default, with `coverage=local` beside it. That reading needs an
-           attestation vouching for the head, and no round on record stating or appearing to state
-           partial coverage.
+           reviewer or not at all. Read-only. Exit 0 = every reference resolves, 70 = one does
+           not, 71 = there were references and none could be read, so nothing was decided.
+  cleanup  Forwarded to `pr_cleanup.py`, which holds the contract and the exit codes, so a command
+           line naming this script keeps working under the allow rule the host-safety installer
+           registers for it.
+  status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
+           Exit 0 = no Copilot review covers the head yet, or the review covering it states no
+           partial coverage and its verdict counts what it flags. 42 = the round covering the
+           head states it read fewer files than the pull request changed, or states nothing while
+           an earlier round on record states partial coverage. 50 = that round opens on a verdict
+           other than the clean one while it counts no finding, opens no thread, collapses no
+           suppressed or previously-missed finding, and no thread is open, so what it flags is
+           named in its headline alone, printed under `VERDICT WITH NO COUNTED FINDING`. The code
+           repeats on that head after the headline is answered, since nothing here reads an
+           answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
+           HEADLINE`, which changes no exit code.
+           `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
+           states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
+           on, `table` where a round covering the head names exactly the changed files in its own
+           file table,
+           `carried:table` where the newest round carrying a table does, `local` where an attested
+           local pass covers a head on a pull request into a branch other than the default, and
+           `none` otherwise. A table stands in only where no round on record states partial
+           coverage and the whole review history is in view. `none` decides no exit code and
+           prints a note, since Merge Gate item 2 in pr-review-conduct reads this field.
            A promotion re-reviews content its feature pull requests already carried, so the hosted
-           review runs once per change, at the promotion. On a pull request into any other branch,
-           the attested local pass alone covers every head. Under the same conditions the
-           attestation also covers a head whose Copilot round states no coverage, has none carried
-           to it, and carries no file table, which reads `review_on_head=yes coverage=local`.
-           Use `wait` when review presence is the condition, since `status` reports an absent
-           review without treating it as a failure.
-           42 = a round read fewer files than the pull request changed, so part of the diff
-           has no review at all. That round is the one covering the head, or the one carried
-           to it under 45 below, an unread part staying unread across a push that leaves the
-           change set alone. Measured over four pull requests and seven rounds here, a
-           re-request never cleared one and no round ever recovered, so this is a state to
-           hand to the maintainer rather than one to retry into.
-           43 = the reviewer sent a shape this script has no reader for, so no field here can
-           be believed. The remedy is an issue on the repository hosting this script, and the
-           review loop does not close until the reader is fixed. Merging regardless is the
-           maintainer's decision rather than the agent's.
-           45 = no statement of changed-file coverage describes this head, and no file table or
-           attested local pass stands in for one. A round that
-           states none carries the newest round that states some forward, bounded on the change
-           set, so this covers three states: nothing ever stated coverage, the round that did
-           describes a different set of changed files, or that comparison could not be read.
-           Past those, a round covering the head whose own table names exactly the changed
-           files stands in, or where none carries a table, the newest round that does, its table
-           naming exactly the changed files, under the same change-set bound. Either table
-           stands in only where no Copilot round on the pull request, on any commit, states or
-           appears to state partial coverage, quoted or not, and the whole review
-           history is in view, since over the rounds measured the table names the whole changed
-           set on partial rounds too. The digest names why no table stood in.
-           Copilot's Balanced review effort, the default since 2026-09-28, writes the table and
-           almost never a statement, which is the case the table reading exists for.
-           Where the head branch lacks the current review instructions, which a round at Lite
-           effort needs to state coverage, bring them onto it, push, and run `wait`, which requests a round on the new head, and where the
-           comparison could not be read, run `status` again. Past those, a develop -> main
-           promotion can still satisfy coverage, in the one case pr-review-conduct's Merge Gate
-           item 2 states. Otherwise hand the state to the maintainer rather than retrying into
-           it, since a round
-           re-requested on the same head states coverage or carries a table only by chance.
-           50 = the round covering the head opens on a verdict other than the clean one, while it
-           states no open finding, opened no thread, collapsed no suppressed or previously-missed
-           finding, and no reviewer's thread is open, so what it flags is named in its headline
-           alone, printed under `VERDICT WITH NO COUNTED FINDING`. Ranked under 42, 43, and 45,
-           and over `wait`'s 44.
-           The headline is owed the triage a suppressed finding gets, and the code repeats on that
-           head after it is answered, since nothing here reads an answer.
-           A clean verdict on the same terms prints its headline under `CLEAN VERDICT HEADLINE`.
-           That line is advisory and changes no exit code, since it may name an answered nit.
-           A refusal naming the account quota still reads as absent here, exit 0, since a refusal
-           covers no head either. Its printed digest line carries `refusal=QUOTA` regardless, and
-           `refusal=ERROR` for an error refusal whose run log names no rate limit or could not be
-           read. Either field reads the pull request's newest Copilot review where it is a quota or
-           error refusal, on an earlier head or over a head a genuine round covered before it, and a
-           file-count refusal is spent by coverage of the same head. `wait` is where that state gets
-           its own exit codes, 46 and 47 below, because only `wait` is the command a caller might
-           otherwise poll out a timeout on.
-           `unresolved` counts every open thread whoever opened it, since an open thread blocks
-           a ruleset-gated merge whatever its author, and a filter on known reviewer logins
-           once read `unresolved=0` over a qodo thread posted under a login it did not know.
-           The known logins, Copilot, CodeRabbit (`coderabbitai`), and qodo
-           (`qodo-free-for-open-source-projects`), only attribute a thread in the breakdown
-           beside the count, where any other author reads as `other`.
-           Both `threads=` and `unresolved=` are read from a single 100-thread page with no
-           further pagination, so a pull request carrying more than that undercounts silently
-           past that point: both fields print a trailing `+` and a `THREADS TRUNCATED` block
-           follows, naming the gap rather than leaving either count to be trusted as whole.
-           Reading past the cut needs `reply`'s own paginated walk instead. `suppressed=`
-           and `cr_outside_diff=` carry the identical marker over the separate 100-review page
-           they are both read from, a `REVIEWS TRUNCATED` block following, since an unanswered
-           finding on a round old enough to fall out of that window is exactly as invisible.
-           Coverage, refusal, and `wait`/request support stay Copilot-only, each being its own
-           format and its own future task per bot. Where either has posted anything at all on
-           the current head, `other_reviewed` names it, identity and commit only, no verdict
-           read from what it said. `other_rate_limited` names one whose newest comment or review
-           carries its own rate-limit marker instead. That marker is a structural
-           `<!-- ... rate limited by ... -->` convention rather than free-text prose (observed on
-           CodeRabbit). Reading it needs no per-bot wording model the way Copilot's quota refusal
-           needed `QUOTA` built for its own text. CodeRabbit's reply to an explicit review command
-           lands in the same field, read by a pattern of its own for CodeRabbit's fixed wording.
-           That reply is an `auto-generated reply` marker over an `Action not completed` block
-           saying `Review rate limited.`, and its service is named from the login.
-           Two of their own finding shapes are read, though, each its own blind spot a thread
-           poll alone cannot see. `cr_outside_diff=N (on_head=X earlier=Y)` counts
-           CodeRabbit's own "outside diff range" findings, collapsed into the review body rather
-           than raised as an inline review comment because the finding sits on a line outside
-           the pull request's changed hunks. Printed once CodeRabbit has raised one, on any
-           round, or once the reviews window is truncated, since an older round could then
-           still carry one unseen (`cr_outside_diff=0+`). Stays silent otherwise, whether that
-           silence means no finding was raised or CodeRabbit was never trialed at all.
-           `qodo_open=N` counts Qodo's own
-           numbered findings that carry neither its `Resolved` nor `Dismissed` self-tracked
-           badge: Qodo's formal review carries an empty body on every round observed, so its
-           findings are read from its "Code Review by Qodo" PR-level comment instead, not
-           head-scoped since a comment carries no commit. Printed as `0` once Qodo has posted
-           that comment at all, since a `0` is itself a reading, `unknown` where its findings
-           comment specifically could be sitting behind the 100-comment window even while a
-           paired `PR Summary by Qodo` stays visible, so its silence cannot be told from it
-           never having commented, and absent only where it genuinely never has. Qodo's own
-           badge is a fast pre-triage signal, not a substitute for reading the finding:
-           spot-verify against `gh pr diff` rather than trusting it outright.
-           `overview=T/M` reads the second Copilot review-body format's own finding total, `T`,
-           beside the number of review threads that round actually opened, `M`. `T` reads `?`
-           where no total is found in the overview preamble or in a count-first open-findings
-           section, which covers a round stating none, a round stating one only after its first
-           collapsed section anywhere else, and a round stating one as a bullet, that last
-           blocking at exit 43 as an unvetted metadata label. None of them says
-           the round withheld nothing, and a `?` is a reason to read the body. Present
-           only where the round covering the head is written in that format, which reached this
-           repository after every round the vetted marker lists below were measured over.
-           `M` is read from the API rather than from the review's prose. That format enumerates
-           the findings it opened threads for, and the anchor each entry links is the database id
-           of that thread's own comment, so the threads are the same set already structured.
-           Reading the enumeration instead took six attempts and four of them cancelled a
-           shortfall by counting something that was not an entry, telling those apart needing a
-           Markdown parser rather than a line scan.
-           A total larger than the thread count is findings the round raised that polling threads
-           cannot see, and a `FINDINGS WITH NO THREAD` block follows naming the shortfall, except
-           where a count-first open section supplied the total, as stated below, or where open
-           entries standing for an earlier round's threads account for it, as stated below. Two
-           things overstate that shortfall rather than hiding it, so it is confirmed against the
-           body rather than acted on from the number. One is a thread past the hundred
-           `reviewThreads` reads, which would have counted in `M`, and `threads=` carries the
-           trailing `+` saying the page was cut. The other is a finding an earlier round raised
-           that the total still counts and no open entry links, its thread being none this round
-           opened. An open entry whose title links an earlier round's thread, and which links
-           none this round opened, is counted beside `M` before the two are compared, since the
-           total counts what is still open rather than what this round raised. So `T` above `M`
-           can print no block, and where a block prints it names how many it counted that way.
-           A withheld finding is owed the triage a suppressed one is. No exit code rides on it,
-           the same as `suppressed=` and `cr_outside_diff=`, since what an unread finding says is
-           the reader's to judge.
-           Where the preamble states no total, the count opening the open-findings section is
-           `T`, since that format's later revision writes the bare zero line only for a zero.
-           Each entry an open section lists links its thread, and an entry whose title links no
-           thread on the pull request is counted in that same block whatever the totals say. So
-           is each entry an `Open (N)` section counts beyond its linked entries, the bullets at its
-           margin carrying a link this script reads, outside any block collapsed within it.
-           Where the open-findings section supplied `T`, the block is measured against the
-           entries it lists with a link rather than against `M`, so an entry linking an earlier
-           round's thread is no finding without one, while a finding that section's count names
-           and no entry links is still counted. Entries are counted rather than links, so a
-           back-reference beside an entry's own link covers no other entry.
-           The block also counts each finding a file table row names with a vote count, `(N
-           votes)`, that pairs with no thread of that round on the row's file. Each thread pairs
-           with one finding at most, so two findings on a file one thread is on leave one.
-           It counts a headline spelling out more findings than the round and the reviewer's
-           earlier threads account for, those threads resolved or not, since a headline counts
-           across rounds and counts a settled finding as readily as an owed one.
-           A round can also list its findings in prose under a `Review findings:` label, each
-           entry naming the files it concerns in code spans, a trailing part of a path or a
-           directory holding it included. An entry that pairs with no thread of that round, one
-           thread per entry, is a finding with no thread. Where those entries outnumber the
-           shortfall above, the block counts them instead. A thread an open entry links counts as
-           that round's in both pairings, since the entry names a finding the round still holds.
-           An `Open findings remain:` list is read the same way, except that an entry pairs only
-           with a thread whose open entry is badged at the severity tier the entry's own bold
-           word states. An entry naming no file pairs on that tier alone, and an entry or thread
-           whose tier is not read pairs with nothing. An entry stating `votes each` counts as two.
-           Ten bodies in that format have been read here, so what follows describes those rather
-           than the format in general. None carried a `Suppressed comments` heading, which is
-           why this field rather than `suppressed=` is what finds a withheld finding in one.
-           None stated its file coverage the first format's way, in either the bulleted spelling
-           or the bare one, so the `fleet-review` marker the fleet's own carried `fleet-code-review`
-           instructions ask for is the only coverage statement this format has been seen to make.
-           Five of the ten carry it, on heads carrying those same instructions, so its absence is
-           intermittent rather than structural. Both absences measured on one drive were
-           re-reviews of a delta of one line and of four files, which is why a round stating none
-           carries an earlier round's statement forward rather than blocking. A re-request is not
-           the remedy the block named either: four were measured and one produced the marker, so
-           it clears by chance rather than by asking.
-           A later body in that format that
-           does collapse a suppressed section is read by `suppressed=`, that heading being vetted
-           and read wherever it sits. Whether the shortfall counts those findings a second time
-           turns on whether the stated total includes them, which no body read here says, so treat
-           `suppressed=2` beside a shortfall of 2 as either two findings or four until the body
-           settles it. A body stating coverage as a bare `**Files reviewed:**` line would still go
-           unread, the reader requiring a bullet where this format states its metadata without
-           one, which is why `effort=` had to drop that requirement. Ten rounds have stated it
-           that way none of the time, so this is a gap rather than the reason a round reads as
-           unstated, and `Files reviewed` sitting in the vetted labels does nothing about it
-           since the line never reaches that comparison.
-           Nothing reports either contradiction, the vetted lists reporting an unvetted marker
-           rather than a marker turning up somewhere new.
-           Two quotation shapes carry a column-0 `<details>` past both masks, a multi-line HTML
-           comment and a raw `<pre>` block, and either ends the preamble and prints `?`. The
-           indented code block is a third, answered by the pattern's own bound rather than a mask.
+           review runs once per change, at the promotion. On a pull request into any other branch
+           the attested local pass covers every head, `review_on_head=local` where no Copilot
+           round covers it.
+           `review_on_head` and `rounds=` name Copilot's own coverage, never "no review of any
+           kind covers this head". `other_reviewed` names a tracked other reviewer that posted on
+           the head, identity and commit only, and its empty body there is its own "reviewed,
+           nothing to flag" shape, not a gap.
+           `other_rate_limited` names one whose newest comment or review is its own rate-limit
+           notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
+           the account quota or an error whose run log names a rate limit, `ERROR` for any other
+           error refusal, `YES` for any other refusal. `status` exits 0 over a refusal, and `wait`
+           gives it 41.
+           `unresolved` counts every open thread whoever opened it, its breakdown attributing the
+           known logins. Both `threads=` and `unresolved=` read one 100-thread page, a trailing
+           `+` and a `THREADS TRUNCATED` block naming a cut page. `suppressed=`,
+           `previously_missed=`, and `cr_outside_diff=N (on_head=X earlier=Y)` count findings
+           collapsed into review bodies over every round, split into the head's and earlier ones,
+           each printed whole since no thread carries it, a trailing `+` marking a cut reviews
+           window. `qodo_open=N` counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
+           where that comment can sit behind the window. `overview=T/M` is the open findings the
+           round covering the head states beside the threads that round opened, `?` where it
+           states no count, and `FINDINGS WITH NO THREAD` names findings the round names that no
+           thread on the pull request carries. Each of these is owed the triage a suppressed
+           finding gets, and none decides an exit code.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
            mutation, which resolves globally and so writes to a real thread somewhere
@@ -292,97 +97,35 @@ Subcommands
            thread resolved, 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
            current head, then print the digest. The auto-request is skipped once a review past
-           --min-rounds already covers the head, once Copilot has already answered outside a
-           formal review, or once one is already in the pending request set, so calling `wait`
-           again on the same PR never double-requests. It is also skipped under 46's and 47's quota
-           readings below, since a request into a reached limit spends quota and returns the same
-           refusal. It is skipped too on a pull request into a branch other than the default, whose
-           every head an attested local pass covers. An attested head is covered at once. The wait
-           then polls its checks instead, only while they can still move its merge, as 30 below
-           lists. One with no attestation exits 49 naming the `attest` step.
-           --request asks for a round anyway. The request goes out unasked on a pull request into
-           the default branch. It also goes out where a partial or a review history past the window
-           is on record. The attestation comment also carries the findings count the pass recorded,
-           shown and not gated. `wait` reads the Copilot reviewer's bot id from the repository's own
-           most recently updated PRs rather than a fixed id: the last HISTORY_PRS, widened once to
-           HISTORY_PRS_WIDE where that narrow window carries no Copilot activity at all, since an
-           outage that outlasts HISTORY_PRS PRs would otherwise empty it on every call for as long
-           as the outage runs. Requests nothing (falling back to polling only) where both windows
-           come up empty, since a repository with no Copilot review in either has nothing to read
-           the id from and a fabricated one is never an option. The loop runs in-process, so a
-           45-minute wait costs one agent turn, not 90.
+           --min-rounds covers the head, once Copilot has answered outside a formal review, once
+           one is pending, and under a refusal or quota reading below, since a request into a
+           reached limit spends quota and returns the same refusal. It is skipped on a pull
+           request into a branch other than the default too, whose every head an attested local
+           pass covers: an attested head has its checks polled instead while they can still move
+           its merge, and one with no attestation exits 49. --request asks for a round anyway.
+           The bot id is read from the repository's most recently updated pull requests, the last
+           HISTORY_PRS, widened once to HISTORY_PRS_WIDE, and nothing is requested where neither
+           carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
+           agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled as far as the rollup window reads them, with the merge reading CLEAN,
-           UNSTABLE, or HAS_HOOKS, or with the pull request closed, 30 = still pending at timeout
-           (pending is not failure), on a held head a required check still settling, any check while
-           no required one has posted, none posted on a BLOCKED, BEHIND, or DRAFT merge, or the
-           merge still UNKNOWN, printed as `status=CHECKS_PENDING`, or a round requested while the
-           held poll ran, printed as `status=PENDING` unless 40's outside answer or 46's or 47's
-           quota reading outranks it,
-           40 = Copilot answered outside a formal review, so read the printed body.
-           40 reports the shape of that answer and reads nothing of its cause: an answer
-           carrying no commit covers no head, so the wait ends and the reader decides.
-           41 = the review carrying the head says it did not review, so it covers nothing.
-           42, 43, 45, and 50 = the review landed and `status`'s readings apply to it.
-           A wait ending on a round that covered half the diff, or on output nothing here can
-           read, has ended on something other than a review of this pull request, and one ending
-           on a 50 has ended on a review whose finding no count carries. 50 outranks 44, so on a
-           head carrying a 50 a stuck check shows only in the digest. A 42 can
-           be decided by an earlier round whose partial coverage carries to a head stating none,
-           in which case the round the wait ended on is not the round the code came from.
-           44 = the review loop closed, the merge reads BLOCKED, and a required check is in a shape
-           no wait clears: queued with nothing acting on it, expected and never posted, running far
-           past what the job costs, or failed, though on a held head a required check running long
-           is still polled, as 30 states. A check merely still running normally is not this and
-           exits 0, or on a held head is polled while it can still move the merge, which includes
-           a context the base branch's rules require and the head has not yet registered. Neither is a
-           stuck check its rollup node reads as not required, since the rollup carries checks no
-           ruleset requires, nor any stuck check on a merge that is not BLOCKED. Nor is a failed
-           check from an older run whose workflow has a newer run on the head not yet finished.
-           The digest names that one as superseded. The digest reports the check in every case,
-           so a shape outside 44 is still named rather than lost.
-           46 = the newest Copilot review on the pull request, on this head or an earlier one, is a
-           refusal naming the account quota, or one saying only that it encountered an error,
-           printed above under COPILOT REFUSED THIS ROUND. The weekly rate limit posts that error
-           body and writes its cause to the reviewer's own Actions run, so that run's job log is
-           read: a logged rate limit reports as the quota with its reset time, and anything else, an
-           unreadable log included, as a possible quota hit. Either way no request is sent, and a
-           request already pending after a refusal on an earlier head is still polled for. That is
-           an account-level state a re-request or a further wait does not clear, unlike 41's other
-           causes (a file count over the limit, cleared by splitting the pull request), so it is its
-           own code rather than folded into 41: proceed on the other reviewers' coverage instead of
-           retrying.
-           47 = this pull request's current head carries no Copilot activity of its own, and the
-           reviewer's own most recent activity found in the repository, a review or comment on any
-           other pull request, is that same account-quota refusal with nothing having answered it
-           since. A refusal on this pull request itself is 46 instead. The poll that would otherwise
-           have run is skipped for this reason, printed as a `note:` line before the digest, rather
-           than spent finding the same account state out a call late, and no request is sent, while
-           a request already pending is still polled for. Pass --ignore-quota-signal to request and
-           poll --timeout anyway once the quota is believed to have reset. 46 is read from this pull
-           request's own reviews and always takes priority over 47, so a genuine 0/40/41/42/43/45 on
-           this pull request outranks 47 whenever both would otherwise apply, and so does a 50, and
-           on a held head covered by an attested local pass a 30 or a 44. A genuine round the final
-           read shows on the head rules 47 out, and so does any review of this pull request, on any
-           head, submitted after the refusal and not itself a quota refusal, since it answers that
-           refusal as one anywhere in the repository would. A genuine round already on the head when
-           the wait begins leaves the request and the poll to run as usual.
-           A pending request remains pending until a review, an answer, or the timeout. GitHub's
-           effort-labeled review lifecycle does not always emit `copilot_work_started`, so that
-           event is not evidence that distinguishes queued work from abandoned work.
-           48 = the auto-request returned success and recorded nothing on the pull request,
-           neither a pending reviewer nor a review-request event. Observed once, while the
-           requesting account's Copilot allowance was exhausted, where no refusal was posted to
-           read and clearing the set and requesting again changed nothing. It is decided one
-           poll interval after the request, and the rest of the poll is skipped, since no
-           request exists to answer. It ranks under 0/40/41/42/43/44/45/46/50 and above 47.
-           `status` cannot report it, since a request that recorded nothing leaves nothing for a
-           later read to find.
-           49 = no Copilot round covers this head and none was requested. The pull request merges
-           into a branch other than the default and no attestation vouches for the head. Run the
-           local strict review, record it, push, and run `attest`, or pass --request.
-           64 = the write scope could not be established or excludes the target, checked before
-           the auto-request or any poll, so a cross-owner target reads and writes nothing here.
+           checks settled. 30 = still pending at the timeout, a required check still settling on
+           a held head printed as `status=CHECKS_PENDING`, or a round past --min-rounds not yet
+           landed. 40 = no Copilot review covers the head: the reviewer answered outside a formal
+           review, the request returned success and recorded nothing on the pull request, or the
+           reviewer writes under a login no query filters on. 41 = the newest round is a refusal
+           or a quota state, the kind printed in its status line and, for a refusal on this pull
+           request, in the digest's `refusal=`: a refusal on the
+           head, the pull request's newest review being a quota or error refusal on any head, or
+           the reviewer's newest activity elsewhere in the repository being a quota refusal
+           nothing answered since while this head carries none of its own. Proceed on the other
+           reviewers' coverage rather than retrying, and pass --ignore-quota-signal once the
+           quota is believed to have reset. 42 and 50 = the review landed and `status`'s readings
+           apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
+           is in a shape no wait clears, queued with nothing acting on it, expected and never
+           posted, running far past what the job costs, or failed. 49 = no Copilot round covers
+           this head and none was requested, the pull request merging into a branch other than
+           the default with no attestation vouching for the head. 64 = the write scope could not
+           be established or excludes the target, checked before the auto-request or any poll.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
 mutation spelled as a `gh` command in a shell is read by the gh-write-guard PreToolUse hook, and
@@ -395,9 +138,7 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import functools
-import html
 import io
 import itertools
 import json
@@ -407,104 +148,36 @@ import subprocess
 import sys
 import tarfile
 import time
-import unicodedata
 import urllib.parse
-from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple
 
 import gh_graphql as shared
-import handoff
+import pr_review_copilot as adapter
 
-# The directory this script sits in, and the anchor every scope answer is read from.
-# One value serves the owner probe and the refusal naming it, so the two cannot disagree.
+# The directory this script sits in, the anchor every scope answer is read from.
 HERE = Path(__file__).resolve().parent
 
-REVIEWER = "copilot-pull-request-reviewer"
-# Other review bots this repository has trialed alongside Copilot.
-# Tracked at the identity level only, login and commit oid, never body prose, except where a reader below names one explicitly.
-# Each format read here is its own reader, and doing that well is a separate task per bot.
-CODERABBIT_LOGIN = "coderabbitai"
-QODO_LOGIN = "qodo-free-for-open-source-projects"
-# Named rather than inlined at each of their own readers below, so a login rename updates one spelling instead of silently leaving a hardcoded copy matching nothing.
+# Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
+REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
+CODERABBIT_LOGIN = adapter.VOCABULARIES["coderabbit"]["login"]
+QODO_LOGIN = adapter.VOCABULARIES["qodo"]["login"]
 OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
-# PENDING here means dispatched and not begun, which a StatusContext's means the opposite of.
-# That one is translated away in check_nodes, where the node shape is still known.
-# Reading QUEUED alone scores the rest of these as running.
+# A StatusContext's PENDING means the opposite, so `check_nodes` translates it away.
 NOT_STARTED = frozenset({"QUEUED", "WAITING", "PENDING", "REQUESTED"})
-# A required status nothing has posted, which is a StatusContext's state and only ever that.
-# It is not a starved job and must not borrow that remedy, since no runner is owed it at all.
-# Left out of both sets it reaches the conclusion branch, where it reports as a red check.
+# A required status nothing has posted, only ever a StatusContext's state, and not a starved job.
 NOT_POSTED = frozenset({"EXPECTED"})
-# What counts as a check having passed, rather than as one still deciding or failed.
-# SKIPPED and NEUTRAL are passes, since the fleet aggregator pattern skips the conditional jobs.
-# Treating a skip as unfinished reports four blockers on every green pull request here.
+# SKIPPED and NEUTRAL count as passed, since the fleet aggregator skips conditional jobs.
 CHECK_OK = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
-# How long a queued check is simply a check starting.
-# Observed pickup on a healthy run here is one to two minutes.
-# This is the pickup grace's five minutes for the same reason that one is.
+# How long a queued check is simply starting, the pickup grace's five minutes.
 CHECK_GRACE = 300
-# How long a running check runs before its duration is worth reporting.
-# Generous on purpose, since this repository's lint job legitimately takes eleven minutes.
-# A fleet repository building and testing .NET takes longer still.
-# A threshold that flags those trains the reader to skim the genuinely hung job too.
+# How long a running check runs before its duration is worth reporting, generous so it does not flag a slow job.
 CHECK_STALL = 1800
 
-# A review body can carry a collapsed block of findings withheld from the inline threads.
-# Those appear nowhere in `reviewThreads`, so polling threads alone reports a clean pass.
-# The alternation is the runbook's, since the heading wording has changed once already.
-# Matching one phrasing alone reports zero on a review that has them.
-SUPPRESSED = re.compile(r"Suppressed comments|low confidence", re.IGNORECASE)
-# The second overview format's own section for a finding against code the pull request did not change.
-# Anchored to the opening of its line, past whatever markup a heading wears, rather than matched anywhere in it.
-# The wording is ordinary English, so a body-wide match reads a sentence such as `restores a guard previously missed (2) rounds ago` as this section.
-# `marker_blocks` accepts a line that is not a heading on a `(N)` alone, which is what lets that sentence through.
-# So the anchor is what separates a heading from prose naming one.
-# The opener admits heading markup and anything outside ASCII, and nothing else.
-# One count may follow it, since a later revision opens the heading on its count, as `2 previously missed issues`.
-# A count opening a line is how a sentence opens too, so `marker_blocks` reads such a line as prose unless it is a heading.
-# `OPENING_COUNT` reads that count past this same opener, so whatever markup the anchor admits, the prose check strips.
-# An emoji is what this format already puts on its verdict headings, and a spelling that admitted no such character read a heading wearing one as no section at all.
-# That failure is silent rather than loud, the heading itself being vetted and `normal` dropping the emoji before the comparison, so the digest reports every shape read while the findings reach nobody.
-# Widened to any non-word character instead, ordinary punctuation opened the run and a sentence such as `- Previously missed (2) findings were re-raised` became the section, printing the prose around it as the finding.
-# Punctuation is what prose opens with and markup is what a heading opens with, so the class is the markup rather than the complement of a word.
-# The whitespace is spelled out rather than taken from `\s`, which is Unicode-aware and so overlaps the non-ASCII alternative on every non-ASCII space.
-# Two alternatives able to consume the same character make the run ambiguous, and the parse then doubles per character of it on a line that does not go on to say this, which is a hang rather than a slow read.
-# A body carrying 30 non-breaking spaces in a line took minutes, and every alternative here now opens on a character the others cannot.
-# An emphasis marker is admitted only where no space follows it, which is what tells `**Previously missed (1)**` from the list item `* Previously missed (2) findings`.
-# A bullet is the one prose opener that is also heading markup, and `marker_blocks` accepts a line on a `(N)` alone.
-# So the list item read as the section and printed the prose around it as findings.
-# One character per iteration rather than a run of them, since a repeated group that can split a run of stars more than one way is ambiguous and parses exponentially in it.
-# What this still admits is non-ASCII punctuation, an em dash or a typographic quote opening a sentence, which reads that sentence as the section.
-# It is narrower than the spelling before it, which admitted ASCII punctuation as well, and the remedy for the rest is a class of non-ASCII symbols rather than the whole of non-ASCII.
-HEADING_OPENER = r"(?:</?[A-Za-z][^>]*>|[ \t>#]|[*_](?![ \t])|[^\x00-\x7f])*"
-PREVIOUSLY_MISSED = re.compile(
-    rf"^{HEADING_OPENER}(?:[0-9]+[ \t]+)?Previously missed\b",
-    re.IGNORECASE,
-)
-# CodeRabbit's own equivalent, collapsed into the review body like `SUPPRESSED` rather than raised as an inline comment.
-CR_OUTSIDE_DIFF = re.compile(r"Outside diff range comments", re.IGNORECASE)
-# A refusal declines the round as a formal review carrying the head and no threads.
-# That is the clean pass byte for byte, so every coverage check passes over a round that never ran.
-# The alternation is the runbook's for the same reason the one above is.
-# One phrasing is one rewording away from reading a refusal as a review.
-# The dot covers the apostrophe in the typographic spelling and the ASCII one alike.
-# It also keeps the published filter usable inside single quotes, which neither survives.
-REFUSAL = re.compile(
-    r"wasn.t able to review|was not able to review|unable to review", re.IGNORECASE
-)
-# The account-level cause among the refusal wordings, as opposed to a per-pull-request one like the file count.
-# Read against `refusal_of`'s own return rather than the raw body.
-# That way the exemptions built for that anchor, the opening line and the fenced quotation, protect this reading too instead of needing their own.
-# This script's own corpus and this file both quote the sentence below its overview, same as the refusal wording itself does.
-# Observed once here: "Copilot was unable to review this pull request because the user who requested the review has reached their quota limit."
-QUOTA = re.compile(r"reached (?:their|its|his|her|your|my) quota limit", re.IGNORECASE)
-ERROR_REFUSAL = re.compile(r"encountered an error", re.IGNORECASE)
 COPILOT_RUN_PATH = "dynamic/agents/copilot-pull-request-reviewer"
 RUN_ERROR_TYPE = re.compile(r"errorType: '([a-z_]+)'")
 RUN_RATE_LIMIT = re.compile(
@@ -512,568 +185,44 @@ RUN_RATE_LIMIT = re.compile(
 )
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
-# A structural marker rather than prose, so reading it needs no per-bot wording model the way `QUOTA` above needs one for Copilot's free-text refusal.
-# Observed on CodeRabbit, a plain PR comment rather than a formal review: "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->".
-# The service name is captured rather than assumed.
-# A second bot using the same auto-generated-comment convention is read without a new pattern.
-# Any other shape stays unread unless a pattern of its own, like the reply one below, reads it.
-# That reply's marker names the product rather than the `coderabbit.ai` service, so `RATE_LIMIT_SERVICE` supplies the service by login.
-RATE_LIMITED = re.compile(r"auto-generated comment:\s*rate limited by\s*(\S+?)\s*-->")
-RATE_LIMITED_REPLY = re.compile(
-    r"<!--\s*This is an auto-generated reply by [^>\n]*-->\s*(?:<!--[^>\n]*-->\s*)*"
-    r"<details>\s*<summary>[^<\n]*Action not completed\s*</summary>\s*Review rate limited\."
-)
-RATE_LIMIT_SERVICE = {CODERABBIT_LOGIN: "coderabbit.ai"}
-# Anchored to the `<h3>` tag rather than a bare substring, since prose elsewhere can mention the phrase without being the comment it names.
-QODO_REVIEW_HEADING = re.compile(r"<h3>\s*Code Review by Qodo\s*</h3>", re.IGNORECASE)
-# Only the numbered heading counts as a finding, told apart from Qodo's own nested sub-summaries by starting with a number and a period (`1.`, `2.`, ...).
-QODO_FINDING = re.compile(r"\s*\d+\.\s")
-# A finding's own title can quote `Resolved`/`Dismissed` without carrying the badge, so the glyph is required rather than just the word.
-# Escaped (U+2713, U+2717) rather than typed literally, per the repository's ASCII charset rule.
-QODO_BADGE = re.compile(r"<code>[^<]*(?:\u2713 Resolved|\u2717 Dismissed)[^<]*</code>")
-# A round states how much of the diff it read on a line of its own.
-# A round that read part of it is the clean pass elsewhere, same commit and threads and digest.
-# Five such rounds landed across three merged pull requests here.
-# One of them read 2 of 3 changed files across both its rounds and merged.
-# This is the third instance of the shape the two patterns above answer.
-# It is also the only one nothing was reading.
-# The line is anchored at its start rather than matched body-wide, both spellings being structural.
-# Over 333 review bodies every coverage statement opens its line and not one sits mid-sentence.
-# 272 of them open with the reviewer's own name and 32 are the `Review details` bullet.
-# A body-wide match reports the pull request adding this check as a partial round.
-# That is the false positive the suppressed matcher and the refusal matcher have each had once.
-# The cost of the anchor is named rather than hidden.
-# A wording that moves the statement off the line start reads as no statement at all.
-# Two openers rather than one alternation, because the text each needs beside it differs.
-# The bullet's own label is the marker, so it is a coverage line whatever follows the counts.
-# Requiring the trailing words there made a bullet that drops them read as no statement at all.
-# The sentence opener is the reviewer's name, which prose also opens a line with.
-# That one keeps the text requirement, since the name alone does not say the line states coverage.
-COVERAGE_BULLET = re.compile(r"\s*[-*]\s*\*\*Files reviewed:", re.IGNORECASE)
-COVERAGE_SENTENCE = re.compile(r"\s*Copilot\b", re.IGNORECASE)
-# A blockquote marker (`>` per line, Markdown's own quoting convention) sits in front of every line CodeRabbit wraps its outside-diff section in.
-# `HEADING`'s `\s*` does not match `>`, so a heading under one reads as prose without this stripped first.
-# Read by two callers for opposite purposes, which is why it is defined here rather than beside either.
-# `marker_blocks` strips it to find a heading underneath, and `coverage_statements` refuses the line outright.
-# A quoted marker is a quotation whichever convention quotes it, and the coverage reader has no use for what a blockquote carries.
-BLOCKQUOTE = re.compile(r"^>+\s?")
-# The severity the second overview format now renders as a theme-switched `picture` element.
-# Its only textual carrier is the `img` `alt`, every other part being a URL that changes with the icon set.
-# The set is versioned in those URLs and has already been bumped once, so matching them would pin this reader to one revision.
-# Reduced to the `alt` text rather than dropped, since the severity is the half of a finding entry worth reading.
-# Either quoting is read, both being valid HTML and the attribute's own spelling being exactly the kind of presentation this reader exists not to depend on.
-# Read in one only, a change of quoting leaves the badge unreduced, which prints two icon URLs per finding and can report the entry as a shape nothing here knows.
-# Neither gap may cross a `picture` tag, or one match spans from the first element to a later element's `img`.
-# An entry whose own `img` carries no `alt`, which the icon set drifting is exactly how to get, then pairs with the next entry's.
-# Everything between, that entry's title and its whole finding text, is replaced by the later severity and lost from the only place these findings appear.
-# Bounded, such an entry keeps its markup and reads as an unrecognized shape, which is the failure that reports itself.
-SEVERITY_BADGE = re.compile(
-    r"<picture\b[^>]*>(?:(?!</?picture\b).)*?"
-    r"<img\b[^>]*\salt=(?:\"([^\"]*)\"|'([^']*)')[^>]*>"
-    r"(?:(?!</?picture\b).)*?</picture>",
-    re.DOTALL | re.IGNORECASE,
-)
-# What is left of a finding entry's own heading once the badge above is reduced to its text.
-# A finding entry cannot be vetted the way a section heading is, its title being different on every finding.
-# The badge is therefore what identifies the shape, and the title after it is free text by design.
-# The severity alone does not separate the two, a section being free to name one in its own heading.
-# Every vetted section heading here states its count and a finding's title states none, so the absence of one is the other half of the test.
-# Without it a section this has no reader for is vetted on its first word, which turns a shape that reports itself into one that is silently passed over.
-SEVERITY_TEXT = re.compile(r"(critical|high|medium|low)\s+severity\b", re.IGNORECASE)
-# The count as `normal` leaves it rather than as the heading wrote it.
-# `normal` rewrites every `(\d+)` to `(N)` before a marker is ever compared, so a reader keyed on the digits finds none and reads every section heading as carrying no count.
-NORMALIZED_COUNT = re.compile(r"\((?:\d+|N)\)")
-# Ask the reviewer for a stable coverage shape instead of adapting only to changing prose.
-# Keep the prose readers for reviews made before the marker shipped.
-# Searched within its line rather than matched as the whole of one, because the reviewer writes it both ways.
-# It carries no whitespace of its own at either end, which a search has no use for and pays for: an unanchored run of `\s*` is quadratic in the whitespace run it sits in.
-# Left in place from the spelling that matched a whole line, a line of 16000 spaces took half a second and 65000 took nine, where the marker itself is what a search is looking for.
-# The instruction it is emitted from asks only that the body end with it, and one of the two overview formats ends a prose sentence with it instead.
-# Anchored to the whole line, that format read as a round stating no coverage at all, over a body carrying the counts in plain sight.
-# The anchor was never what made the marker trustworthy: an HTML comment renders invisibly, so a body that wants one seen has to quote it, and a quotation is refused before this is ever consulted.
-# The digit runs are matched unbounded and judged in `read_coverage` rather than bounded here, which is the difference between a line this cannot believe and a line that is not a statement at all.
-# Bounded here, a marker stating a count longer than any review states stopped matching, so the line left the gate silently and a round carrying one read as full on whatever else it said.
-# `int` also raises on a run past 4300 digits, so the judgment has to happen somewhere, and the place that can answer `unvetted` is the reader rather than the pattern.
-FLEET_REVIEW = re.compile(
-    r"<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->",
-    re.IGNORECASE,
-)
-# The count pair itself, in the two spellings the corpus carries.
-# The comment tail one of them ends on is deliberately not part of the unit.
-# It says how many comments the round raised, which is not coverage.
-# A fifth wording of it would fail every merge over a sentence ending read correctly.
-# The plural is optional, since a one-file round reading `1 changed file` means what it says.
-# Blocking on that is the cry-wolf case, a fleet-wide stop over a grammatical agreement.
-# The bullet's trailing words are optional for the reason its label alone identifies the line.
-# Detection and parsing disagreeing there turned a readable `4/4` into a block on a readable line.
-# What is left blocking is a bullet carrying no counts, which genuinely states no coverage.
-COVERAGE_COUNTS = re.compile(
-    r"reviewed\s+(\d+)\s+out of\s+(\d+)\s+changed files?"
-    r"|\*\*Files reviewed:\*\*\s*(\d+)\s*/\s*(\d+)(?:\s+changed files?)?",
-    re.IGNORECASE,
-)
-LOOSE_COUNTS = re.compile(r"reviewed\D{0,40}?(\d+)\s*(?:out of|of|/)\s*(\d+)", re.IGNORECASE)
-EMPHASIS_MARK = re.compile(r"[*_`]")
 
 
-HTML_SPACE = r"[ \t\n\f\r]"
-# A block start ends a tag's name on cmark's whitespace, which a vertical tab joins.
-BLOCK_SPACE = r"[ \t\n\v\f\r]"
-
-
-def attributes(spanning: bool = False, lone_space: bool = True) -> str:
-    """The pattern for a tag's attributes after its name, through the `>` that closes it.
-
-    A quoted value may hold a `>`. Anything else that is not an attribute ends the tag unread, so
-    an opener quoted as `<details [^>]*>` is not one. A `spanning` reader takes a line break where
-    HTML does, between attributes and inside a quoted value, and any other reads one line.
-
-    Without `lone_space`, whitespace must lead to an attribute, and its name to a letter. That is
-    how a reader refuses the `<summary >` or `<summary _y>` a code span masked to a space leaves,
-    and it refuses `<summary />` with them. Any other reader takes a name as CommonMark does.
-
-    One tail serves every reader here of a tag's attributes, and it stays lenient. A tail kept per
-    site was fixed at one and not at its siblings. `TAG_ATTRIBUTE` is CommonMark's stricter grammar
-    for any inline tag, which is what decides whether a backtick inside one opens a span.
-    """
-    space, quoted = (HTML_SPACE, "") if spanning else (r"[ \t\f]", r"\n")
-    value = rf"\"[^\"{quoted}]*\"|'[^'{quoted}]*'|[^\s\"'<>]+"
-    lead = "[A-Za-z_:]" if lone_space else "[A-Za-z]"
-    attribute = rf"{space}+{lead}[\w.:-]*(?:{space}*={space}*(?:{value}))?"
-    if lone_space:
-        return rf"(?:{attribute})*{space}*/?>"
-    return rf"(?:(?:{attribute})+{space}*)?/?>"
-
-
-ATTRIBUTES = attributes()
-HTML_TAG = re.compile(rf"</?[A-Za-z][\w-]*{ATTRIBUTES}")
-MARKER_NAME = re.compile(r"fleet[\W_]{0,3}review", re.IGNORECASE)
-MARKER_NAME_TIGHT = re.compile(r"fleet\W?review", re.IGNORECASE)
-LINE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?/?>")
-BARE_TAG = re.compile(r"<(?!!--)[^<>]*>")
-MARKER_REACH = 300
-FILE_ROW = re.compile(
-    r"^(?![^\n]*<!--)[ \t]*\|[ \t]*`[^|`\n]*[./][^|`\n]*`[ \t]*\|[^\n]*$", re.MULTILINE
-)
-LINE_END = r"[ \t]*\r?(?=\n|\Z)"
-ATX_HEADING = rf"#{{1,6}}(?:[ \t]|{LINE_END})"
-THEMATIC_BREAK = rf"(?:(?:\*[ \t]*){{3,}}|(?:-[ \t]*){{3,}}|(?:_[ \t]*){{3,}}){LINE_END}"
-
-
-def fence_opener(ticks: str = "`{3,}", tildes: str = "~{3,}") -> str:
-    """The pattern for a fence's opening line after its indent.
-
-    A backtick fence's info string carries no backtick, and a tilde fence's carries anything.
-    `FENCE` passes each run as a capturing group, so its closer can repeat the opener's mark.
-    """
-    return rf"{ticks}[^`\n]*(?=\n|\Z)|{tildes}[^\n]*"
-
-
-# A fenced block is a quotation rather than a statement, and 131 of those bodies carry one.
-# This change puts both spellings into the source and the runbook, so a review of it quotes them.
-# A quoted count read as this round's own is a coverage figure nobody stated.
-FENCE = re.compile(
-    rf"^ {{0,3}}(?:{fence_opener('(`{3,})', '(~{3,})')})(?:\n.*?)??"
-    rf"(?:(?P<close>\n {{0,3}}(?:\1`*|\2~*){LINE_END})|\Z)",
-    re.DOTALL | re.MULTILINE,
-)
-
-
-def strip_fences(
-    body: str, repl: Callable[[re.Match[str]], str] = lambda m: "", to_end: bool = False
-) -> str:
-    """The body with each fenced block replaced by `repl`, the unclosed one kept unless `to_end`.
-
-    Markdown runs an unclosed fence to the end of the body, so for the coverage reader everything
-    after one is a quotation, and masking it there reads as no coverage, which blocks. Every other
-    reader looks for something that blocks, such as a suppressed finding or an unrecognized shape,
-    and masking the rest of the body there would hide it, so those keep reading it.
-    """
-    return FENCE.sub(
-        lambda m: repl(m) if to_end or m.group("close") is not None else m.group(), body
-    )
-
-
-def tag_opener(*names: str, closer: bool = False, space: str = HTML_SPACE) -> str:
-    """The pattern opening a tag of one of these names, up to where its name ends.
-
-    A tag's name ends on HTML whitespace, `>`, `/>`, or the end of a line. So `<summaryx>` names
-    another tag and `<summary/>` opens a summary. A `<details/x>` shows as text, since Markdown
-    hands HTML no tag there. Python's `\\s` is wider than that whitespace, so a no-break space
-    after the name leaves no tag.
-
-    One boundary serves every opener reader here that admits an attribute. A rule kept per site
-    had to be fixed by hand at each of its siblings. With `closer`, a closing tag matches too.
-    A block start's reader passes `BLOCK_SPACE` as `space`.
-    """
-    return rf"<{'/?' if closer else ''}(?:{'|'.join(names)})(?={space}|/?>|$)"
-
-
-HTML_BLOCK_NAMES = (
-    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|"
-    "dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|"
-    "hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|"
-    "section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-)
-HTML_RAW_TEXT_NAMES = "pre|script|style|textarea"
-HTML_BLOCK_START = (
-    rf"(?:(?i:<(?:{HTML_RAW_TEXT_NAMES})(?={BLOCK_SPACE}|>|$)"
-    rf"|{tag_opener(HTML_BLOCK_NAMES, closer=True, space=BLOCK_SPACE)})"
-    r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)"
-)
-# What a line opens, after at most three spaces, to end the paragraph above it as GitHub renders it.
-# A bare blockquote marker is left to each reader, since one line cannot tell a quotation's next line from one opening under a paragraph.
-INTERRUPTS_PARAGRAPH = (
-    rf"{HTML_BLOCK_START}|[-+*][ \t]+\S|0{{0,8}}1[.)][ \t]+\S|{ATX_HEADING}|{THEMATIC_BREAK}"
-    rf"|{fence_opener()}"
-)
-
-
-PARAGRAPH_BREAK = (
-    rf"\n(?!\s*\n| {{0,3}}>(?: {{0,4}}>)*{LINE_END}"
-    rf"|(?: {{0,3}}>(?: {{0,4}}>)* {{0,4}}| {{0,3}})(?:{INTERRUPTS_PARAGRAPH}))"
-)
-IN_PARAGRAPH = rf"(?:[^\n]|{PARAGRAPH_BREAK})"
-TAG_SPACE = rf"[ \t]*(?:\r?{PARAGRAPH_BREAK}[ \t]*)?"
-TAG_ATTRIBUTE = (
-    rf"(?=[ \t\r\n]){TAG_SPACE}[A-Za-z_:][A-Za-z0-9_.:-]*(?:{TAG_SPACE}={TAG_SPACE}"
-    rf"(?:[^ \t\r\n\"'=<>`]+|'(?:[^'\n]|{PARAGRAPH_BREAK})*'|\"(?:[^\"\n]|{PARAGRAPH_BREAK})*\"))?"
-)
-INLINE_HTML = (
-    rf"(?<!\\)(?:\\\\)*(?:<[A-Za-z][A-Za-z0-9-]*(?:{TAG_ATTRIBUTE})*{TAG_SPACE}/?>"
-    rf"|</[A-Za-z][A-Za-z0-9-]*{TAG_SPACE}>"
-    rf"|<!--(?:-?>|(?:{IN_PARAGRAPH}*?(?:[^-\n]|{PARAGRAPH_BREAK}))?-->)"
-    rf"|<\?{IN_PARAGRAPH}*?\?>"
-    rf"|<![A-Z]+(?:[ \t]|\r?{PARAGRAPH_BREAK})(?:[^>\n]|{PARAGRAPH_BREAK})*>"
-    rf"|<!\[CDATA\[{IN_PARAGRAPH}*?\]\]>"
-    r"|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x00-\x20<>]*>"
-    r"|<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
-    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>)"
-)
-
-
-class CodeSpans:
-    """The inline code spans in a body, read the way GitHub reads them, left to right.
-
-    A code span, raw inline HTML, and an autolink bind by which one opens first. A backtick inside
-    an HTML comment, a tag's quoted value, or an autolink that opened earlier is literal, so it
-    opens no span. Read alone, that backtick paired with a later one, and a live tag between the two
-    read as quoted.
-
-    So one pattern reads all three, each match consuming its own text, and only a span is
-    reported. A span carries its backtick run as group 1, which is what tells it from the rest.
-
-    Some readings differ from GitHub's and stay known limits that tests pin, since no reviewer
-    body has carried any of them. A paragraph's end is read from its line alone. So a span here
-    can pair across a line ending a list item's or a quotation's paragraph on GitHub. It pairs
-    across a top-level setext underline too. A backtick run after an even run of backslashes opens a
-    span on GitHub and none here. One inside an inline link's destination or title opens none on
-    GitHub and pairs here.
-    """
-
-    def __init__(self) -> None:
-        self.pattern = re.compile(
-            rf"(?<![\\`])(`+)(?!`){IN_PARAGRAPH}*?(?<!`)\1(?!`)|{INLINE_HTML}"
-        )
-
-    def finditer(self, text: str) -> Iterator[re.Match[str]]:
-        """Every span in `text`, in order."""
-        return (m for m in self.pattern.finditer(text) if m.group(1) is not None)
-
-    def search(self, text: str) -> re.Match[str] | None:
-        """The first span in `text`, or None."""
-        return next(self.finditer(text), None)
-
-    def sub(self, repl: str | Callable[[re.Match[str]], str], text: str) -> str:
-        """`text` with each span replaced by `repl`, and the HTML and autolinks left as they are."""
-
-        def one(m: re.Match[str]) -> str:
-            if m.group(1) is None:
-                return m.group()
-            return repl if isinstance(repl, str) else repl(m)
-
-        return self.pattern.sub(one, text)
-
-
-# An inline code span is a quotation for the same reason a fenced block is.
-# A reviewer naming `<summary>` in prose was read as opening one.
-# Bounded to a paragraph, and an escaped tick opens nothing, since either masks a section.
-# Only the opener takes that guard, a backslash being literal inside a span rather than an escape.
-# Replaced by a space, since deleting joins the sides into a tag the body never carried.
-CODE_SPAN = CodeSpans()
-
-
-# The round's own file summary table, whose first column is a path and whose second is prose.
-# The header row is the marker rather than the `<details>` around it.
-# One measured round carries the table with no `<summary>`, and two summary spellings wrap it.
-# Over the same 348 bodies, 91 carry a table and every table row in the corpus belongs to one.
-# A row outside this shape is a shape nothing has seen rather than a table read wrongly.
-TABLE_HEADER = re.compile(r"\s*\|\s*File\s*\|", re.IGNORECASE)
-# The alignment row under the header, which is punctuation rather than a file.
-TABLE_RULE = re.compile(r"\s*\|[\s:|-]+\|\s*$")
-TABLE_ROW = re.compile(r"\s*\|([^|]*)\|")
-TABLE_GLOB = frozenset("*?")
-TABLE_GAP = " ... "
-TABLE_SPAN = re.compile(r"`([^`]+)`")
-TABLE_SEPARATORS = re.compile(r"[\s,]*")
-# The readings a round's coverage carries, worst first.
-# A head carries more than one round only through a re-request.
-# Where two disagree, the one naming files it did not read is the one to answer.
-# `UNSTATED` sits last rather than beside the failures, being the absence of a statement.
-# A round that did state full coverage settles the question over one that stated nothing.
-UNVETTED, PARTIAL, FULL, UNSTATED = "unvetted", "partial", "full", "unstated"
-# Not a state a round reports, but the reading that carries an earlier round's forward.
-CARRIED = "carried"
-TABLE = "table"
-LOCAL = "local"
-NO_HEAD_TABLE = "no round covering the head carries a file table of its own"
-SEVERITY = (UNVETTED, PARTIAL, FULL, UNSTATED)
-# Upper-case for the two that block a merge, for the reason `review_on_head=NO` is upper-case.
-# `unstated` rather than `unknown`, since a body carrying no count is a shape this knows.
-# What this script does not know is the separate `shapes` field, and one word for both hides it.
-# The constant carries that name too, so no reader has to map a name here onto another word.
-COVERAGE_FIELD = {
-    UNVETTED: "UNVETTED",
-    PARTIAL: "PARTIAL",
-    FULL: "full",
-    UNSTATED: "unstated",
-    TABLE: "table",
-    LOCAL: "local",
-}
-
-# Every structural marker the reviewer's own bodies carry, measured over the same 333.
-# A body is read for these rather than trusted, because every reader below keys on one of them.
-# A heading this script has no spelling for is a section it will not find, reported as absent.
-# That is the shape of all three failures already on record here, each caught after it landed.
-# Two overview formats are carried rather than one, the second arriving after that measurement.
-# Its own markers are listed beside the first's, since a round in either format can land next.
-# Counts are normalized to `(N)` and non-ASCII is dropped before comparing, and `unvetted` folds letter case at the comparison itself.
-# The verdict headings carry a colored circle, so the emoji is what would drift most cheaply.
-# Dropping it also keeps this file inside the charset rule that governs the repository.
-CLEAN_VERDICTS = {"### Approval recommended", "### Ready to approve"}
-FLAGGING_VERDICTS = {
-    "### Changes recommended",
-    "### Needs a closer look",
-    "### Not ready to approve",
-    "### Human review recommended",
-}
-VETTED_HEADINGS = (
-    {
-        "## Pull request overview",
-        "## Copilot review overview",
-        "### Reviewed changes",
-        "### Suppressed comments (N)",
-    }
-    | CLEAN_VERDICTS
-    | FLAGGING_VERDICTS
-)
-NARRATIVE_SUMMARY = "What changed in this PR"
-TOTAL, OPEN, RESOLVED = "total", "open", "resolved"
-OVERVIEW_SECTIONS = {
-    "Open (N)": OPEN,
-    "(N) open findings": TOTAL,
-    "(N) open finding": TOTAL,
-    "(N) open issues": TOTAL,
-    "(N) open issue": TOTAL,
-    "Resolved since last review (N)": RESOLVED,
-    "(N) resolved since last review": RESOLVED,
-}
-PREVIOUSLY_MISSED_SUMMARIES = {
-    "Previously missed (N)",
-    "(N) previously missed issues",
-    "(N) previously missed issue",
-}
-SUPPRESSED_SUMMARIES = {"Suppressed comments (N)", "Comments suppressed due to low confidence (N)"}
-VETTED_SUMMARIES = (
-    set(OVERVIEW_SECTIONS)
-    | {
-        "Pull request overview",
-        NARRATIVE_SUMMARY,
-        "Show a summary per file",
-        "File summaries",
-        "Review details",
-    }
-    | SUPPRESSED_SUMMARIES
-    | PREVIOUSLY_MISSED_SUMMARIES
-)
-VETTED_LABELS = {"Files reviewed", "Comments generated", "Review effort level", "Review effort"}
-# Inline emphasis around a marker is presentation rather than identity.
-# The second overview format wraps every `<summary>` in `<strong>` where the first wrapped none.
-# Vetting the tags along with the text blocks on markup changing under a section that has not.
-# That is the same cheap drift the verdict headings already drop their colored circle for.
-EMPHASIS = re.compile(r"</?(?:strong|b|em|i)>", re.IGNORECASE)
-MARKDOWN_HEADING = re.compile(rf"\s*{ATX_HEADING}")
-# The `Review details` metadata bullets, of which the coverage line is one.
-# The bullet stays required, so the second format's bare bold metadata lines are not read here.
-# Dropping it reads that format's own `**Changes:**` prose label as metadata and blocks on it.
-# Each bare line that carries a reading has its own pattern below instead.
-LABEL_LINE = re.compile(r"\s*[-*]\s+\*\*([^*]+):\*\*")
-# Two spellings, one per overview format.
-# The first states it as a `Review details` bullet.
-# The second has no `Review details` section and states it as a bare bold line.
-# Reading the first alone printed `effort=unknown` over a body stating the level outright.
-# A later revision opens the second on an emoji, a non-ASCII run excluding whitespace so `\s*` cannot overlap it.
-EFFORT_LINE = re.compile(
-    r"\s*(?:[-*]\s+)?(?:[^\x00-\x7f\s]+\s*)?\*\*Review effort(?: level)?:\*\*\s*"
-    r"(?:(Default)\s*\(\s*(Lite|Balanced|Max)\s*\)|(Lite|Balanced|Max))\s*$",
-    re.IGNORECASE,
-)
-# The second overview format states its own version in the marker its body opens with.
-# Keyed on that marker rather than on the heading wording, a version being what it states.
-# Anchored to a line of its own, since the marker is an HTML comment and renders invisibly.
-# A body naming it mid-sentence is a body about the format rather than one written in it.
-# A writer who wants it seen at all has to quote it, which is why a code span is masked first.
-# Bounded to three spaces of indent, which is the rule `FENCE` reads a fence by.
-# A fourth makes the line a code block, and so a quotation the fence guard never sees.
-CCR_OVERVIEW = re.compile(r"^ {0,3}<!--\s*ccr-overview-v2\s*-->\s*$", re.MULTILINE)
-# That format's own finding total, which the first format states nowhere.
-# Line-anchored for the reason a coverage line is, prose being able to carry the words mid-line.
-# Bounded to three spaces for the reason the marker above is, a fourth making it a code block.
-# The largest total wins, so a quoted number otherwise beat the round's own.
-# `None` is a total of zero spelled in words, which a round raising nothing states.
-# Read as no total at all it printed `?`, and this file's own rule is that the two differ.
-# The rest of the line is taken whole rather than its first number.
-# The format states a count per severity, so a round stating `2 <medium> . 3 <low>` raised five.
-CCR_FINDINGS = re.compile(r"^ {0,3}\*\*Findings:\*\*(.*)$", re.MULTILINE)
-CCR_OPEN_FINDINGS = re.compile(
-    r"^ {0,3}\*\*(\d+|No) open (?:findings?|issues?)\*\*[ \t]*(?:[^\x00-\x7f\s]+[ \t]*)?\r?$",
-    re.MULTILINE | re.IGNORECASE,
-)
-# The markup the format writes a count beside, replaced by one sentinel before a count is read.
-# Masked rather than matched around, because a badge carries digits of its own in its attributes.
-# `2 <img src="b.svg" width="62" height="18">` read `18` as a severity count on that reasoning.
-# Dropping the markup outright would join the digits either side of it into one number instead.
-# The tag alternative is bounded by `[^<>]`, so it cannot span from one tag into another.
-# An unmatched `<` earlier in the line otherwise paired with a later tag's closing `>`.
-# Every count between the two was swallowed with it.
-# It opens on a name character for the same reason, a `<` followed by a space being prose.
-# The link alternative tolerates one level of nested parentheses and brackets, a URL carrying a
-# `)` of its own having otherwise ended the match early and left its anchor id on the line.
-# A reference-style link is its own alternative, its label being a number as often as a word.
-COUNT_MARKUP = re.compile(
-    r"</?[A-Za-z][^<>]*>"
-    r"|!?\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]\([^()]*(?:\([^()]*\)[^()]*)*\)"
-    r"|!?\[[^\[\]]*\]\[[^\[\]]*\]"
-)
-# What opens a block of its own, and so ends a blockquote rather than continuing it.
-# Markdown's lazy continuation carries paragraph text only, which of the three coverage spellings is the reviewer's own sentence alone.
-# The bullet spelling and the marker each open a block, so each is the round's own line again however the lines above it are quoted.
-# Read as continuations they reported `unstated` over a round stating full coverage, which blocks a merge on a satisfied item.
-# A setext underline is not one, since it cannot underline a lazy line and so continues the quotation as text.
-# The caller also holds the four-space bound, an indented line being a code block, which cannot interrupt a paragraph and so cannot end a quotation either.
-STARTS_BLOCK = re.compile(INTERRUPTS_PARAGRAPH)
-# A control character, so no body can carry one of its own and be read as having a count here.
-MARKUP_MASK = "\x00"
-# Every integer the markup did not swallow, which is how this format states each severity.
-# Bounded to four digits, because a review states tens of findings and never thousands.
-# A longer run is an identifier, so the mask is not the only thing saying an anchor id is not one.
-# That bound is also what keeps `int` from being handed a digit run long enough to raise.
-# A digit touching a `.` is part of a decimal, so `confidence < 0.5` contributes no count.
-COUNT_LOOSE = re.compile(r"(?<![\d.])\d{1,4}(?![\d.])")
-# The digits a count may carry before it is a run to refuse rather than a number to read.
-# `int` raises above 4300 of them, so every conversion of a matched run goes through `counted` rather than straight to `int`.
-# Bounding the pattern instead would leave the line unmatched, which reads as no statement at all rather than as one this cannot believe.
-# Four is what `COUNT_LOOSE` above already holds its own runs to, a review stating tens of files and never thousands.
-COUNT_DIGITS = 4
-# A total of zero spelled in words, anchored to where the line states its total.
-# Read as a bare substring instead, `see nonetheless the summary below` stated a zero.
-# Emphasis markers are skipped, the format writing the word italicized as often as bare.
-# Bounded by a lookahead rather than by `\b`, since `_` is a word character.
-# `_None_` then ended on no boundary at all, reading an italicized stated zero as none stated.
-STATED_NONE = re.compile(r"^[\s_*]*none(?![a-z0-9])", re.IGNORECASE)
-
-
-# The first section opener on a line of its own, which is where the overview preamble ends.
-# Read case-insensitively as every other tag reader in this file is, since a body spelling it
-# `<DETAILS>` otherwise never ends the preamble and a section's own total becomes the round's.
-# Anchored to a line for the reason the marker and the total above are.
-# Bounded as `DETAILS_TAG`'s opener is, so `<details/>` ends the preamble and `<detailsfoo>` does not.
-# Matched anywhere instead, a round naming `<details>` in its overview prose ended the preamble.
-# That threw its stated total away, printing `?` and no shortfall over a round withholding findings.
-DETAILS_OPEN = re.compile(rf"^ {{0,3}}{tag_opener('details')}", re.IGNORECASE | re.MULTILINE)
-# A login that reads as this reviewer without being the spelling every query here filters on.
-# A rename leaves every filter matching nothing, so a review that landed reads as none at all.
-# A wait then polls out its whole timeout against a review sitting in plain sight.
-# `copilot-swe-agent` is the coding agent rather than the reviewer, and does not match this.
+# A login that reads as this reviewer without being the spelling every query filters on.
+# `copilot-swe-agent` is the coding agent and does not match.
 READS_AS_REVIEWER = re.compile(r"copilot.*review", re.IGNORECASE)
-# The repository this script is hosted in, named because an unrecognized shape is fixed here.
-# It is a literal rather than the pull request's own repository.
-# That one is where the shape was seen, not where the reader failing on it lives.
+# The repository this script is hosted in, where an unrecognized shape is fixed, not where it was seen.
 HUB = "ptr727/ProjectTemplate"
-# The opening tag takes an attribute, as `DETAILS_TAG` already allows on its own pair.
-# This reader was the one exception, and the observed format does emit `<details open>`, so a
-# `<summary class="x">` read as no summary at all missed a section while reporting no shape.
-# An attribute name opens on a letter, which is what tells one from whitespace alone.
-# Masking a code span inside `<summary`x`>` otherwise fuses a `<summary >` the body never had.
-SUMMARY = re.compile(
-    rf"{tag_opener('summary')}{attributes(spanning=True, lone_space=False)}(.*?)</summary>",
-    re.DOTALL | re.IGNORECASE,
-)
-TAGS = re.compile(
-    rf"</(?:details|summary)>|{tag_opener('details', 'summary')}{ATTRIBUTES}", re.IGNORECASE
-)
-COUNT = re.compile(r"\((\d+)\)")
-# A count opening a line past any opener `PREVIOUSLY_MISSED` admits, which is how `marker_blocks` tells prose.
-OPENING_COUNT = re.compile(rf"{HEADING_OPENER}[0-9]+[ \t]")
-LEADING_COUNT = re.compile(r"^([#*_ ]*)([0-9]+)(?= )")
-# What makes a line a heading rather than prose mentioning the phrase, in either markup.
-# A line that is neither still qualifies where it carries a `(N)` and does not open on a count.
-# The section has appeared as a bare line too, and a closing `(N)` is what prose does not carry.
-# A count opening the line is not that signal, since a sentence opens on one as readily as a heading does.
-DETAILS_OPENER = re.compile(rf"{tag_opener('details')}{ATTRIBUTES}[ \t]*", re.IGNORECASE)
-SUMMARY_OPENER = re.compile(tag_opener("summary"), re.IGNORECASE)
-HEADING = re.compile(
-    rf"\s*(?:{ATX_HEADING}|(?:{DETAILS_OPENER.pattern})?{SUMMARY_OPENER.pattern})", re.IGNORECASE
-)
 
-# How many of the newest reviews and comments both queries read.
-# A narrow window drops the reviewer's answer behind ordinary discussion, reporting no answer.
-# A test holds this equal to the number the queries carry, since a drift between them reads clean.
+# How many of the newest reviews and comments both queries read, held equal to the queries by a test.
 WINDOW = 100
 
 FILES_WINDOW = 100
 FILES_CAP = 3000
 FILES_UNREAD = "unread"
-# The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
-COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
 ATTEST_HEAD_DELAYS = (3, 5, 10, 15, 15, 12)
 _attest_sleep = time.sleep
 # What a git ref may not hold before it is interpolated into a REST path.
-# Refused rather than allow-listed, git permitting more than a branch name usually carries.
-# An allow-list of the usual ASCII refused `release/1.0+build` and any non-ASCII name alike.
-# Each of those is a ref git accepts, and refusing one refuses the carry on every pull request.
-# What is refused instead is the set that changes the path rather than traveling along it.
-# `#` truncates the path at a fragment, `?` at a query, and `%` opens an escape.
-# A space and a control character are not path characters at all.
+# Refused rather than allow-listed, since git permits more than a branch name usually carries.
+# The set refused is what changes the path: `#`, `?`, `%`, whitespace, and control characters.
 UNSAFE_REF = re.compile(r"[\s#?%]|[\x00-\x1f\x7f]")
-# A dot segment travels up the path and reaches another repository, which no ref shape excuses.
-# Git forbids `..` in a ref name, so this refuses a value that never came from a ref at all.
+# A dot segment travels up the path and reaches another repository.
 DOT_SEGMENT = re.compile(r"(?:^|/)\.\.(?:/|$)")
 
-# How many rollup contexts the full query asks for, which is not the window above.
-# The query is built from this and the truncation line quotes it, so the two cannot drift.
-# Naming it beside a hard-coded literal only documented the literal, which a case then held.
-# A case is not the guarantee though, since it holds only where someone runs it.
+# How many rollup contexts the full query asks for, built into the query so the two cannot drift.
 CHECKS_WINDOW = 100
 
-# How many of the repository's own pull requests, and how much of each one's own reviewer history within them, the repo-wide history read looks across.
-# Smaller than WINDOW on purpose, since this is a best-effort signal rather than the certainty WINDOW's own two queries are read for.
-# Neither carries a `hasPreviousPage` guard for that same reason.
-# A caller finding the signal wrong once quota has plainly reset already has --ignore-quota-signal for it, which is a cheaper remedy than paginating this window out.
+# How many pull requests, and how much reviewer history within each, the repo-wide history read covers.
+# Smaller than WINDOW and without a `hasPreviousPage` guard, since this is a best-effort signal.
 HISTORY_PRS = 20
 HISTORY_REVIEWS = 20
 HISTORY_COMMENTS = 5
 
-# The one-time widened retry `copilot_history` reaches for where HISTORY_PRS carries no Copilot activity at all, rather than reverting every caller to blind polling for the rest of an outage that outlasts it.
-# GitHub's own connection ceiling for a single `first`, the same reason FILES_WINDOW and CHECKS_WINDOW hold it.
-# Reaching further back needs cursor pagination, which this best-effort signal is not worth paying for, so one wider try is where this stops.
+# The one-time widened retry `copilot_history` makes where HISTORY_PRS carries no Copilot activity.
+# GitHub's connection ceiling for a single `first`, so further reach would need pagination.
 HISTORY_PRS_WIDE = 100
 
-# Liveness query: timestamps and ids only, no comment or review bodies.
-# A liveness check does not need the finding text, and re-fetching bodies was 76% of polls.
-# It does need the reviewer's non-review answers.
-# A wait reading formal reviews alone treats a refusal as an unmet condition.
+# Liveness query: timestamps and ids only, no bodies, plus the reviewer's non-review answers.
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
@@ -1084,16 +233,10 @@ query($o:String!,$r:String!,$n:Int!){
   }}}
 """
 
-# The reviewer's own review and comment history, read live from the repository's own pull requests rather than hand-typed or cached across runs.
-# Two callers share this one query.
-# The bot's node id belongs to the reviewer account rather than to any one PR or review, so it is identical wherever it is found and recency does not matter once one is found.
-# A repo-wide reading of the reviewer's own most recent activity is the other caller, and recency is the whole point there, so `submittedAt`, `createdAt`, and `body` ride along for a reader that does not stop at the first bot id.
-# Ordered by `UPDATED_AT` rather than `CREATED_AT`, since a fresh review round bumps a pull request's own update time regardless of how long ago it was opened, where creation order can leave a re-reviewed older pull request outside the window entirely.
-# `reviews(last:$reviews)` reads the newest rounds a pull request carries rather than the oldest, and `comments(last:$comments)` catches a plain answer that supersedes a formal review without needing every comment a busy pull request holds.
-# `$prs` is a variable rather than baked into the document, unlike the other windows in this file, because `copilot_history` runs this same query twice on an empty narrow read, once at HISTORY_PRS and, only then, once at HISTORY_PRS_WIDE.
-# One document read at two widths costs nothing a second document would not, and it keeps the two reads provably identical apart from that one number.
-# `pullRequests` names no `states` argument, because the connection's omitted default is every state rather than `OPEN`.
-# Merged pull requests therefore fill the window alongside open ones.
+# The reviewer's own review and comment history, read live from the repository's pull requests.
+# Two callers share it: the bot id lookup, and the repo-wide recency reading that needs the timestamps.
+# Ordered by `UPDATED_AT` so a re-reviewed older pull request stays inside the window.
+# `$prs` is a variable so one document serves both widths, and no `states` argument means merged pull requests count.
 Q_BOT_ID = """
 query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
   repository(owner:$o,name:$r){
@@ -1118,9 +261,7 @@ mutation($pr:ID!,$bot:ID!){
   requestReviews(input:{pullRequestId:$pr, botIds:[$bot], union:true}){ pullRequest{ id __REQUEST_STATE__ } }}
 """.replace("__REQUEST_STATE__", REQUEST_STATE)
 
-# The rollup rides this query rather than a REST call, so reading the checks costs no round-trip.
-# It is asked of the last commit because a rollup hangs off a commit object.
-# A case holds that commit equal to `headRefOid`, since a rollup a push ago still renders whole.
+# The rollup rides this query and hangs off the last commit, which a case holds equal to `headRefOid`.
 HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus
     baseRepository{ defaultBranchRef{ name } }
@@ -1156,11 +297,9 @@ query($o:String!,$r:String!,$n:Int!,$after:String){
   }}}
 """.replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
-# An f-string would need every one of them doubled, which is unreadable against the schema.
 
 
 # The description and the branch it describes, read together so neither is stale against the other.
-# No review or comment connection here, since a description is neither.
 Q_CLAIMS = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid body }}}
@@ -1169,16 +308,8 @@ query($o:String!,$r:String!,$n:Int!){
 # A `uses:` reference quoted in a description, in the spelling a workflow writes it.
 BODY_USES = re.compile(r'uses:\s*(?P<ref>[A-Za-z0-9_.\-]+/[^\s`"\']+@[^\s`"\']+)')
 # A commit the description claims this branch carries, being a verb plus a SHA rather than a SHA.
-# The free scan was built first and the corpus rejected it outright.
-# Over 25 merged pull requests it raised four findings and every one was correct prose.
-# Those were a develop commit named as history, a SHA in quoted output, and two in another repo.
-# Nothing in the shape of a bare SHA separates one of those from a genuine claim.
-# Separating them by meaning is the similarity heuristic `spec/section-model.md` rejects.
-# A path arm measured on the same corpus did worse, flagging 54 of 215 backticked candidates, mostly bare basenames and other repos.
-# The verb is what makes a SHA a claim about this branch rather than a mention of one.
-# This alternation raises exactly one reference over the same 25, and that one is true.
-# The vocabulary is an inclusion list, so a phrasing nobody thought of costs a detection.
-# Being incomplete in that direction is the safe one, since it never invents a finding.
+# A bare SHA scan flagged only correct prose, so the verb is what makes it a claim about this branch.
+# The vocabulary is an inclusion list, so a phrasing it misses costs a detection and never invents a finding.
 BODY_CLAIM = re.compile(
     r"\b(?:fixed|landed|shipped|added|introduced|corrected|resolved|carried|amended)"
     r"\s+(?:in|by|as)\s+`?(?P<sha>[0-9a-f]{7,40})`?",
@@ -1187,19 +318,14 @@ BODY_CLAIM = re.compile(
 # What `gh` prints when GitHub answered, as opposed to when nothing was reached at all.
 HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 # The two GitHub returns for an object that is not there.
-# A network error carries no status, and 401 and 403 are credentials and a rate limit.
-# Reading one of those as absence reports a correct description as stale.
-# Everything outside this set is therefore "not read" rather than "not there".
+# Everything outside this set is "not read" rather than "not there".
 ABSENT = {"404", "422"}
 # What a reference reads as where GitHub never answered for it.
 UNREAD = "unread"
-# Longer than the ordinary read's, since this one downloads a repository rather than a field.
+# Longer than the ordinary read's, since this one downloads a repository.
 TARBALL_TIMEOUT = 120
 
-# Threads for the reply path, paginated.
-# A first page read as the whole set reports no match on a thread that is simply further along.
-# `line` is read for the confirmation line rather than for matching, since a push moves it.
-# That is how a reply keyed on a line number went to a thread that had shifted underneath it.
+# Threads for the reply path, paginated, with `line` read for the confirmation line and not for matching.
 Q_THREADS = """
 query($o:String!,$r:String!,$n:Int!,$after:String){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
@@ -1231,8 +357,7 @@ TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
 # The conversation-comment and thread mutations the runbook publishes.
-# `url` is fetched because it is the one field that confirms a comment or reply carried a body.
-# A reply that posted empty still returns a comment, and three did, each then resolved.
+# `url` is fetched because it confirms the comment or reply carried a body.
 M_COMMENT = """
 mutation($subjectId:ID!,$body:String!){
   addComment(input:{subjectId:$subjectId, body:$body}){
@@ -1248,42 +373,6 @@ mutation($threadId:ID!){
   resolveReviewThread(input:{threadId:$threadId}){ thread{ id isResolved } }}
 """
 
-Q_CLEANUP_TARGET = """
-query($o:String!,$r:String!,$n:Int!){
-  repository(owner:$o,name:$r){
-    defaultBranchRef{ name }
-    pullRequest(number:$n){
-      merged baseRefName headRefName headRefOid headRepository{ nameWithOwner } } }}
-"""
-Q_CLEANUP_REF = """
-query($o:String!,$r:String!,$q:String!){
-  repository(owner:$o,name:$r){ ref(qualifiedName:$q){ id target{ oid } } }}
-"""
-Q_CLEANUP_HEADS = """
-query($o:String!,$r:String!,$b:String!,$after:String){
-  repository(owner:$o,name:$r){
-    heads: pullRequests(states:OPEN,headRefName:$b,first:100,after:$after){
-      pageInfo{ hasNextPage endCursor } nodes{ number headRepository{ nameWithOwner } } } }}
-"""
-Q_CLEANUP_BASES = """
-query($o:String!,$r:String!,$b:String!){
-  repository(owner:$o,name:$r){
-    bases: pullRequests(states:OPEN,baseRefName:$b,first:20){ totalCount nodes{ number } } }}
-"""
-Q_SWEEP_DEFAULT = """
-query($o:String!,$r:String!){ repository(owner:$o,name:$r){ defaultBranchRef{ name } }}
-"""
-Q_SWEEP_MERGED = """
-query($o:String!,$r:String!,$b:String!){
-  repository(owner:$o,name:$r){
-    merged: pullRequests(states:MERGED,headRefName:$b,first:50){
-      totalCount nodes{ number baseRefName headRefOid headRepository{ nameWithOwner } } } }}
-"""
-M_DELETE_REF = """
-mutation($refId:ID!){
-  deleteRef(input:{refId:$refId}){ clientMutationId }}
-"""
-
 
 WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 
@@ -1291,11 +380,8 @@ WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 def gh_graphql(query: str, **variables) -> dict:
     """Run one GraphQL document and return its `data`, ending the run on a failed read.
 
-    The transport is `gh_graphql.request`, which raises `GraphQLError` and never exits. This is
-    the exit contract of this script, where a failed read prints what the transport had to show
-    and ends the run with the transport's one-line message, at exit 1.
-
-    Only an error set made of `workflowRun` paths is tolerated.
+    The transport raises `GraphQLError` and never exits, so a failed read prints its detail and
+    ends the run at exit 1. Only an error set made of `workflowRun` paths is tolerated.
     """
     try:
         response = shared.request(query, variables, tolerate=_is_workflow_run_error)
@@ -1310,11 +396,7 @@ def gh_graphql(query: str, **variables) -> dict:
 
 
 def _is_workflow_run_error(error: object) -> bool:
-    """True where the error is a per-field failure on `workflowRun` and nothing else.
-
-    A token without Actions read access can fail that one field, and the field is null in `data`.
-    `check_nodes` then keys Actions runs by suite instead, so the digest still reads.
-    """
+    """True where the error is a per-field failure on `workflowRun` and nothing else."""
     path = error.get("path") if isinstance(error, dict) else None
     return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
 
@@ -1330,10 +412,7 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
 def follow(
     query: str, owner: str, repo: str, num: int, connection: str, after: str | None = None
 ) -> Iterator[dict]:
-    """Each page of the pull request's `connection`, from the one past `after` to the last.
-
-    One cursor walk for every paged read, so a fix to how a page is followed lands once.
-    """
+    """Each page of the pull request's `connection`, from the one past `after` to the last."""
 
     def fetch(cursor: str | None) -> dict:
         extra: dict[str, str] = {"after": cursor} if cursor else {}
@@ -1349,14 +428,9 @@ def follow(
 def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
     """Read the rest of `pr`'s changed-file list into it, past the full read's first page.
 
-    `FILES_WINDOW` is the connection's own ceiling on one page, so a longer list is paged.
-    `FILES_CAP` is GitHub's documented ceiling on the whole list, which the API need not flag,
-    so a list reaching it stays marked as cut short. A page read at a head other than the first
-    page's leaves the list unread instead, under `FILES_UNREAD`, which `files_shortfall`
-    reports and `full_read` reads again. A list cut short or unread is compared against
-    nothing, where a list marked whole but missing a path reads exactly like a path the
-    reviewer left out. A page that fails to read ends the run as any other failed read does,
-    since that failure is already loud.
+    A list reaching `FILES_CAP` stays marked as cut short, and a page read at another head leaves
+    it unread under `FILES_UNREAD`. A list cut short or unread is compared against nothing. A
+    failed page read ends the run.
     """
     files = pr.get("files")
     if not isinstance(files, dict):
@@ -1379,11 +453,7 @@ def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
 
 
 def reviewer_requested(pr: dict) -> bool:
-    """True where the reviewer sits in the pending request set.
-
-    Read from GraphQL rather than `gh pr view --json reviewRequests`, which omits a Bot
-    reviewer entirely and reports an empty set while the reviewer is sitting in it.
-    """
+    """True where the reviewer sits in the pending request set."""
     return any(
         (n.get("requestedReviewer") or {}).get("login") == REVIEWER
         for n in ((pr.get("reviewRequests") or {}).get("nodes") or [])
@@ -1391,28 +461,11 @@ def reviewer_requested(pr: dict) -> bool:
 
 
 def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
-    """The reviewer's own reviews and comments across the repository's most recently updated
-    pull requests, newest activity first regardless of which connection it came from.
+    """The reviewer's own reviews and comments across the most recently updated pull requests.
 
-    Read at HISTORY_PRS first and, only where that comes back carrying no usable bot id, read
-    again at the wider HISTORY_PRS_WIDE. A narrow window emptying out is the ordinary case, a
-    repository whose most recent activity genuinely carries none of the reviewer's, and costs
-    nothing beyond the one call either caller below was always going to make. It stops being
-    ordinary once an outage outlasts HISTORY_PRS pull requests: every one of them then carries
-    the same silence, the narrow window empties out too, and both callers would otherwise fall
-    back to blind polling for the rest of the outage with no way to tell that outage apart from a
-    repository that has simply never seen a Copilot review, a shape reproduced over four
-    consecutive pull requests. The wider read is what tells the two apart.
-
-    Emptying out is not the only way the narrow window fails a bot-id lookup, though: it can
-    carry real activity and still have none, when every entry within it is a plain comment. A
-    formal review, `copilot_bot_id`'s only source for the id, can sit just outside the narrow
-    window while a newer comment sits inside it, and returning the narrow read as soon as it has
-    anything at all left that review permanently unread. Widening is keyed on
-    `copilot_bot_id(entries)` rather than on emptiness for exactly that case, so a comment-only
-    narrow window still triggers the wider read the same way an empty one does. The ordinary case
-    -- a narrow window already carrying a review -- still costs one call rather than two, since
-    that is the common shape a usable bot id already satisfies.
+    Newest activity first, whichever connection it came from. Read at HISTORY_PRS and, where that
+    carries no usable bot id, read again at HISTORY_PRS_WIDE, so a long outage or a comment-only
+    window does not read as a repository that never saw a Copilot review.
     """
     entries = _copilot_history_window(owner, repo, HISTORY_PRS)
     if entries and copilot_bot_id(entries) is not None:
@@ -1421,27 +474,12 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
 
 
 def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, dict]]:
-    """One read of `copilot_history`'s traversal, over the `prs` most recently updated pull
-    requests. Split out so the narrow and widened reads share every line but the one count.
+    """One read of `copilot_history`'s traversal over the `prs` most recently updated pull
+    requests.
 
-    Paired with the pull request number each came from, since a repo-wide reading has to name
-    where it looked rather than just assert one. Sorted by timestamp rather than trusted to
-    arrive in that order, since the two connections are read separately and merged.
-
-    Unfiltered, including the caller's own pull request if it appears in the window. No pull
-    request is special-cased out: `copilot_bot_id` is happy to read a valid id from anywhere,
-    including an earlier round on the very pull request `wait` is running against, and
-    `quota_signal` treats an earlier round on that same pull request as real evidence about the
-    account rather than a self-reference to discard. A refusal on the caller's own current head
-    is caught directly, at higher priority, before either reading here is ever consulted.
-
-    A plain comment is read alongside a formal review, tagged `_kind` so `copilot_bot_id` can
-    still tell them apart, because `answered_outside_review` already treats a comment as
-    meaningful reviewer activity for one pull request, and a repo-wide reading that only checked
-    reviews could keep reporting a stale refusal after a newer plain comment answered it.
-
-    One call serves both the bot-id lookup and the repo-wide quota reading below, since both
-    need the same traversal and a caller needing either otherwise pays for it twice.
+    Entries pair with their pull request number and sort by timestamp. Nothing is filtered out, the
+    caller's own pull request included. A plain comment is tagged `_kind` so `copilot_bot_id` can
+    tell it from a formal review.
     """
     data = gh_graphql(
         Q_BOT_ID, o=owner, r=repo, prs=prs, reviews=HISTORY_REVIEWS, comments=HISTORY_COMMENTS
@@ -1461,11 +499,7 @@ def _copilot_history_window(owner: str, repo: str, prs: int) -> list[tuple[int, 
 
 
 def history_entry(number: int, node: dict, kind: str) -> tuple[int, dict]:
-    """One reviewer review or comment in the shape `copilot_history` returns, stamped and tagged.
-
-    Shared with `standing_quota`, which merges this pull request's own reviews into the history
-    `wait` read, so the two can never spell the entry differently.
-    """
+    """One reviewer review or comment in the shape `copilot_history` returns, stamped and tagged."""
     stamp = node.get("submittedAt" if kind == "review" else "createdAt") or ""
     return number, {**node, "_at": stamp, "_kind": kind}
 
@@ -1476,16 +510,7 @@ def newest_first(entries: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
 
 
 def copilot_bot_id(history: list[tuple[int, dict]]) -> str | None:
-    """The Copilot reviewer bot's node id from an already-fetched history, or None where none
-    carries one.
-
-    Read from the review entries only, since a comment's author carries no node id in the query
-    that fetches it, that field belonging to the review connection's `... on Bot{ id }` selection.
-    None is a real answer, not a failure to retry: a repository's very first PR, or one Copilot
-    has never reviewed, carries no review to read the id from. The caller falls back to polling
-    only rather than guessing, since a fabricated or reused id resolves globally and a wrong one
-    would silently target another repository's PR.
-    """
+    """The Copilot reviewer bot's node id from an already-fetched history, or None."""
     for _number, entry in history:
         if entry.get("_kind") != "review":
             continue
@@ -1496,17 +521,10 @@ def copilot_bot_id(history: list[tuple[int, dict]]) -> str | None:
 
 
 def quota_signal(history: list[tuple[int, dict]]) -> tuple[int, dict] | None:
-    """The reviewer's own most recent activity anywhere in this repository, review or comment,
-    where it is a quota refusal, paired with the pull request number it came from.
+    """The reviewer's newest activity anywhere in this repository where it is a quota refusal.
 
-    The most recent rather than any match, since a repository can carry an old refusal and a
-    later working round both, and only the most recent record says which is still true. A
-    genuine review anywhere since the refusal spends it, the same reading `refusing_review`
-    already gives one pull request's own history, and so does a later plain comment, since
-    `answered_outside_review` treats one the same way for that one pull request. Reading across
-    pull requests rather than one is what a repository-wide account state needs, since the pull
-    request in front of a caller can carry none of its own reviewer activity to read that state
-    from at all.
+    Returned paired with the pull request number it came from, else None. A genuine review or a
+    later plain comment since the refusal spends it.
     """
     newest = history[0] if history else None
     return newest if newest and quota_refusal(newest[1]) else None
@@ -1517,12 +535,8 @@ def standing_quota(
 ) -> tuple[int, dict] | None:
     """`quota_signal` over `history` as this pull request's own read leaves it, or None.
 
-    None where a genuine round covers the head, since the reading is about a head carrying no
-    Copilot activity of its own. This pull request's reviews are merged in rather than trusted to
-    sit in `history`, which reads only the most recently updated pull requests, so a review of it,
-    on any head, submitted after the refusal answers that refusal as one anywhere else would. `wait`
-    reads this on its opening snapshot and on its final read, so both apply one rule, though a
-    push between them can change what the rule finds.
+    None where a genuine round covers the head. This pull request's reviews are merged in, so a
+    review of it submitted after the refusal answers that refusal.
     """
     if reviewed_head(pr):
         return None
@@ -1531,37 +545,18 @@ def standing_quota(
 
 
 def rate_limited_by(pr: dict, login: str) -> str | None:
-    """The service name a rate-limit marker gives, where this login's newest comment or review
-    on this pull request carries one. `None` otherwise. CodeRabbit's reply to an explicit review
-    command, `RATE_LIMITED_REPLY`, is read from its markers and its fixed `Action not completed`
-    block alone. Its marker says `CodeRabbit` rather than the `coderabbit.ai` the other shape
-    gives, so `RATE_LIMIT_SERVICE` names the service by login and both shapes read alike. A login
-    missing there stays unread.
-
-    Reads both connections. Both observed shapes ride a plain PR comment, and a future bot using
-    the same convention might ride a formal review instead. A plain comment
-    carries no commit, so the reading is not scoped to the head. Current pull request
-    only, unlike Copilot's `quota_signal`. That one generalizes from a pattern of silence across
-    several pull requests, while this reads one notice rather than a history.
+    """The service a tracked reviewer's newest comment or review names as rate limiting it, or
+    None.
     """
     nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
     if not nodes:
         return None
     newest = max(nodes, key=lambda n: n.get("createdAt") or n.get("submittedAt") or "")
-    body = newest.get("body") or ""
-    if match := RATE_LIMITED.search(body):
-        return match.group(1)
-    if RATE_LIMITED_REPLY.search(body):
-        return RATE_LIMIT_SERVICE.get(login)
-    return None
+    return reading(newest, login).rate_limited
 
 
 def newest_request_event(pr: dict) -> str | None:
-    """The id of the newest review-request event naming the reviewer, or None where there is none.
-
-    The id is compared rather than a count, since a count over a bounded window stops moving once
-    the window is full.
-    """
+    """The id of the newest review-request event naming the reviewer, or None where there is none."""
     ids = [
         n.get("id")
         for n in ((pr.get("timelineItems") or {}).get("nodes") or [])
@@ -1573,14 +568,9 @@ def newest_request_event(pr: dict) -> str | None:
 def request_recorded(before: dict, after: dict) -> bool | None:
     """Whether a review request that returned success left anything on the pull request.
 
-    True where the reviewer sits in the pending set afterwards, or where a review-request event
-    naming it is newer than the newest one read before the request. False where neither holds,
-    which is the shape an exhausted Copilot allowance left: every mutation succeeded, and none
-    added an event or a pending reviewer. None where the answer lacks either field, since an
-    unread state is not a reading of one, and the wait then polls as it did before this existed.
-    None too where a login that reads as the reviewer's but is spelled otherwise answers, since
-    a drifted login would otherwise read a recorded request as an unrecorded one and blame the
-    account for it.
+    True where the reviewer sits in the pending set afterwards, or a review-request event naming it
+    is newer than the newest one read before. False where neither holds, the shape an exhausted
+    Copilot allowance leaves. None where either field is missing or the login is spelled otherwise.
     """
     if after.get("reviewRequests") is None or after.get("timelineItems") is None:
         return None
@@ -1600,23 +590,11 @@ def request_copilot_review(
 ) -> tuple[str, bool | None]:
     """Ask Copilot to review the current head, and say in one line what happened.
 
-    This exists because `wait` used to only ever poll, never request, so a PR whose auto-seed
-    never fired or whose prior request was superseded by a later push sat waiting the full
-    timeout for a review nothing had asked for, twice in one session before this was written.
-    `union:true` adds the bot to the request set rather than replacing it, so a human reviewer
-    requested alongside it stays requested. Raises where `gh_graphql` does, on the mutation
-    itself, the same as every other write in this script: a failed write is reported, never
-    quietly swallowed into a fallback that would recreate the exact blind-poll failure this
-    function exists to prevent, from a different cause. The one quiet path is finding no bot id
-    to request with at all, which is not a failure, since a repository with no Copilot review
-    anywhere carries nothing to read the id from. The id itself is the caller's to find, via
-    `copilot_bot_id` over a `copilot_history` read it already paid for, which already tried both
-    the narrow HISTORY_PRS window and the wider HISTORY_PRS_WIDE one before coming up empty.
+    `union:true` adds the bot to the request set, so a human reviewer stays requested. A failed
+    mutation raises as every other write does. Finding no bot id is the one quiet path.
 
-    The second value is `request_recorded` over the state read before the request and the one
-    the mutation answers with, and None where nothing was requested. An answer reading as
-    unrecorded is read once more with the same query and judged the same way, `settle` seconds
-    later, since GitHub can take a moment to record a request it has already accepted.
+    The second value is `request_recorded` over the state before and after the request, None where
+    nothing was requested. An unrecorded answer is read once more `settle` seconds later.
     """
     if not bot_id:
         return (
@@ -1643,12 +621,7 @@ def request_copilot_review(
 
 
 def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
-    """This login's own nodes under `field`, oldest first as the API returns them.
-
-    `login` defaults to the fully-modeled reviewer, so every existing call keeps reading
-    Copilot's own nodes unchanged. A caller reading another known reviewer's presence
-    generically, identity and commit only, no body parsing, passes it explicitly.
-    """
+    """This login's own nodes under `field`, oldest first as the API returns them."""
     return [
         n
         for n in ((pr.get(field) or {}).get("nodes") or [])
@@ -1657,17 +630,9 @@ def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
 
 
 def answered_outside_review(pr: dict) -> dict | None:
-    """The reviewer's newest plain comment, where it postdates its newest formal review.
-
-    The test is the shape of the answer rather than its cause, which this reads nothing of:
-    a comment carries no commit, so it satisfies no coverage check whatever it says.
-    Treating that shape as an unmet condition is what leaves a wait with nothing at its end.
-    A comment older than the newest review is spent, since the review it preceded did land.
-    """
+    """The reviewer's newest plain comment, where it postdates its newest formal review."""
     comments = reviewer_nodes(pr, "comments")
-    # A blind review window leaves no honest baseline to date a comment against.
-    # An empty one dates every comment as newer, so each reads as an answer.
-    # Reporting nothing keeps the wait polling, where a wrong answer ends it outright.
+    # A blind review window leaves no honest baseline to date a comment against, so report nothing.
     if not comments or window_blind(pr, "reviews"):
         return None
     newest = max(comments, key=lambda n: n.get("createdAt") or "")
@@ -1679,118 +644,50 @@ def answered_outside_review(pr: dict) -> dict | None:
 def window_blind(pr: dict, field: str, login: str = REVIEWER) -> bool:
     """True where this login's own nodes can sit behind the window, so the view cannot decide.
 
-    `login` defaults to the fully-modeled reviewer, so every existing caller keeps reading
-    Copilot's own blind spot unchanged. A caller reading another known reviewer's own window,
-    Qodo's `comments` connection carrying its findings comment, passes it explicitly.
-
-    Each query reads the newest nodes rather than this login's, so ordinary traffic is what
-    pushes theirs out of reach. Nodes arrive in creation order, so anything behind the window is
-    older than everything inside it: one of this login's in view bounds every hidden one as
-    older still, which settles the question rather than leaving it open. `hasPreviousPage` is
-    what says anything is back there at all, since a full window and a window holding the lot
-    are the same length.
+    `login` defaults to the fully-modeled reviewer. Nodes arrive in creation order, so one of this
+    login's in view bounds every hidden one as older. `hasPreviousPage` says whether anything is
+    back there at all.
     """
     older = ((pr.get(field) or {}).get("pageInfo") or {}).get("hasPreviousPage")
     return bool(older) and not reviewer_nodes(pr, field, login)
 
 
 def threads_truncated(pr: dict) -> bool:
-    """True where `reviewThreads(first:100)` cut off before this pull request's actual thread
-    count, so `threads=`/`unresolved=` below undercount rather than reading the true total.
-
-    Unlike `window_blind`'s `last`-windowed connections, `reviewThreads` reads forward from the
-    first page in the connection's own creation order, so `hasNextPage` here means the threads
-    left unread are the newest ones, not the oldest, exactly the ones most likely to still be
-    open. That inversion is why this is its own guard rather than a second use of `window_blind`:
-    that one settles the question from what is already in view, and there is no such settling
-    available here, only the fact that something was cut, undercounted ever since `unresolved`
-    widened from Copilot's own threads to every open thread.
-    """
+    """True where `reviewThreads(first:100)` cut off before the actual thread count."""
     return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
 
 
 def reviews_truncated(pr: dict) -> bool:
-    """True where the `reviews` connection's own page cut off before this pull request's actual
-    round count, so a suppressed or outside-diff-range finding raised on an older, windowed-out
-    round is missing from `suppressed=`/`cr_outside_diff=` below rather than merely counted as
-    stale.
+    """True where the `reviews` connection cut off before this pull request's actual round count.
 
-    Unlike `window_blind`, which settles a coverage or dating question once even one of a
-    login's own reviews sits in view, a finding count needs every round read, not just a
-    recent-enough one: an unread round can carry a finding of its own regardless of whether a
-    newer round from the same login is visible. `hasPreviousPage` on this `last`-windowed
-    connection means the reviews left unread are the oldest, exactly where an unanswered
-    finding is most likely to still sit unresolved.
+    A finding count needs every round read, so an older windowed-out round can hide a suppressed or
+    outside-diff-range finding. `hasPreviousPage` means the unread reviews are the oldest.
     """
     return bool(((pr.get("reviews") or {}).get("pageInfo") or {}).get("hasPreviousPage"))
 
 
 def refusal_of(node: dict) -> str:
-    """The review's body where its opening line says the reviewer did not review, otherwise empty.
-
-    Read over the opening rather than the whole body, because a refusal replaces the review and
-    is the only thing the body carries, where a review that merely quotes the wording carries it
-    below its own overview. This script and its documentation are that quotation, so a body-wide
-    match would report the pull request adding this check as a refusal, which is the false
-    positive the suppressed-block matcher already had once.
-
-    The opening is one line rather than two, and the second line is where the cost of widening
-    it shows: a review's first line is its heading and its second is the overview prose, which
-    is exactly where a review describing this check states the wording. Reading two lines passed
-    every case here except that one, which is the case that matters. A refusal introduced by a
-    heading would sit below the opening and be missed, and answering that shape means telling it
-    from an overview rather than reading one line further.
-
-    The second overview format's version marker is skipped rather than read as that opening,
-    since it is markup that renders invisibly and a refusal wearing it opens on the line below.
-    That leaves the heading-introduced refusal named above missing in both formats alike rather
-    than in one, which is where it was before this format arrived. Such a round states no
-    coverage either, so it reaches the maintainer as an unproven diff rather than as a clean
-    pass, which is a worse remedy than a refusal's own and not a false green.
-    """
+    """The review's body where the adapter reads it as a refusal, otherwise empty."""
     body = node.get("body") or ""
-    opening = next(
-        (ln for ln in body.splitlines() if ln.strip() and not CCR_OVERVIEW.fullmatch(ln)), ""
-    )
-    return body if REFUSAL.search(opening) else ""
+    return body if reading(node).refusal != "none" else ""
 
 
 def quota_refusal(node: dict) -> bool:
-    """True where a refusal on this node names the account quota rather than another cause.
-
-    Read from `refusal_of`'s own return rather than the raw body, so its exemptions protect
-    this reading too: a node that is not a refusal at all returns `""` here, on which `QUOTA`
-    cannot match, rather than this needing its own opening-line anchor and fenced-quote guard.
-    The distinction matters because the two remedies are opposite. A file-count refusal is
-    cleared by splitting the pull request. A quota one is an account-level state that a
-    re-request or a wait does not touch, so treating the two alike sends a reader at a remedy
-    that does nothing here.
-    """
-    return bool(QUOTA.search(refusal_of(node)))
+    """True where a refusal on this node names the account quota rather than another cause."""
+    return reading(node).refusal == "quota"
 
 
 def possible_quota(node: dict) -> bool:
-    """True where a refusal on this node names an error rather than any cause.
-
-    The weekly rate limit posts exactly this body, its cause written only to the job log, so it
-    reads as a possible quota hit rather than as a transient failure. A re-request into a reached
-    limit spends quota it cannot recover and returns the same body, which is why one is enough.
-    """
-    return bool(ERROR_REFUSAL.search(refusal_of(node)))
+    """True where a refusal on this node names an error rather than any cause."""
+    return reading(node).refusal == "error"
 
 
 @functools.cache
 def run_cause(owner: str, repo: str, oid: str, before: str) -> tuple[str, str] | None:
     """The error type and rate-limit sentence the reviewer's own failed run logged, or None.
 
-    An error refusal's body names no cause, and the run that produced it does: the reviewer runs
-    as an Actions workflow on the reviewed commit, and its job log states the weekly limit and
-    when it resets. The run read is the newest failed one on that commit created no later than
-    the review, so a later run on the same commit is not read as this round's.
-
-    None wherever any read fails or finds nothing, which leaves the round a possible quota hit
-    rather than a confirmed one or a cleared one. Memoized for the run, so the digest and the exit
-    code read one log once.
+    The run read is the newest failed one on that commit created no later than the review. None
+    wherever any read fails or finds nothing. Memoized for the run.
     """
     if not oid or not ISO_STAMP.fullmatch(before):
         return None
@@ -1830,13 +727,7 @@ def confirmed_quota(owner: str, repo: str, node: dict) -> str:
 
 
 def stopping_refusal(pr: dict) -> dict | None:
-    """The reviewer's newest review on this pull request, on any head, where it is a quota refusal or an error.
-
-    Read across heads rather than on the head alone, since a push after such a refusal moves the
-    head and the account state the refusal reports does not move with it. A genuine round since
-    spends it, the newest review being the one read, and so does a plain comment of the
-    reviewer's since, which `answered_outside_review` already reads as spending one.
-    """
+    """The reviewer's newest review on any head, where it is a quota refusal or an error."""
     if answered_outside_review(pr):
         return None
     newest = newest_of(reviewer_nodes(pr, "reviews"))
@@ -1846,15 +737,7 @@ def stopping_refusal(pr: dict) -> dict | None:
 
 
 def refusing_review(pr: dict) -> dict | None:
-    """The reviewer's newest review carrying the current head, where that review is a refusal.
-
-    Head-scoped, unlike a suppressed finding, because a refusal is a statement about one commit:
-    a push retires it, and the round the push raises either reviews that head or refuses it in
-    its own right.
-
-    A genuine round on the same head after the refusal spends it, so the newest review on the
-    head is the one read rather than the newest refusal.
-    """
+    """The reviewer's newest review carrying the current head, where that review is a refusal."""
     head = pr["headRefOid"]
     newest = newest_of(
         [n for n in reviewer_nodes(pr, "reviews") if (n.get("commit") or {}).get("oid") == head]
@@ -1865,18 +748,9 @@ def refusing_review(pr: dict) -> dict | None:
 def newest_of(nodes: list[dict]) -> dict | None:
     """The newest of these nodes by submission time, the later arrival winning a tie.
 
-    `max` returns the first maximal element and `reviewer_nodes` returns these oldest first, so
-    a tie on `submittedAt` selected the oldest round rather than the newest. GitHub stamps two
-    rounds on one commit with the same second often enough for that to decide a digest, and the
-    position in the connection is the only later-arriving signal there is once the timestamps
-    agree.
-
-    A node carrying no timestamp sorts oldest, a round that has not been submitted not being the
-    one describing the head.
-
-    Shared rather than spelled per reader, because `effort=` and `overview=` are read from a
-    round each and a digest line whose fields disagree about which round it describes is worse
-    than either field being wrong on its own.
+    `reviewer_nodes` returns oldest first and GitHub often stamps two rounds with the same second,
+    so position breaks the tie. A node with no timestamp sorts oldest. Shared so `effort=` and
+    `overview=` describe the same round.
     """
     if not nodes:
         return None
@@ -1886,13 +760,8 @@ def newest_of(nodes: list[dict]) -> dict | None:
 def head_reviews(pr: dict) -> list[dict]:
     """The reviewer's own reviews that cover the current head, refusals excluded.
 
-    A refusal is not coverage. It is a formal review, `state: COMMENTED`, carrying the head's
-    commit and raising no threads, so it satisfies every check a clean pass does and renders a
-    digest identical to one. That is how a pull request of 301 changed files, one over the
-    reviewer's limit, sat one command from merging on a review that never ran.
-
-    One list rather than a predicate beside a filter, because coverage and the count of rounds on
-    the head are read from the same set and a second spelling of it drifts from the first.
+    A refusal is a formal review with the head's commit and no threads, so it satisfies every check
+    a clean pass does. One list serves coverage and the round count.
     """
     head = pr["headRefOid"]
     return [
@@ -1903,46 +772,18 @@ def head_reviews(pr: dict) -> list[dict]:
 
 
 def reviewed_head(pr: dict) -> bool:
-    """True where one of the reviewer's own reviews covers the current head's commit.
-
-    The liveness query carries no bodies, so a refusal reads there as ordinary coverage. That is
-    deliberate rather than a gap: it ends the wait, which is what a terminal outcome should do,
-    and the full read every wait finishes with is what tells the two apart. No exit code and no
-    merge decision is taken from the liveness reading.
-    """
+    """True where one of the reviewer's own reviews covers the current head's commit."""
     return bool(head_reviews(pr))
 
 
 def head_review_done(pr: dict, min_rounds: int) -> bool:
     """True once a round past position `min_rounds` in the reviewer's own history covers the head.
 
-    Positions are read off `reviewer_nodes(pr, "reviews")`, every one of the reviewer's own
-    reviews on this pull request, on any head, refusals included, oldest first: the exact list
-    `status` counts for its own `rounds=`. A caller that already read that count, then
-    re-requested a review on an already-covered head, passes it through `wait --min-rounds`
-    instead, so this holds out for a round sitting past it.
-
-    The round satisfying `min_rounds` and the round satisfying coverage must be the same round,
-    which is why this walks one list rather than checking `reviewed_head(pr)` and a count as two
-    independent clauses. Two clauses would let a refusal past the baseline satisfy the count
-    while an untouched, older genuine round still satisfies `reviewed_head`, reporting done on a
-    round that answered the re-request by declining it. A caller passing 0, every caller that
-    predates this flag among them, reduces to `reviewed_head` exactly, since position 0 is every
-    position a non-empty list has.
-
-    Counting `reviewer_nodes(pr, "reviews")` rather than `head_reviews(pr)`, the head-scoped,
-    refusal-excluded list `reviewed_head` itself narrows to, matters independently of the above:
-    a push during the wait moves the head, which empties a head-scoped list and reads a brand
-    new head's first genuine round as still short of a baseline measured against a head that no
-    longer exists, where this list carries forward since a push adds to it rather than resetting
-    it. Positions still land past `min_rounds` correctly once the head moves, since a review on
-    the superseded head sits at an earlier position than one on the new head, never a later one.
-
-    The same `last:100` window both `Q_LIVE` and `Q_FULL` place on their own `reviews`
-    connection bounds this the way it bounds `status`'s own `rounds=`: a pull request whose
-    Copilot rounds have aged out of that window under other reviewers' own traffic undercounts
-    here exactly as `status` would, reading a landed round as still short of the baseline rather
-    than crediting it, so this fails toward a caller waiting longer, not toward a false success.
+    Positions are read off `reviewer_nodes(pr, "reviews")`, every review on any head, refusals
+    included, oldest first, the list `status` counts for `rounds=`. One list is walked so the round
+    satisfying `min_rounds` is the round satisfying coverage. A push adds to the list rather than
+    resetting it, so positions stay valid when the head moves. The `last:100` window can undercount
+    an aged-out round, which fails toward waiting longer. Passing 0 reduces to `reviewed_head`.
     """
     revs = reviewer_nodes(pr, "reviews")
     head = pr["headRefOid"]
@@ -1953,324 +794,16 @@ def head_review_done(pr: dict, min_rounds: int) -> bool:
 
 
 def review_effort(pr: dict) -> tuple[str, str]:
-    """The newest head review's effective effort and selection source.
-
-    GitHub can render an inherited choice as `Default (Lite)`, `Default (Balanced)`, or
-    `Default (Max)`. A bare level is explicit. The setting remains user-controlled, and this
-    reader only reports metadata that the completed review body exposes.
-    """
+    """The newest head review's effective effort and selection source."""
     newest = newest_of(head_reviews(pr))
     if newest is None:
         return "unknown", "unknown"
-    plain = strip_fences(newest.get("body") or "")
-    for line in plain.splitlines():
-        match = EFFORT_LINE.fullmatch(line)
-        if match:
-            source = "default" if match.group(1) else "explicit"
-            return (match.group(2) or match.group(3)).lower(), source
-    return "unknown", "unknown"
-
-
-def code_indented(line: str) -> bool:
-    """Whether the line opens four or more columns in, the indentation of a Markdown code block.
-
-    Measured in columns rather than characters, a tab being four of them and so an indented code
-    block on its own, which a character count reads as one column. Only spaces and tabs indent,
-    so a line opening on any other whitespace is ordinary text.
-    """
-    expanded = line.expandtabs(4)
-    return len(expanded) - len(expanded.lstrip(" ")) >= 4
-
-
-def is_coverage_line(line: str) -> bool:
-    """Whether this line is the reviewer stating its file coverage, rather than prose about it."""
-    if FLEET_REVIEW.search(line):
-        return True
-    if COVERAGE_BULLET.match(line):
-        return True
-    return bool(COVERAGE_SENTENCE.match(line)) and "changed file" in line.lower()
-
-
-def coverage_statements(body: str) -> list[str]:
-    """The lines this round states its file coverage on, quotations excluded.
-
-    An inline code span is a quotation the same as a fenced block, so a span carrying a coverage
-    line reads as one this round stated rather than one it quoted.
-
-    A blockquoted line is the third such convention and is dropped whole rather than unwrapped.
-    The line anchor used to exclude one for free, the marker reader having required the marker to
-    be the whole of its line and a `>` not being whitespace. Reading the marker within its line
-    took that exclusion away, so the quotation it was refusing is refused here instead, where the
-    other two already are. The prose readers beside it are unaffected either way, each being
-    anchored to a line opener that a `>` already fails.
-
-    The quotation runs to the blank line that closes it rather than to the end of the line opening
-    it, which is Markdown's own lazy continuation: a line carrying no `>` under one that does is
-    still rendered inside the quotation. Refusing only the marked line reads the line after a
-    quotation's first as this round's own statement.
-
-    Continuation carries paragraph text and nothing else, so a line opening a block of its own ends
-    the quotation above it. Of the three spellings read here only the reviewer's own sentence is
-    paragraph text, the bullet and the marker each opening a block, and treating those as quoted
-    reported no coverage at all over a round that stated it in full.
-
-    A line indented four or more columns is the fourth convention, an indented code block, and a
-    marker on one is dropped from the line rather than the line being dropped whole. The indent
-    opens a code block only where nothing runs on into it, since an indented line under paragraph
-    text is that paragraph's lazy continuation and renders as part of it, and a list item's own
-    text runs on the same way. A heading, a setext underline, a thematic break, and a line opening
-    an HTML comment each end their own block, and a code line carries its block on to the next. `CCR_OVERVIEW`
-    and `CCR_FINDINGS` bound their openers to three spaces for the same reason, and the marker,
-    being read within its line, takes that bound here instead of in its pattern. The rest of the
-    line is still read, the bullet and the sentence being left to their own readers as before, and
-    the marker comes off before the line is kept, because every reader downstream reads the
-    kept line with its indentation already stripped.
-    """
-    plain = CODE_SPAN.sub(" ", strip_fences(body or "", to_end=True))
-    found = []
-    quoted = False
-    continues = False
-    for ln in plain.splitlines():
-        stripped = ln.lstrip(" \t")
-        if not stripped:
-            # A blank line is what ends a blockquote, so the next line starts outside one again.
-            quoted = False
-            continues = False
-            continue
-        indented = code_indented(ln)
-        code = indented and not continues
-        continues = not code and not re.match(
-            rf"{ATX_HEADING}|{THEMATIC_BREAK}|(?:=+|-+){LINE_END}|<!--", stripped
-        )
-        # An indented line cannot open a blockquote, being code or a paragraph's continuation, so its `>` is text rather than a quotation's own marker.
-        # Read as one, a prompt quoted in a code block opened a blockquote that swallowed every line to the next blank one, and a coverage statement among them read as none stated at all.
-        if not indented and BLOCKQUOTE.match(stripped):
-            quoted = True
-            continue
-        if not indented and STARTS_BLOCK.match(stripped):
-            # A line opening its own block is not continuation text, so the quotation ends above it.
-            quoted = False
-        if code:
-            ln = FLEET_REVIEW.sub(" ", ln)
-        # What is left under a quotation is paragraph text, which is still inside it by Markdown's own lazy continuation and renders as part of it.
-        if quoted or not is_coverage_line(ln):
-            continue
-        found.append(ln.strip())
-    return found
-
-
-def read_coverage(line: str) -> tuple[int, int] | None:
-    """The (reviewed, changed) counts the line states, or None where they cannot be believed.
-
-    None covers a wording this has no vetted spelling for and a pair that cannot both be true
-    alike, since each leaves the same question unanswered and each takes the same remedy. A round
-    reporting it read more files than the pull request changed is not a round that read them all,
-    it is a line this script is parsing wrongly, and reading it as full coverage fails open on
-    exactly the statement that says something is off.
-
-    Two readings on one line that disagree are that same case, reached within a line rather than
-    between two. Reading the marker within its line rather than as the whole of one is what makes a
-    line able to carry both, and settling such a line on the marker alone would clear the gate for a
-    round whose own prose says it read part of the diff.
-    """
-    marker = FLEET_REVIEW.search(line)
-    m = COVERAGE_COUNTS.search(line)
-    prose = None
-    if m:
-        got = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
-        # Bounded exactly as the marker's own runs are below, and for the same reason.
-        # Guarding one of the two left the other crashing the digest on the sentence spelling.
-        read = (counted(got[0]), counted(got[1]))
-        if read[0] is None or read[1] is None:
-            return None
-        prose = (read[0], read[1])
-    if marker:
-        # Judged before conversion, `int` raising above 4300 digits and no review stating a count of even five.
-        # A run this long is a line to refuse rather than one to crash on.
-        pair = (counted(marker.group(1)), counted(marker.group(2)))
-        if pair[0] is None or pair[1] is None:
-            return None
-        counts = (pair[0], pair[1])
-        # A line carrying both readings and disagreeing is a line this cannot believe, which is the impossible pair below reached a different way, and it takes that case's answer.
-        # Taking the worse of the two instead reads an impossible pair as the better one, a negative shortfall never being the larger.
-        # `reviewed=4 changed=3` beside a prose `4/4` then passed the gate outright, where refusing the line blocks it.
-        # One line and two do not settle under the same code, reading unvetted and partial, and neither passes, which is the property that matters here.
-        if prose is not None and prose != counts:
-            return None
-        return counts if counts[0] <= counts[1] else None
-    if prose is None:
-        return None
-    return prose if prose[0] <= prose[1] else None
-
-
-def coverage_of(node: dict) -> tuple[str, str]:
-    """This round's coverage reading, with the line it was read from.
-
-    A round making no statement at all reads as unstated rather than unvetted. 28 of the 333
-    bodies measured carry an overview and a change list and nothing more. The shape is recognized,
-    but it cannot prove full diff coverage and therefore blocks the status gate.
-
-    A wording that is coverage-shaped and parses to no counts is the failure whose remedy is
-    fixing this script, since a gate that allows whatever it does not recognize stops gating as
-    the wording drifts, which it has done once already for each of the two patterns above.
-    """
-    worst, detail = UNSTATED, ""
-    for line in coverage_statements(node.get("body") or ""):
-        counts = read_coverage(line)
-        state = UNVETTED if counts is None else (FULL if counts[0] == counts[1] else PARTIAL)
-        if SEVERITY.index(state) < SEVERITY.index(worst):
-            worst, detail = state, line
-    return worst, detail
-
-
-def head_coverage(pr: dict) -> tuple[str, str]:
-    """The worst coverage the rounds covering the current head state, and the line saying it.
-
-    Head-scoped for the reason a refusal is, and unlike a suppressed finding: a partial round is
-    a statement about one commit's diff, and the push that changes that diff raises a round which
-    reads the whole of the new one. A refusal needs no exemption of its own here, `head_reviews`
-    having dropped it already, and reading one would report the round that declined as a wording
-    this script fails to recognize.
-    """
-    worst, detail = UNSTATED, ""
-    for node in head_reviews(pr):
-        state, line = coverage_of(node)
-        if SEVERITY.index(state) < SEVERITY.index(worst):
-            worst, detail = state, line
-    return worst, detail
-
-
-def carried_coverage(pr: dict) -> tuple[str, str, str] | None:
-    """The newest round on this pull request that states any coverage, and the commit it read.
-
-    None where no round ever stated any, which is the one case left with nothing to carry.
-
-    A round covering the head and stating no coverage is the ordinary shape of this format rather
-    than a defect in it: five of ten rounds measured omit the marker, and both omissions measured
-    on one drive were re-reviews of a delta of one line and of four files. Blocking every one of
-    those asks for a re-request that produced the marker in one of the four measured, so the
-    block clears by chance rather than by asking and a reader learns to route around it.
-
-    What an earlier round's statement is worth depends on what changed since, which is why the
-    caller reports that delta beside this rather than this returning a verdict. The state carries
-    as it was: a round that read part of the diff carries partial, since the part it never read is
-    still unread.
-
-    `newest_of` rather than plain `max`, for the reason it documents: two rounds share a
-    timestamp often enough to decide a digest, `max` returns the first maximal element, and
-    `reviewer_nodes` returns these oldest first, so a tie selected the older of the two. Returned
-    that way a partial round outranked the full one stamped in the same second, or the reverse,
-    on nothing but the order the connection happened to list them in.
-    """
-    stating = {}
-    for node in reviewer_nodes(pr, "reviews"):
-        if refusal_of(node):
-            continue
-        state, line = coverage_of(node)
-        if state != UNSTATED:
-            stating[id(node)] = (node, state, line)
-    newest = newest_of([n for n, _, _ in stating.values()])
-    if newest is None:
-        return None
-    _node, state, line = stating[id(newest)]
-    return state, line, (newest.get("commit") or {}).get("oid") or ""
-
-
-def delta_since(owner: str, repo: str, base: str, head: str) -> str:
-    """How much changed between the round that stated coverage and the head, as one clause.
-
-    Every reading is a clause its callers complete a sentence with, so a delta that could not be
-    read composes as readably as one that could. Returned as a noun phrase instead, the failure
-    read "with the delta between them could not be read".
-
-    Reported rather than judged. Whether a delta is small enough to let an earlier round's
-    coverage stand is the maintainer's reading, and this gives them the number to read it from.
-
-    An unreadable compare says so rather than returning a zero, since a delta that could not be
-    read and a delta of nothing take opposite decisions. The filter defaults neither field for
-    that reason: a 200 missing either one fails the filter and reads as unread, where a `//`
-    default rendered it as a delta of nothing. The API caps its file list at 300, so a larger
-    delta is reported as at least that, never as exactly it.
-    """
-    if not base or not head:
-        return "the commit either side of the delta is unknown"
-    if base == head:
-        return "nothing changed between them"
-    proc = gh_rest(
-        f"repos/{owner}/{repo}/compare/{base}...{head}",
-        r'if (.files | type) == "array" and (.ahead_by | type) == "number" '
-        r'then "\(.files | length) \(.ahead_by)" else empty end',
-    )
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return "the delta between them could not be read"
-    try:
-        files, commits = (int(x) for x in proc.stdout.split())
-    except ValueError:
-        return "the delta between them could not be read"
-    at_least = "at least " if files >= COMPARE_FILE_CAP else ""
-    return (
-        f"{at_least}{files} file{'' if files == 1 else 's'} changed over "
-        f"{commits} commit{'' if commits == 1 else 's'} since"
-    )
-
-
-def files_shortfall(pr: dict) -> str:
-    """Why the payload's changed-file list cannot be matched against a table, or "" where it can.
-
-    One predicate for the table reading's reason and for `files_unread`'s re-read, so the two
-    cannot disagree about which lists were read. A list the query cut short is not a shortfall
-    here, since that list was read, and `table_shortfall` names it separately. A list
-    `page_files` left unread, a page arriving at another head, is one, since reading
-    again can answer it.
-    """
-    files = pr.get("files")
-    if not isinstance(files, dict):
-        return "the changed-file list is absent from the query, so the table has nothing to match"
-    if unread := files.get(FILES_UNREAD):
-        return f"{unread}, so the table cannot be matched against it"
-    nodes = files.get("nodes")
-    page = files.get("pageInfo")
-    if (
-        not isinstance(nodes, list)
-        or not isinstance(page, dict)
-        or not isinstance(page.get("hasNextPage"), bool)
-        or any(not (n or {}).get("path") for n in nodes)
-    ):
-        return "the changed-file list is malformed, so the table cannot be matched against it"
-    if not nodes and not page["hasNextPage"]:
-        return "the pull request changes no files, so the table has nothing to match"
-    return ""
-
-
-def files_unread(pr: dict) -> bool:
-    """Whether the changed-file list is the reason a file table cannot stand in for this head.
-
-    The table reading runs only where a round covers the head and states no coverage. It reads
-    the head's own table first, and otherwise the newest tabled round, which counts only where
-    that round names a commit. This takes the table in that same order. `table_shortfall` is
-    asked rather than restated, so a partial on record or a cut review history re-reads nothing.
-    An empty list counts as unread too. A diff that is really empty costs one schedule of
-    re-reads, where an empty list from a failed read decides the coverage.
-    """
-    if not head_reviews(pr) or head_coverage(pr)[0] != UNSTATED:
-        return False
-    short = files_shortfall(pr)
-    if not short:
-        return False
-    carried = carried_table(pr)
-    named = head_table(pr) or (carried[0] if carried is not None and carried[1] else [])
-    return bool(named) and table_shortfall(pr, named) == short
+    found = reading(newest)
+    return found.effort, found.effort_source
 
 
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
-    """The full payload, `pr` where one was read already, read again while `files_unread` holds.
-
-    The whole payload is read again rather than the one connection. The digest and the exit code
-    then still come from one read of the pull request. The changed-file list is paged here, on
-    `pr` and on each read again, rather than on every `Q_FULL` read, since this is the payload
-    the digest and the exit code read the list from, and a read deciding only a wait's next step
-    never looks at it. `pr` is a read `page_files` has not yet seen, which every caller passes.
-    """
+    """The full payload with its changed files paged, read again while that list is unread."""
 
     def read() -> dict:
         fresh = gql(Q_FULL, owner, repo, num)
@@ -2278,89 +811,26 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
         return fresh
 
     if pr is None:
-        return backoff(read(), read, files_unread, delays=READ_RETRY_DELAYS)
-    page_files(owner, repo, num, pr)
+        pr = read()
+    else:
+        page_files(owner, repo, num, pr)
     return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
 
 
-class Capped(NamedTuple):
-    """A compare whose file list reached `COMPARE_FILE_CAP`, with the merge base it named.
-
-    The merge base is what `tree_changed_at` reads past the cap from, carried here so that
-    reading costs no second compare.
-    """
-
-    merge_base: str
-
-
-@functools.cache
-def changed_at(owner: str, repo: str, base: str, commit: str) -> frozenset[str] | Capped | None:
-    """The paths a pull request off `base` changes at `commit`, or why that could not be had.
-
-    Read as a three-dot compare, which is the same merge-base reading the pull request's own file
-    list is, so the set at an earlier commit and the set at the head are two readings of one
-    question rather than two questions. Reading one side from the GraphQL payload instead would
-    compare across two APIs with two different ceilings, and a disagreement between them would
-    read as the change set having moved.
-
-    None rather than an empty set wherever the read did not happen, since a pull request that
-    changes nothing and a compare that could not be fetched take opposite decisions, and the
-    caller fails closed on the second. The API caps its file list at 300, and the response carries
-    no flag saying it did, so a set at the cap is returned as `Capped` rather than as a set that
-    is probably short, and `tree_changed_at` reads past it. A name the response leaves null
-    would coerce to the literal path `None` and compare equal to another round's null, so an
-    entry that is not a non-empty string makes the whole reading unreadable rather than a set
-    with a fabricated member in it.
-
-    A read that did not happen is taken again on the `READ_RETRY_DELAYS` schedule before it is
-    returned as None. One run read `unstated` on a head where the runs either side of it carried a
-    table. An absence `answered_absent` recognizes is not taken again, being GitHub's own answer.
-
-    Memoized for the run, which is what makes `digest` and `report_verdict` agree. Each computes
-    the bound from its own reads, so an unmemoized transient failure in one and not the other
-    printed a carried block beside an exit code that refused the carry, and the reverse, which is
-    the fail-open direction since the exit code is what a wait keys on. It also reads each ref
-    once per run rather than once per caller. It does not close the other window: the two
-    compares are still taken at two moments, so a base branch advancing between them still
-    manufactures a set mismatch, which refuses the carry and is the fail-closed direction. The
-    key is the ref as written, so a branch that advances during a run is answered from the read
-    taken before it did, a stale reading held consistently rather than two that disagree.
-
-    The refs are checked before either is interpolated into a compare path, because git permits
-    a character that changes the path rather than traveling along it. A `#` truncates it at a
-    fragment, answering about a different ref rather than failing. The check refuses that set
-    rather than allow-listing the ASCII a branch name usually carries, an allow-list having
-    refused a valid `release/1.0+build` and any non-ASCII name. A dot segment is refused
-    separately, since it reaches another repository and git forbids one in a ref anyway, so a
-    value carrying one did not come from a ref.
-    """
-    refs = (base, commit)
-    if not base or not commit or any(UNSAFE_REF.search(r) or DOT_SEGMENT.search(r) for r in refs):
-        return None
-
-    compared = reread_json(
-        f"repos/{owner}/{repo}/compare/{base}...{commit}",
-        r'if (.files | type) == "array" then ({files: [.files[].filename], '
-        r'merge_base: (.merge_base_commit.sha // "")} | @json) else empty end',
+def files_unread(pr: dict) -> bool:
+    """Whether the changed-file list is to be read again before a file table is matched to it."""
+    files = pr.get("files") or {}
+    if files.get(FILES_UNREAD):
+        return True
+    return not files.get("nodes") and any(
+        reading(n).table is not None for n in reviewer_nodes(pr, "reviews")
     )
-    if not isinstance(compared, dict):
-        return None
-    names = compared.get("files")
-    if not isinstance(names, list):
-        return None
-    if not all(isinstance(n, str) and n for n in names):
-        return None
-    if len(names) >= COMPARE_FILE_CAP:
-        merge_base = compared.get("merge_base")
-        return Capped(merge_base) if isinstance(merge_base, str) and merge_base else None
-    return frozenset(names)
 
 
 def reread_json(path: str, jq: str) -> object:
     """One REST read whose filter emits JSON, parsed, re-read on the `READ_RETRY_DELAYS` schedule.
 
-    None wherever nothing parseable came back, an absence GitHub answered included, so the caller
-    has one value to refuse on.
+    None wherever nothing parseable came back, an absence GitHub answered included.
     """
     return parsed_json(reread(path, jq))
 
@@ -2386,1618 +856,20 @@ def parsed_json(proc: subprocess.CompletedProcess) -> object:
         return None
 
 
-def tree_at(owner: str, repo: str, commit: str) -> dict[str, tuple[str, str]] | None:
-    """Every path in `commit`'s tree with its mode and object id, or None where that was unread.
-
-    A tree GitHub truncated is unread too. Its ceiling on a recursive read is about 100,000
-    entries, which no fleet repository approaches. A directory entry is left out, a submodule
-    kept, since the compare lists a submodule moving as a change.
-    """
-    tree = reread_json(
-        f"repos/{owner}/{repo}/git/trees/{commit}?recursive=1",
-        r'if (.tree | type) == "array" and (.truncated | type) == "boolean" '
-        r'then ({truncated, entries: [.tree[] | select(.type != "tree") | [.path, .mode, .sha]]} '
-        r"| @json) else empty end",
-    )
-    if not isinstance(tree, dict) or tree.get("truncated") is not False:
-        return None
-    entries = tree.get("entries")
-    if not isinstance(entries, list):
-        return None
-    paths: dict[str, tuple[str, str]] = {}
-    for entry in entries:
-        if not (
-            isinstance(entry, list)
-            and len(entry) == 3
-            and all(isinstance(e, str) and e for e in entry)
-        ):
-            return None
-        paths[entry[0]] = (entry[1], entry[2])
-    return paths
-
-
-@functools.cache
-def tree_changed_at(owner: str, repo: str, merge_base: str, commit: str) -> frozenset[str] | None:
-    """The paths `commit` changes against `merge_base`, read past the compare's file cap.
-
-    The compare caps its file list at 300 on every page. Measured on a 308-file comparison, the
-    first page carried 300 files and the second none at all, so no paging of it reaches further.
-    The trees either side do: the commit's own and the merge base's, each read whole and diffed
-    here. On that comparison this named exactly the paths `git diff --no-renames --name-only`
-    does, 326 of them. That is not the compare's own reading, which names a rename once by its
-    new path, so `carry_holds` reads both commits this way or neither, never one of each.
-
-    None where either tree was unread. Memoized for the run, for the reason `changed_at` is.
-    """
-    before = tree_at(owner, repo, merge_base)
-    after = tree_at(owner, repo, commit)
-    if before is None or after is None:
-        return None
-    return frozenset(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
-
-
-def carry_holds(owner: str, repo: str, pr: dict, carried_from: str) -> bool | None:
-    """Whether an earlier round's coverage statement still describes this head's change set.
-
-    True only where the set of paths the pull request changes is the same at both commits, which
-    is the condition measured on this fleet for the reviewer's own marker carrying: one pull
-    request in a promotion chain held its marker across a push whose change set stayed the same
-    three files, and the next lost it across a push that grew its change set from one file to
-    three. The reviewer keyed on the set rather than on the head moving, and so does this.
-
-    Path identity is the whole of the test, so a push that rewrites the contents of exactly the
-    same files carries the statement onto content that statement never read. That is deliberate
-    rather than overlooked. The carry is consulted only where a round did cover the head and
-    stated nothing, so the reviewer has read this commit and declined to restate its coverage,
-    and the delta the digest prints beside the carried reading is what a maintainer judges the
-    rest from.
-
-    There is deliberately no short-circuit for a round on the head commit itself. It reads like
-    the carry's own case, two rounds on one commit where only the first states coverage, and it
-    is unreachable: `head_coverage` takes the worst state over every round on the head and
-    `UNSTATED` ranks last in `SEVERITY`, so a head round stating coverage is the head reading and
-    neither caller consults the carry at all.
-
-    None where the comparison could not be made at all, which the caller reads as a refusal
-    rather than as a pass. A bound that fell open when it could not be measured would be the
-    unbounded carry again, reached by a different route.
-
-    A compare at its cap on one side only is a definite no, since the other side's list is whole
-    and shorter than the cap, so the two sets differ in size. At the cap on both, the change set
-    is read again from the trees, for both commits.
-    """
-    head = pr.get("headRefOid") or ""
-    base = pr.get("baseRefName") or ""
-    earlier = changed_at(owner, repo, base, carried_from)
-    current = changed_at(owner, repo, base, head)
-    if earlier is None or current is None:
-        return None
-    if isinstance(earlier, frozenset) and isinstance(current, frozenset):
-        return earlier == current
-    if isinstance(earlier, frozenset) or isinstance(current, frozenset):
-        return False
-    before = tree_changed_at(owner, repo, earlier.merge_base, carried_from)
-    after = tree_changed_at(owner, repo, current.merge_base, head)
-    if before is None or after is None:
-        return None
-    return before == after
-
-
-def second_format(body: str) -> bool:
-    """Whether this body is written in the second overview format.
-
-    Keyed on the version marker the format opens with, bounded to three spaces of indent, since a
-    fourth makes the line a Markdown code block and so a quotation the fence guard never sees.
-
-    Quotations are dropped first for the reason a coverage line's are: this change puts the marker
-    into the diff, and a round quoting it is not a round written in that format.
-    """
-    return bool(CCR_OVERVIEW.search(CODE_SPAN.sub(" ", strip_fences(body or ""))))
-
-
-def findings_on(tail: str) -> int | None:
-    """The total one `**Findings:**` line states, summed over the severities it splits it into.
-
-    None where the line states no total at all, which is the absence of the claim
-    `unlisted_findings` subtracts the opened threads from rather than a claim that nothing was
-    raised. `None` spelled in words is a
-    stated zero, which a round raising nothing writes.
-
-    The markup is masked to one sentinel first, so the digits a badge carries in its own
-    attributes are not read as counts. Masking rather than dropping, since dropping joins the
-    digits either side into one number. The mask is bounded rather than exhaustive, and the
-    four-digit ceiling on a count is the second guard under it: an identifier that survives a
-    mask that terminated early is still not read, where an unbounded reading turned one link's
-    anchor id into a total of two billion.
-
-    Summed over every count left on the line, because the format states one per severity joined
-    by a separator that is presentation rather than structure. Summed rather than paired with the
-    markup beside each one, since which side of a count that markup sits on, and whether it is
-    markup at all, is the format's presentation rather than its structure: `**3** high` pairs a
-    count with no markup and read by pairing alone it summed to nothing.
-
-    Summing overstates rather than understates wherever the line states its counts outside the
-    markup, which every body measured does, and which is the direction this picks deliberately.
-    A count written inside the markup instead, `[3](url) high`, is masked away with it and the
-    line then states no total at all, which prints `?` rather than a fabricated zero.
-    A line stating a grand total and then the severities it decomposes into is summed with its
-    own parts, and a line stating a total in prose beside a file count sums both. A shortfall
-    overstated prints a block a reader checks against the body, where one the reader suppressed
-    closes a merge gate over findings nobody answered. `stated_total` takes the largest across
-    lines for the same reason.
-
-    `None` is read first and anchored to the front of the line, which is where this format
-    states its total. Anchored, so a body naming the word mid-sentence does not fabricate a
-    stated zero out of a line stating no total at all, and read first because a line stating the
-    zero and then counting something else, `None found in the 3 files reviewed`, states zero
-    findings and three files. Read after the counts it reported three findings.
-    """
-    masked = COUNT_MARKUP.sub(MARKUP_MASK, tail)
-    if STATED_NONE.search(masked):
-        return 0
-    counts = [int(n) for n in COUNT_LOOSE.findall(masked)]
-    return sum(counts) if counts else None
-
-
-DISCUSSION_LINK = re.compile(
-    r"\]\((?:https://github\.com/[^/\s()]+/[^/\s()]+/pull/\d+)?#discussion_r(\d+)\)"
-)
-ENTRY_LINE = re.compile(r"[-*+]\s")
-OverviewSection = tuple[str, int | None, list[list[str]], int]
-
-
-def read_overview(body: str) -> tuple[str, str, list[OverviewSection]]:
-    """The verdict, its headline, and the counted sections of one second-format body.
-
-    One reader for every overview section, because each section this format added arrived as a
-    spelling nothing here read, and three rounds parked on exit 43 over sections a reader beside
-    the others would have answered one at a time. A new spelling is one row in
-    `OVERVIEW_SECTIONS`, or one verdict in its set, rather than another reader.
-
-    The verdict is the first verdict heading ahead of the first collapsed section, and the headline
-    is the prose under it up to the next heading or bold line, taken from the body unmasked so a
-    code span the headline names survives. Each section is a top-level
-    `<details>` whose own summary is a row of `OVERVIEW_SECTIONS`, as its role, the count that
-    summary states, the thread ids each linked entry links, one list per entry, each id the
-    database id of that thread's first comment, and how many of its entries carry such a link.
-    An entry is a bullet at the section's margin, outside any block collapsed within it, so an
-    indented back-reference or a list an entry collapses is read as neither an entry nor a link.
-    One entry can still link a thread beside its own, so a section's links can outnumber its
-    linked entries, which is why they are kept per entry. Quotations are masked first, so a body
-    quoting a section is not read as carrying one.
-
-    An open section's entries are findings, each checked against the threads, and a resolved
-    section's are threads an earlier round raised. The count-first open section also states the
-    round's total, having listed that round's own threads in all 17 rounds measured, where
-    `Open (N)` listed an earlier round's thread in 2 of 41, so its count is not read as one.
-    """
-    masked = mask_quotations(body or "")
-    tags = mask_quotations(body or "", MARKUP_MASK)
-    opener = DETAILS_OPEN.search(tags)
-    end = opener.start() if opener else len(masked)
-    verdict, headline = "", []
-    for line, raw in zip(masked[:end].splitlines(), (body or "")[:end].splitlines()):
-        if MARKDOWN_HEADING.match(line):
-            if verdict:
-                break
-            if not unvetted(normal(line), CLEAN_VERDICTS | FLAGGING_VERDICTS):
-                verdict = normal(line)
-        elif verdict and line.lstrip().startswith("**"):
-            break
-        elif verdict and line.strip():
-            headline.append(raw.strip())
-    sections: list[OverviewSection] = []
-    for role, count, entries in section_entries(body):
-        ids = [found for line in entries if (found := DISCUSSION_LINK.findall(line))]
-        linked = sum(1 for line in entries if DISCUSSION_LINK.search(line))
-        sections.append((role, count, ids, linked))
-    return verdict, " ".join(headline), sections
-
-
-def section_entries(body: str) -> list[tuple[str, int | None, list[str]]]:
-    """Each counted overview section as its role, its stated count, and its entry lines.
-
-    The entry lines are the bullets at the section's margin, outside any block collapsed within
-    it, as `read_overview` documents. Quotations are masked first, so a body quoting a section is
-    not read as carrying one.
-    """
-    masked = mask_quotations(body or "")
-    tags = mask_quotations(body or "", MARKUP_MASK)
-    roles = {k.casefold(): v for k, v in OVERVIEW_SECTIONS.items()}
-    found: list[tuple[str, int | None, list[str]]] = []
-    for start, end in details_spans(tags)[0]:
-        summary = heading_of(masked[start:end])
-        role = roles.get(normal(summary).casefold())
-        if role is None:
-            continue
-        count = heading_count(summary)
-        text = masked[start:end]
-        own = "\n".join(text[a:b] for a, b in details_spans(tags[start:end])[1])
-        found.append((role, count, [ln for ln in own.splitlines() if ENTRY_LINE.match(ln)]))
-    return found
-
-
-def stated_total(body: str, preamble_only: bool = False) -> int | None:
-    """The finding total this round states for itself, or None where its overview states none.
-
-    Read from the overview preamble, the text ahead of the first section opener, because a total
-    inside a collapsed section is that section's own, the count-first open-findings section below
-    being the one exception. Any other total stated only after that opener reads as none stated,
-    which prints `?` and no shortfall, so the reading that is missing suppresses the shortfall
-    rather than fabricating one.
-
-    The largest wins where the preamble states more than one, so an ambiguous body overstates the
-    shortfall rather than suppressing it. The opener is found where each code span is one
-    `MARKUP_MASK`, for the reason `details_tags` gives, which keeps every offset the preamble needs.
-
-    A later revision of the format drops the `**Findings:**` line and states its total as a bare
-    `**0 open findings**` line. That line is read here the same way, since left unread it printed
-    `?` and suppressed the shortfall the total is compared for. A later one still writes that zero as
-    `**No open issues**` and an emoji. That is the same stated zero.
-
-    That revision writes the bare line only for a zero, measured over every body carrying it, and
-    states any other total as the count opening its open-findings section, so where the preamble
-    states no total, the round's open section states it. `preamble_only` leaves that section out,
-    which is how a caller tells which of the two supplied the total.
-    """
-    stripped = strip_fences(body or "")
-    plain = CODE_SPAN.sub(" ", stripped)
-    opener = DETAILS_OPEN.search(CODE_SPAN.sub(MARKUP_MASK, stripped))
-    preamble = plain[: opener.start()] if opener else plain
-    totals = [findings_on(m.group(1)) for m in CCR_FINDINGS.finditer(preamble)]
-    totals += [
-        0 if m.group(1).casefold() == "no" else counted(m.group(1))
-        for m in CCR_OPEN_FINDINGS.finditer(preamble)
-    ]
-    found = [t for t in totals if t is not None]
-    if not found and not preamble_only:
-        found = [c for role, c, *_ in read_overview(body)[2] if role == TOTAL and c is not None]
-    return max(found, default=None)
-
-
-def round_threads(pr: dict, review: dict) -> int:
-    """How many review threads this round opened, read from the API rather than from its prose.
-
-    The count the stated total is compared against. Six readings tried to take it from the review
-    body's own enumeration, and four of them cancelled a shortfall by counting something that was
-    not an entry: a link in the change summary, a nested sub-bullet, a back-reference beside an
-    entry's own link, a list inside an entry's collapsed detail. Telling those apart needs each
-    list marker's own content column and each HTML block's own extent, which is a Markdown parser
-    rather than a line scan, and the format supplies no marker that makes the distinction
-    structural.
-
-    It is not in the prose to begin with. The anchor each entry links is the database id of the
-    thread comment carrying that finding, so the threads the round opened are the same set the
-    enumeration names, already structured, and no shape of the body can move the number.
-
-    That equivalence holds only while the enumeration lists what this round raised, and the format
-    itself now gives reason to doubt that: a round on this pull request carried a
-    `Resolved since last review (N)` section, so the format tracks a finding's state across rounds
-    rather than describing one round. If `Open (N)` likewise carries what an earlier round raised
-    and this round left open, its total counts findings whose threads belong to that earlier round,
-    and this count leaves out exactly those, so it is not compared against the total alone.
-
-    It does: `Open (N)` listed an earlier round's thread in 2 of the 41 rounds `read_overview`
-    was measured over, which is why that section's count is not read as a total. The preamble
-    total counted those carried findings too, in both rounds measured where a total exceeded the
-    threads its round opened. So the comparison counts each open entry standing for an earlier
-    round's thread beside `M`, per `carried_open_threads`, rather than this count growing to
-    include it, which would move `M` off what the round itself opened.
-
-    A thread beyond the hundred the query reads is not counted, which overstates the shortfall.
-    That is the direction that reports, and `threads=` already prints a trailing `+` saying the
-    page was cut.
-    """
-    return len(round_thread_nodes(pr, review))
-
-
-def round_thread_nodes(pr: dict, review: dict) -> list[dict]:
-    """The review threads this round opened, each read by the round its first comment names."""
-    rid = review.get("id")
-    if not rid:
-        return []
-    return [
-        thread
-        for thread in ((pr.get("reviewThreads") or {}).get("nodes") or [])
-        for comment in (((thread.get("comments") or {}).get("nodes") or [])[:1])
-        if ((comment.get("pullRequestReview") or {}).get("id")) == rid
-    ]
-
-
-def head_overview(pr: dict) -> tuple[int | None, int] | None:
-    """The newest round covering the head, as its stated total beside the threads it opened.
-
-    None where no round covers the head and where the one that does is in the first format, so the
-    field is absent rather than reading `0/0` on every pull request that has neither.
-
-    Head-scoped for the reason the coverage line is, and unlike the suppressed count: a total is
-    one round's statement about one diff, and the push that changes that diff raises a round
-    stating its own. The suppressed count is not head-scoped because its blocks carry the finding
-    text an answer is owed to, where a shortfall carries a number and nothing to answer.
-
-    The newest round on the head is chosen first and its own body then answers, which is the order
-    `review_effort` reads its own field in. Choosing the newest round that happens to be in that
-    format instead reports a superseded total as current, and a re-request during the rollout can
-    land a round in either format on one commit.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return None
-    return (stated_total(newest.get("body") or ""), round_threads(pr, newest))
-
-
-def second_format_head(pr: dict) -> dict | None:
-    """The newest round covering the head, where it is written in the second format."""
-    newest = newest_of(head_reviews(pr))
-    if newest is None or not second_format(newest.get("body") or ""):
-        return None
-    return newest
-
-
-def unthreaded_entries(pr: dict) -> int:
-    """How many findings the head round's open sections link to no thread on this pull request.
-
-    Each entry links the database id of its thread's first comment, so an id no thread carries is
-    a finding named only in the review body, which no thread poll reaches. An entry is read by its
-    first link, its title's own anchor, as `carried_open_threads` reads it, so a back-reference
-    beside a title anchor that is a thread adds nothing. Distinct title anchors are counted, and a
-    resolved section's entries are not, being threads an earlier round raised. A title anchor
-    past the hundred threads the query reads counts here too, overstating rather than hiding.
-    An `Open (N)` section counting more entries than it has linked entries adds the difference.
-    An entry carrying a link this reader does not recognize lands there too, overstating rather
-    than hiding.
-    """
-    known = thread_comment_ids((pr.get("reviewThreads") or {}).get("nodes") or [])
-    return len(open_entry_ids(pr) - known) + unlinked_open_entries(pr)
-
-
-def thread_comment_ids(threads: list[dict]) -> set[str]:
-    """The database id of each thread's first comment, the id an overview entry's anchor links."""
-    return {
-        str(first_comment(thread)["fullDatabaseId"])
-        for thread in threads
-        if first_comment(thread).get("fullDatabaseId") is not None
-    }
-
-
-def carried_open_threads(pr: dict) -> int:
-    """How many of the head round's open entries stand for a thread an earlier round opened.
-
-    A preamble total counts what is still open across rounds rather than what this round raised,
-    so a finding an earlier round raised and left open is in the total while its thread is not
-    among the ones this round opened. In both rounds measured where a total exceeded the threads
-    its round opened, each entry of the open section linked an earlier round's thread and the
-    total equalled that section's count. Each such entry
-    is counted beside the round's own threads before the two are compared, so a carried-over
-    finding with a thread of its own no longer reads as one with none.
-
-    Counted per entry rather than per link, since one entry can link a thread beside its own. An
-    entry linking any thread this round opened is that round's finding, already in `M`, so a
-    back-reference on it to an earlier thread cancels no shortfall. An entry stands for its
-    first link, its title's own anchor, so it is carried only where that link is a thread on this
-    pull request. A title anchor naming no thread is `unthreaded_entries`'s to count, and a
-    back-reference beside it does not also count the entry here. Two entries standing for one
-    earlier thread count once.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
-    known = thread_comment_ids((pr.get("reviewThreads") or {}).get("nodes") or [])
-    own = thread_comment_ids(round_thread_nodes(pr, newest))
-    sections = read_overview(newest.get("body") or "")[2]
-    return len(
-        {
-            entry[0]
-            for role, _, ids, _ in sections
-            if role != RESOLVED
-            for entry in ids
-            if entry[0] in known and not set(entry) & own
-        }
-    )
-
-
-def unlinked_open_entries(pr: dict) -> int:
-    """How many entries the head round's `Open (N)` sections count beyond their linked entries."""
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
-    sections = read_overview(newest.get("body") or "")[2]
-    return sum(
-        max(count - linked, 0)
-        for role, count, _, linked in sections
-        if role == OPEN and count is not None
-    )
-
-
-def total_section_entries(pr: dict) -> int:
-    """How many entries the head round's count-first open-findings sections list with a link.
-
-    Counted per entry rather than per link, since one entry can link a thread beside its own, and
-    counting links let that back-reference cancel an entry the section lists with no link at all.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
-    sections = read_overview(newest.get("body") or "")[2]
-    return sum(linked for role, _, _, linked in sections if role == TOTAL)
-
-
-def open_entry_links(pr: dict) -> list[list[str]]:
-    """The thread ids each of the head round's open entries links, resolved sections left out."""
-    newest = second_format_head(pr)
-    if newest is None:
-        return []
-    sections = read_overview(newest.get("body") or "")[2]
-    return [entry for role, _, ids, _ in sections if role != RESOLVED for entry in ids]
-
-
-def open_entry_ids(pr: dict) -> set[str]:
-    """The distinct title anchors the head round's open entries link."""
-    return {entry[0] for entry in open_entry_links(pr)}
-
-
-def open_linked_ids(pr: dict) -> set[str]:
-    """Every thread id the head round's open entries link, back-references included."""
-    return {found for entry in open_entry_links(pr) for found in entry}
-
-
-TABLE_VOTES = re.compile(r"\(\d+ votes?\b[^()]*\)")
-NUMBER_WORDS = {
-    word: n
-    for n, word in enumerate(
-        [
-            "one",
-            "two",
-            "three",
-            "four",
-            "five",
-            "six",
-            "seven",
-            "eight",
-            "nine",
-            "ten",
-            "eleven",
-            "twelve",
-        ],
-        start=1,
-    )
-}
-HEADLINE_COUNT = re.compile(
-    r"\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+(?:[a-z-]+\s+){0,2}?findings?\b", re.IGNORECASE
-)
-
-
-def table_findings(body: str) -> list[list[str]]:
-    """The first cell's paths of the file table row naming each finding, one list per finding.
-
-    A row names a finding by the vote count written beside it, so one row can name several. Each
-    is listed with the paths the row's first cell names, as `cell_paths` reads them. The wording
-    is not read, since a finding is paired with a thread by its file rather than by its title.
-    A count inside a code span is a quotation and is not read.
-    """
-    found = []
-    for row in table_rows(body):
-        first = TABLE_ROW.match(row)
-        named = cell_paths(bare_path(first.group(1))) if first else []
-        quoted = [span.span() for span in CODE_SPAN.finditer(row)]
-        found += [
-            named
-            for match in TABLE_VOTES.finditer(row)
-            if not any(a <= match.start() < b for a, b in quoted)
-        ]
-    return found
-
-
-def unpaired(named: list[list[str]], paths: list[str]) -> int:
-    """How many findings, each read as the paths it names, pair with no thread's path.
-
-    A finding pairs with a thread on a file it names, per `names_path`. Each thread pairs with one
-    finding at most, so two findings on a file one thread is on leave one unpaired. The pairing is
-    the largest there is, found by augmenting paths. So no order of listing leaves a finding
-    unpaired that some other pairing would place.
-    """
-    return unmatched(
-        len(named), len(paths), lambda f, t: any(names_path(n, paths[t]) for n in named[f])
-    )
-
-
-def unmatched(findings: int, threads: int, fits: Callable[[int, int], bool]) -> int:
-    """How many of `findings` pair with none of `threads`, where `fits` says which pairs may.
-
-    Each thread pairs with one finding at most. The pairing is the largest there is, found by
-    augmenting paths. So no order of listing leaves a finding unpaired that some other pairing
-    would place.
-    """
-    owner: dict[int, int] = {}
-
-    def place(finding: int, seen: set[int]) -> bool:
-        for thread in range(threads):
-            if thread in seen or not fits(finding, thread):
-                continue
-            seen.add(thread)
-            if thread not in owner or place(owner[thread], seen):
-                owner[thread] = finding
-                return True
-        return False
-
-    return sum(1 for finding in range(findings) if not place(finding, set()))
-
-
-def round_thread_paths(pr: dict, review: dict) -> list[str]:
-    """The file of each thread the round accounts for, one per thread, so a file can repeat.
-
-    That is each thread the round opened and each its open entries link by their title anchor.
-    An open entry standing for an earlier round's thread is a finding the round still names.
-    """
-    return [
-        bare_path(first_comment(thread).get("path") or "")
-        for thread in round_accounted_threads(pr, review)
-    ]
-
-
-def round_accounted_threads(pr: dict, review: dict) -> list[dict]:
-    """Each thread the round opened and each its open entries link by their title anchor."""
-    linked = open_entry_ids(pr)
-    own = round_thread_nodes(pr, review)
-    return [
-        thread
-        for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
-        if thread in own or str(first_comment(thread).get("fullDatabaseId")) in linked
-    ]
-
-
-def unthreaded_table_findings(pr: dict) -> int:
-    """How many findings the head round's file table names that pair with no thread of that round.
-
-    A finding is paired by the file its row is about, as `unpaired` pairs it, against the threads
-    `round_thread_paths` lists. Each path the row's first cell names is read against those
-    threads' files as `row_paths` reads one against a diff. That is exactly, or through a gap or a
-    wildcard. A finding left unpaired is named only in a table row, which no thread poll reaches.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
-    paths = round_thread_paths(pr, newest)
-    files = set(paths)
-    named = [
-        [path for name in names for path in row_paths(name, files)[0]]
-        for names in table_findings(newest.get("body") or "")
-    ]
-    return unpaired(named, paths)
-
-
-def headline_findings(headline: str) -> int | None:
-    """The largest count of findings a headline spells out, or None where it states none.
-
-    Every count is read, whatever its sentence says about it. Whether a count is settled or owed
-    is the prose's to say. So `headline_shortfall` compares it against every finding the pull
-    request accounts for, settled ones included. The largest wins, so a headline overstates.
-    """
-    counts = []
-    for match in HEADLINE_COUNT.finditer(headline):
-        word = match.group(1).casefold()
-        counts.append(NUMBER_WORDS[word] if word in NUMBER_WORDS else int(word))
-    return max(counts, default=None)
-
-
-def earlier_round_threads(pr: dict, review: dict) -> set[str]:
-    """The first-comment ids of the threads the reviewer's other rounds opened, resolved or not.
-
-    Read by the thread's own author and round rather than from the review list. That list's window
-    holds the newest reviews, while the thread window holds the oldest threads.
-    """
-    return thread_comment_ids(
-        [
-            thread
-            for thread in (pr.get("reviewThreads") or {}).get("nodes") or []
-            if thread_author(thread) == REVIEWER
-            and (first_comment(thread).get("pullRequestReview") or {}).get("id")
-            not in (None, review.get("id"))
-        ]
-    )
-
-
-def headline_shortfall(pr: dict) -> tuple[int, int]:
-    """The headline's finding count beside every finding the pull request accounts for.
-
-    A headline counts across rounds, so it is compared against all of them rather than the open
-    sections alone. That is the larger of the open sections' count and the round's stated total.
-    The round's suppressed and previously missed findings are added, and so is each thread the
-    reviewer's other rounds opened that no open entry links. Both are zero where the head round is
-    not in the second format or its headline states no count.
-
-    Those threads count resolved or not, since a headline counts a settled finding as readily as
-    an owed one. Telling the two apart was a reading of its prose, and each attempt left a phrasing
-    unread. The cost is a headline naming no more findings than earlier rounds opened threads,
-    which this does not report. The file table and the `Review findings:` list are read apart.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0, 0
-    body = newest.get("body") or ""
-    stated = headline_findings(read_overview(body)[1])
-    if stated is None:
-        return 0, 0
-    listed = sum(
-        max(count or 0, len(entries))
-        for role, count, entries in section_entries(body)
-        if role != RESOLVED
-    )
-    withheld = suppressed_blocks(body) + previously_missed_blocks(body)
-    accounted = max(listed, stated_total(body) or 0) + sum(map(finding_count, withheld))
-    return stated, accounted + len(earlier_round_threads(pr, newest) - open_linked_ids(pr))
-
-
-PROSE_FINDINGS = re.compile(
-    r"^ {0,3}[*_]{0,2}Review findings[*_]{0,2}:[*_]{0,2}[ \t]*$", re.IGNORECASE
-)
-
-
-def prose_findings(body: str) -> list[list[str]]:
-    """The paths each entry of a `Review findings:` list names, one list per entry."""
-    return [entry_paths(entry) for entry in labelled_entries(body, PROSE_FINDINGS)]
-
-
-def labelled_entries(body: str, label: re.Pattern[str]) -> list[str]:
-    """The text of each entry of every list directly under a line `label` matches.
-
-    An entry is a bullet at the margin in the run of lines directly under the label, and an
-    indented line continues the entry above it. The label and the bullets are found where
-    quotations are masked, so a body quoting the list is not read as carrying one. Each entry's
-    text is taken from the body.
-    """
-    raw = (body or "").splitlines()
-    masked = mask_quotations(body or "").splitlines()
-    entries: list[str] = []
-    at = 0
-    while at < len(masked):
-        if not label.match(masked[at]):
-            at += 1
-            continue
-        at += 1
-        while at < len(masked) and not masked[at].strip():
-            at += 1
-        start = len(entries)
-        while at < len(masked):
-            line = masked[at]
-            if ENTRY_LINE.match(line):
-                entries.append(raw[at])
-            elif len(entries) > start and line.strip() and line[:1].isspace():
-                entries[-1] += "\n" + raw[at]
-            else:
-                break
-            at += 1
-    return entries
-
-
-LINE_SUFFIX = re.compile(r":[0-9]+(?:-[0-9]+)?$")
-
-
-def entry_paths(entry: str) -> list[str]:
-    """The paths one list entry names, read from its own code spans.
-
-    A span written as `FILE:LINE` or `FILE:START-END` names the file, so the suffix is dropped.
-    A thread carries the path alone, which is what the entry's path is paired against.
-    """
-    return [
-        named
-        for span in CODE_SPAN.finditer(entry)
-        if (
-            named := LINE_SUFFIX.sub(
-                "", bare_path(span.group()[len(span.group(1)) : -len(span.group(1))]).strip()
-            )
-        )
-    ]
-
-
-def names_path(named: str, path: str) -> bool:
-    """Whether a path an entry names is `path`, a trailing part of it, or a directory holding it."""
-    named = named.strip("/")
-    return bool(named) and (
-        path == named or path.endswith("/" + named) or path.startswith(named + "/")
-    )
-
-
-def unthreaded_prose_findings(pr: dict) -> int:
-    """How many `Review findings:` entries in the head round pair with no thread of that round.
-
-    Paired by file, as `unpaired` pairs them, against the threads `round_thread_paths` lists. An
-    entry names a file and a thread carries one, where its wording shares nothing a match could key
-    on. An entry naming no path is counted. An entry paired with a thread on some other finding
-    the list leaves out is not, which is the case this cannot see.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
-    return unpaired(prose_findings(newest.get("body") or ""), round_thread_paths(pr, newest))
-
-
-NARRATIVE_FINDINGS = re.compile(
-    r"^ {0,3}[*_]{0,2}Open findings remain[*_]{0,2}:[*_]{0,2}[ \t]*$", re.IGNORECASE
-)
-ENTRY_SEVERITY = re.compile(r"\*\*([A-Za-z]+)\*\*")
-ENTRY_EACH = re.compile(r"\bvotes?\s+each\b", re.IGNORECASE)
-SEVERITY_TIER = {
-    "critical": 3,
-    "high": 3,
-    "moderate": 2,
-    "medium": 2,
-    "low": 1,
-    "nit": 1,
-}
-
-
-def entry_tier(entry: str) -> int | None:
-    """The tier the bold severity words of one entry state, or None where they state not one.
-
-    Read outside its code spans, so a quoted bold word is not a severity. The list and the open
-    section's badges spell severity in two vocabularies. The one round seen wrote `critical` over
-    a `High` badge and `nit` over a `Low` one. So the top two words share a tier in
-    `SEVERITY_TIER`, and a word missing from it states no tier.
-    """
-    words = ENTRY_SEVERITY.findall(CODE_SPAN.sub(" ", entry))
-    tiers = {SEVERITY_TIER.get(w.casefold()) for w in words}
-    tiers &= set(SEVERITY_TIER.values())
-    return tiers.pop() if len(tiers) == 1 else None
-
-
-def open_entry_tiers(body: str) -> dict[str, int | None]:
-    """The tier each open entry's badge states, keyed by the thread its title anchor links.
-
-    A thread two entries link at different tiers, or one an entry links under no badge this
-    reads, maps to None.
-    """
-    tiers: dict[str, int | None] = {}
-    for role, _, lines in section_entries(body):
-        if role == RESOLVED:
-            continue
-        for line in lines:
-            ids = DISCUSSION_LINK.findall(line)
-            if not ids:
-                continue
-            badge = SEVERITY_BADGE.search(line)
-            word = SEVERITY_TEXT.search(badge_text(badge)) if badge else None
-            tier = SEVERITY_TIER.get(word.group(1).casefold()) if word else None
-            tiers[ids[0]] = tier if tiers.get(ids[0], tier) == tier else None
-    return tiers
-
-
-def unthreaded_narrative_findings(pr: dict) -> int:
-    """How many `Open findings remain:` entries in the head round pair with no thread of it.
-
-    The threads are the ones `round_accounted_threads` lists. An entry's own bold severity word
-    states a tier, and it pairs only with a thread whose open entry is badged at that tier. It
-    must also name that thread's file, per `names_path`, where it names any path at all. The file
-    alone was not enough, a round having listed an entry beside a thread on its file that carried
-    another finding. An entry naming no path pairs on the tier alone, a round having listed one
-    such entry for findings its threads carry. An entry or a thread whose tier is not read pairs
-    with nothing, which overstates rather than hides.
-
-    An entry stating `votes each` names several findings, so it counts as two, each pairing on
-    its own.
-    A third finding it names is the case this cannot see.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return 0
-    body = newest.get("body") or ""
-    entries = [
-        entry
-        for entry in labelled_entries(body, NARRATIVE_FINDINGS)
-        for _ in range(2 if ENTRY_EACH.search(CODE_SPAN.sub(" ", entry)) else 1)
-    ]
-    named = [entry_paths(entry) for entry in entries]
-    wants = [entry_tier(entry) for entry in entries]
-    tiers = open_entry_tiers(body)
-    threads = [
-        (
-            bare_path(first_comment(t).get("path") or ""),
-            tiers.get(str(first_comment(t).get("fullDatabaseId"))),
-        )
-        for t in round_accounted_threads(pr, newest)
-    ]
-
-    def fits(finding: int, thread: int) -> bool:
-        path, tier = threads[thread]
-        if wants[finding] is None or wants[finding] != tier:
-            return False
-        return not named[finding] or any(names_path(n, path) for n in named[finding])
-
-    return unmatched(len(entries), len(threads), fits)
-
-
-def uncounted_verdict(pr: dict, verdicts: set[str] = FLAGGING_VERDICTS) -> tuple[str, str] | None:
-    """The head round's verdict in `verdicts` and its headline, where that round counts no finding.
-
-    A round opening on a flagging verdict that states no open finding, lists none in an open
-    section, opens no thread, and collapses no suppressed or previously-missed finding names
-    whatever it flags in its headline
-    alone, which every count here reads as a clean pass. Measured over the rounds in this format,
-    the headline named a finding in most such rounds and a caution about the change in the rest,
-    and only reading it tells the two apart.
-
-    An open thread defers the reading rather than cancelling it, since the headline may name that
-    thread and the loop already waits on it, and once it is resolved the reading returns.
-
-    Passed `CLEAN_VERDICTS`, it reads a clean round on the same terms, whose headline named a
-    remaining nit in about a quarter of the rounds measured. That reading is printed and never
-    gated, since nothing in the body says whether the nit is new or an answered thread.
-    """
-    newest = second_format_head(pr)
-    if newest is None:
-        return None
-    body = newest.get("body") or ""
-    verdict, headline, sections = read_overview(body)
-    if not verdict or unvetted(verdict, verdicts):
-        return None
-    listed = any(role != RESOLVED and (count or ids) for role, count, ids, _ in sections)
-    if listed or stated_total(body) or round_threads(pr, newest):
-        return None
-    if suppressed_blocks(body) or previously_missed_blocks(body):
-        return None
-    if open_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
-        return None
-    return verdict, headline
-
-
 def open_threads(threads: list[dict]) -> list[dict]:
-    """Every unresolved thread, whoever opened it, since each one blocks a ruleset-gated merge.
-
-    The author decides only how `status` attributes a thread, never whether it counts, because a
-    login set read off past history misses the next spelling a reviewer posts under.
-    """
+    """Every unresolved thread, whoever opened it, since each one blocks a ruleset-gated merge."""
     return [t for t in threads if not t.get("isResolved")]
 
 
-def unlisted_findings(manifest: tuple[int | None, int] | None) -> int:
-    """How many findings a round states that it opened no thread for.
-
-    Zero where there is no manifest and zero where it states no total, both being the absence of
-    the claim this subtracts from rather than a claim that nothing is missing. Floored at zero,
-    since a round that opened more threads than it states findings is the reviewer counting
-    differently rather than a negative number of findings.
-    """
-    if manifest is None or manifest[0] is None:
-        return 0
-    return max(manifest[0] - manifest[1], 0)
-
-
-def bare_path(path: str) -> str:
-    """The path with its Unicode format characters dropped, the form a table and a diff compare in.
-
-    The second overview format writes a zero-width space after a path's slash, and `str.strip`
-    keeps it, so every nested path read as one the diff does not carry while every root-level
-    path matched. Both sides are reduced, since a real file name can carry a format character of
-    its own, a zero-width joiner in an emoji sequence being one, and reducing only the table's
-    side would name that file as omitted.
-    """
-    return "".join(c for c in path if unicodedata.category(c) != "Cf")
-
-
-def gap_fits(path: str, parts: list[str]) -> bool:
-    """Whether `path` holds `parts` in order, the first opening it, the last closing it.
-
-    At least one character stands between each part and the next. Each middle part is taken at
-    its leftmost place, which leaves the most room for the parts after it, so one pass decides it.
-    """
-    head, *middle, tail = parts
-    if not path.startswith(head) or not path.endswith(tail):
-        return False
-    at, end = len(head), len(path) - len(tail)
-    for part in middle:
-        found = path.find(part, at + 1, end - 1)
-        if found < 0:
-            return False
-        at = found + len(part)
-    return end - at >= 1
-
-
-def segment_fits(segment: str, pattern: str) -> bool:
-    """Whether one path segment matches one row segment, a `[` in either being a literal.
-
-    A segment holding a wildcard must also hold a letter or a digit, so a row of bare wildcards
-    such as `*/*` or `*.*` names nothing rather than every path at that depth.
-    """
-    if not TABLE_GLOB & set(pattern):
-        return segment == pattern
-    if not any(c.isalnum() for c in pattern):
-        return False
-    return fnmatch.fnmatchcase(segment, pattern.replace("[", "[[]"))
-
-
-def row_paths(row: str, diff: set[str]) -> tuple[list[str], bool, bool]:
-    """The changed paths a row names, whether it names one at most, and whether a note came off.
-
-    While a row names nothing and ends in a parenthesized note, it is read again without that
-    note, since the second format writes one after a path, as in `docs/a.md (cleanup)`. A note
-    comes off only while the row names nothing, so a row naming a changed path in any of
-    `row_form`'s ways reads as written, whatever parentheses it ends in.
-
-    A row that names its paths only once a note comes off is not counted as naming a path the
-    diff does not carry, and it covers none of them either. Nothing reads the note's text, which
-    could just as well say the file went unreviewed, so only a row naming a path as written
-    covers it.
-    """
-    noted = False
-    while True:
-        paths, single = row_form(row, diff)
-        if paths or not (head := note_head(row)):
-            return paths, single, noted
-        row, noted = head, True
-
-
-def note_split(row: str) -> tuple[str, str]:
-    """The row's text before its trailing parenthesized note, and the note, or two empty strings.
-
-    The note runs from the last `(` to the closing `)`, holding no parenthesis of its own, and
-    whitespace stands between it and the text before it.
-    """
-    if not row.endswith(")"):
-        return "", ""
-    start = row.rfind("(")
-    if start < 1 or ")" in row[start + 1 : -1] or not row[start - 1].isspace():
-        return "", ""
-    return row[:start], row[start:]
-
-
-def note_head(row: str) -> str:
-    """The row before its trailing note, as `note_split` finds one, or empty where it ends in none.
-
-    That text is returned with its outer backticks dropped, as `cell_paths` drops a whole cell's,
-    since a code span can come before the note.
-    """
-    return note_split(row)[0].strip().strip("`").strip()
-
-
-def row_form(row: str, diff: set[str]) -> tuple[list[str], bool]:
-    """The changed paths one table row names, out of `diff`, and whether it names one at most.
-
-    A row names a path in one of three ways, and every claim here and in the digest that a table
-    names a set of paths counts all three. A row the diff carries names that path, whatever
-    characters it holds. Otherwise a row holding `TABLE_GAP` names every path `gap_fits`, its
-    other characters read literally, and since it shortens one path it names one at most.
-    Its text outside the gaps must hold a letter or a digit, so a gap between bare punctuation
-    names nothing rather than whichever path happens to fit.
-    Otherwise a row holding a wildcard names every path it matches one segment at a time, so a
-    `*` never crosses a `/`, per `segment_fits`.
-    """
-    if row in diff:
-        return [row], True
-    if TABLE_GAP in row:
-        parts = row.split(TABLE_GAP)
-        if not any(c.isalnum() for c in "".join(parts)):
-            return [], True
-        return sorted(p for p in diff if gap_fits(p, parts)), True
-    if TABLE_GLOB & set(row):
-        parts = row.split("/")
-        return sorted(
-            p
-            for p in diff
-            if len(segments := p.split("/")) == len(parts)
-            and all(map(segment_fits, segments, parts))
-        ), False
-    return [], True
-
-
-def table_match(
-    named: list[str], diff: set[str]
-) -> tuple[list[str], list[str], list[str], list[str]]:
-    """The changed paths no row covers, the rows naming none, too many, and the noted paths.
-
-    A row naming one path at most that matches several names none of them, since which one it
-    shortened is unknown. A row covers what it names unless a note came off it first, per
-    `row_paths`, and the last list holds the uncovered paths such a row names, so it is a subset
-    of the first. Each list is sorted, and the table stands in for coverage only where the first
-    three are empty.
-    """
-    covered: set[str] = set()
-    noted_paths: set[str] = set()
-    invented, ambiguous = [], []
-    for row in dict.fromkeys(named):
-        paths, single, noted = row_paths(row, diff)
-        if not paths:
-            invented.append(row)
-        elif single and len(paths) > 1:
-            ambiguous.append(row)
-        else:
-            (noted_paths if noted else covered).update(paths)
-    left = diff - covered
-    return sorted(left), sorted(invented), sorted(ambiguous), sorted(noted_paths & left)
-
-
-def file_table(body: str) -> list[str]:
-    """The paths the round's own file summary table names, in the order it names them.
-
-    Quotations are dropped for the reason a coverage line's are: this change puts a table into
-    the diff and a review of it quotes one, and a quoted table read as this round's own names
-    files nobody reviewed. That is a fenced block, an unclosed one running to the end of the
-    body as Markdown runs it, and a line indented as a code block. Code spans are kept, being how
-    the second format writes each path, and a span running over several lines is not masked
-    either, since a stray backtick in one row's prose pairs with the next row's path and would
-    hide the real table.
-
-    The header is what opens the table and any line that is not a row closes it, so a second
-    table later in the body is read as a second table rather than as more of the first.
-
-    Each cell is reduced by `bare_path`, for the reason it states, and read by `cell_paths`.
-    """
-    paths: list[str] = []
-    for row in table_rows(body):
-        if first := TABLE_ROW.match(row):
-            paths.extend(cell_paths(bare_path(first.group(1))))
-    return [p for p in paths if p]
-
-
-def table_rows(body: str) -> list[str]:
-    """The data rows of the round's file summary table, each as its whole line.
-
-    The header is what opens the table and any line that is not a row closes it, so a second
-    table later in the body is read as a second table rather than as more of the first. The
-    alignment row is not a data row, and quotations are dropped as `file_table` states.
-    """
-    rows, reading = [], False
-    for line in strip_fences(body or "", to_end=True).splitlines():
-        if code_indented(line):
-            reading = False
-        elif TABLE_HEADER.match(line):
-            reading = True
-        elif TABLE_ROW.match(line) is None:
-            reading = False
-        elif reading and not TABLE_RULE.match(line):
-            rows.append(line)
-    return rows
-
-
-def cell_paths(cell: str) -> list[str]:
-    """The paths one table cell names, one per code span where it lists several.
-
-    The second format can group related files into one row, each in a code span of its own with
-    a comma between them. Read whole, such a cell is one path holding backticks, which names none
-    of the files it lists. So a cell holding single-backtick spans with nothing but commas and
-    whitespace outside them names each span.
-
-    Such a list can end in notes, each as `note_split` finds one, and they come off one after
-    another as `row_paths` takes them off a row. Each span then keeps those notes, so each reads
-    as a noted row, since which file a note is about is unknown. The notes come off before the
-    spans are found, so a span quoted inside one is never read as a path. Any other cell is read
-    whole, its outer backticks dropped.
-    """
-    if spans := span_list(cell):
-        return [s.strip() for s in spans]
-    head, notes = cell.strip(), ""
-    while (split := note_split(head))[1]:
-        head, notes = split[0].rstrip(), f"{split[1]} {notes}".rstrip()
-        if spans := span_list(head):
-            return [f"{s.strip()} {notes}" for s in spans]
-    return [cell.strip().strip("`").strip()]
-
-
-def span_list(text: str) -> list[str]:
-    """The spans `text` lists, or none where it holds more than spans, commas, and whitespace."""
-    spans = TABLE_SPAN.findall(text)
-    return spans if spans and TABLE_SEPARATORS.fullmatch(TABLE_SPAN.sub("", text)) else []
-
-
 def changed_paths(pr: dict) -> tuple[list[str], bool]:
-    """The paths this pull request changes, and whether that list is incomplete.
-
-    Incomplete is a list cut short at GitHub's ceiling, and also one `page_files` left unread,
-    whose first page's `hasNextPage` still stands, `FILES_UNREAD` naming which of the two it is.
-    It is carried rather than hidden, since a path missing from the list reads exactly like a
-    path the reviewer left out of its table, and the two take opposite readings.
-    """
+    """The paths this pull request changes, and whether that list is incomplete."""
     files = pr.get("files") or {}
     paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
     return [p for p in paths if p], bool((files.get("pageInfo") or {}).get("hasNextPage"))
 
 
-def head_table(pr: dict) -> list[str]:
-    """The file table the rounds covering the current head carry, from the first that has one.
-
-    Any round on the head rather than the one whose counts decided the verdict, since rounds on
-    one commit describe one diff, and a re-requested round states the counts again and carries no
-    table at all. Thirteen commits here carry more than one round and one of those pairs is that
-    shape exactly, so which of the two the verdict happens to read must not decide whether a
-    table is found.
-
-    Head-scoped for the reason the coverage line is, and this is the tighter half of the reading:
-    three of this repository's four partial pull requests carry their table on the round before a
-    push, describing a diff that is not the one being merged, and comparing that table against
-    the current changed files would name files as unreviewed on the strength of a stale list.
-    Those report as no table rather than as a comparison, which is the honest answer.
-    """
-    for node in head_reviews(pr):
-        named = file_table(node.get("body") or "")
-        if named:
-            return named
-    return []
-
-
-def table_against_diff(pr: dict, counts: tuple[int, int] | None) -> str:
-    """What the reviewer's own file table says about the files the counts leave unread.
-
-    This reports and decides nothing. The exit code stays with the counts, because the table
-    tracks them nowhere near well enough to overturn one, and the measurement is what says so.
-    Over 348 review bodies on this repository and 121 on ptr727/Blog, the table names the whole
-    changed set on partial and fully covered rounds alike: all seven partials on Blog name every
-    changed file, as do two of the four here that carry a table. A reading identical under both
-    outcomes discriminates neither, which is why a full table is reported as corroborating
-    nothing rather than as the count being a miscount.
-
-    The one arm that locates anything is a table shorter by exactly what the counts say went
-    unread. One round states 16 of 17 and names 16, omitting `GOVERNANCE.md`, and it is the
-    only evidence on record that the unread file is a real file rather than an artifact of
-    counting. It stays a lead rather than a verdict, since the table is prose the reviewer
-    writes: another states 61 of 62 and names 50, and a third names `GOVENANCE.md`, a path no
-    diff here carries.
-
-    A path named that the diff does not carry is what disqualifies the naming arm, that typo
-    being enough to drop a real file into the omissions and read it as the one nobody reviewed.
-    A shortened path matching several changed files disqualifies it for the same reason, and so
-    does a file named only on a row carrying a note, which sits in the omissions although the
-    table names it.
-    """
-    named = head_table(pr)
-    if not named:
-        return "no round covering this head carries a file table, so none of them locates the file"
-    changed, truncated = changed_paths(pr)
-    unread = (pr.get("files") or {}).get(FILES_UNREAD)
-    if truncated or not changed or unread:
-        why = unread or (
-            f"the changed-file list reaching the {FILES_CAP} files GitHub lists"
-            if truncated
-            else "the changed-file list being absent from the query"
-        )
-        return (
-            f"the reviewer names {len(named)} entries in its own table and the diff could not "
-            f"be read back to compare them, {why}"
-        )
-    left, invented, ambiguous, noted = table_match(named, {bare_path(c) for c in changed})
-    omitted = [p for p in changed if bare_path(p) in left]
-    short = 0 if counts is None else counts[1] - counts[0]
-    if not omitted:
-        return (
-            f"the reviewer's own file table names all {len(changed)} changed files, which it "
-            f"also does on rounds stating full coverage, so it corroborates nothing and "
-            f"names no unread file"
-        )
-    if len(omitted) == short and not invented and not ambiguous and not noted:
-        return (
-            f"the reviewer's own file table omits exactly the {short} file"
-            f"{'' if short == 1 else 's'} the counts leave unread, naming "
-            f"{', '.join(omitted)}. The table is prose the reviewer writes rather than a "
-            f"list from the API, so that is a lead to check rather than a verdict"
-        )
-    return (
-        f"the reviewer's own file table names {len(changed) - len(omitted) + len(noted)} of the "
-        f"{len(changed)} changed "
-        f"files, omitting {len(omitted) - len(noted)} where the counts leave {short} unread"
-        + (f" and naming {', '.join(invented)}, which the diff does not carry" if invented else "")
-        + (f" and shortening {', '.join(ambiguous)} to fit several" if ambiguous else "")
-        + (
-            f" and naming {', '.join(noted)} only on a row with a note, which covers nothing"
-            if noted
-            else ""
-        )
-        + ", so it tracks the counts nowhere and names no unread file"
-    )
-
-
-def count_value(digits: str) -> str:
-    """A count in a form two counts compare in, leading zeros dropped, and never through `int`.
-
-    `int` refuses a digit run past the interpreter's limit, so a body carrying one would crash
-    the digest rather than read as a partial.
-    """
-    return "".join(str(unicodedata.digit(c)) for c in digits).lstrip("0") or "0"
-
-
-def body_views(body: str) -> list[str]:
-    """The body as each reading of it that `partial_in` scans, every one of them folded.
-
-    Each transform that exposes one hiding place can also hide another: decoding an entity
-    can break a tag's quoting, folding a compatibility form can turn a separator into letters,
-    and stripping a tag can erase a marker written as one. So no transform replaces another.
-    The body is read raw, with entities decoded and format characters dropped, and with
-    compatibility forms folded and combining marks dropped too, and each of those with tags
-    kept and with tags stripped three ways, a partial found in any one of them counting.
-    """
-    decoded = "".join(c for c in html.unescape(body) if unicodedata.category(c) != "Cf")
-    folded = unicodedata.normalize(
-        "NFKC",
-        "".join(
-            c
-            for c in unicodedata.normalize("NFKD", decoded)
-            if unicodedata.category(c) not in ("Cf", "Mn")
-        ),
-    )
-    return [
-        " ".join(EMPHASIS_MARK.sub("", strip.sub("", base) if strip else base).split())
-        for base in (body, decoded, folded)
-        for strip in (None, HTML_TAG, LINE_TAG, BARE_TAG)
-    ]
-
-
-def partial_in(view: str, rowless: str | None = None) -> str:
-    """The first partial marker, marker mention, or count in one reading of a body, or "".
-
-    `rowless` is the same reading with file-summary rows removed, and only the bare marker-name
-    mention is looked for there. A well-formed marker and a count are read in `view` whole.
-    """
-    for m in FLEET_REVIEW.finditer(view):
-        if count_value(m.group(1)) != count_value(m.group(2)):
-            return m.group(0)[:200]
-    rest = FLEET_REVIEW.sub(" ", view if rowless is None else rowless)
-    for name in (MARKER_NAME, MARKER_NAME_TIGHT):
-        for m in name.finditer(rest):
-            if re.search(r"\d", rest[m.end() : m.end() + MARKER_REACH]):
-                return rest[m.start() : m.end() + MARKER_REACH][:200]
-    for pattern in (COVERAGE_COUNTS, LOOSE_COUNTS):
-        for m in pattern.finditer(view):
-            counts = [count_value(g) for g in m.groups() if g is not None][:2]
-            if len(counts) == 2 and counts[0] != counts[1]:
-                return m.group(0)[:200]
-    return ""
-
-
-def partial_shaped(pr: dict) -> str:
-    """The first coverage marker or count in any Copilot round's body that is not a full one.
-
-    Empty where there is none. Read over every round on the pull request, on any commit, with
-    no quotation masked, since the table stands in only where no round even appears to have read
-    part of a diff. Masking and the line-start anchor are what keep a quoted count from being
-    read as a statement, which is right where an unread count blocks as unstated and wrong here,
-    where the table would otherwise pass a partial the coverage reader did not recognize.
-
-    Every reading `body_views` gives is scanned, and a partial in any one of them counts, so a
-    reading added to catch one shape never hides a shape another reading catches. A well-formed marker counts where its two
-    counts differ. Any other mention of the marker's name, in any spelling, counts where a digit
-    follows it within `MARKER_REACH` characters, since a marker is written by a model from an
-    instruction and a drifted one cannot be parsed reliably, so it is not parsed at all. A mention
-    followed by no digit, prose or a placeholder, is skipped. Prose can word a partial in ways no
-    pattern here anticipates, so this narrows the gap rather than closing it, which is the cost
-    of reading a table at all.
-
-    A table row opening with a code-span path is dropped from the marker-name mention reading only.
-    A file-summary cell about the review skill names the marker in prose rather than stating coverage.
-    A well-formed marker and a count inside such a row are still read.
-    """
-    for node in reviewer_nodes(pr, "reviews"):
-        body = node.get("body") or ""
-        for view, rowless in zip(body_views(body), body_views(FILE_ROW.sub("", body)), strict=True):
-            if found := partial_in(view, rowless):
-                return found
-    return ""
-
-
-def table_shortfall(pr: dict, named: list[str] | None = None) -> str:
-    """Why no round covering the head names exactly this pull request's changed files, or "".
-
-    Empty where the table stands in, which is the coverage reading `table_reading` gives.
-    Otherwise the reason, which the digest prints under an unstated head, since the remedies
-    differ: a missing or mismatched table may be answered by another round, a changed-file list
-    at GitHub's own ceiling by a split, and a partial on record by nothing but the maintainer's
-    reading.
-
-    `named` is an earlier round's table where `table_reading` matches a carried one, and the
-    head's own table otherwise. Every other check reads the pull request either way, since a
-    partial on record or a cut-short list refuses a carried table exactly as it refuses one on
-    the head.
-    """
-    if reviews_truncated(pr):
-        return (
-            "the review history is longer than the window this reads, so a round stating "
-            "partial coverage may sit out of view"
-        )
-    if partial := partial_shaped(pr):
-        return (
-            f"a Copilot round on this pull request states or appears to state partial coverage, "
-            f"'{partial}', so the maintainer reads it rather than the table"
-        )
-    if named is None:
-        named = head_table(pr)
-    if not named:
-        return NO_HEAD_TABLE
-    if short := files_shortfall(pr):
-        return short
-    changed, truncated = changed_paths(pr)
-    if truncated:
-        return (
-            f"the pull request changes {FILES_CAP} files or more, GitHub's own ceiling on the "
-            f"changed-file list, so the table cannot be compared against all of them"
-        )
-    diff = {bare_path(p) for p in changed}
-    if len(diff) != len(set(changed)):
-        return (
-            "two changed paths differ only by a format character, so the table cannot tell "
-            "them apart"
-        )
-    left, invented, ambiguous, noted = table_match(named, diff)
-    if not left and not invented and not ambiguous:
-        return ""
-    omitted = [p for p in left if p not in noted]
-    return "the table " + ", and ".join(
-        part
-        for part in (
-            f"leaves out {', '.join(omitted)}" if omitted else "",
-            f"names {', '.join(noted)} only on a row with a note, which covers nothing"
-            if noted
-            else "",
-            f"names {', '.join(invented)}, which the diff does not carry" if invented else "",
-            f"shortens {', '.join(ambiguous)}, which matches more than one changed file"
-            if ambiguous
-            else "",
-        )
-        if part
-    )
-
-
-def carried_table(pr: dict) -> tuple[list[str], str] | None:
-    """The newest round on this pull request carrying a file table, its table, and its commit.
-
-    None where no round carries one. A refusal is skipped for the reason `carried_coverage`
-    skips it, being a round that read nothing.
-    """
-    tabled = [
-        node
-        for node in reviewer_nodes(pr, "reviews")
-        if not refusal_of(node) and file_table(node.get("body") or "")
-    ]
-    newest = newest_of(tabled)
-    if newest is None:
-        return None
-    return file_table(newest.get("body") or ""), (newest.get("commit") or {}).get("oid") or ""
-
-
-def table_reading(owner: str, repo: str, pr: dict) -> tuple[str, str]:
-    """Whether a file table stands in for this head's coverage, as the commit it was read on and why not.
-
-    The shortfall is empty where a table stands in. The commit names the earlier round's commit
-    where one was consulted and names one, whether or not its table carries, and is empty
-    otherwise.
-
-    This is the coverage reading for a head that no round states coverage on and no earlier
-    statement carries to. Copilot's Balanced review effort, the default since 2026-09-28, writes
-    the second overview format with a file table and almost never a coverage statement, whatever
-    the review instructions ask, so without this reading no pull request reviewed at that effort
-    could close its loop.
-
-    It is weaker than a statement, and `table_against_diff` says why: over the rounds measured,
-    the table names the whole changed set on partial rounds as well as full ones. So it stands
-    in only where nothing on record says any round read part of a diff: no Copilot round on the
-    pull request, on any commit, carries a coverage-shaped count that is not a full one, quoted
-    or not, and the whole review history is in view. A pull request that ever had a partial
-    round goes to the maintainer, since whether that partial still describes this diff is what
-    a carry bound refusing, failing, or never reaching it cannot settle. A table naming a file
-    the diff does not carry, leaving one out, or shortening a path to fit several is not this
-    reading either, and neither is a changed-file list the query cut short or returned malformed.
-
-    A table carries under the bound a statement does, the pull request changing exactly the same
-    set of files at both commits, which `carry_holds` reads. Three pull requests in one session
-    each had a full table on their first round and a re-review on the next head carrying no
-    table, with the file set unchanged between the two, and the maintainer accepted the first
-    round's table every time. Only the newest round carrying a table is consulted, and only where
-    no round covering the head carries one of its own, since a head table that misses the diff is
-    the newer reading and an older one matching does not overrule it.
-    """
-    shortfall = table_shortfall(pr)
-    if shortfall != NO_HEAD_TABLE:
-        return "", shortfall
-    earlier = carried_table(pr)
-    if earlier is None:
-        return "", f"{NO_HEAD_TABLE}, and no earlier round carries one either"
-    named, carried_from = earlier
-    if not carried_from:
-        return "", (
-            f"{NO_HEAD_TABLE}, and the newest round that does names no commit, so there is no "
-            f"change set of its own to compare"
-        )
-    whose = f"{NO_HEAD_TABLE}, while the newest round that does is on {carried_from[:8]}"
-    if why := table_shortfall(pr, named):
-        return carried_from, f"{whose}, where {why}"
-    kept = carry_holds(owner, repo, pr, carried_from)
-    if kept is None:
-        return carried_from, (
-            f"{whose}, and the change set could not be read at both commits, so its table is "
-            f"not carried"
-        )
-    if not kept:
-        return carried_from, (
-            f"{whose}, and the pull request changes a different set of files at the two "
-            f"commits, so its table describes a diff this head no longer has"
-        )
-    return carried_from, ""
-
-
-def badge_text(match: re.Match[str]) -> str:
-    """The severity a badge states, taken from whichever quoting its `alt` uses.
-
-    One group per quoting, since a single group cannot hold two alternatives, and the one that
-    did not match is `None` rather than empty.
-    """
-    return match.group(1) if match.group(1) is not None else (match.group(2) or "")
-
-
-def counted(digits: str) -> int | None:
-    """The number this run of digits states, or None where it carries more than a count does."""
-    return int(digits) if len(digits) <= COUNT_DIGITS else None
-
-
-def reduced(text: str) -> str:
-    """The text with each severity badge reduced to its word and its emphasis markup dropped.
-
-    The one reduction `normal`, `unwrap`, and `heading_count` share, so a heading is vetted,
-    printed, and counted from the same text.
-
-    A badge or an emphasis tag a finding quotes in code is the finding's text, so it is kept.
-    """
-    badges = unquoted_sub(SEVERITY_BADGE, badge_text, text)
-    return unquoted_sub(EMPHASIS, lambda m: "", badges)
-
-
-def unquoted_sub(pattern: re.Pattern[str], repl: Callable[[re.Match[str]], str], text: str) -> str:
-    """The text with each match of `pattern` replaced by `repl`, except one inside a quotation.
-
-    The matches are found in a copy with every quotation masked, which keeps their offsets, and
-    `repl` reads each one from the text itself. A match whose span the text does not match whole
-    has a quotation inside it, so it is kept.
-    """
-    kept, end = [], 0
-    for hit in pattern.finditer(mask_quotations(text, MARKUP_MASK)):
-        own = pattern.fullmatch(text, hit.start(), hit.end())
-        if own:
-            kept += [text[end : hit.start()], repl(own)]
-            end = hit.end()
-    return "".join(kept) + text[end:]
-
-
-def spaced(text: str) -> str:
-    """The text `reduced`, then cut to ASCII and single spaces, which `LEADING_COUNT` reads.
-
-    `LEADING_COUNT` is the one leading-count rule `normal` and `heading_count` share. It reads a
-    count past a Markdown heading or emphasis marker, and `normal` keeps that marker in place. It
-    skips no tag, since a finding entry opens on a severity badge rather than on heading markup. A
-    badge read as markup made an entry titled `2 low confidence results` state a count.
-    """
-    return re.sub(r"\s+", " ", "".join(c for c in reduced(text) if ord(c) < 128)).strip()
-
-
-def normal(text: str) -> str:
-    """A marker reduced toward what a vetted list compares: emphasis markup dropped, ASCII,
-    single spaces, counts as `(N)`.
-
-    Letter case survives, and `unvetted` folds it at the membership test instead.
-
-    The verdict headings carry a colored circle, the suppressed heading carries its finding
-    count, and the second overview format wraps each of its own summaries in `<strong>`, so all
-    three drift on every review without the section having changed at all.
-
-    A severity badge is reduced to its own `alt` text for the same reason and one more: the markup
-    around that text is a pair of versioned icon URLs, so a marker carrying one drifts whenever the
-    icon set is rebuilt, and the text it carries is the only part a reader wants.
-
-    A count opening the marker is rewritten the same way, since a later revision of the second
-    format writes `3 resolved since last review` where it once closed the summary on `(3)`.
-    `heading_count` reads that count by the same `LEADING_COUNT`.
-    """
-    return LEADING_COUNT.sub(r"\1(N)", re.sub(r"\([0-9]+\)", "(N)", spaced(text)))
-
-
-def finding_entry(marker: str) -> bool:
-    """Whether this normalized summary is one finding's own heading rather than a section's.
-
-    A section heading is fixed wording a vetted list can hold. A finding entry is a severity and
-    then the finding's title, and the title differs on every finding, so no list can ever hold one
-    and vetting by text would block on each new finding forever. The severity is what says which of
-    the two this is, and `normal` has already reduced the badge carrying it to its own text.
-
-    Recognizing the shape is not the same as passing over the finding. An entry reached this way
-    sits inside a collapsed section, and that section is read whole and printed by the digest, so
-    what is recognized here is the presentation while the finding itself still reaches a reader.
-
-    A stated count is what keeps that narrow. A section is free to open its own heading with a
-    severity, and one recognized on the severity alone would be vetted although nothing here has a
-    reader for it, so its findings would reach no digest at all. That is the failure this file
-    records three instances of, turned from one that reports itself into one that is silent.
-    """
-    return bool(SEVERITY_TEXT.match(marker)) and not NORMALIZED_COUNT.search(marker)
-
-
-def unvetted(marker: str, vetted: set[str]) -> bool:
-    """Whether `marker` is absent from `vetted`, compared without regard to letter case."""
-    # Folded here rather than in `normal`, whose value the report strings also carry.
-    # A report naming a folded shape would not match the body it asks the reader to quote beside it.
-    return marker.casefold() not in {v.casefold() for v in vetted}
-
-
-def unrecognized_in(body: str) -> list[str]:
-    """Every marker in one review body this script has no vetted spelling for.
-
-    Read over the body with fenced blocks removed, for the reason the coverage line is: a review
-    quoting a heading is not a review carrying one, and this script's own pull requests quote
-    these lists in full.
-
-    A previously-missed or suppressed summary that its reader does not find as a section is
-    reported too. Its spelling is vetted wherever it appears, while the reader keys on how its line
-    opens and where the section around it ends. A layout the reader misses would otherwise hand its
-    findings to nobody under `shapes=ok`. The check compares which summaries open the blocks rather
-    than how many blocks there are. Compared by count, a bare `(N)` line read in one region stood in
-    for a summary missed in another. Compared by every summary a block holds, a block that ran on
-    into the next section stood in for that section.
-
-    A body carrying no heading at all is reported rather than passed, since every one of the 333
-    measured opens on a heading and a body with none is a format nothing here has seen. A refusal
-    is the exemption, being a bare paragraph by design and already classified as one.
-
-    Two readings differ from GitHub's and stay known limits that tests pin, since no reviewer body
-    has carried either. `str.splitlines` also ends a line at each separator `QUOTED_CHAR` names
-    besides a newline and a carriage return, where GitHub does not. And `MARKDOWN_HEADING` and
-    `HEADING` open a heading after any indent, where GitHub's top level takes at most three spaces.
-    """
-    # A refusal is a bare paragraph rather than a review body, and `REFUSAL` is its spelling.
-    # It carries no marker to check, and its own opening line is not a coverage statement.
-    # Its wording drifting is still caught, since `refusal_of` then stops matching.
-    # What is left of a drifted refusal is a body with no heading, which is the arm below.
-    if refusal_of({"body": body}):
-        return []
-    stripped = strip_fences(body or "")
-    plain = CODE_SPAN.sub(" ", stripped)
-    headings = [normal(ln) for ln in plain.splitlines() if MARKDOWN_HEADING.match(ln)]
-    lines = mask_narrative(plain, CODE_SPAN.sub(MARKUP_MASK, stripped)).splitlines()
-    labels = [normal(m.group(1)) for m in map(LABEL_LINE.match, lines) if m]
-    found = [f"heading: {h}" for h in dict.fromkeys(headings) if unvetted(h, VETTED_HEADINGS)]
-    found += [
-        f"summary: {marker}"
-        # Deduplicated on the raw text before normalizing, which is what it did before the hoist.
-        for marker in (normal(s) for s in dict.fromkeys(SUMMARY.findall(plain)))
-        if unvetted(marker, VETTED_SUMMARIES) and not finding_entry(marker)
-    ]
-    summaries = [normal(s) for s in SUMMARY.findall(plain)]
-    for vetted, reader in (
-        (PREVIOUSLY_MISSED_SUMMARIES, previously_missed_blocks),
-        (SUPPRESSED_SUMMARIES, suppressed_blocks),
-    ):
-        expected = Counter(marker for marker in summaries if not unvetted(marker, vetted))
-        read = Counter(
-            normal(s)
-            for block in reader(body)
-            for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(block)).split("\n", 1)[0])[:1]
-        )
-        unread = expected - read
-        if unread:
-            found.append(f"summary: {next(iter(unread))}, vetted while no reader found its section")
-    found += [
-        f"metadata label: {la}" for la in dict.fromkeys(labels) if unvetted(la, VETTED_LABELS)
-    ]
-    found += [
-        f"coverage line: {ln}" for ln in coverage_statements(body) if read_coverage(ln) is None
-    ]
-    if not headings and not refusal_of({"body": body}):
-        found.append("body carrying no heading at all, which no measured review body does")
-    return found
-
-
-def unrecognized_shapes(pr: dict) -> list[str]:
-    """Everything about this pull request's reviewer output that this script cannot read.
-
-    Every round rather than the head's, because this asks whether the reader still understands
-    the reviewer rather than what the reviewer said about this commit. A shape that arrived one
-    round ago is one every later round will carry.
-    """
-    found = []
-    for node in reviewer_nodes(pr, "reviews"):
-        where = ((node.get("commit") or {}).get("oid") or "")[:8] or "commit unknown"
-        found += [f"{item}  (round {where})" for item in unrecognized_in(node.get("body") or "")]
-    return found + reviewer_login_drift(pr)
-
-
 def reviewer_login_drift(pr: dict) -> list[str]:
-    """Logins that read as this reviewer without being the spelling every query here filters on.
-
-    Read from the authors alone, so the liveness query answers it as well as the full one. That
-    is what lets the wait stop on a drift rather than poll its whole timeout out against a review
-    sitting in plain sight, which is the failure this reading exists to name.
-    """
+    """Logins that read as this reviewer without being the spelling every query filters on."""
     logins = {
         (n.get("author") or {}).get("login") or ""
         for field in ("reviews", "comments")
@@ -4010,160 +882,19 @@ def reviewer_login_drift(pr: dict) -> list[str]:
     ]
 
 
-def report_verdict(pr: dict, owner: str, repo: str) -> int:
-    """Print the blocking verdict's own status line, and return the exit code it carries.
-
-    The unrecognized shape outranks the coverage one, because a reader that does not understand
-    the output cannot be trusted about what it read of the diff either.
-
-    An earlier round's coverage carries forward here as it does in the digest, so the two agree
-    on the exit code, and the digest is where the reader is told which round it came from. Which
-    round stated coverage is answered by the payload alone, and whether that statement still
-    describes this head is not, so this takes the repository and reads the compare `carry_holds`
-    bounds the carry on. That reader is memoized for the run, which is what keeps this and the
-    digest from reaching two verdicts out of two independent sets of network reads.
-    """
-    # A coverage line this cannot parse is one of the shapes below rather than a case of its own.
-    # It exits here with the remedy that fits it, the reader being what needs the fix.
-    if unrecognized_shapes(pr):
-        print(
-            f"status=UNRECOGNIZED_REVIEWER_OUTPUT this script does not know one or more shapes "
-            f"in what the reviewer sent, listed above, so nothing it reports about this review "
-            f"is trustworthy and the review loop does not close on this digest. File an issue "
-            f"on {HUB} naming each shape and quoting the body it came from, since this script "
-            f"is hosted there and the fix lands there. Merging this pull request anyway is the "
-            f"maintainer's decision to take and not this script's, and not the agent's."
-        )
-        return 43
-    # A missing head review has no coverage verdict yet.
-    # The wait path owns that incomplete state.
-    if not head_reviews(pr):
-        return 0
-    state, line = head_coverage(pr)
-    # An earlier round's statement stands until something changes it.
-    # The digest printed above this one says which round is carried and what changed since.
-    # So this reads the same state and says nothing, two wordings being two places to keep true.
-    # `carry_holds` is what bounds it, and it is read here for the same reason the state is.
-    # Read as falsy where the bound could not be measured, so an unreadable compare refuses too.
-    carried = carried_coverage(pr) if state == UNSTATED else None
-    if carried is not None and not carry_holds(owner, repo, pr, carried[2]):
-        carried = None
-    if carried is not None:
-        state, line, _from_head = carried
-    if state == UNSTATED and not table_reading(owner, repo, pr)[1]:
-        state = TABLE
-    if state == UNSTATED and local_beside_round(pr):
-        state = LOCAL
-    if state == PARTIAL:
-        # The unread count comes from the line that decided PARTIAL, never from past rounds.
-        # None is unreachable there, and narrowing keeps a later change from crashing the gate.
-        counts = read_coverage(line)
-        if counts is None:
-            gap = "that the counts on that line could not be re-read, so the total is unknown"
-        else:
-            unread = counts[1] - counts[0]
-            gap = (
-                f"{unread} of the {counts[1]} changed files "
-                f"{'has' if unread == 1 else 'have'} no review"
-            )
-        # The table is read against the counts only where both describe the same diff.
-        # A carried partial states counts about an earlier commit, and the table is this head's.
-        # The ternary below withholds the reading rather than any refusal `head_table` makes.
-        # Withheld although an identical path set means both denominators name the same files.
-        # What that earlier round read of those files is still not what this head holds.
-        whose = (
-            "an earlier round read fewer files than the pull request changed, and the round "
-            "covering the head states no coverage of its own, so that reading carries"
-            if carried is not None
-            else "the review covering the head read fewer files than the pull request changed"
-        )
-        corroboration = (
-            "the counts describe an earlier commit's diff, so the file table on this head is not "
-            "read against them"
-            if carried is not None
-            else table_against_diff(pr, counts)
-        )
-        print(
-            f"status=COVERAGE_IS_PARTIAL {whose}, so part of the diff has no review at all. "
-            f"Every partial on "
-            f"record stayed partial at the identical ratio across every later round, so a "
-            f"re-request is not the remedy it reads as. Splitting is "
-            f"the remedy where it applies, and it does not apply to a promotion. Otherwise this "
-            f"is the maintainer's call, taken knowing {gap}, and knowing that "
-            f"{corroboration}"
-        )
-        return 42
-    if state == UNSTATED:
-        print(
-            "status=COVERAGE_IS_UNSTATED no statement of changed-file coverage describes this "
-            "head, so the review loop cannot prove any round read the full diff. A round that "
-            "states none is the ordinary shape of the second overview format and carries the "
-            "newest round that states some forward, bounded on the change set, and failing "
-            "that, a round covering the head whose own file table names exactly the changed "
-            "files stands in, or where none carries a table, the newest round that does, its "
-            "table naming exactly the changed files, under the same change-set bound, where no "
-            "round on the pull request states or appears to state partial coverage. Reaching here means no table stood in, for the reason the digest "
-            "above names, and also one of three things it says which of: no round ever stated "
-            "coverage, the round that did describes a different set of changed files than this "
-            "head has, or that comparison could not be read. Confirm the head branch carries "
-            "the current fleet-code-review skill and Copilot instructions, since a round at Lite "
-            "effort states no coverage without them, and where they are missing bring them onto the branch, "
-            "push, and run wait, which requests a round on the new head. Where the digest says "
-            "the comparison could not be read, run status again, since a failed API read is "
-            "one cause of that, and the same holds where it says the head moved while the "
-            "changed-file list was paged. Where the digest names GitHub's "
-            "own ceiling on the changed-file list, the table cannot be matched at all, and "
-            "splitting the pull request is the remedy where it applies. "
-            "A re-request on this same head is not the remedy it reads as, because it returns a "
-            "round stating coverage or carrying a table only by chance. Past those, a develop -> "
-            "main promotion can still satisfy coverage, in the one case pr-review-conduct's Merge "
-            "Gate item 2 states, recording the evidence that item names. Anything else is the "
-            "maintainer's call, and merging without coverage is their decision, not the agent's."
-        )
-        return 45
-    if flagged := uncounted_verdict(pr):
-        print(
-            f"status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on "
-            f"`{flagged[0]}`, a verdict that is not the clean one, while it states no open "
-            f"finding, opened no thread, and collapsed no finding, so what it flags is named in "
-            f"its headline alone, printed above under VERDICT WITH NO COUNTED FINDING. Give the "
-            f"headline the triage a suppressed finding gets: fix what it names and push, or "
-            f"answer it on the pull request with `comment`, saying so where it names a caution "
-            f"rather than a finding. The answer satisfies this reading, and this code still "
-            f"repeats on this head, since nothing here reads an answer, so a caller holding one "
-            f"goes on to the other readings"
-        )
-        return 50
-    return 0
-
-
 def age(stamp: str, now: datetime) -> float | None:
-    """Seconds from `stamp` to `now`, or None where the stamp is absent or unparseable.
-
-    None is returned rather than zero or a raise, because every caller treats an unknown age as
-    "cannot judge this" and reports nothing. Zero would read as a check that just started, which
-    is the reading that reports a job stuck for hours as fresh.
-    """
+    """Seconds from `stamp` to `now`, or None where the stamp is absent or unparseable."""
     if not stamp:
         return None
     try:
         return (now - datetime.fromisoformat(stamp)).total_seconds()
-    # ValueError is the unparseable stamp, and TypeError is the parseable one carrying no zone.
-    # A stamp with no offset parses to a naive datetime, which will not subtract from an aware now.
-    # Catching only the first lets that raise out of a reporting call and take the digest with it.
-    # A crash is the worst outcome here, since the whole point is to say what the state is.
+    # ValueError is an unparseable stamp and TypeError a parseable one with no zone, and neither may take the digest down.
     except (ValueError, TypeError):
         return None
 
 
 def head_commit(pr: dict) -> dict:
-    """The commit object whose oid is the head's, or an empty dict where none is.
-
-    One reader, because three functions traversed this same shape in three slightly different
-    ways and a payload change would have had to be caught in all three. Selection is by oid
-    rather than by position, since a rollup off any other commit describes a push ago and renders
-    every field, which is a review counted without being read one field along.
-    """
+    """The commit object whose oid is the head's, or an empty dict where none is."""
     head = pr.get("headRefOid") or ""
     return next(
         (
@@ -4178,37 +909,21 @@ def head_commit(pr: dict) -> dict:
 def check_nodes(pr: dict) -> list[dict]:
     """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
 
-    A readable node also carries `required`, true unless the rollup marks it `isRequired: false`,
-    which `held_checks_open` and `wait`'s exit `44` decide on. A CheckRun also carries `app_id`, its
-    app's database id, which a rule's `integration_id` is matched against. A StatusContext has none.
-    A node of an unrecognized union member carries empty values for `name`, `state`, `conclusion`,
-    and `since`, and an `unreadable` key naming its type instead.
+    A readable node also carries `required`, false only where the rollup marks `isRequired: false`,
+    and a CheckRun carries `app_id`, matched against a rule's `integration_id`. A node of an
+    unrecognized union member has empty values and an `unreadable` key naming its type.
 
-    A rollup carries two node shapes and they spell every field differently: a CheckRun has a
-    `name`, a `status` and a `conclusion`, while a StatusContext has a `context` and a single
-    `state` that folds both. Reading one shape's keys off the other yields None for all of them,
-    which scores an external status as a check in no state at all, so neither pending nor failed.
-    They are normalized here so one reading serves both.
+    A CheckRun and a StatusContext spell every field differently, so both are normalized here. Runs
+    group by workflow and name, or by app and name where the suite has no workflow run, and an
+    unreadable workflow groups an Actions run by its own suite. Each group keeps every run of its
+    highest suite id, since `startedAt` misorders overlapping runs. A name only an older suite
+    carries stays, since the merge gate still reads it.
 
-    Runs group by workflow and name, or by app and name where the suite has no workflow run.
-    Where the workflow is unreadable, an Actions run groups by its own suite and none is dropped.
-    Each group keeps every run of its highest suite id and drops its runs from older suites.
-    A name only an older suite carries stays, since the merge gate still reads it.
-    The highest suite id decides, since `startedAt` misorders overlapping runs.
-    A rerun of a superseded suite keeps its older id, so it does not override the newer suite.
-
-    A finished check whose name only an older suite carries is marked `superseded` while the
-    workflow's newest suite has not completed. That suite's run id rides along as `newer_run`.
-    An unfinished check keeps its own stuck reading. A cancelled run's aggregator fails over its
-    cancelled jobs. Its replacement posts its own aggregator only once its other jobs finish, so
-    until then the failure describes a run nobody waits on. Once the newest suite completes, a name
-    it never posted stands as the merge gate reads it.
-    The head commit's own suites count toward the newest one as well as the rollup's. A run
-    waiting on its concurrency slot has a suite and no check run yet, so the rollup lacks it.
+    A finished check only an older suite carries is marked `superseded`, with `newer_run`, while
+    the workflow's newest suite has not completed, since a cancelled run's aggregator fails over
+    jobs nobody waits on. The head commit's own suites count toward the newest one as well.
     """
-    # No match reports nothing rather than falling back to another commit's rollup.
-    # A fallback is that same stale reading reached by a different route.
-    # The absence is not silent either, and `checks_unreadable` is where the digest says it.
+    # No match reports nothing rather than another commit's rollup, and `checks_unreadable` says so.
     commit = head_commit(pr)
     rollup = commit.get("statusCheckRollup") or {}
     out: list[dict] = []
@@ -4254,12 +969,7 @@ def check_nodes(pr: dict) -> list[dict]:
                 }
             )
         elif n.get("__typename") == "StatusContext":
-            # A StatusContext reports one field for both, so its state doubles as its conclusion.
-            # Its PENDING means the posting system reported the run as under way.
-            # A CheckRun's PENDING means the opposite, dispatched and not begun.
-            # So the same string is two states, and the shape is knowable only here.
-            # Left alone, a long external build reports as queued with no runner assigned.
-            # That names a cause the run does not have, on a system that did pick it up.
+            # A StatusContext's PENDING means under way and a CheckRun's means not begun, knowable only here.
             state = n.get("state") or ""
             out.append(
                 {
@@ -4271,11 +981,7 @@ def check_nodes(pr: dict) -> list[dict]:
                 }
             )
         else:
-            # A third union member is skipped rather than forced into the StatusContext shape.
-            # Forcing it reads a label off a node spelling it otherwise, so it renders nameless.
-            # It also reads a state that is not there, so it reports as a red check.
-            # So skipping is right and skipping *quietly* is not, which review caught here.
-            # An unread check missing from the tally is this script's own core failure.
+            # A third union member is skipped rather than forced into a shape, but not quietly.
             # The name carries the typename so the digest can say which member it could not read.
             out.append(
                 {
@@ -4301,68 +1007,42 @@ def check_nodes(pr: dict) -> list[dict]:
 def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     """How this check is stuck, or the empty string where it is not.
 
-    Four shapes, because `mergeStateStatus` collapses all of them into `BLOCKED` and each wants
-    a different response. A run this session spent twenty-five minutes polling `BLOCKED` on a
-    pull request whose only unfinished check was a rollup job no runner ever took, and the cause
-    came from the maintainer rather than from any reading here.
+    `mergeStateStatus` collapses every shape into `BLOCKED`, and each wants a different response.
 
-    NOT_POSTED is a required status whose poster has not spoken, which is a StatusContext's
-    `EXPECTED` and only ever that. It is not a starved job and must not borrow that remedy: no
-    runner is owed a status nothing has posted, so re-running a workflow clears nothing, and
-    reported as NOT_PICKED_UP it sends a reader at the runner pool over a missing poster.
+    NOT_POSTED is a required status whose poster has not spoken, a StatusContext's `EXPECTED`. It
+    is not a starved job, so re-running a workflow clears nothing.
 
-    NOT_PICKED_UP is the well-founded one: a job GitHub has dispatched but assigned no runner.
-    It is read from the queued state rather than from a runner name, which GraphQL does not carry,
-    and the state is sufficient because a job held behind a `needs:` dependency does not appear
-    in the rollup at all until that dependency finishes, so there is no dependency-blocked queue
-    to mistake for a starved one. Observed pickup on a healthy run is one to two minutes, so the
-    grace is the pickup grace for the same reason that one is five minutes: inside it, a queued
-    job is simply a job starting.
+    NOT_PICKED_UP is a job dispatched but assigned no runner, read from the queued state. A job
+    behind `needs:` is absent from the rollup, so a queue is never dependency-blocked. Inside the
+    pickup grace a queued job is simply starting.
 
-    RUNNING_LONG is deliberately weaker and says so in its wording, because duration alone cannot
-    separate a stalled job from a slow one. This repository's own lint job legitimately runs nine
-    to eleven minutes while its aggregator is a single shell conditional, and a fleet repository
-    building and testing .NET runs longer still. So the threshold is generous, the elapsed time is
-    printed for the reader to judge against what the job costs, and nothing here asserts a fault.
+    RUNNING_LONG is deliberately weaker, since duration alone cannot separate a stalled job from a
+    slow one. The elapsed time is printed for the reader to judge and no fault is asserted.
 
-    FAILED is any finished check that did not pass, which is a definite answer rather than a stuck
-    one, and it is reported here so that a reader is never left deducing a red check from `BLOCKED`.
-    A check `check_nodes` marks superseded is none of these, since it waits on a newer run.
-    Read as FAILED, it exited 44 while that run was still going.
+    FAILED is any finished check that did not pass. A check marked superseded is none of these.
     """
     if node.get("superseded"):
         return ""
     state, conclusion = node.get("state") or "", node.get("conclusion") or ""
     elapsed = age(node.get("since") or "", now)
     if state in NOT_POSTED:
-        # Its own shape, because the starved remedy is wrong for it in both directions.
-        # No runner is owed a status nothing has posted, so re-running a workflow clears nothing.
-        # Reported under NOT_PICKED_UP it sent a reader at the runner pool over a missing poster.
+        # Its own shape, since the starved remedy is wrong for it in both directions.
         return "NOT_POSTED" if elapsed is not None and elapsed > grace else ""
     if state in NOT_STARTED:
         return "NOT_PICKED_UP" if elapsed is not None and elapsed > grace else ""
     if state == "IN_PROGRESS":
         return "RUNNING_LONG" if elapsed is not None and elapsed > stall else ""
-    # A finished check carrying no conclusion yet is still settling, so nothing is reported.
-    # Reading an absent verdict as a failure invents a red check out of a race in the API.
-    # An unrecognized state would reach the line below and produce that same false failure.
+    # A finished check with no conclusion yet is still settling, not a failure.
     if not conclusion:
         return ""
-    # A conclusion this does not recognize is reported rather than passed over.
-    # An unknown verdict blocking a merge is exactly what a reader needs told.
-    # A new enum member read as a pass is a red check rendering as a green digest.
+    # A conclusion this does not recognize is reported rather than passed over as a pass.
     return "" if conclusion in CHECK_OK else "FAILED"
 
 
 def checks_stuck(
     nodes: list[dict], now: datetime, grace: float, stall: float
 ) -> list[tuple[dict, str]]:
-    """Every check in a stuck shape, as (node, shape), in the order the rollup returns them.
-
-    Takes the normalized list rather than the payload, so one `check_nodes` call serves the tally
-    and this together. Two calls parsed the same rollup twice per digest, and this script's whole
-    reason for existing is that the reading is the cost.
-    """
+    """Every check in a stuck shape, as (node, shape), in the order the rollup returns them."""
     return [
         (n, s)
         for n in nodes
@@ -4371,13 +1051,7 @@ def checks_stuck(
 
 
 def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float) -> list[dict]:
-    """Every check still on its way to a conclusion that waiting can reach.
-
-    A stuck check is left out, since its shape is one no wait clears and polling it only runs the
-    timeout out. RUNNING_LONG is the exception, since duration alone cannot tell a stalled job
-    from a slow one. Of the rest, a check is settling where it has not passed, which leaves the
-    state taxonomy to `check_shape` alone.
-    """
+    """Every check still on its way to a conclusion that waiting can reach."""
     return [
         n
         for n in nodes
@@ -4397,23 +1071,15 @@ def held_checks_open(
 ) -> bool:
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
-    A merge reading CLEAN, UNSTABLE, or HAS_HOOKS has no required check outstanding, which is
-    GitHub's own reading, so on such a merge a check nothing requires does not hold the wait. A
-    BLOCKED merge carrying a stuck required check, other than one running long, has its exit, 44,
-    decided already, so nothing holds it. Otherwise a required check still settling holds it. So
-    does any check still settling while no required check has posted, since a required aggregator
-    behind `needs:` enters the rollup only once its dependencies finish. A rollup carrying no check
-    at all holds it while the merge reads BLOCKED, BEHIND, or DRAFT, since that is a push whose
-    check suites have not registered, where a conflicted, DIRTY one runs no workflow at all. A merge
-    reading UNKNOWN holds it whatever the rollup carries, since GitHub has not yet decided the word
-    the exit code is chosen by. A pull request no longer open has no merge left to move, and GitHub
-    reads UNKNOWN on it for good.
+    A CLEAN, UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check
+    does not hold. A BLOCKED merge with a stuck required check, other than one running long, has
+    its exit 44 decided already. Otherwise a required check still settling holds, as does any
+    settling check while no required check has posted. A rollup with no check holds while the merge
+    reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the rollup carries, and a pull
+    request no longer open holds nothing.
 
-    A BLOCKED merge also holds it, where the rollup was read whole, while a context the base
-    branch's rules require is unmet by it, which `required` carries as (context, integration id)
-    pairs and `required_unmet` reads. The rollup only knows the checks that have registered, so a
-    push whose other workflows have not started reads five of five passed and BLOCKED. An empty
-    `required` is a rules read that found nothing or did not happen, and it holds nothing.
+    A BLOCKED merge also holds while a context the base branch requires is unmet, which `required`
+    carries as (context, integration id) pairs. An empty `required` holds nothing.
     """
     if pr.get("state", "OPEN") != "OPEN":
         return False
@@ -4450,12 +1116,7 @@ def required_for(pr: dict, owner: str, repo: str) -> frozenset[tuple[str, int | 
 
 
 def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> list[str]:
-    """The contexts among `required` that no rollup node satisfies, sorted.
-
-    An entry without an integration id is satisfied by a node of either type carrying its name.
-    An entry with one is satisfied only by a CheckRun of that name whose app has that id. A
-    StatusContext carries no app, so it never satisfies one, which errs toward holding.
-    """
+    """The contexts among `required` that no rollup node satisfies, sorted."""
     seen = [n for n in nodes if not n.get("unreadable")]
     return sorted(
         {
@@ -4474,12 +1135,8 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[tuple[str, 
     """Every status check the base branch's rules require, or None where it was unread.
 
     Each is a (context, integration id) pair, the id None where the rule binds no app. Read from
-    the rules rather than the rollup, since the rollup lists only the checks that have registered
-    on the head, which is exactly the set a push in flight is short of. None rather than an empty
-    set wherever the read did not happen, so an unreadable rules endpoint never reads as nothing
-    being required. An integration id that is present and not a positive integer is a malformed
-    entry and reads as None. The read is one page of a hundred rules, and a full page is taken as
-    possibly cut short and returned as None. Memoized for the run, which also prints the note once.
+    the rules, since the rollup lists only registered checks. None wherever the read did not
+    happen, a malformed integration id, or a full page of a hundred rules. Memoized for the run.
     """
     safe = base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
     read = (
@@ -4522,39 +1179,18 @@ def _unmet_note(required: frozenset[tuple[str, int | None]], nodes: list[dict]) 
 
 
 def checks_truncated(pr: dict) -> bool:
-    """True where the head's rollup carries more contexts than the query asked for.
-
-    The same guard `window_blind` is for, one connection along. A rollup past a hundred contexts
-    would drop the rest silently, and a required check among them would be missing from both the
-    tally and the stuck reading, so the digest would render a clean pass over a check it never saw.
-    That is the exact false clean the rest of this script exists to prevent, and a fleet repository
-    with a large matrix build reaches a hundred contexts far sooner than this one does.
-    """
+    """True where the head's rollup carries more contexts than the query asked for."""
     contexts = (head_commit(pr).get("statusCheckRollup") or {}).get("contexts") or {}
     return bool((contexts.get("pageInfo") or {}).get("hasNextPage"))
 
 
 def checks_unread(nodes: list[dict]) -> list[str]:
-    """The rollup typenames this could not read, in the order they appeared.
-
-    A union member that is neither a CheckRun nor a StatusContext cannot be normalized, and it is
-    reported rather than dropped. Dropping it is the silent narrowing every other guard here
-    exists against: a check absent from the tally and from the stuck reading renders as a clean
-    pass over something never seen. Raised in review on this change, against the commit that
-    chose skipping over forcing, which was the right half of the answer on its own.
-    """
+    """The rollup typenames this could not read, in the order they appeared."""
     return [n["unreadable"] for n in nodes if n.get("unreadable")]
 
 
 def checks_unreadable(pr: dict) -> bool:
-    """True where the payload carries commits but none of them is the head.
-
-    `check_nodes` reports nothing in that case rather than reading another commit's rollup, and
-    nothing is indistinguishable from a pull request with no checks. So the state is named instead
-    of left to render as `checks=0/0`, which a reader would take as a fact about the head rather
-    than as this reading having failed. A silent narrowing is the failure mode this whole script
-    is built against, and it does not get an exception for its own newest field.
-    """
+    """True where the payload carries commits but none of them is the head."""
     return bool((pr.get("commits") or {}).get("nodes") or []) and not head_commit(pr)
 
 
@@ -4567,11 +1203,8 @@ def checks_tally(nodes: list[dict]) -> tuple[int, int]:
 def liveness(pr: dict, min_rounds: int = 0) -> tuple[bool, dict | None, list[str]]:
     """Return (head_review_done, answered_outside_review, reviewer_login_drift) off one payload.
 
-    These are the three readings `wait`'s Copilot poll stops on. Its first evaluation and every
-    re-read both come here, so a reading added to one cannot be missing from the other. A
-    drifted login matches no filter, so `head_review_done` stays false however long the wait
-    runs, and waiting it out reports a review that landed as one that never did. `Q_LIVE`
-    carries the authors, so the drift costs the poll no extra call. A `min_rounds` of 0 reads
+    The three readings `wait`'s Copilot poll stops on, shared by its first evaluation and every
+    re-read. `Q_LIVE` carries the authors, so drift costs no extra call. A `min_rounds` of 0 reads
     as `reviewed_head`.
     """
     return head_review_done(pr, min_rounds), answered_outside_review(pr), reviewer_login_drift(pr)
@@ -4584,439 +1217,183 @@ def live_state(
     return liveness(gql(Q_LIVE, owner, repo, num), min_rounds)
 
 
-def heading_of(block: str) -> str:
-    """The block's own heading, unwrapped from `<summary>` where it wears one.
-
-    A block starts at its heading, so the heading is the first line whatever markup it carries.
-    Reading further would let a finding's own text supply a count the heading never carried, and
-    a wrong count reads exactly like a right one.
-
-    A `<details>` opener ahead of the summary on that line is read past, as `HEADING` reads past
-    it. Kept, it hid the summary, so a count opening the heading went unread.
-    """
-    head = block.lstrip()
-    opener = DETAILS_OPENER.match(head)
-    if opener and SUMMARY_OPENER.match(head, opener.end()):
-        head = head[opener.end() :]
-    m = SUMMARY.match(head)
-    return m.group(1) if m else head.split("\n", 1)[0]
-
-
-def heading_count(heading: str) -> int | None:
-    """The count a heading states, closing it as `(N)` or opening it.
-
-    One reader serves every caller, since the format moved its count to the front of a summary.
-    A caller reading only one of the two places misses the other. A section bounded on `(N)` alone
-    ran into a count-first sibling and printed that sibling's findings twice.
-
-    It takes the heading itself rather than the block, and reads all of it. Cut to its first line,
-    a summary split as `Open` and then `(2)` lost the count its role was vetted with.
-
-    The count is read from `spaced`, the text `normal` vets the role on, through the same
-    `LEADING_COUNT`. A badge reduces to its word, which is what keeps an entry titled
-    `2 low confidence results` from stating a count.
-    """
-    text = spaced(heading)
-    closing = COUNT.search(text)
-    opening = LEADING_COUNT.match(text)
-    digits = closing.group(1) if closing else opening.group(2) if opening else None
-    return counted(digits) if digits is not None else None
-
-
-# `<details>(.*?)</details>` lazily pairs each open with the *next* close, which is the innermost one once a shape nests, silently losing everything the outer wrapper still carries after it.
-# CodeRabbit's outside-diff section does exactly that: a file wrapper nested inside the section heading, itself wrapping a per-finding "Prompt for AI Agents" block three levels deep.
-DETAILS_TAG = re.compile(
-    rf"(?P<open>{tag_opener('details')}{attributes(spanning=True)})"
-    r"|(?P<lead>(?<![^\n\r]) {0,3}(?P<quote>(?:> {0,4})+)?)?</details"
-    r"(?(lead)(?:/|(?:[ \t][^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?"
-    r"(?(quote)|(?:(?:\r\n|\n|\r)[^<>\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]*)?))"
-    r"|[ \t]*)>",
-    re.IGNORECASE,
-)
-
-
-def details_tags(text: str) -> list[tuple[int, int, bool]]:
-    """Each `<details>` tag in `text` as `(start, end, opening)`, starting at its `<` past any lead.
-
-    A close is read anywhere bare. With more before its bracket, or its bracket on the next line, it
-    is read only where its own line opens an HTML block: up to three spaces in, behind any
-    blockquote markers, its tail allowed one line break where no marker leads it. Behind a marker
-    the next line carries its own container, so a tail crossing it would end the close inside
-    that line's markup or swallow a line outside the blockquote. Mid-line a next line opening on
-    `>` is a blockquote, which leaves the close as text, so a next-line bracket is not read there.
-    HTML still reads some closes these rules leave unread, such as one inside an HTML block already
-    open. A tail stops at any `<` and at every other line boundary, so it never swallows a later
-    tag.
-
-    `text` is read as given, so a caller masks its code spans first, each to `MARKUP_MASK` rather
-    than to spaces. A span masked to spaces left the text after it looking indented, and a literal
-    mid-line then read as a tag.
-    """
-    return [
-        (max(m.start(), m.end("lead")), m.end(), m.group("open") is not None)
-        for m in DETAILS_TAG.finditer(text)
-    ]
-
-
-def details_spans(body: str) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """Every top-level `<details>...</details>` region's own content as a `(start, end)` span,
-    plus the spans of what is left once every top-level region is removed whole.
-
-    Spans rather than text, so one caller can find a heading in one rendering of the body and take
-    the block out of another. `marker_blocks` needs exactly that: it looks for a heading in a copy
-    with every quotation blanked, and returns the block from the body the review actually carries.
-    """
-    regions: list[tuple[int, int]] = []
-    leftover: list[tuple[int, int]] = []
-    depth = 0
-    region_start = 0
-    cursor = 0
-    for start, end, opening in details_tags(body):
-        if opening:
-            if depth == 0:
-                leftover.append((cursor, start))
-                cursor = start
-                region_start = end
-            depth += 1
-        elif depth > 0:
-            depth -= 1
-            if depth == 0:
-                regions.append((region_start, start))
-                cursor = end
-    leftover.append((cursor, len(body)))
-    return regions, leftover
-
-
-def mask_narrative(text: str, tags: str | None = None) -> str:
-    """The text with each narrative block's own content blanked, offsets and lines left alone.
-
-    A narrative block is one whose own summary opens it and names `NARRATIVE_SUMMARY`. A block
-    nested inside it keeps its content, and an unclosed block is never blanked, so a label it
-    holds is still read wherever it sits. The tags are read from `tags` where given, the same text
-    with its code spans masked as `details_tags` needs, and everything else from `text`.
-    """
-    stack: list[tuple[int, int, list[tuple[int, int]]]] = []
-    blank: list[tuple[int, int]] = []
-    for tag_at, tag_end, opening in details_tags(text if tags is None else tags):
-        if opening:
-            stack.append((tag_at, tag_end, []))
-            continue
-        if not stack:
-            continue
-        tag_start, start, children = stack.pop()
-        opener = SUMMARY.match(text[start:tag_at].lstrip())
-        if opener and not unvetted(normal(opener.group(1)), {NARRATIVE_SUMMARY}):
-            cursor = start
-            for child_start, child_end in children:
-                blank.append((cursor, child_start))
-                cursor = child_end
-            blank.append((cursor, tag_at))
-        if stack:
-            stack[-1][2].append((tag_start, tag_end))
-    masked = text
-    for start, end in blank:
-        masked = masked[:start] + QUOTED_CHAR.sub(" ", masked[start:end]) + masked[end:]
-    return masked
-
-
-# Every character a quotation covers replaced by a space, and every line boundary kept.
-# Length-preserving on purpose, so a span found in the masked copy addresses the same text in the body.
-# A mask that dropped the quotation instead would shift every offset after it and return a block starting mid-finding.
-# The class spells out every character `str.splitlines` breaks on rather than the newline alone, because the block is taken by line index while the span is found by offset.
-# A quoted snippet carrying a form feed, a vertical tab, a lone carriage return or a Unicode line separator otherwise left the masked copy one line shorter than the body.
-# The block then started a line early and dropped the finding text off its end, which is the defect the spans exist to prevent arriving through the mask instead.
-QUOTED_CHAR = re.compile("[^\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
-
-
-def mask_quotations(body: str, span: str = " ") -> str:
-    """The body with every fenced block and inline code span blanked, offsets left alone.
-
-    A span's characters become `span`, which `details_tags` needs to be other than a space.
-
-    A review quoting a section heading is not a review carrying that section, which is the reading
-    every other reader in this file already takes and the one `marker_blocks` did not. This file's
-    own test bodies quote these headings, so a round reviewing this script reported the sections
-    its test data names as findings the round had raised.
-    """
-    return CODE_SPAN.sub(
-        lambda m: QUOTED_CHAR.sub(span, m.group()),
-        strip_fences(body or "", lambda m: QUOTED_CHAR.sub(" ", m.group())),
+def thread_ids(pr: dict) -> tuple[str, ...]:
+    """The database id of each thread's first comment, which an overview entry's link names."""
+    return tuple(
+        str(c["fullDatabaseId"])
+        for t in (pr.get("reviewThreads") or {}).get("nodes") or []
+        if (c := first_comment(t)).get("fullDatabaseId")
     )
 
 
-# The sections that are each other's siblings, so one's heading is where another's block ends.
-SECTION_MARKERS = (SUPPRESSED, PREVIOUSLY_MISSED)
+def reading(node: dict, login: str = REVIEWER, pr: dict | None = None) -> adapter.Reading:
+    """The adapter's reading of one body, by the vocabulary for its author's login."""
+    threads = thread_ids(pr) if pr is not None else None
+    return adapter.read(node.get("body") or "", adapter.LOGINS.get(login, "copilot"), threads)
 
 
-def entry_heading(line: str) -> bool:
-    """Whether this line is a finding entry's own heading, which opens on a severity badge.
+def opened_by(pr: dict, node: dict) -> list[dict]:
+    """The threads this round opened, by the review id each thread's first comment carries."""
+    return [
+        t
+        for t in (pr.get("reviewThreads") or {}).get("nodes") or []
+        if node.get("id")
+        and (first_comment(t).get("pullRequestReview") or {}).get("id") == node["id"]
+    ]
 
-    A finding entry is never a section heading, whatever words its title carries. `SUPPRESSED`
-    matches anywhere in a line, and `PREVIOUSLY_MISSED` reads past the badge as heading markup.
-    Read as a heading, an entry titled `2 low confidence results are dropped` opened a section.
-    A summary opening on a severity and stating a count is still reported by `unrecognized_in`,
-    as an unvetted spelling.
+
+def partial_on_record(pr: dict) -> bool:
+    """Whether any Copilot round on the pull request, on any commit, states partial coverage."""
+    return any(
+        reading(n).coverage == "partial" for n in reviewer_nodes(pr, "reviews") if not refusal_of(n)
+    )
+
+
+def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
+    """Whether a file table names exactly the changed files, a glob row matching what it names.
+
+    A glob matches one segment at a time, `*` and `?` never crossing a `/`, and every other
+    character is literal, so a row of `src/*` names `src/a.py` and not `src/sub/b.py`.
     """
-    return bool(SEVERITY_TEXT.match(spaced(TAGS.sub("", heading_of(line)))))
+
+    def hits(entry: str, path: str) -> bool:
+        if entry == path:
+            return True
+        want, have = entry.split("/"), path.split("/")
+        return len(want) == len(have) and all(
+            re.fullmatch(re.escape(w).replace(r"\*", "[^/]*").replace(r"\?", "[^/]"), h)
+            for w, h in zip(want, have, strict=True)
+        )
+
+    return all(any(hits(e, p) for e in named) for p in changed) and all(
+        any(hits(e, p) for p in changed) for e in named
+    )
 
 
-def marker_blocks(body: str, marker: re.Pattern[str], strip_blockquote: bool = False) -> list[str]:
-    """Return the review body's sections whose own heading matches `marker`.
+def table_cover(pr: dict) -> tuple[str, str]:
+    """Whether a Copilot file table stands in for a missing statement, and the reason either way.
 
-    Each is sliced from its heading to the next sibling heading or the end of its own region.
-    Past a region's first section, only a sibling heading some section ends at can open another.
-
-    Shared by `suppressed_blocks`, `previously_missed_blocks`, and `outside_diff_blocks`.
-    `strip_blockquote` affects heading detection only, never the returned content. A summary split
-    across lines is folded onto its opening line in the returned content too, per `fold_summaries`.
-
-    A line that is not a heading qualifies on a `(N)` it carries, and only where it does not open
-    on a count. A count opening a line is how a heading states it and also how a sentence opens,
-    so `2 previously missed (3) rounds ago` is prose, not a section.
+    The head's own table is read first, else the newest round's that carries one (`carried:table`).
+    Either counts only where it names exactly the files changed now and no round states partial
+    coverage.
     """
-    if not body:
-        return []
-    # Each wrapper's contents, plus what is left outside them all, so a heading is found anywhere.
-    # The regions do not overlap, since `details_spans` reports exactly what it removes.
-    # Found in the masked copy and taken from the body, which is what makes a quoted heading not a section.
-    # The mask keeps every offset, so one set of spans addresses both.
-    masked = mask_quotations(body)
-    region_spans, leftover_spans = details_spans(mask_quotations(body, MARKUP_MASK))
-    blocks = []
-    for spans in [[s] for s in region_spans] + [leftover_spans]:
-        raw_lines = "".join(body[a:b] for a, b in spans).splitlines()
-        # Scanned line by line rather than read from a wrapper's own summary.
-        # A heading can sit in the wrapper's body instead, where reading only the summary would miss it.
-        scan_lines = "".join(masked[a:b] for a, b in spans).splitlines()
-        scan_lines, raw_lines = fold_summaries(scan_lines, raw_lines)
-        if strip_blockquote:
-            scan_lines = [BLOCKQUOTE.sub("", ln) for ln in scan_lines]
-        for i, line in enumerate(scan_lines):
-            bare = COUNT.search(line) and not OPENING_COUNT.match(line)
-            if marker.search(line) and (HEADING.match(line) or bare) and not entry_heading(line):
-                start = i
-                while start < len(scan_lines):
-                    end = sibling_heading(scan_lines, start)
-                    if marker.search(scan_lines[start]):
-                        blocks.append("\n".join(raw_lines[start:end]))
-                    start = end
-                break
-    return blocks
+    if partial_on_record(pr):
+        return "", "a round on this pull request states partial coverage, so no table stands in"
+    if reviews_truncated(pr):
+        return "", "the review history runs past the window, so a partial round could sit unseen"
+    head = pr["headRefOid"]
+    tabled = [
+        n
+        for n in reviewer_nodes(pr, "reviews")
+        if not refusal_of(n) and reading(n).table is not None
+    ]
+    own = [n for n in tabled if (n.get("commit") or {}).get("oid") == head]
+    node = newest_of(own) or newest_of(tabled)
+    if node is None:
+        return "", "no round carries a file table"
+    changed, cut = changed_paths(pr)
+    if cut or files_unread(pr) or not changed:
+        return "", "the changed-file list is incomplete or empty, so no table can be matched"
+    named = reading(node).table or ()
+    where = ((node.get("commit") or {}).get("oid") or "")[:8] or "a commit this cannot name"
+    if not table_matches(named, changed):
+        return "", (
+            f"the table on {where} names {len(named)} path(s) where the pull request changes "
+            f"{len(changed)} file(s), and the two sets differ"
+        )
+    return ("table" if node in own else "carried:table"), (
+        f"the table on {where} names exactly the {len(changed)} changed file(s)"
+    )
 
 
-FOLD_OPENER = re.compile(rf"[>\s]*{SUMMARY_OPENER.pattern}", re.IGNORECASE)
-FOLD_STOP = re.compile(rf"\s*{tag_opener('details', 'summary')}", re.IGNORECASE)
+def coverage(pr: dict) -> tuple[str, str]:
+    """The head's coverage reading and the statement or reason it rests on.
 
-
-def fold_summaries(scan_lines: list[str], raw_lines: list[str]) -> tuple[list[str], list[str]]:
-    """Both line lists with each `<summary>` split across lines folded onto its opening line.
-
-    A heading is found line by line, so a summary whose text sits on lines of its own read as no
-    heading at all. `unrecognized_in` vetted its spelling meanwhile and reported nothing. The groups
-    come from the scanned copy and apply to both, so the two keep addressing the same lines.
-
-    Only a line opening on `<summary` folds, and the fold stops short at a line opening another
-    wrapper, summary, or Markdown heading. A tag named mid-sentence otherwise folded every line to
-    the next close. A sibling heading caught inside that fold was then no longer at a line's start.
-    A continuation line's blockquote markers are dropped, being the quoting rather than the text.
+    A statement on a round covering the head decides it, the worst winning. Where none states any,
+    a file table stands in under `table_cover`, then an attested local pass under `local_cover`.
     """
-    scan: list[str] = []
-    raw: list[str] = []
-    i = 0
-    while i < len(scan_lines):
-        end = i
-        if FOLD_OPENER.match(scan_lines[i]) and "</summary>" not in scan_lines[i].lower():
-            for j in range(i + 1, len(scan_lines)):
-                bare = BLOCKQUOTE.sub("", scan_lines[j].strip())
-                if FOLD_STOP.match(bare) or MARKDOWN_HEADING.match(bare):
-                    break
-                if "</summary>" in bare.lower():
-                    end = j
-                    break
-        for source, target in ((scan_lines, scan), (raw_lines, raw)):
-            parts = [BLOCKQUOTE.sub("", ln.strip()) for ln in source[i + 1 : end + 1]]
-            target.append(" ".join([source[i].rstrip(), *parts]))
-        i = end + 1
-    return scan, raw
+    rounds = head_reviews(pr)
+    rank = ("full", "unknown", "partial")
+    stated = [(r.coverage, r.coverage_line) for n in rounds if (r := reading(n)).coverage != "none"]
+    if stated:
+        return max(stated, key=lambda s: rank.index(s[0]))
+    if rounds and partial_on_record(pr):
+        return (
+            "partial",
+            "an earlier round states partial coverage, and no round on the head states any",
+        )
+    why = ""
+    if rounds:
+        state, why = table_cover(pr)
+        if state:
+            return state, why
+    if local_cover(pr) and not any(reading(n).table is not None for n in rounds):
+        return "local", f"an attested local pass recorded {attestation(pr)} finding(s)"
+    return "none", why
 
 
-def sibling_heading(scan_lines: list[str], start: int) -> int:
-    """Where this block ends, which is the next sibling section's heading or the region's end.
+def uncounted_verdict(pr: dict, kind: str = "flagging") -> tuple[str, str] | None:
+    """The head round's verdict of `kind` and its headline, where that round counts no finding.
 
-    Two sections sharing one wrapper is a shape the corpus carries, a Markdown heading each inside
-    the `Review details` wrapper rather than a wrapper of their own. Run to the end of the region
-    regardless, the first section's block contains the second whole, and the digest prints those
-    findings twice, the second time under a banner asserting the opposite triage about them.
-
-    A heading is not enough to tell the two apart. In this format every finding entry is its own
-    `<summary>`, so `HEADING` matches all of them, and the suppressed marker is ordinary English
-    that an entry's title carries as readily as a heading does. Bounded on the heading alone, a
-    section whose second entry is titled `Low confidence fallback swallows the error` ends at that
-    entry, and the entries after it print under the other section's banner, which asserts the
-    opposite triage about them, while both counts come out wrong.
-
-    A stated count is what separates them, the same signal `finding_entry` reads: every section
-    heading here states one and a finding's own title does not. A title can still state one, so
-    an entry opening on its severity badge never bounds, per `entry_heading`. Requiring a count
-    also narrows the bound on a CodeRabbit block, whose own marker is in neither of the two.
-
-    A section of the same kind that follows directly bounds too, so each is its own block with
-    its own count. Read as one block, the digest counted only the first heading's findings.
-
-    A `<summary>` sharing its line with the `<details>` that opens it is a heading as well, its
-    count read past the opener per `heading_of`. Read as prose, a sibling opened that way never
-    bounded. A suppressed block then ran on into the previously-missed section after it and
-    printed its findings twice. Each kind's own reader still found its own section, so the
-    vetted-but-unread check had nothing to report.
-
-    The cost is named rather than hidden. A sibling heading stating no count does not bound, so a
-    block runs into it, which is where this started before the bound existed at all. It is strictly
-    narrowing, since the requirement can only lose a bound and never invent one, and every vetted
-    heading states a count, so the shape that reaches this also reports `shapes=UNRECOGNIZED` in
-    the same digest and tells its reader not to believe the fields beside it.
+    A flagging round that states, lists, and opens no finding names what it flags in its headline
+    alone. An open thread defers the reading. Passed `clean`, it reads a clean round the same way.
     """
-    for j in range(start + 1, len(scan_lines)):
-        line = scan_lines[j]
-        if not (HEADING.match(line) and heading_count(heading_of(line)) is not None):
-            continue
-        if entry_heading(line):
-            continue
-        if any(o.search(line) for o in SECTION_MARKERS):
-            return j
-    return len(scan_lines)
+    node = newest_of(head_reviews(pr))
+    if node is None:
+        return None
+    found = reading(node, pr=pr)
+    counts = found.counts
+    if found.verdict != kind or found.entries or any(counts.values()) or opened_by(pr, node):
+        return None
+    if open_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
+        return None
+    return found.verdict_heading, found.headline
 
 
-def suppressed_blocks(body: str) -> list[str]:
-    """Copilot's own low-confidence findings, collapsed rather than raised as inline threads.
-
-    See `marker_blocks` for the shared reading.
-    """
-    return marker_blocks(body, SUPPRESSED)
-
-
-def unwrap(block: str) -> str:
-    """A block reduced to what a reader wants out of it, with its presentation markup dropped.
-
-    Every one of these sections reaches the digest and no thread, so this rendering is the only
-    place its findings are read. The wrapper tags say nothing, emphasis around a heading says
-    nothing, and a severity badge says one word wrapped in two versioned icon URLs that bury the
-    title following them. The word is kept and the markup is not.
-
-    A `<details>` or `<summary>` tag a finding quotes in code is the finding's text, so it is kept.
-    """
-    return unquoted_sub(TAGS, lambda m: "", reduced(block))
-
-
-def previously_missed_blocks(body: str) -> list[str]:
-    """Findings the round raises against code that has not changed since the last review.
-
-    The second overview format collapses these into the review body under a counted heading of
-    their own, each entry a severity badge and a title, and raises no inline thread for any of
-    them. That is a suppressed finding's exact shape, so it is read the same way and for the same
-    reason: a finding carrying no thread has no resolved state, and the digest is the only place a
-    reader meets it at all.
-
-    Counted across every round rather than the head's, as a suppressed finding is. A round that
-    raised one and was then superseded by a push did not thereby have it answered.
-
-    See `marker_blocks` for the shared reading.
-    """
-    return marker_blocks(body, PREVIOUSLY_MISSED)
-
-
-def outside_diff_blocks(body: str) -> list[str]:
-    """CodeRabbit's own outside-diff-range findings: a real finding on a line outside the pull
-    request's changed hunks, which GitHub cannot attach as an inline review comment, so
-    CodeRabbit collapses it into the review body instead. Observed corpus: a
-    `<summary>...Outside diff range comments (N)</summary>` heading, nested one
-    file-level `<details>` deep in turn nesting a per-finding "Prompt for AI Agents" block,
-    wrapped in the review's own blockquote.
-
-    Reads a section spanning several files or several findings in one file just as reliably as a
-    single finding, since `details_spans` counts the nesting rather than pairing the first
-    open it meets with the first close.
-    """
-    return marker_blocks(body, CR_OUTSIDE_DIFF, strip_blockquote=True)
-
-
-def finding_count(block: str) -> int:
-    """The heading's stated count, floored at one, since a block reported as zero reads as clean.
-
-    A heading stating its count first, `2 previously missed issues`, is read by `heading_count` too.
-    Left unread, it fell to the floor and reported one finding where the round raised two.
-
-    A run longer than a count carries falls to that same floor rather than crashing the digest,
-    the block existing being what says there is at least one finding in it.
-    """
-    stated = heading_count(heading_of(block))
-    return max(stated, 1) if stated is not None else 1
-
-
-def qodo_review_comment(pr: dict) -> dict | None:
-    """The reviewer's newest `Code Review by Qodo` comment, where its actual findings live.
-
-    Its formal review object carries an empty body on every review checked, confirmed across
-    roughly 60. The findings ride a PR-level comment instead, alongside a second one, `PR
-    Summary by Qodo`, that carries none, told apart by this comment's own heading. Comments carry
-    no commit, so this is read by recency rather than by head, the same limitation
-    `answered_outside_review` already has for Copilot's own plain comments.
-    """
+def qodo_comment(pr: dict) -> dict | None:
+    """Qodo's newest findings comment, told from its summary comment by the vocabulary's heading."""
+    heading = adapter.VOCABULARIES["qodo"]["comment_heading"]
     comments = [
-        c
-        for c in reviewer_nodes(pr, "comments", QODO_LOGIN)
-        if QODO_REVIEW_HEADING.search(c.get("body") or "")
+        c for c in reviewer_nodes(pr, "comments", QODO_LOGIN) if heading.search(c.get("body") or "")
     ]
     return max(comments, key=lambda c: c.get("createdAt") or "", default=None)
 
 
-def qodo_open_findings(body: str) -> list[str]:
-    """Each numbered finding in a `Code Review by Qodo` comment that carries neither Qodo's own
-    `Resolved` nor `Dismissed` self-tracked badge, so it is still open.
-
-    Qodo nests each finding's own Description/Code/Relevance/Evidence/Agent-prompt sections
-    under `<summary>` tags of their own, so every `<summary>` in the comment is read rather than
-    only the outermost ones, and only the numbered heading itself, matched by `QODO_FINDING`,
-    counts as a finding.
-    """
-    if not body:
-        return []
-    return [
-        s.strip()
-        for s in SUMMARY.findall(CODE_SPAN.sub(" ", strip_fences(body)))
-        if QODO_FINDING.match(s) and not QODO_BADGE.search(s)
-    ]
-
-
 def qodo_comments_blind(pr: dict) -> bool:
-    """True where Qodo's own `Code Review by Qodo` comment specifically can be sitting behind
-    the comments window, so `qodo_open` cannot tell "never commented" from "commented, unseen".
-
-    `window_blind(pr, "comments", QODO_LOGIN)` alone is not enough: it clears the moment any
-    Qodo comment is visible, including the paired `PR Summary by Qodo` that carries no findings
-    of its own, so a findings comment old enough to fall out of the window would read as though
-    Qodo had never posted one at all. A second check closes that gap: an older page exists, some
-    Qodo comment is visible, yet `qodo_review_comment` still finds none matching the findings
-    heading among what is visible, so the one that matters is the one sitting behind the cut.
-    """
+    """True where Qodo's findings comment can sit behind the comments window unseen."""
     if window_blind(pr, "comments", QODO_LOGIN):
         return True
     older = ((pr.get("comments") or {}).get("pageInfo") or {}).get("hasPreviousPage")
-    return (
-        bool(older)
-        and bool(reviewer_nodes(pr, "comments", QODO_LOGIN))
-        and not qodo_review_comment(pr)
-    )
+    return bool(older) and bool(reviewer_nodes(pr, "comments", QODO_LOGIN)) and not qodo_comment(pr)
+
+
+def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.Section]], str]:
+    """Each section of `kind` in this login's rounds, with where it was raised, and the field.
+
+    Every round rather than the head's, since an unanswered finding survives a push. The field
+    reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut.
+    """
+    head = pr["headRefOid"]
+    found = []
+    for node in reviewer_nodes(pr, "reviews", login):
+        oid = (node.get("commit") or {}).get("oid") or ""
+        where = (
+            "commit unknown, treat as outstanding"
+            if not oid
+            else "on head"
+            if oid == head
+            else f"raised on {oid[:8]}, earlier round"
+        )
+        found += [(where, s) for s in reading(node, login).sections if s.kind == kind]
+    total = sum(s.findings for _, s in found)
+    on_head = sum(s.findings for w, s in found if w == "on head")
+    mark = "+" if reviews_truncated(pr) else ""
+    return found, f"{total}{mark} (on_head={on_head} earlier={total - on_head})"
 
 
 def thread_author(t: dict) -> str:
-    """The login on a thread's opening comment, or `""` where there is none to read.
-
-    A deleted account leaves `author` present and null, which a chained `.get` would crash on
-    without the default here.
-    """
-    return (((t.get("comments") or {}).get("nodes") or [{}])[0].get("author") or {}).get(
-        "login"
-    ) or ""
+    """The login on a thread's opening comment, or `""` where there is none to read."""
+    return (first_comment(t).get("author") or {}).get("login") or ""
 
 
 def digest(
@@ -5025,7 +1402,6 @@ def digest(
     num: int,
     seen: set[str] | None = None,
     pr: dict | None = None,
-    stalled: str | None = None,
     now: datetime | None = None,
     grace: float = CHECK_GRACE,
     stall: float = CHECK_STALL,
@@ -5033,63 +1409,29 @@ def digest(
 ) -> tuple[str, int]:
     """Render the digest from a caller's payload and normalized checks when supplied.
 
-    The caller passes its own readings when the exit code has to agree with what was printed,
-    since a review landing between two reads makes a fresh fetch describe a different pull
-    request than the one the code was decided from. `checks` spends the rollup parse once,
-    since the wait decides an exit code from the reading it just printed.
-    `now` is a parameter for the same reason, so a case can hold a check at a known age rather
-    than at whatever the clock says when the suite runs.
-
-    `stalled` remains as an ignored compatibility parameter for callers that supplied the old
-    pickup reading. GitHub's effort-labeled lifecycle makes that reading inconclusive.
+    The caller passes its own readings so the exit code agrees with what was printed. `now` is a
+    parameter so a case can hold a check at a known age.
     """
     pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
-    # `revs` is every round and `on_head` is the ones that reviewed this commit.
-    # A refusal sits in the first and not the second, being a round that covered nothing.
     on_head = head_reviews(pr)
+    newest = newest_of(on_head)
+    found = reading(newest, pr=pr) if newest is not None else None
     effort, effort_source = review_effort(pr)
-    cover, cover_line = head_coverage(pr)
-    # An earlier round's statement stands until something changes it.
-    # The delta below is what changed, and the maintainer reads the two together.
-    # Reassigned rather than held beside `cover`, so the field and the partial block agree.
-    # Gated on a round covering the head, since an empty `on_head` reads as unstated too.
-    # Ungated, every push carried an earlier round forward onto a head nobody has reviewed.
-    # The digest then printed a coverage block beside `review_on_head=NO`.
-    # Bounded on the change set, per `carry_holds`.
-    # A round on a commit whose diff touched other files clears no gate on a diff nobody has now.
-    # The candidate is held apart from the carry, so a refused one is still a round to name.
-    # Keyed on the candidate rather than on its commit, which a round can leave unnamed.
-    # A review of a commit a force-push made unreachable carries a null `oid`.
-    # Keyed on the commit, that round was refused and the digest then said nothing at all.
-    candidate = carried_coverage(pr) if cover == UNSTATED and on_head else None
-    carried = None
-    carried_from, carried_since, carry_kept = "", "", None
-    if candidate is not None:
-        carried_from = candidate[2]
-        carry_kept = carry_holds(owner, repo, pr, carried_from)
-        carried_since = delta_since(owner, repo, carried_from, head)
-        if carry_kept:
-            carried = candidate
-            cover, cover_line, _carried_from = candidate
-        else:
-            carried = None
-    table_from, table_short = (
-        table_reading(owner, repo, pr) if cover == UNSTATED and on_head else ("", "")
-    )
-    if cover == UNSTATED and on_head and not table_short:
-        cover = TABLE
-    local = local_cover(pr) if not on_head else cover == UNSTATED and local_beside_round(pr)
-    if local:
-        cover = LOCAL
-    unknown = unrecognized_shapes(pr)
+    cover, cover_why = coverage(pr)
+    # Every round's notes, since a renamed section on an earlier round hides a finding too.
+    notes = [
+        *dict.fromkeys(
+            f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
+            for node in revs
+            for n in reading(node).notes
+        ),
+        *reviewer_login_drift(pr),
+    ]
     threads = pr["reviewThreads"]["nodes"]
-    # True where the connection cut off before this pull request's actual thread count.
-    # Read here rather than inline below, since both the summary line and the explanatory block need it.
     truncated = threads_truncated(pr)
-    # Same reasoning, the `reviews` connection rather than `reviewThreads`, feeding `suppressed=` and `cr_outside_diff=` below.
     revs_truncated = reviews_truncated(pr)
     unresolved = open_threads(threads)
     by_login = {
@@ -5102,55 +1444,14 @@ def digest(
         if len(contributors) > 1 or "other" in contributors
         else ""
     )
-
-    # Every round, not just the head, because a suppressed finding has no resolved state to read.
-    # Head-scoping treated "superseded by a push" as "answered", and the two are not the same.
-    # A finding nobody replied to left the digest the moment the branch moved, reporting zero.
-    # That is how four rounds went unanswered across three pull requests in one day.
-    # The head is still marked per block, since a finding on an older round may be moot.
-    # Deciding that is the reader's call rather than one the count makes for them.
-    blocks = [(n, b) for n in revs for b in suppressed_blocks(n.get("body") or "")]
-    on_head_blocks = [b for n, b in blocks if (n.get("commit") or {}).get("oid") == head]
-    stale = sum(finding_count(b) for n, b in blocks) - sum(finding_count(b) for b in on_head_blocks)
-    # Read over the same rounds and split the same way, a previously-missed finding reaching no thread exactly as a suppressed one does.
-    # Kept as its own list rather than folded into the one above, because the two take different answers.
-    # A suppressed finding is one the reviewer chose to withhold, and this one is a finding it raised outright against code the branch never touched.
-    # That one is as likely to be declined as fixed, which is a reader's call rather than one a shared count makes.
-    pm_blocks = [(n, b) for n in revs for b in previously_missed_blocks(n.get("body") or "")]
-    pm_on_head = [b for n, b in pm_blocks if (n.get("commit") or {}).get("oid") == head]
-    pm_stale = sum(finding_count(b) for n, b in pm_blocks) - sum(
-        finding_count(b) for b in pm_on_head
-    )
-    # The second format's stated finding total, beside the threads that round actually opened.
-    # It is where that format puts the count the first format's suppressed heading is read for.
-    # Absent on a round in the first format, and on a head no round covers.
-    # The field below is therefore printed only where there is a round in that format to read.
-    manifest = head_overview(pr)
-    stated, listed = manifest if manifest else (None, 0)
-    unthreaded = unthreaded_entries(pr)
-    newest_body = (second_format_head(pr) or {}).get("body") or ""
-    sectional = stated is not None and stated_total(newest_body, preamble_only=True) is None
-    linked = total_section_entries(pr)
-    restated = carried_open_threads(pr)
-    prose = unthreaded_prose_findings(pr)
-    narrative = unthreaded_narrative_findings(pr)
-    in_table = unthreaded_table_findings(pr)
-    headlined, headline_listed = headline_shortfall(pr)
-    unlisted = max(
-        max((stated or 0) - linked, 0) + unthreaded
-        if sectional
-        else max(unlisted_findings((stated, listed + restated)), unthreaded),
-        prose,
-        narrative,
-        in_table,
-        max(headlined - headline_listed, 0),
-    )
+    suppressed, suppressed_field = collected(pr, REVIEWER, "suppressed")
+    missed, missed_field = collected(pr, REVIEWER, "previously_missed")
+    outside, outside_field = collected(pr, CODERABBIT_LOGIN, "previously_missed")
+    listed = len(opened_by(pr, newest)) if newest is not None else 0
     flagged = uncounted_verdict(pr)
-    advisory = uncounted_verdict(pr, CLEAN_VERDICTS)
-
+    advisory = uncounted_verdict(pr, "clean")
     answer = answered_outside_review(pr)
     refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
-    # Read once and handed to the line below, since `quota_refusal` re-walks `refusal_of`.
     refusal_field = (
         "no"
         if not refusal
@@ -5162,17 +1463,9 @@ def digest(
     )
     blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
     answered = "yes" if answer else ("unknown" if blind else "no")
-    # Normalized once and handed to both readers, since the parse is the cost here.
-    # The caller's own list wins where it has one, so the wait parses the rollup once.
-    # Without that it read once for what it prints and again for what it returns.
     checks = check_nodes(pr) if checks is None else checks
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
-    # Which other known reviewers have posted anything at all on this exact head, identity and commit only, no body read.
-    # Whether it is a clean pass, a finding, or a refusal of its own is each bot's own prose to parse.
-    # Two shapes of that are read below rather than left as each bot's own future task: CodeRabbit's outside-diff-range blocks and Qodo's comment-only findings.
-    # Coverage and refusal reading stay Copilot-only, each of the others writing its own findings in its own format.
-    # Omitted entirely where none has, so a repository not trialing either stays silent.
     other_on_head = [
         login
         for login in OTHER_REVIEWERS
@@ -5180,106 +1473,51 @@ def digest(
             (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
         )
     ]
-    # The service each tracked other-reviewer's rate-limit notice names, or its login supplies, where its newest comment or review here is one.
     other_limited = {
-        login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login))
+        login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
     }
-    # CodeRabbit's own outside-diff-range findings, the identical blind spot `blocks` above reads for Copilot.
-    # A real finding collapsed into the review body rather than raised as an inline review comment opens no `reviewThreads` entry either.
-    # Read every round, not only the head, for the same reason `blocks` is: a finding nobody replied to must not drop out of the digest the moment a later push supersedes its own round.
-    cr_revs = reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)
-    cr_blocks = [(n, b) for n in cr_revs for b in outside_diff_blocks(n.get("body") or "")]
-    cr_on_head_blocks = [b for n, b in cr_blocks if (n.get("commit") or {}).get("oid") == head]
-    cr_stale = sum(finding_count(b) for n, b in cr_blocks) - sum(
-        finding_count(b) for b in cr_on_head_blocks
-    )
-    # Qodo's own comment-only findings: its formal review carries no body at all on any round checked, so its numbered findings are read from its `Code Review by Qodo` PR comment instead.
-    # Comments carry no commit, so this is read by recency, not head-scoped the way `cr_blocks` above is.
-    qodo_comment = qodo_review_comment(pr)
-    qodo_open = qodo_open_findings(qodo_comment.get("body") or "") if qodo_comment else []
+    qodo = qodo_comment(pr)
+    qodo_open = [s for s in reading(qodo, QODO_LOGIN).sections if s.kind == "open"] if qodo else []
     lines = [
-        # The repository leads the line, since a number alone reads as correct anywhere.
-        # A digest of the wrong pull request is well-formed, so naming it is what shows the miss.
+        # The repository leads the line, since a digest of the wrong pull request is well-formed.
         f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
-        f"review_on_head={'yes' if on_head else 'local' if local else 'NO'} "
-        # Present only where at least one other tracked reviewer has posted on this exact head.
-        # No verdict rides on it, unlike `review_on_head`, since nothing here reads what a CodeRabbit or qodo round said, only that one landed.
+        f"review_on_head={'yes' if on_head else 'local' if cover == 'local' else 'NO'} "
         + (f"other_reviewed={','.join(other_on_head)} " if other_on_head else "")
-        # Present only where a tracked other-reviewer's newest word is one of those rate-limit notices.
-        # The common case, neither is rate-limited right now, stays silent rather than printing `none`.
         + (
-            f"other_rate_limited={','.join(f'{login}:{name}' for login, name in other_limited.items())} "
+            "other_rate_limited="
+            + ",".join(
+                f"{login}:{name}" if name else login for login, name in other_limited.items()
+            )
+            + " "
             if other_limited
             else ""
         )
         + f"effort={effort} effort_source={effort_source} "
-        # A field of its own beside that one, since a round can cover the head and read part.
-        # Those two readings are what `review_on_head=yes` alone conflates.
-        # `carried:` prefixes the state rather than replacing it.
-        # What the earlier round said is the reading, and which round said it is the provenance.
-        f"coverage={CARRIED + ':' if carried or (cover == TABLE and table_from) else ''}{COVERAGE_FIELD[cover]} "
-        # Every other field on this line is a reading of the review.
-        # This one says whether the readings can be believed at all, so it is not a count.
-        f"shapes={'UNRECOGNIZED' if unknown else 'ok'} "
-        # A field of its own, since `rounds=1 review_on_head=NO` is also what a stale round is.
-        # The two want opposite responses, one a re-request and the other a split pull request.
-        # Upper-case for the reason `NO` is, as a state that blocks a merge is not one to skim.
-        # `QUOTA` is its own value rather than folded into `YES`, since its remedy is neither a re-request nor a split.
-        # It is the account-level state `status`/`wait` name distinctly.
+        f"coverage={cover.upper() if cover in ('partial', 'unknown') else cover} "
+        f"shapes={'NOTED' if notes else 'ok'} "
         f"refusal={refusal_field} "
-        # A trailing `+` says the count right before it undercounts, rather than a reader having to notice a fourth field further down to learn the same thing.
-        # `unresolved` is drawn from the same truncated `threads` list, so a cut page can hide an open thread exactly as easily as it hides a resolved one, and both counts carry the marker.
         f"threads={len(threads)}{'+' if truncated else ''} "
         f"unresolved={len(unresolved)}{'+' if truncated else ''}{breakdown} "
-        # A trailing `+` on either count says the same as it does on `threads=`/`unresolved=` above: a round old enough to fall out of the `reviews` window is a round its own finding cannot be read from.
-        f"suppressed={sum(finding_count(b) for n, b in blocks)}{'+' if revs_truncated else ''} "
-        f"(on_head={sum(finding_count(b) for b in on_head_blocks)} earlier={stale}) "
-        # Present where the round raised at least one finding against unchanged code, or the truncated window means one could exist unseen.
-        # Silent otherwise, rather than printing a permanent zero on every repository whose reviewer never raises one.
-        # No exit code rides on it, the same as `suppressed=`: it reports a finding to triage rather than a state that blocks.
+        f"suppressed={suppressed_field} "
+        + (f"previously_missed={missed_field} " if missed or revs_truncated else "")
         + (
-            f"previously_missed={sum(finding_count(b) for n, b in pm_blocks)}{'+' if revs_truncated else ''} "
-            f"(on_head={sum(finding_count(b) for b in pm_on_head)} earlier={pm_stale}) "
-            if pm_blocks or revs_truncated
+            f"overview={'?' if found.open is None else found.open}/{listed} "
+            if found is not None and found.marked
             else ""
         )
-        # Present only where the round covering the head is written in the second format.
-        # `?` where that round states no total, which is not the same reading as a total of zero.
-        + (f"overview={'?' if stated is None else stated}/{listed} " if manifest else "")
-        # Present where CodeRabbit has raised at least one outside-diff-range finding on any round, or the truncated window means one could exist unseen.
-        # A repository not trialing it, on an untruncated window, stays silent rather than printing a permanent `cr_outside_diff=0`.
-        + (
-            f"cr_outside_diff={sum(finding_count(b) for n, b in cr_blocks)}{'+' if revs_truncated else ''} "
-            f"(on_head={sum(finding_count(b) for b in cr_on_head_blocks)} earlier={cr_stale}) "
-            if cr_blocks or revs_truncated
-            else ""
-        )
-        # Present once Qodo has posted a `Code Review by Qodo` comment at all, `0` included.
-        # A `0` here is itself a reading, Qodo reviewed and left nothing open, rather than silence about whether it reviewed.
-        # `unknown` where its findings comment specifically can be sitting behind the window, so its silence here cannot be told apart from it never having commented.
-        # Absent only where `qodo_comments_blind` clears it and it genuinely never has.
+        + (f"cr_outside_diff={outside_field} " if outside or revs_truncated else "")
         + (
             f"qodo_open={len(qodo_open)} "
-            if qodo_comment
+            if qodo
             else ("qodo_open=unknown " if qodo_comments_blind(pr) else "")
         )
         + f"answered_outside_review={answered} "
         f"requested={'yes' if reviewer_requested(pr) else 'no'} "
         f"merge={pr.get('mergeStateStatus')} "
-        # `merge=BLOCKED` names no cause and is worn by every gate alike.
-        # A red check, a check nothing runs, an open thread, and a missing approval all read it.
-        # One run here polled that word for twenty-five minutes without learning which it was.
-        # The tally says how far the head got, and `checks=0/0` says the rollup carried nothing.
         f"checks={ok}/{total}"
-        # Named only where there is one to name.
-        # A field reading `none` on every green run is one a reader skips when it finally says more.
-         + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
+        + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
     ]
     if refusal:
-        # Printed whole for the reason the comment below is, as the wording carries the remedy.
-        # A file-count refusal is cleared by splitting the pull request.
-        # A quota refusal is account-level state nothing here clears, so the caller proceeds on the other reviewers' coverage.
-        # This reads neither cause, only that the round declined.
         lines.append(
             "  COPILOT REFUSED THIS ROUND: the newest Copilot review on this pull request says "
             "it did not review, so it covers nothing and re-requesting repeats it, and the body "
@@ -5290,71 +1528,21 @@ def digest(
         ]
         if limit := confirmed_quota(owner, repo, refusal):
             lines.append(f"  RATE LIMIT FROM THE REVIEWER'S RUN LOG: {limit}")
-    if unknown:
-        # First of the blocks, since it says how far the rest of them can be trusted.
+    if notes:
         lines.append(
-            f"  UNRECOGNIZED REVIEWER OUTPUT ({len(unknown)}): the shapes below are ones "
-            "this script has no reader for, so every other field here is a reading of "
-            "output it does not fully understand and a clean digest does not mean a "
-            f"clean review. File an issue on {HUB}, which hosts this script, naming each "
-            "shape and quoting the body it came from, before closing the review loop. "
-            "Whether to merge anyway is the maintainer's call rather than the agent's"
+            f"  REVIEWER OUTPUT NOTED ({len(notes)}): the reader placed part of what the reviewer "
+            "sent nowhere, so read the body itself before closing the review loop. A spelling "
+            f"to add belongs in `scripts/reviewers/` on {HUB}, which hosts this script"
         )
-        lines += [f"    {item}" for item in unknown]
-    if unlisted:
-        # The count is all this shape carries, unlike a suppressed block, whose text prints.
-        # What the finding says is in the review body, which is where this sends the reader.
+        lines += [f"    {note}" for note in notes]
+    if found is not None and found.unthreaded:
         lines.append(
-            f"  FINDINGS WITH NO THREAD ({unlisted}): the round covering the head states "
-            + ("no total" if stated is None else f"{stated} finding{'' if stated == 1 else 's'}")
-            + (
-                f", its open section listing {linked} with a link"
-                if sectional
-                else f" and opened {listed} thread{'' if listed == 1 else 's'}"
-                + (
-                    f", its open section also linking {restated} "
-                    f"thread{'' if restated == 1 else 's'} an earlier round opened"
-                    if restated
-                    else ""
-                )
-            )
-            + (
-                f", and {unthreaded} of the entries its open sections count "
-                f"{'has' if unthreaded == 1 else 'have'} no title link this script reads to a "
-                "thread on this pull request"
-                if unthreaded
-                else ""
-            )
-            + (
-                f", and {prose} of the entries under its `Review findings:` label "
-                f"{'pairs' if prose == 1 else 'pair'} with no thread of that round on its file"
-                if prose
-                else ""
-            )
-            + (
-                f", and {narrative} of the findings its `Open findings remain:` entries name "
-                f"{'pairs' if narrative == 1 else 'pair'} with no thread at the severity it "
-                "states, on a file it names where it names one"
-                if narrative
-                else ""
-            )
-            + (
-                f", and {in_table} of the findings its file table names "
-                f"{'pairs' if in_table == 1 else 'pair'} with no thread of that round on its file"
-                if in_table
-                else ""
-            )
-            + (
-                f", and its headline states {headlined} finding{'' if headlined == 1 else 's'} "
-                f"where the round and earlier rounds' threads account for {headline_listed}"
-                if headlined > headline_listed
-                else ""
-            )
-            + f", so {unlisted} "
-            f"{'finding is' if unlisted == 1 else 'findings are'} raised where polling threads "
-            "cannot see them. Read the review body itself and give each the triage a suppressed "
-            "finding gets, before closing the review loop. A thread past the hundred this reads "
-            "would count here too, and `threads=` carries a trailing `+` where that page was cut"
+            f"  FINDINGS WITH NO THREAD ({found.unthreaded}): the round covering the head names "
+            f"more findings than its open entries link to threads on this pull request, so "
+            f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
+            "threads cannot see them. Read the review body and give each the triage a suppressed "
+            "finding gets. A thread past the hundred read here counts too, and `threads=` "
+            "carries a trailing `+` where that page was cut"
         )
     if flagged:
         lines.append(
@@ -5367,109 +1555,22 @@ def digest(
         lines.append(
             f"  CLEAN VERDICT HEADLINE: the round covering the head opens on `{advisory[0]}` and "
             "counts no finding. Its headline may name a remaining nit, new or already answered, "
-            "which nothing here tells apart, so this is advisory and changes no exit code. Read "
-            "it before closing the review loop"
+            "which nothing here tells apart, so this is advisory and changes no exit code"
         )
         lines.append(f"    {advisory[1]}")
-    if carried is not None:
-        # Printed whatever the carried state is, the provenance being the same question either way.
-        # A carried partial then prints its own block under this one.
+    if cover in ("table", "carried:table", "local", "partial", "unknown"):
+        lines.append(f"  COVERAGE IS {cover.upper()}: {cover_why}")
+    elif cover == "none" and on_head:
         lines.append(
-            f"  COVERAGE IS CARRIED: the round covering the head states none, which is the "
-            f"ordinary shape of the second overview format rather than a defect in it. The "
-            f"newest round that states any is {carried_from[:8] or 'a commit this cannot name'}, "
-            f"and {carried_since}. Whether that round still covers this head is the "
-            f"maintainer's reading, and the delta is what to read it from"
-        )
-        lines.append(f"    {cover_line}")
-    elif candidate is not None:
-        # The reader is told which round it declined and on what ground.
-        # The alternative is a digest printing nothing about a statement it found and did not use.
-        if not carried_from:
-            why = "that round names no commit, so there is no change set of its own to compare"
-        elif carry_kept is None:
-            why = (
-                "the change set could not be read at both commits, so the bound could not be "
-                "measured and the statement is not carried"
-            )
-        else:
-            why = (
-                "the pull request changes a different set of files at the two commits, so "
-                "that statement describes a diff this head no longer has"
-            )
-        lines.append(
-            f"  COVERAGE IS NOT CARRIED: the newest round that states any is "
-            f"{carried_from[:8] or 'a commit this cannot name'}, and {carried_since}, but {why}"
-        )
-    if cover == TABLE:
-        count = len(changed_paths(pr)[0])
-        files = f"{count} changed file{'' if count == 1 else 's'}"
-        lines.append(
-            "  COVERAGE IS READ FROM THE FILE TABLE: no round states coverage of this head and "
-            "none carries to it, and "
-            + (
-                f"no round covering it carries a file table, so the newest round that does, on "
-                f"{table_from[:8]}, carries its table, which names exactly the {files}, the "
-                f"pull request changing that same set at both commits, and "
-                f"{delta_since(owner, repo, table_from, head)}"
-                if table_from
-                else f"a round covering it names exactly the {files} in its own table"
-            )
-        )
-    elif cover == UNSTATED and on_head:
-        lines.append(f"  NO FILE TABLE STANDS IN: {table_short}")
-    elif cover == LOCAL:
-        lines.append(
-            "  COVERAGE IS READ FROM THE LOCAL PASS: this pull request merges into a branch other "
-            "than the default, "
-            + (
-                "the Copilot round covering it states no coverage, none carries to it, and no "
-                "round covering it carries a file table, "
-                if on_head
-                else "no Copilot round covers it, "
-            )
-            + "and a comment from an owner, member, or collaborator attests a recorded local "
-            "strict-review pass over exactly this head's content, which recorded "
-            f"{attestation(pr)} finding(s)"
-        )
-    if cover == PARTIAL:
-        # The line prints under the marker for the reason a suppressed block does.
-        # The counts say how much of the diff went unread, and no thread carries them.
-        lines.append(
-            "  COVERAGE IS PARTIAL: "
-            + (
-                "an earlier round read fewer files than the pull request changed and the round "
-                "covering the head states none, so that reading carries"
-                if carried is not None
-                else "the review covering the head read fewer files than the pull request changed"
-            )
-            + ", so files in the diff have no review at all. A "
-            "re-request has never cleared this on record, so report it rather than "
-            "retrying into it, and let the maintainer take the merge decision"
-        )
-        lines.append(f"    {cover_line}")
-        # The counts decide the state and this line says what the reviewer's file table adds.
-        # Printed under the same marker, since a maintainer taking the decision wants both.
-        # It names no verdict of its own, having been measured against the counts it sits under.
-        # The table tracks them nowhere, which is why it is reported rather than read.
-        # Withheld on a carried partial, the counts and the table then describing two diffs.
-        lines.append(
-            "    the counts describe an earlier commit's diff, so the file table on this head "
-            "is not read against them"
-            if carried is not None
-            else f"    {table_against_diff(pr, read_coverage(cover_line))}"
+            "  NO COVERAGE IS SHOWN: no round covering the head states coverage, and "
+            f"{cover_why or 'nothing stands in'}. Merge Gate item 2 reads this field"
         )
     for node, shape in stuck:
-        # Each shape carries its own remedy, which is the whole point of telling them apart.
-        # A reader handed one word for all three retries the wrong thing, or waits on a queue.
+        # Each shape carries its own remedy, so one word for all three would send a reader the wrong way.
         elapsed = age(node.get("since") or "", now)
-        # Clamped for display only, since a machine clock behind GitHub's renders `queued -3m`.
-        # A negative age reads as nonsense and hides how long the thing has actually waited.
-        # The comparison above keeps the raw value, so skew cannot make a stuck check report.
+        # Clamped for display only, since a skewed clock renders a negative age.
         mins = "age unknown" if elapsed is None else f"{int(max(elapsed, 0) // 60)}m"
-        # Read with `.get` for the reason `age` catches two exceptions.
-        # A caller handing this an odd node shape should cost a field, never the whole digest.
-        # Reporting the state is the one job here, so it must not be the thing that raises.
+        # Read with `.get`, since an odd node shape should cost a field and never the digest.
         name = node.get("name") or "unnamed"
         if shape == "NOT_PICKED_UP":
             lines.append(
@@ -5551,8 +1652,7 @@ def digest(
             "undercount"
         )
     if answer:
-        # Printed whole for the same reason a suppressed finding is, since it reaches no thread.
-        # Its wording is the only thing separating a refusal from an ordinary remark.
+        # Printed whole, since its wording is the only thing separating a refusal from a remark.
         lines.append(
             f"  COPILOT COMMENT ({answer.get('createdAt')}, newer than any review): "
             "the reviewer answered without reviewing, so read the body below and "
@@ -5563,7 +1663,7 @@ def digest(
         ]
     new = 0
     for t in unresolved:
-        c = (t.get("comments") or {}).get("nodes", [{}])[0]
+        c = first_comment(t)
         tid = t["id"]
         mark = ""
         if seen is not None:
@@ -5574,78 +1674,69 @@ def digest(
             new += 1
         body = " ".join((c.get("body") or "").split())
         lines.append(f"  {mark}{tid} {c.get('path')}:{c.get('line')} {body[:160]}")
-    for n, b in blocks:
-        # Printed whole where a thread body is truncated, since a thread can be re-read at its id.
-        # A suppressed finding has none, so this digest is the only place it appears.
-        # GraphQL returns a null commit for a pending or partial review.
-        # An empty sha rendered as "raised on , earlier round", losing what traces the finding.
-        sha = ((n.get("commit") or {}).get("oid") or "")[:8]
-        if not sha:
-            where = "commit unknown, treat as outstanding"
-        elif sha == head[:8]:
-            where = "on head"
-        else:
-            where = f"raised on {sha}, earlier round"
-        lines.append(
-            f"  SUPPRESSED ({where}): no thread to resolve, "
-            "answer it in the PR conversation quoting the finding"
-        )
-        # Indentation is kept, since a block carries fenced code a flattened line would garble.
-        lines += [f"    {ln.rstrip()}" for ln in unwrap(b).splitlines() if ln.strip()]
-    for n, b in pm_blocks:
-        # Mirrors the `SUPPRESSED` rendering above, its own reasons applying identically here.
-        sha = ((n.get("commit") or {}).get("oid") or "")[:8]
-        if not sha:
-            where = "commit unknown, treat as outstanding"
-        elif sha == head[:8]:
-            where = "on head"
-        else:
-            where = f"raised on {sha}, earlier round"
-        lines.append(
-            f"  PREVIOUSLY MISSED ({where}): no thread to resolve, "
-            "raised against code this branch did not change, "
-            "answer it in the PR conversation quoting the finding"
-        )
-        lines += [f"    {ln.rstrip()}" for ln in unwrap(b).splitlines() if ln.strip()]
-    for n, b in cr_blocks:
-        # Mirrors the `SUPPRESSED` rendering above, its own reasons applying identically here.
-        sha = ((n.get("commit") or {}).get("oid") or "")[:8]
-        if not sha:
-            where = "commit unknown, treat as outstanding"
-        elif sha == head[:8]:
-            where = "on head"
-        else:
-            where = f"raised on {sha}, earlier round"
-        lines.append(
-            f"  CODERABBIT OUTSIDE-DIFF ({where}): no thread to resolve, "
-            "answer it in the PR conversation quoting the finding"
-        )
-        lines += [f"    {ln.rstrip()}" for ln in unwrap(b).splitlines() if ln.strip()]
-    for finding in qodo_open:
-        # Not head-scoped, since the comment it comes from carries no commit at all.
+    # Printed whole, since a finding with no thread appears nowhere but here.
+    for heading, entries in (
+        ("SUPPRESSED", suppressed),
+        ("PREVIOUSLY MISSED", missed),
+        ("CODERABBIT OUTSIDE-DIFF", outside),
+    ):
+        for where, section in entries:
+            lines.append(
+                f"  {heading} ({where}): no thread to resolve, "
+                "answer it in the PR conversation quoting the finding"
+            )
+            lines += [f"    {ln}" for ln in section.text.splitlines() if ln.strip()]
+    for section in qodo_open:
         lines.append(
             "  QODO OPEN FINDING: neither Resolved nor Dismissed, no thread to resolve, "
             "answer it in the PR conversation quoting the finding, and spot-verify Qodo's "
             "own badge against `gh pr diff` rather than trusting it outright"
         )
-        lines.append(f"    {' '.join(finding.split())}")
+        lines.append(f"    {section.title}")
     if seen is not None:
         lines[0] += f" new={new}"
     return "\n".join(lines), len(unresolved)
 
 
-def origin_owner() -> str | None:
-    """The owner `git remote get-url origin` yields against this script's own directory, or None.
+def report_verdict(pr: dict) -> int:
+    """Print the blocking verdict's own status line, and return the exit code it carries.
 
-    Anchored on the script's own directory rather than the working directory, because this is
-    reached from a hub checkout while the repository being answered is named on the command line,
-    so the working directory says nothing about who owns either.
+    A missing head review has no verdict yet, which the wait path owns. Coverage shown nowhere is a
+    note rather than an exit, and so is an unrecognized shape.
     """
-    # An inherited GIT_DIR or GIT_COMMON_DIR overrides the `-C` argument and points the probe at another repository's config.
-    # An inherited GIT_CONFIG* channel injects config into this call, and `remote get-url` applies `insteadOf` rewriting, so an injected rewrite would make it name an owner this checkout does not have.
-    # This strip closes the channels an inherited tooling environment sets: the four discovery names it drops, and any name starting with GIT_CONFIG that injects config into this one call.
-    # It does not close, and cannot close, an inherited HOME, XDG_CONFIG_HOME, or PATH, because a caller who controls any of those already controls the process that would perform the write, leaving nothing here for this check to defend.
-    # The environment is stripped rather than cleared, since git still needs PATH to be found at all, and HOME so the checkout's own global config and `safe.directory` still apply.
+    if not head_reviews(pr):
+        return 0
+    state, why = coverage(pr)
+    if state == "partial":
+        print(
+            f"status=COVERAGE_IS_PARTIAL the review covering the head states it read fewer files "
+            f"than the pull request changed ({why}), so part of the diff has no review at all. A "
+            "re-request is not the remedy it reads as. Splitting is the remedy where it applies, "
+            "and it does not apply to a promotion. Otherwise this is the maintainer's call"
+        )
+        return 42
+    if flagged := uncounted_verdict(pr):
+        print(
+            f"status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on "
+            f"`{flagged[0]}`, a verdict that is not the clean one, while it counts no finding, so "
+            "what it flags is named in its headline alone, printed above under VERDICT WITH NO "
+            "COUNTED FINDING. Fix what it names and push, or answer it with `comment`. This code "
+            "repeats on this head after the answer, since nothing here reads one"
+        )
+        return 50
+    if state in ("none", "unknown"):
+        print(
+            "note: no statement, file table, or attested local pass shows full coverage of this "
+            "head, so Merge Gate item 2 is unmet unless the promotion case it states applies"
+        )
+    return 0
+
+
+def origin_owner() -> str | None:
+    """The owner `git remote get-url origin` yields against this script's own directory, or None."""
+    # An inherited GIT_DIR, GIT_COMMON_DIR, or GIT_CONFIG* name can point the probe at another repository's config or inject an `insteadOf` rewrite.
+    # The environment is stripped rather than cleared, since git needs PATH and HOME.
+    # An inherited HOME, XDG_CONFIG_HOME, or PATH is not closable here, since its holder already controls the writer.
     env = {
         k: v
         for k, v in os.environ.items()
@@ -5672,13 +1763,10 @@ def origin_owner() -> str | None:
 def in_scope(target_owner: str) -> tuple[bool, str]:
     """Whether writing to `target_owner` is in scope here, with the reason where it is not.
 
-    Same owner covers the origin and every sibling, which is the whole fleet. A different owner is
-    the shape that once put a comment on a stranger's pull request, and it is refused outright
-    rather than granted by an environment variable, because a variable this process can be handed
-    is one the caller can set on the command that runs it, and a grant the caller writes for
-    itself is not a grant. The `gh-write-guard` hook reads that grant from the session it was
-    launched with, which is why the cross-owner case belongs on the runbook's explicit `gh` path
-    where the hook is the one adjudicating it.
+    The same owner covers the origin and every sibling. A different owner is refused outright
+    rather than granted by an environment variable, since the caller could set it for itself. The
+    cross-owner case belongs on the runbook's explicit `gh` path, where the `gh-write-guard` hook
+    adjudicates it.
     """
     origin = origin_owner()
     if origin is None:
@@ -5707,11 +1795,7 @@ def first_comment(thread: dict) -> dict:
 
 
 def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
-    """Every unresolved review thread, following the cursor to the end.
-
-    Stopping at the first page reports no match on a thread that is merely further along, and a
-    no-match is indistinguishable from a thread that was already answered.
-    """
+    """Every unresolved review thread, following the cursor to the end."""
     out: list[dict] = []
     for pr in follow(Q_THREADS, owner, repo, num, "reviewThreads"):
         out += open_threads(pr["reviewThreads"]["nodes"])
@@ -5719,13 +1803,7 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
 
 
 def describe(thread: dict) -> str:
-    """One line naming a thread by what a reader recognizes it as, never by its id.
-
-    The 120-character cutoff below is a display limit rather than a matching one: `--match`
-    itself compares against the whole body, so a pattern copied from past the cutoff has nothing
-    printed to copy from, and widening the words or adding `--path` is the way past that, not a
-    longer cutoff here.
-    """
+    """One line naming a thread by what a reader recognizes it as, never by its id."""
     c = first_comment(thread)
     body = " ".join((c.get("body") or "").split())
     return (
@@ -5750,16 +1828,10 @@ _TYPOGRAPHIC_FOLD = str.maketrans(
 def matching_threads(threads: list[dict], match: str, path: str | None) -> list[dict]:
     """Threads whose finding text contains `match`, narrowed by `path` where one is given.
 
-    Matched on the finding's own words rather than on a line number, because a fix push moves the
-    line and every lookup keyed to one then misses: replies posted against nothing while the
-    resolves still succeeded, so the threads closed carrying no answer. Case-insensitive, since
-    the text is quoted back out of a digest by a reader rather than compared by a machine. Both
-    sides are folded through `_TYPOGRAPHIC_FOLD` first, since the pattern is a substring copied
-    from a rendered finding whose typographic quotes, dashes, or ellipsis may not survive that
-    copy in ASCII. Both sides also fold whitespace to a single space, the same collapse
-    `describe()` applies before printing a thread's body as an `unresolved:` line, so a pattern
-    copied from that printed line still matches the raw body it was copied from, whether the
-    whitespace the printed line flattened was a line break, a tab, or a run of spaces.
+    Matched on the finding's words rather than a line number, which a fix push moves.
+    Case-insensitive, and both sides fold typographic characters through `_TYPOGRAPHIC_FOLD` and
+    whitespace to a single space, as `describe()` does, so a pattern copied from a printed line
+    matches the raw body.
     """
     needle = fold_finding(match)
     return [
@@ -5812,16 +1884,11 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
 def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
 
-    The receipt `local_review.py` records lives in the checkout's git directory, so nothing on
-    GitHub can read it, and a feature pull request's gate needs to. A promotion's per-file fallback
-    in the Merge Gate reads the comment too, since removing the worktree deletes the receipt. This
-    reads the receipt where it lives and posts a comment the gate can read, and only after four
-    checks, each of which would otherwise vouch for content the pull request does not carry: the
-    checkout's HEAD is the pull request's head, the checkout holds no change beyond that commit, its
-    merge base with the base branch is the pull request's own, and `local_review.py status` reports
-    a current pass against the pull request's base, one read answering the coverage and the findings
-    count alike. The first two are read again once the check returns, since the checkout can move
-    while it runs.
+    The `local_review.py` receipt lives in the checkout's git directory, which GitHub cannot read,
+    so this posts a comment the gate can read. It first checks that the checkout's HEAD is the pull
+    request's head, the checkout holds no change beyond that commit, its merge base is the pull
+    request's own, and `local_review.py status` reports a current pass against the base. The first
+    two are read again after the check returns.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -5922,10 +1989,8 @@ def await_registered_head(
 ) -> tuple[str, bool]:
     """The pull request's head after waiting for GitHub to register a push, and whether it did.
 
-    A push moves the remote branch at once and the pull request's head a moment later, so an
-    attest straight after a push read the old head and refused. The wait applies only where the
-    remote branch tip is the checkout's own commit, which is what makes the head merely late.
-    Any other tip, or one that cannot be read, returns at once with the head as read.
+    Applies only where the remote branch tip is the checkout's own commit, so the head is merely
+    late. Any other tip, or one that cannot be read, returns at once with the head as read.
     """
     meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
     ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
@@ -5954,10 +2019,9 @@ def await_registered_head(
 def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
     """Whether a recorded pass covers the checkout's content, its findings, and what was read.
 
-    One `local_review.py status` read answers both, so the coverage and the count describe the
-    same receipt, where a check followed by a second read could straddle a record replacing it.
-    The findings are the covering passes' counts summed, or "unknown" where any recorded none,
-    and they are shown rather than gated, since a local pass's findings are advisory.
+    One `local_review.py status` read answers both, so coverage and count describe the same
+    receipt. The findings are the covering passes' counts summed, or "unknown" where any recorded
+    none, and are shown rather than gated.
     """
     try:
         proc = subprocess.run(
@@ -6012,48 +2076,35 @@ def attested(pr: dict) -> bool:
 def attestation(pr: dict) -> str | None:
     """The findings count an owner's, member's, or collaborator's attestation of this head carries.
 
-    None where no attestation vouches for the head against the pull request's current base, so
-    a retargeted pull request needs a new one, and "unknown" where the pass recorded no count.
+    None where no attestation vouches for the head against the pull request's current base, and
+    "unknown" where the pass recorded no count.
 
-    Read over every comment rather than the reviewer's own, since an attestation is the
-    maintainer's account speaking. The association is what keeps a passer-by's comment carrying
-    the same marker from vouching for anything. The marker counts only as a line of its own outside
-    a fence. So a comment quoting it inline or in a code block vouches for nothing. A tick on each
-    side of that line opens no span, since the line ends the paragraph, so the marker still counts.
+    Read over every comment, with the author association keeping a passer-by's marker from
+    vouching. The marker counts only as a line of its own outside a fence.
     """
     head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
     for node in (pr.get("comments") or {}).get("nodes") or []:
         if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
             continue
-        body = strip_fences(node.get("body") or "", to_end=True)
-        for m in ATTESTATION.finditer(body):
-            if m.group(1) == head and m.group(2) == base:
+        for line in adapter.html_lines(node.get("body") or ""):
+            m = ATTESTATION.fullmatch(line)
+            if m and m.group(1) == head and m.group(2) == base:
                 return m.group(3)
     return None
 
 
 def promotion(pr: dict) -> bool:
-    """Whether the pull request merges into the repository's default branch.
-
-    That is the promotion, whose own Copilot round is the backstop reading the whole diff, so
-    the local pass never stands in for it. A default branch the payload does not name reads as
-    a promotion too, since the failure that way is one more Copilot request rather than a gate
-    passed on a local pass alone.
-    """
+    """Whether the pull request merges into the repository's default branch."""
     default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
     return not default or pr.get("baseRefName") == default
 
 
 def holds(pr: dict) -> bool:
-    """Whether a local pass rather than a Copilot round is to cover this head, attested or not.
-
-    Read again on the payload the verdict is graded on, since a push between two reads moves the
-    head the hold was decided for.
-    """
+    """Whether a local pass rather than a Copilot round is to cover this head, attested or not."""
     return (
         not promotion(pr)
         and not reviews_truncated(pr)
-        and not partial_shaped(pr)
+        and not partial_on_record(pr)
         and not reviewer_requested(pr)
     )
 
@@ -6061,30 +2112,17 @@ def holds(pr: dict) -> bool:
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 
-    Only on a pull request into a branch other than the default, on a head its writer attests. Only
-    where nothing on record says a round read part of a diff and the whole review history is in
-    view. That is the bound a file table stands in under. The hosted review runs once per change,
-    so a promotion keeps its own Copilot round and every other head reads the local pass. A
-    refusal on this head is Copilot's own word on it, which no attestation overrules, and only a
-    later round of Copilot's own on the head spends it.
+    Only on a pull request into a non-default branch, on a head its writer attests, where no round
+    on record read part of a diff and the whole review history is in view. A refusal on this head
+    is Copilot's own word, which only a later Copilot round on the head spends.
     """
     return (
         not refusing_review(pr)
         and not promotion(pr)
         and attested(pr)
         and not reviews_truncated(pr)
-        and not partial_shaped(pr)
+        and not partial_on_record(pr)
     )
-
-
-def local_beside_round(pr: dict) -> bool:
-    """Whether a recorded local pass covers a head whose own Copilot round leaves coverage unread.
-
-    The caller has found that no statement reaches the head and no table stands in. This holds
-    only where no round covering the head carries a table at all, so a table naming fewer files
-    than the diff changed, which is a round's own word that it skipped one, is never overruled.
-    """
-    return table_shortfall(pr) == NO_HEAD_TABLE and local_cover(pr)
 
 
 POLL_DELAYS = (15, 20, 30, 45, 60, 120)
@@ -6100,15 +2138,10 @@ def backoff[Polled](
 ) -> Polled:
     """Re-read `value` on a schedule of delays while `keep` holds and the bound allows.
 
-    `delays` defaults to `POLL_DELAYS`, its last delay repeated only where a clock bounds the loop,
-    so no call runs unbounded. A finite schedule ends the loop by running out, with no clock where
-    `start` is None. Otherwise `start` is a `time.monotonic` reading and `timeout` is in seconds.
-    The bound is checked before each sleep, so the poll can run past it by up to one delay.
-    Returns the last value read, or `value` itself where the poll never sleeps.
-
-    One loop for every re-read here, since a fix applied to one inline copy and not another
-    makes one wait time out differently from another.
-    The backoff runs in-process, so the whole wait costs one agent turn.
+    `delays` defaults to `POLL_DELAYS`, its last delay repeated only where a clock bounds the loop.
+    A finite schedule ends by running out, with no clock where `start` is None. Otherwise `start`
+    is a `time.monotonic` reading and `timeout` is in seconds, checked before each sleep. Returns
+    the last value read, or `value` itself where the poll never sleeps.
     """
     if delays is None:
         repeated = itertools.repeat(POLL_DELAYS[-1]) if start is not None else ()
@@ -6133,18 +2166,11 @@ def reply_to_thread(
 ) -> int:
     """Answer the one thread `match` selects, and resolve it where asked. Returns an exit code.
 
-    Every refusal below is a stop rather than a fallback. There is no id to guess at, no
-    second-best thread to settle for, and no resolve on a reply that did not land, because each
-    of those closes a finding while leaving it unanswered, which is the state a reviewer reads as
-    addressed. A no-match names the unresolved count, since zero and several otherwise read the
-    same without the reader counting the lines the refusal prints below it.
+    Every refusal is a stop rather than a fallback: no guessed id, no second-best thread, and no
+    resolve on a reply that did not land. A no-match names the unresolved count.
 
-    `all_identical` covers the one ambiguity no wording can narrow: a reviewer posting the same
-    finding as two threads. Their opening comments fold to the same text, so every pattern that
-    selects one selects the other, and the refusal left both open with no route to either. The
-    flag answers every candidate with the one body, and only when they all sit on one file and
-    fold identically, so two findings that merely share the quoted words still refuse, and the
-    same text on two files stays two findings that `--path` already tells apart.
+    `all_identical` covers a reviewer posting the same finding as two threads. It answers every
+    candidate with the one body, only when they all sit on one file and fold identically.
     """
     ok, why = in_scope(owner)
     if not ok:
@@ -6221,8 +2247,7 @@ def answer_thread(target: dict, body: str, resolve: bool) -> int:
         or {}
     )
     comment = reply.get("comment") or {}
-    # The url is what says a reply carried a body, and an empty one still returns a comment.
-    # Resolving past that closes the thread with nothing in it, which is what happened three times.
+    # The url says a reply carried a body, and resolving past an empty one closes the thread with nothing in it.
     if not comment.get("url") or not (comment.get("body") or "").strip():
         print(
             "status=REPLY_NOT_CONFIRMED the reply returned no url or an empty body, so the "
@@ -6252,12 +2277,10 @@ def answer_thread(target: dict, body: str, resolve: bool) -> int:
 def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.CompletedProcess:
     """One REST read, returned whole so the caller can tell an absent object from an unread one.
 
-    Unlike `gh_graphql` this does not raise on a non-zero exit, because a 404 here is an answer
-    the caller acts on rather than a failure. Reads only: every path passed in is a GET.
-
-    `raw` is for a job log, which carries terminal escape sequences that `gh` 2.97 and later
-    refuse to print without `--allow-escape-sequences`. An older `gh` has no such flag and
-    prints the log as it is, so the flag is passed only where `gh_takes_escape_flag` says so.
+    Unlike `gh_graphql` this does not raise on a non-zero exit, since a 404 is an answer. Every
+    path passed in is a GET. `raw` is for a job log, which `gh` 2.97 and later refuse to print
+    without `--allow-escape-sequences`, so the flag is passed only where `gh_takes_escape_flag`
+    says so.
     """
     argv = ["gh", "api", path] + (["--jq", jq] if jq else [])
     if raw and gh_takes_escape_flag():
@@ -6267,13 +2290,7 @@ def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.C
 
 @functools.cache
 def gh_takes_escape_flag() -> bool:
-    """Whether this `gh` accepts `--allow-escape-sequences`, answered by its own exit status.
-
-    The read itself exits 1 both for an unknown flag and for an HTTP error, so its status cannot
-    say which happened. Asking for `gh api --help` with the flag is an operation of its own whose
-    status answers that one question, and it reads nothing from GitHub. Memoized, since the
-    installed `gh` does not change within one run.
-    """
+    """Whether this `gh` accepts `--allow-escape-sequences`, answered by its own exit status."""
     return _gh_run(["gh", "api", "--allow-escape-sequences", "--help"], False).returncode == 0
 
 
@@ -6302,16 +2319,10 @@ def answered_absent(proc: subprocess.CompletedProcess) -> bool:
 def body_references(body: str) -> tuple[list[str], list[str]]:
     """The `uses:` refs and the claimed commits a description quotes, de-duplicated and sorted.
 
-    A commit counts only where a verb claims this branch carries it. A SHA mentioned without one
-    is a mention of history, of another repository, or of quoted output, and the corpus above says
-    that is what a description's SHAs almost always are.
-
-    Prose claims stay out for the same reason the free SHA scan did. Judging those needs a
-    similarity heuristic, which `spec/section-model.md` rejects.
-
-    A claimed SHA still has to carry a digit, as a backstop on the vocabulary above: `accede` and
-    `defaced` inflect into all-hex English words, so a verb this list gains later cannot start
-    reading one of them as a commit. It costs about one real SHA in a thousand.
+    A commit counts only where a verb claims this branch carries it, since a SHA otherwise mentions
+    history, another repository, or quoted output. Prose claims stay out, as judging them needs a
+    similarity heuristic. A claimed SHA must still carry a digit, so an all-hex English word such
+    as `accede` is never read as a commit.
     """
     uses = sorted({m.group("ref") for m in BODY_USES.finditer(body)})
     shas = sorted(
@@ -6325,12 +2336,7 @@ def body_references(body: str) -> tuple[list[str], list[str]]:
 
 
 def commit_state(owner: str, repo: str, sha: str, head: str) -> str:
-    """The empty string where `head` carries `sha`, `UNREAD` where nothing was read, else why not.
-
-    Ancestry rather than membership of the branch's own commits, so a description may cite a
-    commit it inherited from the base branch. GitHub reports the comparison from the base's side,
-    so `identical` and `ahead` are the two readings that say the head carries it.
-    """
+    """The empty string where `head` carries `sha`, `UNREAD` where nothing was read, else why not."""
     proc = gh_rest(f"repos/{owner}/{repo}/compare/{sha}...{head}", ".status")
     if proc.returncode == 0:
         status = proc.stdout.strip()
@@ -6347,17 +2353,10 @@ def commit_state(owner: str, repo: str, sha: str, head: str) -> str:
 def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] | None:
     """Which of `refs` appear anywhere in the tree at `head`, or None where nothing was read.
 
-    Read at the head commit rather than from a local checkout, because the branch being described
-    need not be fetched here and a working tree is not what a description is measured against.
-
-    The whole tree rather than a guessed set of workflow paths: this repo carries `uses:` lines in
-    catalog snippets and in documentation as well as under `.github/`, and a surface narrower than
-    the tree would report a ref as absent because it looked in the wrong place. One archive is
-    also one request, where walking a listing costs a request per file and grows with the repo.
+    Read at the head commit, since the branch need not be fetched here. The whole tree is searched,
+    since `uses:` lines also sit in catalog snippets and docs, and one archive is one request.
     """
-    # Read as bytes, so this cannot go through `gh_rest` and carries that helper's guards itself.
-    # An absent `gh` or a hung download reads as undecided, like every other unreadable answer.
-    # Raising instead would abort a run the caller is in the middle of.
+    # Read as bytes, so it carries its own guards and an absent `gh` or hung download reads as undecided.
     try:
         proc = subprocess.run(
             ["gh", "api", f"repos/{owner}/{repo}/tarball/{head}"],
@@ -6379,8 +2378,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
                 handle = archive.extractfile(member)
                 if handle is None:
                     continue
-                # Matched as bytes, so a file this cannot decode is searched rather than skipped.
-                # No encoding guess can then turn a present ref into an absent one.
+                # Matched as bytes, so an undecodable file is searched rather than skipped.
                 blob = handle.read()
                 found |= {r for r, n in needles.items() if r not in found and n in blob}
                 if len(found) == len(needles):
@@ -6422,8 +2420,7 @@ def check_claims(owner: str, repo: str, num: int) -> int:
     for line in stale:
         print(f"  {line}")
     if stale:
-        # Named as the description's problem rather than the branch's.
-        # The branch is the ground truth here, and the body is what drifted away from it.
+        # Named as the description's problem, since the branch is the ground truth.
         print(
             "status=DESCRIPTION_CONTRADICTS_ITS_BRANCH update the body to what the head tree "
             "carries, since a reference that resolves to nothing is caught by a reviewer or "
@@ -6442,1091 +2439,8 @@ def check_claims(owner: str, repo: str, num: int) -> int:
     return 0
 
 
-class CleanupUnread(Exception):
-    """A read `cleanup` needed did not produce an answer, reported at exit 2."""
-
-
-def cleanup_read(query: str, **variables: object) -> dict:
-    """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1.
-
-    `gh_graphql` exits 1 on a failed read, which is `cleanup`'s refusal code, so a read that could
-    not answer would be reported as a refusal the caller can act on.
-    """
-    try:
-        return shared.request(query, variables).data
-    except shared.GraphQLError as exc:
-        sys.stderr.write(exc.detail)
-        raise CleanupUnread(str(exc)) from exc
-
-
-def cleanup_rest(path: str, what: str) -> object:
-    """One REST read for `cleanup`, retried, raising with its stderr where nothing parsed."""
-    proc = reread(path, ".")
-    data = parsed_json(proc)
-    if data is None:
-        sys.stderr.write(proc.stderr)
-        raise CleanupUnread(f"the {what} read failed rc={proc.returncode} or printed no JSON")
-    return data
-
-
-def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
-    """The branch's ref node, or None where the branch does not exist.
-
-    The read is by exact qualified name, so a branch sharing a suffix never answers for it. The
-    node id it returns goes straight to the delete, so no caller ever holds one to mistype.
-    """
-    data = cleanup_read(Q_CLEANUP_REF, o=owner, r=repo, q=f"refs/heads/{branch}")
-    repository = data.get("repository")
-    if not isinstance(repository, dict):
-        raise CleanupUnread(f"{owner}/{repo} returned no repository for the ref read")
-    ref = repository.get("ref")
-    if ref is None:
-        return None
-    oid = (ref.get("target") or {}).get("oid") if isinstance(ref, dict) else None
-    if not isinstance(ref, dict) or not ref.get("id") or not oid:
-        raise CleanupUnread(f"the ref read for {branch!r} returned no id and tip: {ref!r}")
-    return ref
-
-
-def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
-    """What protects the branch, rulesets and classic protection alike, empty where nothing does.
-
-    The branch travels inside a REST path, so a name that would change the path is not read, and
-    an unread rule set is never reported as no rules.
-    """
-    if UNSAFE_REF.search(branch) or DOT_SEGMENT.search(branch):
-        raise CleanupUnread(
-            f"the head branch {branch!r} holds a character that changes a REST path, so the "
-            "rules applying to it cannot be read"
-        )
-    rules = cleanup_rest(f"repos/{owner}/{repo}/rules/branches/{branch}", "branch rules")
-    if not isinstance(rules, list) or not all(isinstance(r, dict) for r in rules):
-        raise CleanupUnread(f"the branch rules read returned no list of rules: {rules!r}"[:400])
-    found = [f"ruleset rule {r.get('type') or 'unnamed'}" for r in rules]
-    detail = cleanup_rest(f"repos/{owner}/{repo}/branches/{branch}", "branch protection")
-    protected = detail.get("protected") if isinstance(detail, dict) else None
-    if not isinstance(protected, bool):
-        raise CleanupUnread(f"the branch read returned no protected flag: {detail!r}"[:400])
-    if protected:
-        found.append("branch protection")
-    return found
-
-
-def in_repository(node: dict, owner: str, repo: str) -> bool:
-    """Whether a pull request's head lives in `owner/repo`, a fork's same-named branch being none."""
-    name = (node.get("headRepository") or {}).get("nameWithOwner") or ""
-    return name.lower() == f"{owner}/{repo}".lower()
-
-
-def local_heads(owner: str, repo: str, branch: str) -> list[object]:
-    """The number of each open pull request whose head is the branch in `owner/repo`.
-
-    The connection also holds forks' pull requests on a same-named branch. So every page is read
-    and filtered to this repository's own before anything is decided, and a fork's is never
-    counted. A page that does not answer, or one that cannot be followed to the next, raises rather
-    than reading as no pull request.
-    """
-
-    def fetch(cursor: str | None) -> dict:
-        extra = {"after": cursor} if cursor else {}
-        return cleanup_read(Q_CLEANUP_HEADS, o=owner, r=repo, b=branch, **extra)
-
-    numbers: list[object] = []
-    try:
-        for parent in shared.walk(fetch, ("repository", "heads"), strict_page=True):
-            nodes = parent["heads"].get("nodes")
-            if not isinstance(nodes, list) or not all(isinstance(n, dict) for n in nodes):
-                raise CleanupUnread(
-                    f"the open pull request read returned no heads list: {nodes!r}"[:400]
-                )
-            numbers += [n.get("number") for n in nodes if in_repository(n, owner, repo)]
-    except shared.GraphQLError as exc:
-        raise CleanupUnread(str(exc)) from exc
-    return numbers
-
-
-def branch_users(owner: str, repo: str, branch: str) -> list[str]:
-    """The open pull requests in this repository whose head or base is the branch.
-
-    Deleting a branch closes every open pull request headed on it. It retargets or closes the ones
-    based on it, so each is named where one exists. Every head is read, per `local_heads`. A base
-    past the twenty read is counted rather than named, every one being this repository's own. An
-    unanswered read is never reported as no pull request.
-    """
-    users = [f"#{number} (head)" for number in local_heads(owner, repo, branch)]
-    data = cleanup_read(Q_CLEANUP_BASES, o=owner, r=repo, b=branch)
-    repository = data.get("repository")
-    if not isinstance(repository, dict):
-        raise CleanupUnread(f"{owner}/{repo} returned no repository for the open pull request read")
-    found = repository.get("bases")
-    nodes = found.get("nodes") if isinstance(found, dict) else None
-    total = found.get("totalCount") if isinstance(found, dict) else None
-    if not isinstance(nodes, list) or not isinstance(total, int):
-        raise CleanupUnread(f"the open pull request read returned no bases list: {found!r}"[:400])
-    users += [f"#{n.get('number')} (base)" for n in nodes if isinstance(n, dict)]
-    if total > len(nodes):
-        users.append(f"{total - len(nodes)} more with the branch as base")
-    return users
-
-
-class CleanupPlan(NamedTuple):
-    branch: str
-    head: str
-    ref: dict | None
-
-
-def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
-    """Every read-only check on pull request `num` and its remote branch, with no write.
-
-    Raises `CleanupRefused` carrying the whole refusal text, and `CleanupUnread` on any
-    unanswered read. A branch anything protects is refused whatever that protection would allow.
-    The write guard's per-branch rule check never sees a delete made from inside this script.
-    """
-    target = f"{owner}/{repo}"
-    data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
-    repository = data.get("repository") or {}
-    pr = repository.get("pullRequest")
-    default = (repository.get("defaultBranchRef") or {}).get("name")
-    if not isinstance(pr, dict) or not default:
-        raise CleanupUnread(f"{target} #{num} returned no pull request or no default branch")
-    branch = pr.get("headRefName")
-    head = pr.get("headRefOid")
-    if not branch or not head:
-        raise CleanupUnread(f"{target} #{num} returned no head branch or head commit")
-    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or ""
-    refusals = []
-    if pr.get("merged") is not True:
-        refusals.append("the pull request is not merged")
-    if pr.get("baseRefName") != "develop":
-        refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
-    if head_repo.lower() != target.lower():
-        refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
-    if branch in ("develop", "main", default):
-        refusals.append(f"its head branch {branch!r} is a permanent branch")
-    if refusals:
-        raise CleanupRefused(
-            "REFUSED", f"nothing was deleted from {target} #{num}: {', and '.join(refusals)}"
-        )
-
-    ref = cleanup_ref(owner, repo, branch)
-    if ref is None:
-        return CleanupPlan(branch, head, None)
-    rules = branch_rules(owner, repo, branch)
-    if rules:
-        raise CleanupRefused(
-            "REFUSED",
-            f"nothing was deleted: {branch!r} on {target} is covered by "
-            f"{', '.join(rules)}, so its delete is the maintainer's call",
-        )
-    users = branch_users(owner, repo, branch)
-    if users:
-        raise CleanupRefused(
-            "REFUSED",
-            f"nothing was deleted: open pull requests use {branch!r} on {target}, "
-            f"{', '.join(users)}, and deleting it would close or retarget them",
-        )
-    tip = ref["target"]["oid"]
-    if tip != head:
-        raise CleanupRefused(
-            "TIP_MOVED",
-            f"nothing was deleted: {branch!r} on {target} is at {tip}, and #{num} merged "
-            f"{head}, so something reached the branch after the merge or the name was reused",
-        )
-    return CleanupPlan(branch, head, ref)
-
-
-def cleanup_fresh(owner: str, repo: str, plan: CleanupPlan) -> CleanupPlan:
-    """Read the remote branch again right before its delete, so the delete uses a fresh node id.
-
-    The checks and the local preflight take time, and another session may have pushed since.
-    """
-    if plan.ref is None:
-        return plan
-    ref = cleanup_ref(owner, repo, plan.branch)
-    if ref is None:
-        return CleanupPlan(plan.branch, plan.head, None)
-    tip = ref["target"]["oid"]
-    if tip != plan.head:
-        raise CleanupRefused(
-            "TIP_MOVED",
-            f"nothing was deleted: {plan.branch!r} on {owner}/{repo} is at {tip} just before "
-            f"its delete, and the pull request merged {plan.head}",
-        )
-    return CleanupPlan(plan.branch, plan.head, ref)
-
-
-def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
-    """Delete the remote branch `plan` verified and read it back.
-
-    A delete that reports a failure may still have landed, so the read back decides the outcome
-    either way.
-    """
-    target = f"{owner}/{repo}"
-    branch = plan.branch
-    if plan.ref is None:
-        print(f"status=ALREADY_GONE branch={branch} is not on {target}, so nothing was deleted")
-        return 0
-    tip = plan.ref["target"]["oid"]
-    print(f"deleting: {branch} on {target} at {tip}")
-    try:
-        response = shared.request(M_DELETE_REF, {"refId": plan.ref["id"]}).data
-        print(f"  response: {json.dumps(response)[:400]}")
-    except shared.GraphQLError as exc:
-        print(f"  the delete reported a failure: {exc}")
-        sys.stderr.write(exc.detail)
-    try:
-        after = cleanup_ref(owner, repo, branch)
-    except CleanupUnread as exc:
-        print(
-            f"status=DELETE_NOT_CONFIRMED the delete of {branch!r} on {target} was sent, and "
-            f"reading the ref back did not answer: {exc}"
-        )
-        return 2
-    if after is not None:
-        print(
-            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} still reads at "
-            f"{after['target']['oid']} after the delete"
-        )
-        return 2
-    print(f"status=DELETED branch={branch} oid={tip}, confirmed by reading the ref back")
-    return 0
-
-
-def _cleanup(owner: str, repo: str, num: int) -> int:
-    """The checks, the delete, and the read back, raising `CleanupUnread` on any unanswered read."""
-    try:
-        plan = cleanup_check(owner, repo, num)
-    except CleanupRefused as exc:
-        print(f"status={exc.status} {exc}")
-        return 1
-    return cleanup_remote_delete(owner, repo, plan)
-
-
-def cleanup_scope(owner: str, repo: str) -> int | None:
-    """The exit code where the write scope refuses or cannot be established, else None."""
-    ok, why = in_scope(owner)
-    if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was deleted: {why}")
-        return 64
-    try:
-        handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=f"{owner}/{repo}"))
-    except handoff.Refusal as exc:
-        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
-        return 1
-    except handoff.Execution as exc:
-        print(f"status=UNREAD nothing was deleted: {exc}")
-        return 2
-    return None
-
-
-def cleanup(owner: str, repo: str, num: int, checkout: str | None = None) -> int:
-    """Delete the head branch of merged pull request `num` once every check passes.
-
-    Returns 0 where the branch is deleted and confirmed gone, or is already gone, and 1 on a
-    refusal. Returns 2 where a read did not answer or the delete could not be confirmed. Returns
-    64 where the write scope `comment` and `reply` check excludes the target. Past that check,
-    the owner is bound to the fleet registry. The repository must be registered or a fork, by
-    `handoff.py`'s own write-scope check, reused rather than copied so the two cannot drift
-    apart. Its refusal text is printed as `handoff.py` words it.
-
-    With `checkout`, the local half follows a remote half that exited 0. The checkout and every
-    local refusal are judged before the remote delete. A local refusal then means nothing at all
-    was deleted, the remote branch included. A re-check after the delete can still refuse when a
-    concurrent session changed the branch or a worktree. The output then names what happened.
-    """
-    refused = cleanup_scope(owner, repo)
-    if refused is not None:
-        return refused
-    target = f"{owner}/{repo}"
-    primary = None
-    try:
-        if checkout is not None:
-            primary = cleanup_primary(checkout, target)
-        plan = cleanup_check(owner, repo, num)
-        if primary is not None:
-            cleanup_preflight(primary, plan.branch, plan.head)
-            cleanup_leave_branch(primary, plan.branch)
-            plan = cleanup_fresh(owner, repo, plan)
-    except CleanupRefused as exc:
-        if exc.status in ("REFUSED", "TIP_MOVED", "BAD_CHECKOUT"):
-            print(f"status={exc.status} {exc}")
-        else:
-            print(f"status={exc.status} nothing was deleted, remote branch included: {exc}")
-        return 1
-    except CleanupUnread as exc:
-        print(f"status=UNREAD nothing was deleted: {exc}")
-        return 2
-    code = cleanup_remote_delete(owner, repo, plan)
-    if code != 0 or primary is None:
-        return code
-    try:
-        return cleanup_local(primary, plan.branch, plan.head)
-    except CleanupRefused as exc:
-        print(f"status={exc.status} {exc}")
-        return 1
-    except CleanupUnread as exc:
-        print(f"status=UNREAD the local half stopped: {exc}")
-        return 2
-
-
-ON_WINDOWS = os.name == "nt"
-
-
-class CleanupRefused(Exception):
-    """A local check refused, carrying the `status=` name to print, reported at exit 1."""
-
-    def __init__(self, status: str, message: str) -> None:
-        super().__init__(message)
-        self.status = status
-
-
-class Worktree(NamedTuple):
-    path: str
-    head: str
-    branch: str | None
-    locked: bool
-    prunable: bool
-
-
-GITHUB_REMOTE = re.compile(
-    r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://[^@/]+@github\.com/|[^@/]+@github\.com:)"
-    r"([^/]+)/([^/]+?)(?:\.git)?/?$",
-    re.IGNORECASE,
-)
-
-
-def cleanup_git(
-    root: str, *args: str, ok: tuple[int, ...] = (0,)
-) -> subprocess.CompletedProcess[str]:
-    """One git call in `root` as an argv list, raising with its stderr on an unexpected code.
-
-    A return code the caller lists in `ok` is an answer it reads. Any other code is a call that
-    did not do what was asked, so it is shown and ends the step rather than swallowed.
-    """
-    try:
-        proc = subprocess.run(
-            ["git", "-C", root, *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            timeout=300,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CleanupUnread(f"`git {' '.join(args)}` did not run: {exc}") from exc
-    if proc.returncode not in ok:
-        sys.stderr.write(proc.stderr)
-        raise CleanupUnread(f"`git {' '.join(args)}` failed rc={proc.returncode}")
-    return proc
-
-
-def cleanup_primary(checkout: str, target: str) -> str:
-    """The real path of the primary checkout at `checkout`, refusing anything else.
-
-    A linked worktree is refused, since removing worktrees and moving branches belongs to the
-    clone that owns them. So is an origin naming another repository, since every local step
-    here derives from a pull request in `target`.
-    """
-    probe = cleanup_git(
-        checkout,
-        "rev-parse",
-        "--absolute-git-dir",
-        "--git-common-dir",
-        "--show-toplevel",
-        ok=(0, 128),
-    )
-    lines = probe.stdout.splitlines()
-    if probe.returncode != 0 or len(lines) != 3:
-        raise CleanupRefused("BAD_CHECKOUT", f"{checkout!r} is not a git checkout with a work tree")
-    git_dir, common, top = lines
-    if os.path.realpath(git_dir) != os.path.realpath(os.path.join(checkout, common)):
-        raise CleanupRefused(
-            "BAD_CHECKOUT", f"{checkout!r} is a linked worktree, not a primary one"
-        )
-    url = cleanup_git(top, "config", "--get", "remote.origin.url", ok=(0, 1)).stdout.strip()
-    found = GITHUB_REMOTE.match(url)
-    if found is None or f"{found[1]}/{found[2]}".lower() != target.lower():
-        shown = re.sub(r"//[^/@]*@", "//", url) or "unset"
-        raise CleanupRefused("BAD_CHECKOUT", f"origin of {top} is {shown}, not {target}")
-    return os.path.realpath(top)
-
-
-def cleanup_worktrees(primary: str) -> list[Worktree]:
-    """Every worktree git lists for the clone, the primary first."""
-    out = cleanup_git(primary, "worktree", "list", "--porcelain").stdout
-    trees = []
-    for block in out.split("\n\n"):
-        fields = dict(line.partition(" ")[::2] for line in block.splitlines())
-        if "worktree" not in fields:
-            continue
-        branch = fields.get("branch")
-        trees.append(
-            Worktree(
-                path=os.path.realpath(fields["worktree"]),
-                head=fields.get("HEAD", ""),
-                branch=branch.removeprefix("refs/heads/") if branch else None,
-                locked="locked" in fields,
-                prunable="prunable" in fields,
-            )
-        )
-    return trees
-
-
-def cleanup_tip(primary: str, ref: str) -> str | None:
-    """The commit `ref` names, or None where it does not exist."""
-    proc = cleanup_git(primary, "rev-parse", "--verify", "--quiet", ref, ok=(0, 1))
-    return proc.stdout.strip() or None
-
-
-def cleanup_dirty(path: str, untracked: bool) -> bool:
-    """Whether the work tree at `path` has changes, without refreshing its index.
-
-    `--no-optional-locks` keeps the read from rewriting the index, which would make an untouched
-    tree look touched to the age rule of `--sweep`.
-    """
-    flag = "--untracked-files=all" if untracked else "--untracked-files=no"
-    out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", flag).stdout
-    return bool(out.strip())
-
-
-IN_PROGRESS = (
-    "rebase-merge",
-    "rebase-apply",
-    "BISECT_LOG",
-    "MERGE_HEAD",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-)
-
-
-def cleanup_admin(path: str) -> str | None:
-    """The git directory holding the worktree at `path`'s state, or None where unreadable.
-
-    A linked worktree names it in its `.git` file, and a primary checkout's `.git` is it.
-    """
-    if os.path.isdir(os.path.join(path, ".git")):
-        return os.path.join(path, ".git")
-    try:
-        text = Path(path, ".git").read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    if not text.startswith("gitdir:"):
-        return None
-    return os.path.join(path, text.removeprefix("gitdir:").strip())
-
-
-def cleanup_in_progress(path: str) -> bool:
-    """Whether a rebase, bisect, merge, cherry-pick, or revert is paused in the worktree."""
-    admin = cleanup_admin(path)
-    return admin is not None and any(os.path.exists(os.path.join(admin, n)) for n in IN_PROGRESS)
-
-
-def cleanup_operation_names(path: str) -> set[str]:
-    """The branch names a rebase or bisect paused in the worktree at `path` is working on.
-
-    Either detaches HEAD, so the worktree no longer lists the branch it will return to.
-    """
-    admin = cleanup_admin(path)
-    names: set[str] = set()
-    if admin is None:
-        return names
-    for name in ("rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START"):
-        try:
-            text = Path(admin, name).read_text(encoding="utf-8").strip()
-        except OSError:
-            continue
-        names.add(text.removeprefix("refs/heads/"))
-    return names
-
-
-def cleanup_cwd_inside(path: str) -> bool:
-    """Whether this process's working directory is the worktree at `path` or inside it."""
-    try:
-        here = os.path.realpath(os.getcwd())
-    except OSError:
-        return False
-    return here == path or here.startswith(path + os.sep)
-
-
-def cleanup_remove_worktree(primary: str, path: str) -> bool:
-    """Remove the worktree at `path` without force and read the list back for it.
-
-    Returns whether this process was standing inside it. The process moves to the primary
-    checkout first. Windows cannot free a directory the parent shell holds, so callers refuse
-    there before the first removal.
-    """
-    inside = cleanup_cwd_inside(path)
-    if inside:
-        os.chdir(primary)
-    try:
-        cleanup_git(primary, "worktree", "remove", path)
-    except CleanupUnread:
-        if any(w.path == path for w in cleanup_worktrees(primary)):
-            raise
-        if os.path.exists(path):
-            raise CleanupUnread(f"git failed to remove {path}, which is unlisted but still on disk")
-        print(f"  git reported an error, yet {path} is no longer listed, so it is already gone")
-        return inside
-    if any(w.path == path for w in cleanup_worktrees(primary)):
-        raise CleanupUnread(f"the worktree {path} is still listed after its removal")
-    return inside
-
-
-def cleanup_moved_note() -> None:
-    print("  note: the shell's directory was that worktree and is gone, so change directory")
-
-
-def cleanup_delete_branch(primary: str, branch: str, tip: str) -> bool:
-    """Delete the local branch while it still names `tip`, and read it back.
-
-    Returns whether this call deleted it, False where it was already gone. The tip is read again
-    just before the delete. Git's own refusal then covers a branch that is checked out, being
-    rebased, or being bisected in any worktree. It is raised as a refusal.
-    """
-    ref = f"refs/heads/{branch}"
-    now = cleanup_tip(primary, ref)
-    if now is None:
-        return False
-    if now != tip:
-        raise CleanupRefused(
-            "LOCAL_TIP_MOVED", f"{ref} reads {now} just before its delete, and {tip} was expected"
-        )
-    proc = cleanup_git(primary, "branch", "-D", "--", branch, ok=(0, 1))
-    if proc.returncode != 0:
-        if cleanup_tip(primary, ref) is None:
-            return False
-        raise CleanupRefused("WORKTREE_KEPT", f"git kept {ref}: {proc.stderr.strip()}")
-    if cleanup_tip(primary, ref) is not None:
-        raise CleanupUnread(f"{ref} still exists after its delete")
-    return True
-
-
-def cleanup_base(primary: str, apply: bool = True) -> bool:
-    """Fast-forward the primary checkout to current `develop`, never reset, stash, or force.
-
-    Returns whether the clone is current, printing a status line for each way it is not. A clone
-    on another branch, with tracked changes, or that cannot fast-forward is left alone. No
-    outcome here is an error, so callers report it and never fail a run on it. Without `apply`
-    it only reports the fast-forward it would make.
-    """
-    try:
-        current = cleanup_git(primary, "symbolic-ref", "--quiet", "--short", "HEAD", ok=(0, 1))
-        on = current.stdout.strip()
-        if on != "develop":
-            print(f"keep base-not-on-develop {primary} is on {on or 'a detached head'}")
-            return False
-        if cleanup_dirty(primary, False):
-            print(f"status=BASE_DIRTY {primary} has tracked changes, so it was left where it is")
-            return False
-        behind = cleanup_git(
-            primary, "merge-base", "--is-ancestor", "HEAD", "origin/develop", ok=(0, 1)
-        )
-        if behind.returncode == 1:
-            print(f"status=BASE_NOT_FF develop in {primary} cannot fast-forward to origin/develop")
-            return False
-        if not apply and cleanup_tip(primary, "HEAD") != cleanup_tip(
-            primary, "refs/remotes/origin/develop"
-        ):
-            print(f"would-fast-forward develop in {primary}")
-            return True
-        if apply:
-            try:
-                cleanup_git(primary, "merge", "--ff-only", "origin/develop")
-            except CleanupUnread:
-                if cleanup_tip(primary, "HEAD") != cleanup_tip(
-                    primary, "refs/remotes/origin/develop"
-                ):
-                    raise
-    except CleanupUnread as exc:
-        print(f"status=BASE_UNREAD develop in {primary} could not be brought current: {exc}")
-        return False
-    print(f"  develop in {primary} is at origin/develop")
-    return True
-
-
-def cleanup_behind(primary: str, tip: str, head: str) -> bool:
-    """Whether commit `tip` is an ancestor of `head`, so it holds nothing `head` lacks.
-
-    A `head` object this clone lacks proves nothing, and reads as not behind.
-    """
-    proc = cleanup_git(primary, "merge-base", "--is-ancestor", tip, head, ok=(0, 1, 128))
-    return proc.returncode == 0
-
-
-def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None, list[Worktree]]:
-    """Fetch, then decide every local refusal, returning the branch tip and the worktrees to remove.
-
-    Nothing is removed here, so a refusal leaves all of it in place. `head` is the commit the
-    merged pull request carried, read live by the remote half.
-    """
-    cleanup_git(primary, "fetch", "--prune", "origin")
-    ref = f"refs/heads/{branch}"
-    tip = cleanup_tip(primary, ref)
-    if tip is not None and tip != head and not cleanup_behind(primary, tip, head):
-        raise CleanupRefused(
-            "LOCAL_TIP_MOVED",
-            f"{ref} is at {tip}, which is neither the merged head {head} nor behind it, "
-            "so it may carry commits that were never pushed",
-        )
-    mirror = cleanup_tip(primary, f"refs/remotes/origin/{branch}")
-    if mirror is not None and mirror != head:
-        raise CleanupRefused(
-            "TIP_MOVED",
-            f"nothing was deleted: origin/{branch} is at {mirror}, and the pull request merged "
-            f"{head}, so something reached the branch after the merge",
-        )
-    linked = []
-    trees = cleanup_worktrees(primary)
-    others = [w for w in trees if w.path != primary]
-    for w in trees:
-        if not w.prunable and branch in cleanup_operation_names(w.path):
-            raise CleanupRefused(
-                "WORKTREE_KEPT", f"{w.path} has a rebase or bisect in progress on {branch!r}"
-            )
-    holds = any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary))
-    if holds and cleanup_in_progress(primary):
-        raise CleanupRefused(
-            "WORKTREE_KEPT", f"{primary} has a merge, cherry-pick, revert, or bisect in progress"
-        )
-    if holds and cleanup_dirty(primary, False):
-        raise CleanupRefused(
-            "BASE_DIRTY", f"{primary} has {branch!r} checked out with tracked changes"
-        )
-    for w in (w for w in others if w.branch == branch):
-        why = (
-            "it is locked"
-            if w.locked
-            else "a rebase, bisect, merge, cherry-pick, or revert is in progress in it"
-            if cleanup_in_progress(w.path)
-            else "it holds submodules, which only git's own check may remove"
-            if os.path.exists(os.path.join(w.path, ".gitmodules"))
-            else "run from a directory outside it, such as the base clone"
-            if ON_WINDOWS and cleanup_cwd_inside(w.path)
-            else None
-        )
-        if why is not None:
-            raise CleanupRefused("WORKTREE_KEPT", f"{w.path}, {why}")
-        if not w.prunable and cleanup_dirty(w.path, True):
-            raise CleanupRefused("WORKTREE_DIRTY", f"{w.path} has uncommitted changes")
-        linked.append(w)
-    return tip, linked
-
-
-def cleanup_leave_branch(primary: str, branch: str) -> None:
-    """Move the primary checkout to `develop` where it holds `branch`, refusing if git will not.
-
-    This runs before the remote delete, so a checkout that fails still deletes nothing.
-    """
-    if not any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
-        return
-    try:
-        cleanup_git(primary, "checkout", "develop")
-    except CleanupUnread as exc:
-        raise CleanupRefused(
-            "WORKTREE_KEPT", f"{primary} could not leave {branch}, so the branch was kept"
-        ) from exc
-    print(f"  switched {primary} off {branch} to develop")
-
-
-def cleanup_local(primary: str, branch: str, head: str) -> int:
-    """Remove the finished branch's worktrees and local branch, then return the base clone.
-
-    The refusals are decided again before the first removal, so a refused run leaves all of it
-    in place. The base clone's return is reported and never fails the run. The local branch is
-    deleted only at `head` or an ancestor of it, after a tip re-read shows it unchanged.
-    """
-    try:
-        tip, linked = cleanup_preflight(primary, branch, head)
-    except CleanupRefused as exc:
-        raise CleanupRefused(exc.status, f"nothing local was removed: {exc}") from exc
-    for w in linked:
-        moved = cleanup_remove_worktree(primary, w.path)
-        print(f"  removed worktree {w.path}")
-        if moved:
-            cleanup_moved_note()
-    if tip is None:
-        print(f"  local branch {branch} is already gone")
-    else:
-        try:
-            deleted = cleanup_delete_branch(primary, branch, tip)
-        except CleanupUnread as exc:
-            print(f"status=LOCAL_DELETE_NOT_CONFIRMED {exc}")
-            return 2
-        if deleted:
-            print(f"  deleted local branch {branch} at {tip}, confirmed by reading the ref back")
-        else:
-            print(f"  local branch {branch} is already gone")
-    current = cleanup_base(primary)
-    try:
-        first = cleanup_git(primary, "status", "--short", "--branch").stdout.splitlines()[:1]
-        print(f"  {first[0] if first else 'status unavailable'}")
-    except CleanupUnread:
-        print("  status unavailable")
-    try:
-        print(f"  worktrees listed: {len(cleanup_worktrees(primary))}")
-    except CleanupUnread:
-        print("  worktrees listed: unavailable")
-    base = "current" if current else "kept"
-    print(f"status=CLEANED branch={branch} oid={head} locally, base={base}")
-    return 0
-
-
-class CleanupSweep:
-    """One pass over a clone's worktrees and local branches, removing what is provably finished.
-
-    Nothing here is a failure unless a read did not answer or a removal could not be confirmed.
-    `problems` counts those, so the run continues with the other items and still exits 2.
-    """
-
-    def __init__(self, owner: str, repo: str, primary: str, apply: bool, min_age: float) -> None:
-        self.owner = owner
-        self.repo = repo
-        self.target = f"{owner}/{repo}"
-        self.primary = primary
-        self.apply = apply
-        self.min_age = min_age
-        self.problems = 0
-        self.permanent = {"develop", "main"}
-        self.common = ""
-        self.operating: set[str] = set()
-
-    def keep(self, reason: str, what: str) -> None:
-        print(f"keep {reason} {what}")
-
-    def failed(self, what: str, exc: CleanupUnread) -> None:
-        self.problems += 1
-        print(f"unread {what}: {exc}")
-
-    def newest_hours(self, paths: list[str]) -> float:
-        """Hours since the newest mtime among `paths`, infinite where none can be read."""
-        stamps = []
-        for path in paths:
-            try:
-                stamps.append(os.stat(path).st_mtime)
-            except OSError:
-                continue
-        return float("inf") if not stamps else (time.time() - max(stamps)) / 3600
-
-    def worktree_hours(self, w: Worktree) -> float | None:
-        """The idle hours of a linked worktree, or None where its admin directory is unreadable.
-
-        Taken before any status runs on it, and from the admin files git itself writes on use.
-        The directory's own mtime moves only when an entry is added or removed.
-        """
-        admin = cleanup_admin(w.path)
-        if admin is None:
-            return None
-        files = [os.path.join(admin, n) for n in ("HEAD", "index", os.path.join("logs", "HEAD"))]
-        return self.newest_hours([w.path, *files])
-
-    def finished(self, branch: str, tip: str) -> tuple[str, int | None] | None:
-        """How `branch` at `tip` is known finished, with the develop pull request's number if any.
-
-        A merged pull request counts only from a head in this repository whose last commit is
-        `tip`. A reused branch name or a later commit then never rides on an old merge.
-        """
-        data = cleanup_read(Q_SWEEP_MERGED, o=self.owner, r=self.repo, b=branch)
-        found = ((data.get("repository") or {}).get("merged")) or {}
-        nodes = found.get("nodes")
-        total = found.get("totalCount")
-        if not isinstance(nodes, list) or not isinstance(total, int) or total > len(nodes):
-            raise CleanupUnread(f"the merged pull request read for {branch!r} was incomplete")
-        matches = [
-            n
-            for n in nodes
-            if isinstance(n, dict)
-            and in_repository(n, self.owner, self.repo)
-            and (
-                n.get("headRefOid") == tip
-                or cleanup_behind(self.primary, tip, n.get("headRefOid") or "")
-            )
-        ]
-        matches.sort(key=lambda n: n.get("baseRefName") != "develop")
-        if matches:
-            num = matches[0].get("number")
-            return f"merged PR #{num}", num if matches[0].get("baseRefName") == "develop" else None
-        for upstream in ("origin/develop", "origin/main"):
-            if cleanup_behind(self.primary, tip, f"refs/remotes/{upstream}"):
-                return f"contained in {upstream}", None
-        return None
-
-    def remote(self, num: int | None, branch: str) -> None:
-        """Report, or with `apply` run, the remote half for a merged develop pull request.
-
-        The remote half makes its own checks, so its refusal keeps only the remote branch. A
-        report runs those same checks and writes nothing.
-        """
-        if num is None:
-            return
-        if not self.apply:
-            try:
-                plan = cleanup_check(self.owner, self.repo, num)
-            except CleanupRefused as exc:
-                print(f"keep-remote via #{num}: {exc}")
-            except CleanupUnread as exc:
-                self.failed(f"remote branch of #{num}", exc)
-            else:
-                if plan.ref is None:
-                    print(f"remote already gone {branch} via #{num}")
-                else:
-                    print(f"would-remove remote branch {branch} via #{num}")
-            return
-        print(f"  remote half of #{num}:")
-        try:
-            code = _cleanup(self.owner, self.repo, num)
-        except CleanupUnread as exc:
-            self.failed(f"remote branch of #{num}", exc)
-            return
-        if code == 2:
-            self.problems += 1
-        elif code != 0:
-            print(f"kept-remote #{num}, the local removal stands")
-
-    def run(self) -> int:
-        cleanup_git(self.primary, "fetch", "--prune", "origin")
-        found = cleanup_read(Q_SWEEP_DEFAULT, o=self.owner, r=self.repo)
-        default = ((found.get("repository") or {}).get("defaultBranchRef") or {}).get("name")
-        if not default:
-            raise CleanupUnread(f"{self.target} returned no default branch")
-        self.permanent.add(default)
-        self.common = os.path.realpath(
-            os.path.join(
-                self.primary,
-                cleanup_git(self.primary, "rev-parse", "--git-common-dir").stdout.strip(),
-            )
-        )
-        trees = cleanup_worktrees(self.primary)
-        linked = [w for w in trees if w.path != self.primary]
-        for w in trees:
-            if w.path == self.primary and w.branch:
-                self.permanent.add(w.branch)
-        for w in trees:
-            if not w.prunable:
-                self.operating |= cleanup_operation_names(w.path)
-        pruned = self.prune([w for w in linked if w.prunable and not w.locked])
-        held = {w.branch for w in trees if w.branch and w.path not in pruned}
-        for w in linked:
-            if not w.prunable or w.locked:
-                self.linked(w)
-        listed = cleanup_git(
-            self.primary, "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/heads/"
-        ).stdout.splitlines()
-        for line in listed:
-            name, _, tip = line.partition("\0")
-            branch = name.removeprefix("refs/heads/")
-            if branch not in held and branch not in self.permanent:
-                self.loose(branch, tip)
-        self.base()
-        return 2 if self.problems else 0
-
-    def prune(self, stale: list[Worktree]) -> set[str]:
-        """Prune the entries whose directory is gone and whose record is old enough.
-
-        Returns the paths pruned, or under a report the paths a prune would remove, so their
-        branches are no longer held and are judged as loose branches in the same run.
-        """
-        old = []
-        for w in stale:
-            hours = self.entry_hours(w)
-            if hours < self.min_age:
-                self.keep("too-recent", f"prunable worktree entry {w.path} idle {hours:.1f}h")
-            else:
-                old.append(w)
-        if not old:
-            return set()
-        if not self.apply:
-            for w in old:
-                print(f"would-remove prunable worktree entry {w.path}")
-            return {w.path for w in old}
-        expire = f"{int(self.min_age * 3600)}.seconds.ago"
-        try:
-            cleanup_git(self.primary, "worktree", "prune", "--expire", expire)
-            left = {w.path for w in cleanup_worktrees(self.primary)}
-        except CleanupUnread as exc:
-            self.failed("prunable worktree entries", exc)
-            return set()
-        for w in old:
-            if w.path in left:
-                self.problems += 1
-                print(f"unread prunable worktree entry {w.path} is still listed after the prune")
-            else:
-                print(f"removed prunable worktree entry {w.path}")
-        return {w.path for w in old if w.path not in left}
-
-    def entry_hours(self, w: Worktree) -> float:
-        """The idle hours of a missing worktree's record, from the `index` file prune reads.
-
-        Git prunes by the age of that file, and by nothing once it is gone. An entry this cannot
-        match reads as brand new, so it is kept.
-        """
-        base = os.path.join(self.common, "worktrees")
-        try:
-            names = os.listdir(base)
-        except OSError:
-            return 0.0
-        for name in names:
-            try:
-                text = Path(base, name, "gitdir").read_text(encoding="utf-8").strip()
-            except OSError:
-                continue
-            if os.path.realpath(os.path.dirname(os.path.join(base, name, text))) == w.path:
-                return self.newest_hours([os.path.join(base, name, "index")])
-        return 0.0
-
-    def linked(self, w: Worktree) -> None:
-        what = f"worktree {w.path}" + (f" branch={w.branch}" if w.branch else " detached")
-        try:
-            if w.locked:
-                self.keep("locked", what)
-                return
-            if cleanup_in_progress(w.path):
-                self.keep("in-progress-operation", what)
-                return
-            if os.path.exists(os.path.join(w.path, ".gitmodules")):
-                self.keep("submodules", what)
-                return
-            if ON_WINDOWS and cleanup_cwd_inside(w.path):
-                self.keep("cwd-inside", what)
-                return
-            if w.branch in self.permanent:
-                self.keep("permanent-branch", what)
-                return
-            if w.branch in self.operating:
-                self.keep("in-progress-operation", what)
-                return
-            hours = self.worktree_hours(w)
-            if hours is None:
-                self.keep("age-unreadable", what)
-                return
-            if hours < self.min_age:
-                self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
-                return
-            if cleanup_dirty(w.path, True):
-                self.keep("dirty", what)
-                return
-            if w.branch is None:
-                return self.detached(w, what)
-            tip = cleanup_tip(self.primary, f"refs/heads/{w.branch}")
-            if tip is None:
-                self.keep("branch-unreadable", what)
-                return
-            done = self.finished(w.branch, tip)
-            if done is None:
-                self.keep("unmerged-commits", what)
-                return
-            evidence, num = done
-            line = f"{what} tip={tip} evidence={evidence}"
-            if not self.apply:
-                print(f"would-remove {line}")
-                self.remote(num, w.branch)
-                return
-            if cleanup_remove_worktree(self.primary, w.path):
-                cleanup_moved_note()
-            print(f"removed worktree {w.path}")
-            try:
-                deleted = cleanup_delete_branch(self.primary, w.branch, tip)
-            except CleanupRefused as exc:
-                print(f"kept branch {w.branch} after removing its worktree: {exc}")
-                return
-            if deleted:
-                print(f"removed branch {w.branch} tip={tip} evidence={evidence}")
-            else:
-                print(f"branch {w.branch} was already gone")
-            self.remote(num, w.branch)
-        except CleanupUnread as exc:
-            self.failed(what, exc)
-
-    def detached(self, w: Worktree, what: str) -> None:
-        contained = cleanup_git(
-            self.primary,
-            "for-each-ref",
-            "--contains",
-            w.head,
-            "refs/remotes/origin",
-            "--count=1",
-            "--format=%(refname)",
-        ).stdout.strip()
-        if not contained:
-            self.keep("unpushed-commits", what)
-            return
-        if not self.apply:
-            print(f"would-remove {what} head={w.head} evidence=contained in {contained}")
-            return
-        if cleanup_remove_worktree(self.primary, w.path):
-            cleanup_moved_note()
-        print(f"removed worktree {w.path} head={w.head} evidence=contained in {contained}")
-
-    def loose(self, branch: str, tip: str) -> None:
-        """A local branch no worktree holds, judged by the age of its reflog."""
-        what = f"branch {branch}"
-        try:
-            if branch in self.operating:
-                self.keep("in-progress-operation", what)
-                return
-            log = os.path.join(self.common, "logs", "refs", "heads", branch)
-            if not os.path.exists(log):
-                self.keep("age-unreadable", what)
-                return
-            hours = self.newest_hours([log])
-            if hours < self.min_age:
-                self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
-                return
-            done = self.finished(branch, tip)
-            if done is None:
-                self.keep("unmerged-commits", what)
-                return
-            evidence, num = done
-            if not self.apply:
-                print(f"would-remove {what} tip={tip} evidence={evidence}")
-                self.remote(num, branch)
-                return
-            if cleanup_delete_branch(self.primary, branch, tip):
-                print(f"removed {what} tip={tip} evidence={evidence}")
-            else:
-                print(f"{what} was already gone")
-            self.remote(num, branch)
-        except CleanupRefused as exc:
-            reason = "tip-moved" if exc.status == "LOCAL_TIP_MOVED" else "checked-out-elsewhere"
-            self.keep(reason, f"{what}: {exc}")
-        except CleanupUnread as exc:
-            self.failed(what, exc)
-
-    def base(self) -> None:
-        """Return the primary checkout to current `develop`, reporting what it could not do."""
-        cleanup_base(self.primary, self.apply)
-
-
-def cleanup_sweep(owner: str, repo: str, checkout: str, apply: bool, min_age: float) -> int:
-    """Report, or with `apply` remove, the clone's worktrees and branches that are provably done.
-
-    Exits 0 where the pass completed. Exits 2 where a read did not answer or a removal could
-    not be confirmed, the other items having been tried either way.
-    """
-    refused = cleanup_scope(owner, repo)
-    if refused is not None:
-        return refused
-    try:
-        primary = cleanup_primary(checkout, f"{owner}/{repo}")
-        sweep = CleanupSweep(owner, repo, primary, apply, min_age)
-        code = sweep.run()
-    except CleanupRefused as exc:
-        print(f"status={exc.status} nothing was removed: {exc}")
-        return 1
-    except CleanupUnread as exc:
-        print(f"status=UNREAD the sweep stopped: {exc}")
-        return 2
-    mode = "removed" if apply else "reported only, pass --apply to remove"
-    print(f"status=SWEPT {mode}, problems={sweep.problems}")
-    return code
-
-
 def utf8_console() -> None:
-    """Write the console streams as UTF-8, whatever the host code page is.
-
-    Reviewer-authored text carries characters such as emoji badges, which a Windows ANSI code
-    page cannot encode. A stream without `reconfigure` is one a test harness substituted.
-    """
+    """Write the console streams as UTF-8, whatever the host code page is."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
@@ -7534,17 +2448,24 @@ def utf8_console() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("first", nargs="?")
+    for flag in ("--repo", "--checkout", "--min-age-hours"):
+        pre.add_argument(flag)
+    if pre.parse_known_args(args)[0].first == "cleanup":
+        import pr_cleanup
+
+        rest = list(args)
+        rest.remove("cleanup")
+        return pr_cleanup.main(rest)
     utf8_console()
     ap = argparse.ArgumentParser()
-    sweeping = "--sweep" in (sys.argv[1:] if argv is None else argv)
     ap.add_argument(
         "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
     )
-    ap.add_argument("number", type=int, nargs="?" if sweeping else None)
-    # No default, because the wrong repository is the failure this argument has actually had.
-    # A default names one repository, and every run from elsewhere silently reads that one.
-    # The number resolves there, the digest renders, and nothing in the output disagrees.
-    # Two runs read a pull request here while one in their own repository was the subject.
+    ap.add_argument("number", type=int, nargs="?")
+    # No default, because a default names one repository and every run from elsewhere would read that one.
     ap.add_argument(
         "--repo",
         required=True,
@@ -7601,8 +2522,7 @@ def main(argv: list[str] | None = None) -> int:
         "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
         "unchanged from before this flag existed)",
     )
-    # `reply` takes the finding's words rather than its id.
-    # There is deliberately no argument an id fits in, so the caller never holds one to mistype.
+    # `reply` takes the finding's words, and there is no argument an id fits in.
     ap.add_argument(
         "--match",
         metavar="TEXT",
@@ -7635,31 +2555,10 @@ def main(argv: list[str] | None = None) -> int:
         "--checkout",
         metavar="DIR",
         help="attest: the checkout holding the pull request's head and its recorded local pass "
-        "(default the current directory), cleanup: the primary clone whose worktree, local "
-        "branch, and base are cleaned after the remote branch, and the one `--sweep` cleans",
+        "(default the current directory)",
     )
-    ap.add_argument(
-        "--sweep",
-        action="store_true",
-        help="cleanup: take no pull request, and report the finished worktrees and branches of "
-        "--checkout",
-    )
-    ap.add_argument(
-        "--apply",
-        action="store_true",
-        help="cleanup --sweep: remove what the report lists, including the remote head branch "
-        "of a merged develop pull request, through the same checks as `cleanup <n>`",
-    )
-    ap.add_argument(
-        "--min-age-hours",
-        type=float,
-        default=None,
-        help="cleanup --sweep: hours an item must sit untouched before it is eligible (default 24)",
-    )
-    a = ap.parse_args(argv)
-    # Named for the command they belong to, since one silently ignored reads as one that took effect.
-    # A `status` given --body reports a clean digest and writes nothing.
-    # Nothing in that output says the reply never happened.
+    a = ap.parse_args(args)
+    # Named for the command they belong to, since an ignored flag reads as one that took effect.
     reply_only = {
         "--match": a.match,
         "--path": a.path,
@@ -7672,20 +2571,12 @@ def main(argv: list[str] | None = None) -> int:
                 ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
     if a.cmd != "wait" and a.request:
         ap.error(f"--request belongs to `wait`, not `{a.cmd}`")
-    if a.cmd not in ("attest", "cleanup") and a.checkout is not None:
+    if a.cmd == "cleanup":
+        ap.error("`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`")
+    if a.cmd != "attest" and a.checkout is not None:
         ap.error(f"--checkout belongs to `attest` or `cleanup`, not `{a.cmd}`")
-    if a.cmd != "cleanup" and a.sweep:
-        ap.error(f"--sweep belongs to `cleanup`, not `{a.cmd}`")
-    if a.number is None and not a.sweep:
+    if a.number is None:
         ap.error("the following arguments are required: number")
-    if a.sweep and a.number is not None:
-        ap.error("--sweep takes no pull request number")
-    if a.sweep and a.checkout is None:
-        ap.error("--sweep requires --checkout, the primary clone it sweeps")
-    if not a.sweep and (a.apply or a.min_age_hours is not None):
-        ap.error("--apply and --min-age-hours belong to `cleanup --sweep`")
-    if a.min_age_hours is not None and a.min_age_hours < 0:
-        ap.error("--min-age-hours cannot be negative")
     if a.cmd not in ("comment", "reply") and a.body is not None:
         ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
     required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
@@ -7700,14 +2591,11 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--pickup-grace cannot be negative")
     if a.min_rounds < 0:
         ap.error("--min-rounds cannot be negative")
-    # A negative threshold reports every check in that state, on every run, from the first read.
-    # A field that fires always is one a reader learns to skip, which costs the real case.
+    # A negative threshold would report every check in that state on every run.
     for name in ("check_grace", "check_stall"):
         if getattr(a, name) < 0:
             ap.error(f"--{name.replace('_', '-')} cannot be negative")
     # The two thresholds mean opposite things and the readings invert if the order does.
-    # A stall under the grace reports a running check before it would report a starved one.
-    # A case held the constants ordered while the flags could still be passed either way.
     if a.check_grace >= a.check_stall:
         ap.error(
             "--check-grace must be less than --check-stall, since a queued check is "
@@ -7722,14 +2610,6 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "claims":
         return check_claims(owner, repo, a.number)
 
-    if a.cmd == "cleanup" and a.sweep:
-        return cleanup_sweep(
-            owner, repo, a.checkout, a.apply, 24.0 if a.min_age_hours is None else a.min_age_hours
-        )
-
-    if a.cmd == "cleanup":
-        return cleanup(owner, repo, a.number, a.checkout)
-
     if a.cmd == "attest":
         return attest(owner, repo, a.number, a.checkout or ".")
 
@@ -7737,20 +2617,18 @@ def main(argv: list[str] | None = None) -> int:
         return comment_on_pr(owner, repo, a.number, a.body)
 
     if a.cmd == "status":
-        # One payload renders the digest and decides the code, for the reason `wait` reads one.
-        # Fetched twice, a round landing between them prints one pull request and grades another.
+        # One payload renders the digest and decides the code, as in `wait`.
         pr = full_read(owner, repo, a.number)
         out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
         print(out)
-        return report_verdict(pr, owner, repo)
+        return report_verdict(pr)
 
     if a.cmd == "reply":
         return reply_to_thread(
             owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
         )
 
-    # `wait` mutates through the auto-request below, so it refuses a cross-owner target the way `comment` and `reply` do.
-    # The policy is that a cross-owner target is not touched at all, so the refusal precedes the reading half too.
+    # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     ok, why = in_scope(owner)
     if not ok:
         print(f"status=OUT_OF_SCOPE nothing was written: {why}")
@@ -7765,15 +2643,12 @@ def main(argv: list[str] | None = None) -> int:
         if refusing_review(full) and not reviewed_head(full):
             a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
             done = False
-    # Read whenever nothing has landed on this pull request yet, whether or not a request is already outstanding.
-    # An already-pending request drawing no answer at all is exactly the shape a repo-wide quota exhaustion leaves, measured over the six consecutive pull requests that followed a refusal and carried no Copilot activity at all.
-    # The bot id for a fresh request comes from this same traversal, so a caller needing either pays for one call rather than two.
+    # Read whenever nothing has landed yet, since a pending request with no answer is the shape repo-wide quota exhaustion leaves.
+    # The bot id for a fresh request comes from the same traversal.
     history = [] if done or answer or drift else copilot_history(owner, repo)
     snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
-    # `--ignore-quota-signal` only changes whether the signal below is acted on.
-    # It does not change whether the history is read, since the auto-request line still needs it for the bot id regardless.
-    # Read from the same, unfiltered history rather than one that drops this pull request's own entries: a genuine review on an earlier head of this same pull request, superseded since by a push, is real evidence about the account and not a self-reference to discard.
-    # A refusal on this pull request's own current head still never reaches this signal, since it is caught directly and at higher priority first.
+    # `--ignore-quota-signal` changes only whether the signal is acted on, not whether the history is read.
+    # The history is unfiltered, so a review on an earlier head of this pull request counts as evidence.
     signal = None if a.ignore_quota_signal else quota_signal(history)
     quota_stop = (
         None if not signal or snapshot is None else standing_quota(history, snapshot, a.number)
@@ -7788,9 +2663,8 @@ def main(argv: list[str] | None = None) -> int:
         and holds(snapshot)
         and (not answer or attested(snapshot))
     )
-    # Request before the first poll, not just at the call site: a caller expects `wait` to make a review happen, not merely to watch for one.
-    # Two prior gaps this closed, a push superseding an already-answered request and an auto-seed that never fired, both left nothing outstanding for the loop below to ever see land.
-    # Skipped once a review past --min-rounds already covers the head, once Copilot has already answered outside a formal review, or once something is already in the request set, so a second `wait` on the same PR never double-requests.
+    # Request before the first poll, so `wait` makes a review happen rather than only watching for one.
+    # Skipped once a round past --min-rounds covers the head, Copilot answered outside a review, or a request is pending.
     recorded: bool | None = None
     final: dict | None = None
     if (
@@ -7843,7 +2717,6 @@ def main(argv: list[str] | None = None) -> int:
             return (
                 holds(polled)
                 and local_cover(polled)
-                and not unrecognized_shapes(polled)
                 and held_checks_open(
                     polled,
                     check_nodes(polled),
@@ -7874,9 +2747,7 @@ def main(argv: list[str] | None = None) -> int:
             "once the limit is believed to have reset."
         )
     elif quota_stop and not reviewer_requested(pr):
-        # The poll below is skipped rather than shortened, because there is nothing partial about this signal.
-        # The reviewer's own most recent word anywhere in the repository is the account quota, and nothing has answered it since.
-        # Polling this pull request's own silence for up to 45 minutes would only relearn that same account state a call late.
+        # The poll is skipped rather than shortened, since the account quota is not answered by this pull request's silence.
         number, hist_refusal = quota_stop
         print(
             f"note: the reviewer's own most recent activity anywhere in this repository, on "
@@ -7894,15 +2765,10 @@ def main(argv: list[str] | None = None) -> int:
             a.timeout,
         )
 
-    # One payload decides the digest and the exit code together.
-    # Read separately, a review landing between them prints coverage and returns a timeout code.
-    # A reader resolves that by believing the code, dropping the review it was just shown.
-    # The digest also earns its call at the timeout.
-    # A bare PENDING line reports a broken wait and a slow reviewer identically.
+    # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
     now = datetime.now(UTC)
-    # Parsed here and handed down, so the digest and the exit code share one read of the rollup.
-    # Deriving the stuck shapes from that list costs no parse, which is what was doubled.
+    # Parsed here and handed down so the digest and the exit code share one read of the rollup.
     checks = check_nodes(final)
     stuck = checks_stuck(checks, now, a.check_grace, a.check_stall)
     out, _ = digest(
@@ -7917,22 +2783,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(out)
     print(f"waited={int(time.monotonic() - start)}s")
-    # The shape reading comes first and is not gated on coverage of the head.
-    # `reviewed_head` is itself one of the readings a drift breaks.
-    # A renamed login matches no filter here, so it reads as no review at all.
-    # Every arm below then reports a review that landed as a pending one.
-    # Gating the verdict behind it left the login check unable to reach an exit code.
-    # The digest above printed `shapes=UNRECOGNIZED` the whole time it did so.
-    # Coverage of the head is the other half, returning 0 only once the diff is covered too.
+    # A stuck required check decides the code only once the review itself is sound.
     held = held and holds(final)
     covered = held and local_cover(final)
     halted = None if a.ignore_quota_signal else stopping_refusal(final)
-    if (
-        unrecognized_shapes(final)
-        or covered
-        or (not halted and head_review_done(final, a.min_rounds))
-    ):
-        verdict = report_verdict(final, owner, repo)
+    if covered or (not halted and head_review_done(final, a.min_rounds)):
+        verdict = report_verdict(final)
         if verdict == 50 and checks_settling(checks, now, a.check_grace, a.check_stall):
             print(
                 "note: a check on this head has not concluded, and this wait returns 50 at once "
@@ -7941,10 +2797,6 @@ def main(argv: list[str] | None = None) -> int:
                 f"`timeout 1800 gh pr checks {a.number} --repo {owner}/{repo} --watch`, then run "
                 "status"
             )
-        # The check reading ranks under both of those, and never replaces either.
-        # An unreadable shape means no field here can be believed, this one included.
-        # A partial round means the diff is part-reviewed, which outranks a wedged gate.
-        # Only once the review itself is sound does a stuck required check decide the code.
         if verdict:
             return verdict
         if covered and held_checks_open(
@@ -7958,26 +2810,14 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
                 "timeout a check had not concluded, none had posted, a check the base branch "
-                "requires had not registered or came from another app, or the merge was still UNKNOWN, so the merge is "
-                "not ready yet: wait again, or read the checks above"
+                "requires had not registered or came from another app, or the merge was still "
+                "UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
                 + _unmet_note(required_for(final, owner, repo), checks)
             )
             return 30
-        # The review loop closing is not the merge gate, and 0 alone was saying it was.
-        # A wait ends the moment coverage lands, which leaves the checks mid-flight nearly always.
-        # So a merely pending check is not this code, or the code would be the usual outcome.
-        # Only a shape no waiting clears earns it, which is what the stuck field already prints.
-        # It is read from the same payload the digest was, so the two can never disagree.
-        # A rollup carries checks the ruleset does not require, four of six on a green run here.
-        # So only a stuck check whose rollup node reads `isRequired` counts toward the code.
-        # Without that, a stuck optional check on a merge a thread blocks returns 44.
-        # `BLOCKED` is required as well, since `CLEAN` proves no required gate is outstanding.
-        # The digest reports every stuck check either way, so the narrower code costs nothing.
+        # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
         if final.get("mergeStateStatus") == "BLOCKED" and gates:
-            # The block above prints optional stuck checks too, so the required ones are named.
-            # They need not be all that blocks it.
-            # `BLOCKED` is also worn by an open thread or a missing approval.
             print(
                 "status=CHECKS_NOT_MERGEABLE the review loop is closed, the merge reads "
                 "BLOCKED, and a required check is in a shape waiting does not clear, "
@@ -7988,8 +2828,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 44
         return 0
-    # A refusal before an answer, since it names the round that declined where 40 names none.
-    # The digest prints both bodies regardless, so the narrower code costs the reader nothing.
+    # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)
     if refusal is None and not a.ignore_quota_signal:
         refusal = stopping_refusal(final)
@@ -8001,7 +2840,7 @@ def main(argv: list[str] | None = None) -> int:
             "request or a re-request clears, so proceed on the coverage the other reviewers "
             "already gave this pull request rather than waiting on Copilot again"
         )
-        return 46
+        return 41
     if refusal and (limit := confirmed_quota(owner, repo, refusal)):
         print(
             "status=COPILOT_QUOTA_EXHAUSTED the newest Copilot review on this pull request says "
@@ -8010,7 +2849,7 @@ def main(argv: list[str] | None = None) -> int:
             "--ignore-quota-signal, and proceed meanwhile on the coverage the other reviewers "
             "already gave"
         )
-        return 46
+        return 41
     if refusal and possible_quota(refusal):
         print(
             "status=COPILOT_ERROR_POSSIBLE_QUOTA the newest Copilot review on this pull request "
@@ -8020,7 +2859,7 @@ def main(argv: list[str] | None = None) -> int:
             "already gave, and hand the state to the maintainer, who can pass "
             "--ignore-quota-signal once the limit is believed to have reset"
         )
-        return 46
+        return 41
     if held and not refusal:
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
@@ -8037,24 +2876,29 @@ def main(argv: list[str] | None = None) -> int:
             "re-requesting this head clears nothing"
         )
         return 41
-    # An answer before a stall, because the reviewer saying something outranks it saying nothing.
     if answered_outside_review(final):
         print(
-            "status=ANSWERED_OUTSIDE_REVIEW the reviewer answered without reviewing, "
-            "so read the comment above and decide, since where it declines or names a limit "
-            "no review follows and re-requesting does not clear it"
+            "status=ANSWERED_OUTSIDE_REVIEW no Copilot review covers this head, and the reviewer "
+            "answered without reviewing, so read the comment above and decide, since where it "
+            "declines or names a limit no review follows and re-requesting does not clear it"
         )
         return 40
     if recorded is False:
         print(
-            "status=REQUEST_NOT_RECORDED the Copilot review request returned success and "
-            "added neither a pending reviewer nor a review-request event to this pull request. "
-            "The likely cause is an exhausted Copilot allowance on the requesting account, "
-            "which is the maintainer's to restore: clearing the request set and requesting "
-            "again does not clear it, so hand it to the maintainer"
+            "status=REQUEST_NOT_RECORDED no Copilot review covers this head, and the review "
+            "request returned success and added neither a pending reviewer nor a review-request "
+            "event. The likely cause is an exhausted Copilot allowance on the requesting account, "
+            "which is the maintainer's to restore, so hand it to the maintainer"
         )
-        return 48
-    # Lowest priority of the terminal readings, since it is inferred from elsewhere in the repository rather than read on this pull request directly.
+        return 40
+    if reviewer_login_drift(final):
+        print(
+            "status=REVIEWER_LOGIN_DRIFT no Copilot review covers this head under the login every "
+            "query filters on, and the digest notes the login the reviewer now writes as. The "
+            f"remedy is a change to the login this script reads, on {HUB}"
+        )
+        return 40
+    # Ranked last, being inferred from elsewhere in the repository rather than read here.
     if signal and (standing := standing_quota(history, final, a.number)):
         number, hist_refusal = standing
         print(
@@ -8066,7 +2910,7 @@ def main(argv: list[str] | None = None) -> int:
             "the other reviewers already gave this pull request, or pass --ignore-quota-signal "
             "to poll this pull request's own head for the full --timeout"
         )
-        return 47
+        return 41
     if head_review_done(final, rounds_before):
         rounds = len(reviewer_nodes(final, "reviews"))
         print(

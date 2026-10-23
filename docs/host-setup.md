@@ -18,7 +18,7 @@ This section is the **contract**: which tools a host needs and which repo proced
 | --- | --- | --- | --- |
 | `git` | everything, and the identity and signing contract in [`STANDUP.md`][standup] step 0 | `git --version` | none |
 | `gh` | the PR and review loop, `gh api` queries, `repo-config/configure.sh` | `gh --version` | **2.47.0**, measured |
-| Python 3 | `scripts/` and `spec/` (standard library only, no packages to install) | `python3 --version` | **3.13**, target |
+| Python 3 | `scripts/` and `spec/` (standard library, and the few libraries a hub script declares inline, which `uv` supplies) | `python3 --version` | **3.13**, target |
 | `jq` | the ruleset normalizer in `repo-config/configure.sh`, the ruleset diff in [`AUDIT.md`][audit] section 6, and payload regeneration | `jq --version` | **1.7**, target |
 | Ripgrep | repository searches and file discovery by coding agents | `rg --version` | **13.0.0**, target |
 | `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | **29.6.2**, target |
@@ -26,7 +26,7 @@ This section is the **contract**: which tools a host needs and which repo proced
 
 The **Floor** column exists because presence and sufficiency are different questions and the answer to the first was being read as the answer to the second. A tool below its floor still answers `--version`, so every other column reports it as fine while `scripts/host_gate.py` fails it. The kind is named beside the number, since a **measured** floor sits above a version known to break a documented procedure and gives a failing host a defect to point at, where a **target** floor names the version the repo's toolchain is configured for and does not. The next section carries the reasoning behind each one.
 
-Two consequences worth reading off the table rather than discovering later. **Python 3 needs no packages**, because every script here is standard library only, so a bare interpreter is enough. And **the linters need only `docker`**, not `node`, `dotnet` or a local `markdownlint`, since each runs as a pinned image, which is what keeps a local run and CI the same check.
+Two consequences worth reading off the table rather than discovering later. **Python 3 needs no packages installed**, because a script needing a library declares it inline and runs through `uv`, so a bare interpreter beside `uv` is enough. And **the linters need only `docker`**, not `node`, `dotnet` or a local `markdownlint`, since each runs as a pinned image, which is what keeps a local run and CI the same check.
 
 **The interpreter is called `python3` everywhere, and on native Windows that is something the tooling provides rather than something the platform ships.** Windows registers `python` and `py` through the interpreter's own installer, and gives `python3` by default to an *app execution alias stub*, a zero-byte reparse point in the WindowsApps directory belonging to App Installer, which only ever offers to open the Microsoft Store. A Microsoft Store Python registers aliases under those same two names carrying the same reparse tag, and those reach a real interpreter somebody chose, so the target package rather than the tag is what tells a placeholder from a working setup. The installer removes only the placeholder and reports anything else. Measured on a fleet Windows host, that stub writes its `Python was not found` message to **stderr** and exits **9009**, so it fails loudly and a `&&` chain does stop on it. What it does instead is occupy the name: WindowsApps is on `PATH` by default, so wherever it sits ahead of the install directory the stub answers and the installed interpreter cannot be reached under that name at all. [`host-setup/windows/install-tools.ps1`][install-tools-windows] fixes both halves when it manages the `python` tool: it removes those stubs, and it puts a real `python3` beside the interpreter it installed. Stock Debian is the mirror image, carrying `python3` and no bare `python`, so `python3` is the one name that is correct on all three platforms and is what every script and brief should use.
 
@@ -384,7 +384,7 @@ Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `python3 scri
 | --- | --- |
 | Stand up a new repo through [`STANDUP.md`][standup] | step 0 verifies identity and signing, and its window closes at the first commit |
 | Run the four linters locally, matching CI | `docker` runs each as the same pinned image CI uses |
-| Run the repo's own gates and tests | Python 3 covers `scripts/` and `spec/` with no packages to install |
+| Run the repo's own gates and tests | Python 3 and `uv` cover `scripts/` and `spec/` with no packages to install |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
 | Let an agent work with the `gh` credentials live | the host-safety kit is installed |
 | Have the fleet skills surface in every agent session | the skills snapshot is current per `skills_install.py --report` |
