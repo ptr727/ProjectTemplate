@@ -7,9 +7,9 @@
 
 The reviewer's wording and layout change without notice and with no programmatic API, so every
 spelling this reads lives in `reviewers/<name>.json` rather than here. A changed spelling is a
-data edit plus one fixture. A body this cannot place returns `unknown` fields and a one-line note,
-and `read` never raises, so a new shape reaches the digest as a note rather than the gate as a
-crash.
+data edit plus one fixture. A part of a body this cannot place is a one-line note, and `read`
+never raises: a body it trips on reads as no refusal, `unknown` coverage and verdict, and a note,
+so a new shape reaches the digest as a note rather than the gate as a crash.
 
 The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
 of its own and never reads as markup. Only Copilot's current overview format, the one carrying the
