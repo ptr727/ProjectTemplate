@@ -20,6 +20,7 @@ from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
 import audit
+import audit_markdown
 from git_env import git_location_cleared
 
 _LOCATION = contextlib.ExitStack()
@@ -1133,7 +1134,7 @@ class SectionCase(unittest.TestCase):
         ]
         for label, doc, want in cases:
             with self.subTest(label):
-                self.assertEqual(audit.unfenced_text(doc), want)
+                self.assertEqual(audit_markdown.unfenced_text(doc), want)
 
     def test_undeclared_h2_headings(self) -> None:
         cases = [
@@ -1192,7 +1193,7 @@ class SectionCase(unittest.TestCase):
         ]
         for label, doc, declared, want in cases:
             with self.subTest(label):
-                self.assertEqual(audit.undeclared_h2_headings(doc, declared), want)
+                self.assertEqual(audit_markdown.undeclared_h2_headings(doc, declared), want)
 
 
 class ScanCase(unittest.TestCase):
@@ -1339,9 +1340,15 @@ class RenderCase(unittest.TestCase):
         r_two = "# W\n\nLine one.\n\nLine two.\n\n## Build\n"
         h_joined = "# W\n\nLine one.\nLine two.\n\n## Release History\n"
         msg = "history: README/HISTORY title+intro mirror detection"
-        self.assertEqual(audit.title_and_intro(r_md), audit.title_and_intro(h_md), msg)
-        self.assertNotEqual(audit.title_and_intro(r_md), audit.title_and_intro(h_bad), msg)
-        self.assertNotEqual(audit.title_and_intro(r_two), audit.title_and_intro(h_joined), msg)
+        self.assertEqual(
+            audit_markdown.title_and_intro(r_md), audit_markdown.title_and_intro(h_md), msg
+        )
+        self.assertNotEqual(
+            audit_markdown.title_and_intro(r_md), audit_markdown.title_and_intro(h_bad), msg
+        )
+        self.assertNotEqual(
+            audit_markdown.title_and_intro(r_two), audit_markdown.title_and_intro(h_joined), msg
+        )
 
     def test_strip_md_links(self) -> None:
         linked = "Utility to clean [media](https://x.example/Foo_(bar)) per the [spec][spec-ref]."
@@ -1349,22 +1356,28 @@ class RenderCase(unittest.TestCase):
         inner_link = "See [[docs](url)] for details."
         escaped_bracket = r"See [API \[docs](url) for details."
         msg = "description: strip_md_links behavior"
-        refs = audit.references("x\n\n[spec-ref]: https://example.test\n")
+        refs = audit_markdown.references("x\n\n[spec-ref]: https://example.test\n")
         self.assertEqual(
-            audit.strip_md_links(linked, refs), "Utility to clean media per the spec.", msg
+            audit_markdown.strip_md_links(linked, refs), "Utility to clean media per the spec.", msg
         )
         self.assertEqual(
-            audit.strip_md_links(linked), "Utility to clean media per the [spec][spec-ref].", msg
+            audit_markdown.strip_md_links(linked),
+            "Utility to clean media per the [spec][spec-ref].",
+            msg,
         )
-        self.assertEqual(audit.strip_md_links("Plain intro line."), "Plain intro line.", msg)
-        self.assertEqual(audit.strip_md_links(nested), "See API [docs] for details.", msg)
-        self.assertEqual(audit.strip_md_links(inner_link), "See [docs] for details.", msg)
-        self.assertEqual(audit.strip_md_links(escaped_bracket), r"See API \[docs for details.", msg)
+        self.assertEqual(
+            audit_markdown.strip_md_links("Plain intro line."), "Plain intro line.", msg
+        )
+        self.assertEqual(audit_markdown.strip_md_links(nested), "See API [docs] for details.", msg)
+        self.assertEqual(audit_markdown.strip_md_links(inner_link), "See [docs] for details.", msg)
+        self.assertEqual(
+            audit_markdown.strip_md_links(escaped_bracket), r"See API \[docs for details.", msg
+        )
 
     def test_strip_md_links_stays_linear(self) -> None:
         pathological = "[" * 20000
         start = time.monotonic()
-        audit.strip_md_links(pathological)
+        audit_markdown.strip_md_links(pathological)
         elapsed = time.monotonic() - start
         self.assertLessEqual(
             elapsed,
@@ -2497,7 +2510,7 @@ class ReadmeCase(unittest.TestCase):
     def test_section_cases(self) -> None:
         for label, text, sel_types, public, wantn in README_CASES:
             with self.subTest(label):
-                got = audit.readme_section_findings(text, self.rm, sel_types, public)
+                got = audit_markdown.readme_section_findings(text, self.rm, sel_types, public)
                 self.assertEqual(len(got), wantn, f"readme sections: {label} -> {got}")
 
     def test_shield_cases(self) -> None:
@@ -2505,7 +2518,7 @@ class ReadmeCase(unittest.TestCase):
             label, text, ent, wantn = case[:4]
             want_text = case[4] if len(case) > 4 else None
             with self.subTest(label):
-                got = audit.readme_shield_findings(text, self.rm, ent)
+                got = audit_markdown.readme_shield_findings(text, self.rm, ent)
                 good = len(got) == wantn and (
                     want_text is None or any(want_text in t for _, t in got)
                 )
@@ -2514,7 +2527,7 @@ class ReadmeCase(unittest.TestCase):
     def test_link_cases(self) -> None:
         for label, text, want_letter, want_drift in LINK_CASES:
             with self.subTest(label):
-                got = audit.readme_link_findings(text, self.rm, "o/r")
+                got = audit_markdown.readme_link_findings(text, self.rm, "o/r")
                 gl = sum(1 for k, _ in got if k == "LETTER")
                 gd = sum(1 for k, _ in got if k == "DRIFT")
                 self.assertEqual(
@@ -2525,7 +2538,7 @@ class ReadmeCase(unittest.TestCase):
         cat = audit.load("spec/third-party-tools.json")
         for label, text, wantn in TOOL_CASES:
             with self.subTest(label):
-                got = audit.third_party_tool_findings(text, cat)
+                got = audit_markdown.third_party_tool_findings(text, cat)
                 self.assertEqual(len(got), wantn, f"3rd party tools: {label} -> {got}")
 
     def test_canonical_link_entry_with_neither_repopath_nor_match_raises(self) -> None:
@@ -2536,7 +2549,7 @@ class ReadmeCase(unittest.TestCase):
             KeyError,
             msg="canonicalLinks entry with neither repoPath nor match: no error raised",
         ) as ctx:
-            audit.canonical_link_entry("https://example.test/", broken, "o/r")
+            audit_markdown.canonical_link_entry("https://example.test/", broken, "o/r")
         message = str(ctx.exception)
         self.assertTrue(
             "readme-sections.json" in message and "orphan-link" in message,
@@ -2544,11 +2557,11 @@ class ReadmeCase(unittest.TestCase):
         )
 
     def test_tagline_is_the_first_line_of_the_intro_region(self) -> None:
-        two_para = audit.title_and_intro(
+        two_para = audit_markdown.title_and_intro(
             "# X\n\nThe tagline.\n\nA clarifying paragraph.\n\n## Next\n"
         )[1]
-        self.assertEqual(audit.tagline(two_para), "The tagline.")
-        self.assertNotIn("\n", audit.tagline(two_para))
+        self.assertEqual(audit_markdown.tagline(two_para), "The tagline.")
+        self.assertNotIn("\n", audit_markdown.tagline(two_para))
 
 
 class DescriptionCase(unittest.TestCase):
@@ -2557,11 +2570,13 @@ class DescriptionCase(unittest.TestCase):
     def test_description_cases(self) -> None:
         for label, doc_texts_fx, entry_fx, live_fx, wantn in DESC_CASES:
             with self.subTest(label):
-                got = audit.description_findings(doc_texts_fx, entry_fx, live_fx, "owner/Fixture")
+                got = audit_markdown.description_findings(
+                    doc_texts_fx, entry_fx, live_fx, "owner/Fixture"
+                )
                 self.assertEqual(len(got), wantn, f"description: {label} -> {got}")
 
     def test_null_declared_field_is_a_defect_via_validates_contract(self) -> None:
-        null_declared = audit.description_findings(
+        null_declared = audit_markdown.description_findings(
             DESC_README,
             {"description": None},
             {"description": "A short tagline."},
@@ -2576,7 +2591,7 @@ class DescriptionCase(unittest.TestCase):
         )
 
     def test_declared_field_defect_names_the_repo(self) -> None:
-        null_declared = audit.description_findings(
+        null_declared = audit_markdown.description_findings(
             DESC_README,
             {"description": None},
             {"description": "A short tagline."},
@@ -2588,7 +2603,7 @@ class DescriptionCase(unittest.TestCase):
         )
 
     def test_declared_field_names_the_registry_as_the_source(self) -> None:
-        declared_mismatch = audit.description_findings(
+        declared_mismatch = audit_markdown.description_findings(
             DESC_README,
             {"description": "The declared description."},
             {"description": "Something else."},
@@ -2604,9 +2619,9 @@ class DescriptionCase(unittest.TestCase):
 
     def test_stale_docker_hub_short_description_is_reported(self) -> None:
         with mock.patch.object(
-            audit, "docker_hub_description", lambda slug: "A stale Docker Hub blurb."
+            audit_markdown, "docker_hub_description", lambda slug: "A stale Docker Hub blurb."
         ):
-            docker_mismatch = audit.description_findings(
+            docker_mismatch = audit_markdown.description_findings(
                 DESC_README,
                 {"description": "A short tagline.", "publish": [{"target": "docker"}]},
                 {"description": "A short tagline."},
