@@ -192,7 +192,7 @@ maintainer when".
    - A `pre-existing` correctness defect with a stated failure is filed once as its own issue,
      labeled `pre-existing`. Such a finding names an input or a state and the wrong output or the
      crash it produces. Its body line goes under a `Pre-existing findings, filed` heading and
-     links that issue.
+     links that issue. A thread raising it is answered with that issue's link and resolved.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -203,19 +203,20 @@ maintainer when".
    - Any other deferral is filed as an issue first, and the reply carries its link. A deferral
      noted only in a thread is lost the moment the PR merges.
 
-   The body keeps every unfiled `pre-existing` line under one heading, `Pre-existing findings,
-   not filed`. Each line under these headings carries its location and its class. The headings
-   stay apart from the open `introduced` findings a spent edit budget puts in the body, per
-   `local-strict-review` "Disposing of Findings". A reviewer's suppressed finding has no thread,
-   so its pointer is a `Listed in the body` answer, per `pr-review-conduct` "Answering a
-   suppressed finding". A local-pass finding owes nothing beyond its body line. A sibling found
-   by outcome 1's class sweep is not a finding a review raised, so outcome 1 keeps its own
-   filing rule for it. An issue goes in the repository where the fix has to land. For a finding
-   against carried content, that is the repository authoring the content rather than the one
-   carrying it. An issue filed where nobody may make the fix is a deferral nobody can close.
-   Filing every `pre-existing` finding is the expensive path. From 2026-10-16 to 2026-10-23, 108
-   of 329 non-handoff issues filed across four fleet repositories carried `pre-existing`. Each
-   one costs a lane, a pull request, and a review once worked.
+   The body keeps every other unfiled `pre-existing` line, the fourth bullet's, under one
+   heading, `Pre-existing findings, not filed`. Each line under these headings carries its
+   location and its class. The headings stay apart from the open `introduced` findings a spent
+   edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
+   suppressed finding has no thread, so its pointer is an answer per `pr-review-conduct`
+   "Answering a suppressed finding". That answer is `Listed in the body` for a listed or dropped
+   finding, and `Deferred to <issue>` for a filed one. A local-pass finding owes no pointer
+   beyond its body line. A sibling found by outcome 1's class sweep is not a finding a review
+   raised, so outcome 1 keeps its own filing rule for it. An issue goes in the repository where
+   the fix has to land. For a finding against carried content, that is the repository authoring
+   the content rather than the one carrying it. An issue filed where nobody may make the fix is
+   a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
+   2026-10-16 to 2026-10-23, 108 of 329 non-handoff issues filed across four fleet repositories
+   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something: add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.
