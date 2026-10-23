@@ -212,7 +212,7 @@ must have done.
   had nothing to say, which Merge Gate item 2 describes as its own ordinary shape and which posts
   no comment to read. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
-- **Copilot's absence blocks, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
+- **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
   coverage of the current head, or on a pull request into a branch other than the default an attested
   local pass, and the loop's own request step below is where a missing one is answered, on the
   terms stated there. A refusal naming the account quota is its own case rather
