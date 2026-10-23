@@ -104,6 +104,7 @@ NO_REQUIRED_ARGUMENT = frozenset(
         "host-setup/windows/setup-github.ps1",
         "host-setup/windows/setup-wsl.ps1",
         "host-setup/windows/upgrade-host.ps1",
+        "scripts/backlog_metrics.py",
         "scripts/build_dist.py",
         "scripts/docker_lint.py",
         "scripts/host_gate.py",
