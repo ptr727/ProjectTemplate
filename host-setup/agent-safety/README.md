@@ -18,7 +18,7 @@ already read. None was fixed by writing the rule more clearly. [`GOVERNANCE.md`]
 states the general criteria for when a rule like this earns a mechanical hook instead of staying
 prose. The requirements below are that criteria applied to this host.
 
-A hook implementing these requirements bounds a mistake by an agent acting in good faith, not an adversary, and it is not a sandbox. A parse gap is out of scope when only a command shape no agent plausibly types in a normal coding session reaches it. Such a gap is closed as out of scope rather than fixed, and the local review of a hook change does not file it. A hook's own size is a cost too, since every later review reads each hardening change again. A shape is therefore added only when a session produced it or plausibly would. This applies [`GOVERNANCE.md`][governance] "Trust Boundaries and Hardening Effort" to the hooks, per the decision (ptr727, 2026-10-23) on [issue #3391][issue-3391], item 1.
+A hook implementing these requirements bounds a mistake by an agent acting in good faith, not an adversary, and it is not a sandbox. A parse gap is out of scope when only a command shape no agent plausibly types in a normal coding session reaches it. Such a gap is declined as out of scope rather than fixed, and the local review of a hook change does not file it. A hook's own size is a cost too, since every later review reads each hardening change again. A shape is therefore added only when a session produced it or plausibly would. This applies [`GOVERNANCE.md`][governance] "Trust Boundaries and Hardening Effort" to the hooks, per the decision (ptr727, 2026-10-23) on [issue #3391][issue-3391], item 1.
 
 ## Requirements
 
@@ -197,7 +197,7 @@ text says, because the harm it covers was never in the text.
    `xargs` fills with the words it reads. A value holding a `;` or a line break then adds whole
    commands before the inner shell parses the body. A body running neither keeps its verdict, so
    `bash -c "cd $DIR && ls"` is allowed.
-   Outside a push, `xargs -I{} sh -c '{}'` is allowed as an unread script, like `bash script.sh`, since its string holds only the replace string ([issue #3385][issue-3385]).
+   In a command holding no `git push`, `xargs -I{} sh -c '{}'` is allowed as an unread script, like `bash script.sh` ([issue #3385][issue-3385]).
    A command naming git or gh that holds a carriage return is denied, since the shell reads one
    as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
    an escaped backslash before a line break. The shell reads that as a line break where the hook
@@ -399,7 +399,7 @@ text says, because the harm it covers was never in the text.
    A leading one is read as above. A value of `GIT_DIR`, `GIT_WORK_TREE`, `--git-dir`, or
    `--work-tree` may hold a run-time word other than `$HOME`. A subcommand this requirement
    denies is then denied, since that value names no checkout the hook can resolve.
-   Unlike `GIT_DIR`, a quoted run-time `-C` value such as `git -C "$D" reset --hard` is allowed, failing open on a directory that resolves no repository ([issue #3382][issue-3382]).
+   Unlike those values, a quoted `-C` value holding such a word, as in `git -C "$D" reset --hard`, fails open here, since it names no repository ([issue #3382][issue-3382]).
    A subcommand this requirement denies, named in wrappers nested past the reading cap, is denied
    wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
