@@ -75,7 +75,7 @@ _GH_REPO_POSITIONAL = frozenset({"edit", "delete", "rename", "archive", "unarchi
 _GH_BOOL_FLAGS = frozenset(
     {
         *("--admin", "--auto", "--squash", "--merge", "--rebase", "--delete-branch", "--draft"),
-        *("--fill", "--fill-first", "--fill-verbose", "--web", "--yes", "--approve"),
+        *("--fill", "--fill-first", "--fill-verbose", "--web", "--yes", "--approve", "--comment"),
         *("--request-changes", "--paginate", "--slurp", "--include", "--silent", "--verbose"),
         *("--edit-last", "--private", "--public", "--internal", "--clone", "--confirm", "--force"),
         *("--dry-run", "--latest", "--prerelease", "--generate-notes", "--disable-auto"),
@@ -946,7 +946,7 @@ def _gh(argv: list[str]) -> _Gh:
                 g.flags.append((name, value))
             elif a[:2] in ("-R", "-X") and len(a) > 2:
                 g.flags.append((a[:2], a[2:]))
-            elif i + 1 < len(args) and _takes_value(a, next(iter(g.path), None), args[i + 1]):
+            elif i + 1 < len(args) and _takes_value(a, g.path, args[i + 1]):
                 g.flags.append((a, args[i + 1]))
                 i += 1
             else:
@@ -961,13 +961,15 @@ def _gh(argv: list[str]) -> _Gh:
     return g
 
 
-def _takes_value(flag: str, group: str | None, nxt: str) -> bool:
-    """Whether a gh flag with no `=` takes the next word as its value, in a command group."""
+def _takes_value(flag: str, path: list[str], nxt: str) -> bool:
+    """Whether a gh flag with no `=` takes the next word as its value, under its path words."""
+    if path[1:2] in (["close"], ["reopen"]) and flag in ("--comment", "-c"):
+        return not nxt.startswith("-")
     if flag.startswith("--"):
         return flag not in _GH_BOOL_FLAGS and (nxt == "-" or not nxt.startswith("-"))
-    if group == "api":
+    if path[:1] == ["api"]:
         return flag in _GH_API_SHORT_VALUES
-    return flag in (_GH_REPO_SHORT_VALUES if group == "repo" else _GH_SHORT_VALUES)
+    return flag in (_GH_REPO_SHORT_VALUES if path[:1] == ["repo"] else _GH_SHORT_VALUES)
 
 
 def _gh_field(g: _Gh, key: str) -> str | None:
@@ -1315,6 +1317,8 @@ _CASES: list[tuple[str, str, str]] = [
     ('gh issue close --comment "x" https://github.com/stranger/x/issues/5', "deny", "R3"),
     ('gh pr close -c "x" https://github.com/stranger/x/pull/5', "deny", "R3"),
     ("gh pr review 5 --comment -b looks-good", "allow", "R3"),
+    ("gh pr review --comment https://github.com/stranger/x/pull/5 -b ok", "deny", "R3"),
+    ("gh issue close 5 -c https://github.com/stranger/x/pull/9", "allow", "R3"),
     ('gh issue comment 5 --repo "$TARGET" --body hi', "allow", "R3 run-time target"),
     ("gh issue comment 5 --body 'see --repo stranger/x'", "allow", "R3"),
     ("gh issue view 5 --repo stranger/x", "allow", "R3"),
