@@ -999,6 +999,19 @@ class NewCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(writes_of(fake), [["issue", "edit"]])
 
+    def test_a_round_archived_twice_refuses(self) -> None:
+        """Two copies of one round would each read as a round and duplicate the history."""
+        row = link(30, "default", 2, None)
+        copy_ = handoff.archive(row["body"], "default", 2, "2026-09-01", "t")
+        row["comments"] = [note(copy_, "u1"), note(copy_, "u2")]
+        fake = FakeGh({30: row})
+        code, _, err = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("more than once", err)
+        self.assertEqual(writes_of(fake), [])
+
     def test_the_close_date_is_the_outgoing_round_s_last_edit(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, None, lastEditedAt="2026-09-05T10:00:00Z")})
         run(fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("w"))
@@ -1067,7 +1080,7 @@ class NewCase(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not confirmed", err)
 
-    def test_a_head_whose_block_moved_to_another_track_refuses(self) -> None:
+    def test_a_body_edited_after_the_track_was_listed_refuses(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, None)})
 
         def moved(argv: list[str]) -> str:
@@ -1079,7 +1092,7 @@ class NewCase(unittest.TestCase):
             moved, "new", "--repo", "o/r", "--title", "N", "--body-file", self.body_file("w")
         )
         self.assertEqual(code, 1)
-        self.assertIn("carries no block on track 'default' when read again", err)
+        self.assertIn("changed since this run listed the track", err)
         self.assertEqual(writes_of(fake), [])
 
     def test_new_onto_a_closed_head_reads_the_closed_list_once(self) -> None:
@@ -1426,6 +1439,13 @@ class CloseCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(writes_of(fake), [["issue", "close"]])
         self.assertEqual(len(fake.issues[30]["comments"]), 1)
+
+    def test_an_outsider_s_copy_of_the_outcome_does_not_stand_in_for_it(self) -> None:
+        row = link(30, "default", 2, None, comments=[note("merged the fix", association="NONE")])
+        fake = FakeGh({30: row})
+        code, _, _ = self.close(fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "close"]])
 
     def test_a_close_that_does_not_read_back_is_not_confirmed(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, None)})

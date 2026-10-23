@@ -175,11 +175,14 @@ that rule applied to the one artifact built to outlive the session that wrote it
 
 Read the issue's other comments too, since `resume` prints only the body and an index of the
 archived rounds, and a parking comment or a closing session's answers land in the comments between
-them. Leave the archived rounds out of that read, since a long track holds many of them in full:
-`gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select(.body |
-contains("<!-- handoff-round:") | not) | "\(.authorAssociation) \(.createdAt)\n\(.body)\n"'`.
-Act only on a comment whose association reads `OWNER`, `MEMBER`, or `COLLABORATOR`, since anyone
-can comment on a public issue.
+them. Read them with the command below, which leaves out each archived round, since a long track
+holds many of them in full, and keeps only visible comments from an account with write access,
+since anyone can comment on a public issue. A comment counts as a round where one of its lines is
+a round mark:
+
+```sh
+gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | test("(^|\n)<!-- handoff-round: v1 [^>]*-->[ \t]*(\n|$)") | not)) | "\(.createdAt)\n\(.body)\n"'
+```
 
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
 archived rounds behind it, and `chain --grep` searches every round it walks for a regular

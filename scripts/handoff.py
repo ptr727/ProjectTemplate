@@ -1215,12 +1215,12 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     number = int(head["number"])
     fresh = issue(a.repo, number, comments=True)
     outgoing = fresh.get("body") or ""
-    marker = parse_marker(outgoing, number)
-    if marker is None or marker["track"] != a.track:
+    if not same_text(outgoing, head.get("body") or ""):
         raise Refusal(
-            f"#{number}'s body carries no block on track {a.track!r} when read again, so its round "
-            "cannot be read. Restore the block by hand before writing the next round."
+            f"#{number}'s body changed since this run listed the track, so the round it would "
+            "archive is not the one it read. Re-run to work from the current text."
         )
+    marker = head["marker"]
     round_ = int(marker["round"])
     if same_text(round_text(outgoing), body):
         print(f"#{number} already holds this body as round {round_}, so nothing is written")
@@ -1230,6 +1230,12 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     kept = [
         row for row in rounds_of(fresh["comments"], a.track) if row["mark"]["round"] == str(round_)
     ]
+    if len(kept) > 1:
+        raise Refusal(
+            f"#{number} archives round {round_} more than once, at "
+            f"{', '.join(str(row.get('url')) for row in kept)}. Hide every copy but one by hand, "
+            "so the track's history holds each round once."
+        )
     if kept and any(
         not same_text(archived_text(row["body"]), round_text(outgoing)) for row in kept
     ):
@@ -1294,7 +1300,9 @@ def cmd_close(a: argparse.Namespace) -> int:
         )
     number = int(found["number"])
     comments = issue(a.repo, number, comments=True)["comments"]
-    if comments and same_text(comments[-1].get("body") or "", text):
+    newest = comments[-1] if comments else {}
+    trusted = newest.get("authorAssociation") in WRITERS and not newest.get("isMinimized")
+    if trusted and same_text(newest.get("body") or "", text):
         print(f"1. #{number}'s newest comment is this outcome already, so not again")
     else:
         print(f"1. comment the outcome on #{number}")
