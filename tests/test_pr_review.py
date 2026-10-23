@@ -2961,8 +2961,8 @@ class TestCli(GqlCase):
         self.assertNotIn("COPILOT_QUOTA_EXHAUSTED_REPO_WIDE", out)
         self.assertIn("status=PENDING", out)
 
-    def test_a_stale_refusal_on_this_pull_requests_own_earlier_head_is_46(self) -> None:
-        """This pull request's own older refusal is read from its own reviews, ahead of 47."""
+    def test_a_stale_refusal_on_this_pull_requests_own_earlier_head_is_41(self) -> None:
+        """This pull request's own older refusal is read from its own reviews, ahead of the repo-wide reading."""
         self.answer(payload([review(oid=OLD, body=QUOTA_REFUSED, at=EARLY)]))
         self.wire_history([hist_review(7, QUOTA_REFUSED, at=EARLY)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
@@ -3558,7 +3558,7 @@ class TestCli(GqlCase):
         self.assertNotIn("status=PENDING", self.out.getvalue())
 
     def test_a_round_on_the_head_outranks_the_repo_wide_quota_reading(self) -> None:
-        """The 47 line says the head carries no Copilot review of its own, so it cannot fire
+        """The repo-wide quota line says the head carries no Copilot review of its own, so it cannot fire
         where the final read shows one. Three rounds sit on the pull request with a re-request
         pending, the reviewer's newest word elsewhere is a quota refusal, and a fourth genuine
         round lands on the head mid-wait at a position `--min-rounds 4` does not credit. The
@@ -3566,7 +3566,7 @@ class TestCli(GqlCase):
         the final read can catch. Each clock read advances 100 seconds, so one poll lands it and
         the read after it is past the 150-second timeout. The opening shape is answered twice,
         since the wait's liveness read and its snapshot each take one. The fourth round is stamped
-        before the refusal, so that the head alone is what rules 47 out.
+        before the refusal, so that the head alone is what rules the repo-wide reading out.
         """
         for label, oid in (("on head", HEAD), ("superseded", OLD)):
             with self.subTest(label):
@@ -3607,7 +3607,7 @@ class TestCli(GqlCase):
     def test_a_push_off_the_reviewed_head_keeps_the_repo_wide_quota_reading(self) -> None:
         """A round on the head when the wait begins lets the request and poll run, but the
         reading itself stands, since a push during the wait can leave the final head with no
-        Copilot activity of its own, which is exactly what 47 reports. The opening shape is
+        Copilot activity of its own, which is exactly what the repo-wide reading reports. The opening shape is
         answered twice, since the wait's liveness read and its snapshot each take one.
         """
         start = payload([review(at="2026-08-02T10:00:00Z")], pending=True)
