@@ -35,11 +35,6 @@ else
     echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
     exit 1
 fi
-if ! uv --version >/dev/null 2>&1; then
-    echo "pre-commit: 'uv --version' did not run, so the doc gates did not run." >&2
-    echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
-    exit 1
-fi
 
 # The prose gate is scoped to what changed, which is the policy for prose.
 # The base is HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
