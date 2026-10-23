@@ -61,7 +61,7 @@ SETTINGS_KEYS = [
     "allow_update_branch",
     "delete_branch_on_merge",
 ]
-# The bypass_actors field is deliberately absent from this list.
+# The bypass_actors field is deliberately absent, since a bypass list is a per-repository decision configure.sh leaves alone.
 RULESET_SUBSET = ["name", "target", "enforcement", "conditions", "rules"]
 # Phrases that assert work is still outstanding, matched against a registry driftNote.
 PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "missing", "absent"]
@@ -583,7 +583,10 @@ def gh(path, ok404=False) -> Any:
 
 
 def owner_repos(owner):
-    """Every non-fork repository the registry owner actually owns on GitHub, paginated by hand."""
+    """Every non-fork repository the registry owner actually owns on GitHub, paginated by hand.
+
+    Run as the owner's own account, since a repository-scoped token returns an incomplete list with no error.
+    """
     me = gh("user")
     login = me.get("login") if isinstance(me, dict) else None
     # GitHub logins are case-insensitive.
@@ -657,8 +660,13 @@ def normalize_ruleset(payload):
     return json.dumps(sub, sort_keys=True)
 
 
-def check_id_owner(spec, cid):
-    """`(owning project type or None, whether spec/checks.json or spec/project-types.json defines the id)`."""
+def registered_check(cid):
+    """The spec/checks.json entry registering `cid`, or {} where none does."""
+    return next((c for c in registered_checks() if c["id"] == cid), {})
+
+
+def catalog_owner(spec, cid):
+    """`(owning project type or None, whether spec/project-types.json defines the id)`."""
     types = spec.get("types")
     if not types:
         raise KeyError(
@@ -668,13 +676,18 @@ def check_id_owner(spec, cid):
         if any(c.get("id") == cid for c in t.get("checks", [])):
             return name, True
     cross = (c for dim in types.get("crossCutting", {}).values() for c in dim.get("checks", []))
-    known = any(c.get("id") == cid for c in cross)
-    return None, known or any(c["id"] == cid for c in registered_checks())
+    return None, any(c.get("id") == cid for c in cross)
+
+
+def check_id_owner(spec, cid):
+    """`(owning project type or None, whether spec/project-types.json or spec/checks.json defines the id)`."""
+    owner, known = catalog_owner(spec, cid)
+    return owner, known or bool(registered_check(cid))
 
 
 def is_suppression_id(entry, cid):
     """Whether a driftNote naming `cid` suppresses a registered check's finding on this repo, rather than naming a check to judge."""
-    check = next((c for c in registered_checks() if c["id"] == cid), {})
+    check = registered_check(cid)
     if "suppression" not in check:
         return False
     ending_type = check["suppression"]["endsWithType"]
@@ -697,7 +710,7 @@ def driftnote_findings(entry, spec, open_count):
                         f"registry: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines - fix the id or drop the note: {quoted}",
                     )
                 )
-            elif any(c["id"] == cid for c in registered_checks()):
+            elif not catalog_owner(spec, cid)[1]:
                 out.append(
                     (
                         "DRIFT",
@@ -1126,11 +1139,11 @@ def concurrency_caller_findings(path, text):
 
 
 def dependabot_ecosystems(text):
-    """The package-ecosystem values a dependabot.yml declares, empty where it does not parse."""
+    """The package-ecosystem values a dependabot.yml declares, or None where it does not parse."""
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError:
-        return set()
+        return None
     updates = doc.get("updates") if isinstance(doc, dict) else None
     if not isinstance(updates, list):
         return set()
@@ -1289,6 +1302,7 @@ def _last_effective_change(revisions):
 
     `revisions` is newest-first (date, sha, text) triples, and an empty list returns None.
     The oldest revision answers where every later one is normalized churn, and a None text counts as a change.
+    Each entry is taken as its neighbor's parent, which holds for the hub's forward-only, squash-merged history.
     """
     for i, (date, sha, text) in enumerate(revisions):
         if i + 1 == len(revisions):
@@ -1813,6 +1827,13 @@ def check_dependabot_ecosystems(run):
     if not text:
         return []
     declared = dependabot_ecosystems(text)
+    if declared is None:
+        return [
+            (
+                "DRIFT",
+                "dependabot: .github/dependabot.yml does not parse as YAML, so its ecosystems are unread",
+            )
+        ]
     implied = {}
     workflows = gh(f"repos/{run.slug}/contents/.github/workflows?ref={run.ground}", ok404=True)
     if isinstance(workflows, list) and any(

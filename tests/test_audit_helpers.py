@@ -649,6 +649,7 @@ D1 = "2024-01-01T00:00:00+00:00"
 IDENTITY = (
     ["git", "config", "user.email", "test@test.invalid"],
     ["git", "config", "user.name", "test"],
+    ["git", "config", "commit.gpgsign", "false"],
 )
 
 
@@ -1387,6 +1388,8 @@ class RenderCase(unittest.TestCase):
         self.assertEqual(
             audit_markdown.strip_md_links("Plain intro line."), "Plain intro line.", msg
         )
+        padded = "Runs ` make ` targets with ``a `b` c``."
+        self.assertEqual(audit_markdown.strip_md_links(padded), padded, msg)
         self.assertEqual(audit_markdown.strip_md_links(nested), "See API [docs] for details.", msg)
         self.assertEqual(audit_markdown.strip_md_links(inner_link), "See [docs] for details.", msg)
         self.assertEqual(
@@ -1455,13 +1458,8 @@ class BranchCase(unittest.TestCase):
                 self.assertEqual(audit.ground_branch_of(entry, branch, defaults), want)
 
 
-class ShallowCloneCase(unittest.TestCase):
+class ShallowCloneCase(GitRepoCase):
     """Holds the shallow-clone refusal on the history reads and on the public paths."""
-
-    def make_dir(self) -> pathlib.Path:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        return pathlib.Path(tmp.name)
 
     def setUp(self) -> None:
         clear_history_caches()
@@ -4372,6 +4370,22 @@ class RegistryCase(unittest.TestCase):
         )
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
+
+    def test_the_smoke_selftest_passes(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(audit._selftest_cases(), 0, out.getvalue())
+
+    def test_a_registry_only_id_reads_as_evaluated_and_a_catalog_id_does_not(self) -> None:
+        spec = {"types": {"types": {"python": {"checks": [{"id": "settings.general"}]}}}}
+        typed = {"types": ["python"], "driftNotes": ["Owed (settings.general)."]}
+        catalog = audit.driftnote_findings(typed, spec, 1)
+        self.assertNotIn("this audit evaluates", catalog[0][1])
+        registry_only = audit.driftnote_findings(typed, {"types": {"types": {}}}, 1)
+        self.assertIn("this audit evaluates (spec/checks.json)", registry_only[0][1])
+
+    def test_an_unparsed_dependabot_file_reads_as_unparsed(self) -> None:
+        self.assertIsNone(audit.dependabot_ecosystems("updates:\n  - [\n"))
+        self.assertEqual(audit.dependabot_ecosystems("updates: []\n"), set())
 
     def test_a_registry_id_is_a_known_check_id(self) -> None:
         spec: dict[str, Any] = {"types": {"types": {}, "crossCutting": {}}}
