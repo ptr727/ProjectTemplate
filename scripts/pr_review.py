@@ -7818,13 +7818,13 @@ def main(argv: list[str] | None = None) -> int:
             "request, no pending reviewer and no review-request event, so this wait stops here "
             "rather than polling --timeout out against a request that does not exist."
         )
-    elif held and snapshot is not None and not attested(snapshot):
+    elif held and snapshot is not None and not local_cover(snapshot):
         print(
             "note: this pull request merges into a branch other than the default, so its head is "
             "to be covered by an attested local pass rather than a Copilot round, which runs once "
-            "per change at the promotion, and this wait requests nothing. No attestation covers "
-            "this head yet, so run attest once a recorded pass covers it. Pass --request to ask "
-            "for a round anyway."
+            "per change at the promotion, and this wait requests nothing. No attested local pass "
+            "covers this head yet, so the digest below names what it still owes, the attest step "
+            "where none is published. Pass --request to ask for a round anyway."
         )
     elif held:
         print(

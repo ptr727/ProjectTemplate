@@ -212,10 +212,10 @@ must have done.
   had nothing to say, which Merge Gate item 2 describes as its own ordinary shape and which posts
   no comment to read. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
-- **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
-  coverage of the current head, or on a pull request into a branch other than the default an attested
-  local pass, and the loop's own request step below is where a missing one is answered, on the
-  terms stated there. A refusal naming the account quota is its own case rather
+- **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.**
+  Merge Gate item 2 requires Copilot's own coverage of the current head. On a pull request into a
+  branch other than the default, an attested local pass stands in for it. The loop's own request
+  step below is where a missing one is answered, on the terms stated there. A refusal naming the account quota is its own case rather
   than a review, and so is one saying only that Copilot encountered an error, which is what the
   weekly rate limit posts. Each covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the

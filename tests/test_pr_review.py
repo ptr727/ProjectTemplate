@@ -9950,8 +9950,8 @@ class TestCli(GqlCase):
         """Into a branch other than the default, the attested local pass alone covers the head."""
         covered = "its head is covered by an attested local pass"
         for attest, code, said, unsaid in (
-            (False, 49, "No attestation covers this head yet", covered),
-            (True, 0, covered, "No attestation covers this head yet"),
+            (False, 49, "No attested local pass covers this head yet", covered),
+            (True, 0, covered, "No attested local pass covers this head yet"),
         ):
             with self.subTest(attest=attest):
                 self.out.seek(0)

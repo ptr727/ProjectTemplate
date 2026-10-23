@@ -90,7 +90,7 @@ def count_with_label(items: Items, label: str) -> int:
 def count_by_label(items: Items, labels: Sequence[str]) -> dict[str, int]:
     """Count per label, so an item carrying several labels counts under each.
 
-    The named labels always print, a zero included, and every other label an item carries follows.
+    The named labels always appear, a zero included, and every other label an item carries follows.
     """
     found = set().union(*(label_names(item) for item in items)) - set(labels)
     return {label: count_with_label(items, label) for label in [*labels, *sorted(found)]}
