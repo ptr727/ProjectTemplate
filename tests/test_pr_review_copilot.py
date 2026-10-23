@@ -197,6 +197,18 @@ class TestCoverage(unittest.TestCase):
         self.assertEqual("partial", found.coverage)
         self.assertEqual(("a.py", "docs/b.md"), found.table)
 
+    def test_a_count_opening_a_list_item_states_nothing(self) -> None:
+        count = "Reviewed 3 of 3 changed files in the earlier round."
+        resolved = open_section("1 resolved since last review", ("101",)).replace(
+            "[Finding", f"{count} [Finding"
+        )
+        for text in (
+            body(sections=resolved),
+            body(sections=what_changed(extra=f"**Changes:**\n- {count}\n\n")),
+        ):
+            with self.subTest(text=text[60:120]):
+                self.assertEqual("none", adapter.read(text).coverage)
+
     def test_a_sentence_naming_the_count_midway_states_nothing(self) -> None:
         for text in (
             body(headline="The reader treats Copilot reviewed 1 of 2 changed files as partial."),

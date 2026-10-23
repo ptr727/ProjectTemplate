@@ -430,11 +430,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 table = (table or []) + rows
         i += 1
 
-    # A count the reviewer states in a paragraph opening on it, outside any counted finding section.
+    # A count stated in a top-level paragraph opening on it, never a list item, outside counted sections.
     # A sentence opening on the wording reads as a count too, and that false partial is the loud failure.
     for n, token in enumerate(tokens[1:], start=1):
         line = (token.map or [0])[0]
-        if token.type != "inline" or tokens[n - 1].type != "paragraph_open":
+        opener = tokens[n - 1]
+        if token.type != "inline" or opener.type != "paragraph_open" or opener.level:
             continue
         if any(a <= line < b for a, b in counted):
             continue
