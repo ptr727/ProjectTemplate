@@ -151,10 +151,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
    canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
    `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
-   local pass, applied here to a PR-hosted finding, is outcome 4 of "Every finding ends in a
-   listed outcome" below applied once per unit rather than once per finding: the round gathers
-   that unit's such findings onto the unit's tracker, an open hub issue whose title carries the
-   unit key, retitled by the change that moves the key and filed by whichever round first needs
+   local pass, applied here to a PR-hosted finding, is filed once per unit rather than listed
+   per finding under outcome 4 of "Every finding ends in a listed outcome" below: the round
+   gathers that unit's such findings onto the unit's tracker, an open hub issue whose title
+   carries the unit key, retitled by the change that moves the key and filed by whichever round first needs
    it, and answers each finding with that issue's link, resolving a thread on that reply, so a
    `pre-existing` remark on a sentence the change never touched costs one link rather than a
    decline or an issue per finding. The batch runs in the hub, which authors the text of every
@@ -311,11 +311,29 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    turn, before moving to other work. A plan to ask later is resolution by silence the moment
    attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
    and say so, rather than treating the intention to ask as the asking.
-4. **Real and worth doing later, so file the issue first, then reply with its link.** A deferral
-   noted only in a thread is lost the moment the PR merges. File it in the repository where the
-   fix has to land, which for a finding against carried content is the repository that authors
-   that content rather than the one carrying it, since an issue filed where nobody may make the
-   fix is a deferral nobody can close.
+4. **Real and worth doing later, so record it where it outlives the pull request.** A deferral
+   noted only in a thread is lost the moment the PR merges. Where it is recorded turns on its
+   class, per `local-strict-review` "Disposing of Findings":
+   - A `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the pull
+     request body with its location and its class. The list sits under one heading,
+     `Pre-existing findings, not filed`, and no issue is filed for it. The body line is its
+     outcome, and a thread raising it is answered with a link to that line and resolved.
+   - The one exception is a `pre-existing` correctness defect with a stated failure. Such a
+     finding names an input or a state and the wrong output or the crash it produces. It is filed
+     once as its own issue, labeled `pre-existing`, and its body line links that issue.
+   - A `style`, wording, consolidation, or restatement finding on text this change did not touch
+     is dropped. It gets one body line under that heading and nothing else. It gets no decline
+     text, no issue, and no thread reply beyond the link to that line that resolves the thread.
+   - A finding on a canonical Markdown unit keeps the per-unit tracker `pr-review-conduct`
+     "Merge Gate" item 3 describes, since that already costs one link per unit.
+   - Any other deferral is filed as an issue first, and the reply carries its link.
+
+   An issue goes in the repository where the fix has to land. For a finding against carried
+   content, that is the repository authoring the content rather than the one carrying it. An
+   issue filed where nobody may make the fix is a deferral nobody can close. Filing every
+   `pre-existing` finding is the expensive path. From 2026-10-16 to 2026-10-23, 108 of 329
+   non-handoff issues filed across four fleet repositories carry `pre-existing`. Each one costs a
+   lane, a pull request, and a review once worked.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something: add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.
