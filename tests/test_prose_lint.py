@@ -219,7 +219,7 @@ class TestTierTables(BaitCase):
         [(_, kind, message)] = prose_lint.check_file(path, {"charset-unknown"})
         self.assertEqual("charset-unknown", kind)
         self.assertIn('the comment-and-doc-style skill\'s "Character set" section', message)
-        self.assertIn("prose_lint.py's TIER1, TIER2, or TIER3 table", message)
+        self.assertIn("prose_lint.py's TIER1, TIER2, TIER3, or TIER4 table", message)
         self.assertIn("classify it in ptr727/ProjectTemplate:", message)
         self.assertNotIn("GOVERNANCE.md", message)
 
@@ -411,11 +411,22 @@ class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
                 self.assertNotIn(chr(cp), prose_lint.TIER1)
                 self.assertNotIn(chr(cp), prose_lint.TIER2)
 
+    def test_tier_four_markers_are_exactly_the_skill_text(self) -> None:
+        """The markers the rule text names, less the selector it admits, are the gate's set."""
+        m = re.search(r"^- \*\*Tier 4,(.*?)(?=^- \*\*)", self.section, re.MULTILINE | re.DOTALL)
+        if m is None:
+            self.fail("the Tier 4 bullet moved, so the parse is blind")
+        named = {int(h, 16) for h in re.findall(r"U\+([0-9A-Fa-f]{4,6})\b", m.group(1))}
+        named.discard(ord(prose_lint.VARIATION_SELECTOR_16))
+        self.assertEqual(named, {ord(ch) for ch in prose_lint.TIER4})
+
     def test_the_tiers_do_not_overlap(self) -> None:
         t1, t2, t3 = set(prose_lint.TIER1), set(prose_lint.TIER2), set(prose_lint.TIER3)
+        t4 = set(prose_lint.TIER4)
         self.assertEqual(set(), t1 & t2)
         self.assertEqual(set(), t1 & t3)
         self.assertEqual(set(), t2 & t3)
+        self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
 
 class TestDupword(BaitCase):
