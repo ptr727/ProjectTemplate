@@ -429,6 +429,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         elif (
             token.type == "table_open"
             and vocab["table_header"]
+            and not token.level
             and not any(a <= (token.map or [0])[0] < b for a, b in counted)
         ):
             if (rows := table_paths(tokens, i, vocab["table_header"])) is not None:
