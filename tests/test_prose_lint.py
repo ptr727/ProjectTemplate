@@ -18,6 +18,7 @@ import locale
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,9 +56,8 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
     The script is read out of the action rather than restated, so a case proves what the action
     does rather than what this module believes it does.
     """
-    script = step_script(PROSE_GATE_ACTION, "Check prose step")
     env = (
-        os.environ
+        dict(os.environ)
         | {
             "BASE": "HEAD",
             "GITHUB_ACTION_PATH": str(PROSE_GATE_ACTION.parent),
@@ -65,10 +65,44 @@ def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProce
         }
         | extra
     )
+    return run_gate_steps(root, env)
+
+
+def run_gate_steps(root: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the action's locate step, then its check step on the locate step's outputs.
+
+    The check step reads its path and pin only from those outputs, so running it alone would
+    prove a wiring the action does not have.
+    """
+    if shutil.which("uv") is None:
+        raise unittest.SkipTest("the action runs the gate through uv")
+    bash = bash_or_skip()
+    with tempfile.TemporaryDirectory() as tmp:
+        output = Path(tmp) / "output"
+        output.write_text("", encoding="utf-8")
+        located = subprocess.run(
+            [bash, "-c", step_script(PROSE_GATE_ACTION, "Locate gate step")],
+            cwd=root,
+            env=env | {"GITHUB_OUTPUT": str(output)},
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        if located.returncode != 0:
+            return located
+        outputs = dict(
+            line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+        )
+    step_env = env | {
+        "GATE_PATH": outputs["path"],
+        "ACTION_REPOSITORY": outputs["repository"],
+        "ACTION_REF": outputs["ref"],
+    }
     return subprocess.run(
-        [bash_or_skip(), "-c", script],
+        [bash, "-c", step_script(PROSE_GATE_ACTION, "Check prose step")],
         cwd=root,
-        env=env,
+        env=step_env,
         text=True,
         encoding="utf-8",
         capture_output=True,
@@ -6518,19 +6552,10 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         (stub_dir / "prose_lint.py").write_text(
             "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8"
         )
-        script = step_script(PROSE_GATE_ACTION, "Check prose step")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ACTION_", "GITHUB_"))}
         env |= {"BASE": "HEAD", "PATHS": ".", "GITHUB_ACTION_PATH": str(stub_dir)}
         env |= extra
-        r = subprocess.run(
-            [bash_or_skip(), "-c", script],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            env=env,
-        )
+        r = run_gate_steps(root, env)
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
         return json.loads(r.stdout.strip().splitlines()[-1])
 

@@ -217,6 +217,10 @@ MANAGED_PERMISSIONS = [
     # The `:*` rule approves any arguments, so every check the delete makes lives inside the `cleanup` subcommand.
     # The rule decides which command skips a prompt, and it bounds no checkout, since it matches the text.
     ("Bash(python3 scripts/pr_review.py", "Bash(python3 scripts/pr_review.py:*)"),
+    (
+        "Bash(uv run --no-project --script scripts/pr_review.py",
+        "Bash(uv run --no-project --script scripts/pr_review.py:*)",
+    ),
 ]
 
 

@@ -51,9 +51,9 @@ The identity and signing checks in [`STANDUP.md`][standup] section 0 apply to a 
 Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, and they are not interchangeable. The first reports the findings. The second **runs its own audit** and renders those findings as an issue ready to file, so it is a second measurement rather than a view over the first, and the two can disagree if the repository moves between them. The third is a different tool answering a fleet-wide question. The rest of that file is the half no tool evaluates.
 
 ```shell
-python3 spec/audit.py "<Repo>"                    # the deterministic findings, read at main
-python3 spec/audit.py --branch "<ref>" "<Repo>"   # the same, read at a named ref, for convergence still in flight
-python3 spec/audit.py --issue "<Repo>"            # audits again and renders that run as an issue ready to file, so it can differ from the line above
+uv run --no-project --script spec/audit.py "<Repo>"                    # the deterministic findings, read at main
+uv run --no-project --script spec/audit.py --branch "<ref>" "<Repo>"   # the same, read at a named ref, for convergence still in flight
+uv run --no-project --script spec/audit.py --issue "<Repo>"            # audits again and renders that run as an issue ready to file, so it can differ from the line above
 python3 spec/fidelity_honesty.py --report         # regenerate reports/divergences.md before using it as a work list
 ```
 
@@ -65,7 +65,7 @@ python3 spec/fidelity_honesty.py --report         # regenerate reports/divergenc
 
 **A finding is a snapshot.** Quote the run stamp (`audit run <UTC> | hub <sha>`) in anything derived from the run, and re-run before acting on a finding written earlier, because a repository moves between filing and pickup and a stale list leads to re-fixing what is already fixed.
 
-**File defects in the hub against `ptr727/ProjectTemplate`.** This includes bugs exposed by the resync or its tooling and conflicts between hub sources. It also includes unclear or incomplete instructions, missing capabilities, and Copilot findings about any of them. Search open and closed issues first. Update an existing issue when it tracks the same problem, or file a new one. Do not leave the finding only in chat, a review thread, the downstream repository, or agent memory. Include the observed evidence, the affected repository and ref, and the expected and actual behavior. Include the audit run stamp when the finding comes from an audit. A target-repository convergence issue remains separate and uses the generated `python3 spec/audit.py --issue` content above.
+**File defects in the hub against `ptr727/ProjectTemplate`.** This includes bugs exposed by the resync or its tooling and conflicts between hub sources. It also includes unclear or incomplete instructions, missing capabilities, and Copilot findings about any of them. Search open and closed issues first. Update an existing issue when it tracks the same problem, or file a new one. Do not leave the finding only in chat, a review thread, the downstream repository, or agent memory. Include the observed evidence, the affected repository and ref, and the expected and actual behavior. Include the audit run stamp when the finding comes from an audit. A target-repository convergence issue remains separate and uses the generated `uv run --no-project --script spec/audit.py --issue` content above.
 
 ## 3. Apply, in This Order
 

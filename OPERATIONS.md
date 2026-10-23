@@ -4,7 +4,7 @@ How this repository is run. It ships no application code, so its operations are 
 
 ## Local Verification
 
-What verifying a change here requires, including the part CI cannot perform. The gates below do run in CI, so a local run of them buys an earlier failure rather than a different one, with two exceptions stated where each belongs, the prose gate in the next section and `test_install.py` below the block. The two verifications CI never performs are the fleet audit and the repository-configuration check, because each reads live state in another repository over the API and a pull request runner is given neither the credentials nor a target to read. `python3 spec/audit.py --selftest` is what CI runs of the audit, which exercises the checker against its fixtures and reads no repository at all. So a change to [spec/](./spec/), [registry/](./registry/), [repo-config/](./repo-config/) or [AUDIT.md](./AUDIT.md) is verified by running `python3 spec/audit.py` and `repo-config/configure.sh check` from this checkout before the pull request opens, each from the repository root and each taking the arguments the two runbooks below give it. A green pipeline says nothing about either, and taking it as coverage is the failure this section exists to name.
+What verifying a change here requires, including the part CI cannot perform. The gates below do run in CI, so a local run of them buys an earlier failure rather than a different one, with two exceptions stated where each belongs, the prose gate in the next section and `test_install.py` below the block. The two verifications CI never performs are the fleet audit and the repository-configuration check, because each reads live state in another repository over the API and a pull request runner is given neither the credentials nor a target to read. `python3 spec/audit.py --selftest` is what CI runs of the audit, which exercises the checker against its fixtures and reads no repository at all. So a change to [spec/](./spec/), [registry/](./registry/), [repo-config/](./repo-config/) or [AUDIT.md](./AUDIT.md) is verified by running `uv run --no-project --script spec/audit.py` and `repo-config/configure.sh check` from this checkout before the pull request opens, each from the repository root and each taking the arguments the two runbooks below give it. A green pipeline says nothing about either, and taking it as coverage is the failure this section exists to name.
 
 ### Run the gates locally, which is wider than CI
 
@@ -66,9 +66,9 @@ Every run states its scope on stderr, as the files read and, for a diff-scoped r
 ### Audit the fleet
 
 ```sh
-python3 spec/audit.py                 # every cataloged repo
-python3 spec/audit.py [RepoName]      # one repo
-python3 spec/audit.py --issue [RepoName]
+uv run --no-project --script spec/audit.py                 # every cataloged repo
+uv run --no-project --script spec/audit.py [RepoName]      # one repo
+uv run --no-project --script spec/audit.py --issue [RepoName]
 ```
 
 Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md). No project-type check in `spec/project-types.json` runs here, and the cross-cutting ones are covered only in part, so read a clean run as evidence for the subset above and not for AUDIT.md section 4.
