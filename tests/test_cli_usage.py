@@ -108,6 +108,7 @@ NO_REQUIRED_ARGUMENT = frozenset(
         "scripts/build_dist.py",
         "scripts/docker_lint.py",
         "scripts/host_gate.py",
+        "scripts/pr_review_copilot.py",
         "scripts/prose_lint.py",
         "scripts/repo_gate.py",
         "scripts/skills_install.ps1",

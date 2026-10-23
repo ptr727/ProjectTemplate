@@ -14,13 +14,11 @@ crash.
 The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
 of its own and never reads as markup. Only Copilot's current overview format, the one carrying the
 `ccr-overview-v2` marker, is read. A Copilot body in any other layout reads as a note.
-
-Usage: pr_review_copilot.py [--help] [REVIEWER] < BODY
-Prints the reading of the body on standard input, `copilot` by default.
 """
 
 from __future__ import annotations
 
+import argparse
 import functools
 import json
 import re
@@ -541,15 +539,13 @@ def html_lines(body: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    if args and args[0] in ("-h", "--help"):
-        print(__doc__.strip())
-        return 0
-    if len(args) > 1 or (args and args[0] not in REVIEWERS):
-        print(f"pr_review_copilot.py: unrecognized argument: {args[-1]}", file=sys.stderr)
-        return 2
-    reading = read(sys.stdin.read(), args[0] if args else "copilot")
-    print(json.dumps(reading._asdict(), indent=2))
+    ap = argparse.ArgumentParser(
+        prog="pr_review_copilot.py",
+        description="Print the reading of the review body on standard input.",
+    )
+    ap.add_argument("reviewer", nargs="?", default="copilot", choices=REVIEWERS)
+    a = ap.parse_args(argv)
+    print(json.dumps(read(sys.stdin.read(), a.reviewer)._asdict(), indent=2))
     return 0
 
 
