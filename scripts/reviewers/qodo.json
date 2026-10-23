@@ -5,6 +5,7 @@
   "comment_heading": "<h3>\\s*Code Review by Qodo\\s*</h3>",
   "refusal_openings": [],
   "refusal_kinds": {"quota": [], "error": [], "file_count": []},
+  "rate_limit_service": "",
   "rate_limit": [],
   "verdicts": {"clean": [], "flagging": []},
   "headings": [],

@@ -10,43 +10,27 @@ Usage: pr_cleanup.py NUMBER --repo OWNER/NAME [--checkout DIR]
 
 `pr_review.py cleanup` forwards here, so a command line naming either script runs the same code.
 
-Delete a merged pull request's head branch, the verify-then-delete `drive-pr` and
-`merge-and-release` prescribe, done here so it runs under the one allow rule the host-safety
-installer registers for this script rather than as a hand-typed delete. That rule approves any
-arguments, so every check lives here. It takes the pull request number, never a branch name, and
-reads the branch from the pull request. It refuses unless the pull request is merged into `develop`
-from a head in `--repo` itself, and the head branch is none of `develop`, `main`, or the default
-branch read live. The owner is bound to `registry/repos.json`, and the repository must be
-registered or a fork, by `handoff.py`'s own write-scope check. It refuses a branch any ruleset or
-branch protection covers, since the write guard's per-branch check never sees a delete made in
-here. It refuses a branch an open pull request in `--repo` has as its head or base, naming each.
-The ref is read exactly, its tip is checked against the pull request's `headRefOid` before the
-delete is sent, and the delete is confirmed by reading the ref back. The delete itself carries no
-expected tip, so this is verify-then-delete rather than a compare-and-swap. With `--checkout
-<primary clone>`, a local half follows a remote half that exited 0, on the pull request's own
-branch and head commit. Every refusal is decided before anything is deleted, the remote branch
-included. A re-check after the delete can still refuse when a concurrent session changed the branch
-or a worktree in between. The output then names what already happened. A locked, dirty, or
-mid-operation worktree refuses. So does a branch tip that is neither the merged head nor behind it.
-So does a rebase or bisect paused on the branch in any worktree, the primary included. A worktree
-entry whose directory is gone is removed. The primary leaves the merged branch before the remote
-delete, and a failed checkout refuses. The local half removes the worktrees holding the branch. It
-deletes the local branch only at the merged head or an ancestor of it, after a tip re-read shows it
-unchanged. Then it fast-forwards the clone to current `develop`, never a reset, stash, or force. A
-clone left behind is reported and does not fail the run. The clone must be a primary checkout whose
-origin is `--repo`.
+The verify-then-delete `drive-pr` and `merge-and-release` prescribe, run under the one allow rule
+the host-safety installer registers for this script, so every check lives here. It takes the pull
+request number, never a branch name. It refuses unless the pull request is merged into `develop`
+from a head in `--repo` itself, the head is not `develop`, `main`, or the default branch, the
+owner and repository pass `handoff.py`'s write-scope check, no ruleset or protection covers the
+branch, and no open pull request has it as head or base. The tip is checked against the pull
+request's `headRefOid` before the delete and the delete is confirmed by reading the ref back.
+
+With `--checkout <primary clone>`, a local half follows a remote half that exited 0. Every refusal
+is decided before anything is deleted. A locked, dirty, or mid-operation worktree refuses, as does
+a branch tip neither at the merged head nor behind it. The local half removes the worktrees
+holding the branch, deletes the local branch, and fast-forwards the clone to `develop`, never a
+reset, stash, or force. A clone left behind is reported and does not fail the run.
 
 `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is provably
 finished, one `would-remove` or `keep <reason>` line per worktree or branch, and removes it only
-with `--apply`. The report fetches and prunes the remote-tracking refs of `origin` and writes
-nothing else. An item must sit untouched for `--min-age-hours` (default 24) and be clean. A branch
-is finished when a pull request from `--repo` merged it at its exact tip or past it. It is also
-finished when `origin/develop` or `origin/main` contains it. A detached worktree is finished when
-any `origin` ref contains its commit. For a merged develop pull request the sweep also deletes the
-remote head branch through the same checks as `cleanup <n>`. The report runs those checks and names
-the result. The sweep never touches the primary checkout except to fast-forward a tracked-clean
-`develop` to `origin/develop`, and the report names that step. Permanent branches, locked
-worktrees, and worktrees mid-operation are never touched.
+with `--apply`. An item must sit untouched for `--min-age-hours` (default 24) and be clean. A
+branch is finished when a pull request from `--repo` merged it at its exact tip or past it, or
+`origin/develop` or `origin/main` contains it. For a merged develop pull request the sweep also
+deletes the remote head branch through the same checks as `cleanup <n>`. Permanent branches,
+locked worktrees, and worktrees mid-operation are never touched.
 
 Exit 0 = deleted and confirmed gone, or already gone, or a sweep that completed. Exit 1 = refused,
 a moved tip naming both commits among them. Exit 2 = a read did not answer, a partial one included.
@@ -113,11 +97,7 @@ class CleanupUnread(Exception):
 
 
 def cleanup_read(query: str, **variables: object) -> dict:
-    """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1.
-
-    `gh_graphql` exits 1 on a failed read, which is `cleanup`'s refusal code, so a read that could
-    not answer would be reported as a refusal the caller can act on.
-    """
+    """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1."""
     try:
         return shared.request(query, variables).data
     except shared.GraphQLError as exc:
@@ -136,11 +116,7 @@ def cleanup_rest(path: str, what: str) -> object:
 
 
 def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
-    """The branch's ref node, or None where the branch does not exist.
-
-    The read is by exact qualified name, so a branch sharing a suffix never answers for it. The
-    node id it returns goes straight to the delete, so no caller ever holds one to mistype.
-    """
+    """The branch's ref node, or None where the branch does not exist."""
     data = cleanup_read(Q_CLEANUP_REF, o=owner, r=repo, q=f"refs/heads/{branch}")
     repository = data.get("repository")
     if not isinstance(repository, dict):
@@ -155,11 +131,7 @@ def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
 
 
 def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
-    """What protects the branch, rulesets and classic protection alike, empty where nothing does.
-
-    The branch travels inside a REST path, so a name that would change the path is not read, and
-    an unread rule set is never reported as no rules.
-    """
+    """What protects the branch, rulesets and classic protection alike, empty where nothing does."""
     if core.UNSAFE_REF.search(branch) or core.DOT_SEGMENT.search(branch):
         raise CleanupUnread(
             f"the head branch {branch!r} holds a character that changes a REST path, so the "
@@ -185,13 +157,7 @@ def in_repository(node: dict, owner: str, repo: str) -> bool:
 
 
 def local_heads(owner: str, repo: str, branch: str) -> list[object]:
-    """The number of each open pull request whose head is the branch in `owner/repo`.
-
-    The connection also holds forks' pull requests on a same-named branch. So every page is read
-    and filtered to this repository's own before anything is decided, and a fork's is never
-    counted. A page that does not answer, or one that cannot be followed to the next, raises rather
-    than reading as no pull request.
-    """
+    """The number of each open pull request whose head is the branch in `owner/repo`."""
 
     def fetch(cursor: str | None) -> dict:
         extra = {"after": cursor} if cursor else {}
@@ -212,13 +178,7 @@ def local_heads(owner: str, repo: str, branch: str) -> list[object]:
 
 
 def branch_users(owner: str, repo: str, branch: str) -> list[str]:
-    """The open pull requests in this repository whose head or base is the branch.
-
-    Deleting a branch closes every open pull request headed on it. It retargets or closes the ones
-    based on it, so each is named where one exists. Every head is read, per `local_heads`. A base
-    past the twenty read is counted rather than named, every one being this repository's own. An
-    unanswered read is never reported as no pull request.
-    """
+    """The open pull requests in this repository whose head or base is the branch."""
     users = [f"#{number} (head)" for number in local_heads(owner, repo, branch)]
     data = cleanup_read(Q_CLEANUP_BASES, o=owner, r=repo, b=branch)
     repository = data.get("repository")
@@ -302,10 +262,7 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
 
 
 def cleanup_fresh(owner: str, repo: str, plan: CleanupPlan) -> CleanupPlan:
-    """Read the remote branch again right before its delete, so the delete uses a fresh node id.
-
-    The checks and the local preflight take time, and another session may have pushed since.
-    """
+    """Read the remote branch again right before its delete, so the delete uses a fresh node id."""
     if plan.ref is None:
         return plan
     ref = cleanup_ref(owner, repo, plan.branch)
@@ -322,11 +279,7 @@ def cleanup_fresh(owner: str, repo: str, plan: CleanupPlan) -> CleanupPlan:
 
 
 def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
-    """Delete the remote branch `plan` verified and read it back.
-
-    A delete that reports a failure may still have landed, so the read back decides the outcome
-    either way.
-    """
+    """Delete the remote branch `plan` verified and read it back."""
     target = f"{owner}/{repo}"
     branch = plan.branch
     if plan.ref is None:
@@ -464,11 +417,7 @@ GITHUB_REMOTE = re.compile(
 def cleanup_git(
     root: str, *args: str, ok: tuple[int, ...] = (0,)
 ) -> subprocess.CompletedProcess[str]:
-    """One git call in `root` as an argv list, raising with its stderr on an unexpected code.
-
-    A return code the caller lists in `ok` is an answer it reads. Any other code is a call that
-    did not do what was asked, so it is shown and ends the step rather than swallowed.
-    """
+    """One git call in `root` as an argv list, raising with its stderr on an unexpected code."""
     try:
         proc = subprocess.run(
             ["git", "-C", root, *args],
@@ -488,12 +437,7 @@ def cleanup_git(
 
 
 def cleanup_primary(checkout: str, target: str) -> str:
-    """The real path of the primary checkout at `checkout`, refusing anything else.
-
-    A linked worktree is refused, since removing worktrees and moving branches belongs to the
-    clone that owns them. So is an origin naming another repository, since every local step
-    here derives from a pull request in `target`.
-    """
+    """The real path of the primary checkout at `checkout`, refusing anything else."""
     probe = cleanup_git(
         checkout,
         "rev-parse",
@@ -546,11 +490,7 @@ def cleanup_tip(primary: str, ref: str) -> str | None:
 
 
 def cleanup_dirty(path: str, untracked: bool) -> bool:
-    """Whether the work tree at `path` has changes, without refreshing its index.
-
-    `--no-optional-locks` keeps the read from rewriting the index, which would make an untouched
-    tree look touched to the age rule of `--sweep`.
-    """
+    """Whether the work tree at `path` has changes, without refreshing its index."""
     flag = "--untracked-files=all" if untracked else "--untracked-files=no"
     out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", flag).stdout
     return bool(out.strip())
@@ -567,10 +507,7 @@ IN_PROGRESS = (
 
 
 def cleanup_admin(path: str) -> str | None:
-    """The git directory holding the worktree at `path`'s state, or None where unreadable.
-
-    A linked worktree names it in its `.git` file, and a primary checkout's `.git` is it.
-    """
+    """The git directory holding the worktree at `path`'s state, or None where unreadable."""
     if os.path.isdir(os.path.join(path, ".git")):
         return os.path.join(path, ".git")
     try:
@@ -589,10 +526,7 @@ def cleanup_in_progress(path: str) -> bool:
 
 
 def cleanup_operation_names(path: str) -> set[str]:
-    """The branch names a rebase or bisect paused in the worktree at `path` is working on.
-
-    Either detaches HEAD, so the worktree no longer lists the branch it will return to.
-    """
+    """The branch names a rebase or bisect paused in the worktree at `path` is working on."""
     admin = cleanup_admin(path)
     names: set[str] = set()
     if admin is None:
@@ -712,20 +646,13 @@ def cleanup_base(primary: str, apply: bool = True) -> bool:
 
 
 def cleanup_behind(primary: str, tip: str, head: str) -> bool:
-    """Whether commit `tip` is an ancestor of `head`, so it holds nothing `head` lacks.
-
-    A `head` object this clone lacks proves nothing, and reads as not behind.
-    """
+    """Whether commit `tip` is an ancestor of `head`, so it holds nothing `head` lacks."""
     proc = cleanup_git(primary, "merge-base", "--is-ancestor", tip, head, ok=(0, 1, 128))
     return proc.returncode == 0
 
 
 def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None, list[Worktree]]:
-    """Fetch, then decide every local refusal, returning the branch tip and the worktrees to remove.
-
-    Nothing is removed here, so a refusal leaves all of it in place. `head` is the commit the
-    merged pull request carried, read live by the remote half.
-    """
+    """Fetch, then decide every local refusal, returning the branch tip and the worktrees to remove."""
     cleanup_git(primary, "fetch", "--prune", "origin")
     ref = f"refs/heads/{branch}"
     tip = cleanup_tip(primary, ref)
@@ -780,10 +707,7 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
 
 
 def cleanup_leave_branch(primary: str, branch: str) -> None:
-    """Move the primary checkout to `develop` where it holds `branch`, refusing if git will not.
-
-    This runs before the remote delete, so a checkout that fails still deletes nothing.
-    """
+    """Move the primary checkout to `develop` where it holds `branch`, refusing if git will not."""
     if not any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
         return
     try:
@@ -796,12 +720,7 @@ def cleanup_leave_branch(primary: str, branch: str) -> None:
 
 
 def cleanup_local(primary: str, branch: str, head: str) -> int:
-    """Remove the finished branch's worktrees and local branch, then return the base clone.
-
-    The refusals are decided again before the first removal, so a refused run leaves all of it
-    in place. The base clone's return is reported and never fails the run. The local branch is
-    deleted only at `head` or an ancestor of it, after a tip re-read shows it unchanged.
-    """
+    """Remove the finished branch's worktrees and local branch, then return the base clone."""
     try:
         tip, linked = cleanup_preflight(primary, branch, head)
     except CleanupRefused as exc:
@@ -875,11 +794,7 @@ class CleanupSweep:
         return float("inf") if not stamps else (time.time() - max(stamps)) / 3600
 
     def worktree_hours(self, w: Worktree) -> float | None:
-        """The idle hours of a linked worktree, or None where its admin directory is unreadable.
-
-        Taken before any status runs on it, and from the admin files git itself writes on use.
-        The directory's own mtime moves only when an entry is added or removed.
-        """
+        """The idle hours of a linked worktree, or None where its admin directory is unreadable."""
         admin = cleanup_admin(w.path)
         if admin is None:
             return None
@@ -918,11 +833,7 @@ class CleanupSweep:
         return None
 
     def remote(self, num: int | None, branch: str) -> None:
-        """Report, or with `apply` run, the remote half for a merged develop pull request.
-
-        The remote half makes its own checks, so its refusal keeps only the remote branch. A
-        report runs those same checks and writes nothing.
-        """
+        """Report, or with `apply` run, the remote half for a merged develop pull request."""
         if num is None:
             return
         if not self.apply:
@@ -987,11 +898,7 @@ class CleanupSweep:
         return 2 if self.problems else 0
 
     def prune(self, stale: list[Worktree]) -> set[str]:
-        """Prune the entries whose directory is gone and whose record is old enough.
-
-        Returns the paths pruned, or under a report the paths a prune would remove, so their
-        branches are no longer held and are judged as loose branches in the same run.
-        """
+        """Prune the entries whose directory is gone and whose record is old enough."""
         old = []
         for w in stale:
             hours = self.entry_hours(w)
@@ -1021,11 +928,7 @@ class CleanupSweep:
         return {w.path for w in old if w.path not in left}
 
     def entry_hours(self, w: Worktree) -> float:
-        """The idle hours of a missing worktree's record, from the `index` file prune reads.
-
-        Git prunes by the age of that file, and by nothing once it is gone. An entry this cannot
-        match reads as brand new, so it is kept.
-        """
+        """The idle hours of a missing worktree's record, from the `index` file prune reads."""
         base = os.path.join(self.common, "worktrees")
         try:
             names = os.listdir(base)

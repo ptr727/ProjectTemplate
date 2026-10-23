@@ -45,6 +45,7 @@ KEYS = {
     "comment_heading": str,
     "refusal_openings": list,
     "refusal_kinds": dict,
+    "rate_limit_service": str,
     "rate_limit": list,
     "verdicts": dict,
     "headings": list,
@@ -301,7 +302,11 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         re.search(rf"<!--\s*{re.escape(vocab['format_marker'])}\s*-->", h) for h in html
     )
     rate_limited = next(
-        (m.groupdict().get("service") or "" for p in vocab["rate_limit"] if (m := p.search(text))),
+        (
+            m.groupdict().get("service") or vocab["rate_limit_service"]
+            for p in vocab["rate_limit"]
+            if (m := p.search(text))
+        ),
         None,
     )
 
@@ -326,6 +331,8 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             if coverage == "none" or rank[state] > rank[coverage]:
                 coverage, coverage_line = state, m.group(0)
 
+    # A body in another layout is one note, rather than one note per part of it.
+    vet = vocab["vetted"] and (marked or not vocab["format_marker"])
     if vocab["vetted"] and vocab["format_marker"]:
         if not text.strip():
             notes.append("the body is empty")
@@ -351,7 +358,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             ("", None),
         )
         if match is None:
-            if vocab["vetted"] and node.parent is None:
+            if vet and node.parent is None:
                 notes.append(f"a collapsed section this reader has no spelling for: `{name}`")
             continue
         claimed.append((node.start, end + 1))
@@ -389,7 +396,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             if kind and verdict == "unknown":
                 verdict, verdict_heading = kind, name
                 headline = headline_after(tokens, i + 3, lines)
-            elif not kind and vocab["vetted"] and not matched(vocab["headings"], name):
+            elif not kind and vet and not matched(vocab["headings"], name):
                 notes.append(f"a heading this reader has no spelling for: `{name}`")
         elif token.type == "paragraph_open":
             inline = tokens[i + 1]
@@ -409,10 +416,11 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                     open_count = (open_count or 0) + stated(found_kind[1])
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
-            elif vocab["vetted"] and is_label(inline) and not matched(vocab["labels"], name):
+            elif vet and is_label(inline) and not matched(vocab["labels"], name):
                 notes.append(f"a label this reader has no spelling for: `{name}`")
         elif token.type == "table_open" and vocab["table_header"]:
-            table = (table or []) + table_paths(tokens, i, vocab["table_header"])
+            if (rows := table_paths(tokens, i, vocab["table_header"])) is not None:
+                table = (table or []) + rows
         i += 1
 
     named = max(open_count or 0, listed)
@@ -473,17 +481,14 @@ def entries_in(
 
 
 def headline_after(tokens: list[Token], start: int, lines: list[str]) -> str:
-    """The prose under a verdict heading, up to the next block that is not a plain paragraph."""
-    said = []
-    i = start
-    while i < len(tokens) and tokens[i].type == "paragraph_open" and tokens[i].level == 0:
-        inline = tokens[i + 1]
-        if is_label(inline) or (inline.children and inline.children[0].type == "strong_open"):
-            break
-        a, b = tokens[i].map or (0, 0)
-        said.append(" ".join(" ".join(lines[a:b]).split()))
-        i += 3
-    return " ".join(said)
+    """The paragraph directly under a verdict heading, unless it is a label or a bold count line."""
+    if start >= len(tokens) or tokens[start].type != "paragraph_open":
+        return ""
+    inline = tokens[start + 1]
+    if is_label(inline) or (inline.children and inline.children[0].type == "strong_open"):
+        return ""
+    a, b = tokens[start].map or (0, 0)
+    return " ".join(" ".join(lines[a:b]).split())
 
 
 def is_label(inline: Token) -> bool:
@@ -506,7 +511,7 @@ def items_after(tokens: list[Token], start: int) -> int:
     return count
 
 
-def table_paths(tokens: list[Token], start: int, header: str) -> list[str]:
+def table_paths(tokens: list[Token], start: int, header: str) -> list[str] | None:
     """The paths in the first column of the table opening at `start`, where its header names one."""
     named: list[str] = []
     column = -1
@@ -522,7 +527,7 @@ def table_paths(tokens: list[Token], start: int, header: str) -> list[str]:
             head = False
         elif token.type == "inline" and column == 0:
             if head and label(inline_text(token)) != header:
-                return []
+                return None
             if not head:
                 named.extend(paths(token))
     return named

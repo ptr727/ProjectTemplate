@@ -9,6 +9,7 @@
     "error": ["encountered an error"],
     "file_count": ["maximum number of files"]
   },
+  "rate_limit_service": "",
   "rate_limit": [],
   "verdicts": {
     "clean": ["approval recommended", "ready to approve"],

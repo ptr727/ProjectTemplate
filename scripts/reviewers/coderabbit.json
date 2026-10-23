@@ -5,6 +5,7 @@
   "comment_heading": "",
   "refusal_openings": [],
   "refusal_kinds": {"quota": [], "error": [], "file_count": []},
+  "rate_limit_service": "coderabbit.ai",
   "rate_limit": [
     "auto-generated comment:\\s*rate limited by\\s*(?P<service>\\S+?)\\s*-->",
     "<!--\\s*This is an auto-generated reply by [^>\\n]*-->\\s*(?:<!--[^>\\n]*-->\\s*)*<details>\\s*<summary>[^<\\n]*Action not completed\\s*</summary>\\s*Review rate limited\\."
