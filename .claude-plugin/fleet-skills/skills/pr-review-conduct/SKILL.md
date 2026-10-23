@@ -249,11 +249,11 @@ Run `local-strict-review` against the branch's current diff before every push th
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
 2. Run `scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
-3. Request a Copilot round at one defined moment only: the head of a pull request into the default
+3. Request a Copilot round at one defined moment: the head of a pull request into the default
    branch, a promotion among them. Auto-trigger is unreliable, so request it explicitly, which
    step 4's `wait` is what does. On a pull request into any other branch, `wait` reads step 1's
-   attestation as `coverage=local` where Merge Gate item 2 allows that reading, and requests no
-   round unless a partial round or a truncated review history is on record. Pass `wait --request` where a change
+   attestation as `coverage=local` where Merge Gate item 2 allows that reading. There `wait`
+   requests a round only where a partial round or a truncated review history is on record. Pass `wait --request` where a change
    deserves a Copilot round anyway. `wait` also skips the request where
    a review already covers the head, where the answer came outside a formal review, where it detects
    drift, under a quota or error refusal, and where something is already in the request set, which
@@ -286,8 +286,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying and fix each one sitting
-   in a file the diff already touches or that this change itself made wrong, recording the rest as
-   outcome 4 records a `pre-existing` finding, per `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
+   in a file the diff already touches or that this change itself made wrong. Each of the rest takes
+   the outcome a `pre-existing` finding takes under outcome 4, per `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
    raised, not once it recurs. Take the fix through `local-strict-review` the same way the push
    that opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply
    with the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
@@ -343,8 +343,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    suppressed finding has no thread, so its pointer is an answer per `pr-review-conduct`
    "Answering a suppressed finding". That answer is `Listed in the body` for a listed or dropped
    finding, and `Deferred to <issue>` for a filed one. A local-pass finding owes no pointer
-   beyond its body line. A sibling outcome 1's class sweep leaves unfixed takes these bullets as a
-   `pre-existing` finding does. An issue goes in the repository where
+   beyond its body line. A sibling that outcome 1's class sweep leaves unfixed takes the
+   bullet a `pre-existing` finding would take. An issue goes in the repository where
    the fix has to land. For a finding against carried content, that is the repository authoring
    the content rather than the one carrying it. An issue filed where nobody may make the fix is
    a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
