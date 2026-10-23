@@ -97,7 +97,10 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    obstacle to route around, and that
    skill's refusal table says what each refusal means and what clears it.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
-   "Disposing of Every Finding" below.
+   "Disposing of Every Finding" below. Request no Copilot round on this feature PR. Its `wait`
+   requests none and reads step 2's attestation as `coverage=local`, and exit `49` means the head
+   lacks one, so attest again. A promotion re-reviews content its feature PRs already carried, so
+   the hosted review runs once per change, at the promotion in step 6.
 4. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
    call, it is run from inside the task's own worktree per step 1, where the feature branch is
