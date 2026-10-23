@@ -35,6 +35,10 @@ Each language defines a **clean-compile** verification: the combination of build
 - **Classify a subprocess failure by which command failed and the status code it reports, never by the prose of its message.** That prose varies by tool version and locale, and a status code's value does not, even one printed inside the message. A printed code is read by the notation that marks it, and a match finding none counts as an unexpected failure. Where one command's status code cannot separate the failures its caller handles differently, give each expected failure its own real operation. Where no such operation exists, treat the failure as unexpected. A test asserting a script's output, such as the refusal "Command-Line Arguments" requires, verifies that output rather than classifying a failure.
 - **A failure message states the error, the path or other target, and the remedy, and claims nothing about the state the failure left.** The error the operation raised is the one fact the code holds at that point. A description of what the failure left behind is a prediction. It reads false once an unforeseen state reaches the message, such as a file written in full that then fails to close. A remedy such as "fix what it names, then re-run" needs no such claim.
 
+### Parsing Structured Formats
+
+- **A program reading a structured format uses a maintained parser rather than a hand-written one, where a field-tested parser exists for the runtime in use.** That covers YAML, Markdown, TOML, JSON, a programming language's comments or strings, and a shell command line. The standard library's own parsers count, such as Python's `json`, `tomllib`, `ast`, `tokenize`, and `html.parser`. A hand-written reader converges on the format's full grammar one review finding at a time. Three scripts in one repository each grew their own Markdown reader that way.
+
 ### Command-Line Arguments
 
 A command-line script is one a person or an agent runs by name. A hook its host runs, taking its input from that host rather than from a command line, is not one.
@@ -82,6 +86,11 @@ This is packaged as the `dotnet-codestyle` Skill at `.agents/skills/dotnet-codes
 The style guide for any Python project(s) in this repo: the build-versus-lint-only profile split, the uv/ruff/pyright/mypy/pytest toolchain, `src` layout, formatting and linting, comment and docstring conventions, type hints, naming, imports, patterns to avoid, test conventions including the `pytest-cov` dependency and coverage selector a Python directory running pytest owes under `WORKFLOW.md` D1.6, and versioning.
 
 This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codestyle/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the scope. Read the skill for the full rules and the profile-adaptation guidance.
+
+### Tests and Script Dependencies
+
+- **A test lives under the repository's `tests/` tree, never inside the production file it tests.** A deployed script may keep a `--selftest` that runs a small smoke check in seconds, and the case matrix lives in `tests/`. A self-test shipped inside the file it tests grows the file every reviewer reads. One such file reached 21,000 lines that way, 11,600 of them cases.
+- **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --script <path>`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. A script with no such block runs under `python3`. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
 
 ## Shell
 

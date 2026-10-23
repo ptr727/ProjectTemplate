@@ -232,6 +232,15 @@ since `unittest` has no fixture-injection mechanism of its own. Fakes over mocks
 the docstring's contract, not implementation details. See `references/testing.md` for the full
 build-profile conventions, and `references/profiles.md` for the lint-only `unittest` conventions.
 
+## Tests and Script Dependencies
+
+<!-- include: CODESTYLE.md > Tests and Script Dependencies -->
+
+- **A test lives under the repository's `tests/` tree, never inside the production file it tests.** A deployed script may keep a `--selftest` that runs a small smoke check in seconds, and the case matrix lives in `tests/`. A self-test shipped inside the file it tests grows the file every reviewer reads. One such file reached 21,000 lines that way, 11,600 of them cases.
+- **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --script <path>`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. A script with no such block runs under `python3`. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
+
+<!-- /include -->
+
 ## Versioning
 
 Published packages use `_version.py` with `__version__ = "0.0.0"` as a placeholder. Wire
