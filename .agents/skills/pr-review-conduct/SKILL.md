@@ -186,8 +186,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      quoted, per "Escalate to the maintainer when" below.
 
    A part on an earlier round prints under `REVIEWER OUTPUT NOTED` and decides no exit code. So
-   does a label nested in a list, a quote, or a placed part. Read that block rather than the `shapes=` field, which names a
-   head hold first. Read each such part by hand, and give any finding in it item 3's outcome.
+   does a label nested in a list, a quote, or a placed part. Read that block rather than the
+   `shapes=` field, which names a head hold first. Read each such part by hand, and give any
+   finding in it item 3's outcome.
 5. The maintainer has given **explicit** permission to merge.
 
 The agent never merges on its own. A green or CLEAN PR with one open finding is not mergeable,

@@ -8,8 +8,9 @@
 The reviewer's wording and layout change without notice and with no programmatic API, so every
 spelling this reads lives in `reviewers/<name>.json` rather than here. A changed spelling is a
 data edit plus one fixture. A part of a body this cannot place is a one-line note. One that can
-hold a finding also carries its own text as an unplaced part. `read` never raises. A body it trips on reads as no refusal, `unknown` coverage
-and verdict, and the whole body unplaced. A new shape reaches the gate as text, never a crash.
+hold a finding also carries its own text as an unplaced part. `read` never raises. A body it
+trips on reads as no refusal, `unknown` coverage and verdict, and the whole body unplaced. A new
+shape reaches the gate as text, never a crash.
 
 The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
 of its own and never reads as markup. Only Copilot's current overview format, the one carrying the

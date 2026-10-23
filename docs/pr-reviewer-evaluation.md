@@ -148,7 +148,7 @@ The expansion should preserve one compact command while adding provider adapters
 
 `status` should report every enabled reviewer on one line and then list unresolved findings grouped by provider. `wait` should finish only when each selected reviewer reaches a recognized terminal state.
 
-The Copilot adapter is `scripts/pr_review_copilot.py`, with its spellings in `scripts/reviewers/copilot.json`, and a provider joins it as a vocabulary file read by the same code path. Provider support must not weaken its refusal, partial-coverage, or suppressed-finding readings. A part it cannot place on a round covering the head holds the merge gate until an owner acknowledges it.
+The Copilot adapter is `scripts/pr_review_copilot.py`, with its spellings in `scripts/reviewers/copilot.json`, and a provider joins it as a vocabulary file read by the same code path. Provider support must not weaken its refusal, partial-coverage, or suppressed-finding readings. A part it cannot place on a round covering the head holds the merge gate until an owner, member, or collaborator acknowledges it with written outcomes.
 
 ## Next Evaluation Steps
 
