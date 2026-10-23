@@ -3,7 +3,7 @@
 
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
-  charset        Non-ASCII judged against the tiers the charset rule defines, tier 4 being six emoji markers.
+  charset        Non-ASCII judged against the tiers the charset rule defines, tier 4 being emoji markers.
   charset-unknown Non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics.
   semicolon      No semicolon in prose, outside a series or labeled pair carrying a comma.
   dash           No spaced hyphen joining or interrupting a sentence.
@@ -1087,7 +1087,7 @@ TIER3 = frozenset(
     }
 )
 
-# Tier 4 is six emoji callout markers, each admitted alone or before VARIATION SELECTOR-16.
+# Tier 4 is a fixed set of emoji callout markers, each admitted alone or before VARIATION SELECTOR-16.
 # They are warning, information, check mark, cross mark, memo (note), and light bulb.
 # Every other emoji flags, and so does a selector not directly after one of these.
 TIER4 = frozenset({"\u26a0", "\u2139", "\u2705", "\u274c", "\U0001f4dd", "\U0001f4a1"})
@@ -2059,6 +2059,11 @@ def in_numeric_context(line: str, pos: int) -> bool:
     )
 
 
+def starts_lowercase(text: str) -> bool:
+    """Whether the text opens with a lowercase letter, a tier-4 marker being no letter."""
+    return text[:1].islower() and text[0] not in TIER4
+
+
 def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     """Every non-ASCII character on the line, judged against its tier.
 
@@ -2412,7 +2417,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             and prev_body
             and not SENT_END.search(prev_body)
             and not SENT_END.search(prev_whole)
-            and body[:1].islower()
+            and starts_lowercase(body)
         )
         if continuation:
             out.append(
@@ -2426,7 +2431,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A label opening a definition is exempt, since the lowercase word is the name being defined.
         elif (
             leading
-            and body[:1].islower()
+            and starts_lowercase(body)
             and not COMMENT_LABEL.match(body)
             and not is_tool_directive(body)
         ):
@@ -3259,7 +3264,7 @@ def check_file(
                     p
                     and not SENT_END.search(p)
                     and not p.endswith((":", "-", "|"))
-                    and stripped[0].islower()
+                    and starts_lowercase(stripped)
                 ):
                     out.append(
                         (

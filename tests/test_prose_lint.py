@@ -247,9 +247,10 @@ class TestTierTables(BaitCase):
         )
 
     def test_a_callout_marker_is_admitted_alone_or_with_variation_selector_16(self) -> None:
-        """Tier 4 admits six emoji markers, each bare or followed by VARIATION SELECTOR-16."""
+        """Tier 4 admits the documented emoji markers, each bare or followed by VARIATION SELECTOR-16."""
         rules = {"charset", "charset-unknown"}
-        self.assertEqual(6, len(prose_lint.TIER4))
+        documented = {0x26A0, 0x2139, 0x2705, 0x274C, 0x1F4DD, 0x1F4A1}
+        self.assertEqual(documented, {ord(ch) for ch in prose_lint.TIER4})
         for ch in prose_lint.TIER4:
             with self.subTest(codepoint=f"U+{ord(ch):04X}"):
                 self.assertEqual([], self.kinds(f"> {ch} **Note:** text\n", rules))
@@ -271,6 +272,13 @@ class TestTierTables(BaitCase):
                     ["charset-unknown", "charset-unknown"],
                     self.kinds(f"a {ch}\ufe0f here\n", rules),
                 )
+
+    def test_a_marker_opening_a_comment_or_line_is_not_a_lowercase_letter(self) -> None:
+        """U+2139 is category Ll, yet a marker opening a comment is no lowercase sentence start."""
+        info = chr(0x2139)
+        self.assertTrue(info.islower())
+        self.assertFalse(prose_lint.starts_lowercase(f"{info}\ufe0f Run setup first."))
+        self.assertTrue(prose_lint.starts_lowercase("run setup first."))
 
     def test_a_stray_variation_selector_16_is_still_reported(self) -> None:
         """The selector is admitted only directly after a marker, never alone or after a gap."""
