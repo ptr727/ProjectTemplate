@@ -425,11 +425,90 @@ class TestNotes(unittest.TestCase):
         self.assertEqual("unknown", found.coverage)
         self.assertEqual("none", found.refusal)
         self.assertEqual(("the reader failed on this body (ValueError)",), found.notes)
+        self.assertEqual(("anything",), tuple(p.text for p in found.unplaced))
 
     def test_a_pathological_body_reads_in_bounded_time(self) -> None:
         for text in ("<details>" * 5000, "> " * 20000 + "x", "`" * 30000, "\u00a0" * 30000):
             with self.subTest(text=text[:10]):
                 adapter.read(text)
+
+
+class TestUnplaced(unittest.TestCase):
+    def test_each_unplaced_part_carries_its_own_text(self) -> None:
+        odd = (
+            "<details>\n<summary>Confidence notes (2)</summary>\n\nHidden finding.\n</details>\n\n"
+            "### Confidence assessment\n\nThe loop may not end.\n\n**Risk level:**\n\nLow."
+        )
+        parts = {p.note: p.text for p in adapter.read(body(sections=odd)).unplaced}
+        self.assertEqual(3, len(parts))
+        texts = list(parts.values())
+        self.assertTrue(any("Hidden finding." in t and "<summary>" in t for t in texts))
+        self.assertIn("### Confidence assessment\n\nThe loop may not end.", texts)
+        self.assertIn("**Risk level:**\n\nLow.", texts)
+
+    def test_a_body_in_another_layout_is_unplaced_whole(self) -> None:
+        text = "## Pull request overview\n\nThe change is narrow."
+        self.assertEqual((text,), tuple(p.text for p in adapter.read(text).unplaced))
+
+    def test_an_empty_body_and_a_placed_body_leave_nothing_unplaced(self) -> None:
+        self.assertEqual((), adapter.read("").unplaced)
+        self.assertEqual((), adapter.read(body(sections=open_section())).unplaced)
+
+    def test_the_fingerprint_is_short_stable_and_named_by_the_text(self) -> None:
+        a, b = adapter.Unplaced("one", "first part"), adapter.Unplaced("two", "second part")
+        fp = adapter.fingerprint([a, b])
+        self.assertRegex(fp, r"^[0-9a-f]{12}$")
+        self.assertEqual(fp, adapter.fingerprint([b, a]))
+        self.assertNotEqual(fp, adapter.fingerprint([a, b._replace(text="second part.")]))
+
+    def test_an_excerpt_is_bounded_in_lines_and_width(self) -> None:
+        text = "\n".join(["x" * 500] + [f"line {n}" for n in range(40)])
+        shown = adapter.excerpt(text)
+        self.assertEqual(adapter.EXCERPT_LINES + 1, len(shown))
+        self.assertTrue(shown[0].endswith("x..."))
+        self.assertLessEqual(len(shown[0]), adapter.EXCERPT_WIDTH + 10)
+        self.assertIn("29 more lines in the body", shown[-1])
+
+    def test_an_unplaced_label_stops_before_what_the_reader_places(self) -> None:
+        odd = "**Reviewer musings:**\n\nThe loop may not end.\n\n" + what_changed()
+        (part,) = adapter.read(body(sections=odd)).unplaced
+        self.assertIn("The loop may not end.", part.text)
+        self.assertNotIn("What changed", part.text)
+
+    def test_a_label_inside_a_list_item_is_a_note_and_not_a_part(self) -> None:
+        nested = "**Changes:**\n\n- Test updates:\n\n  - Cover the empty case.\n"
+        found = adapter.read(body(sections=nested))
+        self.assertEqual((), found.unplaced)
+        self.assertTrue(any("test updates:" in n for n in found.notes))
+
+    def test_the_effort_tail_stays_out_of_a_trailing_part(self) -> None:
+        texts = [
+            adapter.read(body(sections="**Risk level:**\n\nLow.", tail=tail)).unplaced[0].text
+            for tail in ("<sub>Review effort: Lite</sub>", "<sub>Review effort: Balanced</sub>")
+        ]
+        self.assertEqual(["**Risk level:**\n\nLow."] * 2, texts)
+
+    def test_a_count_line_ends_a_trailing_part(self) -> None:
+        texts = [
+            adapter.read(body(sections=f"**Risk level:**\n\nLow.\n\n{count}")).unplaced[0].text
+            for count in ("**0 open findings**", "**No open findings**")
+        ]
+        self.assertEqual(["**Risk level:**\n\nLow."] * 2, texts)
+
+    def test_an_other_table_or_html_line_stays_inside_the_part(self) -> None:
+        for middle in ("| Area | Note |\n|---|---|\n| retry | off by one |", "<!-- aside -->"):
+            with self.subTest(middle=middle):
+                odd = f"### Risk notes\n\n{middle}\n\nThe loop may not end."
+                (part,) = adapter.read(body(sections=odd)).unplaced
+                self.assertIn("The loop may not end.", part.text)
+
+    def test_a_heading_inside_an_unknown_section_is_not_a_second_part(self) -> None:
+        odd = (
+            "<details>\n<summary>Confidence notes (1)</summary>\n\n### Inner\n\n"
+            "**Odd label:**\n\nText.\n</details>"
+        )
+        (part,) = adapter.read(body(sections=odd)).unplaced
+        self.assertIn("### Inner", part.text)
 
 
 class TestOtherReviewers(unittest.TestCase):

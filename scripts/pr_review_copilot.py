@@ -7,19 +7,21 @@
 
 The reviewer's wording and layout change without notice and with no programmatic API, so every
 spelling this reads lives in `reviewers/<name>.json` rather than here. A changed spelling is a
-data edit plus one fixture. A part of a body this cannot place is a one-line note, and `read`
-never raises: a body it trips on reads as no refusal, `unknown` coverage and verdict, and a note,
-so a new shape reaches the digest as a note rather than the gate as a crash.
+data edit plus one fixture. A part of a body this cannot place is a one-line note. One that can
+hold a finding also carries its own text as an unplaced part. `read` never raises. A body it
+trips on reads as no refusal, `unknown` coverage and verdict, and the whole body unplaced. A new
+shape reaches the gate as text, never a crash.
 
 The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
 of its own and never reads as markup. Only Copilot's current overview format, the one carrying the
-`ccr-overview-v2` marker, is read. A Copilot body in any other layout reads as a note.
+`ccr-overview-v2` marker, is read. A Copilot body in any other layout reads as one unplaced part.
 """
 
 from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import json
 import re
 import sys
@@ -73,6 +75,9 @@ BADGE = re.compile(
 )
 # A count longer than this is an identifier rather than anything a review states.
 COUNT_DIGITS = 4
+FINGERPRINT_HEX = 12
+EXCERPT_LINES = 12
+EXCERPT_WIDTH = 160
 
 PARSER = MarkdownIt("commonmark").enable("table")
 
@@ -86,12 +91,20 @@ class Section(NamedTuple):
     text: str
 
 
+class Unplaced(NamedTuple):
+    """One part of a body the reader cannot place: the note naming it, and the part's own text."""
+
+    note: str
+    text: str
+
+
 class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
     `open` is the count of open findings the body states, None where it states none. `unthreaded`
     is how many findings it names that no thread on the pull request carries. `table` is the
-    paths the body's file table names, None where it carries no table.
+    paths the body's file table names, None where it carries no table. `unplaced` is each part
+    the reader cannot place, with its text, the subset of `notes` that can hold a finding.
     """
 
     coverage: str = "unknown"
@@ -110,6 +123,7 @@ class Reading(NamedTuple):
     rate_limited: str | None = None
     marked: bool = False
     notes: tuple[str, ...] = ()
+    unplaced: tuple[Unplaced, ...] = ()
 
     def held(self, kind: str) -> int:
         """The findings this body holds in sections of `kind`, by the counts their labels state."""
@@ -281,10 +295,10 @@ def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None =
     """
     try:
         return _read(body or "", reviewer, threads)
-    # A shape the reader trips on is a note in the digest, never a crash in the gate.
     except Exception as exc:  # noqa: BLE001
         failed = f"the reader failed on this body ({type(exc).__name__})"
-        return Reading(refusal="none", coverage_line=failed, notes=(failed,))
+        part = Unplaced(failed, (body or "").replace("\r\n", "\n").strip())
+        return Reading(refusal="none", coverage_line=failed, notes=(failed,), unplaced=(part,))
 
 
 @functools.lru_cache(maxsize=512)
@@ -294,6 +308,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     lines = text.split("\n")
     tokens = PARSER.parse(text)
     notes: list[str] = []
+    unplaced: list[Unplaced] = []
+
+    def unread(note: str, start: int, end: int) -> None:
+        notes.append(note)
+        unplaced.append(Unplaced(note, "\n".join(lines[start:end]).strip()))
+
     html = [t.content for t in tokens if t.type == "html_block"] + [
         c.content
         for t in tokens
@@ -340,14 +360,17 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         if not text.strip():
             notes.append("the body is empty")
         elif not marked:
-            notes.append(
+            unread(
                 f"the body carries no `<!-- {vocab['format_marker']} -->` marker, the one format "
-                "this reader reads"
+                "this reader reads",
+                0,
+                len(lines),
             )
 
     found = details(tokens)
     sections: list[Section] = []
     claimed: list[tuple[int, int]] = []
+    opaque: list[tuple[int, int]] = []
     counted: list[tuple[int, int]] = []
     open_count: int | None = None
     entries = linked = 0
@@ -363,7 +386,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         )
         if match is None:
             if vet and node.parent is None:
-                notes.append(f"a collapsed section this reader has no spelling for: `{name}`")
+                opaque.append((node.start, end + 1))
+                unread(
+                    f"a collapsed section this reader has no spelling for: `{name}`",
+                    node.start,
+                    end + 1,
+                )
             continue
         claimed.append((node.start, end + 1))
         # A section counting its entries, resolved ones included, holds findings rather than a statement.
@@ -391,20 +419,48 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     table: list[str] | None = None
     listed = 0
 
-    def inside(token: Token) -> bool:
-        return any(a <= (token.map or [0])[0] < b for a, b in claimed)
+    def inside(token: Token, ranges: list[tuple[int, int]] = claimed) -> bool:
+        return any(a <= (token.map or [0])[0] < b for a, b in ranges)
+
+    def placed(n: int, t: Token) -> bool:
+        if t.type == "heading_open":
+            return True
+        if t.level:
+            return False
+        if t.type == "table_open":
+            return bool(vocab["table_header"]) and (
+                table_paths(tokens, n, vocab["table_header"]) is not None
+            )
+        if t.type == "html_block":
+            return bool(FLEET_REVIEW.search(t.content))
+        if t.type != "paragraph_open":
+            return False
+        said = " ".join(inline_text(tokens[n + 1]).split())
+        return (
+            is_label(tokens[n + 1])
+            or bool(vocab["effort"].fullmatch(label(said)))
+            or any(p.match(said) for p in vocab["coverage_prose"])
+            or any(matched(ps, label(said)) for ps in vocab["sections"].values())
+        )
+
+    stops = sorted(
+        {a for a, _ in claimed + opaque}
+        | {(t.map or [0])[0] for n, t in enumerate(tokens) if placed(n, t)}
+    )
 
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        if token.type == "heading_open" and not inside(token):
+        if token.type == "heading_open" and not inside(token) and not inside(token, opaque):
             name = label(tokens[i + 1].content)
             kind = next((k for k, ps in vocab["verdicts"].items() if matched(ps, name)), "")
             if kind and verdict == "unknown":
                 verdict, verdict_heading = kind, name
                 headline = headline_after(tokens, i + 3, lines, vocab["coverage_prose"])
             elif not kind and vet and not matched(vocab["headings"], name):
-                notes.append(f"a heading this reader has no spelling for: `{name}`")
+                unread(
+                    f"a heading this reader has no spelling for: `{name}`", *span(tokens, i, stops)
+                )
         elif token.type == "paragraph_open":
             inline = tokens[i + 1]
             name = label(inline_text(inline))
@@ -423,8 +479,17 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                     open_count = (open_count or 0) + stated(found_kind[1])
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
-            elif vet and is_label(inline) and not matched(vocab["labels"], name):
-                notes.append(f"a label this reader has no spelling for: `{name}`")
+            elif (
+                vet
+                and is_label(inline)
+                and not matched(vocab["labels"], name)
+                and not inside(token, opaque)
+            ):
+                note = f"a label this reader has no spelling for: `{name}`"
+                if token.level or inside(token):
+                    notes.append(note)
+                else:
+                    unread(note, *span(tokens, i, stops))
         elif (
             token.type == "table_open"
             and vocab["table_header"]
@@ -478,7 +543,31 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         rate_limited=rate_limited,
         marked=marked,
         notes=tuple(dict.fromkeys(notes)),
+        unplaced=tuple(dict.fromkeys(unplaced)),
     )
+
+
+def span(tokens: list[Token], start: int, stops: list[int]) -> tuple[int, int]:
+    """The lines from the block opening at `start` to the next stop, the part a note names."""
+    first = (tokens[start].map or [0])[0]
+    return first, next((s for s in stops if s > first), sys.maxsize)
+
+
+def fingerprint(parts: list[Unplaced]) -> str:
+    """A short stable name for a set of unplaced parts, over their text in sorted order."""
+    digest = hashlib.sha256()
+    for text in sorted({p.text for p in parts}):
+        digest.update(text.encode("utf-8") + b"\0")
+    return digest.hexdigest()[:FINGERPRINT_HEX]
+
+
+def excerpt(text: str) -> list[str]:
+    """The first lines of a part, indented and cut to a width, with a closing line for the rest."""
+    kept = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    shown = [ln if len(ln) <= EXCERPT_WIDTH else ln[:EXCERPT_WIDTH] + "..." for ln in kept]
+    cut = len(kept) - EXCERPT_LINES
+    more = [f"... {cut} more lines in the body"] if cut > 0 else []
+    return [f"      {ln}" for ln in shown[:EXCERPT_LINES] + more]
 
 
 def entries_in(

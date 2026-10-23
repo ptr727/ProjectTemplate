@@ -14,8 +14,8 @@ Discipline" for the rule this implements.
 This file is the gate: the plumbing, the checks, the verdict, the wait loop, and the writes.
 What a reviewer's body says is read by `pr_review_copilot.py`, whose vocabulary lives in
 `reviewers/<name>.json`, so a change in the reviewer's wording is a data edit there and never
-an edit here. A shape the adapter cannot place prints as a note under `shapes=NOTED` and decides
-no exit code.
+an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
+written outcomes acknowledge it, and on an earlier round it is a note.
 
 Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
@@ -33,6 +33,8 @@ Subcommands
            node id is read in the same run, and the returned comment URL and body confirm the
            write. Exit 0 = done, 64 = write scope could not be established or excludes the
            target, 65 = the PR could not be read, 66 = the response did not confirm the comment.
+           --fingerprint posts the body as the acknowledgment of the unplaced set `status` names,
+           with `<!-- fleet-shape-ack: fingerprint=<fp> -->` beneath it.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure caught by a
            reviewer or not at all. Read-only. Exit 0 = every reference resolves, 70 = one does
@@ -50,7 +52,9 @@ Subcommands
            named in its headline alone, printed under `VERDICT WITH NO COUNTED FINDING`. The code
            repeats on that head after the headline is answered, since nothing here reads an
            answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
-           HEADLINE`, which changes no exit code.
+           HEADLINE`, which changes no exit code. 50 is also a head round's part the adapter
+           cannot place, `shapes=HELD` with an excerpt under `UNPLACED ON THE HEAD`. A trusted
+           comment acknowledging its fingerprint clears it, `shapes=ACKNOWLEDGED`.
            `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
            on, `table` where a round covering the head names exactly the changed files in its own
@@ -266,7 +270,7 @@ HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
-    comments(last:100){ nodes{ author{login} authorAssociation createdAt body } pageInfo{ hasPreviousPage } }
+    comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
@@ -354,6 +358,7 @@ ATTESTATION = re.compile(
     re.MULTILINE,
 )
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+ACK_MARKER = "<!-- fleet-shape-ack: fingerprint={} -->"
 LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
 # The conversation-comment and thread mutations the runbook publishes.
@@ -1242,6 +1247,33 @@ def opened_by(pr: dict, node: dict) -> list[dict]:
     ]
 
 
+def shape_hold(pr: dict) -> tuple[str, list[adapter.Unplaced], bool] | None:
+    """The parts the head's rounds leave unplaced, their fingerprint, and whether it is answered.
+
+    None where those rounds place every part. A trusted comment is what answers a fingerprint.
+    """
+    parts = list(dict.fromkeys(p for node in head_reviews(pr) for p in reading(node).unplaced))
+    if not parts:
+        return None
+    fp = adapter.fingerprint(parts)
+    marker = ACK_MARKER.format(fp)
+    acked = any(
+        marker in lines and any(ln.strip() not in ("", marker) for ln in body.splitlines())
+        for body, lines in trusted_comments(pr)
+    )
+    return fp, parts, acked
+
+
+def trusted_comments(pr: dict) -> Iterator[tuple[str, list[str]]]:
+    """Each owner's, member's, or collaborator's shown comment body, with its HTML lines outside code."""
+    for node in (pr.get("comments") or {}).get("nodes") or []:
+        if (node.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS and not node.get(
+            "isMinimized"
+        ):
+            body = node.get("body") or ""
+            yield body, adapter.html_lines(body)
+
+
 def partial_on_record(pr: dict) -> bool:
     """Whether any Copilot round on the pull request, on any commit, states partial coverage."""
     return any(
@@ -1421,12 +1453,14 @@ def digest(
     found = reading(newest, pr=pr) if newest is not None else None
     effort, effort_source = review_effort(pr)
     cover, cover_why = coverage(pr)
+    hold = shape_hold(pr)
     # Every round's notes, since a renamed section on an earlier round hides a finding too.
     notes = [
         *dict.fromkeys(
             f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
             for node in revs
             for n in reading(node).notes
+            if node not in on_head or n not in {p.note for p in reading(node).unplaced}
         ),
         *reviewer_login_drift(pr),
     ]
@@ -1494,7 +1528,7 @@ def digest(
         )
         + f"effort={effort} effort_source={effort_source} "
         f"coverage={cover.upper() if cover in ('partial', 'unknown') else cover} "
-        f"shapes={'NOTED' if notes else 'ok'} "
+        f"shapes={('ACKNOWLEDGED' if hold[2] else 'HELD') if hold else 'NOTED' if notes else 'ok'} "
         f"refusal={refusal_field} "
         f"threads={len(threads)}{'+' if truncated else ''} "
         f"unresolved={len(unresolved)}{'+' if truncated else ''}{breakdown} "
@@ -1535,6 +1569,21 @@ def digest(
             f"to add belongs in `scripts/reviewers/` on {HUB}, which hosts this script"
         )
         lines += [f"    {note}" for note in notes]
+    if hold:
+        lines.append(
+            f"  UNPLACED ON THE HEAD (fingerprint={hold[0]}): a round covering the head carries "
+            + (
+                "parts an owner, member, or collaborator acknowledged with written outcomes"
+                if hold[2]
+                else "text the reader cannot place, where a finding can sit. Read each part whole "
+                "in the review body, the excerpt only locating it, and give each item an outcome, "
+                "fixed with its SHA, declined with evidence, or listed as pre-existing in the PR "
+                f"body. Post them with `comment {num} --repo {owner}/{repo} --fingerprint "
+                f"{hold[0]} --body <outcomes>`"
+            )
+        )
+        for part in hold[1]:
+            lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
     if found is not None and found.unthreaded:
         lines.append(
             f"  FINDINGS WITH NO THREAD ({found.unthreaded}): the round covering the head names "
@@ -1702,7 +1751,7 @@ def report_verdict(pr: dict) -> int:
     """Print the blocking verdict's own status line, and return the exit code it carries.
 
     A missing head review has no verdict yet, which the wait path owns. Coverage shown nowhere is a
-    note rather than an exit, and so is an unrecognized shape.
+    note rather than an exit. A head round's unplaced part is an exit until it is acknowledged.
     """
     if not head_reviews(pr):
         return 0
@@ -1723,6 +1772,13 @@ def report_verdict(pr: dict) -> int:
             "COUNTED FINDING. Fix what it names and push, or answer it with `comment`. This code "
             "repeats on this head after the answer, since nothing here reads one"
         )
+    if (hold := shape_hold(pr)) and not hold[2]:
+        print(
+            f"status=UNPLACED_PARTS_UNACKNOWLEDGED the round covering the head carries text the "
+            f"reader cannot place, under UNPLACED ON THE HEAD. Acknowledging fingerprint {hold[0]} "
+            "with `comment --fingerprint` and each item's outcome clears this code"
+        )
+    if flagged or (hold and not hold[2]):
         return 50
     if state in ("none", "unknown"):
         print(
@@ -2079,14 +2135,12 @@ def attestation(pr: dict) -> str | None:
     None where no attestation vouches for the head against the pull request's current base, and
     "unknown" where the pass recorded no count.
 
-    Read over every comment, with the author association keeping a passer-by's marker from
-    vouching. The marker counts only as a line of its own outside a fence.
+    Read over every comment not hidden, with the author association keeping a passer-by's marker
+    from vouching. The marker counts only as a line of its own outside a fence.
     """
     head, base = pr.get("headRefOid") or "", pr.get("baseRefName") or ""
-    for node in (pr.get("comments") or {}).get("nodes") or []:
-        if (node.get("authorAssociation") or "") not in TRUSTED_ASSOCIATIONS:
-            continue
-        for line in adapter.html_lines(node.get("body") or ""):
+    for _, lines in trusted_comments(pr):
+        for line in lines:
             m = ATTESTATION.fullmatch(line)
             if m and m.group(1) == head and m.group(2) == base:
                 return m.group(3)
@@ -2546,6 +2600,7 @@ def main(argv: list[str] | None = None) -> int:
         help="comment or reply: the answer to post, carrying the fixing commit SHA or "
         "the evidence that disproves the finding",
     )
+    ap.add_argument("--fingerprint", help="comment: acknowledge the unplaced set it names")
     ap.add_argument(
         "--resolve",
         action="store_true",
@@ -2577,6 +2632,8 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"--checkout belongs to `attest` or `cleanup`, not `{a.cmd}`")
     if a.number is None:
         ap.error("the following arguments are required: number")
+    if a.cmd != "comment" and a.fingerprint is not None:
+        ap.error(f"--fingerprint belongs to `comment`, not `{a.cmd}`")
     if a.cmd not in ("comment", "reply") and a.body is not None:
         ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
     required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
@@ -2614,7 +2671,8 @@ def main(argv: list[str] | None = None) -> int:
         return attest(owner, repo, a.number, a.checkout or ".")
 
     if a.cmd == "comment":
-        return comment_on_pr(owner, repo, a.number, a.body)
+        marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
+        return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
 
     if a.cmd == "status":
         # One payload renders the digest and decides the code, as in `wait`.
@@ -2792,8 +2850,8 @@ def main(argv: list[str] | None = None) -> int:
         if verdict == 50 and checks_settling(checks, now, a.check_grace, a.check_stall):
             print(
                 "note: a check on this head has not concluded, and this wait returns 50 at once "
-                "on every call until the head moves, since nothing here reads an answer to the "
-                "headline. Once the headline is answered, watch the checks with a bounded "
+                "while the hold above stands, which for a headline is until the head moves. Once "
+                "it is answered, watch the checks with a bounded "
                 f"`timeout 1800 gh pr checks {a.number} --repo {owner}/{repo} --watch`, then run "
                 "status"
             )
