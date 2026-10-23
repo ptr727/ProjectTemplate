@@ -48,7 +48,6 @@ from audit_markdown import (
     undeclared_h2_headings,
 )
 from carried_text import extract_section, normalize, strip_sections
-from git_env import git_location_cleared
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -1080,7 +1079,7 @@ def concurrency_caller_findings(path, text):
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError:
-        return unreadable
+        return []
     if not isinstance(doc, dict):
         return unreadable
     concurrency = doc.get("concurrency")
@@ -2170,12 +2169,6 @@ def check_registry_driftnotes(run):
     return driftnote_findings(run.entry, run.spec, len(run.findings))
 
 
-def _selftest():
-    """Run the self-test with no variable naming a repository in the environment."""
-    with git_location_cleared():
-        return _selftest_cases()
-
-
 def _selftest_cases():
     """A smoke check of each helper family on constructed fixtures."""
     pr = "name: T\non: pull_request\njobs:\n  check:\n    name: Check job\n    runs-on: ubuntu-latest\n"
@@ -2304,7 +2297,7 @@ def parse_args(argv=None):
 def main(argv=None):
     a = parse_args(argv)
     if a.selftest:
-        return _selftest()
+        return _selftest_cases()
     if a.branch is not None and not validate.GROUND_TRUTH_BRANCH_RE.search(a.branch):
         shape = validate.GROUND_TRUTH_BRANCH_SHAPE
         print(f"--branch {a.branch!r} does not address unencoded ({shape})", file=sys.stderr)

@@ -629,6 +629,12 @@ class CodeViewCase(unittest.TestCase):
         self.assertEqual(
             got, [("DRIFT", "interface: wf does not parse as YAML, so its contract is unread")]
         )
+        publisher = ".github/workflows/publish-release.yml"
+        self.assertEqual(audit.concurrency_caller_findings(publisher, "jobs:\n  a: [\n"), [])
+        entry = {"types": ["python"], "pythonDirectories": ["x"]}
+        self.assertEqual(
+            audit.python_directories_caller_findings(publisher, "jobs:\n  a: [\n", entry), []
+        )
 
 
 CANON = "line one\nline two\nline three\n"

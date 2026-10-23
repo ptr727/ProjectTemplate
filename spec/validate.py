@@ -160,9 +160,8 @@ def _bracket_matches(text, open_char, close_char):
 def contains_description_markdown_link(text):
     """Whether `text` carries a `[text](url)` or `[text][ref]` use, brackets/parens balanced.
 
-    Kept in sync with spec/audit.py's markdown_link_spans(), which needs the same balanced-nesting rule for
-    the same reason: this is a description-shaped link use inside one short string, not the carried-link
-    regexes above, which find a definition's target inside a whole document.
+    A description-shaped link use inside one short string, not the carried-link regexes above, which find a
+    definition's target inside a whole document.
     """
     bracket_close = _bracket_matches(text, "[", "]")
     paren_close = _bracket_matches(text, "(", ")")
