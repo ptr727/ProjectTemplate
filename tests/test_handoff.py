@@ -131,6 +131,7 @@ class FakeGh:
         self.refuse_label = False
         self.calls: list[list[str]] = []
         self.next_number = 1001
+        self.comment_id = 0
         # A close that reports success and leaves the issue open.
         # That is the state the read-back after every close exists to catch.
         self.refuse_close = False
@@ -168,7 +169,7 @@ class FakeGh:
         if head == ("issue", "create"):
             return self._create(argv)
         if head == ("issue", "comment"):
-            return f"https://github.com/o/r/issues/{argv[2]}#issuecomment-1\n"
+            return self._comment(argv)
         if head == ("issue", "close"):
             if not self.refuse_close:
                 self.issues[int(argv[2])]["state"] = "CLOSED"
@@ -257,14 +258,38 @@ class FakeGh:
             "closedAt": None,
             "url": f"https://github.com/o/r/issues/{number}",
             "labels": labels,
+            "comments": [],
         }
         return f"https://github.com/o/r/issues/{number}\n"
+
+    def _comment(self, argv: list[str]) -> str:
+        """Append one comment, its URL carrying an id that is unique in this repository."""
+        self.comment_id += 1
+        url = f"https://github.com/o/r/issues/{argv[2]}#issuecomment-{self.comment_id}"
+        row = self.issues.get(int(argv[2]))
+        if row is not None:
+            text = Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
+            row.setdefault("comments", []).append(note(text, url))
+        return f"{url}\n"
 
     def _edit(self, argv: list[str]) -> str:
         row = self.issues[int(argv[2])]
         if "--body-file" in argv:
             row["body"] = Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
+        if "--title" in argv:
+            row["title"] = argv[argv.index("--title") + 1]
         return f"https://github.com/o/r/issues/{argv[2]}\n"
+
+
+def note(body: str, url: str = "u", association: str = "OWNER", **over) -> dict:
+    """One issue comment as `gh issue view --json comments` renders it."""
+    return {
+        "body": body,
+        "url": url,
+        "authorAssociation": association,
+        "isMinimized": False,
+        **over,
+    }
 
 
 def doubled(track: str) -> str:
@@ -284,6 +309,7 @@ def link(number: int, track: str, round_: int, previous: int | None, **over) -> 
         "closedAt": None,
         "url": f"https://github.com/o/r/issues/{number}",
         "labels": [{"name": handoff.LABEL}],
+        "comments": [],
     }
     row.update(over)
     return row
@@ -428,7 +454,7 @@ class LabelCase(unittest.TestCase):
             "resume": [],
             "chain": [],
             "new": ["--title", "T", "--body-file", body_file(self, "w")],
-            "link": ["--new", "2", "--previous", "1"],
+            "close": ["--body-file", body_file(self, "w")],
         }
         names = set(subcommands())
         self.assertGreaterEqual(len(names), 6)
@@ -631,11 +657,11 @@ class OutsideFleetLabelCase(unittest.TestCase):
         self.assertEqual(argv[argv.index("--color") + 1], want["color"])
         self.assertEqual(argv[argv.index("--description") + 1], want["description"])
 
-    def test_link_refuses_without_the_label(self) -> None:
+    def test_close_refuses_without_the_label(self) -> None:
         fake = FakeGh(label=False)
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
+        code, _, err = run(fake, "close", "--repo", "o/r", "--body-file", body_file(self, "w"))
         self.assertEqual(code, 1)
-        self.assertIn("--create-label", err)
+        self.assertIn("no handoff on track 'default' to close", err)
         self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"], ["label", "list"]])
 
 
@@ -655,7 +681,8 @@ class WriteScopeCase(unittest.TestCase):
         self.assertIn("writes nothing there", err)
         self.assertEqual(fake.calls, [])
         fake = FakeGh()
-        code, _, _ = run(fake, "link", "--repo", "stranger/r", "--new", "2", "--previous", "1")
+        args = ("--body-file", body_file(self, "w"))
+        code, _, _ = run(fake, "close", "--repo", "stranger/r", *args)
         self.assertEqual(code, 1)
         self.assertEqual(fake.calls, [])
 
@@ -666,7 +693,7 @@ class WriteScopeCase(unittest.TestCase):
         self.assertIn("registry drift", err)
         self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
         fake = FakeGh(fork=False)
-        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "2", "--previous", "1")
+        code, _, _ = run(fake, "close", "--repo", "o/r", "--body-file", body_file(self, "w"))
         self.assertEqual(code, 1)
         self.assertEqual([c[:2] for c in fake.calls], [["repo", "view"]])
 
@@ -840,13 +867,6 @@ class ExitCodeCase(unittest.TestCase):
         self.assertEqual(caught.exception.code, 1)
         self.assertIn("refused:", err.getvalue())
 
-    def test_a_below_one_argument_names_the_flag_the_caller_typed(self) -> None:
-        """`new` and `previous` without their dashes name no flag the caller could have passed."""
-        err = io.StringIO()
-        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
-            handoff.main(["link", "--repo", "o/r", "--new", "0", "--previous", "1"])
-        self.assertIn("--new takes an issue number", err.getvalue())
-
     def test_a_round_below_one_never_reaches_the_block(self) -> None:
         """`round=0` parses nowhere, so writing it labels an issue no read can ever see again."""
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
@@ -901,27 +921,179 @@ class ExitCodeCase(unittest.TestCase):
                 handoff.main(["current", "--repo", "o/r", "--track", track])
 
 
+class DeafEdit(FakeGh):
+    """A repository that reports an edit as done and keeps the old body."""
+
+    def _edit(self, argv: list[str]) -> str:
+        return f"https://github.com/o/r/issues/{argv[2]}\n"
+
+
+WRITES = (["issue", "create"], ["issue", "comment"], ["issue", "edit"], ["issue", "close"])
+
+
+def writes_of(fake: FakeGh) -> list[list[str]]:
+    """The write calls a run made, in order, each cut to its subcommand."""
+    return [c[:2] for c in fake.calls if c[:2] in WRITES]
+
+
 class NewCase(unittest.TestCase):
-    """Create, comment, close, in that order, so a failure leaves a discoverable successor."""
+    """Archive the outgoing round, then replace the body, so a failure loses no round."""
 
     def body_file(self, text: str) -> str:
         return body_file(self, text)
 
-    def test_the_three_steps_run_in_order(self) -> None:
+    def test_an_open_head_is_archived_then_replaced_in_place(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, 29)})
+        code, out, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "edit"]])
+        self.assertEqual(fake.issues[30]["state"], "OPEN")
+        self.assertNotIn(1001, fake.issues)
+        self.assertEqual(handoff.round_text(fake.issues[30]["body"]), "work")
+        self.assertEqual(fake.issues[30]["title"], "Session Handoff [default]: Next")
+        archived = fake.issues[30]["comments"][0]["body"]
+        self.assertTrue(
+            archived.startswith(
+                "## Round 2, closed 2026-09-01: Session Handoff [default]: round 2\n"
+            )
+        )
+        self.assertIn("body of round 2", archived)
+        self.assertIn("track=default round=2 closed=2026-09-01", archived)
+        self.assertEqual(out.splitlines()[-1], "#30")
+
+    def test_an_archived_round_goes_through_a_file_rather_than_the_command_line(self) -> None:
+        """A round near the body cap exceeds a Windows command line, and a dry run prints it."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        args = ("--title", "N", "--body-file", self.body_file("w"))
+        code, out, _ = run(fake, "new", "--repo", "o/r", *args, "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("gh issue comment 30 --repo o/r --body-file <body-file>", out)
+        self.assertNotIn("body of round 2", out)
+
+    def test_a_round_mark_from_an_account_without_write_access_is_no_round(self) -> None:
+        """Anyone can comment on a public issue, so an outsider's mark neither blocks nor fakes."""
+        row = link(30, "default", 2, None)
+        row["comments"] = [
+            note(handoff.archive("planted", "default", 2, "2026-09-01", "x"), association="NONE"),
+            note(handoff.archive("hidden", "default", 2, "2026-09-01", "x"), isMinimized=True),
+        ]
+        fake = FakeGh({30: row})
         code, _, _ = run(
             fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
         )
         self.assertEqual(code, 0)
-        writes = [
-            c[:2]
-            for c in fake.calls
-            if c[:2] in (["issue", "create"], ["issue", "comment"], ["issue", "close"])
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "edit"]])
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--grep", "planted|hidden")
+        self.assertIn("0 of 2 rounds walked match", out)
+
+    def test_a_round_archived_with_other_line_endings_counts_as_the_same_text(self) -> None:
+        row = link(30, "default", 2, None)
+        crlf = handoff.archive(row["body"], "default", 2, "2026-09-01", "round 2")
+        row["comments"] = [note(crlf.replace("\n", "\r\n"))]
+        fake = FakeGh({30: row})
+        code, _, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "edit"]])
+
+    def test_a_round_archived_twice_refuses(self) -> None:
+        """Two copies of one round would each read as a round and duplicate the history."""
+        row = link(30, "default", 2, None)
+        copy_ = handoff.archive(row["body"], "default", 2, "2026-09-01", "t")
+        row["comments"] = [note(copy_, "u1"), note(copy_, "u2")]
+        fake = FakeGh({30: row})
+        code, _, err = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("more than once", err)
+        self.assertEqual(writes_of(fake), [])
+
+    def test_the_close_date_is_the_outgoing_round_s_last_edit(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None, lastEditedAt="2026-09-05T10:00:00Z")})
+        run(fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("w"))
+        self.assertIn("closed=2026-09-05", fake.issues[30]["comments"][0]["body"])
+
+    def test_a_rerun_after_the_archive_landed_does_not_archive_again(self) -> None:
+        """The interrupted run: the comment landed and the body edit did not."""
+        row = link(30, "default", 2, None)
+        row["comments"] = [
+            note(handoff.archive(row["body"], "default", 2, "2026-09-01", "round 2"))
         ]
-        self.assertEqual(writes, [["issue", "create"], ["issue", "comment"], ["issue", "close"]])
-        self.assertEqual(fake.issues[30]["state"], "CLOSED")
-        body = next(c for c in fake.calls if c[:2] == ["issue", "comment"])
-        self.assertIn("Continued in #1001", body[body.index("--body") + 1])
+        fake = FakeGh({30: row})
+        code, out, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "edit"]])
+        self.assertEqual(len(fake.issues[30]["comments"]), 1)
+        self.assertEqual(read_marker(fake.issues[30]["body"], 30)["round"], "3")
+        self.assertIn("already archived", out)
+
+    def test_a_rerun_after_everything_landed_writes_nothing(self) -> None:
+        fake = FakeGh({30: link(30, "default", 3, None, body=marked("work", "default", 3, None))})
+        code, out, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [])
+        self.assertIn("already holds this body", out)
+
+    def test_an_archived_round_whose_text_differs_from_the_body_refuses(self) -> None:
+        row = link(30, "default", 2, None)
+        row["comments"] = [
+            note(handoff.archive("other text", "default", 2, "2026-09-01", "round 2"))
+        ]
+        fake = FakeGh({30: row})
+        code, _, err = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("differs from its body", err)
+        self.assertEqual(writes_of(fake), [])
+
+    def test_a_body_edited_between_the_archive_and_the_write_refuses(self) -> None:
+        """Replacing the whole body from a copy read before the edit discards the edit."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+
+        def racing(argv: list[str]) -> str:
+            out = fake(argv)
+            if argv[:2] == ["issue", "comment"]:
+                fake.issues[30]["body"] = marked("an edit nobody here saw", "default", 2, None)
+            return out
+
+        code, _, err = run_with(
+            racing, "new", "--repo", "o/r", "--title", "N", "--body-file", self.body_file("w")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("changed since this run archived it", err)
+        self.assertNotIn(["issue", "edit"], writes_of(fake))
+
+    def test_an_edit_that_does_not_read_back_is_not_confirmed(self) -> None:
+        fake = DeafEdit({30: link(30, "default", 2, None)})
+        code, _, err = run(
+            fake, "new", "--repo", "o/r", "--title", "N", "--body-file", self.body_file("w")
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("not confirmed", err)
+
+    def test_a_body_edited_after_the_track_was_listed_refuses(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None)})
+
+        def moved(argv: list[str]) -> str:
+            if argv[:2] == ["issue", "view"]:
+                fake.issues[30]["body"] = marked("moved", "other", 2, None)
+            return fake(argv)
+
+        code, _, err = run_with(
+            moved, "new", "--repo", "o/r", "--title", "N", "--body-file", self.body_file("w")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("changed since this run listed the track", err)
+        self.assertEqual(writes_of(fake), [])
 
     def test_new_onto_a_closed_head_reads_the_closed_list_once(self) -> None:
         """`new` shares `chain`'s head resolution, so it holds the same single read."""
@@ -947,8 +1119,8 @@ class NewCase(unittest.TestCase):
     def test_the_round_increments_from_the_previous_link(self) -> None:
         fake = FakeGh({30: link(30, "default", 7, 29)})
         run(fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work"))
-        self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["round"], "8")
-        self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "30")
+        self.assertEqual(read_marker(fake.issues[30]["body"], 30)["round"], "8")
+        self.assertEqual(read_marker(fake.issues[30]["body"], 30)["previous"], "29")
 
     def test_a_closed_out_lane_chains_on_rather_than_starting_a_second_chain(self) -> None:
         """The orphan case: no open handoff on a track is not the same as no handoff at all.
@@ -964,14 +1136,12 @@ class NewCase(unittest.TestCase):
         marker = read_marker(fake.issues[1001]["body"], 1001)
         self.assertEqual(marker["round"], "5")
         self.assertEqual(marker["previous"], "30")
-        self.assertIn("already closed", out)
+        self.assertEqual(out.splitlines()[-1], "#1001")
 
-    def test_a_closed_predecessor_is_linked_but_not_closed_again(self) -> None:
+    def test_reopening_a_closed_out_lane_writes_nothing_to_the_closed_issue(self) -> None:
         fake = FakeGh({30: link(30, "default", 1, None, state="CLOSED")})
         run(fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work"))
-        writes = [c[:2] for c in fake.calls]
-        self.assertIn(["issue", "comment"], writes)
-        self.assertNotIn(["issue", "close"], writes)
+        self.assertEqual(writes_of(fake), [["issue", "create"]])
 
     def test_a_closed_lane_on_another_track_does_not_chain_this_one(self) -> None:
         fake = FakeGh({30: link(30, "other", 4, 29, state="CLOSED")})
@@ -996,9 +1166,8 @@ class NewCase(unittest.TestCase):
             fake, "new", "--repo", "o/r", "--title", "First", "--body-file", self.body_file("work")
         )
         self.assertEqual(code, 0)
-        self.assertNotIn(["issue", "close"], [c[:2] for c in fake.calls])
-        self.assertNotIn(["issue", "comment"], [c[:2] for c in fake.calls])
-        self.assertIn("nothing to link or close", out)
+        self.assertEqual(writes_of(fake), [["issue", "create"]])
+        self.assertEqual(out.splitlines()[-1], "#1001")
         self.assertEqual(read_marker(fake.issues[1001]["body"], 1001)["previous"], "none")
 
     def test_new_refuses_an_open_head_that_already_has_a_successor(self) -> None:
@@ -1027,7 +1196,7 @@ class NewCase(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertIn("#21 already succeeds #20", err)
-        self.assertNotIn(1001, fake.issues)
+        self.assertEqual(writes_of(fake), [])
 
     def test_new_refuses_over_a_bare_closed_row(self) -> None:
         """An open head keeps `newest_closed` from ever running, so nothing else reads the bare row.
@@ -1204,12 +1373,21 @@ class NewCase(unittest.TestCase):
             self.body_file("work"),
         )
         self.assertEqual(code, 0)
-        self.assertIn("would run: gh issue create", out)
-        self.assertEqual(fake.issues[30]["state"], "OPEN")
-        self.assertNotIn(1001, fake.issues)
-        self.assertIn("<the new issue>", out)
-        self.assertNotIn("#0", out)
+        self.assertIn("would run: gh issue comment 30", out)
+        self.assertIn("would run: gh issue edit 30", out)
+        self.assertEqual(fake.issues[30]["body"], link(30, "default", 2, 29)["body"])
+        self.assertEqual(fake.issues[30]["comments"], [])
+        self.assertEqual(writes_of(fake), [])
         self.assertIn("--body-file <body-file>", out)
+
+    def test_dry_run_on_a_new_track_writes_nothing(self) -> None:
+        fake = FakeGh()
+        args = ("--title", "First", "--body-file", self.body_file("w"), "--dry-run")
+        code, out, _ = run(fake, "new", "--repo", "o/r", *args)
+        self.assertEqual(code, 0)
+        self.assertIn("would run: gh issue create", out)
+        self.assertIn("no issue number yet", out)
+        self.assertEqual(writes_of(fake), [])
 
     def test_an_unmarked_open_issue_refuses_before_any_write(self) -> None:
         """`require_marked` guards `new` as well as the read side, and only the read side was
@@ -1230,6 +1408,98 @@ class NewCase(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("#4", err)
         self.assertNotIn(["issue", "create"], [c[:2] for c in fake.calls])
+
+
+class CloseCase(unittest.TestCase):
+    """A track ends by its outcome commented on its issue, then the issue closed."""
+
+    def close(self, fake, text: str = "merged the fix", *extra: str) -> tuple[int, str, str]:
+        return run(fake, "close", "--repo", "o/r", "--body-file", body_file(self, text), *extra)
+
+    def test_the_outcome_is_commented_then_the_issue_closed(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        code, out, _ = self.close(fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "close"]])
+        self.assertEqual(fake.issues[30]["state"], "CLOSED")
+        self.assertEqual(fake.issues[30]["comments"][-1]["body"], "merged the fix")
+        self.assertEqual(out.splitlines()[-1], "#30")
+
+    def test_a_track_with_no_open_issue_refuses_without_a_write(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None, state="CLOSED")})
+        code, _, err = self.close(fake)
+        self.assertEqual(code, 1)
+        self.assertIn("no open handoff on track 'default'", err)
+        self.assertEqual(writes_of(fake), [])
+
+    def test_a_rerun_after_the_comment_landed_only_closes(self) -> None:
+        row = link(30, "default", 2, None, comments=[note("merged the fix")])
+        fake = FakeGh({30: row})
+        code, _, _ = self.close(fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "close"]])
+        self.assertEqual(len(fake.issues[30]["comments"]), 1)
+
+    def test_an_outsider_s_copy_of_the_outcome_does_not_stand_in_for_it(self) -> None:
+        row = link(30, "default", 2, None, comments=[note("merged the fix", association="NONE")])
+        fake = FakeGh({30: row})
+        code, _, _ = self.close(fake)
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "close"]])
+
+    def test_a_close_that_does_not_read_back_is_not_confirmed(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        fake.refuse_close = True
+        code, _, err = self.close(fake)
+        self.assertEqual(code, 2)
+        self.assertIn("not confirmed", err)
+
+    def test_dry_run_writes_nothing(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        code, out, _ = self.close(fake, "merged the fix", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("would run: gh issue comment 30", out)
+        self.assertIn("would run: gh issue close 30", out)
+        self.assertEqual(writes_of(fake), [])
+        self.assertEqual(fake.issues[30]["state"], "OPEN")
+
+    def test_only_the_named_track_closes(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None), 31: link(31, "lane", 1, None)})
+        code, _, _ = self.close(fake, "done", "--track", "lane")
+        self.assertEqual(code, 0)
+        self.assertEqual(fake.issues[31]["state"], "CLOSED")
+        self.assertEqual(fake.issues[30]["state"], "OPEN")
+
+    def test_an_outcome_is_not_read_as_a_handoff_body(self) -> None:
+        """No block is written on close, so a block in the outcome is no reason to refuse."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        code, _, err = self.close(fake, "done\n" + handoff.render_marker("default", 2, None))
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+
+    def test_an_outcome_carrying_a_round_mark_refuses(self) -> None:
+        """Posted by a writer, such a line would read as an archived round of the closed track."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        mark = handoff.archive("x", "default", 2, "2026-09-01", "t").splitlines()[-1]
+        code, _, err = self.close(fake, f"done\n{mark}")
+        self.assertEqual(code, 1)
+        self.assertIn("round mark", err)
+        self.assertEqual(writes_of(fake), [])
+
+    def test_an_empty_outcome_refuses(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        code, _, err = self.close(fake, "  \n")
+        self.assertEqual(code, 1)
+        self.assertIn("empty", err)
+        self.assertEqual(writes_of(fake), [])
+
+    def test_a_closed_track_reopens_from_where_it_ended(self) -> None:
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        self.assertEqual(self.close(fake)[0], 0)
+        args = ("--title", "T", "--body-file", body_file(self, "again"))
+        self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        marker = read_marker(fake.issues[1001]["body"], 1001)
+        self.assertEqual((marker["round"], marker["previous"]), ("3", "30"))
 
 
 class ChainCase(unittest.TestCase):
@@ -1279,80 +1549,62 @@ class ChainCase(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("#11", out)
         self.assertNotIn("#12", out)
-        self.assertIn("1 of 3 links walked match", out)
+        self.assertIn("1 of 3 rounds walked match", out)
 
-    def test_a_link_then_new_sequence_cannot_fork_a_lane(self) -> None:
-        """The reproduction that condemned issue-number head resolution, end to end.
-
-        `link` recovers an interrupted `new`, then `new` resumes the lane. Both exited 0 and the
-        lane came out with two links at one round, the real chain unreachable, and `chain --grep`
-        answering no match over text that was in it.
-        """
-        fake = FakeGh(
-            {
-                3: link(3, "alpha", 6, 15, state="CLOSED", body=marked("token15", "alpha", 6, 15)),
-                15: link(15, "alpha", 5, None),
-                56: link(56, "alpha", 5, None, state="CLOSED"),
-            }
-        )
-        first = run(fake, "link", "--repo", "o/r", "--new", "3", "--previous", "15")
-        self.assertEqual(first[0], 1)
-        self.assertIn("#56 also holds round 5", first[2])
-        second = run(
-            fake,
-            "new",
-            "--repo",
-            "o/r",
-            "--track",
-            "alpha",
-            "--title",
-            "T",
-            "--body-file",
-            body_file(self, "w"),
-        )
-        # The second command either refuses or chains onto the round-6 head.
-        # What it must never do is file a second round-6 link and exit 0.
-        if second[0] == 0:
-            marker = read_marker(fake.issues[1001]["body"], 1001)
-            self.assertEqual(marker["previous"], "3")
-            self.assertEqual(marker["round"], "7")
-        else:
-            self.assertNotIn(1001, fake.issues)
-        # The seed already holds two round-5 links, the irregular input `link` exists for.
-        # What the two commands must not do is add another collision.
-        rounds = [
-            read_marker(row["body"], n)["round"]
-            for n, row in fake.issues.items()
-            if handoff.MARKER.search(row["body"] or "")
+    def standing(self) -> FakeGh:
+        """One standing issue at round 3, its earlier rounds archived beside an ordinary comment."""
+        comments = [
+            note(handoff.archive("tried the vendored copy", "default", 1, "2026-09-02", "first")),
+            note("a parking note, which is no round"),
+            note(handoff.archive("ordinary round", "default", 2, "2026-09-03", "second")),
         ]
-        collisions = len(rounds) - len(set(rounds))
-        self.assertEqual(collisions, 1, f"the commands added a round collision: {rounds}")
+        return FakeGh({20: link(20, "default", 3, None, comments=comments)})
 
-    def test_a_link_then_new_sequence_keeps_the_lane_searchable(self) -> None:
-        """The user-visible half: a search must not answer no match over text in the lane."""
+    def test_archived_rounds_list_newest_first_after_the_body(self) -> None:
+        code, out, _ = run(self.standing(), "chain", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertIn("default round 3", lines[0])
+        self.assertIn("ROUND  2026-09-03  default round 2", lines[1])
+        self.assertIn("ROUND  2026-09-02  default round 1", lines[2])
+
+    def test_grep_finds_a_string_only_in_an_archived_round(self) -> None:
+        code, out, _ = run(self.standing(), "chain", "--repo", "o/r", "--grep", "vendored")
+        self.assertEqual(code, 0)
+        self.assertIn("default round 1", out)
+        self.assertNotIn("default round 2", out)
+        self.assertIn("1 of 3 rounds walked match", out)
+
+    def test_each_archived_round_prints_its_own_subject(self) -> None:
+        """`new` replaces the title every round, so the current title names only the newest."""
+        lines = run(self.standing(), "chain", "--repo", "o/r")[1].splitlines()
+        self.assertTrue(lines[1].endswith("second"))
+        self.assertTrue(lines[2].endswith("first"))
+
+    def test_a_cap_inside_the_archived_rounds_names_the_round_it_stopped_at(self) -> None:
+        code, out, _ = run(self.standing(), "chain", "--repo", "o/r", "--limit", "2")
+        self.assertEqual(code, 0)
+        self.assertIn("--limit cap of 2, with round 1 of #20", out)
+
+    def test_a_migrated_lane_reads_on_into_the_issues_filed_per_session(self) -> None:
+        """The first `new` on a pre-change head keeps it, and the walk still reaches behind it."""
         fake = FakeGh(
             {
-                3: link(3, "alpha", 6, 15, state="CLOSED", body=marked("token15", "alpha", 6, 15)),
-                15: link(15, "alpha", 5, None),
-                56: link(56, "alpha", 5, None, state="CLOSED"),
+                11: link(
+                    11, "lane", 1, None, state="CLOSED", body=marked("token11", "lane", 1, None)
+                ),
+                12: link(12, "lane", 2, 11),
             }
         )
-        run(fake, "link", "--repo", "o/r", "--new", "3", "--previous", "15")
-        run(
-            fake,
-            "new",
-            "--repo",
-            "o/r",
-            "--track",
-            "alpha",
-            "--title",
-            "T",
-            "--body-file",
-            body_file(self, "w"),
-        )
-        code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "alpha", "--grep", "token15")
+        args = ("--track", "lane", "--title", "T", "--body-file", body_file(self, "w"))
+        self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        self.assertNotIn(1001, fake.issues)
+        self.assertEqual(read_marker(fake.issues[12]["body"], 12)["previous"], "11")
+        code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "lane", "--grep", "token11")
         self.assertEqual(code, 0)
-        self.assertIn("#3", out)
+        self.assertIn("#11", out)
+        self.assertIn("1 of 3 rounds walked match", out)
 
     def test_a_capped_walk_says_it_stopped_short(self) -> None:
         """A truncated search reading like an exhaustive one is the false "not tried yet"."""
@@ -1459,7 +1711,20 @@ class ResumeCase(unittest.TestCase):
     def test_a_first_round_says_so_rather_than_printing_an_empty_index(self) -> None:
         code, out, _ = run(FakeGh({12: link(12, "default", 1, None)}), "resume", "--repo", "o/r")
         self.assertEqual(code, 0)
-        self.assertIn("first handoff on this track", out)
+        self.assertIn("first round on this track", out)
+
+    def test_archived_rounds_index_newest_first_and_the_body_is_not_repeated(self) -> None:
+        fake = FakeGh({12: link(12, "default", 1, None)})
+        for text in ("second round", "third round"):
+            args = ("--title", "T", "--body-file", body_file(self, text))
+            self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
+        code, out, _ = run(fake, "resume", "--repo", "o/r")
+        self.assertEqual(code, 0)
+        self.assertIn("third round", out)
+        index = out.split("## Earlier rounds", 1)[1].splitlines()[1:]
+        self.assertEqual(len(index), 2)
+        self.assertIn("default round 2", index[0])
+        self.assertIn("default round 1", index[1])
 
 
 class HeadCheckCase(unittest.TestCase):
@@ -1533,7 +1798,7 @@ class HeadCheckCase(unittest.TestCase):
             "vendored copy",
         )
         self.assertEqual(code, 0)
-        self.assertIn("0 of 1 links walked match", out)
+        self.assertIn("0 of 1 rounds walked match", out)
         self.assertIn("#11 also holds round 2", out)
 
     def test_no_match_names_every_link_the_walk_did_not_reach(self) -> None:
@@ -1548,7 +1813,7 @@ class HeadCheckCase(unittest.TestCase):
         )
         code, out, _ = run(fake, "chain", "--repo", "o/r", "--track", "t", "--grep", "vendored")
         self.assertEqual(code, 0)
-        self.assertIn("0 of 3 links walked match", out)
+        self.assertIn("0 of 3 rounds walked match", out)
         self.assertIn("the walk did not reach #12", out)
         self.assertNotIn("may not be the head", out)
 
@@ -2076,326 +2341,6 @@ class MalformedCase(unittest.TestCase):
         )
 
 
-class LinkCase(unittest.TestCase):
-    """A half-applied chain finishes without a second issue being filed for it."""
-
-    def test_it_points_the_successor_and_closes_the_predecessor(self) -> None:
-        fake = FakeGh(
-            {
-                20: link(20, "default", 1, None),
-                21: link(
-                    21,
-                    "default",
-                    2,
-                    None,
-                    body=marked("## Next steps\n\nthe orphan's own prose", "default", 2, None),
-                ),
-            }
-        )
-        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 0)
-        self.assertEqual(read_marker(fake.issues[21]["body"], 21)["previous"], "20")
-        self.assertEqual(fake.issues[20]["state"], "CLOSED")
-        # The body edit rewrites the whole body, so the handoff it was pointing has to survive it.
-        self.assertIn("the orphan's own prose", fake.issues[21]["body"])
-        self.assertIn("## Next steps", fake.issues[21]["body"])
-
-    def test_an_already_linked_pair_only_finishes_what_is_left(self) -> None:
-        fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 20)})
-        code, out, _ = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 0)
-        self.assertIn("nothing to edit", out)
-        self.assertEqual(fake.issues[20]["state"], "CLOSED")
-
-    def test_adjacent_orphans_name_the_later_first_repair_order(self) -> None:
-        """Closed round 1, orphans at rounds 2, 3, 4: repair the highest orphan first."""
-        fake = FakeGh(
-            {
-                10: link(10, "default", 1, None, state="CLOSED"),
-                11: link(11, "default", 2, None, state="CLOSED"),
-                12: link(12, "default", 3, None, state="CLOSED"),
-                13: link(13, "default", 4, None),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
-        self.assertEqual(code, 1)
-        self.assertIn("#13, #12. Do that before linking #11", err)
-        self.assertLess(err.index("Repair the later orphans"), err.index("holds round"))
-        for new, previous in ((13, 12), (12, 11), (11, 10)):
-            code, _, _ = run(
-                fake, "link", "--repo", "o/r", "--new", str(new), "--previous", str(previous)
-            )
-            self.assertEqual(code, 0)
-
-    def test_an_issue_cannot_succeed_itself(self) -> None:
-        """Otherwise the track's only open link closes into a cycle and the run exits 0."""
-        fake = FakeGh({21: link(21, "default", 2, None)})
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "21")
-        self.assertEqual(code, 1)
-        self.assertIn("cannot succeed itself", err)
-        self.assertEqual(fake.issues[21]["state"], "OPEN")
-
-    def test_linking_across_tracks_refuses_rather_than_closing_another_lane(self) -> None:
-        """`link` takes no --track, so the two blocks are all that can say they are one lane."""
-        fake = FakeGh(
-            {
-                20: link(20, "other", 1, None),
-                21: link(21, "default", 2, None, body=marked("orphan", "default", 2, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("'other'", err)
-        self.assertEqual(fake.issues[20]["state"], "OPEN")
-
-    def test_a_predecessor_with_no_block_refuses(self) -> None:
-        fake = FakeGh(
-            {
-                20: link(20, "default", 1, None, body="hand-written"),
-                21: link(21, "default", 2, None, body=marked("orphan", "default", 2, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("by hand", err)
-
-    def test_a_transposed_pair_refuses_rather_than_closing_the_newer_link(self) -> None:
-        """The ordinary slip under the one condition `link` exists for."""
-        fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 20)})
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "20", "--previous", "21")
-        self.assertEqual(code, 1)
-        self.assertIn("transposed", err)
-        self.assertEqual(fake.issues[21]["state"], "OPEN")
-
-    def test_a_predecessor_already_naming_the_successor_refuses(self) -> None:
-        fake = FakeGh(
-            {
-                20: link(20, "default", 3, 21),
-                21: link(21, "default", 9, None, body=marked("orphan", "default", 9, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("cycle", err)
-
-    def test_a_different_predecessor_refuses_rather_than_overwriting(self) -> None:
-        fake = FakeGh({20: link(20, "default", 1, None), 21: link(21, "default", 2, 19)})
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("#19", err)
-
-    def test_a_successor_carrying_no_label_refuses(self) -> None:
-        """The anti-orphan guard: a block with no label is invisible to every read here."""
-        fake = FakeGh(
-            {
-                20: link(20, "lane", 1, None),
-                21: link(21, "lane", 2, 20, labels=[]),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("no findable head", err)
-        self.assertEqual(fake.issues[20]["state"], "OPEN")
-
-    def test_a_body_that_moved_since_the_read_refuses_rather_than_overwriting(self) -> None:
-        """The edit replaces the whole body, so an edit landing since the read would be lost."""
-        fake = FakeGh(
-            {
-                20: link(20, "lane", 1, None),
-                21: link(21, "lane", 2, None, body=marked("orphan", "lane", 2, None)),
-            }
-        )
-        seen: list[int] = []
-        inner = fake.__call__
-
-        def racing(argv: list[str]) -> str:
-            out = inner(argv)
-            if argv[:2] == ["issue", "view"] and int(argv[2]) == 21:
-                seen.append(1)
-                if len(seen) == 1:
-                    fake.issues[21]["body"] += "\na line a maintainer added\n"
-            return out
-
-        code, _, err = run_with(racing, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("changed since this run read it", err)
-        self.assertIn("a line a maintainer added", fake.issues[21]["body"])
-        self.assertEqual(fake.issues[20]["state"], "OPEN")
-
-    def test_link_dry_run_previews_every_step_and_writes_nothing(self) -> None:
-        """The one preview a caller is told to read before trusting this to close an issue."""
-        fake = FakeGh(
-            {
-                20: link(20, "lane", 1, None),
-                21: link(21, "lane", 2, None, body=marked("orphan", "lane", 2, None)),
-            }
-        )
-        code, out, _ = run(
-            fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20", "--dry-run"
-        )
-        self.assertEqual(code, 0)
-        self.assertIn("would run: gh issue edit 21", out)
-        self.assertIn("--body-file <body-file>", out)
-        self.assertIn("would run: gh issue comment 20", out)
-        self.assertIn("would run: gh issue close 20", out)
-        self.assertEqual(fake.issues[20]["state"], "OPEN")
-
-    def test_a_predecessor_that_already_has_a_successor_refuses(self) -> None:
-        """`link` is the only adoption path now, so it carries the anti-fork guard.
-
-        Pointing an orphan at a link that already has a successor gives one predecessor two, and
-        the branch it skips is unreachable from every walk while each step exits 0.
-        """
-        fake = FakeGh(
-            {
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, 10, state="CLOSED"),
-                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
-        self.assertEqual(code, 1)
-        self.assertIn("#11 already succeeds #10", err)
-        self.assertIn("unreachable", err)
-        self.assertEqual(fake.issues[10]["state"], "CLOSED")
-        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
-
-    def test_the_track_s_newest_link_is_a_legitimate_predecessor(self) -> None:
-        """The guard must not refuse the adoption `link` exists for, including a round gap."""
-        fake = FakeGh(
-            {
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, 10, state="CLOSED"),
-                13: link(13, "lane", 7, None, body=marked("an orphan", "lane", 7, None)),
-            }
-        )
-        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "11")
-        self.assertEqual(code, 0)
-        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "11")
-
-    def test_a_predecessor_the_round_checks_question_refuses(self) -> None:
-        """`link` runs the round checks `new` runs, so it cannot adopt onto a head `new` refuses."""
-        fake = FakeGh(
-            {
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, 10, state="CLOSED"),
-                12: link(12, "lane", 3, None, state="CLOSED"),
-                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "11")
-        self.assertEqual(code, 1)
-        self.assertIn("#12 holds round 3, above #11's 2", err)
-        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
-        self.assertEqual(fake.issues[13]["state"], "OPEN")
-
-    def test_an_orphan_with_successors_can_still_be_adopted(self) -> None:
-        """Links that descend from `--new` are not evidence against `--previous`."""
-        fake = FakeGh(
-            {
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, None, state="CLOSED"),
-                12: link(12, "lane", 3, 11),
-            }
-        )
-        code, _, _ = run(fake, "link", "--repo", "o/r", "--new", "11", "--previous", "10")
-        self.assertEqual(code, 0)
-        self.assertEqual(read_marker(fake.issues[11]["body"], 11)["previous"], "10")
-
-    def test_a_predecessor_that_descends_from_the_new_link_refuses(self) -> None:
-        fake = FakeGh(
-            {
-                20: link(20, "lane", 5, None),
-                21: link(21, "lane", 2, 20, state="CLOSED"),
-                22: link(22, "lane", 3, 21, state="CLOSED"),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "20", "--previous", "22")
-        self.assertEqual(code, 1)
-        self.assertIn("cycle", err)
-        self.assertEqual(read_marker(fake.issues[20]["body"], 20)["previous"], "none")
-
-    def test_a_full_closed_window_refuses_rather_than_reading_as_no_successor(self) -> None:
-        """A reader that answers None for "could not look" hands the caller a guard that passes."""
-        rows = {
-            n: link(n, f"filler-{n}", 1, None, state="CLOSED")
-            for n in range(1, handoff.CLOSED_WINDOW + 1)
-        }
-        rows[9010] = link(9010, "lane", 1, None, state="CLOSED")
-        rows[9013] = link(9013, "lane", 3, None, body=marked("an orphan", "lane", 3, None))
-        code, _, err = run(
-            FakeGh(rows), "link", "--repo", "o/r", "--new", "9013", "--previous", "9010"
-        )
-        self.assertEqual(code, 1)
-        self.assertIn("fills the read window", err)
-        self.assertEqual(read_marker(rows[9013]["body"], 9013)["previous"], "none")
-
-    def test_an_unreadable_link_refuses_rather_than_reading_as_no_successor(self) -> None:
-        fake = FakeGh(
-            {
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, 10, state="CLOSED", body=doubled("lane")),
-                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
-        self.assertEqual(code, 1)
-        self.assertIn("could already succeed #10", err)
-        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
-
-    def test_a_bare_link_refuses_rather_than_reading_as_no_successor(self) -> None:
-        """The successor is real and its block was stripped, so nothing says it succeeds the
-        predecessor.
-
-        Reading that as "the predecessor has no successor" lets a second link name it as well,
-        which forks the lane and strands the stripped link while the run exits 0.
-        """
-        fake = FakeGh(
-            {
-                10: link(10, "lane", 1, None, state="CLOSED"),
-                11: link(11, "lane", 2, 10, body="the block was edited out"),
-                13: link(13, "lane", 3, None, body=marked("an orphan", "lane", 3, None)),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "13", "--previous", "10")
-        self.assertEqual(code, 1)
-        self.assertIn("#11", err)
-        self.assertIn("no metadata block", err)
-        self.assertIn("could already succeed #10", err)
-        self.assertEqual(read_marker(fake.issues[13]["body"], 13)["previous"], "none")
-
-    def test_a_successor_with_no_block_refuses(self) -> None:
-        fake = FakeGh(
-            {
-                20: link(20, "default", 1, None),
-                21: link(21, "default", 2, None, body="no block"),
-            }
-        )
-        code, _, err = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 1)
-        self.assertIn("by hand", err)
-
-    def test_a_closed_predecessor_still_gets_the_forward_comment(self) -> None:
-        """`new` comments before it tests the state, so the recovery path has to as well.
-
-        Testing first made the one write `link` exists to finish the one write it could not make.
-        """
-        fake = FakeGh(
-            {
-                20: link(20, "default", 1, None, state="CLOSED"),
-                21: link(21, "default", 2, 20),
-            }
-        )
-        code, out, _ = run(fake, "link", "--repo", "o/r", "--new", "21", "--previous", "20")
-        self.assertEqual(code, 0)
-        self.assertIn("already closed", out)
-        posted = [c for c in fake.calls if c[:2] == ["issue", "comment"]]
-        self.assertEqual(len(posted), 1)
-        self.assertIn("Continued in #21", posted[0][posted[0].index("--body") + 1])
-        # The early return is the point: a closed predecessor must not be closed a second time.
-        self.assertNotIn(["issue", "close"], [c[:2] for c in fake.calls])
-
-
 class StaleSearch(FakeGh):
     """A repository whose label search answers from a snapshot taken before any write.
 
@@ -2419,25 +2364,28 @@ class StaleSearch(FakeGh):
 class ConsistentReadCase(unittest.TestCase):
     """The chain is read from the repository itself, so a read straight after a write sees it."""
 
-    def test_current_straight_after_new_names_the_new_link(self) -> None:
+    def test_current_straight_after_new_names_the_new_round(self) -> None:
         fake = StaleSearch({5: link(5, "default", 1, None)})
         args = ("--title", "T", "--body-file", body_file(self, "w"))
         self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
         code, out, _ = run(fake, "current", "--repo", "o/r")
         self.assertEqual(code, 0)
-        self.assertIn("#1001", out)
-        self.assertNotIn("#5", out)
+        self.assertIn("#5", out)
+        self.assertIn("round=2", out)
 
-    def test_a_second_new_chains_onto_the_first_rather_than_its_predecessor(self) -> None:
-        """A stale read here resolves the closed link as head and forks the chain at it."""
+    def test_a_second_new_archives_the_round_the_first_wrote(self) -> None:
+        """A stale read here archives round 1 twice and writes round 2 twice."""
         fake = StaleSearch({5: link(5, "default", 1, None)})
-        for _ in range(2):
-            args = ("--title", "T", "--body-file", body_file(self, "w"))
+        for text in ("first round", "second round"):
+            args = ("--title", "T", "--body-file", body_file(self, text))
             self.assertEqual(run(fake, "new", "--repo", "o/r", *args)[0], 0)
         self.assertEqual(
-            fake.issues[1002]["body"].splitlines()[-1], handoff.render_marker("default", 3, 1001)
+            fake.issues[5]["body"].splitlines()[-1], handoff.render_marker("default", 3, None)
         )
-        self.assertEqual(fake.issues[1001]["state"], "CLOSED")
+        rounds = handoff.rounds_of(fake.issues[5]["comments"], "default")
+        self.assertEqual([row["mark"]["round"] for row in rounds], ["2", "1"])
+        self.assertEqual(handoff.archived_text(rounds[0]["body"]), "first round")
+        self.assertNotIn(1001, fake.issues)
 
     def test_no_read_goes_through_the_search_backed_list(self) -> None:
         fake = FakeGh({5: link(5, "default", 1, None)})
@@ -2560,7 +2508,7 @@ class SurfaceCase(unittest.TestCase):
 
     def test_the_writing_subcommands_all_take_a_dry_run(self) -> None:
         choices = subcommands()
-        for name in ("new", "link"):
+        for name in ("new", "close"):
             flags = {s for action in choices[name]._actions for s in action.option_strings}
             self.assertIn("--dry-run", flags, f"{name} can write and takes no --dry-run")
 
