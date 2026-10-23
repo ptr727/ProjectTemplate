@@ -280,6 +280,38 @@ class TestTierTables(BaitCase):
         self.assertFalse(prose_lint.starts_lowercase(f"{info}\ufe0f Run setup first."))
         self.assertTrue(prose_lint.starts_lowercase("run setup first."))
 
+    def test_a_marker_opening_a_line_is_no_continuation_or_lowercase_start(self) -> None:
+        """Each caller of the lowercase test treats a marker as a sentence start, end to end."""
+        info = chr(0x2139)
+        comment_rules = {"comment-wrap", "comment-case"}
+        for opener in (info, f"{info}\ufe0f"):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    [],
+                    self.kinds(
+                        f"# A sentence that keeps\n# {opener} Run setup first.\n",
+                        comment_rules,
+                        "bait.py",
+                    ),
+                )
+                self.assertEqual(
+                    [], self.kinds(f"# {opener} Run setup first.\n", comment_rules, "bait.py")
+                )
+                self.assertEqual(
+                    [],
+                    self.kinds(
+                        f"A sentence that keeps\n{opener} Run setup first.\n", {"sentence-split"}
+                    ),
+                )
+        self.assertEqual(
+            ["comment-wrap"],
+            self.kinds("# A sentence that keeps\n# going on.\n", comment_rules, "bait.py"),
+        )
+        self.assertEqual(
+            ["sentence-split"],
+            self.kinds("A sentence that keeps\ngoing on.\n", {"sentence-split"}),
+        )
+
     def test_a_stray_variation_selector_16_is_still_reported(self) -> None:
         """The selector is admitted only directly after a marker, never alone or after a gap."""
         rules = {"charset", "charset-unknown"}
