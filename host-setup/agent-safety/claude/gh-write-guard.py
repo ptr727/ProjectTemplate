@@ -6186,7 +6186,9 @@ def _xargs_filled_body(cmd):
 
     That is the string of a shell xargs runs as its command whose string holds xargs's replace
     string, or whose string option the next word does not follow (see `_string_read_elsewhere`).
-    The inner shell parses each word xargs puts there, so a word holding a separator adds whole
+    It is also the string a launcher such as `flock -c` hands a shell where it holds the replace
+    string, and that of any `watch` xargs runs, since `watch` joins the words xargs appends into
+    its string (see `_shell_bodies_at`). The inner shell parses each word xargs puts there, so a word holding a separator adds whole
     commands, as `echo 'x; git push origin develop' | xargs -I{} sh -c 'git status {}'` does.
     """
     for text in _data_free_texts(cmd) if _names_git_or_gh(cmd) else []:
@@ -6195,7 +6197,9 @@ def _xargs_filled_body(cmd):
             found = _shell_bodies_at(toks, k)
             if not (found and found[0] and _xargs_command(toks, k)):
                 continue
-            if _string_read_elsewhere(toks, k):
+            reps = _xargs_replace_strings(toks, k)
+            filled = _string_read_elsewhere(toks, k) or _base_name(toks[k]) == "watch"
+            if filled or any(r in b for b in found[0] for r in reps):
                 body = next((b for b in found[0] if _runs_git(b, gh=True)), None)
                 if body is not None:
                     return body
@@ -20456,6 +20460,27 @@ _HIDDEN_GIT_CASES = [
         {},
         "allow",
         "control: two git commands each setting index 0 to a readable value are allowed",
+    ),
+    (
+        "echo 'x; git push origin develop' | xargs -I{} flock /example/lock -c 'git status {}'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a flock -c string holding the xargs replace string is filled by xargs",
+    ),
+    (
+        "echo '; git push origin develop' | xargs watch git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a watch that xargs runs joins the words xargs appends into its shell string",
+    ),
+    (
+        "echo x | xargs -I{} flock /example/lock -c 'echo {}'",
+        "feature/x",
+        {},
+        "allow",
+        "control: a filled flock -c string running neither git nor gh keeps its verdict",
     ),
     (
         "declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push; git p origin develop",
