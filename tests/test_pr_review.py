@@ -3881,20 +3881,59 @@ class TestCoverageCarriesForward(CarryCase):
 class TestRawLogRead(unittest.TestCase):
     """A job log read keeps working on a `gh` older than the escape-sequence flag."""
 
-    def test_an_unknown_flag_is_retried_without_it(self) -> None:
-        refused = subprocess.CompletedProcess([], 1, "", "unknown flag: --allow-escape-sequences")
+    LOG = "repos/o/r/actions/jobs/1/logs"
+    PROBE = ("gh", "api", "--allow-escape-sequences", "--help")
+
+    def setUp(self) -> None:
+        """The probe is memoized for the run, so each case starts from an unasked `gh`."""
+        super().setUp()
+        pr_review.gh_takes_escape_flag.cache_clear()
+        self.addCleanup(pr_review.gh_takes_escape_flag.cache_clear)
+
+    def test_an_older_gh_reads_the_log_without_the_flag(self) -> None:
+        refused = subprocess.CompletedProcess([], 1, "", "")
         read = subprocess.CompletedProcess([], 0, "the log", "")
         with mock.patch.object(pr_review, "_gh_run", side_effect=[refused, read]) as run:
-            proc = pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
+            proc = pr_review.gh_rest(self.LOG, raw=True)
         self.assertEqual("the log", proc.stdout)
-        self.assertIn("--allow-escape-sequences", run.call_args_list[0].args[0])
+        self.assertEqual(list(self.PROBE), run.call_args_list[0].args[0])
         self.assertNotIn("--allow-escape-sequences", run.call_args_list[1].args[0])
 
+    def test_a_newer_gh_reads_the_log_with_the_flag(self) -> None:
+        accepted = subprocess.CompletedProcess([], 0, "usage", "")
+        read = subprocess.CompletedProcess([], 0, "the log", "")
+        with mock.patch.object(pr_review, "_gh_run", side_effect=[accepted, read]) as run:
+            proc = pr_review.gh_rest(self.LOG, raw=True)
+        self.assertEqual("the log", proc.stdout)
+        self.assertIn("--allow-escape-sequences", run.call_args_list[1].args[0])
+
     def test_another_failure_is_not_retried(self) -> None:
-        failed = subprocess.CompletedProcess([], 1, "", "HTTP 404")
-        with mock.patch.object(pr_review, "_gh_run", return_value=failed) as run:
-            pr_review.gh_rest("repos/o/r/actions/jobs/1/logs", raw=True)
+        """A failed read is returned as it is, whatever its message says, after one attempt."""
+        accepted = subprocess.CompletedProcess([], 0, "usage", "")
+        for stderr in ("gh: Not Found (HTTP 404)", "unknown flag: --allow-escape-sequences"):
+            with self.subTest(stderr=stderr):
+                pr_review.gh_takes_escape_flag.cache_clear()
+                failed = subprocess.CompletedProcess([], 1, "", stderr)
+                with mock.patch.object(pr_review, "_gh_run", side_effect=[accepted, failed]) as run:
+                    proc = pr_review.gh_rest(self.LOG, raw=True)
+                self.assertIs(failed, proc)
+                self.assertEqual(2, run.call_count)
+
+    def test_the_probe_runs_once_per_process(self) -> None:
+        accepted = subprocess.CompletedProcess([], 0, "usage", "")
+        read = subprocess.CompletedProcess([], 0, "the log", "")
+        with mock.patch.object(pr_review, "_gh_run", side_effect=[accepted, read, read]) as run:
+            pr_review.gh_rest(self.LOG, raw=True)
+            pr_review.gh_rest(self.LOG, raw=True)
+        probes = [c for c in run.call_args_list if c.args[0] == list(self.PROBE)]
+        self.assertEqual(1, len(probes))
+
+    def test_a_read_that_is_not_a_log_never_asks(self) -> None:
+        read = subprocess.CompletedProcess([], 0, "{}", "")
+        with mock.patch.object(pr_review, "_gh_run", return_value=read) as run:
+            pr_review.gh_rest("repos/o/r")
         self.assertEqual(1, run.call_count)
+        self.assertNotIn("--allow-escape-sequences", run.call_args.args[0])
 
 
 class TestFileTableCarriesForward(CarryCase):

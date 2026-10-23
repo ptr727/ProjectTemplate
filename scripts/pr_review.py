@@ -6275,13 +6275,24 @@ def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.C
 
     `raw` is for a job log, which carries terminal escape sequences that `gh` 2.97 and later
     refuse to print without `--allow-escape-sequences`. An older `gh` has no such flag and
-    prints the log as it is, so a run refused on the flag is retried without it.
+    prints the log as it is, so the flag is passed only where `gh_takes_escape_flag` says so.
     """
-    base = ["gh", "api", path] + (["--jq", jq] if jq else [])
-    proc = _gh_run(base + (["--allow-escape-sequences"] if raw else []), raw)
-    if raw and proc.returncode != 0 and "unknown flag: --allow-escape-sequences" in proc.stderr:
-        proc = _gh_run(base, raw)
-    return proc
+    argv = ["gh", "api", path] + (["--jq", jq] if jq else [])
+    if raw and gh_takes_escape_flag():
+        argv.append("--allow-escape-sequences")
+    return _gh_run(argv, raw)
+
+
+@functools.cache
+def gh_takes_escape_flag() -> bool:
+    """Whether this `gh` accepts `--allow-escape-sequences`, answered by its own exit status.
+
+    The read itself exits 1 both for an unknown flag and for an HTTP error, so its status cannot
+    say which happened. Asking for `gh api --help` with the flag is an operation of its own whose
+    status answers that one question, and it reads nothing from GitHub. Memoized, since the
+    installed `gh` does not change within one run.
+    """
+    return _gh_run(["gh", "api", "--allow-escape-sequences", "--help"], False).returncode == 0
 
 
 def _gh_run(argv: list[str], raw: bool) -> subprocess.CompletedProcess:
