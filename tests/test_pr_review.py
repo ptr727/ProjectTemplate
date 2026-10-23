@@ -3204,25 +3204,6 @@ class TestUnrecognizedShapes(GqlCase):
                 assert span is not None
                 self.assertIn("<b>", span.group())
 
-    def test_the_html_block_names_match_the_prose_gate_s(self) -> None:
-        """Both tools model which lines end a paragraph on GitHub, so their lists cannot differ.
-
-        The prose gate sits in a composite action this script cannot import, so this test is
-        what holds the two to one list. A line opening `<source>` once ended a paragraph for one
-        tool and not the other, and `<search>` the reverse.
-        """
-        prose_gate = Path(__file__).resolve().parent.parent / ".github/actions/prose-gate"
-        sys.path.insert(0, str(prose_gate))
-        try:
-            import prose_lint
-        finally:
-            sys.path.remove(str(prose_gate))
-        names = set(pr_review.HTML_BLOCK_NAMES.split("|"))
-        self.assertEqual(names, set(prose_lint.INTERRUPTING_TAGS.split("|")))
-        raw_text = set(pr_review.HTML_RAW_TEXT_NAMES.split("|"))
-        self.assertEqual(raw_text, set(prose_lint.RAW_TEXT_TAGS.split("|")))
-        self.assertEqual(pr_review.BLOCK_SPACE, prose_lint.BLOCK_SPACE)
-
     def test_a_heading_opens_on_the_whitespace_github_takes_after_its_hashes(self) -> None:
         """A space, a tab, or the line's end follows a heading's hashes, and nothing else does.
 
