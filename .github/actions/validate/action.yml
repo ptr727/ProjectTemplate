@@ -23,7 +23,8 @@ runs:
         python-version: "3.13"
 
     # The unittest suite under tests/ is the validator's Python leg, since the hub declares '.' in python-directories, so it runs there under coverage and uploads to Codecov like any adopter's.
-    # What stays here is the audit's helper suite and each self-test that is not a unittest suite, and the agent-safety kit carries its own tests because it ships as a unit.
+    # What stays here is the audit's helper suite and each self-test that is not a unittest suite.
+    # The agent-safety kit carries its own tests because it ships as a unit.
     # The audit's libraries come from tests/requirements.txt, since uvx alone reads no script's inline metadata.
     - name: Run script self-tests step
       shell: bash

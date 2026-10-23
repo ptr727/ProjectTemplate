@@ -31,8 +31,8 @@ def normalize(text):
 def fence_step(line, marker, marker_len):
     """One line's effect on fence state `(marker, marker_len)`, as `(marker, marker_len, is_boundary)`.
 
-    CommonMark fences: at most 3 leading spaces, a closer of the opener's character at least as long
-    with nothing after it, and no backtick in a backtick fence's info string.
+    CommonMark fences: an opener has at most 3 leading spaces. A closer repeats the opener's character
+    at least as many times, with nothing after it. A backtick fence's info string holds no backtick.
     """
     stripped = line.lstrip(" ")
     indent = len(line) - len(stripped)
@@ -58,7 +58,7 @@ def _h2_text(line, marker, boundary):
 def extract_section(text, heading):
     """The normalized `## <heading>` region, heading line included, up to the next H2, or None.
 
-    The heading is found by its folded text, and its exact bytes are part of the region, so a re-cased
+    The heading is found by its folded text. Its exact bytes are part of the region, so a re-cased
     heading is found and still reads as drift.
     """
     want = heading.strip().lower()

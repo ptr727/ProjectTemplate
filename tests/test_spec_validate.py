@@ -66,6 +66,7 @@ class CheckRegistryCase(unittest.TestCase):
                 "endsWithType",
             ),
             ("a check that is no object", ["a.b"], "must be an object"),
+            ("a file check with nothing read", [self.check(scope="file")], "no baseline check"),
         ]
         for label, checks, needle in cases:
             with self.subTest(label):

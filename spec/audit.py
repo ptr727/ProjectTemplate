@@ -698,6 +698,13 @@ def driftnote_findings(entry, spec, open_count):
                         f"registry: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines - fix the id or drop the note: {quoted}",
                     )
                 )
+            elif any(c["id"] == cid for c in registered_checks()):
+                out.append(
+                    (
+                        "DRIFT",
+                        f"registry: driftNote names check '{cid}', which this audit evaluates (spec/checks.json) - delete the note once that check passes: {quoted}",
+                    )
+                )
             elif owner and owner not in declared_types(entry):
                 out.append(
                     (
@@ -927,7 +934,7 @@ def check_interface(path, contract, text):
     # An absent job is already a requiredJobKeys finding, so its tokens are not reported again.
     for job, toks in contract.get("requireTokensInJob", {}).items():
         if job in jobs:
-            view = code_view(jobs[job], 2)
+            view = f"  {job}:\n{code_view(jobs[job], 2)}"
             for t in toks:
                 if t not in view:
                     findings.append(
@@ -935,7 +942,7 @@ def check_interface(path, contract, text):
                     )
     for job, toks in contract.get("forbidTokensInJob", {}).items():
         if job in jobs:
-            view = code_view(jobs[job], 2)
+            view = f"  {job}:\n{code_view(jobs[job], 2)}"
             for t in toks:
                 if t in view:
                     findings.append(
@@ -2161,9 +2168,6 @@ def check_cspell_workspace(run):
 
 def check_registry_driftnotes(run):
     return driftnote_findings(run.entry, run.spec, len(run.findings))
-
-
-_IS_WINDOWS = sys.platform == "win32"
 
 
 def _selftest():

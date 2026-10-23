@@ -396,11 +396,16 @@ def check_registry_errors(registry, types, repos):
         return ["checks.json: 'checks' must be an array"]
     errors = []
     ids = set()
+    read = False
     for i, check in enumerate(checks):
         where = f"checks.json: checks[{i}]"
         if not isinstance(check, dict):
             errors.append(f"{where} must be an object")
             continue
+        # A file check runs only on what a baseline check before it in the same run has read.
+        read = check.get("scope") == "baseline" or (read and check.get("scope") == "file")
+        if check.get("scope") == "file" and not read:
+            errors.append(f"{where} is a file check with no baseline check before it in its run")
         cid = check.get("id")
         if not isinstance(cid, str) or not CHECK_ID_RE.fullmatch(f"({cid})"):
             errors.append(f"{where} id {cid!r} is not a dotted lowercase check id")

@@ -24,6 +24,7 @@ import audit_markdown
 from git_env import git_location_cleared
 
 _LOCATION = contextlib.ExitStack()
+IS_WINDOWS = sys.platform == "win32"
 
 
 def setUpModule() -> None:
@@ -583,6 +584,18 @@ class CheckInterfaceCase(unittest.TestCase):
                 self.assertEqual(len(audit.check_interface("wf", contract, text)), want)
 
 
+class ForbiddenTokenCase(unittest.TestCase):
+    """A forbidden token anchored on a newline matches the job's first key too."""
+
+    def test_job_level_environment_as_the_first_key(self) -> None:
+        text = (
+            "jobs:\n  deploy:\n    environment: production\n"
+            "    uses: acme/hub/.github/workflows/deploy-site-task.yml@x\n"
+        )
+        contract = {"forbidTokensInJob": {"deploy": ["\n    environment:"]}}
+        self.assertEqual(len(audit.check_interface("wf", contract, text)), 1)
+
+
 class SplitJobsCase(unittest.TestCase):
     """Holds the split_jobs edge cases."""
 
@@ -917,7 +930,7 @@ class HubTrackedCase(GitRepoCase):
         try:
             self.run_git(root, "add", "--", bad_name)
         except subprocess.CalledProcessError:
-            if not audit._IS_WINDOWS:
+            if not IS_WINDOWS:
                 raise
             self.skipTest("hub_tracked: non-UTF-8 filename (git cannot add it)")
         self.run_git(root, "commit", "-q", "-m", "add invalid-utf8 name")
@@ -958,7 +971,7 @@ class HubTrackedProbeCase(unittest.TestCase):
         case = HubTrackedCase("test_non_utf8_filename_round_trips")
         self.addCleanup(case.doCleanups)
         with (
-            mock.patch.object(audit, "_IS_WINDOWS", windows),
+            mock.patch.object(sys.modules[__name__], "IS_WINDOWS", windows),
             mock.patch.object(subprocess, "run", run),
         ):
             try:
