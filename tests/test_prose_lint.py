@@ -246,6 +246,45 @@ class TestTierTables(BaitCase):
             self.kinds("a \u271d here\n", {"charset", "charset-unknown"}),
         )
 
+    def test_a_callout_marker_is_admitted_alone_or_with_variation_selector_16(self) -> None:
+        """Tier 4 admits six emoji markers, each bare or followed by VARIATION SELECTOR-16."""
+        rules = {"charset", "charset-unknown"}
+        self.assertEqual(6, len(prose_lint.TIER4))
+        for ch in prose_lint.TIER4:
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertEqual([], self.kinds(f"> {ch} **Note:** text\n", rules))
+                self.assertEqual([], self.kinds(f"> {ch}\ufe0f **Note:** text\n", rules))
+
+    def test_the_reported_warning_pair_is_admitted(self) -> None:
+        """The pair that rendered as a finding in the original report now passes."""
+        line = "> \u26a0\ufe0f **Warning:** Example callout.\n"
+        self.assertEqual([], self.kinds(line, {"charset", "charset-unknown"}))
+
+    def test_a_non_callout_emoji_is_still_reported_even_with_variation_selector_16(self) -> None:
+        """Only the fixed set is admitted, so any other emoji flags, selector or not."""
+        rules = {"charset", "charset-unknown"}
+        for ch in ("\U0001f680", "\u2764", "\u2728", "\u2603"):
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertNotIn(ch, prose_lint.TIER4)
+                self.assertEqual(["charset-unknown"], self.kinds(f"a {ch} here\n", rules))
+                self.assertEqual(
+                    ["charset-unknown", "charset-unknown"],
+                    self.kinds(f"a {ch}\ufe0f here\n", rules),
+                )
+
+    def test_a_stray_variation_selector_16_is_still_reported(self) -> None:
+        """The selector is admitted only directly after a marker, never alone or after a gap."""
+        rules = {"charset", "charset-unknown"}
+        marker = chr(0x26A0)
+        for text in (
+            "stray \ufe0f here",
+            f"{marker} \ufe0f here",
+            f"{marker}\ufe0f\ufe0f here",
+            "\ufe0f" + marker + " here",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset-unknown"], self.kinds(f"{text}\n", rules))
+
     def test_a_mark_that_spells_no_name_is_still_reported(self) -> None:
         """A mark that is no diacritic, or that no Latin letter carries, is reported, not passed."""
         rules = {"charset", "charset-unknown"}

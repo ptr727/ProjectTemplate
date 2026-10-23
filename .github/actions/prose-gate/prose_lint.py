@@ -3,7 +3,7 @@
 
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
-  charset        Non-ASCII judged against the three tiers the charset rule defines.
+  charset        Non-ASCII judged against the tiers the charset rule defines, tier 4 being six emoji markers.
   charset-unknown Non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics.
   semicolon      No semicolon in prose, outside a series or labeled pair carrying a comma.
   dash           No spaced hyphen joining or interrupting a sentence.
@@ -1087,6 +1087,12 @@ TIER3 = frozenset(
     }
 )
 
+# Tier 4 is six emoji callout markers, each admitted alone or before VARIATION SELECTOR-16.
+# They are warning, information, check mark, cross mark, memo (note), and light bulb.
+# Every other emoji flags, and so does a selector not directly after one of these.
+TIER4 = frozenset({"\u26a0", "\u2139", "\u2705", "\u274c", "\U0001f4dd", "\U0001f4a1"})
+VARIATION_SELECTOR_16 = "\ufe0f"
+
 CHARSET_CLASSIFY = (
     "classify it in ptr727/ProjectTemplate:"
     ' the comment-and-doc-style skill\'s "Character set" section'
@@ -2065,9 +2071,14 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     """
     out: list[tuple[int, str, str]] = []
     carrier = False
+    marker = False
     for pos, ch in enumerate(line):
+        after_marker, marker = marker, ch in TIER4
         if ch.isascii():
             carrier = ch.isalpha()
+            continue
+        if marker or (after_marker and ch == VARIATION_SELECTOR_16):
+            carrier = False
             continue
         name = unicodedata.name(ch, f"U+{ord(ch):04X}")
         category = unicodedata.category(ch)
