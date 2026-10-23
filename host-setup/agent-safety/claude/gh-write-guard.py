@@ -70,7 +70,8 @@ _GH_WRITE_SUBSUBS: dict[tuple[str, str], tuple[str, ...]] = {
     ("repo", "autolink"): ("create", "delete"),
 }
 _GH_REPO_POSITIONAL = frozenset({"edit", "delete", "rename", "archive", "unarchive", "sync"})
-# A long flag takes the next word as its value unless it is one of these, since a value-taking flag gh adds later is then still read.
+# A long flag takes the next word as its value unless it is one of these.
+# A value-taking flag gh adds later is then still read.
 _GH_BOOL_FLAGS = frozenset(
     {
         *("--admin", "--auto", "--squash", "--merge", "--rebase", "--delete-branch", "--draft"),
@@ -85,6 +86,7 @@ _GH_SHORT_VALUES = frozenset(
     {"-R", "-t", "-b", "-F", "-l", "-L", "-B", "-H", "-S", "-q", "-o", "-e"}
 )
 _GH_API_SHORT_VALUES = frozenset({"-R", "-f", "-F", "-H", "-X", "-q", "-t", "-p"})
+_GH_REPO_SHORT_VALUES = _GH_SHORT_VALUES | {"-d", "-h", "-s"}
 _GH_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 
 _PROTECTED_DEFAULT = ("main", "master", "develop")
@@ -944,7 +946,7 @@ def _gh(argv: list[str]) -> _Gh:
                 g.flags.append((name, value))
             elif a[:2] in ("-R", "-X") and len(a) > 2:
                 g.flags.append((a[:2], a[2:]))
-            elif i + 1 < len(args) and _takes_value(a, g.path[:1] == ["api"], args[i + 1]):
+            elif i + 1 < len(args) and _takes_value(a, next(iter(g.path), None), args[i + 1]):
                 g.flags.append((a, args[i + 1]))
                 i += 1
             else:
@@ -959,11 +961,13 @@ def _gh(argv: list[str]) -> _Gh:
     return g
 
 
-def _takes_value(flag: str, api: bool, nxt: str) -> bool:
-    """Whether a gh flag with no `=` takes the next word as its value."""
+def _takes_value(flag: str, group: str | None, nxt: str) -> bool:
+    """Whether a gh flag with no `=` takes the next word as its value, in a command group."""
     if flag.startswith("--"):
         return flag not in _GH_BOOL_FLAGS and (nxt == "-" or not nxt.startswith("-"))
-    return flag in (_GH_API_SHORT_VALUES if api else _GH_SHORT_VALUES)
+    if group == "api":
+        return flag in _GH_API_SHORT_VALUES
+    return flag in (_GH_REPO_SHORT_VALUES if group == "repo" else _GH_SHORT_VALUES)
 
 
 def _gh_field(g: _Gh, key: str) -> str | None:
@@ -1035,12 +1039,14 @@ def _gh_targets(g: _Gh, env: dict[str, str]) -> list[tuple[str, str | None]]:
         repos += g.positionals[1:2]
     out += [t for r in repos if (t := _repo_value(r))]
     out += [
-        (m.group(1).lower(), m.group(2).lower()) for p in g.positionals if (m := _GH_URL.match(p))
+        (m.group(1).lower(), m.group(2).lower())
+        for p in g.positionals[:1]
+        if (m := _GH_URL.match(p))
     ]
     out += [
         (v.lower(), None)
         for f, v in g.flags
-        if f in ("--org", "--owner") and v and not v.startswith(("$", "@"))
+        if f in ("--org", "--owner", "-o") and v and not v.startswith(("$", "@"))
     ]
     return out
 
@@ -1305,6 +1311,9 @@ _CASES: list[tuple[str, str, str]] = [
     ("gh issue transfer 5 stranger/x", "deny", "R3"),
     ("gh project create --owner stranger --title y", "deny", "R3"),
     ("gh secret set TOKEN --org stranger --body x", "deny", "R3"),
+    ("gh variable set NAME -o stranger --body x", "deny", "R3"),
+    ('gh repo edit -d "CI/CD helpers"', "allow", "R3"),
+    ("gh issue close 5 --comment https://github.com/stranger/x/pull/9", "allow", "R3"),
     ('gh issue comment 5 --repo "$TARGET" --body hi', "allow", "R3 run-time target"),
     ("gh issue comment 5 --body 'see --repo stranger/x'", "allow", "R3"),
     ("gh issue view 5 --repo stranger/x", "allow", "R3"),
