@@ -1951,6 +1951,38 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
         self.assertIn("coverage=carried:table ", self.out.getvalue())
 
+    def test_a_cut_review_history_keeps_a_table_from_standing_in(self) -> None:
+        pr = payload(
+            [review(body=summarized(["a.py"], covers=""))], files=["a.py"], older_reviews=True
+        )
+        self.assertEqual(0, self.status(pr))
+        self.assertIn("coverage=none ", self.out.getvalue())
+        self.assertIn("review history runs past the window", self.out.getvalue())
+
+    def test_a_glob_row_matches_one_segment_at_a_time(self) -> None:
+        for files, want in (
+            (["src/a.py", "src/b.py"], "table"),
+            (["src/a.py", "src/sub/b.py"], "none"),
+        ):
+            with self.subTest(files=files):
+                self.out.seek(0)
+                self.out.truncate()
+                self.status(payload([review(body=summarized(["src/*"], covers=""))], files=files))
+                self.assertIn(f"coverage={want} ", self.out.getvalue())
+
+    def test_an_unbelievable_marker_reads_unknown_and_leaves_a_note(self) -> None:
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        self.assertEqual(0, self.status(payload([review(body=odd)], files=["a.py"])))
+        out = self.out.getvalue()
+        self.assertIn("coverage=UNKNOWN ", out)
+        self.assertIn("note: no statement, file table, or attested local pass", out)
+
+    def test_a_note_on_an_earlier_round_still_reaches_the_digest(self) -> None:
+        odd = "## Pull request overview\n\nThe change is narrow.\n"
+        rounds = [review(oid=OLD, body=odd, rid="A"), review(rid="B")]
+        self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
+        self.assertIn("shapes=NOTED ", self.out.getvalue())
+
     def test_a_flagging_verdict_that_counts_nothing_exits_fifty(self) -> None:
         text = overview_v2(
             open_count="0 open findings", entries=0, verdict="### Needs a closer look"

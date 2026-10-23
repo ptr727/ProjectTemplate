@@ -196,7 +196,7 @@ python3 scripts/pr_review.py cleanup 452 --repo ptr727/ProjectTemplate
 | `0` | `status`, `wait` | No Copilot review covers the head yet (`status`), or the review covering it states no partial coverage and its verdict counts what it flags. On a held head, an attested local pass with its required checks settled. |
 | `30` | `wait` | Still pending at the timeout, which is pending rather than failed. On a held head, `status=CHECKS_PENDING`. A round past `--min-rounds` not yet landed. |
 | `40` | `wait` | No Copilot review covers the head: the reviewer answered outside a formal review, the request returned success and recorded nothing, or the reviewer writes under a login no query filters on. |
-| `41` | `wait` | The newest round is a refusal or a quota state, its kind printed in `refusal=` and the status line. |
+| `41` | `wait` | The newest round is a refusal or a quota state, its kind printed in the status line, and in `refusal=` for a refusal on this pull request. |
 | `42` | `status`, `wait` | The round covering the head states partial coverage, or states none while an earlier round states partial coverage. |
 | `44` | `wait` | The review loop closed, the merge reads `BLOCKED`, and a required check is in a shape no wait clears. |
 | `49` | `wait` | No Copilot round covers the head and none was requested, on a pull request into a branch other than the default with no attestation. |
@@ -248,11 +248,11 @@ Every spelling the reader matches lives in `reviewers/copilot.json`, `reviewers/
 
 ## `pr_cleanup.py`
 
-`cleanup` and `cleanup --sweep`, moved out of `pr_review.py`, which forwards to this script, so `python3 scripts/pr_review.py cleanup ...` keeps running under the allow rule the host-safety installer registers for it.
+`cleanup` and `cleanup --sweep`, moved out of `pr_review.py`, which forwards to this script. Call it through that forward, as below, since the allow rule the host-safety installer registers names `pr_review.py` and not this script.
 
 ```sh
-python3 scripts/pr_cleanup.py 452 --repo ptr727/ProjectTemplate --checkout ~/repos/ProjectTemplate
-python3 scripts/pr_cleanup.py --sweep --repo ptr727/ProjectTemplate --checkout ~/repos/ProjectTemplate
+python3 scripts/pr_review.py cleanup 452 --repo ptr727/ProjectTemplate --checkout ~/repos/ProjectTemplate
+python3 scripts/pr_review.py cleanup --sweep --repo ptr727/ProjectTemplate --checkout ~/repos/ProjectTemplate
 ```
 
 It deletes the head branch of a merged pull request, the verify-then-delete `drive-pr` and `merge-and-release` prescribe after a merge into `develop`. It is the one place holding the delete's checks, and no skill prescribes a hand-typed delete beside it, since the `gh-write-guard` hook denies `git push origin --delete` from a primary checkout and Claude Code's auto-mode classifier refuses the ref API delete on some days. A command matching a narrow `permissions.allow` rule is settled before that classifier runs, and the host-safety installer registers `Bash(python3 scripts/pr_review.py:*)`. That rule approves any arguments, so every check lives here. It takes the pull request number and `--repo`, never a branch name, and reads the branch from the pull request. It refuses unless the pull request is merged, its base is `develop`, its head repository is `--repo` itself, and the head branch is neither `develop`, `main`, nor the default branch read live. Past the owner check `pr_review.py` makes, `handoff.py`'s own write-scope check binds the owner to `registry/repos.json` and admits a repository only where it is registered or a fork. A branch any ruleset or branch protection covers is refused, and so is a branch another open pull request in `--repo` has as its head or base, each one named. The ref is read by its exact qualified name, and the delete is sent only where that read's tip is the pull request's `headRefOid`, by the node id the same read returned. The delete is confirmed by reading the ref back rather than by the mutation's own answer. Exit `0` is the branch deleted and confirmed gone, or already gone. Exit `1` is a refusal, a tip that moved after the merge among them. Exit `2` is a read that did not answer, the rule read included, a delete the read back could not confirm, or a usage error. Exit `64` is the owner check, run before the registry and before any read.

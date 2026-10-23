@@ -136,7 +136,6 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import functools
 import io
 import itertools
@@ -158,11 +157,10 @@ import pr_review_copilot as adapter
 # The directory this script sits in, the anchor every scope answer is read from.
 HERE = Path(__file__).resolve().parent
 
-REVIEWER = "copilot-pull-request-reviewer"
-# Other review bots tracked at the identity level only, login and commit oid, never body prose.
-CODERABBIT_LOGIN = "coderabbitai"
-QODO_LOGIN = "qodo-free-for-open-source-projects"
-# Named once so a login rename updates one spelling.
+# Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
+REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
+CODERABBIT_LOGIN = adapter.VOCABULARIES["coderabbit"]["login"]
+QODO_LOGIN = adapter.VOCABULARIES["qodo"]["login"]
 OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
@@ -199,8 +197,6 @@ WINDOW = 100
 FILES_WINDOW = 100
 FILES_CAP = 3000
 FILES_UNREAD = "unread"
-# The REST compare endpoint's own ceiling on the file list it returns, which it does not flag.
-COMPARE_FILE_CAP = 300
 READ_RETRY_DELAYS = (2, 5)
 ATTEST_HEAD_DELAYS = (3, 5, 10, 15, 15, 12)
 _attest_sleep = time.sleep
@@ -1252,10 +1248,20 @@ def partial_on_record(pr: dict) -> bool:
 
 
 def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
-    """Whether a file table names exactly the changed files, a glob row matching what it names."""
+    """Whether a file table names exactly the changed files, a glob row matching what it names.
+
+    A glob matches one segment at a time, `*` and `?` never crossing a `/`, and every other
+    character is literal, so a row of `src/*` names `src/a.py` and not `src/sub/b.py`.
+    """
 
     def hits(entry: str, path: str) -> bool:
-        return entry == path or (any(c in entry for c in "*?") and fnmatch.fnmatchcase(path, entry))
+        if entry == path:
+            return True
+        want, have = entry.split("/"), path.split("/")
+        return len(want) == len(have) and all(
+            re.fullmatch(re.escape(w).replace(r"\*", "[^/]*").replace(r"\?", "[^/]"), h)
+            for w, h in zip(want, have, strict=True)
+        )
 
     return all(any(hits(e, p) for e in named) for p in changed) and all(
         any(hits(e, p) for p in changed) for e in named
@@ -1413,8 +1419,9 @@ def digest(
     found = reading(newest, pr=pr) if newest is not None else None
     effort, effort_source = review_effort(pr)
     cover, cover_why = coverage(pr)
+    # Every round's notes, since a renamed section on an earlier round hides a finding too.
     notes = [
-        *(found.notes if found else ()),
+        *dict.fromkeys(n for node in revs for n in reading(node).notes),
         *(
             f"the reviewer login reads as `{d}`, a spelling no query here filters on"
             for d in reviewer_login_drift(pr)
@@ -2439,10 +2446,16 @@ def utf8_console() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if args[:1] == ["cleanup"]:
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("first", nargs="?")
+    for flag in ("--repo", "--checkout", "--min-age-hours"):
+        pre.add_argument(flag)
+    if pre.parse_known_args(args)[0].first == "cleanup":
         import pr_cleanup
 
-        return pr_cleanup.main(args[1:])
+        rest = list(args)
+        rest.remove("cleanup")
+        return pr_cleanup.main(rest)
     utf8_console()
     ap = argparse.ArgumentParser()
     ap.add_argument(

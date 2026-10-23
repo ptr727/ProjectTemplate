@@ -550,7 +550,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("reviewer", nargs="?", default="copilot", choices=REVIEWERS)
     a = ap.parse_args(argv)
-    print(json.dumps(read(sys.stdin.read(), a.reviewer)._asdict(), indent=2))
+    # Read as bytes and decoded as UTF-8, since a Windows console's code page cannot decode a body.
+    body = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    print(json.dumps(read(body, a.reviewer)._asdict(), indent=2))
     return 0
 
 

@@ -97,7 +97,10 @@ class CleanupUnread(Exception):
 
 
 def cleanup_read(query: str, **variables: object) -> dict:
-    """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1."""
+    """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1.
+
+    Exit 1 is `cleanup`'s refusal code, so a read that could not answer must not end on it.
+    """
     try:
         return shared.request(query, variables).data
     except shared.GraphQLError as exc:
@@ -279,7 +282,10 @@ def cleanup_fresh(owner: str, repo: str, plan: CleanupPlan) -> CleanupPlan:
 
 
 def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
-    """Delete the remote branch `plan` verified and read it back."""
+    """Delete the remote branch `plan` verified and read it back.
+
+    A delete that reports a failure may still have landed, so the read back decides either way.
+    """
     target = f"{owner}/{repo}"
     branch = plan.branch
     if plan.ref is None:
@@ -490,7 +496,10 @@ def cleanup_tip(primary: str, ref: str) -> str | None:
 
 
 def cleanup_dirty(path: str, untracked: bool) -> bool:
-    """Whether the work tree at `path` has changes, without refreshing its index."""
+    """Whether the work tree at `path` has changes, without refreshing its index.
+
+    A refreshed index would make an untouched tree look touched to the age rule of `--sweep`.
+    """
     flag = "--untracked-files=all" if untracked else "--untracked-files=no"
     out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", flag).stdout
     return bool(out.strip())
@@ -707,7 +716,10 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
 
 
 def cleanup_leave_branch(primary: str, branch: str) -> None:
-    """Move the primary checkout to `develop` where it holds `branch`, refusing if git will not."""
+    """Move the primary checkout to `develop` where it holds `branch`, refusing if git will not.
+
+    This runs before the remote delete, so a checkout that fails still deletes nothing.
+    """
     if not any(w.path == primary and w.branch == branch for w in cleanup_worktrees(primary)):
         return
     try:

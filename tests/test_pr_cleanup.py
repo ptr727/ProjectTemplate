@@ -950,6 +950,11 @@ class TestCleanupSweepArguments(CleanupCase):
             )
         cleaned.assert_called_once_with("o", "r", 7, "x")
 
+    def test_the_forward_finds_cleanup_behind_a_leading_flag(self) -> None:
+        with mock.patch.object(pr_cleanup, "cleanup", return_value=0) as cleaned:
+            self.assertEqual(0, pr_review.main(["--repo", "o/r", "cleanup", "7"]))
+        cleaned.assert_called_once_with("o", "r", 7, None)
+
     def test_the_sweep_flags_are_checked_against_each_other(self) -> None:
         self.usage("cleanup", "7", "--sweep", "--repo", "o/r", "--checkout", "/x")
         self.usage("cleanup", "--sweep", "--repo", "o/r")

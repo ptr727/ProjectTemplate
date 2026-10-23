@@ -39,8 +39,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    thread, and a missing approval alike, and the response differs by cause.
 2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
    default, every head can carry an attested local pass instead, `coverage=local` in the digest,
-   where the whole review history is in view and no round on record states or appears to state
-   partial coverage. A promotion re-reviews content its feature pull requests already carried, so
+   where the whole review history is in view and no round on record states partial coverage. A promotion re-reviews content its feature pull requests already carried, so
    the hosted review runs once per change, at the promotion. A pull request into the default
    branch, a promotion among them, always carries a Copilot round on its head. A review is matched
    by commit SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
@@ -54,8 +53,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    that does, its table naming exactly the changed files, stands in as `coverage=carried:table`.
    A table stands in only where no Copilot round on the pull request, on any commit, states
    partial coverage, so a pull request that ever had a partial round goes to the maintainer.
-   `coverage=none` leaves this item unsatisfied and decides no exit code, so read the field
-   rather than the exit.
+   `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
+   so read the field rather than the exit.
    The coverage this item requires is Copilot's, or the attested local pass above, and CodeRabbit
    and Qodo are advisory, since the hub's `docs/pr-reviewer-evaluation.md` "Status" names Copilot
    the incumbent and says no candidate is
@@ -67,7 +66,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
    it where it can. A file-count refusal is cleared by splitting the pull request, which is the
    only cause on record that the loop can clear. `pr_review.py wait` exits `41` on every refusal
-   and quota state, its `status=` line and the digest's `refusal=` field naming which.
+   and quota state, its `status=` line naming which, and the digest's `refusal=` field carries
+   a refusal on this pull request.
    `refusal=QUOTA` or `refusal=ERROR`, the pull request's newest Copilot review being an
    account-quota refusal or an error refusal read as a possible quota hit, on this head or an
    earlier one, is the one nothing the loop does clears, which is the case "Which Reviewers a
