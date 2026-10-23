@@ -3204,6 +3204,16 @@ class TestUnrecognizedShapes(GqlCase):
                 assert span is not None
                 self.assertIn("<b>", span.group())
 
+    def test_the_html_block_names_differ_from_commonmark_only_where_github_does(self) -> None:
+        """The prose gate reads CommonMark 0.31's list through markdown-it-py, and GitHub's renderer
+        differs from it in two names, so this tool's list is held to exactly that difference."""
+        from markdown_it.common.html_blocks import block_names
+
+        names = set(pr_review.HTML_BLOCK_NAMES.split("|")) - {"h[1-6]"}
+        names |= {f"h{n}" for n in range(1, 7)}
+        self.assertEqual({"source"}, names - set(block_names))
+        self.assertEqual({"search"}, set(block_names) - names)
+
     def test_a_heading_opens_on_the_whitespace_github_takes_after_its_hashes(self) -> None:
         """A space, a tab, or the line's end follows a heading's hashes, and nothing else does.
 

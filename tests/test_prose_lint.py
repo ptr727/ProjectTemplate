@@ -3814,6 +3814,10 @@ class TestLexerDispatch(BaitCase):
             with self.subTest(first=first):
                 self.assertEqual(lexer, prose_lint.lexer_name(Path("tool"), first))
 
+    def test_a_shebang_assignment_is_not_the_interpreter(self) -> None:
+        first = "#!/usr/bin/env -S PYTHONWARNINGS=error python3"
+        self.assertEqual("python", prose_lint.lexer_name(Path("tool"), first))
+
     def test_a_file_name_outranks_a_shebang(self) -> None:
         self.assertEqual("python", prose_lint.lexer_name(Path("x.py"), "#!/bin/bash"))
 
@@ -4096,6 +4100,10 @@ class TestHashLanguage(BaitCase):
     def test_toml_reads_its_hash_comments(self) -> None:
         self.assertEqual(["comment-wrap"], self.flag("a.toml", 'k = "v"  # Two things. Here.\n'))
 
+    def test_a_shift_is_no_heredoc(self) -> None:
+        """A label opens on a letter, so `<< 2` inside arithmetic hides nothing after it."""
+        self.assertEqual([(2, "After.", True)], self.comments("a.sh", "(( x << 2 ))\n# After.\n"))
+
 
 class TestYamlLanguage(BaitCase):
     """YAML extraction, its block and quoted scalars, and the scalars it lexes again."""
@@ -4226,6 +4234,10 @@ class TestYamlLanguage(BaitCase):
     def test_a_double_quoted_scalar_spans_lines(self) -> None:
         """YAML lets one continue onto the next line, so a `#` inside it is text."""
         self.assertEqual([], self.flag("x.yml", 'key: "unclosed\n# Two things. Here.\n"\n'))
+
+    def test_a_comment_after_a_block_indicator_leaves_the_script_read(self) -> None:
+        text = "run: | # Install.\n  # lower case.\n"
+        self.assertEqual(["comment-case"], self.kinds(text, {"comment-case"}, name="x.yml"))
 
 
 class TestPowerShellLanguage(BaitCase):
@@ -4727,6 +4739,14 @@ class TestMarkdown(BaitCase):
             [(1, "Two things. Here.", True), (3, "Two things. Here.", False)],
             self.comments("a.md", text),
         )
+
+    def test_a_multi_line_html_comment_is_no_paragraph(self) -> None:
+        over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 2))
+        self.assertEqual([], self.found_md(f"<!--\n{over}\n-->\n"))
+
+    def test_an_inline_comment_keeps_its_line_after_a_wrapped_code_span(self) -> None:
+        text = "Run `make\nbuild` now. <!-- check this later. -->\n"
+        self.assertEqual([(2, "check this later.", False)], self.comments("a.md", text))
 
 
 class TestOverrideMerge(BaitCase):
@@ -5398,11 +5418,27 @@ class TestCli(unittest.TestCase):
                 found = prose_lint.check_file(marked, {"comment-added"})
                 self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
 
+    def test_the_local_shim_offers_the_gate_s_own_command_line(self) -> None:
+        """The shim builds its parser from the same data, and answers `--help` without uv."""
+        shim = REPO / "scripts" / "prose_lint.py"
+        env = dict(os.environ) | {"COLUMNS": "100"}
+        shown = subprocess.run(
+            [sys.executable, str(shim), "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=True,
+        ).stdout
+        with mock.patch.dict(os.environ, {"COLUMNS": "100"}):
+            expected = prose_lint.argument_parser(prose_lint.BASE).format_help()
+        self.assertEqual(expected, shown)
+
     def test_a_file_with_no_lexer_is_named_as_plain_text(self) -> None:
-        """No comment rule read it, so a run that skipped its comments is not a clean one."""
+        """No comment rule could read it, so a comment rule's clean run over it is no clean pass."""
         plain = self.bait("notes.unknownsuffix", "# Two things. Here.\n")
-        known = self.bait("tool.sh", "# Two things. Here.\n")
-        err = self.scope_line([plain, known], ["--check", "charset"])
+        known = self.bait("tool.sh", "# One thing.\n")
+        err = self.scope_line([plain, known], ["--check", "comment-wrap"])
         self.assertIn(f"1 file(s) with no lexer read as plain text: {plain.as_posix()!r}", err)
         self.assertNotIn("tool.sh", err)
 
@@ -5412,7 +5448,7 @@ class TestCli(unittest.TestCase):
 
     def test_a_long_plain_list_is_cut_to_five_names(self) -> None:
         baits = [self.bait(f"notes{n}.unknownsuffix", "x\n") for n in range(6)]
-        err = self.scope_line(baits, ["--check", "charset"])
+        err = self.scope_line(baits, ["--check", "comment-wrap"])
         self.assertIn("6 file(s) with no lexer read as plain text", err)
         self.assertIn(f"{baits[4].as_posix()!r} and more", err)
         self.assertNotIn(baits[5].as_posix(), err)

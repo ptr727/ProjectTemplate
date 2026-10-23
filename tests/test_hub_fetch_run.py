@@ -195,9 +195,18 @@ RAISE = b"raise RuntimeError('gate crashed')\n"
 ENV_KEYS = ("PROSE_GATE_PROVENANCE", "GH_TOKEN", "GITHUB_TOKEN")
 
 
-@unittest.skipUnless(shutil.which("uv"), "the fetched script runs through uv")
 class ProvenanceTests(unittest.TestCase):
+    # These stand uv in with a stub, so they run on the host lacking it, the one they are about.
+    STUBBED = frozenset(
+        {
+            "test_the_script_runs_through_uv_with_no_project",
+            "test_a_missing_uv_is_the_gate_not_running",
+        }
+    )
+
     def setUp(self) -> None:
+        if shutil.which("uv") is None and self._testMethodName not in self.STUBBED:
+            self.skipTest("the fetched script runs through uv")
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.out = Path(self._tmp.name) / "seen.txt"
@@ -339,6 +348,7 @@ class ProvenanceTests(unittest.TestCase):
             self.environment(),
             mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
             mock.patch.object(hub.subprocess, "run", return_value=done) as run,
+            mock.patch.object(hub.shutil, "which", return_value="uv"),
             contextlib.redirect_stderr(self.stderr),
         ):
             self.assertEqual(3, hub.main([".github/actions/repo-gate/repo_gate.py", "--x"]))

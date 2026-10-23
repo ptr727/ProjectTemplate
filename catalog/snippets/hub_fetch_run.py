@@ -4,7 +4,7 @@ Never pinned or vendored: a pin nothing keeps current goes stale by construction
 (this repo's own, and the hub's) is the backstop for a change that lands broken on `main`.
 A fetch failure fails the caller loudly rather than silently skipping the gate it guards.
 The script runs as `uv run --no-project --script`, so the packages its PEP 723 block declares
-resolve, beside the data files it reads, which are fetched from the same commit.
+resolve, beside the data files it reads, which are fetched from the same ref.
 Usage: hub_fetch_run.py <hub-relative-path> [script-args...]
 Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
 """

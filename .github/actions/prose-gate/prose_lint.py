@@ -14,8 +14,8 @@ shared: each rule in `RULE_TABLE` is a function of one unit and its context, and
 rule's message, its default, and the vocabulary and exemptions the rules read.
 
 A repository may carry `.prose-gate.json` at its root with additions to the carried exemptions and
-nothing else, each a list merged over the carried one: `hub_hosted`, `generated_trees`, and
-`home_path_exempt` take paths, `service_accounts` account names, `dupword_allow` and
+nothing else, each a list merged over the carried one: `hub_hosted` and `home_path_exempt` take
+paths, `generated_trees` directory names, `service_accounts` account names, `dupword_allow` and
 `spelling_allow` phrases and words, and `tool_directives` directive names matched literally. Any
 other key is refused, since an override that silently does nothing reads as one that works.
 
@@ -66,7 +66,6 @@ TIER4 = frozenset(chr(int(k.removeprefix("U+"), 16)) for k in BASE["charset"]["t
 VARIATION_SELECTOR_16 = chr(0xFE0F)
 GENERATED_ROOTS = frozenset(BASE["generated_roots"])
 INSTRUCTION_DOCS = frozenset(BASE["instruction_docs"])
-HUB_HOSTED = frozenset(BASE["exemptions"]["hub_hosted"])
 DUP_ALLOW = frozenset(BASE["exemptions"]["dupword_allow"])
 # A floor on what a healthy sweep of this repo reaches, asserted by the tests.
 LEAST_PLAUSIBLE = 60
@@ -489,7 +488,7 @@ Extracted = tuple[list[Unit], frozenset[int], bool]
 
 
 CODE_FENCE = re.compile(r"^\s*(```|~~~)")
-SHEBANG = re.compile(r"^#!\s*(?:\S*/)?([\w.+-]+)(?:\s+(?:-\S+\s+)*([\w.+-]+))?")
+SHEBANG = re.compile(r"^#!\s*(?:\S*/)?([\w.+-]+)(?:\s+(?:-\S+\s+|\w+=\S*\s+)*([\w.+-]+))?")
 
 
 def language_of(lexer: str | None) -> dict[str, Any] | None:
@@ -523,7 +522,9 @@ def lexer_name(path: Path, first: str) -> str | None:
 
 # Pygments ends a heredoc at any later `STUB` in a `$STUB_DIR`, and reads no double-quoted label.
 # This rule ends one only on its terminator line, tab-indented for `<<-`.
-HEREDOC = r"(?s)<<(-)?[ \t]*(['\"]?)\\?(\w+)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
+HEREDOC = (
+    r"(?s)<<(-)?[ \t]*(['\"]?)\\?([A-Za-z_]\w*)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
+)
 # Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
 # The comments inside it are lost, so an attribute here is read within its own line.
 ATTRIBUTE = r"^([ \t]*)(\[[^\n]*?\])"
@@ -653,7 +654,8 @@ def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int,
         elif kind in Keyword.Type and value in tags:
             pending = tags[value]
         elif pending and kind in Punctuation.Indicator and value in "|>":
-            while i < len(tokens) and tokens[i][1] in Punctuation.Indicator:
+            # The rest of the header line, a comment after the indicator included, opens nothing.
+            while i < len(tokens) and "\n" not in tokens[i][2]:
                 i += 1
             j = i
             while j < len(tokens) and (
@@ -805,10 +807,12 @@ def extract_markdown(lines: list[str]) -> Extracted:
         if tok.type in ("fence", "code_block"):
             code.update(range(first, last + 1))
         elif tok.type == "html_block":
-            markup += [line for line, _ in comment_lines(tok.content, "html", HTML, first - 1)]
+            found = [line for line, _ in comment_lines(tok.content, "html", HTML, first - 1)]
+            markup += found
+            inside = {line.number for line in found}
             for n in range(first, last + 1):
                 span = TAG.sub(lambda m: " " * len(m.group()), lines[n - 1]).strip()
-                if span and "<!--" not in lines[n - 1] and "-->" not in lines[n - 1]:
+                if span and n not in inside:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
@@ -830,20 +834,24 @@ def extract_markdown(lines: list[str]) -> Extracted:
 def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     """The HTML comments inside one inline token, numbered by the source line each opens on."""
     out: list[Line] = []
-    number = (tok.map or [0])[0] + 1
+    number, last = (tok.map or [0, 1])[0] + 1, (tok.map or [0, 1])[1]
     for child in tok.children or ():
-        if child.type in ("softbreak", "hardbreak"):
-            number += 1
-        elif child.type == "html_inline" and child.content.startswith("<!--"):
+        if child.type == "html_inline" and child.content.startswith("<!--"):
+            # The source line is found by the comment's own text, a wrapped code span holding none.
+            head = child.content.split("\n")[0]
+            number = next((n for n in range(number, last + 1) if head in lines[n - 1]), number)
             source = lines[number - 1]
-            before = source[: max(source.find(child.content.split("\n")[0]), 0)]
+            before = source[: max(source.find(head), 0)]
             for line, _ in comment_lines(child.content, "html", HTML, number - 1):
                 out.append(line._replace(leading=line.number > number or not before.strip()))
     return out
 
 
-def extract(path: Path, text: str) -> Extracted:
-    """The units every rule reads in this file, and whether it was read as plain text."""
+def extract(path: Path, text: str, lex: bool = True) -> Extracted:
+    """The units the rules read in this file, and whether it was read as plain text.
+
+    Without `lex`, a code file's comments and docstrings are left unread, no rule asking for them.
+    """
     lines = [line.rstrip("\r") for line in text.split("\n")]
     lexer = lexer_name(path, lines[0])
     if lexer == "markdown":
@@ -854,8 +862,8 @@ def extract(path: Path, text: str) -> Extracted:
         *line_units("code", lines, fenced),
     ]
     spec = language_of(lexer)
-    if spec is None or lexer is None:
-        return units, fenced, path.suffix.lower() not in BASE["files"]["plain"]
+    if spec is None or lexer is None or not lex:
+        return units, fenced, lex and path.suffix.lower() not in BASE["files"]["plain"]
     clean = text.replace("\r\n", "\n")
     found = comment_lines(clean, lexer, spec)
     if spec.get("nested"):
@@ -1645,7 +1653,8 @@ def check_file(
     bom = chr(0xFEFF)
     text = decoded.removeprefix(bom)
     out = [f for f in charset_findings(1, bom) if f[1] in rules] if text != decoded else []
-    units, fenced, read_plain = extract(path, text)
+    lex = any(RULE_TABLE[r][1] - {"source", "prose", "code"} for r in rules)
+    units, fenced, read_plain = extract(path, text, lex)
     if read_plain and plain is not None:
         plain.append(path)
     lexer = lexer_name(path, text.split("\n", 1)[0].rstrip("\r"))
