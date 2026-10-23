@@ -150,9 +150,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    read so far says. Answer what the body holds rather than what the two numbers add up to.
    What closing a finding owes turns on whether it is `pre-existing`, under the classes
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
-   `pre-existing` finding on text inside a canonical Markdown unit, one the hub's
-   `scripts/canonical_review.py list` names, takes the first bullet of outcome 4 of "Every
-   finding ends in a listed outcome" below. That bullet applies once per unit rather than once
+   `pre-existing` finding on text inside a canonical Markdown unit takes the first bullet of
+   outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
+   `scripts/canonical_review.py list` names. That bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
    whichever round first needs it files it. The round answers each finding with that issue's
