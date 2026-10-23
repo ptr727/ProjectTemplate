@@ -90,8 +90,8 @@ text says, because the harm it covers was never in the text.
    sits. The exception is a write whose command and subcommand are written out, fed only inert
    words. Those come from a pipe out of an `echo` or `printf` of literal words. Each such word
    holds only letters, digits, `_`, and `.`, as in `printf 5 | xargs gh pr comment --body x`. A
-   redirection of the command's input voids the exception. So does a word that lands as an
-   option's value, as after a trailing `--org`, since an owner name is inert too. A
+   redirection of the command's input voids the exception. So does a word that lands as an owner
+   or repo flag's value, as after a trailing `--org`, since an owner name is inert too. A
    gh naming no subcommand under `xargs` is denied. So is one whose path words hold the replace
    string, and a `gh api` call `xargs` appends to. So is a `gh api` call holding the replace
    string in any word but its endpoint. Behind a launcher the hook does not know, an `env` or a
