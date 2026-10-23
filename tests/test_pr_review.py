@@ -9973,7 +9973,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             code = self.cli(["wait", "7", "--ignore-quota-signal", "--timeout", "0"])
         out = self.out.getvalue()
-        self.assertNotEqual(0, code)
+        self.assertEqual(41, code)
         self.assertIn("No attested local pass covers this head yet", out)
         self.assertNotIn("its head is covered by an attested local pass", out)
         self.assertNotIn("coverage=local", out)
