@@ -169,15 +169,26 @@ class TestCoverage(unittest.TestCase):
                 found = adapter.read(body(tail=f"Lead.\n\n{quoted}"))
                 self.assertEqual("none", found.coverage)
 
-    def test_a_count_stated_in_prose_is_read_with_a_note(self) -> None:
-        for line, state in (
-            ("**Files reviewed:** 3/4 changed files", "partial"),
-            ("Copilot reviewed 4 out of 4 changed files.", "full"),
+    def test_a_count_stated_in_a_paragraph_of_its_own_is_read(self) -> None:
+        for line, state, noted in (
+            ("**Files reviewed:** 3/4 changed files", "partial", False),
+            ("Copilot reviewed 4 out of 4 changed files.", "full", False),
+            ("Copilot reviewed 3 out of\n4 changed files.", "partial", False),
+            ("Copilot reviewed 5 out of 4 changed files.", "unknown", True),
         ):
             with self.subTest(line=line):
-                found = adapter.read(body(headline=line))
+                found = adapter.read(body(sections=line))
                 self.assertEqual(state, found.coverage)
-                self.assertTrue(any("outside the fleet-review marker" in n for n in found.notes))
+                self.assertEqual(noted, any("cannot believe" in n for n in found.notes))
+
+    def test_a_sentence_describing_the_count_states_nothing(self) -> None:
+        for text in (
+            body(headline="The reader treats Copilot reviewed 1 of 2 changed files as partial."),
+            body(headline="Copilot reviewed 1 of 2 changed files is the shape read here."),
+            body(sections="This round reads that Copilot reviewed 1 of 2 changed files."),
+        ):
+            with self.subTest(text=text[40:90]):
+                self.assertEqual("none", adapter.read(text).coverage)
 
     def test_a_partial_wins_over_any_reading_beside_it(self) -> None:
         tail = (

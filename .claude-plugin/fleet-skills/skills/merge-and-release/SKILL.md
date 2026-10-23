@@ -61,7 +61,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 1. Identify the open develop -> main promotion PR for this repo, stop and report if none is open.
 2. Record the promotion's live head, `gh pr view [number] --repo owner/repo --json headRefOid
    --jq .headRefOid`. Then, from a hub checkout, `scripts/` is not carried into downstream repos,
-   run `scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
+   run `uv run --no-project --script scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
    pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
    partial gate. A digest reading `coverage=none` is not a partial gate where the promotion meets the
    one case that skill's Merge Gate item 2 states. Check that case again on every re-run below, and record

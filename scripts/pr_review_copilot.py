@@ -427,19 +427,24 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 table = (table or []) + rows
         i += 1
 
-    # A count stated in prose outside any section, read from its text alone, never from code.
+    # A count the reviewer states in a paragraph of its own, opening on it, outside any section.
+    # The opening anchor and the headline's exclusion keep a sentence describing the wording out.
     for n, token in enumerate(tokens[1:], start=1):
         if token.type != "inline" or tokens[n - 1].type != "paragraph_open" or inside(token):
             continue
-        said = " ".join(
-            "".join(c.content for c in token.children or [] if c.type == "text").split()
-        )
-        m = next((m for p in vocab["coverage_prose"] if (m := p.search(said))), None)
-        if m is None:
+        parts = [
+            c.content if c.type == "text" else " "
+            for c in token.children or []
+            if c.type in ("text", "softbreak", "hardbreak")
+        ]
+        said = " ".join("".join(parts).split())
+        m = next((m for p in vocab["coverage_prose"] if (m := p.match(said))), None)
+        if m is None or said == headline:
             continue
         got, of = int(m.group("got")[:COUNT_DIGITS]), int(m.group("of")[:COUNT_DIGITS])
         state = "partial" if got < of else "full" if got == of else "unknown"
-        notes.append(f"a coverage statement outside the fleet-review marker: `{said}`")
+        if state == "unknown":
+            notes.append(f"a coverage count this reader cannot believe: `{said}`")
         if coverage == "none" or rank[state] > rank[coverage]:
             coverage, coverage_line = state, said
 

@@ -10,7 +10,7 @@
     "file_count": ["maximum number of files"]
   },
   "coverage_prose": [
-    "reviewed\\s+(?P<got>\\d+)\\s+(?:out of|of)\\s+(?P<of>\\d+)\\s+changed files?",
+    "(?:copilot\\s+)?reviewed\\s+(?P<got>\\d+)\\s+(?:out of|of)\\s+(?P<of>\\d+)\\s+changed files?",
     "files reviewed:?\\s*(?P<got>\\d+)\\s*/\\s*(?P<of>\\d+)"
   ],
   "rate_limit_service": "",

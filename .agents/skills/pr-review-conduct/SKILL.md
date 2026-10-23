@@ -238,12 +238,12 @@ is never carried into a downstream repository.
 Run `local-strict-review` against the branch's current diff before every push this loop makes, the one that opens the pull request in step 1 and each one after it, whatever finding it answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about, so a re-push of a tree a recorded pass already covers needs no second pass, the receipt being keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps it only while the merge base holds: rebasing onto a target that has moved retires the receipt although no file changed, and that push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads, the hub's own `pre-push` hook being one and a repository having none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around, and that skill's refusal table says what each refusal means and what clears it.
 
 1. Push changes to the PR branch and open the pull request when it does not exist. Once the push
-   lands, run `scripts/pr_review.py attest <number> --repo <owner>/<repo> --checkout <worktree>`.
+   lands, run `uv run --no-project --script scripts/pr_review.py attest <number> --repo <owner>/<repo> --checkout <worktree>`.
    `attest` refuses unless the checkout is the pushed head and a recorded pass covers that head.
    Attest after every push a recorded pass covers, the opening push included. The comment `attest`
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
-2. Run `scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
+2. Run `uv run --no-project --script scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
 3. Request a Copilot round at one defined moment: the head of a pull request into the default
    branch, a promotion among them. Auto-trigger is unreliable, so request it explicitly, which
    step 4's `wait` is what does. On a pull request into any other branch, `wait` reads step 1's
@@ -254,7 +254,7 @@ Run `local-strict-review` against the branch's current diff before every push th
    drift, under a quota or error refusal, and where something is already in the request set, which
    is the condition the recovery below clears. Requesting in the pull request UI is the maintainer's
    route rather than this loop's.
-4. Run a bounded `scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
+4. Run a bounded `uv run --no-project --script scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
    A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
    or read silence as a missing review. A review whose body says it declined to review is the one
    exception, and it is terminal the other way. Nothing follows it, and re-requesting the same
@@ -389,7 +389,7 @@ own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `
 maintainer's decision. State the `(N)` count the block gave so answers can be checked against
 findings, and link the review round.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
-supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
+supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when
