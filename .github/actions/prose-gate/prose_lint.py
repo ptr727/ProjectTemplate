@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py", "pygments"]
+# dependencies = ["markdown-it-py>=4.2.0", "pygments>=2.21.0"]
 # ///
 """Enforce the GOVERNANCE.md "Documentation Style Conventions" rules no other linter checks.
 
-The gate runs in three layers. Extract, shared: a file becomes text units, code and config read
-through the Pygments lexer its name or shebang selects, Markdown through markdown-it-py, and a file
-with no declared lexer as plain text the scope line names. Normalize, per language, from
-`prose-gate.json` beside this script: comment markers, documentation forms, tool directives,
-docstring section names, and nested lexes such as a YAML scalar holding a script or C++. Evaluate,
-shared: each rule in `RULE_TABLE` is a function of one unit and its context, and the JSON holds each
-rule's message, its default, and the vocabulary and exemptions the rules read.
+Three layers: extract text units through Pygments and markdown-it-py, normalize them per language
+from the `prose-gate.json` beside this script, and evaluate each rule in `RULE_TABLE` on a unit. The
+JSON holds the language data, each rule's message and default, and the vocabulary and exemptions.
 
 A repository may carry `.prose-gate.json` at its root with additions to the carried exemptions and
 nothing else, each a list merged over the carried one: `hub_hosted` and `home_path_exempt` take
@@ -39,14 +35,21 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from markdown_it import MarkdownIt
-from markdown_it.token import Token
-from pygments.lexer import Lexer, RegexLexer, bygroups
-from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
-from pygments.lexers.dotnet import CSharpLexer
-from pygments.lexers.shell import BashLexer
-from pygments.token import Comment, Keyword, Name, Punctuation, String, Text, Whitespace
-from pygments.util import ClassNotFound
+try:
+    from markdown_it import MarkdownIt
+    from markdown_it.token import Token
+    from pygments.lexer import Lexer, RegexLexer, bygroups
+    from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
+    from pygments.lexers.dotnet import CSharpLexer
+    from pygments.lexers.shell import BashLexer
+    from pygments.token import Comment, Keyword, Name, Punctuation, String, Text, Whitespace
+    from pygments.util import ClassNotFound
+except ImportError as missing:
+    sys.exit(
+        f"prose_lint.py: {missing.name} is not installed. The gate runs as `uv run --no-project "
+        "--script`, which installs its packages, and a hook importing it in-process carries a "
+        "stale hub_fetch_run.py snippet to resync from the hub."
+    )
 
 BASE: dict[str, Any] = json.loads(
     Path(__file__).resolve().with_name("prose-gate.json").read_text(encoding="utf-8")

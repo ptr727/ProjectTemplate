@@ -5421,6 +5421,24 @@ class TestCli(unittest.TestCase):
                 found = prose_lint.check_file(marked, {"comment-added"})
                 self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
 
+    def test_a_missing_package_names_the_remedy_rather_than_a_traceback(self) -> None:
+        """A stale hook imports the gate in-process, where its script block installs nothing."""
+        run = (
+            "import runpy, sys; sys.modules['markdown_it'] = None; "
+            f"runpy.run_path({str(PROSE_LINT_SCRIPT)!r}, run_name='__main__')"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", run],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(1, done.returncode)
+        self.assertNotIn("Traceback", done.stderr)
+        self.assertIn("uv run --no-project --script", done.stderr)
+        self.assertIn("hub_fetch_run.py", done.stderr)
+
     def test_the_local_shim_offers_the_gate_s_own_command_line(self) -> None:
         """The shim builds its parser from the same data, and answers `--help` without uv."""
         shim = REPO / "scripts" / "prose_lint.py"
