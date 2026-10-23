@@ -16,6 +16,11 @@ files = ["spec", "host-setup", "scripts", "tests"]
 mypy_path = [".github/actions/prose-gate", ".github/actions/python-directories", ".github/actions/repo-gate"]
 exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
+# The prose gate declares these in its own script block, and the generic validator gives mypy none of a script's packages.
+[[tool.mypy.overrides]]
+module = ["markdown_it.*", "pygments.*"]
+ignore_missing_imports = true
+
 [tool.pyright]
 pythonVersion = "3.13"
 # Matches [tool.mypy]'s platform pin above, for the same reason: Pylance in an editor otherwise flags the same POSIX-only attributes live on a Windows or macOS host.
