@@ -157,8 +157,8 @@ maintainer when".
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying and fix each one sitting
-   in a file the diff already touches or that this change itself made wrong, filing the rest, per
-   `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
+   in a file the diff already touches or that this change itself made wrong. Each of the rest takes
+   the outcome a `pre-existing` finding takes under outcome 4, per `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
    raised, not once it recurs. Take the fix through `local-strict-review` the same way the push
    that opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply
    with the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
@@ -214,8 +214,8 @@ maintainer when".
    suppressed finding has no thread, so its pointer is an answer per `pr-review-conduct`
    "Answering a suppressed finding". That answer is `Listed in the body` for a listed or dropped
    finding, and `Deferred to <issue>` for a filed one. A local-pass finding owes no pointer
-   beyond its body line. A sibling found by outcome 1's class sweep is not a finding a review
-   raised, so outcome 1 keeps its own filing rule for it. An issue goes in the repository where
+   beyond its body line. A sibling that outcome 1's class sweep leaves unfixed takes the
+   bullet a `pre-existing` finding would take. An issue goes in the repository where
    the fix has to land. For a finding against carried content, that is the repository authoring
    the content rather than the one carrying it. An issue filed where nobody may make the fix is
    a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
