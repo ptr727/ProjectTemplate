@@ -70,15 +70,21 @@ _GH_WRITE_SUBSUBS: dict[tuple[str, str], tuple[str, ...]] = {
     ("repo", "autolink"): ("create", "delete"),
 }
 _GH_REPO_POSITIONAL = frozenset({"edit", "delete", "rename", "archive", "unarchive", "sync"})
-_GH_VALUE_FLAGS = frozenset(
+# A long flag takes the next word as its value unless it is one of these, since a value-taking flag gh adds later is then still read.
+_GH_BOOL_FLAGS = frozenset(
     {
-        *("-R", "--repo", "--title", "-t", "--body", "-b", "--body-file", "-F", "--notes"),
-        *("--notes-file", "--message", "-m", "--desc", "-f", "--field", "--raw-field", "--input"),
-        *("--jq", "-q", "--template", "-H", "--header", "--method", "-X", "--cache", "--hostname"),
-        *("-p", "--preview", "--org", "--owner", "--base", "-B", "--head", "--label", "-l"),
-        *("--milestone", "--json", "--limit", "-L", "--search", "-S"),
+        *("--admin", "--auto", "--squash", "--merge", "--rebase", "--delete-branch", "--draft"),
+        *("--fill", "--fill-first", "--fill-verbose", "--web", "--yes", "--approve", "--comment"),
+        *("--request-changes", "--paginate", "--slurp", "--include", "--silent", "--verbose"),
+        *("--edit-last", "--private", "--public", "--internal", "--clone", "--confirm", "--force"),
+        *("--dry-run", "--latest", "--prerelease", "--generate-notes", "--disable-auto"),
     }
 )
+# A short flag means different things in different subcommands, so only these take a value.
+_GH_SHORT_VALUES = frozenset(
+    {"-R", "-t", "-b", "-F", "-l", "-L", "-B", "-H", "-S", "-q", "-o", "-e"}
+)
+_GH_API_SHORT_VALUES = frozenset({"-R", "-f", "-F", "-H", "-X", "-q", "-t", "-p"})
 _GH_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 
 _PROTECTED_DEFAULT = ("main", "master", "develop")
@@ -169,7 +175,7 @@ def _tokenize(text: str, i: int = 0, nested: bool = False) -> tuple[list[_Seg], 
     def end_seg(op: str) -> None:
         nonlocal words, redirs
         end_word()
-        if words or redirs:
+        if words or redirs or op in ("(", ")"):
             segs.append(_Seg(words, redirs, op))
         words, redirs = [], []
 
@@ -443,7 +449,13 @@ def _read(
     """
     segs, _ = _tokenize(text)
     out.texts.append((segs, timed))
+    saved: list[tuple[str | None, dict[str, str]]] = []
     for k, seg in enumerate(segs):
+        # A subshell's cd and export end at its closing parenthesis.
+        if k and segs[k - 1].op == "(":
+            saved.append((cwd, dict(env)))
+        elif k and segs[k - 1].op == ")" and saved:
+            cwd, env = saved.pop()
         assigns, argv = _parse(seg.words)
         argv, launched, under_timeout = _launch(argv)
         if not argv:
@@ -475,8 +487,8 @@ def _forced(segs: list[_Seg], k: int) -> bool:
     """True when segment `k` is followed by `|| true`, `|| :`, or `|| echo`."""
     if segs[k].op != "||" or k + 1 >= len(segs):
         return False
-    argv = _parse(segs[k + 1].words)[1]
-    return bool(argv) and _base(argv[0]) in ("true", ":", "echo")
+    words = segs[k + 1].words
+    return bool(words) and _base(words[0]) in ("true", ":", "echo")
 
 
 def _home() -> str:
@@ -509,6 +521,13 @@ def _join_dir(base: str | None, value: str) -> str | None:
     if base is None:
         return None
     return base.rstrip("/\\") + "/" + value
+
+
+def _moved(where: str | None, steps: list[str]) -> str | None:
+    """The directory each step moves `where` to in turn, the way git composes its `-C` values."""
+    for step in steps:
+        where = _join_dir(where, step)
+    return where
 
 
 def _cd(cwd: str | None, args: list[str]) -> str | None:
@@ -623,9 +642,8 @@ def _bare_push_branch(
     """
     if git_dir is not None or moved:
         return _UNRESOLVED
-    where = _msys_drive_path(cwd)
-    for step in [*([leading_cd] if leading_cd else []), *c_dirs]:
-        where = _join_dir(where, step)
+    where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
+    where = _moved(where, c_dirs)
     return _UNRESOLVED if where is None else _current_push_branch(where)
 
 
@@ -662,7 +680,7 @@ def _push_targets(
 ) -> tuple[str | None, list[tuple[str, str]]]:
     """A push's remote and each (operation, branch) it writes, the operation update, force,
     delete, or mirror."""
-    force = delete = every = mirror = False
+    force = delete = every = mirror = tags = False
     pos: list[str] = []
     i = 0
     while i < len(args):
@@ -680,6 +698,8 @@ def _push_targets(
             every = True
         elif a == "--mirror":
             mirror = True
+        elif a == "--tags":
+            tags = True
         elif a in ("--repo", "--receive-pack", "--exec", "-o", "--push-option"):
             i += 1
         elif re.fullmatch(r"-[A-Za-z]+", a):
@@ -693,7 +713,7 @@ def _push_targets(
     if every:
         return remote, [(write, b) for b in _PROTECTED_DEFAULT]
     if not specs:
-        branch = None if delete else branch_of()
+        branch = None if delete or tags else branch_of()
         return remote, [(write, branch)] if branch else []
     out: list[tuple[str, str]] = []
     for spec in specs:
@@ -812,9 +832,7 @@ def _bypass_denial(
             )
     if git.sub != "push":
         return None
-    where = cmd.cwd
-    for d in git.c_dirs:
-        where = _join_dir(where, d) if where is not None else None
+    where = _moved(cmd.cwd, git.c_dirs)
 
     def branch_of() -> str | None:
         if current_branch is not None:
@@ -885,9 +903,7 @@ def _primary_denial(
     git = _git(cmd.argv)
     if git.sub not in _VERDICT_SUBS:
         return None
-    target = cmd.cwd
-    for d in git.c_dirs:
-        target = _join_dir(target, d) if target is not None else None
+    target = _moved(cmd.cwd, git.c_dirs)
     if target is None or not _primary_checkout_verdict(git.sub, git.args, target, ref_resolver):
         return None
     if environ.get(_ALLOW_PRIMARY_ENV, "").strip().lower() not in _FALSY_ENV_VALUES:
@@ -928,7 +944,7 @@ def _gh(argv: list[str]) -> _Gh:
                 g.flags.append((name, value))
             elif a[:2] in ("-R", "-X") and len(a) > 2:
                 g.flags.append((a[:2], a[2:]))
-            elif a in _GH_VALUE_FLAGS and i + 1 < len(args):
+            elif i + 1 < len(args) and _takes_value(a, g.path[:1] == ["api"], args[i + 1]):
                 g.flags.append((a, args[i + 1]))
                 i += 1
             else:
@@ -941,6 +957,13 @@ def _gh(argv: list[str]) -> _Gh:
             g.positionals.append(a)
         i += 1
     return g
+
+
+def _takes_value(flag: str, api: bool, nxt: str) -> bool:
+    """Whether a gh flag with no `=` takes the next word as its value."""
+    if flag.startswith("--"):
+        return flag not in _GH_BOOL_FLAGS and (nxt == "-" or not nxt.startswith("-"))
+    return flag in (_GH_API_SHORT_VALUES if api else _GH_SHORT_VALUES)
 
 
 def _gh_field(g: _Gh, key: str) -> str | None:
@@ -972,6 +995,8 @@ def _gh_is_write(g: _Gh) -> bool:
 
 def _literal_node_id(g: _Gh) -> str | None:
     """A literal node id a GraphQL mutation passes as a field or in its query text."""
+    if g.path[:1] != ["api"] or g.positionals[:1] not in (["graphql"], ["/graphql"]):
+        return None
     for flag, value in g.flags:
         if flag not in _GH_FIELD_FLAGS or not value or "=" not in value:
             continue
@@ -1013,7 +1038,9 @@ def _gh_targets(g: _Gh, env: dict[str, str]) -> list[tuple[str, str | None]]:
         (m.group(1).lower(), m.group(2).lower()) for p in g.positionals if (m := _GH_URL.match(p))
     ]
     out += [
-        (v.lower(), None) for f, v in g.flags if f in ("--org", "--owner") and v and "$" not in v
+        (v.lower(), None)
+        for f, v in g.flags
+        if f in ("--org", "--owner") and v and not v.startswith(("$", "@"))
     ]
     return out
 
@@ -1198,8 +1225,8 @@ def classify(
 
 
 _ORIGIN = ("example", "repo")
-_PRIMARY = "/work/primary"
-_WORKTREE = "/work/wt"
+_PRIMARY = "/c/work/primary"
+_WORKTREE = "/c/work/wt"
 _REFS = frozenset({"develop", "main", "feature/x", "origin/develop"})
 _STRANGER_REPLY = (
     "gh api graphql -f query='mutation($t:ID!){addPullRequestReviewThreadReply(input:"
@@ -1237,12 +1264,14 @@ _CASES: list[tuple[str, str, str]] = [
     ("return 1 2>/dev/null || exit 1", "allow", "R1"),
     ("gh pr comment 5 --body 'add || true to the script'", "allow", "R1"),
     ('gh pr comment 5 --body ">/dev/null hides output"', "allow", "R1"),
+    ('git push origin feature/x || { echo "push failed" >&2; exit 1; }', "allow", "R1"),
     ("git fetch origin >/dev/null 2>&1", "allow", "R1"),
     (_STRANGER_REPLY + ' -F t="PRRT_kwDOExample12345" >/dev/null 2>&1 || true', "deny", "incident"),
     (_STRANGER_REPLY + ' -F t="PRRT_kwDOExample12345"', "deny", "R2"),
     (_STRANGER_REPLY + ' -F t="$TID"', "allow", "R2"),
     (_ID_IN_QUERY, "deny", "R2"),
     ("gh api graphql -f query='{node(id:\"PR_kwDOExample12345\"){id}}'", "allow", "R2"),
+    ("gh api repos/example/repo/actions/variables -f name=AWS_SECRET_ACCESS_KEY", "allow", "R2"),
     ("gh api graphql -f query='mutation($b:String!){x(b:$b)}' -f b=fixed_the_thing", "allow", "R2"),
     ("gh issue comment 5 -R stranger/x --body hi", "deny", "incident"),
     ("gh issue comment 5 --repo=stranger/x --body hi", "deny", "R3"),
@@ -1251,6 +1280,13 @@ _CASES: list[tuple[str, str, str]] = [
     ('gh issue comment 5 --repo "stranger/x" --body hi', "deny", "R3"),
     ("gh issue comment 5 --repo github.com/stranger/x --body hi", "deny", "R3"),
     ("gh issue comment 5 --repo example/other --body hi", "allow", "R3"),
+    ("gh pr create -f -R stranger/x", "deny", "R3"),
+    ('gh repo edit --description "CI/CD helpers"', "allow", "R3"),
+    (
+        "gh project item-add 3 --owner @me --url https://github.com/example/repo/issues/5",
+        "allow",
+        "R3",
+    ),
     ("gh issue comment 5 --repo Example/Repo --body hi", "allow", "R3"),
     ("gh api repos/stranger/x/issues/1/comments -f body=hi", "deny", "R3"),
     ("gh api /repos/stranger/x/issues/1/comments -f body=hi", "deny", "R3"),
@@ -1285,6 +1321,7 @@ _CASES: list[tuple[str, str, str]] = [
     ),
     ("gh pr merge 5 --admin --squash", "deny", "R4"),
     ("gh pr merge 5 --squash", "allow", "R4"),
+    ("gh pr merge 5 -m --admin", "deny", "R4"),
     ("git commit --no-verify -m x", "deny", "R4"),
     ("git commit -n -m x", "deny", "R4"),
     ("git commit -an -m x", "deny", "R4"),
@@ -1382,13 +1419,14 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git push", _RULES, "develop", "deny", "R4"),
     ("git push", _RULES, "feature/x", "allow", "R4"),
     ("git push origin HEAD", _RULES, "develop", "deny", "R4"),
+    ("git push origin --tags", _RULES, "develop", "allow", "R4"),
     ("git push --all origin", _RULES, "feature/x", "deny", "R4"),
     ("git push --mirror origin", _RULES, "feature/x", "deny", "R4"),
     ("git push origin develop", {"develop": set()}, "feature/x", "allow", "R4"),
     ("git push origin develop", _UNREADABLE, "feature/x", "deny", "R4"),
     ("git push origin feature/x", _UNREADABLE, "feature/x", "allow", "R4"),
     ('git push origin "$BRANCH"', _UNREADABLE, "feature/x", "allow", "R4 run-time refspec"),
-    ("cd /work/wt && git push origin develop", _RULES, "feature/x", "deny", "R4"),
+    ("cd /c/work/wt && git push origin develop", _RULES, "feature/x", "deny", "R4"),
     ("timeout 60 git push origin develop", _RULES, "feature/x", "deny", "R4"),
     ("bash -c 'git push origin develop'", _RULES, "feature/x", "deny", "R4"),
     ("xargs -I{} sh -c 'git push origin develop'", _RULES, "feature/x", "deny", "R4"),
@@ -1420,14 +1458,15 @@ _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("git fetch origin", _PRIMARY, {}, "allow", "R6"),
     ("git status", _PRIMARY, {}, "allow", "R6"),
     ("git push origin feature/x", _PRIMARY, {}, "deny", "R6"),
-    ("cd /work/wt && git commit -m x", _PRIMARY, {}, "allow", "R6"),
+    ("cd /c/work/wt && git commit -m x", _PRIMARY, {}, "allow", "R6"),
     ("git commit -m x", _WORKTREE, {}, "allow", "R6"),
-    ("cd /work/primary && git commit -m x", _WORKTREE, {}, "deny", "incident"),
-    ("cd /work/primary/sub && git add f", _WORKTREE, {}, "deny", "R6"),
-    ("cd /work/primary && git status", _WORKTREE, {}, "allow", "R6"),
-    ("git -C /work/primary commit -m x", _WORKTREE, {}, "deny", "R6"),
-    ("pushd /work/primary; git add f", _WORKTREE, {}, "deny", "R6"),
-    ("bash -c 'cd /work/primary && git reset --hard'", _WORKTREE, {}, "deny", "R6"),
+    ("cd /c/work/primary && git commit -m x", _WORKTREE, {}, "deny", "incident"),
+    ("cd /c/work/primary/sub && git add f", _WORKTREE, {}, "deny", "R6"),
+    ("cd /c/work/primary && git status", _WORKTREE, {}, "allow", "R6"),
+    ("(cd /c/work/primary && git log -1) && git commit -m x", _WORKTREE, {}, "allow", "R6"),
+    ("git -C /c/work/primary commit -m x", _WORKTREE, {}, "deny", "R6"),
+    ("pushd /c/work/primary; git add f", _WORKTREE, {}, "deny", "R6"),
+    ("bash -c 'cd /c/work/primary && git reset --hard'", _WORKTREE, {}, "deny", "R6"),
     ('git -C "$D" commit -m x', _WORKTREE, {}, "allow", "3382"),
     ("git -C /elsewhere commit -m x", _WORKTREE, {}, "allow", "R6"),
 ]
@@ -1443,7 +1482,10 @@ _NO_ORIGIN_CASES: list[tuple[str, str, str]] = [
 def _fixture_lookup(directory: str) -> bool | None:
     """The fixture's primary-checkout answer for a directory under one of its checkouts."""
     d = directory.replace("\\", "/")
-    for root, primary in ((_PRIMARY, True), (_WORKTREE, False)):
+    for root, primary in (
+        (_msys_drive_path(_PRIMARY) or "", True),
+        (_msys_drive_path(_WORKTREE) or "", False),
+    ):
         if d == root or d.startswith(root + "/"):
             return primary
     return None
