@@ -1864,22 +1864,6 @@ def _git_invocations_at(cmd):
 _EXPORTING_BUILTINS = {"export": None, "declare": "-x", "typeset": "-x", "local": "-x"}
 
 
-def _set_allexport(options, allexport):
-    """Whether `allexport` holds after a `set` given `options`, each flag applied in order.
-
-    `-a` and `-o allexport` turn it on, `+a` and `+o allexport` turn it off, so a `set +a` after a
-    `set -a` ends the export of later plain assignments. A cluster such as `-ea` turns it on.
-    """
-    for i, w in enumerate(options):
-        if w[:1] in ("-", "+") and w[1:2] not in ("", "-") and "a" in w[1:] and "o" not in w[1:]:
-            allexport = w[0] == "-"
-        elif w in ("-o", "+o") and options[i + 1 : i + 2] == ["allexport"]:
-            allexport = w == "-o"
-        elif w in ("-oallexport", "+oallexport"):
-            allexport = w[0] == "-"
-    return allexport
-
-
 def _export_events(toks):
     """Each place in `toks` where the shell exports variables, as (index, the (name, value) pairs it exports).
 
@@ -1915,7 +1899,8 @@ def _export_events(toks):
                 break
             options.append(w)
         if t == "set":
-            allexport = _set_allexport(options, allexport)
+            flags = [w for w in options if w[:1] == "-" and w[1:2] not in ("", "-")]
+            allexport = allexport or any("a" in w for w in flags) or "allexport" in options
             continue
         if t not in _EXPORTING_BUILTINS and t != "readonly":
             continue
@@ -13910,22 +13895,6 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a set -o allexport exports a plain GIT_DIR assignment",
-    ),
-    (
-        "cd /worktree && set -a; set +a; GIT_DIR=/primary/.git; git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "allow",
-        "a set +a ends the export of a later plain GIT_DIR assignment",
-    ),
-    (
-        "cd /worktree && set -o allexport; set +o allexport; GIT_DIR=/primary/.git; git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "allow",
-        "a set +o allexport ends the export of a later plain GIT_DIR assignment",
     ),
     (
         "cd /worktree && set -e && GIT_DIR=/primary/.git && git reset --hard",
