@@ -186,6 +186,22 @@ class RunGhTests(unittest.TestCase):
         ):
             bm.run_gh(["x"])
 
+    def test_non_json_output_raises(self) -> None:
+        with (
+            unittest.mock.patch.object(bm, "run_subprocess", return_value=(0, "not json", "")),
+            self.assertRaisesRegex(bm.GhError, "no JSON"),
+        ):
+            bm.run_gh(["x"])
+
+    def test_a_missing_binary_raises(self) -> None:
+        with (
+            unittest.mock.patch.object(
+                bm, "run_subprocess", side_effect=bm.GraphQLError("could not run gh")
+            ),
+            self.assertRaisesRegex(bm.GhError, "could not run"),
+        ):
+            bm.run_gh(["x"])
+
     def test_billing_failure_degrades_to_none(self) -> None:
         with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("denied")):
             usage, error = bm.fetch_billing("o", datetime.date(2026, 3, 2))
@@ -208,7 +224,7 @@ class CollectTests(unittest.TestCase):
         for args in calls:
             self.assertIn("o/alpha", args)
             self.assertIn("1000", args)
-        self.assertTrue(any("--search created:>=2026-01-01" in text for text in joined))
+        self.assertTrue(any("--state all" in t and "created:>=2026-01-01" in t for t in joined))
         self.assertTrue(
             any("--state closed --limit 1000 --search closed:>=2026-01-01" in t for t in joined)
         )
