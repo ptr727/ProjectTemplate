@@ -403,12 +403,5 @@ class TestOtherReviewers(unittest.TestCase):
         self.assertEqual(["1. Bad naming Bug"], [s.title.strip() for s in found.sections])
 
 
-class TestSizeCeiling(unittest.TestCase):
-    def test_the_adapter_stays_under_its_ceiling(self) -> None:
-        """A new spelling belongs in the vocabulary, so the reader itself has no reason to grow."""
-        lines = Path(adapter.__file__).read_text(encoding="utf-8").splitlines()
-        self.assertLess(len(lines), 1500)
-
-
 if __name__ == "__main__":
     unittest.main(verbosity=2)

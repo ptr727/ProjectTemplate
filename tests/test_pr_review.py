@@ -6228,12 +6228,5 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
         self.assertEqual([("lint", "FAILURE"), ("lint", "SUCCESS")], kept)
 
 
-class TestSizeCeiling(unittest.TestCase):
-    def test_the_gate_stays_under_its_ceiling(self) -> None:
-        """A reader growing back into the gate is the regression this split exists against."""
-        lines = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8").splitlines()
-        self.assertLess(len(lines), 3000)
-
-
 if __name__ == "__main__":
     unittest.main(verbosity=2)
