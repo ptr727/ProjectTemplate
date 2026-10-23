@@ -1982,6 +1982,15 @@ class TestReadingsThroughTheAdapter(GqlCase):
         rounds = [review(oid=OLD, body=odd, rid="A"), review(rid="B")]
         self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
         self.assertIn("shapes=NOTED ", self.out.getvalue())
+        self.assertIn(f"round {OLD[:8]}: the body carries no", self.out.getvalue())
+
+    def test_a_body_the_reader_trips_on_is_a_note_and_never_a_refusal(self) -> None:
+        with mock.patch.object(pr_review.adapter, "_read", side_effect=ValueError("boom")):
+            self.assertEqual(0, self.status(payload([review(body="odd body")], files=["a.py"])))
+        out = self.out.getvalue()
+        self.assertIn("review_on_head=yes ", out)
+        self.assertIn("refusal=no ", out)
+        self.assertIn("the reader failed on this body (ValueError)", out)
 
     def test_a_flagging_verdict_that_counts_nothing_exits_fifty(self) -> None:
         text = overview_v2(

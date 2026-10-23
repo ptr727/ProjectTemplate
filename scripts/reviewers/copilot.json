@@ -9,6 +9,7 @@
     "error": ["encountered an error"],
     "file_count": ["maximum number of files"]
   },
+  "coverage_prose": ["reviewed\\s+\\d+\\s+(?:out of|of)\\s+\\d+\\s+changed files?", "files reviewed:?\\s*\\d+\\s*/\\s*\\d+"],
   "rate_limit_service": "",
   "rate_limit": [],
   "verdicts": {

@@ -168,6 +168,16 @@ class TestCoverage(unittest.TestCase):
                 found = adapter.read(body(tail=f"Lead.\n\n{quoted}"))
                 self.assertEqual("none", found.coverage)
 
+    def test_a_count_stated_in_prose_reads_unknown_with_a_note(self) -> None:
+        for line in (
+            "**Files reviewed:** 3/4 changed files",
+            "Copilot reviewed 3 out of 4 changed files.",
+        ):
+            with self.subTest(line=line):
+                found = adapter.read(body(headline=line))
+                self.assertEqual("unknown", found.coverage)
+                self.assertTrue(any("outside the fleet-review marker" in n for n in found.notes))
+
     def test_no_marker_states_none(self) -> None:
         self.assertEqual("none", adapter.read(body()).coverage)
 
@@ -340,7 +350,7 @@ class TestNotes(unittest.TestCase):
         with mock.patch.object(adapter, "_read", side_effect=ValueError("boom")):
             found = adapter.read("anything")
         self.assertEqual("unknown", found.coverage)
-        self.assertEqual("unknown", found.refusal)
+        self.assertEqual("none", found.refusal)
         self.assertEqual(("the reader failed on this body (ValueError)",), found.notes)
 
     def test_a_pathological_body_reads_in_bounded_time(self) -> None:

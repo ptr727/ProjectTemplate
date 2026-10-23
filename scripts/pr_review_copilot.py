@@ -45,6 +45,7 @@ KEYS = {
     "comment_heading": str,
     "refusal_openings": list,
     "refusal_kinds": dict,
+    "coverage_prose": list,
     "rate_limit_service": str,
     "rate_limit": list,
     "verdicts": dict,
@@ -140,6 +141,7 @@ def compiled(vocabulary: dict) -> dict:
         "refusal_openings": each(vocabulary["refusal_openings"]),
         "refusal_kinds": {k: each(v) for k, v in vocabulary["refusal_kinds"].items()},
         "rate_limit": each(vocabulary["rate_limit"]),
+        "coverage_prose": each(vocabulary["coverage_prose"]),
         "verdicts": {k: each(v) for k, v in vocabulary["verdicts"].items()},
         "headings": each(vocabulary["headings"]),
         "sections": {k: each(v) for k, v in vocabulary["sections"].items()},
@@ -281,7 +283,9 @@ def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None =
         return _read(body or "", reviewer, threads)
     # A shape the reader trips on is a note in the digest, never a crash in the gate.
     except Exception as exc:  # noqa: BLE001
-        return Reading(notes=(f"the reader failed on this body ({type(exc).__name__})",))
+        return Reading(
+            refusal="none", notes=(f"the reader failed on this body ({type(exc).__name__})",)
+        )
 
 
 @functools.lru_cache(maxsize=512)
@@ -330,6 +334,13 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 state = "full" if got == of else "partial"
             if coverage == "none" or rank[state] > rank[coverage]:
                 coverage, coverage_line = state, m.group(0)
+    # A count stated in prose is no marker, and read as nothing it would let a table stand in.
+    for token in tokens:
+        said = " ".join(inline_text(token).split()) if token.type == "inline" else ""
+        if said and any(p.search(said) for p in vocab["coverage_prose"]):
+            coverage, coverage_line = "unknown", said
+            notes.append(f"a coverage statement outside the fleet-review marker: `{said}`")
+            break
 
     # A body in another layout is one note, rather than one note per part of it.
     vet = vocab["vetted"] and (marked or not vocab["format_marker"])

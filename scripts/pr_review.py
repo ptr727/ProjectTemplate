@@ -112,7 +112,8 @@ Subcommands
            landed. 40 = no Copilot review covers the head: the reviewer answered outside a formal
            review, the request returned success and recorded nothing on the pull request, or the
            reviewer writes under a login no query filters on. 41 = the newest round is a refusal
-           or a quota state, the kind printed in the digest and its status line: a refusal on the
+           or a quota state, the kind printed in its status line and, for a refusal on this pull
+           request, in the digest's `refusal=`: a refusal on the
            head, the pull request's newest review being a quota or error refusal on any head, or
            the reviewer's newest activity elsewhere in the repository being a quota refusal
            nothing answered since while this head carries none of its own. Proceed on the other
@@ -1421,11 +1422,12 @@ def digest(
     cover, cover_why = coverage(pr)
     # Every round's notes, since a renamed section on an earlier round hides a finding too.
     notes = [
-        *dict.fromkeys(n for node in revs for n in reading(node).notes),
-        *(
-            f"the reviewer login reads as `{d}`, a spelling no query here filters on"
-            for d in reviewer_login_drift(pr)
+        *dict.fromkeys(
+            f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
+            for node in revs
+            for n in reading(node).notes
         ),
+        *reviewer_login_drift(pr),
     ]
     threads = pr["reviewThreads"]["nodes"]
     truncated = threads_truncated(pr)
@@ -2825,7 +2827,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 44
         return 0
-    # Every refusal and quota state is 41, the kind printed in the digest's `refusal=` field.
+    # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)
     if refusal is None and not a.ignore_quota_signal:
         refusal = stopping_refusal(final)

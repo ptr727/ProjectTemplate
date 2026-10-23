@@ -91,8 +91,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      coverage, not by permission. Failing that, each file it changed has positive evidence of a
      full read, at the head that last changed the file or a later one. A Copilot table row with no
      note, on that pull request or on the promotion, is such evidence. It counts only where no
-     Copilot round on the pull request holding it, on any commit, states or appears to state
-     partial coverage. A round stating full coverage is evidence for every file. So is the
+     Copilot round on the pull request holding it, on any commit, states partial coverage. A round stating full coverage is evidence for every file. So is the
      attestation `pr_review.py attest` published on the feature pull request, for each file the attested
      head's diff held. That head is held to the same rule, the head that last changed the file or a
      later one. The attestation counts only from an owner, member, or collaborator, with the marker

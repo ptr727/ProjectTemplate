@@ -10,8 +10,9 @@ Usage: pr_cleanup.py NUMBER --repo OWNER/NAME [--checkout DIR]
 
 `pr_review.py cleanup` forwards here, so a command line naming either script runs the same code.
 
-The verify-then-delete `drive-pr` and `merge-and-release` prescribe, run under the one allow rule
-the host-safety installer registers for this script, so every check lives here. It takes the pull
+The verify-then-delete `drive-pr` and `merge-and-release` prescribe. Call it through
+`pr_review.py cleanup`, the spelling the host-safety installer's allow rule names, and since that
+rule approves any arguments, every check lives here. It takes the pull
 request number, never a branch name. It refuses unless the pull request is merged into `develop`
 from a head in `--repo` itself, the head is not `develop`, `main`, or the default branch, the
 owner and repository pass `handoff.py`'s write-scope check, no ruleset or protection covers the
