@@ -532,46 +532,42 @@ CODE_VIEW_CASES = [
     (
         "block scalar body dropped, key line kept",
         "  deploy:\n    name: |\n      with:\n      environment:\n",
-        "  deploy:\n    name: |",
+        "deploy:\n  name:",
     ),
     (
         "a dedented sibling key ends the block scalar body",
         "  deploy:\n    name: |\n      with:\n    with:\n      environment: prod\n",
-        "  deploy:\n    name: |\n    with:\n      environment: prod",
+        "deploy:\n  name:\n  with:\n    environment: prod",
     ),
     (
         "folded scalar, strip-chomp indicator, trailing comment on the key line",
         "  deploy:\n    name: >-  # a folded, strip-chomped scalar\n      environment:\n",
-        "  deploy:\n    name: >-  # a folded, strip-chomped scalar",
+        "deploy:\n  name:",
     ),
     (
-        # A step's `- run: |` boundary is `run:`'s column, not the dash's column.
-        # A sibling `env:` key genuinely at that column is real structure, not block-scalar body.
         "a step's `- run: |` block scalar body drops, its sibling env: mapping survives",
         "      - run: |\n          echo body\n        env:\n          TOKEN: xyz\n",
-        "      - run: |\n        env:\n          TOKEN: xyz",
+        "  run:\n  env:\n    TOKEN: xyz",
     ),
     (
-        # A valid YAML anchor property (`&label`) sits between the colon and the indicator.
         "an anchored block scalar (`name: &label |`) is still recognized as a block-scalar key",
         "  deploy:\n    name: &lbl |\n      with:\n      environment:\n",
-        "  deploy:\n    name: &lbl |",
+        "deploy:\n  name:",
     ),
     (
-        # A bare sequence item (a matrix string) has no key, so its boundary is the dash's column.
         "a bare sequence-item block scalar (`- |`, a matrix string) still drops its body",
         "  include:\n    - |\n      TOKEN\n",
-        "  include:\n    - |",
+        "include:",
     ),
     (
-        "a folded `if: >-` keeps its body, folded onto the key line",
+        "a folded `if: >-` keeps its body, folded onto one line",
         "  publish:\n    if: >-\n      ${{ a\n\n      && b }}\n    uses: x\n",
-        "  publish:\n    if: >- ${{ a && b }}\n    uses: x",
+        "publish:\n  if: ${{ a && b }}\n  uses: x",
     ),
     (
         "a step's folded `- if: >-` keeps its body too",
         "      - if: >-\n          ${{ a }}\n        run: echo\n",
-        "      - if: >- ${{ a }}\n        run: echo",
+        "  if: ${{ a }}\n  run: echo",
     ),
 ]
 
@@ -606,12 +602,18 @@ class SplitJobsCase(unittest.TestCase):
 
 
 class CodeViewCase(unittest.TestCase):
-    """Holds the block-scalar handling of _code_view."""
+    """Holds the block-scalar handling of code_view."""
 
     def test_block_scalar_handling(self) -> None:
         for label, text, want in CODE_VIEW_CASES:
             with self.subTest(label):
-                self.assertEqual(audit._code_view(text), want)
+                self.assertEqual(audit.code_view(audit._compose(text)), want)
+
+    def test_unparsed_workflow_is_one_finding(self) -> None:
+        got = audit.check_interface("wf", PR_CONTRACT, "jobs:\n  a: [\n")
+        self.assertEqual(
+            got, [("DRIFT", "interface: wf does not parse as YAML, so its contract is unread")]
+        )
 
 
 CANON = "line one\nline two\nline three\n"
@@ -1346,7 +1348,13 @@ class RenderCase(unittest.TestCase):
         inner_link = "See [[docs](url)] for details."
         escaped_bracket = r"See [API \[docs](url) for details."
         msg = "description: strip_md_links behavior"
-        self.assertEqual(audit.strip_md_links(linked), "Utility to clean media per the spec.", msg)
+        refs = audit.references("x\n\n[spec-ref]: https://example.test\n")
+        self.assertEqual(
+            audit.strip_md_links(linked, refs), "Utility to clean media per the spec.", msg
+        )
+        self.assertEqual(
+            audit.strip_md_links(linked), "Utility to clean media per the [spec][spec-ref].", msg
+        )
         self.assertEqual(audit.strip_md_links("Plain intro line."), "Plain intro line.", msg)
         self.assertEqual(audit.strip_md_links(nested), "See API [docs] for details.", msg)
         self.assertEqual(audit.strip_md_links(inner_link), "See [docs] for details.", msg)
@@ -3552,21 +3560,21 @@ class PythonDirectoriesCase(unittest.TestCase):
                 py_caller_value.format('&dirs "Tools\\nOther"'),
                 {},
                 1,
-                "an anchored escaped double-quoted value is refused",
+                "an anchored escaped double-quoted value is decoded",
             ),
             (
                 py_caller_path,
                 py_caller_value.format('!!str "Tools\\nOther"'),
                 {},
                 1,
-                "a tagged escaped double-quoted value is refused",
+                "a tagged escaped double-quoted value is decoded",
             ),
             (
                 py_caller_path,
                 py_caller_value.format('\n        "Tools\\nOther"'),
                 {},
                 1,
-                "an escaped double-quoted value on the next line is refused",
+                "an escaped double-quoted value on the next line is decoded",
             ),
             (
                 py_caller_path,
@@ -3582,7 +3590,7 @@ class PythonDirectoriesCase(unittest.TestCase):
                 py_caller_value.format('"Tools\n        \\nOther"'),
                 {"pythonDirectories": ["Tools"]},
                 1,
-                "an escape on a double-quoted value's continuation line is refused",
+                "an escape on a double-quoted value's continuation line is decoded",
             ),
             (
                 py_caller_path,
@@ -3595,22 +3603,22 @@ class PythonDirectoriesCase(unittest.TestCase):
                 py_caller_path,
                 py_caller_value.format("&dirs >\n        Tools"),
                 {"pythonDirectories": ["Tools"]},
-                1,
-                "an anchored folded scalar is refused",
+                0,
+                "an anchored folded scalar reads as its value",
             ),
             (
                 py_caller_path,
                 py_caller_folded,
                 {"pythonDirectories": ["Other", "Tools"]},
                 1,
-                "a folded scalar is refused",
+                "a folded scalar joins its lines into one entry",
             ),
             (
                 py_caller_path,
                 py_caller_tabbed,
                 {"pythonDirectories": ["Too\tls"]},
-                1,
-                "a tabbed entry resolves to nothing",
+                0,
+                "a tab the YAML reader refuses leaves the file to the interface check",
             ),
         ]
         for path_in, text_in, entry_in, expected, label in python_caller_cases:
@@ -3623,10 +3631,7 @@ class PythonDirectoriesCase(unittest.TestCase):
         escaped_got = audit.python_directories_caller_findings(
             py_caller_path, py_caller_escaped, {"pythonDirectories": ["Other", "Tools"]}
         )
-        self.assertTrue(
-            len(escaped_got) == 1 and "backslash escape" in escaped_got[0][1],
-            f"an escaped double-quoted value is refused -> {escaped_got}",
-        )
+        self.assertEqual(escaped_got, [], "an escaped double-quoted value is decoded")
 
 
 class ConcurrencyCallerFindingsCase(unittest.TestCase):
@@ -3702,22 +3707,23 @@ class ConcurrencyCallerFindingsCase(unittest.TestCase):
             (
                 pub_path,
                 "concurrency: ${{ github.workflow }}-${{ github.ref }}\n  -extra\njobs:\n  x: {}\n",
-                "cannot read",
-                "a continuation after an inline scalar",
+                "group is",
+                "a continuation after an inline scalar folds into the group",
             ),
             (
                 pub_path,
                 pub_text.replace(pub_line, "  group: >-\n    " + pub_value),
-                "cannot read",
-                "a folded scalar",
+                "",
+                "a folded group reads as its value",
             ),
             (
                 pub_path,
                 pub_text.replace(pub_line, pub_line + "\n      more"),
-                "cannot read",
-                "a continuation line",
+                "group is",
+                "a continuation line folds into the group",
             ),
-            (pub_path, "concurrency: { group: x }\n", "cannot read", "a flow mapping"),
+            (pub_path, "concurrency: { group: x }\n", "group is", "a flow mapping is read"),
+            (pub_path, "concurrency: [x]\n", "cannot read", "a sequence is refused"),
             (
                 pub_path,
                 pub_text.replace("concurrency:\n", "concurrency: &c\n", 1),
@@ -4011,8 +4017,8 @@ class ConcurrencyCallerFindingsCase(unittest.TestCase):
             (
                 pub_path,
                 pub_text.replace(pub_line, "  group: >-\n    " + pub_value),
-                1,
-                "a folded scalar is refused",
+                0,
+                "a folded group reads as its value",
             ),
             (
                 pub_path,

@@ -390,8 +390,8 @@ def verify_target(
 
 
 @functools.cache
-def audit_module() -> Any:
-    """`spec/audit.py`, imported on first use rather than at module import, then held.
+def carried_text_module() -> Any:
+    """`spec/carried_text.py`, imported on first use rather than at module import, then held.
 
     It is a script rather than a package module and imports its own sibling by bare name, so the
     spec directory has to be importable before it is. Lazily, so a tree carry never pays to load
@@ -403,9 +403,9 @@ def audit_module() -> Any:
     spec = str(ROOT / "spec")
     if spec not in sys.path:
         sys.path.insert(0, spec)
-    import audit
+    import carried_text
 
-    return audit
+    return carried_text
 
 
 # A line and its own terminator, splitting on LF alone. `str.splitlines` also breaks on a form feed and on several Unicode separators, which are content in a carried document rather than line boundaries, so splitting on it would move bytes this tool was asked to leave alone.
@@ -415,7 +415,7 @@ _LINE = re.compile(r"[^\n]*\n|[^\n]+$")
 def split_lines(text: str, rel: str | None = None) -> list[str]:
     """`text` as lines that keep their own terminators, so joining them returns the original bytes.
 
-    A lone CR is refused rather than read as content, because `spec/audit.py`'s `normalize` treats
+    A lone CR is refused rather than read as content, because `spec/carried_text.py`'s `normalize` treats
     one as a line break and this does not, so the two would read a CR-terminated document as
     different line sets: the audit would report a section stale that this tool cannot even locate,
     and the refusal it would otherwise raise names an absent section rather than the real problem.
@@ -452,7 +452,7 @@ def file_ending(lines: list[str]) -> str:
 def normalize_eol(text: str) -> str:
     """`text` with every line ending as LF.
 
-    Deliberately not `spec/audit.py`'s `normalize`, which also masks a Dependabot-owned action pin
+    Deliberately not `spec/carried_text.py`'s `normalize`, which also masks a Dependabot-owned action pin
     and a per-repository `needs:` list. Those are governed drift for a comparison asking whether
     two copies say the same thing, and this tool writes bytes, so masking either would let it
     overwrite a value the repository owns. Line endings are the one exception, because
@@ -464,13 +464,13 @@ def normalize_eol(text: str) -> str:
 
 
 def fence_step(line: str, marker: str | None, marker_len: int) -> tuple[str | None, int, bool]:
-    """`spec/audit.py`'s fence reading, so one CommonMark reading spans the fidelity checks and this.
+    """`spec/carried_text.py`'s fence reading, so one CommonMark reading spans the fidelity checks and this.
 
     A second reading here could disagree with the audit's about where a section stops, and then a
     `## ` shown inside a code sample would end a region for one tool and not the other, leaving
     the audit reporting drift in text this tool never touched.
     """
-    return audit_module()._fence_step(line, marker, marker_len)
+    return carried_text_module().fence_step(line, marker, marker_len)
 
 
 def h2_headings(lines: list[str]) -> list[str]:
@@ -489,7 +489,7 @@ def h2_headings(lines: list[str]) -> list[str]:
 def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     """The `[start, end)` line range of the `## <heading>` region, or None when the file has none.
 
-    Boundaries are `spec/audit.py`'s `extract_section`: the heading line is inside the region, a
+    Boundaries are `spec/carried_text.py`'s `extract_section`: the heading line is inside the region, a
     sibling level-two heading ends it, a fenced `## ` is content, and the match is on the parsed
     heading text case-folded, so a re-cased heading is found rather than read as absent. The range
     is positional rather than the text itself, which is what lets the caller replace the region
@@ -512,7 +512,7 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
 
 
 def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
-    """The region rendered the way `spec/audit.py`'s `extract_section` renders it.
+    """The region rendered the way `spec/carried_text.py`'s `extract_section` renders it.
 
     That function splits the whole document on LF and joins the region's lines back with LF, so a
     file ending in a newline yields one final empty element and a region running to the end of the
@@ -555,7 +555,7 @@ def guard_governed_drift(path: str, section: str, region: str, side: str) -> Non
     section declared verbatim carries either today, and this refuses rather than discovering it
     silently the first time one does.
     """
-    if audit_module().normalize(region) != normalize_eol(region):
+    if carried_text_module().normalize(region) != normalize_eol(region):
         raise CarryError(
             f"{path} section '{section}' carries content the fidelity comparison normalizes away"
             f" ({side} copy), so re-vendoring its bytes could revert per-repository drift."

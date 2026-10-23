@@ -16,9 +16,9 @@ files = ["spec", "host-setup", "scripts", "tests"]
 mypy_path = [".github/actions/prose-gate", ".github/actions/python-directories", ".github/actions/repo-gate"]
 exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
-# The review scripts declare markdown-it-py inline, and a type check run with no environment of its own does not install it.
+# The review scripts and the audit declare their libraries inline, and a type check run with no environment of its own does not install them.
 [[tool.mypy.overrides]]
-module = ["markdown_it", "markdown_it.*"]
+module = ["markdown_it", "markdown_it.*", "yaml"]
 ignore_missing_imports = true
 
 [tool.pyright]

@@ -183,7 +183,7 @@ _INCLUDE_LIKE = re.compile(r"^<!--+\s*/?\s*include\b", re.IGNORECASE)
 # Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<text>\S.*?)\s*$")
 # CommonMark's own bound for a fence, so a marker sitting in an indented code block is content here the way it is there.
-# A heading is matched at any indentation instead, the way spec/audit.py and canonical_review.py read one, so the three tools split a document alike.
+# A heading is matched at any indentation instead, the way spec/carried_text.py and canonical_review.py read one, so the three tools split a document alike.
 _MAX_INDENT = 3
 
 
@@ -191,15 +191,15 @@ _MAX_INDENT = 3
 # The module scripts/skills_install.py imports this one at module scope, and host-setup/*/install-skills.* and scripts/skills_install.sh each commit to Python 3.7+, because that path runs before the fleet's own toolchain exists to install a newer interpreter.
 # So functools.cache here would raise AttributeError at import on 3.7 and 3.8, breaking the one path that has to survive an old host, and spec/host-tools.json's python3 entry records that 3.7 floor and why it sits below the fleet's own.
 @functools.lru_cache(maxsize=None)  # noqa: UP033
-def _audit_module():
-    """spec/audit.py, imported on first use rather than at module import, then held.
+def _carried_text():
+    """spec/carried_text.py, imported on first use rather than at module import, then held.
 
     Imported lazily because scripts/skills_install.py imports this module on hosts whose Python
-    predates what audit.py needs, and installing never fills a region. Held because the caller
+    predates what the spec scripts need, and installing never fills a region. Held because the caller
     below reaches for it once per line, and re-resolving it there costs a sys.path scan and a
     sys.modules lookup every time: one pass over the 24 authored skills, 4644 lines across the 40
     Markdown files they comprise, measured warm in one process, best of five, costs 17.5 ms
-    re-resolved against 0.9 ms held, where calling audit directly costs 0.7 ms. One --check run
+    re-resolved against 0.9 ms held, where calling it directly costs 0.7 ms. One --check run
     makes 18708 of these calls, four times that corpus, because it scans the authored tree and
     both generated trees, and it runs on every pull request. The cache sits here rather than on
     _fence_step, whose arguments vary per line and would make one unbounded.
@@ -207,18 +207,18 @@ def _audit_module():
     spec = str(ROOT / "spec")
     if spec not in sys.path:
         sys.path.insert(0, spec)
-    import audit
+    import carried_text
 
-    return audit
+    return carried_text
 
 
 def _fence_step(line, marker, marker_len):
-    """spec/audit.py's fence reading.
+    """spec/carried_text.py's fence reading.
 
     One reading of CommonMark across the fidelity checks, the review ledger, and this generator,
     rather than a second one here that could disagree with them.
     """
-    return _audit_module()._fence_step(line, marker, marker_len)
+    return _carried_text().fence_step(line, marker, marker_len)
 
 
 def _lf(text):
@@ -318,7 +318,7 @@ def heading_body(lines, heading, key):
     """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
-    a section of a sibling skill with one vocabulary. Matched the way spec/audit.py matches a
+    a section of a sibling skill with one vocabulary. Matched the way spec/carried_text.py matches a
     declared section, on the parsed text case-folded and at any indentation, so a re-cased heading
     still resolves and the two split a document alike. Two matches are two answers to one
     question, refused rather than resolved to the first, and a heading inside a fenced code block

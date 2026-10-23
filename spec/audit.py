@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Live fleet audit: the deterministic subset of AUDIT.md, run from the hub (stdlib + gh).
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4", "pyyaml>=6"]
+# ///
+"""Live fleet audit: the deterministic subset of AUDIT.md, run from the hub (gh plus the libraries above).
 
 Compares each cataloged registry repo against the ground truth in this repo - general settings
 (repo-config/settings.json), branch rulesets (normalized diff vs the model's payloads), secret
@@ -21,7 +25,7 @@ changes develop lacks, a stale secret, a registry field contradicting reality), 
 failed, so the repo could not be fully audited). Exits non-zero when any repo has a DEFECT,
 LETTER, or ERROR finding.
 
-Usage: python3 spec/audit.py [RepoName ...] [--branch REF]   (default: every cataloged repo,
+Usage: uv run --no-project --script spec/audit.py [RepoName ...] [--branch REF]   (default: every cataloged repo,
 each read at its registry groundTruthBranch). --branch overrides that branch for the run, so a
 convergence can be verified before it is promoted, without editing the registry.
 
@@ -48,7 +52,10 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
+import markdown_it
 import validate  # sibling, import-safe (its main is guarded)
+import yaml
+from carried_text import extract_section, normalize, strip_sections
 from git_env import git_location_cleared
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -1031,9 +1038,6 @@ def applies(applies_to, sel):
     return bool(set(tokens) & sel)
 
 
-_HEADING = re.compile(r"^#{1,6}\s+(.*?)\s*$")
-
-
 def _section_spec(elt):
     """Normalize a sections[] entry to (name, appliesTo, fidelity). A bare string is appliesTo `*`, intent."""
     if isinstance(elt, str):
@@ -1066,59 +1070,6 @@ def verbatim_sections(item, sel):
     return out
 
 
-def _fence_step(line, marker, marker_len):
-    """One line's effect on fence state `(marker, marker_len)`: returns the state after the line, and
-    whether the line itself is a fence boundary (opens or closes one) rather than fenced or plain content.
-
-    Fence matching follows CommonMark. A fence marker needs at most 3 leading spaces, more reads as
-    content, not a boundary. A closing fence needs the same character, a run at least as long as the
-    opener's, and nothing but whitespace after that run.
-    A mismatched or shorter marker does not close it, such as a ~~~ example inside a ``` block, or a
-    ``` inside a longer ````. Trailing text does not close it either, since an opening fence's language
-    tag has no closing counterpart. A backtick fence's info string may not itself contain a backtick,
-    per CommonMark, so such an opener is not a boundary either.
-    """
-    stripped = line.lstrip(" ")
-    indent = len(line) - len(stripped)
-    char = stripped[:1]
-    run = len(stripped) - len(stripped.lstrip(char)) if indent <= 3 and char in ("`", "~") else 0
-    if marker is None:
-        if run >= 3 and not (char == "`" and "`" in stripped[run:]):
-            return char, run, True
-        return None, 0, False
-    if char == marker and run >= marker_len and not stripped[run:].strip():
-        return None, 0, True
-    return marker, marker_len, False
-
-
-def extract_section(text, heading):
-    """The `## <heading>` H2 section including its heading line, up to the next sibling H2 or EOF, or None if absent.
-
-    EOL-normalized to `\\n`. The match that locates the heading is by its parsed text (the text after the `## `
-    marker, case-folded and stripped of surrounding whitespace), so a re-cased heading or one with extra
-    marker-gap whitespace is still found rather than read as a missing section - internal heading-text
-    whitespace must match exactly. The heading line's exact bytes are then part of the hashed region, so that
-    re-casing or re-spacing surfaces as drift. A nested `###` stays inside the body. A `## ` line inside a
-    fenced code block, per `_fence_step`, is not a boundary. So a code sample cannot truncate the region and
-    hide drift after it.
-    """
-    want = heading.strip().lower()
-    out, capturing, marker, marker_len = [], False, None, 0
-    for ln in normalize(text).split("\n"):
-        stripped = ln.strip()
-        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
-        if not boundary and marker is None and stripped.startswith("## "):
-            if capturing:
-                break  # a sibling H2 ends the section
-            if stripped[2:].strip().lower() == want:  # parsed heading text after the "## " marker
-                capturing = True
-                out.append(ln)  # include the heading so its exact bytes are part of the hash
-            continue
-        if capturing:
-            out.append(ln)
-    return "\n".join(out) if capturing else None
-
-
 # Carried files scanned for a coordination reference (GOVERNANCE.md "Documentation Style Conventions").
 TEMPLATE_REF_SCANNED = ("AGENTS.md", "GOVERNANCE.md", ".github/copilot-instructions.md")
 
@@ -1127,33 +1078,6 @@ UNDECLARED_HEADING_SCANNED = TEMPLATE_REF_SCANNED
 
 VERSION_LITERAL_SCANNED = validate.VERSION_LITERAL_SCANNED
 VERSION_LITERAL = validate.VERSION_LITERAL
-
-
-def strip_sections(text, names, keep_pins=False):
-    """`text` with each named `## <heading>` region removed, located by position rather than by content.
-
-    The result is normalized, which reduces an action pin to `<pin>`, unless `keep_pins` asks for the
-    line endings alone to be neutralized, which is what a scan for the pin's own value needs.
-
-    Region rules match extract_section (a fenced `## ` is not a boundary, a sibling H2 ends the region), so
-    the two agree on where a section starts and stops.
-    Positional removal is the point: deleting the extracted text instead would also delete an identical
-    passage anywhere else in the document, including one quoted inside the prose the caller means to read.
-    That failure is silent and it fails open, since the removed duplicate takes its content out of the scan.
-    """
-    want = {n.strip().lower() for n in names}
-    out, dropping, marker, marker_len = [], False, None, 0
-    base = text.replace("\r\n", "\n").replace("\r", "\n") if keep_pins else normalize(text)
-    for ln in base.split("\n"):
-        stripped = ln.strip()
-        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
-        if not boundary and marker is None and stripped.startswith("## "):
-            dropping = (
-                stripped[2:].strip().lower() in want
-            )  # a sibling H2 always ends the previous region
-        if not dropping:
-            out.append(ln)
-    return "\n".join(out)
 
 
 def version_literals_outside_verbatim(text, verbatim_names):
@@ -1172,16 +1096,8 @@ def version_literals_outside_verbatim(text, verbatim_names):
 
 
 def undeclared_h2_headings(text, declared):
-    """Level-two headings in `text` that `declared` does not name, sorted.
-
-    `declared` is normalized here (stripped, lowercased), not trusted pre-normalized. The contract
-    then holds for any caller, regardless of how its own names are cased or spaced.
-    Scoped to `## ` only, the section model's unit. An H1 title or a nested H3 is not itself a
-    section this check judges.
-    Fence-aware via unfenced_text. Either a heading-syntax line or a `##`-prefixed shell comment, shown
-    inside a fenced code sample, is not misread as a real heading.
-    """
-    h2s = {ln[3:].strip().lower() for ln in unfenced_text(text).split("\n") if ln.startswith("## ")}
+    """Level-two headings in `text` that `declared` does not name, folded and sorted."""
+    h2s = {h.strip().lower() for level, h, _, _ in _atx_headings(text) if level == 2}
     return sorted(h2s - {d.strip().lower() for d in declared})
 
 
@@ -1199,126 +1115,62 @@ def template_ref_outside_verbatim(text, verbatim_names, hub_name):
     return hub_name.lower() in strip_sections(text, verbatim_names).lower()
 
 
+# CommonMark plus tables, with escapes kept as their own tokens so a line can be rebuilt from its source.
+_MD = markdown_it.MarkdownIt("commonmark").enable("table").disable("text_join")
+
+
+def _atx_headings(text):
+    """`(level, raw text, first line, last line)` for each ATX heading, the form the region reader splits on."""
+    tokens = _MD.parse(text)
+    return [
+        (int(t.tag[1]), tokens[i + 1].content, t.map[0], t.map[1])
+        for i, t in enumerate(tokens)
+        if t.type == "heading_open" and t.markup.startswith("#") and t.map
+    ]
+
+
+def references(text):
+    """The reference definitions markdown-it reads from a document, keyed the way it resolves a link."""
+    env = {}
+    _MD.parse(text, env)
+    return env.get("references", {})
+
+
 def heading_texts(markdown):
     """Lowercased heading texts in a Markdown document, for case-insensitive section-presence matching."""
-    return {
-        m.group(1).strip().lower()
-        for line in markdown.splitlines()
-        for m in (_HEADING.match(line),)
-        if m
-    }
+    return {h.strip().lower() for _, h, _, _ in _atx_headings(markdown)}
 
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
-def _bracket_matches(text, open_char, close_char):
-    """Map from each open_char index in text to the index just past its balanced close_char.
+def strip_md_links(text, references=None):
+    """`text` with each Markdown link reduced to its label, everything else kept as written.
 
-    A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
-    label carrying its own nested brackets, e.g. `[API [docs]](url)`. Counting only open_char/close_char
-    nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
-    mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
-    counting scan per open position: re-scanning from every unmatched open is what made the previous
-    version O(N^2) on a run of N unmatched opens. A close pops the most recently pushed
-    open, the same pairing a fresh depth count from that open would find, so this is one pass, not N.
-    An open with no closing partner, or a close with nothing open, is left out of the map, same as before.
-
-    A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
-    matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
-    count.
+    `references` is the document's reference table, so `[text][ref]` is a link only where `ref` is defined.
     """
-    stack = []
-    matches = {}
-    escaped = False
-    for i, c in enumerate(text):
-        if escaped:
-            escaped = False
-        elif c == "\\":
-            escaped = True
-        elif c == open_char:
-            stack.append(i)
-        elif c == close_char and stack:
-            matches[stack.pop()] = i + 1
-    return matches
-
-
-def markdown_link_spans(text):
-    """Yield (start, end, label) for each `[label](dest)` or `[label][ref]` use, brackets/parens balanced.
-
-    Kept in sync with spec/validate.py's contains_description_markdown_link(), which needs the same
-    balanced-nesting rule for the same reason.
-    """
-    bracket_close = _bracket_matches(text, "[", "]")
-    paren_close = _bracket_matches(text, "(", ")")
-    i, n = 0, len(text)
-    while i < n:
-        if text[i] != "[":
-            i += 1
-            continue
-        label_end = bracket_close.get(i)
-        if label_end is None:
-            i += 1
-            continue
-        label = text[i + 1 : label_end - 1]
-        dest_end = paren_close.get(label_end) if label_end < n and text[label_end] == "(" else None
-        if dest_end is not None:
-            yield i, dest_end, label
-            i = dest_end
-            continue
-        ref_end = bracket_close.get(label_end) if label_end < n and text[label_end] == "[" else None
-        if ref_end is not None:
-            yield i, ref_end, label
-            i = ref_end
-            continue
-        # This span is not itself a link.
-        # A nested bracket run starting inside it may still be one, e.g. `[[docs](url)]`.
-        # Retry one character in rather than skipping past the whole span.
-        i += 1
-
-
-def strip_md_links(text):
-    """Markdown links reduced to their text - `[text](url)` and `[text][ref]` become `text`.
-
-    The plain-text form GOVERNANCE.md "Repository Details" says the About description carries.
-    """
-    spans = list(markdown_link_spans(text))
-    if not spans:
-        return text
-    out, pos = [], 0
-    for start, end, label in spans:
-        out.append(text[pos:start])
-        out.append(label)
-        pos = end
-    out.append(text[pos:])
+    out = []
+    for tok in _MD.parseInline(text, {"references": dict(references or {})})[0].children or []:
+        if tok.type in ("text", "html_inline"):
+            out.append(tok.content)
+        elif tok.type == "code_inline":
+            out.append(tok.markup + tok.content + tok.markup)
+        elif tok.type == "softbreak":
+            out.append("\n")
+        elif tok.type not in ("link_open", "link_close"):
+            out.append(tok.markup)
     return "".join(out)
 
 
 def title_and_intro(text):
-    """The H1 title text and the intro region before the first H2, HTML comments stripped.
-
-    Drives the README/HISTORY mirror check (spec/readme-structure.md "HISTORY.md"): both files open with the
-    same title and intro, and the README's ToC-omit comment must not read as a difference.
-    """
-    norm = _HTML_COMMENT.sub("", normalize(text))
-    title, region, seen_h1 = None, [], False
-    for ln in norm.split("\n"):
-        s = ln.strip()
-        if not seen_h1:
-            if s.startswith("# "):
-                title = s[2:].strip()
-                seen_h1 = True
-            continue
-        if s.startswith("## "):
-            break
-        region.append(ln.rstrip())
-    # Trim the blank lines surrounding the region but keep the interior ones, so a paragraph-boundary difference is a real difference.
-    # The spec says the intro is copied verbatim.
-    while region and not region[0]:
-        region.pop(0)
-    while region and not region[-1]:
-        region.pop()
-    return title, "\n".join(region)
+    """The H1 title text and the intro region between it and the first H2, HTML comments stripped."""
+    lines = _HTML_COMMENT.sub("", normalize(text)).split("\n")
+    heads = _atx_headings("\n".join(lines))
+    first = next((h for h in heads if h[0] == 1), None)
+    if first is None:
+        return None, ""
+    end = next((h[2] for h in heads if h[0] == 2 and h[2] > first[2]), len(lines))
+    return first[1].strip(), "\n".join(ln.rstrip() for ln in lines[first[3] : end]).strip("\n")
 
 
 def tagline(intro):
@@ -1332,6 +1184,7 @@ def tagline(intro):
     return intro.split("\n")[0]
 
 
+# Text scans, since a parsed link keeps its target but not the reference name and position these checks read.
 _MD_IMAGE_REF = re.compile(r"!\[[^\]]*\]\[([^\]]+)\]")
 _MD_IMAGE_INLINE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
 _LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
@@ -1341,20 +1194,12 @@ _URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.IGNORECASE)
 
 
 def unfenced_text(text):
-    """`text` with every fenced block removed, EOL-normalized.
-
-    Markup shown inside a code sample is being displayed rather than used, so a `[ref]: url`, a
-    `<!-- Shields -->` or an `![alt][ref]` in one is not a definition, a group, or a rendered badge. Kept as
-    one helper because the checkers were fence-aware in some places and blind in others, which is the state
-    that lets a document be read two ways by one audit.
-    Fence matching, including boundary lines themselves, is `_fence_step`'s contract.
-    """
-    out, marker, marker_len = [], None, 0
-    for ln in normalize(text).split("\n"):
-        marker, marker_len, boundary = _fence_step(ln, marker, marker_len)
-        if not boundary and marker is None:
-            out.append(ln)
-    return "\n".join(out)
+    """`text` normalized with every fenced code block's lines removed, since markup in a sample is shown rather than used."""
+    lines = normalize(text).split("\n")
+    fenced = {
+        i for t in _MD.parse("\n".join(lines)) if t.type == "fence" and t.map for i in range(*t.map)
+    }
+    return "\n".join(ln for i, ln in enumerate(lines) if i not in fenced)
 
 
 def readme_region(text, heading):
@@ -1407,34 +1252,20 @@ def addressed_region(text, address):
     body = readme_region(text, parts[0])
     if body is None or len(parts) == 1:
         return body
-    want, out, capturing = parts[1].lower(), [], False
-    for ln in body.split("\n"):
-        s = ln.strip()
-        if s.startswith("### "):
-            if capturing:
-                break
-            capturing = s[4:].strip().lower() == want
-            continue
-        if capturing:
-            out.append(ln)
-    return "\n".join(out) if capturing else None
+    lines = body.split("\n")
+    h3s = [h for h in _atx_headings(body) if h[0] == 3]
+    for i, (_, name, _, end) in enumerate(h3s):
+        if name.strip().lower() == parts[1].lower():
+            stop = h3s[i + 1][2] if i + 1 < len(h3s) else len(lines)
+            return "\n".join(lines[end:stop])
+    return None
 
 
 def ordered_headings(markdown, level):
-    """Heading texts at `level` in document order, HTML comments stripped, fenced blocks skipped.
-
-    Distinct from heading_texts, which returns an unordered set across every level: the order check needs the
-    sequence, and the ToC-omit comment (`## License <!-- omit from toc -->`) must not read as a different name.
-    A `## ` line inside a fenced block is not a heading, matching extract_section, so a code sample cannot
-    inject a phantom section.
-    """
-    marker = "#" * level + " "
-    out = []
-    for ln in _HTML_COMMENT.sub("", unfenced_text(markdown)).split("\n"):
-        s = ln.strip()
-        if s.startswith(marker):
-            out.append(s[len(marker) :].strip())
-    return out
+    """Heading texts at `level` in document order, HTML comments stripped, fenced blocks skipped."""
+    return [
+        _HTML_COMMENT.sub("", h).strip() for lv, h, _, _ in _atx_headings(markdown) if lv == level
+    ]
 
 
 def readme_section_findings(text, model, sel, public):
@@ -1751,30 +1582,9 @@ def readme_link_findings(text, model, slug):
     return findings
 
 
-# Both outer pipes are optional because GitHub's Markdown makes them optional, so a row written without either is still a row this section is graded on.
-# Requiring them skipped such a row outright, so its link, its description and its place in the ordering all went unread and the repo scored clean on a table nothing had read.
-# The separating pipe is what makes a row a row, and it is the one this keeps demanding, since a line carrying none of them is prose.
+# A tool row is read as text for its reference name, with both outer pipes optional as GitHub's Markdown makes them.
 _TOOL_ROW = re.compile(r"^\|?\s*\[([^\]]+)\]\[([^\]]+)\]\s*\|\s*([^|]*?)\s*(?:\||$)")
 _TOOL_BULLET = re.compile(r"^[-*]\s*\[([^\]]+)\]\[([^\]]+)\]\s*(.*)$")
-_DELIM_CELL = re.compile(r"^:?-{3,}:?$")
-
-
-def table_cells(line):
-    """The cells of a Markdown table row, or None where the line is not one.
-
-    Both outer pipes are dropped where they are there, and neither is required, for the same reason _TOOL_ROW
-    stopped requiring them.
-
-    A separating pipe is required instead, which is what keeps a thematic break out: `---` alone carries no
-    pipe and returns None here, where treating it as a one-cell delimiter row would have read the paragraph
-    above it as a table header.
-    """
-    s = line.strip()
-    if "|" not in s:
-        return None
-    s = s.removeprefix("|")
-    s = s.removesuffix("|")
-    return [c.strip() for c in s.split("|")]
 
 
 def third_party_tool_findings(text, catalog):
@@ -1802,19 +1612,18 @@ def third_party_tool_findings(text, catalog):
     defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
     findings = []
     listed = []
-    lines = body.split("\n")
-    for i, ln in enumerate(lines):
-        cells = table_cells(ln)
-        if i and cells and all(_DELIM_CELL.match(c) for c in cells):
-            header = table_cells(lines[i - 1]) or []
-            if any(c.lower() == "license" for c in header):
-                findings.append(
-                    (
-                        "LETTER",
-                        "readme: 3rd Party Tools carries a License column - a license belongs to the dependency and is authoritative at its source, so restating it adds a maintenance obligation and no information (spec/readme-structure.md)",
-                    )
+    in_head = False
+    for tok in _MD.parse(body):
+        if tok.type in ("thead_open", "thead_close"):
+            in_head = tok.type == "thead_open"
+        elif in_head and tok.type == "inline" and tok.content.strip().lower() == "license":
+            findings.append(
+                (
+                    "LETTER",
+                    "readme: 3rd Party Tools carries a License column - a license belongs to the dependency and is authoritative at its source, so restating it adds a maintenance obligation and no information (spec/readme-structure.md)",
                 )
-            continue
+            )
+    for ln in body.split("\n"):
         m = _TOOL_ROW.match(ln.strip()) or _TOOL_BULLET.match(ln.strip())
         if not m:
             continue
@@ -1983,6 +1792,7 @@ def description_findings(doc_texts, entry, live, slug):
     if "README.md" in doc_texts:
         title, intro = title_and_intro(doc_texts["README.md"])
         intro_line = tagline(intro)
+        refs = references(doc_texts["README.md"])
         # The H1 is the repository name, and a hyphenated name may render its hyphens as spaces.
         # Use the GitHub API's canonical name, since the registry-URL slug can carry a different case.
         repo_name = live.get("name") or slug.split("/")[-1]
@@ -2008,14 +1818,14 @@ def description_findings(doc_texts, entry, live, slug):
                 )
             )
         else:
-            if strip_md_links(intro_line) != intro_line:
+            if strip_md_links(intro_line, refs) != intro_line:
                 findings.append(
                     (
                         "LETTER",
                         "readme: the tagline carries Markdown links - keep it link-free plain text, it doubles as the repo About description (spec/readme-structure.md)",
                     )
                 )
-            readme_want = strip_md_links(intro_line).strip()
+            readme_want = strip_md_links(intro_line, refs).strip()
             if len(readme_want) > 100:
                 findings.append(
                     (
@@ -2083,152 +1893,98 @@ def workspace_cspell_words(text):
     )
 
 
-_JOB_KEY = re.compile(r"^([A-Za-z0-9_.\-]+):(\s.*)?$")
+def _compose(text):
+    """The YAML node tree of `text`, or None where it does not parse."""
+    try:
+        return yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return None
 
 
-def split_jobs(text):
-    """Slice a workflow YAML into {job_key: block_text} by the jobs-level indent, without a YAML parser.
-
-    Structural, not semantic: find the top-level `jobs:` key, take the indent of its first child as the
-    job-key indent, and cut the region at each key line at exactly that indent. A line dedented below the
-    job-key indent (a sibling top-level key) ends the jobs region.
-    """
-    lines = text.splitlines(keepends=True)
-    ji = next((i for i, ln in enumerate(lines) if re.match(r"^jobs:\s*(#.*)?$", ln)), None)
-    if ji is None:
+def _mapping(node):
+    """A mapping node's children as `{key: node}`, `{}` for any other node."""
+    if not isinstance(node, yaml.MappingNode):
         return {}
-    job_indent = None
-    for ln in lines[ji + 1 :]:
-        if ln.strip() == "" or ln.lstrip().startswith("#"):
-            continue
-        job_indent = len(ln) - len(ln.lstrip())
-        break
-    if not job_indent:
-        return {}
-    blocks, key, cur = {}, None, []
-    for ln in lines[ji + 1 :]:
-        indent = len(ln) - len(ln.lstrip())
-        if ln.strip() and indent < job_indent:
-            if ln.lstrip().startswith("#"):
-                continue  # a dedented comment is not part of any job and does not end the mapping - skip it
-            break  # a sibling top-level key ends the jobs region
-        m = _JOB_KEY.match(ln[job_indent:]) if indent == job_indent else None
-        if m:
-            if key is not None:
-                blocks[key] = "".join(cur)
-            key, cur = (
-                m.group(1),
-                [ln],
-            )  # include the key line so an inline mapping on it is captured
-        elif key is not None:
-            cur.append(ln)
-    if key is not None:
-        blocks[key] = "".join(cur)
-    return blocks
+    return {str(k.value): v for k, v in node.value if isinstance(k, yaml.ScalarNode)}
 
 
-# A `key: |`/`key: >` block-scalar indicator, with an optional anchor (`&name`) before it.
-# Anchored whole-line so `key: "a|b"` does not match.
-_BLOCK_SCALAR_KEY = re.compile(r"^[^:#\n]*:\s*(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
-# A bare `- |`/`- >` sequence item, a block scalar with no mapping key at all (a matrix string).
-_BARE_BLOCK_SCALAR = re.compile(r"^(&\S+\s+)?[|>][0-9+-]*\s*(#.*)?$")
-# A step's `- key: |` sequence-item prefix, stripped before matching the two patterns above.
-_SEQUENCE_ITEM_PREFIX = re.compile(r"^-[ \t]+")
-_IF_KEY = re.compile(r"^if\s*:")
+def _plain(node):
+    """The Python value a node constructs, as the safe loader reads it."""
+    return yaml.SafeLoader("").construct_object(node, deep=True)
 
 
-def _code_view(text):
-    """Workflow text with comment-only lines and block-scalar bodies dropped, neither is structure.
+def job_nodes(text):
+    """The workflow's jobs as `{key: node}`, `{}` where it has none or does not parse."""
+    return _mapping(_mapping(_compose(text)).get("jobs"))
 
-    A carried task file documents its own contract in comments (build-release-task.yml names
-    `release-asset-` and `artifact-ids:` in prose), so a raw substring search over the whole text would
-    both false-pass a missing handoff and false-flag a forbidden token that appears only in a comment.
-    A block-scalar string value (`name: |` followed by indented text) can hide or fake a token the same
-    way, so its body is dropped too, keeping only the `key:` line itself.
-    A block-scalar `if:` body, the form the Workflow YAML convention sets for a multi-line condition, is kept,
-    since an `if:` value is always an expression.
-    It is folded onto the key line, so a token the condition wraps across two lines still matches whole.
-    A trailing comment on that key line is dropped first, so it never reads as part of the condition.
+
+def code_view(node, depth=0):
+    """A node's keys and scalar values as lines indented two spaces per level, the shape a contract token is read in.
+
+    A job's children sit at `depth` 2, its place in a workflow. A block-scalar body is a script or prose rather
+    than structure, so it is left out, except an `if:` condition, folded onto one line.
     """
     out = []
-    skip_indent = None
-    fold_indent = None
-    for ln in text.splitlines():
-        if ln.lstrip().startswith("#"):
-            continue
-        if fold_indent is not None:
-            if not ln.strip():
-                continue
-            if (len(ln) - len(ln.lstrip())) > fold_indent:
-                out[-1] += " " + ln.strip()
-                continue
-            fold_indent = None
-        if skip_indent is not None:
-            if ln.strip() and (len(ln) - len(ln.lstrip())) <= skip_indent:
-                skip_indent = None  # a dedent back to (or past) the key column ends the block body
-            else:
-                continue  # still inside the block scalar body, not real structure
-        stripped = ln.lstrip()
-        dash_col = len(ln) - len(stripped)
-        key_col = dash_col
-        dash = _SEQUENCE_ITEM_PREFIX.match(stripped)
-        if dash:
-            # A keyed scalar's boundary is the key's own column, not the dash's.
-            # A sibling key genuinely at that column (`env:` alongside a `- run: |` step) is real structure.
-            key_col += dash.end()
-            stripped = stripped[dash.end() :]
-        if _BLOCK_SCALAR_KEY.match(stripped):
-            if _IF_KEY.match(stripped):
-                fold_indent = key_col
-                ln = re.sub(r"[ \t]+#.*$", "", ln)
-            else:
-                skip_indent = key_col
-        elif dash and _BARE_BLOCK_SCALAR.match(stripped):
-            # A bare `- |` has no key, so its own boundary is the dash's column, not a key past it.
-            skip_indent = dash_col
-        out.append(ln)
+
+    def walk(child, key, level):
+        label = "  " * level + ("" if key is None else f"{key}:")
+        if isinstance(child, yaml.MappingNode):
+            out.extend([label] if key else [])
+            for k, v in child.value:
+                walk(v, k.value, level + 1)
+        elif isinstance(child, yaml.SequenceNode):
+            out.extend([label] if key else [])
+            for v in child.value:
+                walk(v, None, level + 1)
+        elif key == "if":
+            out.append(f"{label} {' '.join(str(child.value).split())}")
+        elif child.style in ("|", ">"):
+            out.extend([label] if key else [])
+        else:
+            out.append(f"{label} {child.value}".rstrip())
+
+    if node is not None:
+        walk(node, None, depth - 1)
     return "\n".join(out)
 
 
-def job_level_names(blocks):
-    """The job-level `name:` values - a job's own direct-child name key, not a step's name.
+def split_jobs(text):
+    """Each job's own source lines, `{key: text}`, cut at the parser's marks for the verbatim job hash.
 
-    The ruleset-bound check is a job name, so a step happening to share the string must not satisfy it. A
-    job's direct children sit at the shallowest indent of its block (below the key line); a step name is
-    deeper or a `- name:` list item, so neither reaches that indent as a bare `name:`.
+    A comment dedented below the job keys belongs to no job, so it is left out of every region.
     """
-    out = set()
-    for block in blocks.values():
-        for ln in job_child_lines(block):
-            m = re.match(r"name:\s*['\"]?(.*?)['\"]?\s*$", ln)
-            if m:
-                out.add(m.group(1))
-    return out
-
-
-def job_child_lines(block):
-    """A job block's direct-child lines, dedented, read at the shallowest indent below its key line."""
-    body = [ln for ln in block.splitlines()[1:] if ln.strip() and not ln.lstrip().startswith("#")]
-    if not body:
-        return []
-    child = min(len(ln) - len(ln.lstrip()) for ln in body)
-    return [ln[child:] for ln in body if len(ln) - len(ln.lstrip()) == child]
+    jobs = _mapping(_compose(text)).get("jobs")
+    if not isinstance(jobs, yaml.MappingNode) or jobs.flow_style or not jobs.value:
+        return {}
+    lines = text.splitlines(keepends=True)
+    indent = jobs.value[0][0].start_mark.column
+    end = jobs.end_mark.line + (1 if jobs.end_mark.column else 0)
+    starts = [k.start_mark.line for k, _ in jobs.value] + [end]
+    return {
+        str(k.value): "".join(
+            ln
+            for ln in lines[starts[i] : starts[i + 1]]
+            if not (ln.lstrip().startswith("#") and len(ln) - len(ln.lstrip()) < indent)
+        )
+        for i, (k, _) in enumerate(jobs.value)
+    }
 
 
 def check_interface(path, contract, text):
-    """Verify a workflow honors its fixed contract by name and wiring, never its body (spec/fidelity-model.md).
-
-    All findings are DRIFT: the interface is what a repo must keep, the body is owned, and a rename or a
-    forked handoff is a hint to verify, not a hard failure. `verbatimJobs` is the verbatim engine's concern.
-    """
+    """DRIFT where a workflow breaks its fixed contract by name and wiring, never its body (spec/fidelity-model.md)."""
+    try:
+        yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return [("DRIFT", f"interface: {path} does not parse as YAML, so its contract is unread")]
     findings = []
-    jobs = split_jobs(text)
-    code = _code_view(text)
+    jobs = job_nodes(text)
     for k in contract.get("requiredJobKeys", []):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    if name and name not in job_level_names(jobs):
+    nodes = (_mapping(job).get("name") for job in jobs.values())
+    names = {n.value for n in nodes if isinstance(n, yaml.ScalarNode)}
+    if name and name not in names:
         findings.append(
             (
                 "DRIFT",
@@ -2236,111 +1992,39 @@ def check_interface(path, contract, text):
             )
         )
     tok = contract.get("artifactNameToken")
-    if tok and tok not in code:
+    if tok and tok not in code_view(_compose(text)):
         findings.append(
             ("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff")
         )
-    # Token checks only apply to a job that is present, since an absent job is already reported by requiredJobKeys, so skip it rather than emit a redundant "missing token" for every token it cannot contain.
-    # Scan the job's code view so a token in a comment is not read as signal.
+    # An absent job is already a requiredJobKeys finding, so its tokens are not reported again.
     for job, toks in contract.get("requireTokensInJob", {}).items():
         if job in jobs:
-            block = _code_view(jobs[job])
+            view = code_view(jobs[job], 2)
             for t in toks:
-                if t not in block:
+                if t not in view:
                     findings.append(
                         ("DRIFT", f"interface: {path} job '{job}' missing required '{t}'")
                     )
     for job, toks in contract.get("forbidTokensInJob", {}).items():
         if job in jobs:
-            block = _code_view(jobs[job])
+            view = code_view(jobs[job], 2)
             for t in toks:
-                if t in block:
-                    # Generic rather than tied to one contract's reason.
-                    # forbidTokensInJob guards more than the github-release seam.
-                    # intentRef on the file's own entry routes a reader to the actual context.
+                if t in view:
                     findings.append(
                         ("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}'")
                     )
     return findings
 
 
-# The two workflow files whose validate job may declare validate-task.yml's `python-directories` input,
-# per WORKFLOW.md's caller contract. A stub that has not yet adopted the reusable gate names no such job
-# and is skipped by python_directories_caller_findings() below rather than compared.
+# The callers whose validate job may declare validate-task.yml's `python-directories` input, per WORKFLOW.md.
 PYTHON_DIRECTORIES_CALLERS = (
     ".github/workflows/test-pull-request.yml",
     ".github/workflows/publish-release.yml",
 )
-# A `key: |`/`key: >` block-scalar indicator on a `with:` input line, matching _BLOCK_SCALAR_KEY's shape
-# below but anchored to the key rather than to a whole line, since workflow_input_text() has already
-# sliced the line down to the value past `key:`.
-_WITH_INPUT_BLOCK_SCALAR = re.compile(r"^(&\S+[ \t]+)?[|>][0-9+-]*[ \t]*(#.*)?$")
-_WITH_KEY = re.compile(r"^([ \t]*)with:[ \t]*(#.*)?$")
-
-
-def workflow_input_text(job_text, key, raw=False):
-    """The raw text of a `with:` input on a workflow-call job: a block scalar's dedented body, or a plain
-    single value's own line, whichever shape the input was written in. With raw, the text after the key's
-    colon and every line nested under it instead, unprocessed, for a caller judging the value's shape.
-
-    Structural, like split_jobs() and _code_view() above: it reads indentation, not YAML semantics, since
-    a hand-written `with:` block stays inside this narrow shape everywhere the fleet writes one. Returns
-    None where the job carries no `with:` mapping, or no such key inside it.
-    """
-    lines = job_text.splitlines()
-    with_at = next((i for i, ln in enumerate(lines) if _WITH_KEY.match(ln)), None)
-    if with_at is None:
-        return None
-    with_indent = len(lines[with_at]) - len(lines[with_at].lstrip())
-    child_indent = None
-    key_at = None
-    for i in range(with_at + 1, len(lines)):
-        ln = lines[i]
-        if not ln.strip() or ln.lstrip().startswith("#"):
-            continue
-        indent = len(ln) - len(ln.lstrip())
-        if indent <= with_indent:
-            break  # dedent out of the with: mapping
-        if child_indent is None:
-            child_indent = indent
-        if indent == child_indent and re.match(rf"^{re.escape(key)}:", ln[child_indent:]):
-            key_at = i
-            break
-    if key_at is None or child_indent is None:
-        return None
-    rest = lines[key_at][child_indent + len(key) + 1 :].strip()
-    if raw:
-        nested = []
-        for ln in lines[key_at + 1 :]:
-            if (
-                ln.strip()
-                and not ln.lstrip().startswith("#")
-                and len(ln) - len(ln.lstrip()) <= child_indent
-            ):
-                break
-            nested.append(ln)
-        return "\n".join([rest, *nested])
-    if not rest or _WITH_INPUT_BLOCK_SCALAR.match(rest):
-        body = []
-        for ln in lines[key_at + 1 :]:
-            if not ln.strip():
-                body.append("")
-                continue
-            indent = len(ln) - len(ln.lstrip())
-            if indent <= child_indent:
-                break  # dedent back to (or past) the key column ends the block body
-            body.append(ln[child_indent:])
-        return "\n".join(body)
-    return re.sub(r"[ \t]+#.*$", "", rest).strip().strip("'\"")
 
 
 def normalize_declared_python_directory(line):
-    """Mirror python_directories.py's normalize(), success case only.
-
-    The audit's cross-check only needs the directories a caller's declaration resolves to; a malformed
-    line is already refused by the hub validator itself at merge time, so this drops one silently rather
-    than reporting the same defect a second time.
-    """
+    """Mirror python_directories.py's normalize() for a valid line, None for one the hub validator refuses."""
     path = line.strip()
     if not path or "\t" in path or path.startswith("/") or "\\" in path or ".." in path.split("/"):
         return None
@@ -2348,27 +2032,20 @@ def normalize_declared_python_directory(line):
 
 
 def python_directories_caller_findings(path, text, entry):
-    """DRIFT when a caller's declared `python-directories` input disagrees with the registry's own.
+    """DRIFT where a caller's declared `python-directories` input disagrees with the registry's own.
 
-    Each side is normalized and deduplicated, then compared as a set of declarations rather than by
-    the directories each resolves to, since naming `.` is not the same as naming nothing: a declared
-    directory owes a suite and a type check that the root default only runs where it finds them.
-
-    Scoped to PYTHON_DIRECTORIES_CALLERS, and only where the job's own code (comments excluded, per
-    _code_view()) actually names validate-task.yml, since a caller with no validate job, or one that has
-    not adopted the reusable gate yet, states nothing this can compare against; that absence is already
-    check_interface()'s finding, not this one's. A shape this cannot read is reported rather than skipped
-    or misread: validate-task.yml called from a job under another key, and a flow-mapping `with:`.
+    Compared as normalized sets of declarations, since naming `.` is not the same as naming nothing.
+    Only the job keyed `validate` is compared, and validate-task.yml called from another job is reported.
     """
     if path not in PYTHON_DIRECTORIES_CALLERS:
         return []
-    jobs = split_jobs(text)
-    validate_job = jobs.get("validate", "")
+    jobs = job_nodes(text)
     others = sorted(
-        k for k, body in jobs.items() if k != "validate" and "validate-task.yml" in _code_view(body)
+        k for k, job in jobs.items() if k != "validate" and "validate-task.yml" in code_view(job)
     )
-    unread = (
-        [
+    unread = []
+    if others:
+        unread = [
             (
                 "DRIFT",
                 (
@@ -2378,54 +2055,13 @@ def python_directories_caller_findings(path, text, entry):
                 ),
             )
         ]
-        if others
-        else []
-    )
-    if "validate-task.yml" not in _code_view(validate_job):
+    validate_job = jobs.get("validate")
+    if validate_job is None or "validate-task.yml" not in code_view(validate_job):
         return unread
-    if re.search(r"^[ \t]*with:[ \t]*\{", validate_job, re.MULTILINE):
-        return unread + [
-            (
-                "DRIFT",
-                (
-                    f"python-directories: {path} writes its validate job's with: inputs as a flow "
-                    "mapping, which the audit cannot read. Write a block mapping, one input per line."
-                ),
-            )
-        ]
-    value = re.sub(
-        r"^(?:\s|[&!]\S*|#[^\n]*)*",
-        "",
-        workflow_input_text(validate_job, "python-directories", raw=True) or "",
-    )
-    # A folded scalar's value depends on YAML's indentation rules, so it is refused rather than guessed.
-    if value.startswith(">"):
-        return unread + [
-            (
-                "DRIFT",
-                (
-                    f"python-directories: {path} passes a folded (>) scalar. Write it as a literal "
-                    "(|) block, one directory per line."
-                ),
-            )
-        ]
-    if value.startswith('"') and "\\" in value[1:].split('"', 1)[0]:
-        return unread + [
-            (
-                "DRIFT",
-                (
-                    f"python-directories: {path} passes a double-quoted value carrying a backslash "
-                    "escape. Write it unquoted, or as a literal (|) block, one directory per line."
-                ),
-            )
-        ]
-    declared_text = workflow_input_text(validate_job, "python-directories") or ""
+    node = _mapping(_mapping(validate_job).get("with")).get("python-directories")
+    declared_text = "" if node is None else _scalar_text(_plain(node)) or ""
     declared = sorted(
-        {
-            d
-            for d in (normalize_declared_python_directory(ln) for ln in declared_text.splitlines())
-            if d
-        }
+        {d for d in map(normalize_declared_python_directory, declared_text.splitlines()) if d}
     )
     registry = sorted(python_directories_of(entry))
     if declared == registry:
@@ -2454,25 +2090,11 @@ _RUN_ID_SUFFIX = re.compile(
 )
 _SCHEDULE_RUN_ID_SUFFIX = "${{github.event_name=='schedule'&&format('-{0}',github.run_id)||''}}"
 _DISPATCH_TEST = "github.event_name=='workflow_dispatch'"
-_TOP_CONCURRENCY = re.compile(r"^concurrency:[ \t]*(.*)$", re.MULTILINE)
-_TOP_ON = re.compile(r"^on:[ \t]*(.*)$", re.MULTILINE)
 _EXPRESSION_SPACE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 
 
-def _yaml_scalar(value):
-    """A plain or quoted scalar's text, trailing comment dropped, or None where it cannot be read as one."""
-    value = value.strip()
-    quoted = re.match(r"""^(?:'((?:[^']|'')*)'|"((?:[^"\\]|\\.)*)")\s*(?:#.*)?$""", value)
-    if quoted:
-        single = quoted.group(1)
-        return single.replace("''", "'") if single is not None else quoted.group(2)
-    if value[:1] in ("'", '"', ">", "|"):
-        return None
-    return re.sub(r"[ \t]+#.*$", "", value)
-
-
 def _strip_unquoted_space(value):
-    """Whitespace removed except inside single-quoted strings, so a name such as `'a b'` stays distinct from `'ab'`."""
+    """Whitespace removed except inside single-quoted strings, so `'a b'` stays distinct from `'ab'`."""
     parts = value.split("'")
     return "'".join(
         re.sub(r"\s+", "", part) if i % 2 == 0 else part for i, part in enumerate(parts)
@@ -2483,57 +2105,31 @@ def _tight(value):
     return _EXPRESSION_SPACE.sub(lambda m: "${{" + m.group(1) + "}}", value)
 
 
-def _workflow_triggers(code):
-    """The event names keyed under a block-mapping workflow-level `on:`, or None for any other shape.
-
-    Only the block-mapping form is read, the shape a `schedule` trigger with its `cron` list takes in practice.
-    """
-    head = _TOP_ON.search(code)
-    if head is None or re.sub(r"(?:^|[ \t]+)#.*$", "", head.group(1)).strip():
+def _scalar_text(value):
+    """A YAML scalar as the string GitHub reads, or None for a mapping or a sequence."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (dict, list)):
         return None
-    events = set()
-    child_indent = None
-    for line in code[head.end() :].splitlines()[1:]:
-        if not line.strip():
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent == 0:
-            break
-        if child_indent is None:
-            child_indent = indent
-        if indent != child_indent:
-            continue
-        m = re.match(r"^['\"]?([A-Za-z_]+)['\"]?[ \t]*:", line.strip())
-        if m is None:
-            return None
-        events.add(m.group(1))
-    return events
+    return "" if value is None else str(value)
 
 
-def _schedule_never_publishes(code):
-    """True where the publisher's `on:` admits a `schedule` and no `push`, and every release job requires a dispatch.
+def _schedule_never_publishes(doc):
+    """True where `on:` admits a `schedule` and no `push`, and every build-release-task.yml job requires a dispatch.
 
-    The plan task reports a schedule as a publish. A schedule therefore publishes nothing only where each job
-    calling `build-release-task.yml` holds `github.event_name == 'workflow_dispatch'` as a top-level conjunct
-    of its job-level `if:`.
-    A condition holding any `||` or a negated group is not read as such a gate. A publisher where no job
-    calls `build-release-task.yml` returns False.
+    The dispatch test must be a top-level conjunct of the job's `if:`, in a condition holding no `||` or negated group.
     """
-    triggers = _workflow_triggers(code)
-    if triggers is None or "schedule" not in triggers or "push" in triggers:
+    # PyYAML reads a bare `on` key as the boolean true, per YAML 1.1.
+    on = doc.get("on", doc.get(True))
+    triggers = set(on) if isinstance(on, (dict, list)) else {on}
+    if "schedule" not in triggers or "push" in triggers:
         return False
     release_jobs = 0
-    for block in split_jobs(code).values():
-        keys = {}
-        for ln in job_child_lines(block):
-            m = re.match(r"^(uses|if):[ \t]*(.*)$", ln)
-            if m:
-                keys[m.group(1)] = m.group(2)
-        if "build-release-task.yml" not in keys.get("uses", ""):
+    for job in (doc.get("jobs") or {}).values():
+        if not isinstance(job, dict) or "build-release-task.yml" not in str(job.get("uses", "")):
             continue
         release_jobs += 1
-        condition = _yaml_scalar(re.sub(r"^[|>][0-9+-]*[ \t]*", "", keys.get("if", "")))
-        tight = _strip_unquoted_space(condition or "")
+        tight = _strip_unquoted_space(_scalar_text(job.get("if")) or "")
         if tight.startswith("${{") and tight.endswith("}}"):
             tight = tight[3:-2]
         conjuncts = {term.strip("()") for term in tight.split("&&")}
@@ -2543,15 +2139,11 @@ def _schedule_never_publishes(code):
 
 
 def concurrency_caller_findings(path, text):
-    """DRIFT when the publisher or the merge-bot declares a concurrency group other than the one WORKFLOW.md pins.
+    """DRIFT where the publisher or the merge-bot declares a concurrency group other than the one WORKFLOW.md pins.
 
-    The publisher's group is the ref-scoped base, optionally followed by one `${{ }}` expression naming both
-    `github.event_name` and `github.run_id`. That is the push-only suffix, or the schedule-only suffix
-    on a publisher whose schedule never publishes. The merge-bot's group is the
-    base keyed on the PR number. Either must leave `cancel-in-progress` false or unset. Only the
-    workflow-level `concurrency:` is read, as a block mapping or a bare group scalar. A shape this cannot
-    read is reported rather than skipped. A file absent from the repo never reaches here, since the
-    interface unit reports that.
+    The publisher's group is the ref-scoped base plus at most the push-only run-id suffix, or the schedule-only
+    suffix where its schedule never publishes. The merge-bot's is the base keyed on the PR number. Either leaves
+    `cancel-in-progress` false or unset.
     """
     base = CONCURRENCY_CALLERS.get(path)
     if base is None:
@@ -2562,45 +2154,25 @@ def concurrency_caller_findings(path, text):
             f"concurrency: {path} writes its concurrency in a shape the audit cannot read. Write a block mapping with group and cancel-in-progress, each a single-line scalar.",
         )
     ]
-    code = _code_view(text)
-    head = _TOP_CONCURRENCY.search(code)
-    if head is None:
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return unreadable
+    if not isinstance(doc, dict):
+        return unreadable
+    concurrency = doc.get("concurrency")
+    if concurrency is None:
         return [
             (
                 "DRIFT",
                 f"concurrency: {path} declares no workflow-level concurrency, expected group '{base}'",
             )
         ]
-    group = cancel = None
-    inline = re.sub(r"^(?:&\S+[ \t]*)?(?:#.*)?", "", head.group(1)).strip()
-    if inline.startswith("{"):
+    raw_cancel = concurrency.get("cancel-in-progress") if isinstance(concurrency, dict) else None
+    group = _scalar_text(concurrency.get("group") if isinstance(concurrency, dict) else concurrency)
+    cancel = None if raw_cancel is None else _scalar_text(raw_cancel)
+    if group is None or (raw_cancel is not None and cancel is None):
         return unreadable
-    if inline:
-        group = _yaml_scalar(inline)
-        following = next((ln for ln in code[head.end() :].splitlines()[1:] if ln.strip()), "")
-        if group is None or following[:1] in (" ", "\t"):
-            return unreadable
-    else:
-        child_indent = None
-        for line in code[head.end() :].splitlines()[1:]:
-            if not line.strip():
-                continue
-            indent = len(line) - len(line.lstrip())
-            if indent == 0:
-                break
-            if child_indent is None:
-                child_indent = indent
-            if indent > child_indent:
-                return unreadable
-            m = re.match(r"^[ \t]+(group|cancel-in-progress):[ \t]*(.*)$", line)
-            if m:
-                value = _yaml_scalar(m.group(2))
-                if value is None:
-                    return unreadable
-                if m.group(1) == "group":
-                    group = value
-                else:
-                    cancel = value
     findings = []
     if not group:
         findings.append(("DRIFT", f"concurrency: {path} reads no group value, expected '{base}'"))
@@ -2608,25 +2180,18 @@ def concurrency_caller_findings(path, text):
         tight_group, tight_base = _tight(group), _tight(base)
         suffix = tight_group[len(tight_base) :] if tight_group.startswith(tight_base) else None
         tight_suffix = _strip_unquoted_space(suffix) if suffix else ""
+        publisher = path.endswith("publish-release.yml")
+        schedule_suffix = publisher and tight_suffix == _SCHEDULE_RUN_ID_SUFFIX
         suffix_ok = suffix is not None and (
             suffix == ""
-            or (
-                path.endswith("publish-release.yml")
-                and (
-                    bool(_RUN_ID_SUFFIX.match(tight_suffix))
-                    or (tight_suffix == _SCHEDULE_RUN_ID_SUFFIX and _schedule_never_publishes(code))
-                )
-            )
+            or (publisher and bool(_RUN_ID_SUFFIX.match(tight_suffix)))
+            or (schedule_suffix and _schedule_never_publishes(doc))
         )
-        if (
-            not suffix_ok
-            and path.endswith("publish-release.yml")
-            and tight_suffix == _SCHEDULE_RUN_ID_SUFFIX
-        ):
+        if not suffix_ok and schedule_suffix:
             findings.append(
                 (
                     "DRIFT",
-                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs a block-mapping on: with no push trigger, and github.event_name == 'workflow_dispatch' as a top-level conjunct of each build-release-task.yml job's if:, an if: holding no || or negated group.",
+                    f"concurrency: {path} gives a schedule its own group, but the audit cannot read its schedule as never publishing. That needs an on: with no push trigger, and github.event_name == 'workflow_dispatch' as a top-level conjunct of each build-release-task.yml job's if:, an if: holding no || or negated group.",
                 )
             )
         elif not suffix_ok:
@@ -2638,34 +2203,20 @@ def concurrency_caller_findings(path, text):
     return findings
 
 
-# A `uses: <action>@<40-hex sha>` pin, plus only a trailing Dependabot version comment such as ` # v1.2.3`, where the leading `v` or digit is required.
-# Dependabot bumps both per repo, so that drift is governed the way EOL is rather than being a fidelity deviation.
-# It is anchored to `uses:`, so a 64-hex docker digest and a tag or branch ref such as `@v4` do not match.
-# Hex is case-insensitive, and a hand-written note on a pin is not version-shaped, so it survives to be compared.
-_ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
-# A workflow job's `needs:` list names the jobs it sequences after.
-# In a verbatim job region a repo prunes that list to the targets it actually vendors, since a `needs` entry naming an unvendored job fails the whole workflow to load, so the list is owned per repo rather than fixed.
-# Mask it in the inline, scalar and block-list forms, the same as the action pin.
-# The interface contract still checks the required job keys separately.
-_JOB_NEEDS = re.compile(
-    r"(^[ \t]*)needs:[ \t]*"
-    r"(?:\[[^\]\n]*\]"  # inline: needs: [a, b] (same line only)
-    r"|[A-Za-z0-9_.\-]+[ \t]*(?=\n|$)"  # scalar: needs: a
-    r"|(?:\n[ \t]+-[ \t]*[A-Za-z0-9_.\-]+[ \t]*)+)",  # block: needs:\n  - a\n  - b
-    re.MULTILINE,
-)
-
-
-def normalize(text):
-    """Reduce a carried unit to its comparable form: neutralize line endings (EOL variance is governed
-    separately, not a fidelity deviation), a Dependabot-owned action pin (the 40-hex `uses: <action>@<sha>` commit
-    plus its ` # vN` comment, bumped per repo), and a job's owned `needs:` list (pruned per repo to its vendored
-    targets). All three are governed drift, not a fidelity deviation. This is NOT placeholder masking of declared
-    per-file tokens; see spec/fidelity-model.md "Normalization".
-    """
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = _ACTION_PIN.sub(r"\1@<pin>", text)
-    return _JOB_NEEDS.sub(r"\1needs: <needs>", text)
+def dependabot_ecosystems(text):
+    """The package-ecosystem values a dependabot.yml declares, empty where it does not parse."""
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return set()
+    updates = doc.get("updates") if isinstance(doc, dict) else None
+    if not isinstance(updates, list):
+        return set()
+    return {
+        str(u["package-ecosystem"])
+        for u in updates
+        if isinstance(u, dict) and u.get("package-ecosystem")
+    }
 
 
 @functools.lru_cache(
@@ -3363,7 +2914,6 @@ def audit_repo(entry, spec, branch=None):
     # --- Dependabot ecosystem coverage ---
     # A repo's tree implies Dependabot ecosystems it must track, being github-actions where it ships workflows and devcontainers where it ships a .devcontainer.
     # Without the first, the action versions those workflows reference go stale and a merge-bot then has no PRs to auto-merge.
-    # The dependabot.yml file is YAML and no stdlib parser reads it, so scan the declared package-ecosystem values by regex, anchored to the line start so a commented-out entry is not read as declared.
     # This asserts an implied ecosystem's *presence* only.
     # Whether each declared ecosystem dual-targets main and develop, which is the fleet norm, is verified by inspection rather than here.
     # It only runs where dependabot.yml exists, since its absence is already a file-presence LETTER below.
@@ -3371,13 +2921,7 @@ def audit_repo(entry, spec, branch=None):
     db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
     db_text = contents_text(db)
     if db_text:
-        declared = set(
-            re.findall(
-                r'^[ \t]*-?[ \t]*package-ecosystem:[ \t]*["\']?([\w-]+)',
-                db_text,
-                re.MULTILINE,
-            )
-        )
+        declared = dependabot_ecosystems(db_text)
         implied = {}
         workflows = gh(f"repos/{slug}/contents/.github/workflows?ref={ground}", ok404=True)
         if isinstance(workflows, list) and any(

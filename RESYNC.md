@@ -54,7 +54,7 @@ Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, an
 uv run --no-project --script spec/audit.py "<Repo>"                    # the deterministic findings, read at main
 uv run --no-project --script spec/audit.py --branch "<ref>" "<Repo>"   # the same, read at a named ref, for convergence still in flight
 uv run --no-project --script spec/audit.py --issue "<Repo>"            # audits again and renders that run as an issue ready to file, so it can differ from the line above
-python3 spec/fidelity_honesty.py --report         # regenerate reports/divergences.md before using it as a work list
+uv run --no-project --script spec/fidelity_honesty.py --report         # regenerate reports/divergences.md before using it as a work list
 ```
 
 **The branch is `main`, and the registry field naming it is not a choice a resync makes.** The runner reads the repository's `groundTruthBranch`, and [`AUDIT.md`][audit] section 1 owns what that value may be: `main` is the released and gated state for **both** workflow models, so a field naming `develop` contradicts the procedure rather than configuring it. Every cataloged repository declares `main` or omits the field and takes it as the default, so the first line above reads `main` in every case today.

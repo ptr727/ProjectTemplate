@@ -62,11 +62,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# `spec/audit.py` is a script rather than a package module, and it imports its own sibling by bare name, so the spec directory has to be importable before it is.
+# `spec/carried_text.py` is a script-directory module rather than a package one, so the spec directory has to be importable before it is.
 sys.path.insert(0, str(ROOT / "spec"))
 
-import audit
 import build_dist
+import carried_text
 import carry
 import local_review
 
@@ -154,7 +154,7 @@ def decode(rel: str, data: bytes) -> str:
 def split_markdown(text: str) -> list[tuple[str | None, str]]:
     """`(heading, region)` pairs: the preamble under `None`, then one region per level-two heading.
 
-    Fence state comes from `spec/audit.py`'s own step function rather than a second reading of
+    Fence state comes from `spec/carried_text.py`'s step function rather than a second reading of
     CommonMark, so a `## ` shown inside a code sample cannot split a unit here while leaving the
     fidelity checks reading the document the other way. A document read two ways by two tools is
     the failure that helper was extracted to end.
@@ -166,7 +166,7 @@ def split_markdown(text: str) -> list[tuple[str | None, str]]:
     marker: str | None = None
     marker_len = 0
     for line in normalize(text).split("\n"):
-        marker, marker_len, boundary = audit._fence_step(line, marker, marker_len)
+        marker, marker_len, boundary = carried_text.fence_step(line, marker, marker_len)
         stripped = line.strip()
         if not boundary and marker is None and stripped.startswith("## "):
             regions.append((stripped[2:].strip(), [line]))
