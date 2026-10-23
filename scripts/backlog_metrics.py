@@ -2,8 +2,9 @@
 """Render a weekly backlog and review-cost report for the fleet's repositories.
 
 Why this exists: a weekly count of issues filed against closed, and of issues per merged pull
-request, shows the backlog's direction. Copilot review runs and the month's Copilot gross sit
-beside the merged pull requests. Review cost per merged pull request is read from the same report.
+request, shows the backlog's direction. Copilot review runs per merged pull request share that
+window. The month's Actions minutes and Copilot gross cover the calendar month to date instead.
+So the report prints them beside the window's counts rather than dividing them by its merges.
 
 The report goes to stdout only, so a server timer can mail it. Nothing here runs from a workflow.
 Counting and rendering are pure functions over parsed `gh` output, and `run_gh` is the one place
@@ -87,18 +88,22 @@ def count_with_label(items: Items, label: str) -> int:
 
 
 def count_by_label(items: Items, labels: Sequence[str]) -> dict[str, int]:
-    """Count per label, so an item carrying several labels counts under each."""
-    return {label: count_with_label(items, label) for label in labels}
+    """Count per label, so an item carrying several labels counts under each.
+
+    The named labels always appear, a zero included, and every other label an item carries follows.
+    """
+    found = set().union(*(label_names(item) for item in items)) - set(labels)
+    return {label: count_with_label(items, label) for label in [*labels, *sorted(found)]}
 
 
 def count_named(runs: Items, workflow: str) -> int:
     return sum(1 for run in runs if run.get("name") == workflow)
 
 
-def per_merged(opened: int, merged: int) -> str:
+def per_merged(count: int, merged: int) -> str:
     if merged == 0:
         return "n/a"
-    return f"{opened / merged:.1f}"
+    return f"{count / merged:.1f}"
 
 
 def compute_metrics(
@@ -159,6 +164,7 @@ HEADERS = (
     "Issues opened per merged PR (ratio)",
     "Workflow runs (count)",
     "Copilot review runs (count)",
+    "Copilot review runs per merged PR (ratio)",
 )
 
 
@@ -174,6 +180,7 @@ def table_rows(metrics: Sequence[RepoMetrics]) -> list[list[str]]:
             per_merged(m.opened, m.merged),
             str(m.runs),
             str(m.review_runs),
+            per_merged(m.review_runs, m.merged),
         ]
         for m in metrics
     ]
@@ -190,13 +197,14 @@ def table_rows(metrics: Sequence[RepoMetrics]) -> list[list[str]]:
             per_merged(opened, merged),
             str(sum(m.runs for m in metrics)),
             str(sum(m.review_runs for m in metrics)),
+            per_merged(sum(m.review_runs for m in metrics), merged),
         ]
     )
     return rows
 
 
 def label_line(m: RepoMetrics) -> str:
-    counts = ", ".join(f"{label} {m.open_by_label.get(label, 0)}" for label in LABELS)
+    counts = ", ".join(f"{label} {count}" for label, count in m.open_by_label.items())
     return f"{m.name}, open issues by label (count): {counts}"
 
 

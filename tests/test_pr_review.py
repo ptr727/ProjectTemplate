@@ -9948,9 +9948,10 @@ class TestCli(GqlCase):
 
     def test_a_feature_pull_request_with_no_round_is_never_requested(self) -> None:
         """Into a branch other than the default, the attested local pass alone covers the head."""
-        for attest, code, said in (
-            (False, 49, "status=AWAITING_LOCAL_PASS"),
-            (True, 0, "coverage=local"),
+        covered = "its head is covered by an attested local pass"
+        for attest, code, said, unsaid in (
+            (False, 49, "No attested local pass covers this head yet", covered),
+            (True, 0, covered, "No attested local pass covers this head yet"),
         ):
             with self.subTest(attest=attest):
                 self.out.seek(0)
@@ -9960,7 +9961,25 @@ class TestCli(GqlCase):
                 with mock.patch.object(pr_review.time, "sleep"):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
                 self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
-                self.assertIn(said, self.out.getvalue())
+                out = self.out.getvalue()
+                self.assertIn(said, out)
+                self.assertNotIn(unsaid, out)
+                self.assertEqual(not attest, "Run attest once" in out)
+                self.assertIn("status=AWAITING_LOCAL_PASS" if code else "coverage=local", out)
+
+    def test_an_attested_head_copilot_refused_is_not_called_covered(self) -> None:
+        """The refusal defeats the local cover, so the note matches the verdict rather than the attestation."""
+        self.answer(self.into(payload([review(body=REFUSED)]), attest=True))
+        self.wire_history([])
+        with mock.patch.object(pr_review.time, "sleep"):
+            code = self.cli(["wait", "7", "--ignore-quota-signal", "--timeout", "0"])
+        out = self.out.getvalue()
+        self.assertEqual(41, code)
+        self.assertIn("No attested local pass covers this head yet", out)
+        self.assertIn("a Copilot refusal on this head overrules it", out)
+        self.assertNotIn("Run attest once", out)
+        self.assertNotIn("its head is covered by an attested local pass", out)
+        self.assertNotIn("coverage=local", out)
 
     def test_status_reads_a_feature_pull_request_with_no_round_from_its_attestation(
         self,

@@ -63,7 +63,18 @@ class CountingTests(unittest.TestCase):
         self.assertEqual(result.open_by_label["bug"], 2)
         self.assertEqual(result.open_by_label["script"], 1)
         self.assertEqual(result.open_by_label["prose"], 0)
-        self.assertEqual(set(result.open_by_label), set(bm.LABELS))
+        self.assertEqual(list(result.open_by_label)[: len(bm.LABELS)], list(bm.LABELS))
+
+    def test_a_label_outside_the_named_set_is_counted_after_it(self) -> None:
+        open_now = [issue("comments"), issue("agents", "bug"), issue("handoff", "skills")]
+        result = bm.compute_metrics("alpha", [], [], open_now, [], [])
+        self.assertEqual(list(result.open_by_label)[len(bm.LABELS) :], ["agents", "comments"])
+        self.assertEqual(result.open_by_label["comments"], 1)
+        self.assertEqual(result.open_by_label["pre-existing"], 0)
+        self.assertNotIn("skills", result.open_by_label)
+        line = bm.label_line(result)
+        self.assertIn("pre-existing 0", line)
+        self.assertTrue(line.endswith("agents 1, comments 1"))
 
     def test_review_runs_match_the_workflow_name_exactly(self) -> None:
         runs = [
@@ -149,13 +160,16 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(total[1], "7")
         self.assertEqual(total[6], "3.5")
         self.assertEqual(total[7], "15")
+        self.assertEqual(total[9], "2.0")
 
     def test_markdown_has_dates_once_units_and_label_lines(self) -> None:
         text = bm.render_markdown(self.START, self.END, self.fixtures(), ["Billing line"])
         self.assertEqual(text.count("2026-01-01"), 1)
         self.assertIn("2026-01-08", text)
         self.assertIn("Issues opened per merged PR (ratio)", text)
-        self.assertIn("| beta | 3 | 2 | 1 | 6 | 0 | n/a | 5 | 1 |", text)
+        self.assertIn("Copilot review runs per merged PR (ratio)", text)
+        self.assertIn("| alpha | 4 | 2 | 1 | 6 | 2 | 2.0 | 10 | 3 | 1.5 |", text)
+        self.assertIn("| beta | 3 | 2 | 1 | 6 | 0 | n/a | 5 | 1 | n/a |", text)
         self.assertIn("alpha, open issues by label (count): pre-existing 0", text)
         self.assertIn("- Billing line", text)
 
