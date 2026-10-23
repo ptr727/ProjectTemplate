@@ -156,6 +156,25 @@ def comment(
     return {"author": {"login": login}, "createdAt": at, "body": body}
 
 
+def unplaced(finding: str = "The retry bound is off by one.") -> str:
+    """A marked overview carrying a collapsed section the vocabulary has no spelling for."""
+    return (
+        f"{OVERVIEW}\n<details>\n<summary>Confidence notes (1)</summary>\n\n{finding}\n"
+        f"</details>\n\n{COVERED}"
+    )
+
+
+def ack(fp: str, association: str, text: str | None = None) -> dict:
+    """A conversation comment acknowledging the unplaced set under `fp`, by `association`."""
+    written = f"Fixed in abc1234: the bound.\n\n{pr_review.adapter.ack_marker(fp)}"
+    return {
+        "author": {"login": "maintainer"},
+        "authorAssociation": association,
+        "createdAt": LATE,
+        "body": written if text is None else text,
+    }
+
+
 def overview_v2(
     open_count: str = "2 open findings",
     covers: str = "<!-- fleet-review: reviewed=1 changed=1 findings=2 -->",
@@ -1993,13 +2012,15 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("shapes=NOTED ", self.out.getvalue())
         self.assertIn(f"round {OLD[:8]}: the body carries no", self.out.getvalue())
 
-    def test_a_body_the_reader_trips_on_is_a_note_and_never_a_refusal(self) -> None:
+    def test_a_body_the_reader_trips_on_holds_and_is_never_a_refusal(self) -> None:
         with mock.patch.object(pr_review.adapter, "_read", side_effect=ValueError("boom")):
-            self.assertEqual(0, self.status(payload([review(body="odd body")], files=["a.py"])))
+            self.assertEqual(50, self.status(payload([review(body="odd body")], files=["a.py"])))
         out = self.out.getvalue()
         self.assertIn("review_on_head=yes ", out)
         self.assertIn("refusal=no ", out)
+        self.assertIn("shapes=HELD ", out)
         self.assertIn("the reader failed on this body (ValueError)", out)
+        self.assertIn("      odd body", out)
         self.assertIn("COVERAGE IS UNKNOWN: the reader failed on this body (ValueError)", out)
 
     def test_a_flagging_verdict_that_counts_nothing_exits_fifty(self) -> None:
@@ -2083,12 +2104,74 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.status(payload([review()], comments=[summary], files=["a.py"]))
         self.assertNotIn("qodo_open", self.out.getvalue())
 
-    def test_an_unrecognized_shape_is_a_note_and_never_an_exit(self) -> None:
-        odd = "## Pull request overview\n\nThe change is narrow.\n\n" + COVERED
-        self.assertEqual(0, self.status(payload([review(body=odd)], files=["a.py"])))
+    def test_an_unrecognized_shape_on_the_head_holds_with_its_text_and_fingerprint(self) -> None:
+        pr = payload([review(body=unplaced())], files=["a.py"])
+        self.assertEqual(50, self.status(pr))
         out = self.out.getvalue()
-        self.assertIn("shapes=NOTED ", out)
-        self.assertIn("REVIEWER OUTPUT NOTED (1)", out)
+        hold = pr_review.shape_hold(pr)
+        assert hold is not None
+        self.assertRegex(hold[0], r"^[0-9a-f]{12}$")
+        self.assertIn("shapes=HELD ", out)
+        self.assertIn(f"UNPLACED ON THE HEAD (fingerprint={hold[0]})", out)
+        self.assertIn("a collapsed section this reader has no spelling for", out)
+        self.assertIn("      The retry bound is off by one.", out)
+        self.assertIn(f"--fingerprint {hold[0]} --body <outcomes>", out)
+        self.assertIn("status=UNPLACED_PARTS_UNACKNOWLEDGED", out)
+        self.assertNotIn("REVIEWER OUTPUT NOTED", out)
+
+    def test_an_acknowledgment_by_an_owner_member_or_collaborator_clears_the_hold(self) -> None:
+        fp = self.fingerprint(unplaced())
+        for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+            with self.subTest(association=association):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = payload(
+                    [review(body=unplaced())], comments=[ack(fp, association)], files=["a.py"]
+                )
+                self.assertEqual(0, self.status(pr))
+                out = self.out.getvalue()
+                self.assertIn("shapes=ACKNOWLEDGED ", out)
+                self.assertIn(f"UNPLACED ON THE HEAD (fingerprint={fp})", out)
+                self.assertNotIn("The retry bound is off by one.", out)
+                self.assertNotIn("status=UNPLACED_PARTS_UNACKNOWLEDGED", out)
+
+    def test_an_acknowledgment_by_a_non_member_does_not_clear_the_hold(self) -> None:
+        fp = self.fingerprint(unplaced())
+        for association in ("CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "NONE", ""):
+            with self.subTest(association=association):
+                pr = payload(
+                    [review(body=unplaced())], comments=[ack(fp, association)], files=["a.py"]
+                )
+                self.assertEqual(50, self.status(pr))
+                self.assertIn("shapes=HELD ", self.out.getvalue())
+
+    def test_a_marker_with_no_outcome_or_inside_a_fence_does_not_clear_the_hold(self) -> None:
+        marker = pr_review.adapter.ack_marker(self.fingerprint(unplaced()))
+        for text in (marker, f"Fixed in abc1234.\n\n```text\n{marker}\n```"):
+            with self.subTest(text=text):
+                pr = payload(
+                    [review(body=unplaced())],
+                    comments=[ack("", "OWNER", text=text)],
+                    files=["a.py"],
+                )
+                self.assertEqual(50, self.status(pr))
+
+    def test_a_new_head_with_new_unplaced_text_holds_again(self) -> None:
+        old = unplaced("The retry bound is off by one.")
+        new = unplaced("The timeout is read before it is set.")
+        rounds = [review(oid=OLD, body=old, rid="A"), review(body=new, rid="B")]
+        pr = payload(rounds, comments=[ack(self.fingerprint(old), "OWNER")], files=["a.py"])
+        self.assertEqual(50, self.status(pr))
+        out = self.out.getvalue()
+        self.assertIn("shapes=HELD ", out)
+        self.assertIn("      The timeout is read before it is set.", out)
+        self.assertIn(f"round {OLD[:8]}: a collapsed section", out)
+        self.assertNotEqual(self.fingerprint(old), self.fingerprint(new))
+
+    def fingerprint(self, text: str) -> str:
+        hold = pr_review.shape_hold(payload([review(body=text)]))
+        assert hold is not None
+        return hold[0]
 
     def test_a_wait_on_a_drifted_login_ends_on_forty(self) -> None:
         drifted = review(login="copilot-pull-request-reviewer-v2")
@@ -4360,6 +4443,36 @@ class TestCommentConfirmsItsTargetAndResult(CommentCase):
             self.assertEqual(64, self.run_comment())
         self.assertEqual([], self.calls)
         self.assertIn("OUT_OF_SCOPE", self.out.getvalue())
+
+
+class TestCommentAcknowledgesAnUnplacedSet(CommentCase):
+    def target(self) -> dict:
+        return {**payload([review(body=unplaced())], files=["a.py"]), "url": COMMENT["url"]}
+
+    def run_ack(self, fp: str) -> int:
+        return pr_review.main(
+            ["comment", "7", "--repo", "o/r", "--fingerprint", fp, "--body", COMMENT_BODY]
+        )
+
+    def test_the_outcomes_post_with_the_marker_for_the_fingerprint_the_head_holds(self) -> None:
+        hold = pr_review.shape_hold(self.target())
+        assert hold is not None
+        sent = f"{COMMENT_BODY}\n\n<!-- fleet-shape-ack: fingerprint={hold[0]} -->"
+        self.wire(self.target(), {**COMMENT, "body": sent})
+        self.assertEqual(0, self.run_ack(hold[0]))
+        mutation = next((v for q, v in self.calls if "addComment" in q))
+        self.assertEqual(sent, mutation["body"])
+        self.assertTrue(pr_review.adapter.acknowledges(sent, hold[0]))
+
+    def test_a_fingerprint_the_head_does_not_hold_writes_nothing(self) -> None:
+        self.wire(self.target())
+        self.assertEqual(69, self.run_ack("0" * 12))
+        self.assertFalse(any("addComment" in query for query, _ in self.calls))
+        self.assertIn("status=FINGERPRINT_NOT_HELD", self.out.getvalue())
+
+    def test_the_fingerprint_belongs_to_comment_alone(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            pr_review.main(["status", "7", "--repo", "o/r", "--fingerprint", "0" * 12])
 
 
 LANDED = {"id": "c1", "url": "https://github.com/o/r/pull/7#discussion_r1", "body": "Fixed in abc."}

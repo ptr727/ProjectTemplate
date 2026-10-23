@@ -101,7 +101,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - Every review thread on the promotion is resolved, and every check passes.
    - `coverage=none` is the only reason `pr_review.py` does not report the promotion ready, read
      from the digest's lines. A `VERDICT WITH NO COUNTED FINDING` headline, exit `50`, is a second
-     reason until it is answered under item 3, and not after.
+     reason until it is answered under item 3, and not after. A `shapes=HELD` hold is another
+     until its acknowledgment posts under item 4.
 
    The merge then runs with `--match-head-commit` set to the head those were checked on. The
    evidence names each constituent pull request and how its coverage was stated. An
@@ -170,12 +171,22 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    the review round, and the list's length where it states the block's `(N)` count. A line under
    a heading that outcome 4 of that section names is not on that list. It is already its
    finding's outcome, and owes only the pointer that outcome names.
-4. Every part of the review the tooling could not read was read by hand (an unrecognized
-   heading, a moved section, an unfamiliar label). The digest marks one `shapes=NOTED` and names
-   each under `REVIEWER OUTPUT NOTED`, and decides no exit code on it, so this item is read from
-   the digest rather than the exit. Read the body for what that part says, give any finding in it
-   item 3's outcome, and file an issue on the hub naming the spelling to add to its
-   `scripts/reviewers/` vocabulary, rather than guessing what the new wording probably meant.
+4. Every part of a round covering the head that the tooling could not place is answered. The
+   digest prints each such part's text under `UNPLACED ON THE HEAD` with a fingerprint for the
+   set and reads `shapes=HELD`, and `status` and `wait` exit `50`.
+   - Read each excerpt and give every item in it item 3's outcome: fixed with its SHA, declined
+     with evidence, or listed as pre-existing in the pull request body.
+   - Post the outcomes as the acknowledgment, with `pr_review.py comment <number> --repo
+     <owner>/<repo> --fingerprint <fp> --body <outcomes>`. One from an owner, member, or
+     collaborator clears the hold, `shapes=ACKNOWLEDGED`. A new head carrying new unplaced text
+     has a new fingerprint and owes a new acknowledgment.
+   - The spelling is a data edit to the matching `scripts/reviewers/*.json` in the hub plus one
+     fixture, in a pull request of its own by whoever acknowledged the part, never an issue.
+   - An item that reads as neither a finding nor not one goes to the maintainer with its raw text
+     quoted, per "Escalate to the maintainer when" below.
+
+   A part on an earlier round prints under `REVIEWER OUTPUT NOTED`, `shapes=NOTED`, and decides
+   no exit code, so it is read by hand and any finding in it takes item 3's outcome.
 5. The maintainer has given **explicit** permission to merge.
 
 The agent never merges on its own. A green or CLEAN PR with one open finding is not mergeable,
@@ -399,6 +410,8 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
   change), don't keep silently re-declining it.
 - A finding is judged real but should not be fixed. That decision is never the agent's alone.
 - An architectural redesign is proposed rather than a bug fix.
+- An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
+  or not. Quote its raw text in the escalation.
 
 An agent that cannot reach the maintainer directly, a dispatched subagent being the ordinary case,
 escalates to whoever dispatched it and stops that unit of work there. It never substitutes its own

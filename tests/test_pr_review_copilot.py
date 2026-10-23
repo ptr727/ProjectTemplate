@@ -425,6 +425,55 @@ class TestNotes(unittest.TestCase):
         self.assertEqual("unknown", found.coverage)
         self.assertEqual("none", found.refusal)
         self.assertEqual(("the reader failed on this body (ValueError)",), found.notes)
+        self.assertEqual(("anything",), tuple(p.text for p in found.unplaced))
+
+
+class TestUnplaced(unittest.TestCase):
+    def test_each_unplaced_part_carries_its_own_text(self) -> None:
+        odd = (
+            "<details>\n<summary>Confidence notes (2)</summary>\n\nHidden finding.\n</details>\n\n"
+            "### Confidence assessment\n\nThe loop may not end.\n\n**Risk level:**\n\nLow."
+        )
+        parts = {p.note: p.text for p in adapter.read(body(sections=odd)).unplaced}
+        self.assertEqual(3, len(parts))
+        texts = list(parts.values())
+        self.assertTrue(any("Hidden finding." in t and "<summary>" in t for t in texts))
+        self.assertTrue(any(t.startswith("### Confidence assessment") for t in texts))
+        self.assertTrue(any("The loop may not end." in t for t in texts))
+
+    def test_a_body_in_another_layout_is_unplaced_whole(self) -> None:
+        text = "## Pull request overview\n\nThe change is narrow."
+        self.assertEqual((text,), tuple(p.text for p in adapter.read(text).unplaced))
+
+    def test_an_empty_body_and_a_placed_body_leave_nothing_unplaced(self) -> None:
+        self.assertEqual((), adapter.read("").unplaced)
+        self.assertEqual((), adapter.read(body(sections=open_section())).unplaced)
+
+    def test_the_fingerprint_is_short_stable_and_named_by_the_text(self) -> None:
+        a, b = adapter.Unplaced("one", "first part"), adapter.Unplaced("two", "second part")
+        fp = adapter.fingerprint([a, b])
+        self.assertRegex(fp, r"^[0-9a-f]{12}$")
+        self.assertEqual(fp, adapter.fingerprint([b, a]))
+        self.assertNotEqual(fp, adapter.fingerprint([a, b._replace(text="second part.")]))
+
+    def test_an_excerpt_is_bounded_in_lines_and_width(self) -> None:
+        text = "\n".join(["x" * 500] + [f"line {n}" for n in range(40)])
+        shown = adapter.excerpt(text)
+        self.assertEqual(adapter.EXCERPT_LINES + 1, len(shown))
+        self.assertTrue(shown[0].endswith("x..."))
+        self.assertLessEqual(len(shown[0]), adapter.EXCERPT_WIDTH + 10)
+        self.assertIn("29 more lines in the body", shown[-1])
+
+    def test_an_acknowledgment_needs_its_marker_outside_a_fence_and_prose_beside_it(self) -> None:
+        marker = adapter.ack_marker("0123456789ab")
+        for text, want in (
+            (f"Declined: the path is unreachable.\n\n{marker}", True),
+            (marker, False),
+            (f"Fixed in abc1234.\n\n```\n{marker}\n```", False),
+            (f"Fixed in abc1234.\n\n{adapter.ack_marker('ba9876543210')}", False),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(want, adapter.acknowledges(text, "0123456789ab"))
 
     def test_a_pathological_body_reads_in_bounded_time(self) -> None:
         for text in ("<details>" * 5000, "> " * 20000 + "x", "`" * 30000, "\u00a0" * 30000):
