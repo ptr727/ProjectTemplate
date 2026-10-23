@@ -399,7 +399,7 @@ text says, because the harm it covers was never in the text.
    A leading one is read as above. A value of `GIT_DIR`, `GIT_WORK_TREE`, `--git-dir`, or
    `--work-tree` may hold a run-time word other than `$HOME`. A subcommand this requirement
    denies is then denied, since that value names no checkout the hook can resolve.
-   Unlike those values, a quoted `-C` value holding such a word, as in `git -C "$D" reset --hard`, fails open here, since it names no repository ([issue #3382][issue-3382]).
+   A quoted `-C` value holding such a word, as in `git -C "$D"`, fails open instead, read as a literal path resolving no repository ([issue #3382][issue-3382]).
    A subcommand this requirement denies, named in wrappers nested past the reading cap, is denied
    wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
