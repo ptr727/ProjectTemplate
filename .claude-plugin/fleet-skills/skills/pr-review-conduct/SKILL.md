@@ -252,7 +252,8 @@ Run `local-strict-review` against the branch's current diff before every push th
 3. Request a Copilot round at one defined moment only: the head of a pull request into the default
    branch, a promotion among them. Auto-trigger is unreliable, so request it explicitly, which
    step 4's `wait` is what does. On a pull request into any other branch, `wait` requests nothing
-   and reads step 1's attestation as `coverage=local`. Pass `wait --request` where a change
+   and reads step 1's attestation as `coverage=local`, unless a partial round or a truncated review
+   history is on record. Pass `wait --request` where a change
    deserves a Copilot round anyway. `wait` also skips the request where
    a review already covers the head, where the answer came outside a formal review, where it detects
    drift, under a quota or error refusal, and where something is already in the request set, which
