@@ -8,6 +8,8 @@ shell wait carrying no bound. Reads and everything that is not a clear write pas
 the requirements this implements, stated once, agent-agnostic, and for how to audit this file against
 them.
 
+It bounds a good-faith agent's mistake rather than an adversary, so host-setup/agent-safety/README.md "Why This Exists" scopes which parse gaps it covers.
+
 Precision over recall for the write-footgun shapes (1-3), the primary-checkout shape (6), and the
 unbounded-wait shape (7): they deny the specific shapes that caused an incident, not everything unparseable, since a false deny would break the
 agent, and a miss still falls under the GOVERNANCE.md "Repository Boundaries and Write Safety" prose

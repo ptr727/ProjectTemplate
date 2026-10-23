@@ -1,45 +1,59 @@
 #!/usr/bin/env python3
-"""The session handoff chain - one open issue per track, each link naming the one before it.
+"""The session handoff chain - one standing issue per track, its body the current handoff.
 
-Why this exists: a handoff written to a file fails in ways that a chained issue does not. The
-file is not found where the next session looks. More than one candidate is found and nothing says
-which is current. And there is no history, so a later round re-runs a path an earlier round already
-tried and already wrote down. The value of a handoff is the record of what has been attempted, and
-one overwritten file on one machine is the shape that cannot hold it. See the `session-handoff`
-Skill for what belongs in a handoff, and GOVERNANCE.md "Hub-Hosted Tooling" for why this is reached
-from a hub checkout rather than carried.
+Why this exists: a handoff written to a file fails in ways that an issue does not. The file is
+not found where the next session looks. More than one candidate is found and nothing says which is
+current. And there is no history, so a later round re-runs a path an earlier round already tried
+and already wrote down. The value of a handoff is the record of what has been attempted, and one
+overwritten file on one machine is the shape that cannot hold it. See the `session-handoff` Skill
+for what belongs in a handoff, and GOVERNANCE.md "Hub-Hosted Tooling" for why this is reached from
+a hub checkout rather than carried.
 
-The chain is machine-readable from one HTML comment on the body's last line, so a retitled or
-hand-edited issue still chains:
+A track holds one issue, created when the track starts and closed when its work is complete. Each
+session close replaces the body in place and bumps the round, after first appending the outgoing
+body to the same issue as a comment, so the track's history stays on one issue in order. An issue
+filed per session costs a create, a comment, and a close every round, and those links crowd out
+the issues that describe work.
+
+The issue is machine-readable from one HTML comment on the body's last line, so a retitled or
+hand-edited issue still reads:
 
   <!-- handoff: v1 track=<slug> round=<n> previous=<issue number or none> -->
+
+`previous=` names the closed issue the track continues from, an issue filed per session before
+the track's issue became a standing one, or a closed-out lane the track reopens, and `none`
+otherwise. It stays fixed while the round moves. Each archived round carries its own line:
+
+  <!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->
 
 The title is for humans and nothing parses it. The invariant a reader checks is that exactly one
 open issue carries the `handoff` label for a given track in a given repository, read from the
 metadata block rather than from the label, since an issue carrying the label and no block belongs
 to no readable track. Zero open is two states rather than one: a track that has never had a
-handoff, and a lane closed out whose newest link is closed. `new` chains onto the newest link
-either way. Two or more open on one track is a defect to report, never one to resolve by picking,
-so every command that would have to choose refuses and names both.
+handoff, and a lane closed out whose newest issue is closed. `new` continues from that closed
+issue where one exists. Two or more open on one track is a defect to report, never one to resolve
+by picking, so every command that would have to choose refuses and names both.
 
-A head resolved that way can still be one the chain has moved past, where another link already
-names it as predecessor, holds a higher round, or holds the same round. `new` refuses onto
-such a head, `link` does too bar the links already descending from `--new`, and `current`,
-`resume`, and `chain` answer from it with a notice naming each such link, since answering from it
-silently is how a search reads "no match" over text in the lane.
+A head resolved that way can still be one the track has moved past, where another issue already
+names it as predecessor, holds a higher round, or holds the same round. `new` and `close` refuse
+onto such a head, and `current`, `resume`, and `chain` answer from it with a notice naming each
+such issue, since answering from it silently is how a search reads "no match" over text in the
+lane.
 
 Subcommands
   current  The open handoff issue for a track, number and URL. Read-only.
-  resume   That issue's body, then a one-line index of the last N closed links. Read-only.
-  chain    Walk one track's `previous=` backwards and list each link, optionally only those
-           whose body matches a regular expression, which is how a session answers "has this
-           already been tried" without reading every round. A walk that stopped at `--limit`
-           names the link it stopped short of, since a capped search reading exactly like an
-           exhaustive one is the false "not tried yet" this exists to prevent. Read-only.
-  new      Create the next link, comment the forward link on the previous one, then close it,
-           in that order and with each step's own result printed.
-  link     Finish a chain that half-applied, so a failed `new` is recoverable without a second
-           issue.
+  resume   That issue's body, then a one-line index of the last N earlier rounds. Read-only.
+  chain    List one track's rounds newest first, the current body, then each archived round,
+           then the closed issue `previous=` names, optionally only those whose text matches a
+           regular expression, which is how a session answers "has this already been tried"
+           without reading every round. A walk that stopped at `--limit` names the round it
+           stopped short of, since a capped search reading exactly like an exhaustive one is the
+           false "not tried yet" this exists to prevent. Read-only.
+  new      Create the track's issue where it has none open. Otherwise append the outgoing body
+           as a comment, then replace the body and bump the round. Either way it prints the
+           issue number. A rerun after an interrupted run finishes it rather than repeating it.
+  close    Comment the track's outcome on its issue, then close it, which is the only way a
+           track ends.
   tracks   Every open handoff with its track and age, so an abandoned lane is visible rather
            than silently current. `--json` prints the same rows as one JSON array carrying
            number, title, track, labels, and updatedAt, read from the same issue connection.
@@ -62,7 +76,7 @@ Usage
   python3 scripts/handoff.py chain   --repo OWNER/NAME [--track T] [--limit N] [--grep PATTERN]
   python3 scripts/handoff.py new     --repo OWNER/NAME [--track T] --title S --body-file PATH
                                      [--create-label]
-  python3 scripts/handoff.py link    --repo OWNER/NAME --new N --previous N
+  python3 scripts/handoff.py close   --repo OWNER/NAME [--track T] --body-file PATH
   python3 scripts/handoff.py tracks  --repo OWNER/NAME [--json]
 
 Every subcommand takes `--repo`, with no default, for the reason `pr_review.py` requires one: an
@@ -77,7 +91,7 @@ label set does not belong on it. There the reads warn and answer as an empty cha
 missing the label refuses, a repository under another owner and an unregistered repository of the
 owner's that is not a fork among them.
 
-The two writing subcommands, `new` and `link`, are bounded whatever the label state, an
+The two writing subcommands, `new` and `close`, are bounded whatever the label state, an
 in-process refusal of the kind `pr_review.py` makes, with the owner read from the registry. They
 refuse a repository under another owner before any call, and an unregistered repository of the
 owner's unless it is a fork, since these writes run as subprocesses a write guard on the caller
@@ -98,6 +112,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as graphql
+from carry import normalize_eol
 
 # The label is the chain's index.
 # Finding a link by label rather than by title search is what frees the title.
@@ -118,7 +133,6 @@ READS = frozenset({"current", "resume", "chain", "tracks"})
 DEFAULT_TRACK = "default"
 
 # A track is a short kebab-case slug naming a lane of work.
-# Parallel lanes each name their own, so each closes its own predecessor.
 TRACK = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # One HTML comment, rendered invisible, carrying what a title must never be parsed for.
@@ -129,7 +143,15 @@ MARKER = re.compile(
     re.MULTILINE,
 )
 
+ROUND_MARK = re.compile(
+    r"^<!--\s*handoff-round:\s*v1\s+track=(?P<track>[a-z0-9]+(?:-[a-z0-9]+)*)\s+"
+    r"round=(?P<round>[1-9]\d*)\s+closed=(?P<closed>\d{4}-\d{2}-\d{2})\s*-->[ \t]*\r?$",
+    re.MULTILINE,
+)
+
 TITLE = "Session Handoff [{track}]: {subject}"
+
+WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 # GitHub's own issue body limit is 65536 characters.
 # The hard cap sits under it, so a refusal names the handoff rather than the API.
@@ -158,7 +180,10 @@ query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!
     issues(labels: $labels, states: $states, first: $first, after: $after,
            orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
-      nodes { number title body state createdAt updatedAt url labels(first: 100) { nodes { name } } }
+      nodes {
+        number title body state createdAt updatedAt lastEditedAt url
+        labels(first: 100) { nodes { name } }
+      }
     }
   }
 }
@@ -168,7 +193,6 @@ query($owner: String!, $name: String!, $labels: [String!], $states: [IssueState!
 # The cut says how much it left, and the count is of characters, since that is what is measured.
 STDERR_CAP = 2000
 
-# How many closed links `resume` indexes and `chain` walks unless told otherwise.
 HISTORY = 5
 CHAIN_LIMIT = 20
 
@@ -439,6 +463,11 @@ def without_label(a: argparse.Namespace) -> int | None:
             f"{repo} has no handoff on track {a.track!r}. Zero is the state before the first "
             "handoff on a track, so `new` is what follows, not a retry of this."
         )
+    if a.cmd == "close":
+        raise Refusal(
+            f"{repo} is a fork outside the fleet and carries no `{LABEL}` label, so it holds no "
+            f"handoff on track {a.track!r} to close."
+        )
     if a.cmd == "new" and create:
         a.body = body_from(Path(a.body_file))
         print(f"0. create the `{LABEL}` label on {repo}, a fork outside the fleet")
@@ -475,6 +504,50 @@ def render_marker(track: str, round_: int, previous: int | None) -> str:
     return f"<!-- handoff: v1 track={track} round={round_} previous={previous or 'none'} -->"
 
 
+def round_text(body: str) -> str:
+    """A handoff's own text, without the metadata block, as two rounds are compared by."""
+    return MARKER.sub("", body or "").strip()
+
+
+def archive(body: str, track: str, round_: int, closed: str, title: str) -> str:
+    """The comment that keeps an outgoing round on the issue once its body is replaced.
+
+    The heading keeps the round's own title, since `new` replaces the title with the next one.
+    """
+    mark = f"<!-- handoff-round: v1 track={track} round={round_} closed={closed} -->"
+    heading = f"## Round {round_}, closed {closed}: {title}"
+    return f"{heading}\n\n{round_text(body)}\n\n{mark}\n"
+
+
+def archived_text(comment_body: str) -> str:
+    """The round text an `archive` comment holds, its heading and its mark taken off."""
+    text = ROUND_MARK.sub("", comment_body or "").strip()
+    first, _, rest = text.partition("\n")
+    return rest.strip() if first.startswith("## Round ") else text
+
+
+def rounds_of(comments: list[dict], track: str) -> list[dict]:
+    """The archived rounds on `track` among an issue's comments, newest first.
+
+    A comment carrying no mark is an ordinary comment, such as a parking note, and is not a
+    round. One carrying several is not a round either, since its round cannot be read. On a public
+    repository anyone can comment, so a mark counts only from an account with write access and
+    only on a comment nobody has hidden, which keeps an outsider from writing a round into the
+    track's history or blocking `new` with a conflicting one.
+    """
+    found = []
+    for row in comments:
+        if row.get("authorAssociation") not in WRITERS or row.get("isMinimized"):
+            continue
+        marks = list(ROUND_MARK.finditer(row.get("body") or ""))
+        if len(marks) == 1 and marks[0]["track"] == track:
+            heading = (row.get("body") or "").strip().partition("\n")[0]
+            _, _, title = heading.partition(": ")
+            found.append({**row, "mark": marks[0].groupdict(), "title": title})
+    found.reverse()
+    return found
+
+
 def with_marker(body: str, track: str, round_: int, previous: int | None) -> str:
     """`body` with the metadata block as its last line, replacing any block already in it.
 
@@ -489,8 +562,12 @@ def with_marker(body: str, track: str, round_: int, previous: int | None) -> str
     return f"{stripped}\n\n{render_marker(track, round_, previous)}\n"
 
 
-def issue(repo: str, number: int) -> dict:
-    """One issue read live, which is where every identifier a later write consumes comes from."""
+def issue(repo: str, number: int, *, comments: bool = False) -> dict:
+    """One issue read live, which is where every identifier a later write consumes comes from.
+
+    `comments` adds every comment, oldest first, which is where the archived rounds sit.
+    """
+    wanted = "number,title,body,state,createdAt,closedAt,updatedAt,url,labels"
     data = gh_json(
         [
             "issue",
@@ -499,11 +576,13 @@ def issue(repo: str, number: int) -> dict:
             "--repo",
             repo,
             "--json",
-            "number,title,body,state,createdAt,closedAt,updatedAt,url,labels",
+            f"{wanted},comments" if comments else wanted,
         ]
     )
     if not isinstance(data, dict):
         raise Execution(f"issue #{number} in {repo} did not read as an object")
+    if comments:
+        rows_of(data.get("comments"), f"comment list of #{number} in {repo}", "body")
     return data
 
 
@@ -632,11 +711,17 @@ def current_or_refuse(repo: str, track: str) -> tuple[dict, list[str]]:
     return found, head_doubts(found, track_links(repo, track, rows))
 
 
-def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str | None]:
-    """The chain from `start` backwards along `previous=`, at most `limit` links.
+def walk(
+    repo: str, start: int, limit: int, cap: str, *, skip_body: bool = False
+) -> tuple[list[dict], str | None]:
+    """The track's rounds from issue `start` backwards, at most `limit` of them.
 
-    Returns the links and, where the walk ended anywhere but at a `previous=none`, a phrase saying
-    where and why. A caller that printed only the links could not tell a chain of four from the
+    Each issue gives its body, which is the round it holds now, then its archived rounds newest
+    first, and the walk then moves to the issue its block names as `previous=`. `skip_body` leaves
+    out the start issue's own body, for a caller that has printed it already.
+
+    Returns the rounds and, where the walk ended anywhere but at a `previous=none`, a phrase saying
+    where and why. A caller that printed only the rounds could not tell a chain of four from the
     first four of forty, and a search reporting no match over a walk that stopped early is the
     false "not tried yet" this whole mechanism exists to prevent.
 
@@ -662,7 +747,7 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
             return links, f"the {cap} cap of {limit}, with #{number} and earlier unread"
         seen.add(number)
         try:
-            data = issue(repo, number)
+            data = issue(repo, number, comments=True)
         except Execution as exc:
             return links, f"#{number}, which could not be read: {exc}"
         if LABEL not in {row["name"] for row in data.get("labels") or []}:
@@ -676,12 +761,30 @@ def walk(repo: str, start: int, limit: int, cap: str) -> tuple[list[dict], str |
             data["marker"] = None
             links.append(data)
             return links, f"#{number}, whose block cannot be read: {exc}"
-        links.append(data)
+        if not (skip_body and number == start):
+            links.append(data)
         marker = data["marker"]
         if marker is None:
             return links, (
                 f"#{number}, whose body carries no metadata block, so nothing names what "
                 "precedes it"
+            )
+        for row in rounds_of(data["comments"], marker["track"]):
+            if len(links) >= limit:
+                return links, (
+                    f"the {cap} cap of {limit}, with round {row['mark']['round']} of #{number} "
+                    "and earlier unread"
+                )
+            links.append(
+                {
+                    "number": data["number"],
+                    "title": row["title"],
+                    "state": "ROUND",
+                    "createdAt": row["mark"]["closed"],
+                    "url": row.get("url"),
+                    "body": row["body"],
+                    "marker": {**marker, "round": row["mark"]["round"]},
+                }
             )
         if marker["previous"] == "none":
             return links, None
@@ -699,11 +802,12 @@ def day(stamp: str | None) -> str:
 
 
 def describe(link: dict) -> str:
-    """One walked link as a line, carrying its own track.
+    """One walked round as a line, carrying its own track.
 
     The track is printed rather than assumed from the track the walk started on, because `walk`
-    follows each marker's `previous=` and nothing stops a hand-edited link naming a
-    predecessor on another lane. Printing it is what makes that visible to the reader.
+    follows each marker's `previous=` and nothing stops a hand-edited issue naming a
+    predecessor on another lane. Printing it is what makes that visible to the reader. An
+    archived round reads `ROUND` in the state column and its close date in the date column.
     """
     marker = link.get("marker")
     round_ = f"{marker['track']} round {marker['round']}" if marker else "unmarked"
@@ -738,10 +842,10 @@ def body_from(path: Path) -> str:
             "cutting them.",
             file=sys.stderr,
         )
-    if MARKER.search(text):
+    if MARKER.search(text) or ROUND_MARK.search(text):
         raise Refusal(
-            "the body file already carries a handoff metadata block. This appends its own, and two "
-            "blocks make the track unreadable. Remove it and let the chain write it."
+            "the body file already carries a handoff metadata block or round mark. This writes its "
+            "own, and two make the track unreadable. Remove it and let the chain write it."
         )
     return text
 
@@ -797,10 +901,15 @@ def create(repo: str, title: str, body: str, dry_run: bool) -> int | None:
 
 
 def comment(repo: str, number: int, text: str, dry_run: bool) -> None:
-    """Post one comment and confirm it by the URL the write returns."""
-    out = gh(
-        ["issue", "comment", str(number), "--repo", repo, "--body", text], dry_run=dry_run
-    ).strip()
+    """Post one comment and confirm it by the URL the write returns.
+
+    The text goes through a file, since an archived round can exceed a Windows command line.
+    """
+    with body_arg(text, dry_run) as path:
+        out = gh(
+            ["issue", "comment", str(number), "--repo", repo, "--body-file", path],
+            dry_run=dry_run,
+        ).strip()
     if dry_run:
         return
     if "/issues/" not in out:
@@ -824,14 +933,26 @@ def close(repo: str, number: int, dry_run: bool) -> None:
         )
 
 
-def edit_body(repo: str, number: int, body: str, dry_run: bool) -> None:
+def same_text(left: str, right: str) -> bool:
+    """Whether two bodies read alike once line endings and surrounding blank space are set aside."""
+    return normalize_eol(left).strip() == normalize_eol(right).strip()
+
+
+def edit_issue(repo: str, number: int, title: str, body: str, dry_run: bool) -> None:
+    """Replace one issue's title and body, and confirm the body by reading it back."""
     with body_arg(body, dry_run) as path:
         out = gh(
-            ["issue", "edit", str(number), "--repo", repo, "--body-file", path],
+            ["issue", "edit", str(number), "--repo", repo, "--title", title, "--body-file", path],
             dry_run=dry_run,
         ).strip()
-    if not dry_run:
-        print(f"  body updated: {out or f'#{number}'}")
+    if dry_run:
+        return
+    print(f"  body updated: {out or f'#{number}'}")
+    if not same_text(issue(repo, number).get("body") or "", body):
+        raise Execution(
+            f"#{number}'s body does not read back as the one just written, so the edit is not "
+            "confirmed. A write that appears to have failed is verified, never assumed harmless."
+        )
 
 
 def cmd_current(a: argparse.Namespace) -> int:
@@ -851,18 +972,15 @@ def cmd_resume(a: argparse.Namespace) -> int:
     print(f"# {found['url']}")
     print()
     print((found.get("body") or "").rstrip())
-    marker = found["marker"]
-    previous = None if marker["previous"] == "none" else int(marker["previous"])
     print()
-    print(f"## Chain history, last {a.history} closed links")
-    if previous is None:
-        print("(none - this is the first handoff on this track)")
-    else:
-        links, stopped = walk(a.repo, previous, a.history, "--history")
-        for link in links:
-            print(describe(link))
-        if stopped is not None:
-            print(f"(index stopped at {stopped})")
+    print(f"## Earlier rounds, last {a.history}")
+    links, stopped = walk(a.repo, found["number"], a.history, "--history", skip_body=True)
+    if not links and stopped is None:
+        print("(none - this is the first round on this track)")
+    for link in links:
+        print(describe(link))
+    if stopped is not None:
+        print(f"(index stopped at {stopped})")
     if doubts:
         print(doubt_notice(found, a.track, doubts))
     return 0
@@ -893,14 +1011,18 @@ def cmd_chain(a: argparse.Namespace) -> int:
         shown += 1
         print(describe(link))
     if pattern is not None:
-        print(f"{shown} of {len(links)} links walked match /{a.grep}/")
-    strayed = [link for link in links if link["marker"] and link["marker"]["track"] != a.track]
+        print(f"{shown} of {len(links)} rounds walked match /{a.grep}/")
+    strayed = {
+        link["number"]: link["marker"]["track"]
+        for link in links
+        if link["marker"] and link["marker"]["track"] != a.track
+    }
     if strayed:
-        listed = ", ".join(f"#{link['number']} on {link['marker']['track']}" for link in strayed)
+        listed = ", ".join(f"#{number} on {track}" for number, track in strayed.items())
         print(f"(the walk left track {a.track!r}: {listed})")
     if stopped is not None:
         print(
-            f"(the walk stopped at {stopped}, so it read {len(links)} link(s) rather than the "
+            f"(the walk stopped at {stopped}, so it read {len(links)} round(s) rather than the "
             "chain, and a search over it is not a search over the chain)"
         )
     if doubts:
@@ -1033,15 +1155,17 @@ def cmd_tracks(a: argparse.Namespace) -> int:
 
 
 def cmd_new(a: argparse.Namespace) -> int:
-    """Create, then comment the forward link, then close, in that order.
+    """Create the track's issue, or archive its outgoing round and replace the body in place.
 
-    Creating first means a failure at any later step leaves a discoverable new issue rather than a
-    closed chain with no successor, and `link` finishes what a failure interrupted.
+    The archive comment is written before the body is replaced, so a failure between the two
+    leaves the outgoing round both archived and still in the body rather than in neither. A rerun
+    then finds that round archived and only replaces the body, and a rerun after a run that wrote
+    everything finds the body already current and writes nothing.
 
-    The read of the predecessor and the create that follows it are not serialized, so two sessions
-    filing on one track at once both resolve the same predecessor and both create. That leaves the
-    two open handoffs every later command refuses over, which is detectable rather than silent, and
-    naming a track per lane is what keeps two sessions off one chain in the first place.
+    The read of the head and the writes that follow it are not serialized, so two sessions closing
+    on one track at once can both archive the same round. The body is re-read immediately before
+    it is replaced, and a change since the archive refuses rather than overwriting text nobody here
+    has seen. Naming a track per lane is what keeps two sessions off one issue in the first place.
 
     After `--create-label` the chain is empty by construction, since a label this run just created
     sits on no issue yet, so no chain read is made, which also keeps a dry run from querying a label
@@ -1050,51 +1174,142 @@ def cmd_new(a: argparse.Namespace) -> int:
     body = getattr(a, "body", None)
     if body is None:
         body = body_from(Path(a.body_file))
+    title = TITLE.format(track=a.track, subject=a.title)
     closed = None
     if getattr(a, "fresh_label", False):
-        rows, previous = [], None
+        rows, head = [], None
     else:
         rows = open_handoffs(a.repo)
         require_marked(rows)
-        previous = on_track(rows, a.track)
-        closed = None if previous else read_closed(a.repo)
-        previous = previous or newest_closed(a.repo, a.track, closed)
-    previous_number = previous["number"] if previous else None
-    round_ = int(previous["marker"]["round"]) + 1 if previous else 1
+        head = on_track(rows, a.track)
+        closed = None if head else read_closed(a.repo)
+    previous = head or (None if closed is None else newest_closed(a.repo, a.track, closed))
     # A head can already have a successor, whatever key resolved it.
-    # An interrupted run does not reach here, since two open links refuse earlier as ambiguous.
     # A lane somebody edited by hand does reach it, on either side.
     # Filing onto such a head forks the lane there and loses the branch it skipped.
-    # The check runs before the create rather than after it.
-    # A refusal that leaves an issue behind is a refusal that changed something.
     if previous is not None:
         doubts = head_doubts(previous, track_links(a.repo, a.track, rows, closed))
         if doubts:
             raise Refusal(
                 cut(
-                    f"#{previous['number']} may not be the head of track {a.track!r}, so filing "
-                    f"another link onto it could fork the chain there. {' '.join(doubts)}"
+                    f"#{previous['number']} may not be the head of track {a.track!r}, so writing "
+                    f"the next round onto it could fork the chain there. {' '.join(doubts)}"
                 )
             )
-    title = TITLE.format(track=a.track, subject=a.title)
-    print(f"1. create the new handoff on track {a.track!r}, round {round_}")
-    number = create(a.repo, title, with_marker(body, a.track, round_, previous_number), a.dry_run)
-    if previous is None:
-        print(f"2. no previous handoff on track {a.track!r}, so nothing to link or close")
+    if head is None:
+        round_ = int(previous["marker"]["round"]) + 1 if previous else 1
+        since = int(previous["number"]) if previous else None
+        print(f"1. create the handoff issue for track {a.track!r}, round {round_}")
+        number = create(a.repo, title, with_marker(body, a.track, round_, since), a.dry_run)
+        print(f"#{number}" if number is not None else "(dry run, so no issue number yet)")
         return 0
-    settled = int(previous["number"])
-    print(f"2. comment the forward link on #{settled}")
-    comment(
-        a.repo,
-        settled,
-        f"Continued in #{number or '<the new issue>'}, round {round_} on track `{a.track}`.",
-        a.dry_run,
-    )
-    if previous["state"] == "CLOSED":
-        print(f"3. #{settled} is already closed, so the chain is finished")
+    return replace_round(a, head, title, body)
+
+
+def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> int:
+    """Archive the head's outgoing round as a comment, then write the next round over its body.
+
+    Every identifier written to is the head's own number, read in this run, and the outgoing body
+    archived is the one read immediately before, never one carried from earlier in the run.
+    """
+    number = int(head["number"])
+    fresh = issue(a.repo, number, comments=True)
+    outgoing = fresh.get("body") or ""
+    if not same_text(outgoing, head.get("body") or ""):
+        raise Refusal(
+            f"#{number}'s body changed since this run listed the track, so the round it would "
+            "archive is not the one it read. Re-run to work from the current text."
+        )
+    marker = head["marker"]
+    round_ = int(marker["round"])
+    if same_text(round_text(outgoing), body):
+        print(f"#{number} already holds this body as round {round_}, so nothing is written")
+        print(f"#{number}")
         return 0
-    print(f"3. close #{settled}")
-    close(a.repo, settled, a.dry_run)
+    previous = None if marker["previous"] == "none" else int(marker["previous"])
+    kept = [
+        row for row in rounds_of(fresh["comments"], a.track) if row["mark"]["round"] == str(round_)
+    ]
+    if len(kept) > 1:
+        raise Refusal(
+            f"#{number} archives round {round_} more than once, at "
+            f"{', '.join(str(row.get('url')) for row in kept)}. Hide every copy but one by hand, "
+            "so the track's history holds each round once."
+        )
+    if kept and any(
+        not same_text(archived_text(row["body"]), round_text(outgoing)) for row in kept
+    ):
+        raise Refusal(
+            f"#{number} already archives a round {round_} whose text differs from its body, at "
+            f"{kept[0].get('url')}. Two texts for one round is not something this can decide "
+            "between, so settle which one stands by hand."
+        )
+    if kept:
+        print(f"1. round {round_} is already archived at {kept[0].get('url')}, so not again")
+    else:
+        stamp = head.get("lastEditedAt") or head.get("createdAt") or fresh.get("createdAt")
+        print(f"1. archive round {round_} as a comment on #{number}")
+        title_then = fresh.get("title") or ""
+        comment(
+            a.repo, number, archive(outgoing, a.track, round_, day(stamp), title_then), a.dry_run
+        )
+    print(f"2. write round {round_ + 1} over the body of #{number}")
+    if not a.dry_run and not same_text(issue(a.repo, number).get("body") or "", outgoing):
+        raise Refusal(
+            f"#{number}'s body changed since this run archived it, and the next round replaces "
+            "the whole body. Re-run to work from the current text."
+        )
+    edit_issue(a.repo, number, title, with_marker(body, a.track, round_ + 1, previous), a.dry_run)
+    print(f"#{number}")
+    return 0
+
+
+def outcome_from(path: Path) -> str:
+    """The closing comment `close` posts, refused where it is empty or over the hard cap."""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise Refusal(f"could not read the outcome file {path}: {exc}") from exc
+    if not text:
+        raise Refusal("the outcome file is empty, and a track closes with its outcome stated.")
+    if ROUND_MARK.search(text):
+        raise Refusal(
+            "the outcome carries a handoff round mark, which would read as an archived round of "
+            "the track. Remove it."
+        )
+    size = len(text.encode("utf-8"))
+    if size > MAX_BYTES:
+        raise Refusal(f"the outcome is {size} bytes, over the {MAX_BYTES}-byte cap.")
+    return text
+
+
+def cmd_close(a: argparse.Namespace) -> int:
+    """Comment the track's outcome on its issue, then close it, which is how a track ends.
+
+    A rerun after the comment landed and the close did not finds the same text as the newest
+    comment and goes straight to the close rather than posting it twice.
+    """
+    text = outcome_from(Path(a.body_file))
+    found, doubts = current_or_refuse(a.repo, a.track)
+    if doubts:
+        raise Refusal(
+            cut(
+                f"#{found['number']} may not be the head of track {a.track!r}, so closing it "
+                f"could leave the track's real head open. {' '.join(doubts)}"
+            )
+        )
+    number = int(found["number"])
+    comments = issue(a.repo, number, comments=True)["comments"]
+    newest = comments[-1] if comments else {}
+    trusted = newest.get("authorAssociation") in WRITERS and not newest.get("isMinimized")
+    if trusted and same_text(newest.get("body") or "", text):
+        print(f"1. #{number}'s newest comment is this outcome already, so not again")
+    else:
+        print(f"1. comment the outcome on #{number}")
+        comment(a.repo, number, text, a.dry_run)
+    print(f"2. close #{number}")
+    close(a.repo, number, a.dry_run)
+    print(f"#{number}")
     return 0
 
 
@@ -1145,8 +1360,7 @@ def head_doubts(head: dict, lane: Lane) -> list[str]:
     round by issue number, so either can resolve a link the chain has already moved past. Three
     states show it: a link already naming it as predecessor, a link at a higher round, and another
     link at its own round. Answering from such a head is how a search reads "no match" over text
-    in the lane, so the reads print these, `new` refuses on them, and `link` does too bar the links
-    already descending from `--new`.
+    in the lane, so the reads print these, and `new` and `close` refuse on them.
     """
     number = int(head["number"])
     round_ = int(head["marker"]["round"])
@@ -1176,166 +1390,6 @@ def doubt_notice(head: dict, track: str, doubts: list[str]) -> str:
         f"(#{head['number']} may not be the head of track {track!r}, so this read may miss the "
         f"chain's newest links. {' '.join(doubts)})"
     )
-
-
-def successor_of(repo: str, track: str, number: int, ignore: int) -> dict | None:
-    """The link on `track` that already names `number` as its predecessor, or None.
-
-    Read from the open and the closed side together, since a predecessor's successor is closed as
-    soon as the round after it is filed, so the closed side is where it usually sits.
-    """
-    lane = track_links(repo, track, open_handoffs(repo))
-    if lane.full:
-        raise Refusal(
-            f"{repo} has at least {CLOSED_WINDOW} closed `{LABEL}` issues, which fills the read "
-            f"window, so a link already succeeding #{number} could sit past it. Pointing a second "
-            "link at it would fork the chain there unseen."
-        )
-    for row in lane.links:
-        if row["number"] != ignore and row["marker"]["previous"] == str(number):
-            return row
-    if lane.unreadable:
-        raise Refusal(
-            cut(" ".join(lane.unreadable))
-            + f" One of those could already succeed #{number}, so whether pointing a second link "
-            "at it forks the chain cannot be read."
-        )
-    return None
-
-
-def cmd_link(a: argparse.Namespace) -> int:
-    """Finish a chain that half-applied, without filing a second issue for it."""
-    if a.new == a.previous:
-        raise Refusal(
-            f"--new and --previous are both #{a.new}, and an issue cannot succeed itself. "
-            "That would close the track's only open link into a cycle."
-        )
-    new = issue(a.repo, a.new)
-    previous = issue(a.repo, a.previous)
-    marker = parse_marker(new.get("body") or "", new["number"])
-    if marker is None:
-        raise Refusal(
-            f"#{new['number']} carries no handoff metadata block, so it is not a chain link. "
-            "Add one to its body by hand before linking it."
-        )
-    if LABEL not in {row["name"] for row in new.get("labels") or []}:
-        raise Refusal(
-            f"#{new['number']} carries a handoff metadata block and no `{LABEL}` label, so no "
-            "read here can find it. Closing the predecessor would leave this track with no "
-            f"findable head. Put the `{LABEL}` label on #{new['number']} first."
-        )
-    # `link` takes no --track, so the two blocks are all that can say they are one lane.
-    # Without this it comments on and closes another lane's open handoff and exits 0.
-    before = parse_marker(previous.get("body") or "", previous["number"])
-    if before is None:
-        raise Refusal(
-            f"#{previous['number']} carries no handoff metadata block, so nothing says it is on "
-            f"track {marker['track']!r}. Add one to its body by hand before linking it."
-        )
-    if before["track"] != marker["track"]:
-        raise Refusal(
-            f"#{new['number']} is on track {marker['track']!r} and #{previous['number']} is on "
-            f"{before['track']!r}. Linking them would close one lane's handoff into another's."
-        )
-    # A chain runs one way, and transposing the two numbers is the ordinary slip here.
-    # Without this the older link is rewritten to name the newer.
-    # The newer is then closed and the run exits 0 over a two-link cycle.
-    if int(marker["round"]) <= int(before["round"]):
-        raise Refusal(
-            f"#{new['number']} is round {marker['round']} and #{previous['number']} is round "
-            f"{before['round']}, so #{new['number']} does not succeed it. Check --new and "
-            "--previous are not transposed."
-        )
-    if before["previous"] == str(new["number"]):
-        raise Refusal(
-            f"#{previous['number']} already names #{new['number']} as its predecessor, so linking "
-            "them this way would close the chain into a cycle."
-        )
-    taken = successor_of(a.repo, marker["track"], previous["number"], new["number"])
-    if taken is not None:
-        raise Refusal(
-            f"#{taken['number']} already succeeds #{previous['number']} on track "
-            f"{marker['track']!r}, so pointing #{new['number']} at it too would fork the chain "
-            f"there and leave #{taken['number']} unreachable. Name the track's newest link as "
-            "--previous instead."
-        )
-    lane = track_links(a.repo, marker["track"], open_handoffs(a.repo))
-    after = {str(new["number"])}
-    grew = True
-    while grew:
-        grew = False
-        for row in lane.links:
-            if str(row["number"]) not in after and row["marker"]["previous"] in after:
-                after.add(str(row["number"]))
-                grew = True
-    if str(previous["number"]) in after:
-        raise Refusal(
-            f"#{previous['number']} already descends from #{new['number']}, so pointing "
-            f"#{new['number']} at it would close the chain into a cycle."
-        )
-    rest = lane._replace(links=[r for r in lane.links if str(r["number"]) not in after])
-    doubts = head_doubts({"number": previous["number"], "marker": before}, rest)
-    if doubts:
-        later = [
-            f"#{r['number']}"
-            for r in sorted(rest.links, key=lambda r: -int(r["marker"]["round"]))
-            if r["marker"]["previous"] == "none"
-            and int(r["marker"]["round"]) > int(marker["round"])
-        ]
-        order = (
-            f" Repair the later orphans first, highest round first, each pointed at the link "
-            f"just below it, in this order: {', '.join(later)}. Do that before linking #{new['number']}. A later orphan reads "
-            f"as a higher round that does not yet descend from #{new['number']}."
-            if later
-            else ""
-        )
-        raise Refusal(
-            cut(
-                f"#{previous['number']} may not be the head of track {marker['track']!r}, so "
-                f"pointing #{new['number']} at it could fork the chain there.{order} "
-                f"{' '.join(doubts)}"
-            )
-        )
-    if marker["previous"] not in ("none", str(previous["number"])):
-        raise Refusal(
-            f"#{new['number']} already names #{marker['previous']} as its predecessor, not "
-            f"#{previous['number']}. Two predecessors is not something this can decide between."
-        )
-    if marker["previous"] == "none":
-        print(f"1. point #{new['number']} at #{previous['number']}")
-        # The body is re-read immediately before the write and refused where it moved.
-        # This replaces the whole body from a copy read earlier in the run.
-        # An edit landing since that read would otherwise be discarded without a word.
-        fresh = issue(a.repo, new["number"])
-        if (fresh.get("body") or "") != (new.get("body") or ""):
-            raise Refusal(
-                f"#{new['number']}'s body changed since this run read it, and pointing it at "
-                f"#{previous['number']} rewrites the whole body. Re-run to work from the current "
-                "text rather than overwriting an edit nobody here has seen."
-            )
-        edit_body(
-            a.repo,
-            new["number"],
-            with_marker(
-                fresh.get("body") or "", marker["track"], int(marker["round"]), previous["number"]
-            ),
-            a.dry_run,
-        )
-    else:
-        print(f"1. #{new['number']} already names #{previous['number']}, nothing to edit")
-    print(f"2. comment the forward link on #{previous['number']}")
-    comment(
-        a.repo,
-        previous["number"],
-        f"Continued in #{new['number']}, round {marker['round']} on track `{marker['track']}`.",
-        a.dry_run,
-    )
-    if previous["state"] == "CLOSED":
-        print(f"3. #{previous['number']} is already closed, so the chain is finished")
-        return 0
-    print(f"3. close #{previous['number']}")
-    close(a.repo, previous["number"], a.dry_run)
-    return 0
 
 
 def add_repo(parser: argparse.ArgumentParser) -> None:
@@ -1383,7 +1437,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=HISTORY,
         metavar="N",
-        help=f"closed links to index after the body (default {HISTORY})",
+        help=f"earlier rounds to index after the body (default {HISTORY})",
     )
 
     p = sub.add_parser("chain", help="walk the chain backwards, optionally searching bodies")
@@ -1402,7 +1456,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="show only links whose body matches this regular expression, case-insensitively",
     )
 
-    p = sub.add_parser("new", help="create the next link, then link and close the previous one")
+    p = sub.add_parser(
+        "new", help="create the track's issue, or archive its round and write the next one"
+    )
     add_repo(p)
     add_track(p)
     add_dry_run(p)
@@ -1416,11 +1472,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="on an unregistered fork with no handoff label, create that one label first",
     )
 
-    p = sub.add_parser("link", help="finish a chain that half-applied")
+    p = sub.add_parser("close", help="comment the track's outcome, then close its issue")
     add_repo(p)
+    add_track(p)
     add_dry_run(p)
-    p.add_argument("--new", type=int, required=True, metavar="N", help="the successor issue")
-    p.add_argument("--previous", type=int, required=True, metavar="N", help="the issue it succeeds")
+    p.add_argument(
+        "--body-file", required=True, metavar="PATH", help="the closing comment, the outcome"
+    )
 
     p = sub.add_parser("tracks", help="every open handoff with its track and age")
     add_repo(p)
@@ -1438,7 +1496,7 @@ HANDLERS = {
     "resume": cmd_resume,
     "chain": cmd_chain,
     "new": cmd_new,
-    "link": cmd_link,
+    "close": cmd_close,
     "tracks": cmd_tracks,
 }
 
@@ -1456,9 +1514,6 @@ def main(argv: list[str] | None = None) -> int:
     for flag in ("history", "limit"):
         if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
             ap.error(f"--{flag} counts links, so it cannot be below 1")
-    for flag in ("new", "previous"):
-        if getattr(a, flag, None) is not None and getattr(a, flag) < 1:
-            ap.error(f"--{flag} takes an issue number, so it cannot be below 1")
     try:
         require_write_scope(a)
         if not label_present(a.repo):

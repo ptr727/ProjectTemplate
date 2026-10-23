@@ -38,11 +38,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    inferred. `BLOCKED` covers a failed check, a required check nothing is running, an unresolved
    thread, and a missing approval alike, and the response differs by cause.
 2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
-   default, a head after Copilot's first round can carry an attested local pass instead,
-   `coverage=local` in the digest, where the whole review history is in view and no round on
-   record states or appears to state partial coverage, and a pull request into the default branch, a
-   promotion among them, always carries a Copilot round on its head. A review is matched by commit
-   SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
+   default, every head can carry an attested local pass instead, `coverage=local` in the digest,
+   where the whole review history is in view and no round on record states or appears to state
+   partial coverage. A promotion re-reviews content its feature pull requests already carried, so
+   the hosted review runs once per change, at the promotion. A pull request into the default
+   branch, a promotion among them, always carries a Copilot round on its head. A review is matched
+   by commit SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
    re-review lands, and the matched review is **read**, not just counted. A review can carry the
    head SHA and still decline the PR outright, or say it read only part of the changed files. Where
    the round covering the
@@ -87,13 +88,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    promotion on which `pr_review.py` exits `45`. That promotion satisfies item 2 where each
    of these holds on the live head:
 
-   - Every change it carries had full coverage on its own feature -> develop pull request. That
-     pull request met item 2 at its merged head by coverage, not by permission. Failing that,
-     each file it changed has positive evidence of a full read, at the head that last changed
-     the file or a later one. A Copilot table row with no note is such evidence. It counts only
-     where no Copilot round on that pull request, on any commit, states or appears to state
+   - Every change it carries had full coverage on its own feature -> develop pull request, from its
+     attested local pass or a Copilot round. That pull request met item 2 at its merged head by
+     coverage, not by permission. Failing that, each file it changed has positive evidence of a
+     full read, at the head that last changed the file or a later one. A Copilot table row with no
+     note, on that pull request or on the promotion, is such evidence. It counts only where no
+     Copilot round on the pull request holding it, on any commit, states or appears to state
      partial coverage. A round stating full coverage is evidence for every file. So is the
-     attestation `pr_review.py attest` published on that pull request, for each file the attested
+     attestation `pr_review.py attest` published on the feature pull request, for each file the attested
      head's diff held. That head is held to the same rule, the head that last changed the file or a
      later one. The attestation counts only from an owner, member, or collaborator, with the marker
      on its own line outside any code span or fence. The attestation's base has to be the one the
@@ -110,7 +112,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `unattended-handoff` worker records it on the handoff, and an attended merge reports it to the
    maintainer. Any other shortfall still goes to the maintainer. One example is a promotion
    carrying a change whose own pull request lacked that coverage, such as one another lane merged
-   with no review round. The case answers item 2 alone, so item 5's permission is still owed.
+   with no attested local pass and no review round. The case answers item 2 alone, so item 5's permission is still owed.
    Every pull request other than a promotion owes this item's coverage in full.
 3. **Every** finding on that head SHA is closed: threads resolved, issue-level comments (which
    have no resolve action) triaged and replied to, **and** the low-confidence findings collapsed
@@ -148,18 +150,19 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    collapse one may have those findings counted by `suppressed=` and again in the shortfall, or may
    have them counted once each, depending on whether its stated total includes them, which no body
    read so far says. Answer what the body holds rather than what the two numbers add up to.
-   What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
-   canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
-   `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
-   local pass, applied here to a PR-hosted finding, is outcome 4 of "Every finding ends in a
-   listed outcome" below applied once per unit rather than once per finding: the round gathers
-   that unit's such findings onto the unit's tracker, an open hub issue whose title carries the
-   unit key, retitled by the change that moves the key and filed by whichever round first needs
-   it, and answers each finding with that issue's link, resolving a thread on that reply, so a
-   `pre-existing` remark on a sentence the change never touched costs one link rather than a
-   decline or an issue per finding. The batch runs in the hub, which authors the text of every
-   verbatim unit. A carrying repository routes a finding on a verbatim unit by fidelity rather
-   than by class, since a resync writes the whole text there: it declines the finding under
+   What closing a finding owes turns on whether it is `pre-existing`, under the classes
+   `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
+   `pre-existing` finding on text inside a canonical Markdown unit takes the first bullet of
+   outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
+   `scripts/canonical_review.py list` names. That bullet applies once per unit rather than once
+   per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
+   issue whose title carries the unit key. The change that moves the key retitles it, and
+   whichever round first needs it files it. The round answers each finding with that issue's
+   link, resolving a thread on that reply. So a `pre-existing` remark on a sentence the change
+   never touched costs one link rather than a decline or an issue per finding. The batch runs in
+   the hub, which authors the text of every verbatim unit.
+   A carrying repository routes a finding on a verbatim unit by fidelity rather than by class,
+   since a resync writes the whole text there: it declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker,
    while a finding on an intent unit is filed there too, the carrier adapting its own copy
    meanwhile, since the defect is still fixed at the source. Every other finding, a `style`
@@ -172,7 +175,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    again. `pr_review.py status` and `wait` do not read the pull request's body, so read the body
    live for that list before judging this item. It has no thread, so answer it as
    "Answering a suppressed finding" below states. Cite the body's list where that section links
-   the review round, and the list's length where it states the block's `(N)` count.
+   the review round, and the list's length where it states the block's `(N)` count. A line under
+   a heading that outcome 4 of that section names is not on that list. It is already its
+   finding's outcome, and owes only the pointer that outcome names.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
@@ -207,11 +212,12 @@ must have done.
   had nothing to say, which Merge Gate item 2 describes as its own ordinary shape and which posts
   no comment to read. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
-- **Copilot's absence blocks, and is answered elsewhere.** Merge Gate item 2 requires Copilot's own
-  coverage of the current head, or on a fix push into a branch other than the default an attested
-  local pass, and the loop's own request step below is where a missing one is answered, on the
-  terms stated there. A refusal naming the account quota is its own case rather
-  than a review, and so is one saying only that Copilot encountered an error, which is what the
+- **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.**
+  Merge Gate item 2 requires Copilot's own coverage of the current head. On a pull request into a
+  branch other than the default, an attested local pass stands in for it. The loop's own request
+  step below is where a missing one is answered, on the terms stated there. A refusal naming the
+  account quota is its own case rather than a review. So is one saying only that Copilot
+  encountered an error, which is what the
   weekly rate limit posts. Each covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
   reviewer's run log names a reset time `pr_review.py` reports it. Each refusal goes to the
@@ -244,12 +250,12 @@ Run `local-strict-review` against the branch's current diff before every push th
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
 2. Run `scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
-3. Request a Copilot round at the defined moments only: the pull request's first round, and the head
-   of a pull request into the default branch, a promotion among them. Auto-trigger is unreliable, so
-   request it explicitly, which step 4's `wait` is what does. On a fix push into any other branch
-   after the first round, `wait` requests nothing, since step 1 attests the pass covering it. Pass
-   `wait --request` where a fix deserves a Copilot round anyway. `status` and `wait` never read an
-   attestation on the head the first round lands on as coverage. `wait` also skips the request where
+3. Request a Copilot round at one defined moment: the head of a pull request into the default
+   branch, a promotion among them. Auto-trigger is unreliable, so request it explicitly, which
+   step 4's `wait` is what does. On a pull request into any other branch, `wait` reads step 1's
+   attestation as `coverage=local` where Merge Gate item 2 allows that reading. There `wait`
+   requests a round only where a partial round or a truncated review history is on record. Pass `wait --request` where a change
+   deserves a Copilot round anyway. `wait` also skips the request where
    a review already covers the head, where the answer came outside a formal review, where it detects
    drift, under a quota or error refusal, and where something is already in the request set, which
    is the condition the recovery below clears. Requesting in the pull request UI is the maintainer's
@@ -281,8 +287,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying and fix each one sitting
-   in a file the diff already touches or that this change itself made wrong, filing the rest, per
-   `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
+   in a file the diff already touches or that this change itself made wrong. Each of the rest takes
+   the outcome a `pre-existing` finding takes under outcome 4, per `GOVERNANCE.md` "Verification Discipline". That sweep is owed the first time the finding is
    raised, not once it recurs. Take the fix through `local-strict-review` the same way the push
    that opened the pull request went, per `pr-review-conduct` "Expected review loop", then reply
    with the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix, which
@@ -311,11 +317,40 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    turn, before moving to other work. A plan to ask later is resolution by silence the moment
    attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
    and say so, rather than treating the intention to ask as the asking.
-4. **Real and worth doing later, so file the issue first, then reply with its link.** A deferral
-   noted only in a thread is lost the moment the PR merges. File it in the repository where the
-   fix has to land, which for a finding against carried content is the repository that authors
-   that content rather than the one carrying it, since an issue filed where nobody may make the
-   fix is a deferral nobody can close.
+4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
+   An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
+   The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
+   bullet that fits decides:
+   - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
+     `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
+   - A `pre-existing` correctness defect with a stated failure is filed once as its own issue,
+     labeled `pre-existing`. Such a finding names an input or a state and the wrong output or the
+     crash it produces. Its body line goes under a `Pre-existing findings, filed` heading and
+     links that issue. A thread raising it is answered with that issue's link and resolved.
+   - A `style`, wording, consolidation, or restatement finding on text this change did not touch
+     is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
+     decline text, no issue, and no reply beyond a pointer to that line, which resolves any
+     thread.
+   - Any other `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the
+     pull request body with its location and its class. No issue is filed for it. The body line
+     is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
+   - Any other deferral is filed as an issue first, and the reply carries its link. A deferral
+     noted only in a thread is lost the moment the PR merges.
+
+   The body keeps every other unfiled `pre-existing` line, the fourth bullet's, under one
+   heading, `Pre-existing findings, not filed`. Each line under these headings carries its
+   location and its class. The headings stay apart from the open `introduced` findings a spent
+   edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
+   suppressed finding has no thread, so its pointer is an answer per `pr-review-conduct`
+   "Answering a suppressed finding". That answer is `Listed in the body` for a listed or dropped
+   finding, and `Deferred to <issue>` for a filed one. A local-pass finding owes no pointer
+   beyond its body line. A sibling that outcome 1's class sweep leaves unfixed takes the
+   bullet a `pre-existing` finding would take. An issue goes in the repository where
+   the fix has to land. For a finding against carried content, that is the repository authoring
+   the content rather than the one carrying it. An issue filed where nobody may make the fix is
+   a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
+   2026-10-16 to 2026-10-23, 108 of 329 non-handoff issues filed across four fleet repositories
+   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something: add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.
@@ -355,9 +390,10 @@ never against its confidence label. Classify before responding:
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
 carry its own context. Quote the finding with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
-`No change needed`, `Deferred to <issue>`, or `Awaiting maintainer`. An `Awaiting maintainer`
-answer leaves the finding open until a later answer records the maintainer's decision. State the
-`(N)` count the block gave so answers can be checked against findings, and link the review round.
+`No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
+`Awaiting maintainer` answer leaves the finding open until a later answer records the
+maintainer's decision. State the `(N)` count the block gave so answers can be checked against
+findings, and link the review round.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
 supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
