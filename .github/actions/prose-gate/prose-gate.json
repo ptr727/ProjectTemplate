@@ -1,0 +1,172 @@
+{
+  "note": "Vocabulary, exemptions, and per-language normalization data for prose_lint.py, which documents each section and the repository-local .prose-gate.json that may add exemptions.",
+  "rules": {
+    "charset": { "default": true, "summary": "a non-ASCII character its tier does not permit here" },
+    "charset-unknown": { "default": true, "summary": "non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics" },
+    "semicolon": { "default": true, "summary": "a semicolon in prose, outside a series or labeled pair carrying a comma" },
+    "dash": { "default": true, "summary": "a spaced hyphen joining or interrupting a sentence" },
+    "comment-wrap": { "default": true, "summary": "a comment sentence wrapped across lines, or two on one line" },
+    "comment-case": { "default": true, "summary": "a comment sentence opening in lowercase" },
+    "comment-added": { "default": true, "summary": "a comment line this change adds or edits, opening its own line" },
+    "dupword": { "default": true, "summary": "a duplicated consecutive word" },
+    "sentence-split": { "default": false, "summary": "a sentence wrapping across lines" },
+    "sentence-length": { "default": false, "summary": "a sentence over the word cap" },
+    "spelling": { "default": true, "summary": "a British spelling where the repo convention is US English" },
+    "home-path": { "default": true, "summary": "an absolute home path naming a real account" },
+    "dead-path": { "default": true, "summary": "a mention of a path git once tracked and the tree no longer holds" },
+    "issue-ref": { "default": true, "summary": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text" }
+  },
+  "messages": {
+    "charset": "{name} (U+{code}) -> {hint}",
+    "charset-tier2": "{name} (U+{code}) in prose -> use '{fix}'",
+    "charset-unknown": "{name} (U+{code}) is in no tier - classify it in ptr727/ProjectTemplate: the comment-and-doc-style skill's \"Character set\" section and prose-gate.json's charset tiers",
+    "semicolon": "semicolon in prose -> a comma or two sentences",
+    "dash": "spaced hyphen -> a comma, two sentences, or parentheses",
+    "comment-run-on": "two sentences on one comment line -> split them",
+    "comment-wrap": "comment sentence wraps into the next line -> one sentence per line",
+    "comment-case": "comment sentence opens in lowercase -> capitalize, or restructure so it does not open on a lowercase name",
+    "comment-added": "a comment line this change adds or edits -> delete it, or allow it: the {label!r} label on the pull request, {env} at a commit, --allow-comments on a run by hand",
+    "dupword": "duplicated word '{word}'",
+    "sentence-split": "sentence wraps across lines (one sentence per line)",
+    "sentence-length": "{words} words in one sentence -> sentences of {cap} words or fewer",
+    "spelling": "British spelling '{found}' -> '{us}'",
+    "home-path": "absolute home path {path!r} -> use a constructed path, not an observed one",
+    "dead-path": "path {token!r} is deleted from this tree -> re-point, rewrite, or remove the stale mention",
+    "issue-ref": "issue or pull request reference {ref!r} -> state the constraint it stands for, or drop the clause",
+    "error-empty-exclude": "--exclude was given an empty value, which matches every path and would report a whole-tree scan as clean. Drop the blank entry rather than passing it, the way the composite action skips a blank line in .github/prose-gate-excludes.",
+    "error-not-a-path": "requested path(s) are not a file or a directory: {paths}. Refusing rather than falling back to the current directory, which would scan one tree and choose the rule set from another.",
+    "error-many-repositories": "the requested paths span more than one repository ({roots}). Each declares its own workflow model, so no single rule set is correct for all of them. Run the gate once per repository.",
+    "error-override": "{path} {why}.",
+    "error-no-diff": "cannot diff against {base!r}, so the run cannot be scoped to changed lines. Refusing to scan the whole tree instead, since that reports the existing backlog as though this change introduced it. Check the ref exists and that the checkout carries its history.",
+    "error-unread-diff": "the diff against {base!r} names {count} readable file(s) this run was asked about, and the scan matched none of them: {paths}. Refusing to report a clean run, since a gate that read nothing is indistinguishable from a gate with nothing to read. Check that the run starts at the repository top level and that the requested paths cover the change.",
+    "note-allowed": "comment-added stood down by {named}. In CI the composite action passes that flag from its own input instead, which the fleet's caller computes from the {label!r} label and from the run being a release-model promotion, and it clears {env} so a runner cannot decide one.",
+    "note-no-diff": "comment-added is not checked without --diff, which is what tells an added comment apart from one the tree already held. Scope the run to a base to run it.",
+    "note-shallow": "dead-path is not checked in a shallow clone, which holds no deletion history to key on. Fetch the full history to run it.",
+    "scope-whole": "scope: {read} file(s) read, whole tree, gate {gate}",
+    "scope-diff": "scope: {read} of {discovered} file(s) read, {lines} changed line(s), diff against {base!r}, gate {gate}",
+    "scope-plain": ", {count} file(s) with no lexer read as plain text: {paths}",
+    "scope-undecoded": ", {count} file(s) the gate could not open or decode as UTF-8, so no rule read them: {paths}"
+  },
+  "cli": {
+    "paths": { "nargs": "*", "default": ["."] },
+    "--check": { "action": "append", "dest": "checks", "choices": "rules" },
+    "--exclude": { "action": "append", "default": [] },
+    "--summary": { "action": "store_true" },
+    "--list-files": { "action": "store_true", "help": "print the discovered file set and exit, for auditing the sweep scope" },
+    "--diff": {
+      "metavar": "BASE",
+      "help": "only report violations on lines changed vs BASE (matches the repo policy: fix as each file is next edited, not swept)"
+    },
+    "--allow-comments": {
+      "action": "store_true",
+      "help": "stand `comment-added` down, for a change whose comment lines are wanted. PROSE_ALLOW_COMMENTS set to anything but a false spelling does the same, for a caller with nowhere to pass a flag. What makes a CI run pass it is the calling workflow's own condition"
+    },
+    "--provenance": {
+      "metavar": "REF",
+      "help": "name this copy of the gate on the verdict, as the composite action's owner/repo@ref, so a finding can be attributed to the commit that raised it"
+    }
+  },
+  "override_keys": ["dupword_allow", "generated_trees", "home_path_exempt", "hub_hosted", "service_accounts", "spelling_allow", "tool_directives"],
+  "sentence_word_cap": 25,
+  "charset": {
+    "tier1": {
+      "U+2014": "restructure", "U+2013": "restructure", "U+2018": "'", "U+2019": "'", "U+201C": "\"", "U+201D": "\"",
+      "U+2026": "...", "U+2022": "-", "U+00A0": " ", "U+2011": "-", "U+2192": "->", "U+21D2": "=>"
+    },
+    "tier2": { "U+2264": "<=", "U+2265": ">=", "U+2260": "!=", "U+00B1": "+/-", "U+2212": "-", "U+00D7": "x", "U+00F7": "/", "U+00B7": "." },
+    "tier3": ["U+00A7", "U+00B0", "U+00B2", "U+00B3", "U+00B5", "U+03C0", "U+2126"],
+    "tier4": ["U+1F4A1", "U+1F4DD", "U+2139", "U+26A0", "U+2705", "U+274C"]
+  },
+  "spelling": {
+    "ise_stems": ["author", "custom", "initial", "maxim", "minim", "normal", "optim", "organ", "priorit", "recogn", "serial", "special", "standard", "summar", "synchron", "util", "visual"],
+    "ise_endings": [["ise", "ize"], ["ised", "ized"], ["ises", "izes"], ["ising", "izing"], ["isation", "ization"], ["isations", "izations"]],
+    "our_stems": ["behavi", "col", "fav", "flav", "hon", "lab", "neighb"],
+    "our_endings": ["", "s", "ed", "ing", "al", "ally", "ful", "ite", "ites"],
+    "re_stems": ["cent", "fib", "lit", "met", "theat"],
+    "re_endings": [["re", "er"], ["res", "ers"], ["red", "ered"]],
+    "odd": {
+      "analyse": "analyze", "analysed": "analyzed", "analysing": "analyzing", "artefact": "artifact", "artefacts": "artifacts",
+      "catalogue": "catalog", "catalogues": "catalogs", "catalogued": "cataloged", "defence": "defense", "defences": "defenses",
+      "fulfil": "fulfill", "fulfils": "fulfills", "fulfilment": "fulfillment", "judgement": "judgment", "judgements": "judgments",
+      "labelled": "labeled", "labelling": "labeling", "licence": "license", "licences": "licenses", "modelled": "modeled",
+      "modelling": "modeling", "offence": "offense", "offences": "offenses", "practise": "practice", "practised": "practiced",
+      "practising": "practicing", "programme": "program", "programmes": "programs", "signalled": "signaled",
+      "signalling": "signaling", "travelled": "traveled", "travelling": "traveling", "whilst": "while"
+    }
+  },
+  "exemptions": {
+    "dupword_allow": ["had had", "that that"],
+    "spelling_allow": [],
+    "service_accounts": ["node", "public", "root", "runner", "shared", "ubuntu", "vscode"],
+    "home_path_exempt": ["OPERATIONS.md"],
+    "generated_trees": ["reports"],
+    "hub_hosted": [
+      ".github/workflows/build-datebadge-task.yml", ".github/workflows/build-docker-task.yml", ".github/workflows/build-release-task.yml",
+      ".github/workflows/check-upstream-version-task.yml", ".github/workflows/deploy-site-task.yml", ".github/workflows/get-version-task.yml",
+      ".github/workflows/publish-docker-readme-task.yml", ".github/workflows/publish-plan-task.yml",
+      ".github/workflows/run-codegen-pull-request-task.yml", ".github/workflows/validate-task.yml",
+      "repo-config/README.md", "repo-config/configure.sh", "repo-config/develop.json", "repo-config/labels.json",
+      "repo-config/main.json", "repo-config/operational/develop.json", "repo-config/settings.json", "spec/secrets.json"
+    ],
+    "tool_directives": [
+      "syntax=", "escape=", "fmt:\\s*(?:on|off|skip)\\b", "pragma:", "nosec\\b", "checkov:", "hadolint\\b", "renovate:",
+      "yaml-language-server:", "-\\*-\\s*coding[:=]", "pyright:", "isort:", "codespell:", "doctest:"
+    ]
+  },
+  "not_prose": [
+    "!", "\\s*[-=#*/<>]+\\s*$", "ruff:", "mypy:", "(?i:flake8)[:=]", "v\\d+(?:\\.\\d+)*$", "(?i:noqa)\\b", "(?i:nopep8)\\b",
+    "type:\\s*ignore\\b", "pylint\\b", "shellcheck\\b", "markdownlint\\b", "omit from toc\\b", "prettier\\b", "eslint\\b", "SPDX\\b",
+    "Copyright\\b", "(?i:c?spell|spell-?checker):"
+  ],
+  "generated_roots": [".artifacts", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "bin", "dist", "node_modules", "obj"],
+  "instruction_docs": [
+    ".github/copilot-instructions.md", "AGENTS.md", "AUDIT.md", "CLAUDE.md", "CODESTYLE.md", "GOVERNANCE.md", "OPERATIONS.md", "RESYNC.md",
+    "STANDUP.md", "WORKFLOW.md"
+  ],
+  "skill_roots": [".agents/skills/", ".github/skills/"],
+  "plugin_skills": [".claude-plugin/", "/skills/"],
+  "files": {
+    "markdown": [".md"],
+    "plain": [".csv", ".lock", ".min", ".svg", ".tsv", ".txt"],
+    "extensionless": "bash",
+    "suffix": {
+      ".code-workspace": "json", ".conf": "ini", ".csproj": "xml", ".gitattributes": "bash", ".gitignore": "bash",
+      ".jsonc": "json", ".props": "xml", ".resx": "xml", ".scss": "css", ".slnx": "xml", ".targets": "xml"
+    },
+    "name": { ".editorconfig": "ini", ".gitattributes": "bash", ".gitignore": "bash", "dockerfile": "bash", "pre-commit": "bash" }
+  },
+  "languages": {
+    "python": {
+      "lexers": ["python"],
+      "line": ["#"],
+      "repeat_marker": true,
+      "docstrings": true,
+      "trailing_directives": ["#\\s*(?:(?i:noqa|nopep8)|type:\\s*ignore)\\b", "\\bpylint:"],
+      "numpy_sections": ["attributes", "methods", "other parameters", "parameters", "raises", "receives", "returns", "warns", "yields"],
+      "google_sections": [
+        "Args", "Arguments", "Attributes", "Keyword Args", "Keyword Arguments", "Methods", "Other Parameters", "Parameters", "Raise",
+        "Raises", "Return", "Returns", "Warns", "Yield", "Yields"
+      ],
+      "google_prose_sections": [
+        "Attention", "Caution", "Danger", "Error", "Hint", "Important", "Note", "Notes", "References", "See Also", "Tip", "Todo",
+        "Warning", "Warnings"
+      ]
+    },
+    "hash": { "lexers": ["bash", "bash-heredoc-as-code", "caddyfile", "make", "ruby", "terraform", "toml"], "line": ["#", "//"], "block": [["/*", "*/", "*"]] },
+    "c": {
+      "lexers": ["arduino", "c", "cpp", "csharp", "javascript", "json", "json5", "typescript"],
+      "line": ["///", "//"],
+      "block": [["/*", "*/", "*"]],
+      "doc_markers": ["///", "/**"]
+    },
+    "css": { "lexers": ["css"], "block": [["/*", "*/", "*"]] },
+    "markup": { "lexers": ["html", "xml"], "block": [["<!--", "-->"]] },
+    "powershell": { "lexers": ["powershell"], "line": ["#"], "block": [["<#", "#>"]], "help_markers": ["<#"] },
+    "ini": { "lexers": ["ini"], "line": ["#", ";"] },
+    "yaml": {
+      "lexers": ["yaml"],
+      "line": ["#"],
+      "nested": [{ "key": "run", "lexer": "bash-heredoc-as-code" }, { "key": "lambda", "lexer": "cpp" }, { "tag": "!lambda", "lexer": "cpp" }]
+    }
+  }
+}

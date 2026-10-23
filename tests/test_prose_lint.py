@@ -190,9 +190,74 @@ SPLICE_BAIT = "It runs on push; " + "it gates the merge"
 DUP_CLASS = "gallery " + "gallery-cols-1"
 DUP_REL = "nofollow " + "nofollow-ugc"
 
+# The gate reads this file, so a bait path is assembled rather than written.
+# A literal would be a finding in the very file that defines the rule.
+# This file already takes that approach for non-ASCII, which it writes as escapes.
+# `adalovelace` is a constructed account name, never an account on any machine here.
+BAIT_USER = "adalovelace"
+
+NIX_HOME = f"/home/{BAIT_USER}"
+
+MAC_HOME = f"/Users/{BAIT_USER}"
+
+WIN_HOME = f"C:\\Users\\{BAIT_USER}"
+
+# Writes U+014D, whose UTF-8 encoding cp1252 has no mapping for, which is the whole of the bait.
+UNMAPPABLE_SNIPPET = "import sys\nsys.stdout.buffer.write('\\u014d'.encode('utf-8'))\n"
+
+
+@contextlib.contextmanager
+def locale_patched_as_cp1252() -> Iterator[None]:
+    """Report cp1252 from every locale accessor this interpreter defines, for the block's duration.
+
+    Which accessor a text-mode pipe consults has moved between releases, so both are patched
+    rather than the test guessing which one this interpreter reads.
+    """
+    with contextlib.ExitStack() as stack:
+        for name in ("getencoding", "getpreferredencoding"):
+            if hasattr(locale, name):
+                stack.enter_context(mock.patch.object(locale, name, return_value="cp1252"))
+        yield
+
+
+@functools.cache
+def locale_patch_bites() -> bool:
+    """Whether patching the locale actually changes how a text-mode pipe decodes, on this host.
+
+    UTF-8 mode decodes as UTF-8 whatever the locale says, so no patch can reach the decoder
+    there. That is the documented workaround for the very defect these cases cover, and a
+    container started with no LANG enables it on its own, so it is an ordinary host rather than
+    an exotic one. Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of
+    the several ways an interpreter arrives at a UTF-8 default.
+
+    On Windows the pipe decodes in a reader thread, whose UnicodeDecodeError never reaches this
+    thread, so the thread's own exception hook records it too.
+
+    Measured once, since answering it spawns an interpreter.
+    """
+    raised: list[type[BaseException]] = []
+    with (
+        locale_patched_as_cp1252(),
+        mock.patch.object(threading, "excepthook", lambda args: raised.append(args.exc_type)),
+    ):
+        try:
+            # Naming no encoding is the whole of the probe, so a sweep must never fix this call.
+            subprocess.run(
+                [sys.executable, "-c", UNMAPPABLE_SNIPPET],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except UnicodeDecodeError:
+            return True
+    return any(issubclass(kind, UnicodeDecodeError) for kind in raised)
+
 
 class BaitCase(unittest.TestCase):
     """Base for cases that write a crafted file and read back what the gate says about it."""
+
+    BAIT = "Two things. Here."
+    RUN_ON = "One thing happens. Another thing happens."
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -202,8 +267,62 @@ class BaitCase(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return [kind for _, kind, _ in prose_lint.check_file(path, rules)]
 
+    def flag(self, name: str, text: str) -> list[str]:
+        """Both comment kinds, so a case cannot pass by asking for the rule it does not test."""
+        return self.kinds(text, {"comment-wrap", "comment-case"}, name=name)
 
-class TestTierTables(BaitCase):
+    def comments(self, name: str, text: str) -> list[tuple[int, str, bool]]:
+        """Each comment line the extractor finds, as its line, its text, and whether it leads."""
+        units, _fenced, _plain = prose_lint.extract(Path(name), text)
+        kinds = ("comment", "doc", "markup")
+        return [(n.number, n.text, n.leading) for u in units if u.kind in kinds for n in u.lines]
+
+    def sentence_of(self, words: int) -> str:
+        return " ".join(["word"] * words) + "."
+
+    def found_md(self, text: str) -> list[tuple[int, str]]:
+        return self.found(text, "bait.md")
+
+    def over_md(self, n: int = 6) -> str:
+        return " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + n))
+
+    def words(self, count: int) -> str:
+        return " ".join(["word"] * count)
+
+    def over(self) -> str:
+        return self.words(prose_lint.SENTENCE_WORD_CAP + 1) + "."
+
+    def at_cap(self) -> str:
+        return self.words(prose_lint.SENTENCE_WORD_CAP) + "."
+
+    def found(
+        self, text: str, name: str = "bait.md", allowed: set[int] | None = None
+    ) -> list[tuple[int, str]]:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-length"}, allowed=allowed)
+        return [(n, kind) for n, kind, _ in found]
+
+
+class TestCharsetRule(BaitCase):
+    """The `charset` and `charset-unknown` rules, and the tier tables they read."""
+
+    def skill_setup(self) -> None:
+        self.doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding="utf-8")
+        section = re.search(r"^## Character set$(.*?)^## ", self.doc, re.MULTILINE | re.DOTALL)
+        if section is None:
+            self.fail("the Character set heading moved, so the parse is blind")
+        self.section = section.group(1)
+
+    def tier_codepoints(self, label: str) -> set[int]:
+        """Codepoints named in one tier's bullet, read out of the rule text itself."""
+        m = re.search(
+            rf"^- \*\*Tier {label},(.*?)(?=^- \*\*)", self.section, re.MULTILINE | re.DOTALL
+        )
+        if m is None:
+            self.fail(f"the Tier {label} bullet moved, so the parse is blind")
+        return {int(h, 16) for h in re.findall(r"U\+([0-9A-Fa-f]{4})", m.group(1))}
+
     def test_every_tier_one_character_is_always_caught(self) -> None:
         """Tier 1 carries no meaning its ASCII form loses, so context never excuses it."""
         for ch, fix in prose_lint.TIER1.items():
@@ -253,7 +372,7 @@ class TestTierTables(BaitCase):
         [(_, kind, message)] = prose_lint.check_file(path, {"charset-unknown"})
         self.assertEqual("charset-unknown", kind)
         self.assertIn('the comment-and-doc-style skill\'s "Character set" section', message)
-        self.assertIn("prose_lint.py's TIER1, TIER2, TIER3, or TIER4 table", message)
+        self.assertIn("prose-gate.json's charset tiers", message)
         self.assertIn("classify it in ptr727/ProjectTemplate:", message)
         self.assertNotIn("GOVERNANCE.md", message)
 
@@ -430,40 +549,15 @@ class TestTierTables(BaitCase):
             with self.subTest(tier=label):
                 self.assertGreaterEqual(len(table), floor)
 
-
-class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
-    """The rule text drives the tables, rather than a copy of the rule driving them.
-
-    The Character Set rule text lives in the comment-and-doc-style Skill.
-    GOVERNANCE.md's own section is a pointer at it, per the "skill becomes sole canonical
-    content" decision. These are the cases that catch an incomplete or mis-tiered table, which
-    no bait built from the tables themselves can do: bait proves the matching works, not that
-    the data is right.
-    """
-
-    def setUp(self) -> None:
-        self.doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding="utf-8")
-        section = re.search(r"^## Character set$(.*?)^## ", self.doc, re.MULTILINE | re.DOTALL)
-        if section is None:
-            self.fail("the Character set heading moved, so the parse is blind")
-        self.section = section.group(1)
-
-    def tier_codepoints(self, label: str) -> set[int]:
-        """Codepoints named in one tier's bullet, read out of the rule text itself."""
-        m = re.search(
-            rf"^- \*\*Tier {label},(.*?)(?=^- \*\*)", self.section, re.MULTILINE | re.DOTALL
-        )
-        if m is None:
-            self.fail(f"the Tier {label} bullet moved, so the parse is blind")
-        return {int(h, 16) for h in re.findall(r"U\+([0-9A-Fa-f]{4})", m.group(1))}
-
     def test_every_tier_names_a_plausible_number_of_characters(self) -> None:
         """A tier bullet that stopped parsing would make every case below it pass vacuously."""
+        self.skill_setup()
         for label, floor in (("1", 10), ("2", 8), ("3", 7)):
             with self.subTest(tier=label):
                 self.assertGreaterEqual(len(self.tier_codepoints(label)), floor)
 
     def test_tier_one_and_two_are_in_the_gate_tables(self) -> None:
+        self.skill_setup()
         for label, table in (("1", prose_lint.TIER1), ("2", prose_lint.TIER2)):
             for cp in sorted(self.tier_codepoints(label)):
                 with self.subTest(tier=label, codepoint=f"U+{cp:04X}"):
@@ -471,6 +565,7 @@ class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
 
     def test_tier_three_is_allowed_rather_than_replaced(self) -> None:
         """A tier-3 symbol in a replacement table would flag the character the rule protects."""
+        self.skill_setup()
         for cp in sorted(self.tier_codepoints("3")):
             with self.subTest(codepoint=f"U+{cp:04X}"):
                 self.assertIn(chr(cp), prose_lint.TIER3)
@@ -479,6 +574,7 @@ class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
 
     def test_tier_four_markers_are_exactly_the_skill_text(self) -> None:
         """The markers the rule text names, less the selector it admits, are the gate's set."""
+        self.skill_setup()
         m = re.search(r"^- \*\*Tier 4,(.*?)(?=^- \*\*)", self.section, re.MULTILINE | re.DOTALL)
         if m is None:
             self.fail("the Tier 4 bullet moved, so the parse is blind")
@@ -487,6 +583,7 @@ class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
         self.assertEqual(named, {ord(ch) for ch in prose_lint.TIER4})
 
     def test_the_tiers_do_not_overlap(self) -> None:
+        self.skill_setup()
         t1, t2, t3 = set(prose_lint.TIER1), set(prose_lint.TIER2), set(prose_lint.TIER3)
         t4 = set(prose_lint.TIER4)
         self.assertEqual(set(), t1 & t2)
@@ -495,90 +592,9 @@ class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
         self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
 
-class TestDupword(BaitCase):
-    """A doubled word, read from Markdown prose and from the comments of every other syntax.
+class TestSemicolonRule(BaitCase):
+    """The `semicolon` rule on Markdown prose units."""
 
-    The scope matters more here than for the other prose rules, because this one gates CI. Outside
-    Markdown a repeated token is far more often correct code than a typo: `class="gallery
-    gallery-cols-1"` is the ordinary HTML idiom, and no edit fixes it without changing the page.
-    """
-
-    def test_every_allowlist_entry_is_permitted(self) -> None:
-        for phrase in prose_lint.DUP_ALLOW:
-            with self.subTest(phrase=phrase):
-                self.assertEqual(
-                    [], self.kinds(f"A case where {phrase} reads correctly.\n", {"dupword"})
-                )
-
-    def test_a_repetition_outside_the_allowlist_is_flagged(self) -> None:
-        """`the the` was in the allowlist while a comment claimed it was flagged."""
-        self.assertEqual(["dupword"], self.kinds(f"{DUP} thing\n", {"dupword"}))
-
-    def test_a_word_joining_character_does_not_start_a_repetition(self) -> None:
-        """ "either/or or" is a phrase followed by a conjunction, not a doubled word."""
-        self.assertEqual([], self.kinds("either/or or must-pair inputs\n", {"dupword"}))
-        self.assertEqual([], self.kinds("a must-pair pair of inputs\n", {"dupword"}))
-
-    def test_a_repetition_in_a_comment_is_flagged_in_every_syntax(self) -> None:
-        """Narrowing the rule to comments has to leave it enforcing in all of them."""
-        for name, comment in (
-            ("bait.py", f"# {DUP.capitalize()} thing."),
-            ("bait.sh", f"# {DUP.capitalize()} thing."),
-            ("bait.yml", f"# {DUP.capitalize()} thing."),
-            ("bait.cs", f"// {DUP.capitalize()} thing."),
-            ("bait.cs", f"/* {DUP.capitalize()} thing. */"),
-            ("bait.html", f"<!-- {DUP.capitalize()} thing. -->"),
-        ):
-            with self.subTest(file=name, comment=comment):
-                self.assertEqual(["dupword"], self.kinds(f"{comment}\n", {"dupword"}, name=name))
-
-    def test_a_trailing_comment_is_read_and_the_code_before_it_is_not(self) -> None:
-        """The comment is prose wherever it sits on the line, and the statement stays code."""
-        self.assertEqual(
-            ["dupword"],
-            self.kinds(f"x = 1  # {DUP.capitalize()} thing.\n", {"dupword"}, name="bait.py"),
-        )
-
-    def test_code_is_not_prose_outside_markdown(self) -> None:
-        """A repeated token in code is the author's, and often the only spelling that works.
-
-        The class attribute is the reported case: two class names sharing a prefix is how CSS is
-        written, and `rel`, `srcset` and `data-*` all take value lists with the same shape.
-        """
-        for name, line in (
-            ("bait.html", f'<div class="{DUP_CLASS}">'),
-            ("bait.html", f'<a rel="{DUP_REL}" href="#">x</a>'),
-            ("bait.html", f"<p>{DUP} thing</p>"),
-            ("bait.py", f'x = "{DUP}"'),
-            ("bait.yml", f"key: {DUP}"),
-            ("bait.json", f'{{ "a": "{DUP}" }}'),
-        ):
-            with self.subTest(file=name, line=line):
-                self.assertEqual([], self.kinds(f"{line}\n", {"dupword"}, name=name))
-
-    def test_two_comments_on_one_line_are_judged_separately(self) -> None:
-        """Joining them would read the second comment's opening word as a repeat of the first's."""
-        word = DUP.split()[0]
-        pair = f"<!-- Ends with {word} --><!-- {word.capitalize()} opens -->\n"
-        self.assertEqual([], self.kinds(pair, {"dupword"}, name="bait.html"))
-
-    def test_inline_code_is_not_prose(self) -> None:
-        """A backticked token is quoted, the same exemption every other prose rule takes."""
-        self.assertEqual([], self.kinds(f"The `{DUP}` field.\n", {"dupword"}))
-        self.assertEqual([], self.kinds(f"# The `{DUP}` field.\n", {"dupword"}, name="bait.py"))
-
-    def test_the_repo_is_clean_of_duplicated_words(self) -> None:
-        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
-        found = [
-            f"{prose_lint.rel(p)}:{ln}"
-            for p in prose_lint.discover(["."])
-            for ln, kind, _ in prose_lint.check_file(p, {"dupword"})
-            if kind == "dupword"
-        ]
-        self.assertEqual([], found)
-
-
-class TestSemicolon(BaitCase):
     def test_a_splice_is_flagged(self) -> None:
         self.assertEqual(["semicolon"], self.kinds(f"{SPLICE_BAIT}.\n", {"semicolon"}))
 
@@ -592,117 +608,6 @@ class TestSemicolon(BaitCase):
     def test_a_fenced_block_is_skipped(self) -> None:
         self.assertEqual([], self.kinds("```sh\nrun; it exits\n```\n", {"semicolon"}))
 
-
-class TestDash(BaitCase):
-    def test_a_clause_break_is_flagged(self) -> None:
-        self.assertEqual(
-            ["dash"], self.kinds("It is capability, not permission - a token is not.\n", {"dash"})
-        )
-
-    def test_a_paired_aside_is_flagged_at_both_ends(self) -> None:
-        self.assertEqual(
-            ["dash", "dash"], self.kinds("The router - a thin file - holds the map.\n", {"dash"})
-        )
-
-    def test_a_label_separator_is_exempt(self) -> None:
-        """`- **Label** - explanation` is structurally a colon and the shape every bullet uses."""
-        self.assertEqual([], self.kinds("- **Bug** - wrong behavior, missing coverage\n", {"dash"}))
-
-    def test_an_ordered_label_separator_is_exempt(self) -> None:
-        """A numbered definition list is the same construct as a bulleted one."""
-        self.assertEqual([], self.kinds("1. **Audit** - check it statically\n", {"dash"}))
-        self.assertEqual(["dash"], self.kinds("2. **Test** - trace it - and probe it\n", {"dash"}))
-
-    def test_a_later_dash_on_a_label_line_still_counts(self) -> None:
-        """Exempting the separator must not exempt the rest of the line."""
-        self.assertEqual(
-            ["dash"], self.kinds("- **Bug** - wrong behavior - and worse besides\n", {"dash"})
-        )
-
-    def test_every_marker_and_bold_spelling_exempts_the_label_separator(self) -> None:
-        """One bullet gets one verdict, whichever marker and strong emphasis spell its label.
-
-        The exemption kept its own narrower marker set and read only `**`, so `+`, `1)`, `__`,
-        and `***` reported the separator the `-` and `**` spelling of the same bullet did not.
-        """
-        labels = (
-            "**Bug**",
-            "**Bug:**",
-            "**Bug**:",
-            "__Bug__",
-            "__Bug:__",
-            "***Bug***",
-            "___Bug___",
-            "**_Bug_**",
-            "__*Bug*__",
-            "_**Bug**_",
-            "*__Bug__*",
-        )
-        for marker in ("-", "*", "+", "1.", "1)", "12.", "12)", "> -"):
-            for label in labels:
-                with self.subTest(marker=marker, label=label):
-                    self.assertEqual(
-                        [], self.kinds(f"{marker} {label} - wrong behavior\n", {"dash"})
-                    )
-                    self.assertEqual(
-                        ["dash"],
-                        self.kinds(f"{marker} {label} - wrong behavior - and worse\n", {"dash"}),
-                    )
-
-    def test_an_unmarked_or_mismatched_label_separator_still_counts(self) -> None:
-        """Without a list marker, or with mismatched emphasis, the dash is a clause break."""
-        for text in (
-            "**Bug** - wrong behavior\n",
-            "- **Bug__ - wrong behavior\n",
-            "- __Bug** - wrong behavior\n",
-            "- _**Bug** - wrong behavior\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual(["dash"], self.kinds(text, {"dash"}))
-
-    def test_compound_words_and_ranges_are_left_alone(self) -> None:
-        for text in (
-            "A well-named must-pair input.\n",
-            "Sections D1 - D9 apply.\n",
-            "- a plain list item\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(text, {"dash"}))
-
-    def test_a_blockquoted_list_marker_is_not_a_dash(self) -> None:
-        """A callout's bullet sits behind `>`, which is structure rather than a word the dash follows."""
-        for text in (
-            "- Refer to X.\n",
-            "  - Nested item.\n",
-            "> - Refer to X.\n",
-            ">- Refer to X.\n",
-            "> > - Refer to X.\n",
-            ">> - Refer to X.\n",
-            "  >   - Nested in a callout.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(text, {"dash"}))
-
-    def test_a_dash_in_a_blockquoted_line_still_counts(self) -> None:
-        """Only the prefix is structure, so the prose after it is judged as it is anywhere else."""
-        for text in (
-            "> - Refer to X - and to Y.\n",
-            "> > - Refer to X - and to Y.\n",
-            ">> - Refer to X - and to Y.\n",
-            "> A callout sentence - with a clause break.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual(["dash"], self.kinds(text, {"dash"}))
-
-    def test_a_blockquoted_label_separator_is_exempt(self) -> None:
-        """The label construct reads the same inside a callout as outside one."""
-        self.assertEqual([], self.kinds("> - **Bug** - wrong behavior\n", {"dash"}))
-        self.assertEqual(
-            ["dash"], self.kinds("> - **Bug** - wrong behavior - and worse\n", {"dash"})
-        )
-
-
-class TestSemicolon2(BaitCase):
     def test_any_prose_semicolon_is_flagged(self) -> None:
         """The rule bans the construction, so the default is to flag rather than to detect a subset."""
         self.assertEqual(["semicolon"], self.kinds(f"{SPLICE_BAIT}.\n", {"semicolon"}))
@@ -943,14 +848,276 @@ class TestSemicolon2(BaitCase):
                 )
 
 
-class TestCommentWrap(BaitCase):
-    """The comment rule reaches every syntax the fleet's project types carry, not only the hash ones."""
+class TestDashRule(BaitCase):
+    """The `dash` rule on Markdown prose units."""
 
-    RUN_ON = "One thing happens. Another thing happens."
+    def test_a_clause_break_is_flagged(self) -> None:
+        self.assertEqual(
+            ["dash"], self.kinds("It is capability, not permission - a token is not.\n", {"dash"})
+        )
 
-    def flag(self, name: str, text: str) -> list[str]:
-        """Both comment kinds, so a case cannot pass by asking for the rule it does not test."""
-        return self.kinds(text, {"comment-wrap", "comment-case"}, name=name)
+    def test_a_paired_aside_is_flagged_at_both_ends(self) -> None:
+        self.assertEqual(
+            ["dash", "dash"], self.kinds("The router - a thin file - holds the map.\n", {"dash"})
+        )
+
+    def test_a_label_separator_is_exempt(self) -> None:
+        """`- **Label** - explanation` is structurally a colon and the shape every bullet uses."""
+        self.assertEqual([], self.kinds("- **Bug** - wrong behavior, missing coverage\n", {"dash"}))
+
+    def test_an_ordered_label_separator_is_exempt(self) -> None:
+        """A numbered definition list is the same construct as a bulleted one."""
+        self.assertEqual([], self.kinds("1. **Audit** - check it statically\n", {"dash"}))
+        self.assertEqual(["dash"], self.kinds("2. **Test** - trace it - and probe it\n", {"dash"}))
+
+    def test_a_later_dash_on_a_label_line_still_counts(self) -> None:
+        """Exempting the separator must not exempt the rest of the line."""
+        self.assertEqual(
+            ["dash"], self.kinds("- **Bug** - wrong behavior - and worse besides\n", {"dash"})
+        )
+
+    def test_every_marker_and_bold_spelling_exempts_the_label_separator(self) -> None:
+        """One bullet gets one verdict, whichever marker and strong emphasis spell its label.
+
+        The exemption kept its own narrower marker set and read only `**`, so `+`, `1)`, `__`,
+        and `***` reported the separator the `-` and `**` spelling of the same bullet did not.
+        """
+        labels = (
+            "**Bug**",
+            "**Bug:**",
+            "**Bug**:",
+            "__Bug__",
+            "__Bug:__",
+            "***Bug***",
+            "___Bug___",
+            "**_Bug_**",
+            "__*Bug*__",
+            "_**Bug**_",
+            "*__Bug__*",
+        )
+        for marker in ("-", "*", "+", "1.", "1)", "12.", "12)", "> -"):
+            for label in labels:
+                with self.subTest(marker=marker, label=label):
+                    self.assertEqual(
+                        [], self.kinds(f"{marker} {label} - wrong behavior\n", {"dash"})
+                    )
+                    self.assertEqual(
+                        ["dash"],
+                        self.kinds(f"{marker} {label} - wrong behavior - and worse\n", {"dash"}),
+                    )
+
+    def test_an_unmarked_or_mismatched_label_separator_still_counts(self) -> None:
+        """Without a list marker, or with mismatched emphasis, the dash is a clause break."""
+        for text in (
+            "**Bug** - wrong behavior\n",
+            "- **Bug__ - wrong behavior\n",
+            "- __Bug** - wrong behavior\n",
+            "- _**Bug** - wrong behavior\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
+    def test_compound_words_and_ranges_are_left_alone(self) -> None:
+        for text in (
+            "A well-named must-pair input.\n",
+            "Sections D1 - D9 apply.\n",
+            "- a plain list item\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"dash"}))
+
+    def test_a_blockquoted_list_marker_is_not_a_dash(self) -> None:
+        """A callout's bullet sits behind `>`, which is structure rather than a word the dash follows."""
+        for text in (
+            "- Refer to X.\n",
+            "  - Nested item.\n",
+            "> - Refer to X.\n",
+            ">- Refer to X.\n",
+            "> > - Refer to X.\n",
+            ">> - Refer to X.\n",
+            "  >   - Nested in a callout.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"dash"}))
+
+    def test_a_dash_in_a_blockquoted_line_still_counts(self) -> None:
+        """Only the prefix is structure, so the prose after it is judged as it is anywhere else."""
+        for text in (
+            "> - Refer to X - and to Y.\n",
+            "> > - Refer to X - and to Y.\n",
+            ">> - Refer to X - and to Y.\n",
+            "> A callout sentence - with a clause break.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
+    def test_a_blockquoted_label_separator_is_exempt(self) -> None:
+        """The label construct reads the same inside a callout as outside one."""
+        self.assertEqual([], self.kinds("> - **Bug** - wrong behavior\n", {"dash"}))
+        self.assertEqual(
+            ["dash"], self.kinds("> - **Bug** - wrong behavior - and worse\n", {"dash"})
+        )
+
+
+class TestDupwordRule(BaitCase):
+    """The `dupword` rule on Markdown prose and on comment units."""
+
+    def test_every_allowlist_entry_is_permitted(self) -> None:
+        for phrase in prose_lint.DUP_ALLOW:
+            with self.subTest(phrase=phrase):
+                self.assertEqual(
+                    [], self.kinds(f"A case where {phrase} reads correctly.\n", {"dupword"})
+                )
+
+    def test_a_repetition_outside_the_allowlist_is_flagged(self) -> None:
+        """`the the` was in the allowlist while a comment claimed it was flagged."""
+        self.assertEqual(["dupword"], self.kinds(f"{DUP} thing\n", {"dupword"}))
+
+    def test_a_word_joining_character_does_not_start_a_repetition(self) -> None:
+        """ "either/or or" is a phrase followed by a conjunction, not a doubled word."""
+        self.assertEqual([], self.kinds("either/or or must-pair inputs\n", {"dupword"}))
+        self.assertEqual([], self.kinds("a must-pair pair of inputs\n", {"dupword"}))
+
+    def test_a_repetition_in_a_comment_is_flagged_in_every_syntax(self) -> None:
+        """Narrowing the rule to comments has to leave it enforcing in all of them."""
+        for name, comment in (
+            ("bait.py", f"# {DUP.capitalize()} thing."),
+            ("bait.sh", f"# {DUP.capitalize()} thing."),
+            ("bait.yml", f"# {DUP.capitalize()} thing."),
+            ("bait.cs", f"// {DUP.capitalize()} thing."),
+            ("bait.cs", f"/* {DUP.capitalize()} thing. */"),
+            ("bait.html", f"<!-- {DUP.capitalize()} thing. -->"),
+        ):
+            with self.subTest(file=name, comment=comment):
+                self.assertEqual(["dupword"], self.kinds(f"{comment}\n", {"dupword"}, name=name))
+
+    def test_a_trailing_comment_is_read_and_the_code_before_it_is_not(self) -> None:
+        """The comment is prose wherever it sits on the line, and the statement stays code."""
+        self.assertEqual(
+            ["dupword"],
+            self.kinds(f"x = 1  # {DUP.capitalize()} thing.\n", {"dupword"}, name="bait.py"),
+        )
+
+    def test_code_is_not_prose_outside_markdown(self) -> None:
+        """A repeated token in code is the author's, and often the only spelling that works.
+
+        The class attribute is the reported case: two class names sharing a prefix is how CSS is
+        written, and `rel`, `srcset` and `data-*` all take value lists with the same shape.
+        """
+        for name, line in (
+            ("bait.html", f'<div class="{DUP_CLASS}">'),
+            ("bait.html", f'<a rel="{DUP_REL}" href="#">x</a>'),
+            ("bait.html", f"<p>{DUP} thing</p>"),
+            ("bait.py", f'x = "{DUP}"'),
+            ("bait.yml", f"key: {DUP}"),
+            ("bait.json", f'{{ "a": "{DUP}" }}'),
+        ):
+            with self.subTest(file=name, line=line):
+                self.assertEqual([], self.kinds(f"{line}\n", {"dupword"}, name=name))
+
+    def test_two_comments_on_one_line_are_judged_separately(self) -> None:
+        """Joining them would read the second comment's opening word as a repeat of the first's."""
+        word = DUP.split()[0]
+        pair = f"<!-- Ends with {word} --><!-- {word.capitalize()} opens -->\n"
+        self.assertEqual([], self.kinds(pair, {"dupword"}, name="bait.html"))
+
+    def test_inline_code_is_not_prose(self) -> None:
+        """A backticked token is quoted, the same exemption every other prose rule takes."""
+        self.assertEqual([], self.kinds(f"The `{DUP}` field.\n", {"dupword"}))
+        self.assertEqual([], self.kinds(f"# The `{DUP}` field.\n", {"dupword"}, name="bait.py"))
+
+    def test_the_repo_is_clean_of_duplicated_words(self) -> None:
+        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
+        found = [
+            f"{prose_lint.rel(p)}:{ln}"
+            for p in prose_lint.discover(["."])
+            for ln, kind, _ in prose_lint.check_file(p, {"dupword"})
+            if kind == "dupword"
+        ]
+        self.assertEqual([], found)
+
+
+class TestSpellingRule(BaitCase):
+    """The `spelling` rule on Markdown prose and on comment units."""
+
+    def messages(self, text: str, name: str = "bait.md") -> list[str]:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return [msg for _, _, msg in prose_lint.check_file(path, {"spelling"})]
+
+    def test_every_banned_spelling_is_caught_and_its_us_form_is_not(self) -> None:
+        """The live table drives the case, so a word added to it arrives already proven."""
+        for british, us in prose_lint.BRITISH.items():
+            with self.subTest(word=british):
+                self.assertEqual(["spelling"], self.kinds(f"One {british} here.\n", {"spelling"}))
+                self.assertEqual([], self.kinds(f"One {us} here.\n", {"spelling"}))
+
+    def test_the_finding_names_the_replacement(self) -> None:
+        word = "behavi" + "our"
+        self.assertEqual(
+            [f"British spelling '{word}' -> 'behavior'"], self.messages(f"The {word} of it.\n")
+        )
+
+    def test_a_match_keeps_the_case_the_source_wrote(self) -> None:
+        """A capitalized or shouted word gets a replacement it can be swapped in for."""
+        word = "colo" + "ur"
+        for written, offered in ((word.capitalize(), "Color"), (word.upper(), "COLOR")):
+            with self.subTest(written=written):
+                self.assertEqual(
+                    [f"British spelling '{written}' -> '{offered}'"],
+                    self.messages(f"{written} of the box.\n"),
+                )
+
+    def test_a_word_that_is_also_correct_us_english_is_not_banned(self) -> None:
+        """`analyses` is the plural of `analysis`, and `cancelled` is an Actions job status."""
+        for word in ("analyses", "cancelled", "analysis", "advertise", "surprise", "exercise"):
+            with self.subTest(word=word):
+                self.assertEqual([], self.kinds(f"One {word} here.\n", {"spelling"}))
+
+    def test_a_banned_spelling_inside_a_word_is_not_a_match(self) -> None:
+        """The pattern is word-anchored, so a longer word that contains one is left alone."""
+        for word in ("parameter", "collaborate", "metering"):
+            with self.subTest(word=word):
+                self.assertEqual([], self.kinds(f"One {word} here.\n", {"spelling"}))
+
+    def test_code_is_not_prose_outside_markdown(self) -> None:
+        """A source file is read through its comments, so an identifier or a table is not bait.
+
+        This is what keeps prose_lint.py from reporting its own lookup table.
+        """
+        word = "organis" + "ation"
+        self.assertEqual([], self.kinds(f"x = '{word}'\n", {"spelling"}, name="bait.py"))
+        self.assertEqual(
+            ["spelling"], self.kinds(f"# The {word} of it.\n", {"spelling"}, name="bait.py")
+        )
+
+    def test_inline_code_is_not_prose(self) -> None:
+        """A backticked word is a quoted token, the same exemption every other prose rule takes."""
+        word = "licen" + "ce"
+        self.assertEqual([], self.kinds(f"The `{word}` field.\n", {"spelling"}))
+        self.assertEqual([], self.kinds(f"# The `{word}` field.\n", {"spelling"}, name="bait.py"))
+
+    def test_the_repo_is_clean_of_british_spellings(self) -> None:
+        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
+        found = [
+            f"{prose_lint.rel(p)}:{ln}"
+            for p in prose_lint.discover(["."])
+            for ln, kind, _ in prose_lint.check_file(p, {"spelling"})
+            if kind == "spelling"
+        ]
+        self.assertEqual([], found)
+
+
+class TestCommentWrapRule(BaitCase):
+    """The `comment-wrap` and `comment-case` rules, the one function reporting both."""
+
+    COMMENT_RULES: ClassVar[set[str]] = {"comment-wrap", "comment-case", "comment-added"}
+
+    def case_flag(self, name: str, text: str) -> list[str]:
+        return self.kinds(text, {"comment-case"}, name=name)
+
+    def wrap_flag(self, text: str) -> list[str]:
+        return self.kinds(text, {"comment-wrap"}, name="tool.py")
 
     def test_a_run_on_is_caught_in_every_comment_syntax(self) -> None:
         """One case per syntax, so a failure names the language whose extractor broke."""
@@ -1024,12 +1191,6 @@ class TestCommentWrap(BaitCase):
         """The marker pattern requires trailing whitespace, so a version or decimal is untouched."""
         self.assertEqual([], self.flag("a.sh", "# 3.13 is the pinned interpreter.\n"))
 
-    def test_json_carries_comments_because_jsonc_is_what_ships(self) -> None:
-        """VS Code tasks, devcontainer, and workspace files ship comments under a plain .json name."""
-        for name in ("a.json", "a.code-workspace", "a.jsonc"):
-            with self.subTest(file=name):
-                self.assertEqual(["comment-wrap"], self.flag(name, f"// {self.RUN_ON}\n"))
-
     def test_a_marker_inside_a_string_is_not_a_comment(self) -> None:
         for name, text in (
             ("a.cs", 'var s = "// no. Really.";\n'),
@@ -1094,158 +1255,6 @@ class TestCommentWrap(BaitCase):
         """An XML doc comment and a docstring may run to paragraphs, which CODESTYLE governs."""
         self.assertEqual([], self.flag("a.cs", f"/// <summary>{self.RUN_ON}</summary>\n"))
         self.assertEqual([], self.flag("a.py", f'"""{self.RUN_ON}"""\n'))
-
-    def test_a_closed_block_doc_gives_the_rest_of_the_line_back(self) -> None:
-        """CODESTYLE owns the documentation comment, not the line it happens to sit on.
-
-        A line doc comment does run to end of line, so only the block form gives anything back.
-        """
-        self.assertEqual([], self.flag("a.cs", f"/** {self.RUN_ON} */\n"))
-        self.assertEqual([], self.flag("a.cs", f"/// {self.RUN_ON} // and more\n"))
-        self.assertEqual(["comment-wrap"], self.flag("a.cs", "/** Docs. */ // Two things. Here.\n"))
-
-    def test_a_multi_line_doc_block_owns_every_line_until_it_closes(self) -> None:
-        """A marker in documentation text is prose, so scanning those lines invents comments.
-
-        The closing line still gives back what follows the closer, which is the one finding here.
-        """
-        self.assertEqual(
-            ["comment-wrap"],
-            self.flag(
-                "a.cs",
-                "/** Docs start\n"
-                " * // Two things. Here.\n"
-                " * /* not an opener\n"
-                " */ // Two things. Here.\n",
-            ),
-        )
-
-    def test_verbatim_rules_apply_to_the_double_quoted_form_only(self) -> None:
-        """C# spells a verbatim string with double quotes, so `@` on a char literal is ordinary.
-
-        Under verbatim rules the doubled quote is one escaped character and both are blanked,
-        so counting what survives tells the two readings apart.
-        """
-        masked, _ = prose_lint.strip_strings("var c = @'a''b'; // t", "\"'", True)
-        self.assertEqual(4, masked.count("'"))
-
-    def test_a_verbatim_string_spans_lines(self) -> None:
-        """It is the one string form here that carries, so masking per line invents comments.
-
-        The line that closes it still gives back what follows the quote.
-        """
-        # The marker on the second line is string content, so nothing is reported.
-        self.assertEqual(
-            [], self.flag("a.cs", 'var s = @"line one\n// Two things. Here.\nline three";\n')
-        )
-        # The line that closes it still gives back the comment after the quote.
-        self.assertEqual(
-            ["comment-wrap"],
-            self.flag("a.cs", 'var s = @"line one\nline two"; // Two things. Here.\n'),
-        )
-        # A plain string ends on its own line, so the next line is ordinary code.
-        self.assertEqual(
-            ["comment-wrap"], self.flag("a.cs", 'var s = "line one";\n// Two things. Here.\n')
-        )
-        # Closing one and opening another leaves real code between them, which is not string content.
-        self.assertEqual(
-            ["comment-wrap"],
-            self.flag(
-                "a.cs",
-                'var s = @"start\n'
-                'end"; /* Two things. Here. */ var t = @"open again\n'
-                'still string";\n',
-            ),
-        )
-
-    def test_a_quote_in_comment_text_is_prose_rather_than_a_string(self) -> None:
-        """Masking the comment too lets its quote open a string that blanks the markers after it.
-
-        Within the line that costs the block its closer, and across lines the state carries and
-        blanks every marker below until something closes it.
-        """
-        self.assertEqual(
-            ["comment-wrap"],
-            self.flag("a.cs", 'code(); /* note @"x */ code2(); // Two things. Here.\n'),
-        )
-        # Each block line is its own sentence, so the two findings are the recovered comments.
-        self.assertEqual(
-            ["comment-wrap", "comment-wrap"],
-            self.flag(
-                "a.cs",
-                '/* A note about @"paths.\n'
-                "   And more. */ // Two things. Here.\n"
-                "var x = 1; // Two things. Here.\n",
-            ),
-        )
-
-    def test_only_a_c_style_continuation_loses_its_leading_asterisk(self) -> None:
-        """The `*` continuing a `/* */` line is punctuation, and anywhere else it is prose.
-
-        Taking it off an emphasis marker leaves a lowercase opening that the case rule reports,
-        which is the rule judging text the extractor damaged.
-        """
-        for name, text in (
-            ("a.md", "<!-- *emphasis* leads here -->\n"),
-            ("a.ps1", "<# *emphasis* leads here #>\n"),
-            ("a.cs", "/* *emphasis* leads here */\n"),
-        ):
-            with self.subTest(file=name):
-                self.assertEqual([], self.flag(name, text))
-        # The convention still holds on the lines it was written for.
-        found = prose_lint.extracted_comments(
-            Path("a.cs"), ["/* Start here.", " * Still going. */"]
-        )
-        self.assertEqual(
-            [(1, "Start here.", True), (2, "Still going.", True)],
-            [(c.line, c.body, c.leading) for c in found],
-        )
-        # The marker is one `*` against whitespace, so a continuation keeps its own emphasis.
-        for text, body in (
-            (" * **bold** here */", "**bold** here"),
-            (" **bold** here */", "**bold** here"),
-            (" *emphasis* here */", "*emphasis* here"),
-        ):
-            with self.subTest(line=text):
-                found = prose_lint.extracted_comments(Path("a.cs"), ["/* Start.", text])
-                self.assertEqual(
-                    [(1, "Start.", True), (2, body, True)],
-                    [(c.line, c.body, c.leading) for c in found],
-                )
-
-    def test_a_parameter_expansion_hash_opens_no_comment(self) -> None:
-        """A `#` after `$` or `${` is bash naming a count, so neither spelling reads as a comment.
-
-        A real comment on the same kind of line is still found, leading or trailing.
-        """
-        for text in (
-            "            count=${#items[@]}",
-            '            echo "::error::${#items[@]} open issues. Close them by hand."',
-            "            echo $#",
-        ):
-            with self.subTest(line=text):
-                self.assertEqual([], prose_lint.extracted_comments(Path("x.yml"), [text]))
-        self.assertEqual(
-            [],
-            self.flag(
-                "x.yml",
-                'run: |\n  echo "::error::${#items[@]} open issues. Close them by hand."\n',
-            ),
-        )
-        for text, leading in (
-            ("            count=${#items[@]} # Count the open items.", False),
-            ("            # Count the open items.", True),
-        ):
-            with self.subTest(line=text):
-                found = prose_lint.extracted_comments(Path("x.yml"), [text])
-                self.assertEqual(
-                    [("Count the open items.", leading)], [(c.body, c.leading) for c in found]
-                )
-
-    def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
-        for name in ("a.lock", "a.csv", "a.txt"):
-            with self.subTest(file=name):
-                self.assertEqual([], self.flag(name, f"// {self.RUN_ON}\n"))
 
     def test_a_wrapped_sentence_is_caught_and_adjacency_is_required(self) -> None:
         """Two comments with code between them are separate, not one wrapped sentence."""
@@ -1615,89 +1624,10 @@ class TestCommentWrap(BaitCase):
             with self.subTest(file=name, line=text.split("\n")[0]):
                 self.assertEqual(["comment-wrap"], self.flag(name, text))
 
-    def test_every_comment_on_a_line_is_read_not_just_the_first(self) -> None:
-        """A ceiling can only describe the first comment, so a later one was unreachable.
-
-        Each case puts the offending sentence in the second comment, which a scan that stops at
-        the first reports as clean.
-        """
-        for name, text in (
-            ("a.cs", "var x = 1; /* Note. */ // Two things. Here.\n"),
-            ("a.cs", "/* Note. */ /* Two things. Here. */\n"),
-            ("a.cs", "/* Start here.\n   Still going. */ // Two things. Here.\n"),
-        ):
-            with self.subTest(line=text.split("\n")[0]):
-                self.assertEqual(["comment-wrap"], self.flag(name, text))
-
-    def test_a_verbatim_string_keeps_its_own_closing_quote(self) -> None:
-        """A backslash is ordinary inside one and a doubled quote is the escape.
-
-        Read with C escape rules the string never closes, so the masker blanks the rest of the
-        line and the trailing comment goes unseen.
-        """
-        # Ending in a backslash, the string swallows its closing quote and hides a real comment.
-        self.assertEqual(
-            ["comment-wrap"], self.flag("a.cs", 'var p = @"C:\\tmp\\"; // Two things. Here.\n')
-        )
-        # Reading a doubled quote as a close then a reopen puts string content outside the string.
-        self.assertEqual(
-            [], self.flag("a.cs", 'var s = @"a""// One thing. Another thing.""b"; // ok\n')
-        )
-        # An interpolated one is spelled either way round, and only one of them abuts the quote.
-        for text in (
-            'var s = $@"C:\\tmp\\"; // Two things. Here.\n',
-            'var s = @$"C:\\tmp\\"; // Two things. Here.\n',
-        ):
-            with self.subTest(line=text.strip()):
-                self.assertEqual(["comment-wrap"], self.flag("a.cs", text))
-
-    def test_only_the_syntax_that_has_verbatim_strings_gets_them(self) -> None:
-        """C shares the C-like spec without the form, so `@` there is an ordinary character."""
-        self.assertTrue(prose_lint.SYNTAX[".cs"]["verbatim"])
-        self.assertFalse(prose_lint.SYNTAX[".c"]["verbatim"])
-        self.assertFalse(prose_lint.SYNTAX[".json"]["verbatim"])
-        # The C escape still hides a marker, which is what the verbatim rule must not undo.
-        self.assertEqual(
-            ["comment-wrap"], self.flag("a.cs", 'var s = "a\\"b"; // Two things. Here.\n')
-        )
-
-    def test_css_has_block_comments_only(self) -> None:
-        """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
-        self.assertEqual([], self.flag("a.css", "a { background: url(http://x/y. Z); }\n"))
-        self.assertEqual(["comment-wrap"], self.flag("a.css", "/* One thing. Another thing. */\n"))
-
     def test_a_version_pin_is_machinery_rather_than_prose(self) -> None:
         """The action-pinning rule requires a trailing release-tag comment such as `# vX.Y.Z`, which is a label, not a sentence."""
         self.assertEqual([], self.flag("a.yml", "  uses: x@sha # v7.0.0\n"))
         self.assertEqual([], self.flag("a.yml", "  uses: x@sha # v3\n"))
-
-    def test_the_syntax_table_covers_a_plausible_number_of_extensions(self) -> None:
-        """A table that shrank would make every case above pass by having nothing to dispatch on."""
-        self.assertGreaterEqual(len(prose_lint.SYNTAX), 25)
-        for label in (
-            ".cs",
-            ".cpp",
-            ".py",
-            ".sh",
-            ".yml",
-            ".json",
-            ".jsonc",
-            ".xml",
-            ".ps1",
-            ".ini",
-        ):
-            with self.subTest(ext=label):
-                self.assertIsNotNone(prose_lint.syntax_for(Path(f"x{label}")))
-
-
-class TestANamedToolIsStillProse(BaitCase):
-    """A comment that names a tool is prose about it, and only a directive the tool reads is exempt.
-
-    The exemption was searched anywhere in the body, so writing a tool's name into a sentence
-    disarmed every comment rule for that line, `comment-added` included.
-    """
-
-    COMMENT_RULES: ClassVar[set[str]] = {"comment-wrap", "comment-case", "comment-added"}
 
     def test_a_sentence_naming_a_tool_is_judged_as_prose(self) -> None:
         for text, expected in (
@@ -1776,593 +1706,680 @@ class TestANamedToolIsStillProse(BaitCase):
                     self.kinds(text, self.COMMENT_RULES, name=name),
                 )
 
-    def test_the_prose_in_front_of_a_trailing_directive_is_judged(self) -> None:
-        """A Python checker reads the directive, and the prose in front of it is still prose."""
-        both = ["comment-wrap", "comment-case", "comment-added"]
-        for text, expected in (
-            ("# A new prose comment the reviewer never sees.  # noqa\n", ["comment-added"]),
-            ("# two sentences here. Another one follows.  # noqa: E501\n", both),
-            ("x = 1  # two sentences here. Another one follows.  # noqa\n", ["comment-wrap"]),
-            (
-                "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
-                ["comment-wrap"],
+    def test_a_lowercase_directive_draws_no_case_finding(self) -> None:
+        for text in (
+            "# nosec B404\n",
+            "# hadolint ignore=DL3008\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.case_flag("tool.py", text))
+
+    def test_a_punctuated_sentence_opening_on_a_directive_name_is_still_judged(self) -> None:
+        self.assertEqual(
+            ["comment-case"], self.case_flag("tool.py", "# nosec the value is read once.\n")
+        )
+
+    def test_an_ordinary_lowercase_comment_still_draws_the_finding(self) -> None:
+        self.assertEqual(
+            ["comment-case"], self.case_flag("tool.py", "# details are allowed here.\n")
+        )
+
+    def test_the_line_after_a_directive_is_not_its_continuation(self) -> None:
+        self.assertEqual(
+            [], self.wrap_flag("# nosec B404\n# the next call is checked below.\nx = 1\n")
+        )
+
+    def test_a_lowercase_line_after_a_directive_is_judged_for_case_instead(self) -> None:
+        self.assertEqual(
+            ["comment-case"],
+            self.kinds(
+                "# nosec B404\n# the next call is checked below.\nx = 1\n",
+                {"comment-wrap", "comment-case"},
+                name="tool.py",
             ),
-            ("# two sentences here. Another one follows.  # pylint: disable=no-member\n", both),
-            ("# two sentences here. Another one follows, pylint: disable=no-member\n", both),
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
-
-    def test_a_trailing_directive_does_not_make_prose_read_as_configuration(self) -> None:
-        """A directive's code ends the body where a full stop would, so the cut comes first."""
-        text = (
-            "# Note: two sentences here. Another one follows.  # noqa: E501\n"
-            "# Note: the value is read once.  # noqa: E501\n"
         )
-        self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
 
-    def test_what_is_left_before_a_directive_keeps_its_exemptions(self) -> None:
-        """The space in front of the directive is cut with it, so an address or a key is still exempt."""
-        for text in (
-            "# https://example.com/a/very/long/reference/path  # noqa: E501\n",
-            "# Note:  # noqa: E501\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
-
-    def test_each_trailing_form_ends_what_is_judged(self) -> None:
-        """A sentence after the directive is cut with it, whichever form it is and however the suffix is cased."""
-        for name, text in (
-            ("tool.py", "x = 1  # Read the row once. pylint: disable=no-member\n"),
-            ("tool.py", "x = 1  # Read the row.  # type: ignore. Another one follows.\n"),
-            ("tool.py", "x = 1  # Read the row.  # type:ignore. Another one follows.\n"),
-            ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
-            ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
-            ("tool.py", "x = 1  # Read the row.  # NOQA. Another one follows.\n"),
-            ("tool.py", "x = 1  # Read the row.  # NoQA: E501. Another one follows.\n"),
-            ("tool.py", "x = 1  # Read the row.  # nopep8. Another one follows.\n"),
-            ("tool.py", "x = 1  # Read the row.  # NoPep8: E501. Another one follows.\n"),
-        ):
-            with self.subTest(name=name, text=text.strip()):
-                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
-
-    def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
-        """What is left once the directive is cut is empty or a directive `NOT_PROSE` already exempts."""
-        for text in (
-            "x = 1  # noqa\n",
-            "x = 1  # pylint: disable=no-member\n",
-            "x = 1  # type: ignore  # noqa: E501\n",
-            "# noqa: E501  # noqa\n",
-            "#  # noqa\n",
-            "#  # NOPEP8\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
-
-    def test_a_trailing_directive_is_prose_outside_python(self) -> None:
-        """No other language's checker reads these forms, so a mention of one is part of the sentence."""
-        both = ["comment-wrap", "comment-case", "comment-added"]
-        for name, text in (
-            ("a.toml", "# two sentences here. Each line carries a `# noqa` marker.\n"),
-            ("a.yml", "# two sentences here. Another one follows.  # noqa\n"),
-            ("run.sh", "# two sentences here. Another one follows, pylint: disable=no-member\n"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(both, self.kinds(text, self.COMMENT_RULES, name=name))
-
-    def test_the_sentence_after_a_mention_is_judged_outside_python(self) -> None:
-        """Only a Python file is cut at the directive, so a run-on after a mention elsewhere is caught."""
-        text = "# Each line carries a `# noqa` marker. Another sentence follows.\n"
-        for name, expected in (
-            ("a.yml", ["comment-wrap", "comment-added"]),
-            ("a.toml", ["comment-wrap", "comment-added"]),
-            ("tool.py", ["comment-added"]),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
-
-    def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
-        for text in (
-            "x = 1  # Read the row.  # noqable. Another one follows.\n",
-            "x = 1  # Read the row mypylint: once. Another one follows.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual(
-                    ["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py")
-                )
-
-    def test_a_directive_named_mid_sentence_leaves_no_wrap(self) -> None:
-        """The sentence goes on past a directive it names, so the next line does not continue it."""
-        for text, expected in (
-            ("# Suppress with `# noqa: E501` where needed.\n# max_len - the longest line.\n", []),
-            ("# Lines carry a `# noqa` marker.\n# flake8 reads it.\n", [(2, "comment-case")]),
-            (
-                "# A sentence that keeps  # noqa\n# going onto the next line.\n",
-                [(1, "comment-wrap")],
-            ),
-        ):
-            with self.subTest(text=text.strip()):
-                path = self.tmp / "tool.py"
-                path.write_text(text, encoding="utf-8")
-                found = prose_lint.check_file(path, {"comment-wrap", "comment-case"})
-                self.assertEqual(expected, [(n, kind) for n, kind, _ in found])
-
-    def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
-        """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
-        text = '"""\n# two sentences here. Another one follows.\n"""\n'
-        for name in ("tool.py", "Tool.PY"):
-            with self.subTest(name=name):
-                self.assertEqual([], self.kinds(text, {"comment-wrap", "comment-case"}, name=name))
-
-
-class TestMultiLineStrings(BaitCase):
-    """A string that spans lines hides its markers on every line it covers, not only the first.
-
-    Masking a line at a time leaves the lines below readable, so the comment rules report on string
-    content and ask a reader to edit text that is data. Each case below puts the bait sentence
-    inside a spanning string and asserts nothing is reported, then puts a real comment after the
-    line that closes it and asserts that one still is - a carry that never releases would swallow
-    the rest of the file, which reads exactly like a clean pass.
-    """
-
-    BAIT = "Two things. Here."
-
-    def flag(self, name: str, text: str) -> list[str]:
-        return self.kinds(text, {"comment-wrap", "comment-case"}, name=name)
-
-    def test_a_shell_quote_that_does_not_close_spans_lines(self) -> None:
-        """Either quote form carries, and the line that closes it gives back what follows."""
-        for quote in ('"', "'"):
-            with self.subTest(quote=quote):
-                self.assertEqual(
-                    [], self.flag("a.sh", f"s={quote}line one\n# {self.BAIT}\nline three{quote}\n")
-                )
-                self.assertEqual(
-                    ["comment-wrap"],
-                    self.flag("a.sh", f"s={quote}line one\nline two{quote}  # {self.BAIT}\n"),
-                )
-
-    def test_a_shell_single_quoted_string_takes_no_backslash_escape(self) -> None:
-        """Read with C escape rules the trailing backslash eats the closing quote.
-
-        The string would then carry into every line below it, which is the failure the C# verbatim
-        form already had within a line, one newline further on.
-        """
-        self.assertEqual(["comment-wrap"], self.flag("a.sh", f"p='C:\\tmp\\'\n# {self.BAIT}\n"))
-
-    def test_a_shell_single_quoted_string_is_neither_doubling_nor_escaped(self) -> None:
-        """It takes no escape at all and cannot embed its own delimiter, so `'a''b'` is two strings.
-
-        Declaring it doubling would state something false about the language. It happens to mask
-        the same either way, since doubling and plain toggling agree on whether a run of quotes
-        leaves a string open, so counting the quotes that survive is what tells the readings apart.
-        """
-        masked, carry = prose_lint.strip_strings(
-            "echo 'a''b'",
-            "\"'",
-            False,
-            prose_lint.CLEAR,
-            prose_lint.SHELL["raw"],
-            prose_lint.SHELL["escape"],
-            prose_lint.SHELL["escape_in"],
-            prose_lint.SHELL["escape_out"],
-        )
-        self.assertEqual(4, masked.count("'"))
-        self.assertEqual("", carry.kind)
-        self.assertEqual("", prose_lint.SHELL["raw"])
-
-    def test_a_shell_backslash_outside_a_string_escapes_the_next_character(self) -> None:
-        r"""`'\''` is how shell embeds a quote in a single-quoted string, and it balances.
-
-        Read without the outside-string escape it leaves one quote open, which then carries and
-        blanks every line below it - a rule that reads nothing reports nothing.
-        """
-        self.assertEqual(["comment-wrap"], self.flag("a.sh", f"echo 'don'\\''t'\n# {self.BAIT}\n"))
-
-    def test_a_heredoc_runs_from_its_label_to_the_line_that_repeats_it(self) -> None:
-        """Bare, quoted, and tab-stripping openers all name the same label."""
-        for opener in ("<<EOF", "<<'EOF'", '<<"EOF"', "<<-EOF", "<< EOF"):
-            with self.subTest(opener=opener):
-                self.assertEqual(
-                    ["comment-wrap"],
-                    self.flag("a.sh", f"cat {opener}\n# {self.BAIT}\nEOF\n# {self.BAIT}\n"),
-                )
-
-    def test_only_the_exact_terminator_ends_a_heredoc(self) -> None:
-        """An indented line is body content, and ending there resumes scanning inside the string.
-
-        `<<-` strips leading tabs and nothing else, so a space-indented line is body under either
-        form. The bait sits on the line after the near-miss, which a premature end reports.
-        """
-        for opener, near_miss in (
-            ("<<EOF", "  EOF"),
-            ("<<EOF", "\tEOF"),
-            ("<<-EOF", "  EOF"),
-            ("<<EOF", "EOF_NOT"),
-        ):
-            with self.subTest(opener=opener, near_miss=repr(near_miss)):
-                self.assertEqual(
-                    [], self.flag("a.sh", f"cat {opener}\n{near_miss}\n# {self.BAIT}\n")
-                )
-
-    def test_a_tab_indented_terminator_ends_a_dash_heredoc(self) -> None:
-        """That is the whole point of `<<-`, so refusing it would run the heredoc to end of file."""
+    def test_a_trailing_directive_is_not_a_continuation_either(self) -> None:
         self.assertEqual(
-            ["comment-wrap"], self.flag("a.sh", f"cat <<-EOF\n\tbody\n\tEOF\n# {self.BAIT}\n")
+            [],
+            self.wrap_flag("import os  # nosec B404\n# the call is checked below.\n"),
         )
 
-    def test_heredocs_stacked_on_one_line_are_read_in_order(self) -> None:
-        """Each body belongs to its own label, so clearing the first must open the second."""
+    def test_a_directive_followed_by_a_directive_draws_nothing(self) -> None:
+        self.assertEqual([], self.wrap_flag("# nosec B404\n# hadolint ignore=DL3008\nx = 1\n"))
+
+    def test_a_two_line_wrap_with_no_directive_is_still_reported(self) -> None:
         self.assertEqual(
-            ["comment-wrap"],
-            self.flag("a.sh", f"cat <<A <<B\n# {self.BAIT}\nA\n# {self.BAIT}\nB\n# {self.BAIT}\n"),
+            ["comment-wrap"], self.wrap_flag("# the next call is\n# checked below.\nx = 1\n")
         )
 
-    def test_a_here_string_and_a_quoted_marker_do_not_open_a_heredoc(self) -> None:
-        """`<<<` is one line, and a `<<` inside a string or a comment is text."""
-        for line in ('jq -r ".x" <<<"$out"', 'echo "cat <<EOF"', "# Match a <<EOF here"):
-            with self.subTest(line=line):
-                self.assertEqual(["comment-wrap"], self.flag("a.sh", f"{line}\n# {self.BAIT}\n"))
-
-    def test_a_powershell_here_string_spans_lines_in_both_quote_forms(self) -> None:
-        """It opens on `@"` or `@'` at the end of a line and closes on the matching token."""
-        for quote in ('"', "'"):
-            with self.subTest(quote=quote):
-                self.assertEqual(
-                    [], self.flag("a.ps1", f"$s = @{quote}\n# {self.BAIT}\n{quote}@\n")
-                )
-                # The closing line gives back what follows the token, as a closing quote does.
-                self.assertEqual(
-                    ["comment-wrap"],
-                    self.flag("a.ps1", f"$s = @{quote}\nbody\n{quote}@  # {self.BAIT}\n"),
-                )
-
-    def test_a_powershell_double_quoted_string_is_escaped_and_doubling_at_once(self) -> None:
-        """Its escape is a backtick, and it also embeds the delimiter by doubling it.
-
-        Neither property implies the other, so both are read per string. Missing the backtick ends
-        the string on the escaped quote, and reading a backslash as an escape consumes the closing
-        one. The single-quoted form takes no backtick escape, so its escape is doubling only.
-        """
-        for code in ('$s = "a`"b"', '$s = "a""b"', "$s = 'a`'", "$s = 'a''b'", '$p = "C:\\tmp\\"'):
-            with self.subTest(code=code):
-                self.assertEqual(["comment-wrap"], self.flag("a.ps1", f"{code}  # {self.BAIT}\n"))
-
-    def test_a_here_string_closes_only_on_a_token_at_the_start_of_the_line(self) -> None:
-        """PowerShell requires the closer at column 0, so an indented one is here-string content."""
-        self.assertEqual(
-            [], self.flag("a.ps1", f'$s = @"\n  "@ is not the closer\n# {self.BAIT}\n"@\n')
-        )
-
-    def test_a_powershell_quote_carries_because_the_escape_is_a_backtick(self) -> None:
-        """A backslash is an ordinary character there, so it cannot consume the closing quote."""
-        self.assertEqual([], self.flag("a.ps1", f'$s = "line one\n# {self.BAIT}\nline three"\n'))
-        self.assertEqual(
-            ["comment-wrap"], self.flag("a.ps1", '$p = "C:\\tmp\\"  # ' + self.BAIT + "\n")
-        )
-
-    def test_a_yaml_block_scalar_is_data_until_the_indentation_drops(self) -> None:
-        """Every header form opens one, and the line that dedents is code again."""
-        for header in ("key: |", "key: >", "key: |-", "key: >-", "key: |2", "  - |"):
-            with self.subTest(header=header):
-                self.assertEqual(
-                    ["comment-wrap"],
-                    self.flag(
-                        "a.yml",
-                        f"{header}\n    # {self.BAIT}\n\n    still data\nnext: 1  # {self.BAIT}\n",
-                    ),
-                )
-
-    def test_a_run_scalar_stays_a_script_the_comment_rules_govern(self) -> None:
-        """Its `#` lines are shell comments, so treating the block as data would stop linting them.
-
-        A data key holds text the reader cannot edit, which is the case the block rule is for.
-        The chomping and indent indicators ride along on the header, so every form of it counts.
-        """
-        for header in (
-            "run: |",
-            "run: |-",
-            "run: |+",
-            "run: |2",
-            "run: >",
-            "run: >-",
-            "      run: |",
-            "      - run: |",
-        ):
-            with self.subTest(header=header):
-                self.assertEqual(
-                    ["comment-wrap"], self.flag("a.yml", f"{header}\n        # {self.BAIT}\n")
-                )
-        # The exemption is anchored to the key, so a key merely ending in the word is still data.
-        for header in (
-            "files: |",
-            "files: |-",
-            "tags: >-",
-            "dry run: |",
-            "first run: |-",
-            "post-run: |",
-        ):
-            with self.subTest(header=header):
-                self.assertEqual([], self.flag("a.yml", f"{header}\n  # {self.BAIT}\n"))
-
-    def test_a_pipe_that_is_not_a_block_header_opens_nothing(self) -> None:
-        """A plain scalar ending in a pipe is a value, not a block indicator."""
-        self.assertEqual(["comment-wrap"], self.flag("a.yml", f"key: a | b\n# {self.BAIT}\n"))
-
-    def test_a_yaml_quote_delimits_only_at_the_start_of_a_value(self) -> None:
-        """A plain scalar's apostrophe is text, so reading it as an opener hides a real comment.
-
-        The masked span would run from the apostrophe to the end of the line, taking the trailing
-        `#` with it, and this repo's own workflow YAML carries the pattern (`the merge-bot's ...`).
-        A quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
-        """
-        for code in (
-            "key: don't",
-            "name: Don't do this",
-            "key: [don't, 'x']",
-            "key: 'quoted'",
-            "  - 'item'",
-            'key: "don\'t"',
-            "key: {k: 'v'}",
-        ):
-            with self.subTest(code=code):
-                self.assertEqual(["comment-wrap"], self.flag("a.yml", f"{code}  # {self.BAIT}\n"))
-
-    def test_a_quote_still_opens_anywhere_in_a_syntax_with_no_bare_words(self) -> None:
-        """The restriction is scoped to YAML, the one syntax here whose values can go unquoted.
-
-        A C# string opens after `=`, `(`, or `,`, none of which YAML's set contains, so applying the
-        restriction everywhere would stop masking C# strings entirely. The masked span is what shows
-        it, since no C# comment marker fits inside a char literal to hide.
-        """
-        self.assertEqual("", prose_lint.SYNTAX[".cs"]["quote_after"])
-        self.assertTrue(prose_lint.SYNTAX[".yml"]["quote_after"])
-        masked, _ = prose_lint.strip_strings('var s = "// no";', "\"'")
-        self.assertEqual('var s = "     ";', masked)
-        self.assertEqual(["comment-wrap"], self.flag("a.cs", f"var s = 'a';  // {self.BAIT}\n"))
-        self.assertEqual([], self.flag("a.cs", f'var s = "// {self.BAIT}";\n'))
-
-    def test_a_single_quoted_yaml_or_toml_scalar_takes_no_backslash_escape(self) -> None:
-        r"""A trailing backslash would otherwise consume the closing quote and hide the comment.
-
-        Both languages spell the escape as a doubled quote in the single-quoted form, and both
-        keep the backslash escape in the double-quoted one, so the two forms are read differently
-        in the same file. The bait is a trailing comment, which only survives a correct read.
-        """
-        for name, code in (
-            ("a.yml", "key: 'C:\\tmp\\'"),
-            ("a.yml", "key: 'it''s'"),
-            ("a.toml", "s = 'C:\\tmp\\'"),
-            ("a.toml", "s = 'it''s'"),
-        ):
-            with self.subTest(file=name, code=code):
-                self.assertEqual(["comment-wrap"], self.flag(name, f"{code}  # {self.BAIT}\n"))
-        # The double-quoted form keeps it, so an escaped quote does not close the string early.
-        for name, code in (("a.yml", 'key: "a\\"b"'), ("a.toml", 's = "a\\"b"')):
-            with self.subTest(file=name, code=code):
-                self.assertEqual(["comment-wrap"], self.flag(name, f"{code}  # {self.BAIT}\n"))
-
-    def test_a_form_carries_only_in_the_syntax_that_has_it(self) -> None:
-        """A YAML plain scalar's apostrophe is not a string, and a TOML file has no heredoc.
-
-        Carrying either would blank every line below it, and a rule that reads nothing reports
-        nothing, so the file would go quiet rather than fail.
-        """
-        for name, opener in (
-            ("a.yml", "key: don't"),
-            ("a.yml", 'key: "unclosed'),
-            ("a.toml", "s = 'unclosed"),
-            ("a.toml", "cat <<EOF"),
-            ("a.ini", "k = don't"),
-            ("a.json", '{"a": "unclosed'),
-        ):
-            with self.subTest(file=name, opener=opener):
-                self.assertEqual(
-                    ["comment-wrap"], self.flag(name, f"{opener}\n# {self.BAIT}\n// {self.BAIT}\n")
-                )
-
-    def test_every_declared_carry_kind_is_one_the_extractor_implements(self) -> None:
-        """A typo in a `carry` set would silently disable the form it was meant to turn on."""
-        implemented = {"quote", "verbatim", "here", "label", "block"}
-        for label, spec in sorted(prose_lint.SYNTAX.items()):
-            with self.subTest(ext=label):
-                self.assertLessEqual(set(spec["carry"]), implemented)
-                # A raw quote has to be one the syntax reads as a quote in the first place.
-                self.assertLessEqual(set(spec["raw"]), set(spec["quotes"]))
-                # An escape character that is also a quote would never reach the escape branch.
-                self.assertEqual(set(), set(spec["escape"]) & set(spec["quotes"]))
-                # The escape works inside quotes the syntax actually has, and is one character.
-                self.assertLessEqual(set(spec["escape_in"]), set(spec["quotes"]) | {'"', "'"})
-                self.assertEqual(1, len(spec["escape"]))
-                # A syntax with nowhere for its escape to apply would carry a dead field.
-                self.assertTrue(spec["escape_in"] or spec["escape_out"])
-
-    def test_the_carrying_syntaxes_are_still_wired_to_their_extensions(self) -> None:
-        """Every case above dispatches on a suffix, so a rewired table would pass them vacuously."""
-        for label, kind in (
-            (".sh", "label"),
-            (".bash", "quote"),
-            (".yml", "block"),
-            (".yaml", "block"),
-            (".ps1", "here"),
-            (".cs", "verbatim"),
-        ):
-            with self.subTest(ext=label):
-                self.assertIn(kind, prose_lint.SYNTAX[label]["carry"])
-        self.assertIn("label", prose_lint.BY_NAME["dockerfile"]["carry"])
-
-    def test_a_string_opens_from_code_after_a_closed_block_comment(self) -> None:
-        """The code a line holds is every span outside its comments, not only the first one.
-
-        Reading only the code before the first marker misses an opener that sits after a block
-        comment that closed on the same line. The here-string then falls back to an ordinary
-        carried quote, which the first quote in its body closes, and scanning resumes inside it.
-        """
-        for opener in ('<# Note. #> $s = @"', '$s = @"'):
-            with self.subTest(opener=opener):
-                self.assertEqual(
-                    [], self.flag("a.ps1", f'{opener}\nhe said "hi\n# {self.BAIT}\n"@\n')
-                )
-
-    def test_a_string_does_not_open_under_a_block_comment(self) -> None:
-        """The block comment owns the lines below, so its text cannot open one."""
-        self.assertEqual(
-            ["comment-wrap", "comment-wrap"],
-            self.flag("a.ps1", f'<# Note @"\n   {self.BAIT} #>\n$x = 1 # {self.BAIT}\n'),
-        )
+    def test_a_sentence_wrapping_into_a_directive_is_still_reported(self) -> None:
+        self.assertEqual(["comment-wrap"], self.wrap_flag("# the value is\n# nosec B404\nx = 1\n"))
 
 
-class TestDiscovery(unittest.TestCase):
-    def setUp(self) -> None:
+class TestCommentAddedRule(BaitCase):
+    """The `comment-added` rule and the label and variable that stand it down."""
+
+    PROSE = "# The value is read once, since the second read can disagree with the first.\n"
+    # A `#` line inside a triple-quoted string, which is string text however the file parses.
+    # The marker opens its line, so the `leading` filter cannot be what drops it.
+    DOCSTRING = 'def f():\n    """Sharp usage:\n\n# to the parser and it stops.\n    """\n'
+
+    def _write(self, text: str, name: str) -> Path:
+        path = self.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def stand_down_setup(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+        self.bait = self.tmp / "tool.py"
+        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
 
-    def test_sweep_reaches_a_plausible_share_of_the_repo(self) -> None:
-        """A sweep that quietly stops finding files satisfies every rule by having nothing to read."""
-        found = prose_lint.discover([str(REPO)])
-        self.assertGreaterEqual(len(found), prose_lint.LEAST_PLAUSIBLE)
+    def label_setup(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        (self.root / "tool.py").write_text("value = 1\n", encoding="utf-8")
+        self.label_git("add", "-A")
+        self.label_git("commit", "-qm", "base")
+        (self.root / "tool.py").write_text(
+            "# The value is read once, since the second read can disagree.\nvalue = 1\n",
+            encoding="utf-8",
+        )
 
-    def test_no_discovered_path_is_git_ignored(self) -> None:
-        """Scoping by `git ls-files` is what keeps generated trees out of the sweep."""
-        found = prose_lint.discover([str(REPO)])
-        r = subprocess.run(
-            ["git", "-C", str(REPO), "check-ignore", "--stdin"],
-            input="\n".join(str(p) for p in found),
+    def label_git(self, *args: str) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.root),
+                "-c",
+                "user.email=gate@example.invalid",
+                "-c",
+                "user.name=gate test",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
             capture_output=True,
+        )
+
+    def test_a_comment_line_in_code_is_reported(self) -> None:
+        self.assertEqual(
+            ["comment-added"], self.kinds(self.PROSE, {"comment-added"}, name="tool.py")
+        )
+
+    def test_only_a_comment_that_opens_its_line_is_read(self) -> None:
+        """A trailing comment is out of scope, and the languages below are why.
+
+        Which mid-line marker opens a comment is a parser fact that differs by language: TOML and
+        HCL carry a `#` inside a multi-line string, a git pattern file holds no trailing comment at
+        all, PowerShell opens one after almost anything, and shell after its metacharacters. Six
+        attempts at deciding it from the marker's neighbourhood each got a language wrong, and each
+        wrong answer either reported a line holding no comment or silenced one that held several.
+        A marker opening its line is unambiguous in every language.
+        """
+        for text, name in (
+            ("value = read()  # The second read can disagree.\n", "tool.py"),
+            ("while [[ $# -gt 0 ]]; do\n", "t.sh"),
+            ("- name: Check C# formatting step\n", "t.yml"),
+            ("note: See (#1234) for the discussion of this change.\n", "a.yml"),
+            ('description = """\nReference owner/repo#1234 when it lands.\n"""\n', "a.toml"),
+            ("build/ # The output tree is ignored.\n", ".gitignore"),
+            ("run_gate;# The gate is run once here.\n", "t.sh"),
+        ):
+            with self.subTest(name=name, text=text.strip().splitlines()[0]):
+                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_a_comment_opening_its_line_is_read_in_every_syntax(self) -> None:
+        """The other half, so the narrowing cannot pass by reporting nothing at all."""
+        for text, name in (
+            ("# The store is read once here.\n", "t.sh"),
+            ("# The store is read once here.\n", "t.yml"),
+            ("// The store is read once here.\nlet x = 1;\n", "a.ts"),
+            ("/* The store is read once here. */\n", "a.css"),
+            ("<!-- The store is read once here. -->\n", "a.xml"),
+            ("; The store is read once here.\n", "x.ini"),
+            ("# The store is read once here.\n", "a.ps1"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_config_carries_the_rule_as_code_does(self) -> None:
+        for name, text in (
+            (
+                "workflow.yml",
+                "# The base is the pull request's own, not the branch tip.\njobs: {}\n",
+            ),
+            ("settings.json", "// The base is the pull request's own, not the branch tip.\n{}\n"),
+            ("deploy.sh", "# The base is the pull request's own, not the branch tip.\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_an_instruction_to_a_tool_is_not_prose(self) -> None:
+        """Deleting one of these changes what the file does, which is not what the rule asks for."""
+        for line in (
+            "#!/usr/bin/env python3\n",
+            "value = read()  # noqa: E501\n",
+            "value = read()  # type: ignore[arg-type]\n",
+            "# ruff: noqa\n",
+            "# shellcheck disable=SC2086\n",
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_directive_name_opening_a_sentence_is_still_prose(self) -> None:
+        """Anchoring the name alone let a directive open a sentence and exempt the whole comment."""
+        for line, expected in (
+            ("# nosec B404\n", []),
+            ("# hadolint ignore=DL3008\n", []),
+            (
+                "# nosec The value is read once, since the second read can disagree.\n",
+                ["comment-added"],
+            ),
+            ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
+            # Unpunctuated, so the sentence half cannot be what reports these.
+            # The name has to open the body, and `search` in place of `match` exempts them.
+            (
+                "# The pyright: ignore form is written per line rather than per file\n",
+                ["comment-added"],
+            ),
+            (
+                "# A nosec marker would silence the whole call rather than this one\n",
+                ["comment-added"],
+            ),
+            # A reason written as an argument is exempt.
+            # The same reason punctuated as a sentence is not, which is one test reading one body.
+            ("# nosec B608 - the query is parameterized\n", []),
+            ("# nosec B608 - the query is parameterized.\n", ["comment-added"]),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it\n", []),
+            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it.\n", ["comment-added"]),
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_reference_and_a_key_are_not_prose(self) -> None:
+        for line in ("# https://example.invalid/spec\n", "# ignore:\n"):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_powershell_help_block_is_a_documentation_comment(self) -> None:
+        """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
+
+        PowerShell documents two help forms. The `<# ... #>` block is read as documentation here,
+        the way `///` is in C#. The `#` form is read as the ordinary comment lines it is written
+        as, which the last case pins, because telling it from a remark needs a second grammar in a
+        rule that holds none.
+        """
+        # Written so `comment-wrap` has something to find here.
+        # That is what makes the second assertion prove the skip is this rule's own.
+        block = (
+            "<#\n"
+            ".SYNOPSIS\n"
+            "Returns the thing the caller asked for\n"
+            "once the store has answered.\n"
+            "#>\n"
+            "param()\n"
+        )
+        self.assertEqual([], self.kinds(block, {"comment-added"}, name="Tool.ps1"))
+        self.assertEqual(["comment-wrap"], self.kinds(block, {"comment-wrap"}, name="Tool.ps1"))
+        # An ordinary remark is not documentation, so the rule still reads it, after a block too.
+        # A marker inside a string is not an opener, which two hand-written scans each missed.
+        # The first stood the rule down to end of file, the second to the next block's terminator.
+        for name, text in (
+            ("alone", "# The store is read once, since a second read can disagree.\nparam()\n"),
+            ("after a block", "<#\n.SYNOPSIS\nDoc.\n#>\n# The store is read once here.\n"),
+            ("after a one-line block", "<# .SYNOPSIS Doc. #>\n# The store is read once here.\n"),
+            ("under an opener in a string", "$p = '<#'\n# The store is read once here.\n"),
+            ("under an opener in a here-string", "$s = @'\n<#\n'@\n# The store is read once.\n"),
+            (
+                "between an opener in a string and a later block",
+                "$m = '<#'\n# The marker is written out here.\n<#\n.SYNOPSIS\nDoc.\n#>\n",
+            ),
+            ("after a stray closer", "# The store is read once here.\n#>\nparam()\n"),
+            (
+                "past an opener inside a block",
+                "<#\n.SYNOPSIS\nUse <# to open.\n#>\n# The store is read once here.\n",
+            ),
+            (
+                "on a line naming both markers",
+                "# A block is written <# like this #> above a function.\n",
+            ),
+        ):
+            with self.subTest(case=name):
+                self.assertEqual(
+                    ["comment-added"], self.kinds(text, {"comment-added"}, name="Tool.ps1")
+                )
+        # An opener that never closes puts the rest of the file inside a comment, which is what
+        # PowerShell itself reads there, so the rule follows the parser rather than guessing.
+        self.assertEqual(
+            [], self.kinds("<#\n# The store is read once here.\n", {"comment-added"}, name="T.ps1")
+        )
+        # The `#` help form is reported, deliberately rather than by oversight.
+        # It is a run of comment lines, and the label is what a change writing one carries.
+        hash_help = "# .SYNOPSIS\n# Returns the thing the caller asked for.\nfunction G {}\n"
+        self.assertEqual(
+            ["comment-added", "comment-added"],
+            self.kinds(hash_help, {"comment-added"}, name="T.ps1"),
+        )
+
+    def test_markdown_is_out_of_scope(self) -> None:
+        """Markdown prose is the document, and its HTML comments are markers a tool matches."""
+        text = "<!-- The section below is generated. -->\n\nOrdinary prose.\n"
+        self.assertEqual([], self.kinds(text, {"comment-added"}, name="doc.md"))
+
+    def test_a_file_that_carries_no_comments_is_left_alone(self) -> None:
+        self.assertEqual([], self.kinds("a,b\n1,2\n", {"comment-added"}, name="data.csv"))
+
+    def test_a_line_that_looks_like_a_fence_does_not_silence_the_rule(self) -> None:
+        """One unbalanced fence line suppressed every comment after it, in a refusing gate.
+
+        A fence is a Markdown construct and Markdown is out of scope, so the rule reads a file's
+        comments as its own syntax defines them. Reached here through a heredoc, which is where a
+        code or config file holds such a line.
+        """
+        text = "cat <<EOF\n```\nEOF\n" + self.PROSE
+        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="tool.sh"))
+
+    def test_a_python_file_that_does_not_parse_keeps_its_strings_strings(self) -> None:
+        """The lexer reads a half-written file, and a `#` inside its docstring stays string text."""
+        self.assertEqual(
+            [], self.kinds("x = (1\n" + self.DOCSTRING, {"comment-added"}, name="bad.py")
+        )
+
+    def test_this_rule_reads_a_python_suffix_in_either_case(self) -> None:
+        """A case-insensitive filesystem hands the same file back under either spelling."""
+        for name in ("mixed.py", "mixed.PY"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))
+
+    def test_a_known_tool_directive_is_not_prose(self) -> None:
+        """Deleting one changes what the file does, which the rule's first remedy would have done."""
+        for line in (
+            "# syntax=docker/dockerfile:1\n",
+            "# fmt: off\n",
+            "# pragma: no cover\n",
+            "# nosec B404\n",
+            "# yaml-language-server: $schema=https://example.invalid/s.json\n",
+            "# renovate: datasource=github-releases depName=owner/name\n",
+            "value = read()  # fmt: skip\n",
+            "value = read()  # pyright: ignore[reportUnknownMemberType]\n",
+            "# isort: skip_file\n",
+            "# codespell:ignore fo\n",
+            "value = read()  # doctest: +SKIP\n",
+        ):
+            with self.subTest(line=line.strip()):
+                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_the_rule_list_says_what_the_rule_does(self) -> None:
+        """`--summary` and `--help` print this line, and it said the rule fires on an addition.
+
+        A diff counts a modified line as an added one, so a reworded comment is reported, and a
+        reader told otherwise by the rule list meets the finding without expecting it.
+        """
+        self.assertIn("adds or edits", prose_lint.RULES["comment-added"])
+        findings = prose_lint.check_file(
+            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
+        )
+        self.assertIn("adds or edits", findings[0][2])
+
+    def test_the_rule_runs_by_default(self) -> None:
+        """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
+        self.assertIn("comment-added", prose_lint.DEFAULT_RULES)
+        self.assertIn("comment-added", prose_lint.RULES)
+
+    def test_the_message_names_the_label_that_stands_it_down(self) -> None:
+        """A finding a reader cannot act on is a finding that gets worked around.
+
+        The label is looked for as the quoted name the message builds from the constant, since the
+        bare word also appears in the message's closing clause and matched there instead.
+        """
+        findings = prose_lint.check_file(
+            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
+        )
+        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), findings[0][2])
+        self.assertIn(prose_lint.COMMENT_ENV_NAME, findings[0][2])
+        # The flag belongs beside them, since the message prints on a run by hand too.
+        # There no pull request carries a label, and a variable is the clumsier way to pass one.
+        self.assertIn("--allow-comments", findings[0][2])
+
+    def test_without_a_diff_the_rule_stands_down_and_says_so(self) -> None:
+        """Read over a whole tree it would report every comment the repository already holds.
+
+        The environment override is cleared for this case, since the note it prints is the other
+        stand-down's, and the docs tell a developer to export that variable.
+        """
+        self.stand_down_setup()
+        self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
+        with mock.patch.object(prose_lint, "discover", return_value=[self.bait]):
+            self.assertEqual(0, prose_lint.main(["--check", "comment-added", str(self.tmp)]))
+        self.assertIn("comment-added is not checked without --diff", self.err.getvalue())
+
+    def test_a_value_spelled_false_does_not_stand_the_rule_down(self) -> None:
+        """The composite action's input reads `true`, so mirroring it here turned the rule off."""
+        self.stand_down_setup()
+        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
+        for value, expected in (
+            ("false", 1),
+            ("0", 1),
+            ("off", 1),
+            ("no", 1),
+            (" false ", 1),
+            ("False", 1),
+            ("1", 0),
+            ("yes", 0),
+            ("true", 0),
+        ):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": value}),
+                mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
+                mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
+            ):
+                code = prose_lint.main(
+                    ["--check", "comment-added", "--diff", "HEAD", str(self.tmp)]
+                )
+                self.assertEqual(expected, code)
+
+    def test_the_override_stands_it_down_and_names_the_label(self) -> None:
+        """The local escape is not the one CI honors, so the note says which is which."""
+        self.stand_down_setup()
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
+            mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
+        ):
+            code = prose_lint.main(
+                ["--check", "comment-added", "--allow-comments", "--diff", "HEAD", str(self.tmp)]
+            )
+        self.assertEqual(0, code)
+        note = self.err.getvalue()
+        self.assertIn("stood down by --allow-comments", note)
+        # The quoted name, since the bare word is a substring of the flag named on the same line.
+        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), note)
+        self.assertIn(f"clears {prose_lint.COMMENT_ENV_NAME}", note)
+
+    def test_an_unlabeled_change_fails_on_the_comment_it_adds(self) -> None:
+        self.label_setup()
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
+
+    def test_a_labeled_change_passes_and_the_run_says_it_stood_down(self) -> None:
+        self.label_setup()
+        result = run_prose_gate_action(self.root, ALLOW_COMMENTS="true")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("stands down", result.stdout)
+
+    def test_anything_other_than_true_runs_the_gate(self) -> None:
+        """A label expression that matched nothing renders false, and so does a misspelled input."""
+        self.label_setup()
+        for value in ("false", "", "True", "yes"):
+            with self.subTest(value=value):
+                result = run_prose_gate_action(self.root, ALLOW_COMMENTS=value)
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+
+    def test_a_code_edit_beside_a_comment_reports_that_comment(self) -> None:
+        """The rule's stated cost, asserted rather than left to be discovered.
+
+        `git diff --unified=0` counts a modified line as an added one, so re-indenting a comment
+        that opens its line puts it in scope. The label is the remedy, the same one a wanted
+        comment takes. A trailing comment is out of scope for a different reason, which
+        `test_only_a_comment_that_opens_its_line_is_read` carries.
+        """
+        self.label_setup()
+        held = "# The upper limit is fixed by the protocol.\nLIMIT = 1\n"
+        (self.root / "held.py").write_text(held, encoding="utf-8")
+        self.label_git("add", "-A")
+        self.label_git("commit", "-qm", "held")
+        (self.root / "held.py").write_text(
+            "if True:\n    # The upper limit is fixed by the protocol.\n    LIMIT = 1\n",
+            encoding="utf-8",
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("held.py:2: comment-added", result.stdout)
+
+    def test_a_comment_the_change_does_not_touch_is_not_reported(self) -> None:
+        """The diff scope is the whole of what narrows this rule, so it is asserted directly."""
+        self.label_setup()
+        (self.root / "held.py").write_text(
+            "# The upper limit is fixed by the protocol.\nLIMIT = 1\n", encoding="utf-8"
+        )
+        self.label_git("add", "-A")
+        self.label_git("commit", "-qm", "held")
+        (self.root / "held.py").write_text(
+            "# The upper limit is fixed by the protocol.\nLIMIT = 2\n", encoding="utf-8"
+        )
+        result = run_prose_gate_action(self.root)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_the_environment_override_reaches_a_caller_with_no_flag_to_pass(self) -> None:
+        """A hook entry is one command string, and a downstream one runs this file from the hub.
+
+        Deleting the whole environment stand-down passed the suite before this case existed, and it
+        is the only local escape there is.
+        """
+        self.label_setup()
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(PROSE_GATE_ACTION.parent / "prose_lint.py"),
+                ".",
+                "--diff",
+                "HEAD",
+                "--check",
+                "comment-added",
+            ],
+            cwd=self.root,
+            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1"},
             text=True,
             encoding="utf-8",
-            errors="surrogateescape",
+            capture_output=True,
             check=False,
         )
-        self.assertEqual("", r.stdout.strip())
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        # The naming clause, since the variable is also named in the note's closing sentence.
+        self.assertIn(f"stood down by {prose_lint.COMMENT_ENV_NAME}", result.stderr)
 
-    def test_the_fallback_skips_generated_roots(self) -> None:
-        """`git check-ignore` fails on exactly the machine with no git, so this path names them."""
-        (self.tmp / ".mypy_cache").mkdir()
-        (self.tmp / ".mypy_cache" / "cached.md").write_text(f"{DUP}\n", encoding="utf-8")
-        (self.tmp / "authored.md").write_text("fine\n", encoding="utf-8")
-        found = prose_lint.walk_paths(self.tmp)
-        self.assertEqual(["authored.md"], sorted(p.relative_to(self.tmp).as_posix() for p in found))
+    def test_the_action_clears_the_environment_override(self) -> None:
+        """Otherwise a runner's own environment decides a pull request the label was meant to.
 
-    def test_empty_git_output_falls_back_rather_than_scanning_nothing(self) -> None:
-        """An initialized but empty checkout exits 0 with no output.
-
-        Reading that as an empty file set would scan nothing and report success, which is the
-        shape of a gate that has silently stopped gating.
+        Deleting the action's `unset` passed the suite before this case existed, and an org-level
+        `env:` would then disarm the gate on every pull request while the run still exits 0.
         """
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with mock.patch.object(prose_lint.subprocess, "run", return_value=done):
-            self.assertIsNone(prose_lint.tracked_paths(self.tmp))
+        self.label_setup()
+        result = run_prose_gate_action(self.root, PROSE_ALLOW_COMMENTS="1")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("tool.py:1: comment-added", result.stdout)
 
-    def test_a_dot_prefixed_path_keeps_its_prefix(self) -> None:
-        """`lstrip` took a character set and ate the leading dot, so --diff never matched .github."""
-        self.assertEqual(".github/workflows/x.yml", prose_lint.rel(Path(".github/workflows/x.yml")))
-        self.assertEqual(".editorconfig", prose_lint.rel(Path(".editorconfig")))
-        self.assertEqual("GOVERNANCE.md", prose_lint.rel(Path("./GOVERNANCE.md")))
+    def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
+        """Four surfaces name this label, and a rename that misses one silently disarms it."""
+        self.label_setup()
+        declared = {label["name"] for label in json.loads(FLEET_LABELS.read_text(encoding="utf-8"))}
+        self.assertIn(prose_lint.COMMENT_LABEL_NAME, declared)
+        step = yaml_step(
+            VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Read comments label step"
+        )
+        self.assertEqual("comments-label", yaml_value(step, "id"))
+        self.assertEqual(
+            "${{ contains(github.event.pull_request.labels.*.name, "
+            f"'{prose_lint.COMMENT_LABEL_NAME}') }}}}",
+            yaml_value(step, "env", "PAYLOAD_LABELED"),
+        )
+        self.assertEqual(
+            ("0", "labeled=true"),
+            run_comments_label_step(prose_lint.COMMENT_LABEL_NAME + "\n", "false")[:2],
+        )
 
-    def test_a_subdirectory_root_yields_paths_that_exist(self) -> None:
-        """`git ls-files` prints paths relative to its `-C` directory, not the repo top level.
+    def test_the_action_delivers_its_input_to_the_script(self) -> None:
+        """The harness feeds the variable, so nothing else reads the action's own wiring.
 
-        Review read it the other way round, which would make the join in tracked_paths produce
-        broken paths. It does not, and the invariant is pinned here because passing `--full-name`
-        would flip the behavior with nothing else to notice.
+        Two mutations survived the whole suite before this: deleting the `env:` mapping, after
+        which the label and the promotion stand-down never reach the gate and a labeled pull
+        request is still refused, and flipping the input's default to `'true'`, after which any
+        caller that omits the input has the rule stood down on every run and says nothing. Both are
+        read off the structure, since a substring match over the file also passed with the `env:`
+        entry commented out.
         """
-        for root in (REPO / "spec", REPO / "scripts"):
-            with self.subTest(root=root.name):
-                found = prose_lint.discover([str(root)])
-                self.assertGreaterEqual(len(found), 5)
-                self.assertEqual([], [str(p) for p in found if not p.exists()])
+        self.label_setup()
+        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
+        self.assertEqual(
+            "${{ inputs.allow-comments }}",
+            yaml_value(yaml_step(action, "Check prose step"), "env", "ALLOW_COMMENTS"),
+        )
+        self.assertEqual("'false'", yaml_value(action, "inputs", "allow-comments", "default"))
 
-    def test_an_explicit_file_argument_bypasses_discovery(self) -> None:
-        """A single file has to be checkable directly, including one git does not track."""
-        loose = self.tmp / "loose.md"
-        loose.write_text("fine\n", encoding="utf-8")
-        self.assertEqual([loose], prose_lint.discover([str(loose)]))
+    def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
+        """Asserted whole, since a fragment of it left two disarming mutations green.
 
-    def test_a_directory_git_cannot_describe_warns_and_walks_it(self) -> None:
-        """Silently scanning nothing there would report a clean run over an unread tree."""
-        (self.tmp / "authored.md").write_text("fine\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
-            contextlib.redirect_stderr(io.StringIO()) as err,
-        ):
-            found = prose_lint.discover([str(self.tmp)])
-        self.assertEqual(["authored.md"], [p.name for p in found])
-        self.assertIn("falling back to a filesystem walk", err.getvalue())
-
-    def test_an_excluded_path_is_dropped(self) -> None:
-        (self.tmp / "keep.md").write_text("fine\n", encoding="utf-8")
-        (self.tmp / "drop.md").write_text("fine\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
-            contextlib.redirect_stderr(io.StringIO()),
-        ):
-            found = prose_lint.discover([str(self.tmp)], ("drop.md",))
-        self.assertEqual(["keep.md"], [p.name for p in found])
-
-    def test_a_generated_tree_is_skipped_when_a_wider_scan_expands_into_it(self) -> None:
-        """Its prose is the generator's, so a finding there names no edit an author can make."""
-        (self.tmp / "authored.md").write_text("fine\n", encoding="utf-8")
-        generated = self.tmp / "reports"
-        generated.mkdir()
-        (generated / "audit.md").write_text("fine\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
-            contextlib.redirect_stderr(io.StringIO()),
-        ):
-            found = prose_lint.discover([str(self.tmp)])
-        self.assertEqual(["authored.md"], [p.name for p in found])
-
-    def test_a_parent_directory_above_the_checkout_does_not_decide_generated(self) -> None:
-        """The decision is repository-relative, so the filesystem path above it cannot leak in.
-
-        Judged on the absolute path, a checkout under a parent named `reports` carried that
-        parent into every file's parts, which read the whole scan as deliberately requested and
-        put the repository's own generated tree back into an ordinary sweep.
+        Flipping the `||` to `&&` refuses every labeled pull request, and passed while this read
+        one fragment. It is read under the prose step's own `with:`, since the same line moved to a
+        sibling step passed a substring match while the gate fell back to the input's default. The
+        promotion's own terms live in the stand-down step, whose cases run its script.
         """
-        repo = self.tmp / "reports" / "checkout"
-        (repo / "reports").mkdir(parents=True)
-        (repo / "authored.md").write_text("fine\n", encoding="utf-8")
-        (repo / "reports" / "audit.md").write_text("fine\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
-            contextlib.redirect_stderr(io.StringIO()),
+        self.label_setup()
+        step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Check prose step")
+        self.assertEqual(
+            "${{ steps.comments-label.outputs.labeled == 'true' || "
+            "steps.comment-stand-down.outputs.stand-down == 'true' }}",
+            yaml_value(step, "with", "allow-comments"),
+        )
+
+    def test_the_promotion_stands_down_only_on_the_release_model(self) -> None:
+        """An operational promotion may be the first review its lines get, so the rule runs there.
+
+        Each row after the first varies the release promotion that stands down, so dropping any one
+        term of the test, the workflow model's above all, turns a row green that must stay red.
+        """
+        self.label_setup()
+        promotion = {
+            "HEAD_REPOSITORY": "example/widget",
+            "REPOSITORY": "example/widget",
+            "HEAD_REF": "develop",
+            "BASE_REF": "main",
+            "DEFAULT_BRANCH": "main",
+        }
+        for label, model, changed, expected in (
+            ("release promotion", "release", {}, "true"),
+            ("operational promotion", "operational", {}, "false"),
+            ("feature branch into main", "release", {"HEAD_REF": "feature/widget"}, "false"),
+            ("fork branch named develop", "release", {"HEAD_REPOSITORY": "fork/widget"}, "false"),
+            ("develop into another base", "release", {"BASE_REF": "next"}, "false"),
+            (
+                "a push, carrying no pull request",
+                "release",
+                {"HEAD_REPOSITORY": "", "HEAD_REF": "", "BASE_REF": ""},
+                "false",
+            ),
         ):
-            found = prose_lint.discover([str(repo)])
-        self.assertEqual(["authored.md"], [p.name for p in found])
+            with self.subTest(label):
+                code, output, log = run_comment_stand_down_step(model, promotion | changed)
+                self.assertEqual(("0", f"stand-down={expected}"), (code, output), log)
+                self.assertIn(f"Workflow model: {model}", log)
 
-    def test_naming_a_generated_tree_directly_still_reads_it(self) -> None:
-        """The skip keeps a wide scan honest, and must not make the tree uncheckable."""
-        generated = self.tmp / "reports"
-        generated.mkdir()
-        (generated / "audit.md").write_text("fine\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
-            contextlib.redirect_stderr(io.StringIO()),
+    def test_only_the_release_model_stands_the_promotion_down(self) -> None:
+        """A value other than `release` runs the rule, so a misspelling reports comments rather than hiding them."""
+        self.label_setup()
+        promotion = {"HEAD_REPOSITORY": "example/widget", "HEAD_REF": "develop", "BASE_REF": "main"}
+        for model in ("", "Release", "release ", "operational"):
+            with self.subTest(model=model):
+                code, output, log = run_comment_stand_down_step(model, promotion)
+                self.assertEqual(("0", "stand-down=false"), (code, output), log)
+
+    def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
+        """The harness feeds the variables, so nothing else reads the step's own wiring.
+
+        The default is pinned too, since a caller declaring nothing is a release repository by the
+        registry's own default, and flipping it would run the rule on every such promotion.
+        """
+        self.label_setup()
+        text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
+        step = yaml_step(text, "Resolve comment stand-down step")
+        self.assertEqual("comment-stand-down", yaml_value(step, "id"))
+        for name, expression in (
+            ("WORKFLOW_MODEL", "inputs.workflow-model"),
+            ("HEAD_REPOSITORY", "github.event.pull_request.head.repo.full_name"),
+            ("REPOSITORY", "github.repository"),
+            ("HEAD_REF", "github.head_ref"),
+            ("BASE_REF", "github.base_ref"),
+            ("DEFAULT_BRANCH", "github.event.repository.default_branch"),
         ):
-            found = prose_lint.discover([str(generated)])
-        self.assertEqual(["audit.md"], [p.name for p in found])
-        loose = generated / "audit.md"
-        self.assertEqual([loose], prose_lint.discover([str(loose)]))
+            self.assertEqual(f"${{{{ {expression} }}}}", yaml_value(step, "env", name), name)
+        self.assertEqual(
+            "release",
+            yaml_value(text, "on", "workflow_call", "inputs", "workflow-model", "default"),
+        )
 
-    def test_an_unreadable_root_is_not_a_file_set(self) -> None:
-        """`tracked_paths` answers None on the error paths, never an empty list read as clean."""
-        with mock.patch.object(prose_lint.subprocess, "run", side_effect=OSError):
-            self.assertIsNone(prose_lint.tracked_paths(self.tmp))
-        failed = subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="")
-        with mock.patch.object(prose_lint.subprocess, "run", return_value=failed):
-            self.assertIsNone(prose_lint.tracked_paths(self.tmp))
+    def test_the_structure_reader_sees_only_a_live_entry_under_its_own_step(self) -> None:
+        """The two mutations the substring matches let through, against the reader the cases use."""
+        self.label_setup()
+        steps = (
+            "steps:\n"
+            "  - name: Gate step\n"
+            "    env:\n"
+            "      # FLAG: on\n"
+            "      OTHER: off\n"
+            "    with:\n"
+            "      base: main\n"
+            "  - name: Sibling step\n"
+            "    with:\n"
+            "      flag: on\n"
+        )
+        gate = yaml_step(steps, "Gate step")
+        self.assertIsNone(yaml_value(gate, "env", "FLAG"))
+        self.assertEqual("off", yaml_value(gate, "env", "OTHER"))
+        self.assertIsNone(yaml_value(gate, "with", "flag"))
+        self.assertEqual("main", yaml_value(gate, "with", "base"))
+        self.assertEqual("on", yaml_value(yaml_step(steps, "Sibling step"), "with", "flag"))
 
-    def test_an_unopenable_path_is_not_text(self) -> None:
-        self.assertFalse(prose_lint.is_text(self.tmp / "absent.md"))
+    def test_the_label_is_read_live_rather_than_off_the_payload(self) -> None:
+        """The payload is a snapshot from the event, which a label applied after it never reaches.
 
-    def test_a_binary_file_is_not_scanned(self) -> None:
-        blob = self.tmp / "payload.md"
-        blob.write_bytes(DUP.encode() + b"\x00binary\n")
-        self.assertFalse(prose_lint.is_text(blob))
+        The live answer wins in both directions, so a payload that predates the label, or one
+        that predates its removal, decides nothing while the read succeeds. It ignores case, as
+        the payload's contains() does. The log line is the one the skills tell a driver to look for.
+        The harness sets the labels path and stubs gh, so the step's own path and token are read
+        off the step itself.
+        """
+        self.label_setup()
+        for live, payload, expected in (
+            ("bug\ncomments\n", "false", "true"),
+            ("Comments\n", "false", "true"),
+            ("bug\n", "true", "false"),
+            ("", "true", "false"),
+            ("comments-wanted\n", "false", "false"),
+        ):
+            with self.subTest(live=live, payload=payload):
+                code, output, log, called = run_comments_label_step(live, payload)
+                self.assertEqual(("0", f"labeled={expected}"), (code, output), log)
+                self.assertIn("Read the pull request's labels live", log)
+                self.assertIn("repos/example/widget/issues/7/labels", called)
+                self.assertIn("--paginate", called)
+                self.assertIn(".[].name", called)
+        step = yaml_step(
+            VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Read comments label step"
+        )
+        self.assertEqual("${{ github.token }}", yaml_value(step, "env", "GH_TOKEN"))
+        self.assertEqual(
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels",
+            yaml_value(step, "env", "LABELS_PATH"),
+        )
+
+    def test_a_failed_read_falls_back_to_the_payload_and_says_so(self) -> None:
+        """A token that cannot read the labels keeps the payload's answer rather than a silent false."""
+        self.label_setup()
+        for payload in ("true", "false"):
+            with self.subTest(payload=payload):
+                code, output, log, _ = run_comments_label_step(None, payload)
+                self.assertEqual(("0", f"labeled={payload}"), (code, output), log)
+                self.assertIn("could not be read live", log)
 
 
-class TestSentenceSplit(BaitCase):
-    """One sentence per line, the Markdown counterpart of the comment-wrap rule."""
+class TestSentenceSplitRule(BaitCase):
+    """The opt-in `sentence-split` rule on Markdown prose units."""
 
     def test_a_sentence_continuing_onto_the_next_line_is_flagged(self) -> None:
         self.assertEqual(
@@ -2408,11 +2425,8 @@ class TestSentenceSplit(BaitCase):
         )
 
 
-class TestSentenceLength(BaitCase):
-    """The word cap on one Markdown sentence, the first structural house-style check."""
-
-    def sentence_of(self, words: int) -> str:
-        return " ".join(["word"] * words) + "."
+class TestSentenceLengthRule(BaitCase):
+    """The opt-in `sentence-length` rule on Markdown blocks, comment runs, and docstrings."""
 
     def test_a_sentence_over_the_cap_is_flagged(self) -> None:
         over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
@@ -2443,24 +2457,11 @@ class TestSentenceLength(BaitCase):
         text = f'{lead} said "stop right now." {lead} said nothing.\n'
         self.assertEqual([], self.kinds(text, {"sentence-length"}))
 
-    def test_structure_is_not_a_sentence(self) -> None:
-        """A table row, a heading, a link definition, and a blockquote hold no prose sentence."""
-        run = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
-        for text in (f"| {run} |\n", f"# {run}\n", f"[ref]: ./{run}.md\n", f"> {run}\n"):
-            with self.subTest(text=text[:20]):
-                self.assertEqual([], self.kinds(text, {"sentence-length"}))
-
     def test_a_list_marker_is_not_a_word(self) -> None:
         at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
         for marker in ("-", "*", "+", "1.", "1)"):
             with self.subTest(marker=marker):
-                self.assertEqual([], self.found(f"{marker} {at_cap}\n"))
-
-    def found(self, text: str) -> list[tuple[int, str]]:
-        path = self.tmp / "bait.md"
-        path.write_text(text, encoding="utf-8")
-        found = prose_lint.check_file(path, {"sentence-length"})
-        return [(n, kind) for n, kind, _ in found]
+                self.assertEqual([], self.found_md(f"{marker} {at_cap}\n"))
 
     def test_a_wrapped_sentence_over_the_cap_is_flagged_where_it_starts(self) -> None:
         words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
@@ -2468,37 +2469,23 @@ class TestSentenceLength(BaitCase):
         wrapped = " ".join(words[:10]) + "\n" + " ".join(words[10:20]) + "\n"
         wrapped += " ".join(words[20:]) + "."
         expected = [(3, "sentence-length")]
-        self.assertEqual(expected, self.found(f"Intro.\n\n{one_line}\n"))
-        self.assertEqual(expected, self.found(f"Intro.\n\n{wrapped}\n"))
+        self.assertEqual(expected, self.found_md(f"Intro.\n\n{one_line}\n"))
+        self.assertEqual(expected, self.found_md(f"Intro.\n\n{wrapped}\n"))
 
     def test_a_wrapped_sentence_within_the_cap_passes(self) -> None:
         words = ["word"] * 20
-        self.assertEqual([], self.found(" ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n"))
+        self.assertEqual(
+            [], self.found_md(" ".join(words[:10]) + "\n" + " ".join(words[10:]) + ".\n")
+        )
 
     def test_short_sentences_across_a_line_break_are_judged_alone(self) -> None:
         lead = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        self.assertEqual([], self.found(f"{lead}.\n{lead}.\n"))
+        self.assertEqual([], self.found_md(f"{lead}.\n{lead}.\n"))
 
     def test_a_list_item_is_measured_with_its_continuation_lines(self) -> None:
         words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
         item = "- " + " ".join(words[:15]) + "\n  " + " ".join(words[15:]) + ".\n"
-        self.assertEqual([(2, "sentence-length")], self.found("Intro:\n" + item))
-
-    def test_separate_blocks_are_never_joined(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        fence = "```\ncode\n```\n"
-        for text in (
-            f"- {half}\n- {half}\n",
-            f"{half}\n\n{half}\n",
-            f"{half}\n# Head\n{half}\n",
-            f"{half}\n{fence}{half}\n",
-            f"{half}\n| a | b |\n{half}\n",
-        ):
-            with self.subTest(text=text[:30]):
-                self.assertEqual([], self.found(text))
-
-    def over(self, n: int = 6) -> str:
-        return " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + n))
+        self.assertEqual([(2, "sentence-length")], self.found_md("Intro:\n" + item))
 
     def test_an_edit_to_a_continuation_line_flags_the_sentence(self) -> None:
         words = ["word"] * (prose_lint.SENTENCE_WORD_CAP + 6)
@@ -2509,176 +2496,25 @@ class TestSentenceLength(BaitCase):
         self.assertEqual([4], [n for n, _, _ in found])
         self.assertEqual([], prose_lint.check_file(path, {"sentence-length"}, allowed={1}))
 
-    def test_front_matter_is_not_joined_into_the_body(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        text = f"---\nname: {half}\ndescription: {half}\n...\n{half}.\n"
-        self.assertEqual([], self.found(text))
-
-    def test_a_long_front_matter_line_is_still_flagged(self) -> None:
-        text = f"---\nname: x\ndescription: {self.over()}.\n---\nBody.\n"
-        self.assertEqual([(3, "sentence-length")], self.found(text))
-
-    def test_a_block_level_tag_line_interrupts_a_paragraph(self) -> None:
-        a = " ".join(["word"] * 15)
-        self.assertEqual([], self.found(f"{a}\n<div>\n{a}.\n"))
-        text = f"<details>\n<summary>S</summary>\n\n- {a}\n</details>\n{a}.\n"
-        self.assertEqual([], self.found(text))
-
-    def test_prose_wrapped_in_tags_is_still_measured(self) -> None:
-        over = self.over()
-        flagged = [(1, "sentence-length")]
-        self.assertEqual(flagged, self.found(f'<p align="center">{over}.</p>\n'))
-        self.assertEqual(flagged, self.found(f"<summary>{over}.</summary>\n"))
-        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
-        self.assertEqual([], self.found(f'<p align="center">{at_cap}</p>\n'))
-
     def test_a_huge_digit_run_is_not_a_marker_and_does_not_crash(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
         text = f"{half}\n{'1' * 5000}) {half}\n"
-        self.assertEqual([(1, "sentence-length")], self.found(text))
-
-    def test_other_block_boundaries_end_a_block(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        cases = {
-            "setext": f"{half}\n===\n{half}\n",
-            "setext dashes": f"{half}\n---\n{half}\n",
-            "thematic": f"{half}\n***\n{half}\n",
-            "thematic underscores": f"{half}\n___\n{half}\n",
-            "html block": f"<details>\n<summary>{half}</summary>\n{half}\n</details>\n",
-            "html comment": f"{half}\n<!-- {half}\n{half} -->\n{half}\n",
-            "pipeless table": f"a | b\n--- | ---\n{half} | x\n{half} | y\n\n{half}\n",
-            "indented code": f"{half}\n\n    {half}\n    {half}\n\n{half}\n",
-        }
-        for name, text in cases.items():
-            with self.subTest(name=name):
-                self.assertEqual([], self.found(text))
-
-    def test_an_indented_list_continuation_is_not_code(self) -> None:
-        text = f"- Item.\n\n    {self.over()}.\n"
-        self.assertEqual([(3, "sentence-length")], self.found(text))
+        self.assertEqual([(1, "sentence-length")], self.found_md(text))
 
     def test_a_wrapped_code_span_is_one_word(self) -> None:
         cap = prose_lint.SENTENCE_WORD_CAP
         lead = " ".join(["word"] * (cap - 3))
         text = f"{lead} `one\ntwo three four` end.\n"
-        self.assertEqual([], self.found(text))
+        self.assertEqual([], self.found_md(text))
 
     def test_a_quote_mark_pairs_within_its_line(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
         text = f'Cut 5" pipe {half}\n{half} and 6" pipe end.\n'
-        self.assertEqual([(1, "sentence-length")], self.found(text))
-
-    def test_inline_html_and_a_tag_inside_a_paragraph_stay_prose(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        for mid in ("<br>", "<number>", "<https://example.test>", "<kbd>x</kbd>"):
-            with self.subTest(mid=mid):
-                self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n{mid} {half}\n"))
-        for lead in ("<kbd>x</kbd>", "<number>", "<https://example.test>"):
-            self.assertEqual([(1, "sentence-length")], self.found(f"{lead} {self.over()}.\n"))
-        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
-        self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n<br>\n{c}\n"))
-
-    def test_a_fence_inside_an_html_comment_is_not_a_fence(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        text = f"<!--\n```\n-->\n{half}\n{half}\n"
-        self.assertEqual([(4, "sentence-length")], self.found(text))
-
-    def test_a_setext_underline_discards_the_heading_only(self) -> None:
-        over = self.over()
-        self.assertEqual([], self.found(f"{over}\n===\nShort.\n"))
-        self.assertEqual([], self.found(f"{over}\n---\nShort.\n"))
-        self.assertEqual([], self.found(f"{over}\n-\nShort.\n"))
-
-    def test_a_thematic_break_flushes_the_paragraph(self) -> None:
-        over = self.over()
-        flagged = [(1, "sentence-length")]
-        self.assertEqual(flagged, self.found(f"{over}.\n- - -\nShort.\n"))
-        self.assertEqual(flagged, self.found(f"{over}.\n***\nShort.\n"))
-        self.assertEqual(flagged, self.found(f"- {over}.\n---\nShort.\n"))
-        self.assertEqual(flagged, self.found(f"{over}\nmore words.\n---\nShort.\n"))
-
-    def test_only_the_line_above_a_table_delimiter_is_the_header(self) -> None:
-        text = f"{self.over()}.\nhead | x\n--- | ---\nrow | y\n"
-        self.assertEqual([(1, "sentence-length")], self.found(text))
-
-    def test_a_column_zero_fence_ends_a_list(self) -> None:
-        text = f"- item\n\n```\ncode\n```\n\n    {self.over()}.\n"
-        self.assertEqual([], self.found(text))
-
-    def test_code_indented_past_a_list_item_is_code(self) -> None:
-        self.assertEqual([], self.found(f"- item\n\n      {self.over()}.\n"))
-
-    def test_front_matter_needs_a_closing_line(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        self.assertEqual([(2, "sentence-length")], self.found(f"---\nname: x\n{self.over()}.\n"))
-        self.assertEqual([(2, "sentence-length")], self.found(f"---\n{half} here\n{half}\n---\n"))
-
-    def test_a_thematic_break_with_fences_or_tables_is_not_front_matter(self) -> None:
-        a = " ".join(["word"] * 15)
-        fenced = f"---\n```\n{self.over()}\n```\n---\nShort.\n"
-        table = f"---\n| {a} | x |\n| --- | --- |\n---\nShort.\n"
-        self.assertEqual([], self.found(fenced))
-        self.assertEqual([], self.found(table))
-
-    def test_a_line_github_opens_no_block_on_does_not_interrupt(self) -> None:
-        """GitHub's renderer reads `<search>` as no block name, though CommonMark 0.31 lists it.
-
-        A custom element such as `<source-x>` is no block name either, though one opens its name.
-        A no-break space does not end a name, though a vertical tab does.
-        """
-        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
-        tags = ("<search>", "</style>", "</pre>", "</textarea>", "<source-x>", "<div-x>")
-        for tag in (*tags, "<div\xa0class=x>"):
-            with self.subTest(tag=tag):
-                self.assertEqual([(1, "sentence-length")], self.found(f"{a}\n{tag}\n{c}.\n"))
-
-    def test_front_matter_has_no_line_reach(self) -> None:
-        keys = "".join(f"key{n}: value\n" for n in range(55))
-        text = f"---\n{keys}description: {self.over()}.\n---\nBody.\n"
-        self.assertEqual([(57, "sentence-length")], self.found(text))
-
-    def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
-        """GitHub's renderer reads `<source>` as a block name, though CommonMark 0.31 drops it."""
-        a = " ".join(["word"] * 15)
-        tags = ("<dl>", "<figure>", "<style>", "<nav>", "<source>", "<textarea>", "</div>")
-        for tag in (*tags, "<hr/>", "<div\tclass=x>", "<div\vclass=x>"):
-            with self.subTest(tag=tag):
-                self.assertEqual([], self.found(f"{a}\n{tag}\n{a}.\n"))
-
-    def test_a_tag_line_indented_past_its_container_continues_the_paragraph(self) -> None:
-        """Four columns past the paragraph's container, a tag line is lazy text on GitHub."""
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n    <div>\n{half}.\n"))
-        self.assertEqual([], self.found(f"{half}\n   <div>\n{half}.\n"))
-        self.assertEqual(
-            [(1, "sentence-length")], self.found(f"- {half}\n      <div>\n  {half}.\n")
-        )
-        self.assertEqual([], self.found(f"- {half}\n     <div>\n  {half}.\n"))
-        self.assertEqual([], self.found(f"- {half}\nlazy\n    <div>\n  {half}.\n"))
-        self.assertEqual([], self.found(f"-   {half}\n      <div>\n    {half}.\n"))
-        for empty in ("-", "- "):
-            with self.subTest(empty=empty):
-                self.assertEqual([], self.found(f"{empty}\n  {half}\n    <div>\n  {half}.\n"))
-        for empty, pad in (("*", "  "), ("+", "  "), ("1.", "   "), ("1)", "   ")):
-            with self.subTest(empty=empty):
-                text = f"{empty}\n{pad}{half}\n{pad}  <div>\n{pad}{half}.\n"
-                self.assertEqual([], self.found(text))
-        self.assertEqual([], self.found(f"-\t{half}\n      <div>\n    {half}.\n"))
-        for head in (f"{half}\n*\n", f"{half}\n+\n", f"{half}\n1)\n", f"- {half}\n  *\n  "):
-            with self.subTest(head=head):
-                self.assertEqual([(1, "sentence-length")], self.found(f"{head}{half}.\n"))
-        wide = f"-   {half}\n        <div>\n    {half}.\n"
-        self.assertEqual([(1, "sentence-length")], self.found(wide))
-
-    def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
-        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
-        self.assertEqual([(1, "sentence-length")], self.found(f"{half}\n2) {half}\n"))
-        self.assertEqual([], self.found(f"{half}\n1) {half}\n"))
-        self.assertEqual([], self.found(f"- a\n  {half}\n2) {half}\n"))
+        self.assertEqual([(1, "sentence-length")], self.found_md(text))
 
     def test_a_sentence_starting_mid_line_is_reported_on_that_line(self) -> None:
         tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
-        self.assertEqual([(2, "sentence-length")], self.found("Intro line.\n" + tail))
+        self.assertEqual([(2, "sentence-length")], self.found_md("Intro line.\n" + tail))
 
     def test_a_source_line_that_is_not_a_comment_is_not_judged(self) -> None:
         """A source file's long code lines are code, which no sentence rule judges."""
@@ -2689,25 +2525,6 @@ class TestSentenceLength(BaitCase):
         """Adoption is incremental, so the default set stays unchanged until a promotion."""
         self.assertNotIn("sentence-length", prose_lint.DEFAULT_RULES)
         self.assertIn("sentence-length", prose_lint.RULES)
-
-
-class TestCommentSentenceLength(BaitCase):
-    """The word cap reaches comments and docstrings, where the prose of a source file lives."""
-
-    def words(self, count: int) -> str:
-        return " ".join(["word"] * count)
-
-    def over(self) -> str:
-        return self.words(prose_lint.SENTENCE_WORD_CAP + 1) + "."
-
-    def at_cap(self) -> str:
-        return self.words(prose_lint.SENTENCE_WORD_CAP) + "."
-
-    def found(self, text: str, name: str, allowed: set[int] | None = None) -> list[tuple[int, str]]:
-        path = self.tmp / name
-        path.write_text(text, encoding="utf-8")
-        found = prose_lint.check_file(path, {"sentence-length"}, allowed=allowed)
-        return [(n, kind) for n, kind, _ in found]
 
     def test_an_over_cap_shell_comment_is_flagged(self) -> None:
         self.assertEqual(
@@ -3244,80 +3061,1932 @@ class TestCommentSentenceLength(BaitCase):
         self.assertEqual([(9, "sentence-length")], self.found(text, "bait.py"))
 
 
-class TestSpelling(BaitCase):
-    """US English, read from Markdown prose and from the comments of every other syntax.
+class TestHomePathRule(BaitCase):
+    """The `home-path` rule and the runbook it exempts."""
 
-    The rule runs on whatever file it is handed, README and HISTORY included. It complements the
-    cspell gate rather than dividing the tree with it: cspell reads those two files and this reads
-    the prose in all of them, so what it adds is coverage of everywhere cspell was never pointed.
-    """
+    def runbook_setup(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
+        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
 
-    def messages(self, text: str, name: str = "bait.md") -> list[str]:
-        path = self.tmp / name
-        path.write_text(text, encoding="utf-8")
-        return [msg for _, _, msg in prose_lint.check_file(path, {"spelling"})]
+    def test_a_home_path_naming_a_person_is_flagged(self) -> None:
+        for text in (
+            f"See {NIX_HOME}/notes.txt for the log.\n",
+            f"See {MAC_HOME}/notes.txt for the log.\n",
+            f"See {WIN_HOME}\\notes.txt for the log.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertIn("home-path", self.kinds(text, {"home-path"}))
 
-    def test_every_banned_spelling_is_caught_and_its_us_form_is_not(self) -> None:
-        """The live table drives the case, so a word added to it arrives already proven."""
-        for british, us in prose_lint.BRITISH.items():
-            with self.subTest(word=british):
-                self.assertEqual(["spelling"], self.kinds(f"One {british} here.\n", {"spelling"}))
-                self.assertEqual([], self.kinds(f"One {us} here.\n", {"spelling"}))
+    def test_the_documentation_placeholder_is_not_a_finding(self) -> None:
+        """The rule's own wording quotes these shapes to describe them, and must survive its gate.
 
-    def test_the_finding_names_the_replacement(self) -> None:
-        word = "behavi" + "our"
-        self.assertEqual(
-            [f"British spelling '{word}' -> 'behavior'"], self.messages(f"The {word} of it.\n")
-        )
+        A real user segment is required, so the placeholder form does not match and no exemption
+        list has to carry the files that describe the rule. A stale exemption list is what turns
+        a gate into a work list that damages correct documents.
+        """
+        for text in (
+            "The shapes are `/home/<name>` and `C:\\Users\\<name>`.\n",
+            "A path under `/Users/<name>` is the macOS form.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
 
-    def test_a_match_keeps_the_case_the_source_wrote(self) -> None:
-        """A capitalized or shouted word gets a replacement it can be swapped in for."""
-        word = "colo" + "ur"
-        for written, offered in ((word.capitalize(), "Color"), (word.upper(), "COLOR")):
-            with self.subTest(written=written):
-                self.assertEqual(
-                    [f"British spelling '{written}' -> '{offered}'"],
-                    self.messages(f"{written} of the box.\n"),
+    def test_a_container_account_is_not_a_personal_home(self) -> None:
+        """`/home/vscode` is a fixed name a devcontainer image ships, so it names no environment.
+
+        Every one of this repository's 15 home-path hits is this shape, from the devcontainer
+        snippets and the doc describing them, so a rule without this exemption would open with a
+        work list of 15 findings and no true positive among them.
+        """
+        for account in ("vscode", "runner", "root", "ubuntu", "node"):
+            with self.subTest(account=account):
+                self.assertNotIn(
+                    "home-path",
+                    self.kinds(f"Mounted at /home/{account}/.ssh here.\n", {"home-path"}),
                 )
 
-    def test_a_word_that_is_also_correct_us_english_is_not_banned(self) -> None:
-        """`analyses` is the plural of `analysis`, and `cancelled` is an Actions job status."""
-        for word in ("analyses", "cancelled", "analysis", "advertise", "surprise", "exercise"):
-            with self.subTest(word=word):
-                self.assertEqual([], self.kinds(f"One {word} here.\n", {"spelling"}))
+    def test_a_path_inside_a_fenced_block_is_still_a_finding(self) -> None:
+        """A transcript pasted from a terminal is the exposure, and it arrives fenced.
 
-    def test_a_banned_spelling_inside_a_word_is_not_a_match(self) -> None:
-        """The pattern is word-anchored, so a longer word that contains one is left alone."""
-        for word in ("parameter", "collaborate", "metering"):
-            with self.subTest(word=word):
-                self.assertEqual([], self.kinds(f"One {word} here.\n", {"spelling"}))
-
-    def test_code_is_not_prose_outside_markdown(self) -> None:
-        """A source file is read through its comments, so an identifier or a table is not bait.
-
-        This is what keeps prose_lint.py from reporting its own lookup table.
+        Every other prose rule skips a fenced block because it holds code rather than prose. This
+        one reads it, since the rule gates a literal path rather than a sentence.
         """
-        word = "organis" + "ation"
-        self.assertEqual([], self.kinds(f"x = '{word}'\n", {"spelling"}, name="bait.py"))
-        self.assertEqual(
-            ["spelling"], self.kinds(f"# The {word} of it.\n", {"spelling"}, name="bait.py")
+        self.assertIn(
+            "home-path", self.kinds(f"```text\n$ ls {NIX_HOME}/keys\n```\n", {"home-path"})
         )
 
-    def test_inline_code_is_not_prose(self) -> None:
-        """A backticked word is a quoted token, the same exemption every other prose rule takes."""
-        word = "licen" + "ce"
-        self.assertEqual([], self.kinds(f"The `{word}` field.\n", {"spelling"}))
-        self.assertEqual([], self.kinds(f"# The `{word}` field.\n", {"spelling"}, name="bait.py"))
+    def test_a_path_in_a_config_value_is_still_a_finding(self) -> None:
+        """A bind mount naming a real home is the exposure in its most consequential form."""
+        self.assertIn(
+            "home-path",
+            self.kinds(
+                f'{{ "target": "{NIX_HOME}/.ssh/id_ed25519.pub" }}\n', {"home-path"}, "a.json"
+            ),
+        )
 
-    def test_the_repo_is_clean_of_british_spellings(self) -> None:
-        """The rule gates in CI, so the tree it gates has to pass it today and not eventually."""
-        found = [
-            f"{prose_lint.rel(p)}:{ln}"
-            for p in prose_lint.discover(["."])
-            for ln, kind, _ in prose_lint.check_file(p, {"spelling"})
-            if kind == "spelling"
+    def test_a_relative_or_tilde_path_is_not_a_finding(self) -> None:
+        """`~/.ssh` names no account, which is the form the docs are supposed to use."""
+        for text in (
+            "Copy `~/.ssh/id_ed25519.pub` into place.\n",
+            f"The path `home/{BAIT_USER}` is relative.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
+
+    def test_the_windows_branch_is_case_insensitive(self) -> None:
+        """Windows filesystems are case-insensitive, so a pasted path may be any casing."""
+        for form in (f"C:\\users\\{BAIT_USER}", f"c:\\USERS\\{BAIT_USER}"):
+            with self.subTest(form=form):
+                self.assertIn("home-path", self.kinds(f"See {form} here.\n", {"home-path"}))
+
+    def test_the_posix_branch_stays_case_sensitive(self) -> None:
+        """A lowercase `/users/` is the commonest REST path there is, and names no home.
+
+        This is why the case-insensitive fix is scoped to the drive-letter branch rather than
+        applied to the whole pattern: widening it would flag every API route in every doc.
+        """
+        for text in (
+            f"GET https://api.example.com/users/{BAIT_USER} returns the record.\n",
+            f"The route is `/users/{BAIT_USER}` in the API.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
+
+    def test_a_bare_drive_letter_is_not_a_shape(self) -> None:
+        """Kept as a case because the backlog recorded it as one and the corpus rejected it.
+
+        These are the two forms that made it unworkable: an escaped newline in a fixture, and a
+        temporary directory in a string literal.
+        """
+        for text in ("key: 'jobs:\\n  a:'\n", 'var p = "C:\\tmp\\out";\n'):
+            with self.subTest(text=text.strip()):
+                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
+
+    def test_the_rule_runs_by_default(self) -> None:
+        """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
+        self.assertIn("home-path", prose_lint.DEFAULT_RULES)
+        self.assertIn("home-path", prose_lint.RULES)
+
+    def test_neither_source_file_carries_a_literal_home_path(self) -> None:
+        """Both files are read by the rule they implement, so the bait is assembled.
+
+        This is the same guarantee the tier tables carry for non-ASCII, and it is the reason the
+        constants above exist. Written as literals, the gate would report its own definition and
+        its own cases, and the only repair would be an exemption naming these files, which is the
+        stale-exemption shape that hands out a work list damaging correct documents.
+        """
+        for path in (REPO / "scripts" / "prose_lint.py", Path(__file__)):
+            with self.subTest(source=path.name):
+                found = prose_lint.check_file(path, {"home-path"})
+                self.assertEqual([], found)
+
+    def test_the_runbook_allows_a_literal_operator_path(self) -> None:
+        """The operations runbook owns the literal path an operator types."""
+        self.runbook_setup()
+        bait = self.tmp / "OPERATIONS.md"
+        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
+        self.assertEqual([], prose_lint.check_file(bait, {"home-path"}, self.tmp))
+
+    def test_a_nested_runbook_does_not_receive_the_exemption(self) -> None:
+        """Only the repository-root runbook owns literal operator paths."""
+        self.runbook_setup()
+        bait = self.tmp / "docs" / "OPERATIONS.md"
+        bait.parent.mkdir()
+        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
+        self.assertEqual(1, len(prose_lint.check_file(bait, {"home-path"}, self.tmp)))
+
+    def test_another_file_still_reports_the_finding(self) -> None:
+        """The exemption must not be the whole rule."""
+        self.runbook_setup()
+        bait = self.tmp / "runbook.md"
+        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(prose_lint, "discover", return_value=[bait]),
+        ):
+            self.assertEqual(1, prose_lint.main(["--check", "home-path"]))
+
+    def test_a_configuration_payload_is_not_the_runbook(self) -> None:
+        """The exemption names one file, so a payload holding a path still reports it."""
+        self.runbook_setup()
+        for parts in (("repo-config", "develop.json"), ("docs", "OPERATIONS.md")):
+            with self.subTest(path=parts):
+                target = self.tmp.joinpath(*parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(f'{{"path": "{NIX_HOME}/x"}}\n', encoding="utf-8")
+                self.assertEqual(1, len(prose_lint.check_file(target, {"home-path"}, self.tmp)))
+
+
+class TestDeadPathRule(unittest.TestCase):
+    """The `dead-path` rule on Markdown prose units."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def git(self, root: Path, *args: str) -> None:
+        # Signing is disabled explicitly, since a host that signs by default cannot commit here.
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "-c",
+                "user.email=gate@example.invalid",
+                "-c",
+                "user.name=gate test",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def repo(self) -> Path:
+        """A repository that tracked `scripts/gone.py` once and then deleted it."""
+        root = self.tmp / "repo"
+        (root / "scripts").mkdir(parents=True)
+        (root / "scripts" / "gone.py").write_text("print()\n", encoding="utf-8")
+        (root / "scripts" / "kept.py").write_text("print()\n", encoding="utf-8")
+        self.git(root, "init", "-q")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "base")
+        self.git(root, "rm", "-q", "scripts/gone.py")
+        self.git(root, "commit", "-qm", "delete")
+        return root
+
+    def kinds(self, root: Path, text: str, rel: str = "DOC.md") -> list[str]:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return [kind for _, kind, _ in prose_lint.check_file(path, {"dead-path"}, root)]
+
+    def test_a_deleted_path_in_a_span_is_flagged(self) -> None:
+        root = self.repo()
+        self.assertIn("dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
+
+    def test_a_living_path_is_not_a_finding(self) -> None:
+        root = self.repo()
+        self.assertEqual([], self.kinds(root, "Run `scripts/kept.py` to apply.\n"))
+
+    def test_a_path_with_no_history_here_is_not_a_finding(self) -> None:
+        """A proposal in a backlog and another repository's layout both name unborn paths."""
+        root = self.repo()
+        self.assertEqual([], self.kinds(root, "Ship `scripts/future.py` next.\n"))
+
+    def test_a_reference_definition_to_a_deleted_target_is_flagged(self) -> None:
+        root = self.repo()
+        self.assertIn("dead-path", self.kinds(root, "[gone]: ./scripts/gone.py\n"))
+        self.assertEqual([], self.kinds(root, "[kept]: ./scripts/kept.py\n"))
+
+    def test_an_inline_link_to_a_deleted_target_is_flagged(self) -> None:
+        root = self.repo()
+        self.assertIn("dead-path", self.kinds(root, "See [the script](scripts/gone.py).\n"))
+
+    def test_a_relative_mention_anchors_on_the_files_own_directory(self) -> None:
+        root = self.repo()
+        self.assertIn(
+            "dead-path", self.kinds(root, "See [it](../scripts/gone.py).\n", rel="docs/D.md")
+        )
+        self.assertEqual([], self.kinds(root, "See [it](../scripts/kept.py).\n", rel="docs/D.md"))
+
+    def test_an_uppercase_markdown_suffix_is_judged_for_dead_paths(self) -> None:
+        root = self.repo()
+        self.assertIn(
+            "dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n", rel="DOC.MD")
+        )
+
+    def test_a_ref_or_directory_shaped_span_is_not_a_candidate(self) -> None:
+        """`origin/develop` styles a ref and `scripts/` a layout, and neither asserts a file."""
+        root = self.repo()
+        for text in (
+            "Fetched from `origin/develop` here.\n",
+            "The `scripts/` tree holds the tools.\n",
+            "A run like `./scripts/...` is elided.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(root, text))
+
+    def test_a_fenced_block_is_skipped(self) -> None:
+        """A fence quotes a transcript or an example, which may legitimately show any path."""
+        root = self.repo()
+        self.assertEqual([], self.kinds(root, "```sh\npython3 scripts/gone.py\n```\n"))
+
+    def test_a_manifest_declared_carried_path_is_exempt(self) -> None:
+        """The hub's instance of a carried file retires to a snippet, and docs still name it."""
+        root = self.repo()
+        (root / "spec").mkdir()
+        (root / "spec" / "files.json").write_text(
+            json.dumps({"baseline": [{"path": "scripts/gone.py"}]}), encoding="utf-8"
+        )
+        prose_lint.carried_paths.cache_clear()
+        self.addCleanup(prose_lint.carried_paths.cache_clear)
+        self.assertEqual([], self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
+
+    def test_a_hub_hosted_path_is_exempt(self) -> None:
+        """A repo that retired its copy still names the hub's, which is the pointer the rule wants.
+
+        The manifest exemption cannot reach this one, since no repository carries `spec/files.json`,
+        so without the literal set every retirement fails its own promotion gate.
+        """
+        root = self.tmp / "retired"
+        (root / "repo-config").mkdir(parents=True)
+        (root / "repo-config" / "configure.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        self.git(root, "init", "-q")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "base")
+        self.git(root, "rm", "-q", "repo-config/configure.sh")
+        self.git(root, "commit", "-qm", "retire")
+        self.assertEqual([], self.kinds(root, "Run the hub's `repo-config/configure.sh`.\n"))
+
+    def test_the_hub_hosted_set_matches_the_ledger(self) -> None:
+        """The data file's list is a copy of the ledger, so a retirement missing it fails here."""
+        ledger = json.loads((REPO / "spec" / "divergences.json").read_text(encoding="utf-8"))
+        data = (PROSE_LINT_SCRIPT.parent / "prose-gate.json").read_text(encoding="utf-8")
+        retired = {
+            e["path"]
+            for group in ("dispositions", "gaps")
+            for e in ledger.get(group, [])
+            if isinstance(e, dict) and e.get("disposition") == "retire"
+        }
+        self.assertEqual(retired, set(json.loads(data)["exemptions"]["hub_hosted"]))
+
+    def test_without_git_the_rule_stands_down(self) -> None:
+        """No history means no deletion signature, so nothing is reported rather than guessed."""
+        bare = self.tmp / "bare"
+        bare.mkdir()
+        path = bare / "DOC.md"
+        path.write_text("Run `scripts/gone.py` to apply.\n", encoding="utf-8")
+        self.assertEqual([], [k for _, k, _ in prose_lint.check_file(path, {"dead-path"})])
+
+    def test_a_shallow_clone_stands_down_loudly(self) -> None:
+        """A shallow clone holds no deletion history, so a run there says so and reports nothing.
+
+        Without the announcement a shallow CI checkout would pass every mention forever, which
+        is the silent-stop failure the sweep floor exists to prevent.
+        """
+        root = self.repo()
+        (root / "DOC.md").write_text("Run `scripts/gone.py` to apply.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "doc")
+        shallow = self.tmp / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", f"file://{root}", str(shallow)],
+            check=True,
+            capture_output=True,
+        )
+        err = io.StringIO()
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(err),
+            contextlib.chdir(shallow),
+        ):
+            rc = prose_lint.main([".", "--check", "dead-path"])
+        self.assertEqual(0, rc)
+        self.assertIn("shallow", err.getvalue())
+
+    def test_this_repository_is_clean_of_dead_paths(self) -> None:
+        """The gate ships clean on its own tree, so every finding after this is a regression."""
+        md = [
+            p
+            for p in REPO.rglob("*.md")
+            if not prose_lint.GENERATED_ROOTS.intersection(p.relative_to(REPO).parts)
+            and "reports" not in p.relative_to(REPO).parts
         ]
-        self.assertEqual([], found)
+        hits = [
+            (prose_lint.rel(p), ln, msg)
+            for p in md
+            for ln, kind, msg in prose_lint.check_file(p, {"dead-path"}, REPO)
+            if kind == "dead-path"
+        ]
+        self.assertEqual([], hits)
+
+
+class TestIssueRefRule(unittest.TestCase):
+    """The `issue-ref` rule on instruction text, comments, and docstrings."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def kinds(self, name: str, text: str) -> list[str]:
+        path = self.tmp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return [kind for _, kind, _ in prose_lint.check_file(path, {"issue-ref"}, self.tmp)]
+
+    def test_a_comment_carries_the_finding_in_every_syntax(self) -> None:
+        for name, text in (
+            ("a.py", "# The retry is one character in (#1011).\nx = 1\n"),
+            ("a.sh", "# The retry is one character in (#1011).\nx=1\n"),
+            ("a.yml", "# The retry is one character in (#1011).\nx: 1\n"),
+            ("a.ps1", "# The retry is one character in (#1011).\n$x = 1\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["issue-ref"], self.kinds(name, text))
+
+    def test_a_trailing_line_comment_is_out_of_scope(self) -> None:
+        """The same bound `comment-added` carries, and for the same reason it carries it."""
+        self.assertEqual([], self.kinds("a.py", "x = 1  # per #1011\n"))
+
+    def test_a_wrapped_block_comment_is_read_from_its_second_line(self) -> None:
+        """A continuation line opens its own line, so the leading test reads it as one.
+
+        The extractor reports a non-empty continuation line of an open block as leading, whatever
+        preceded the opener, since such a line carries no marker of its own to judge. The finding
+        is wanted, the comment being a real one carrying a real reference.
+        """
+        self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("b.c", "int x = 1; /* see\n   #1234 for why */\n")
+        )
+
+    def test_a_block_opener_that_swallows_the_reference_hash_is_read(self) -> None:
+        """PowerShell's `<#` is the one opener in the syntax table ending in the marker character.
+
+        The body loses that `#` with the opener, so only the comment as written carries it, and
+        only a block comment bounded by its closer can be read that way without taking in code.
+        """
+        self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#1011 was the cause. #>\n"))
+        self.assertEqual([], self.kinds("b.ps1", '<# Doc. #> $x = "#1011"\n'))
+
+    def test_a_docstring_carries_it_and_reports_its_own_line(self) -> None:
+        text = '"""Module.\n\nThe walk was O(N^2) once (#1011).\n"""\n\n\ndef f() -> None:\n    """Body (#973)."""\n'
+        path = self.tmp / "a.py"
+        path.write_text(text, encoding="utf-8")
+        found = prose_lint.check_file(path, {"issue-ref"}, self.tmp)
+        self.assertEqual([3, 8], [line for line, _, _ in found])
+
+    def test_a_string_literal_is_left_alone(self) -> None:
+        """A test builds the numbers it asserts against, so reading one reports a fixture."""
+        self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
+
+    def test_a_reference_hugging_a_leading_comment_marker_is_read(self) -> None:
+        """The body has the marker off, so the reference's own `#` is gone with it.
+
+        The comment is read as written as well, which is what tells `#N was the cause` from the
+        `# N items` the same body spells once the marker and the space are stripped. Only where the
+        marker opens the line, since mid-line the scan's own marker is a guess.
+        """
+        for name, text in (
+            ("a.py", "#1011 was the cause.\nx = 1\n"),
+            ("a.sh", "#1011 was the cause.\nx=1\n"),
+            ("a.yml", "#1011 was the cause.\nkey: 1\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(["issue-ref"], self.kinds(name, text))
+        self.assertEqual([], self.kinds("c.py", "# 1011 items were read.\nx = 1\n"))
+
+    def test_a_marker_the_language_does_not_read_as_one_reports_nothing(self) -> None:
+        """Only a marker that opens the line is read as written, since mid-line it is a guess.
+
+        The parser takes the first `#` on a line whatever the language does with it, so the written
+        spelling of a URI fragment in a YAML value, of a shell parameter expansion, and of a
+        trailing comment each carry a `#` the body does not. A leading marker is a comment in every
+        language the gate knows, and that is the position this reads.
+        """
+        for name, text in (
+            ("a.yml", "docs: https://example.invalid/spec#4217\n"),
+            ("a.yml", "other: a#1011\n"),
+            ("a.sh", "curl https://example.invalid/spec#4217 -o f\n"),
+            ("b.sh", "n=${#12}\n"),
+            ("a.toml", 'docs = "https://example.invalid/spec#4217"\n'),
+            ("b.py", "x = 1  #1011 caused it\n"),
+            ("c.yml", "other: some#thing#1011\n"),
+            ("d.yml", "run: sed -i 's#build#1011#g' f\n"),
+            (".gitattributes", "* text=auto eol=lf#a#1011\n"),
+            ("c.sh", "echo a#b#1011\n"),
+        ):
+            with self.subTest(name=name, text=text):
+                self.assertEqual([], self.kinds(name, text))
+
+    def test_a_non_ascii_docstring_line_does_not_shift_the_span(self) -> None:
+        """A column counted in UTF-8 bytes rather than characters mis-cuts the span.
+
+        Over-running pulls the code beside the closing quote in, which reports a string literal.
+        Under-running cuts the opening of the text, which drops the reference this rule is for.
+        """
+        wide = "\u00b5" * 10
+        self.assertEqual([], self.kinds("a.py", f'def f():\n    """{wide}"""; y = "#2022"\n'))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("b.py", 'def f(x="\u00b5\u00b5\u00b5\u00b5"): """#1011."""\n')
+        )
+
+    def test_a_uri_fragment_is_not_a_reference(self) -> None:
+        """A fragment is a number after a `#` and names a heading rather than an issue."""
+        self.assertEqual(
+            [], self.kinds("a.py", "# See https://example.invalid/spec#4217 here.\nx = 1\n")
+        )
+        self.assertEqual([], self.kinds("AGENTS.md", "See <https://example.invalid/spec#4217>.\n"))
+
+    def test_a_reference_definition_label_is_read(self) -> None:
+        """Only the destination is blanked, and a label renders as prose the reader sees."""
+        self.assertEqual(["issue-ref"], self.kinds("CLAUDE.md", "[#1011]: #1011\n"))
+
+    def test_a_file_that_will_not_parse_is_still_read(self) -> None:
+        """The lexer never refuses a file, so a half-written one is read rather than skipped."""
+        self.assertEqual(["issue-ref"], self.kinds("a.py", "def f(:\n    # per #1011\n"))
+
+    def test_instruction_text_is_read_whole(self) -> None:
+        for name in (
+            "GOVERNANCE.md",
+            "AGENTS.md",
+            "OPERATIONS.md",
+            ".github/copilot-instructions.md",
+            ".agents/skills/x/SKILL.md",
+            ".github/skills/x/SKILL.md",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    ["issue-ref"], self.kinds(name, "The rule was settled in #1011.\n")
+                )
+
+    def test_the_repository_own_narrative_keeps_its_references(self) -> None:
+        """A tracker and a history exist to carry exactly these, and a README is not rule text."""
+        for name in ("README.md", "TODO.md", "HISTORY.md", "docs/rollout.md", "scripts/README.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+        # A README under a Skills root is rule text by its root, which the rule says in so many words.
+        self.assertEqual(
+            ["issue-ref"], self.kinds(".agents/skills/README.md", "Shipped in #1011.\n")
+        )
+
+    def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
+        """A fence is quoted content rather than the document's own prose, as every rule reads it.
+
+        An inline code span is not exempt, and deliberately so, since backticks around a reference
+        are how one is ordinarily written rather than a signal that it is being quoted.
+        """
+        self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
+        self.assertEqual(
+            ["issue-ref"], self.kinds("AGENTS.md", "A commit message reads `Fixes #1011`.\n")
+        )
+
+    def test_the_cross_repository_spelling_is_caught(self) -> None:
+        self.assertEqual(
+            ["issue-ref"], self.kinds("a.py", "# Settled in owner/repo#1011.\nx = 1\n")
+        )
+
+    def test_the_placeholder_the_rule_text_uses_escapes_its_own_gate(self) -> None:
+        """`#N` is the fleet placeholder, so a rule showing the form it bans stays clean."""
+        self.assertEqual([], self.kinds("GOVERNANCE.md", "Render it as `[#N](url/pull/N)`.\n"))
+
+    def test_a_shape_that_is_not_a_reference_is_not_matched(self) -> None:
+        for body in ("#1a2b3c", "# 1011", "ISO 1011", "#123456"):
+            with self.subTest(body=body):
+                self.assertEqual([], self.kinds("a.py", f"# Reads {body} here.\nx = 1\n"))
+
+    def test_the_digit_bounds_are_choices_rather_than_facts_about_a_reference(self) -> None:
+        """Both bounds let a real reference through, which the rule text covers and this does not.
+
+        One digit is the shape of an ordinal and of an enumeration, and six is the shape of a hex
+        color, so each bound trades a detection for the false positives the other side carries.
+        """
+        for body in ("#5", "#123456"):
+            with self.subTest(body=body):
+                self.assertEqual([], self.kinds("a.py", f"# Settled in {body}.\nx = 1\n"))
+        self.assertEqual(["issue-ref"], self.kinds("b.py", "# Settled in #12.\nx = 1\n"))
+        self.assertEqual(["issue-ref"], self.kinds("c.py", "# Settled in #12345.\nx = 1\n"))
+
+    def test_a_documentation_comment_is_read_like_any_other(self) -> None:
+        """`comment-added` skips one and this rule must not, or C# escapes what PowerShell carries.
+
+        C# is the case that carries the widening. PowerShell declares its help block for
+        `comment-added` alone, so no other rule skips one.
+        """
+        self.assertEqual(
+            ["issue-ref"], self.kinds("a.cs", "/// <summary>See #1011</summary>\nint x = 1;\n")
+        )
+
+    def test_a_statement_sharing_the_closing_quote_line_is_not_read(self) -> None:
+        """The docstring span is sliced at its own columns, so the string beside it stays code."""
+        self.assertEqual([], self.kinds("a.py", 'def f() -> None:\n    """Doc."""; y = "#1011"\n'))
+
+    def test_one_reference_on_one_line_reports_once(self) -> None:
+        """The line is the unit, so one reference on it is one finding however many reads see it.
+
+        A docstring line carrying a comment is read twice over, and a comment is read twice again,
+        as written and with its marker off. Two distinct comments on one line collapse the same
+        way, which is what `comment-added` already does for the same reason.
+        """
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("a.py", 'def f() -> None:\n    """Body #1011."""  # per #1011\n'),
+        )
+
+    def test_an_anchor_to_a_heading_is_not_a_reference(self) -> None:
+        """A heading that opens on a number anchors to a link destination carrying the same shape.
+
+        The blanking that hides it is also what hid every URL spelling of a real reference, which
+        the forge pattern reads off the unblanked line instead. A destination naming no tracker is
+        untouched by that pattern, so both halves hold at once: the anchor passes and the link text
+        beside it still reports.
+        """
+        self.assertEqual([], self.kinds("AUDIT.md", "[section 10](#10-converge-apply-the-fixes)\n"))
+        self.assertEqual([], self.kinds("AGENTS.md", "[s]: #10-converge\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("GOVERNANCE.md", "See [#1011](https://x.invalid/pull/1011).\n"),
+        )
+
+    def test_one_reference_on_one_line_is_one_finding_in_either_spelling(self) -> None:
+        """The line is the unit, and a link carries the same reference twice over.
+
+        The destination names it and the link text spells it bare, so a key on the matched text
+        reports one reference as two. The number both patterns capture is the key instead.
+        """
+        url = "https://github.com/acme/widget/issues/4242"
+        self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", f"See [#4242]({url}) today.\n"))
+        self.assertEqual(
+            ["issue-ref", "issue-ref"],
+            self.kinds("CODESTYLE.md", f"See [#4243]({url}) today.\n"),
+        )
+
+    def test_a_service_subdomain_is_not_the_forge_host(self) -> None:
+        """The tracker is served from the bare host, so a service beside it is a different service.
+
+        `www` is that host's own alias rather than a service of its own, which is why it reads as
+        the host and the two constructed service names below do not.
+        """
+        for url in (
+            "https://docs.github.com/acme/widget/issues/4242",
+            "https://raw.github.com/acme/widget/issues/4242",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual([], self.kinds("CODESTYLE.md", f"See {url} today.\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds("CODESTYLE.md", "See https://www.github.com/acme/widget/pull/4242 now.\n"),
+        )
+
+    def test_two_references_sharing_a_number_on_one_line_report_once(self) -> None:
+        """The digit key's own cost, pinned so a later change meets it rather than finds it.
+
+        Two projects number their trackers independently, so one line can name two references under
+        one number and the key cannot tell them apart. The second reports on the run after the first
+        is fixed, which is a round rather than a lost detection, and it is written down either way.
+        """
+        text = (
+            "See https://github.com/acme/widget/issues/4242 and "
+            "https://github.com/other/thing/issues/4242 now.\n"
+        )
+        self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", text))
+
+    def test_only_the_skill_roots_are_instruction_text(self) -> None:
+        """A product with a `skills/` directory of its own is not carrying fleet law in it."""
+        for name in ("src/skills/notes.md", "docs/skills/guide.md", "skills/top.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
+        self.assertEqual(
+            ["issue-ref"],
+            self.kinds(".claude-plugin/fleet-skills/skills/x/SKILL.md", "Shipped in #1011.\n"),
+        )
+
+    def test_the_link_spelling_is_read_in_instruction_text(self) -> None:
+        """Every link form of one reference, each of which passed while the bare form reported."""
+        url = "https://github.com/acme/widget/pull/4242"
+        for label, text in (
+            ("inline", f"The [pull request]({url}) landed.\n"),
+            ("bare", f"See {url} for the history.\n"),
+            ("definition", f"The [pull request][pr-a] landed.\n\n[pr-a]: {url}\n"),
+            ("issues", "See https://github.com/acme/widget/issues/4242 today.\n"),
+        ):
+            with self.subTest(form=label):
+                self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", text))
+
+    def test_a_link_naming_another_tracker_is_kept_in_code(self) -> None:
+        """The surface split the rule turns on: in code the link is the citation for the line."""
+        text = (
+            "# Raise the frequency to clear the timeout.\n"
+            "# https://github.com/acme/widget/issues/4242\n"
+            "frequency: 400kHz\n"
+        )
+        self.assertEqual([], self.kinds("a.yml", text))
+
+    def test_a_link_in_a_narrative_document_is_kept(self) -> None:
+        """A tracker, a history and a README exist to carry exactly these references."""
+        text = "Landed in https://github.com/acme/widget/pull/4242 upstream.\n"
+        for name in ("README.md", "HISTORY.md", "TODO.md"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(name, text))
+
+    def test_a_fenced_link_is_quoted_rather_than_stated(self) -> None:
+        """The same bound the bare form already carries, a fence quoting content."""
+        text = "Text.\n\n```\nhttps://github.com/acme/widget/pull/4242\n```\n"
+        self.assertEqual([], self.kinds("CODESTYLE.md", text))
+
+    def test_a_link_to_something_other_than_a_tracker_is_not_a_reference(self) -> None:
+        """The path decides it, so a link to a file, a release or a repository is untouched."""
+        for url in (
+            "https://github.com/acme/widget",
+            "https://github.com/acme/widget/blob/main/README.md",
+            "https://github.com/acme/widget/releases/tag/4242",
+            "https://example.com/acme/widget/pull/4242",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual([], self.kinds("CODESTYLE.md", f"See {url} today.\n"))
+
+    def test_the_rule_gates_a_pull_request_rather_than_waiting_to_be_named(self) -> None:
+        self.assertIn("issue-ref", prose_lint.RULES)
+        self.assertIn("issue-ref", prose_lint.DEFAULT_RULES)
+
+    def test_the_skill_states_the_rule_this_gate_reads(self) -> None:
+        """The gate reads one half of the ban, so the rule text has to carry the other."""
+        doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding="utf-8")
+        section = re.search(
+            r"^## Issue, pull request, and commit references$(.*?)^## ",
+            doc,
+            re.MULTILINE | re.DOTALL,
+        )
+        if section is None:
+            self.fail("the reference-ban heading moved, so the parse is blind")
+        body = section.group(1)
+        self.assertIn("issue-ref", body)
+        self.assertIn("docstring", body)
+        # The enumeration is read out of the opening paragraph and compared both ways.
+        # Asserting only that each name appears somewhere in the section was satisfiable elsewhere.
+        # A name the surfaces sentence had dropped passed on the carve-out paragraph mentioning it.
+        opening = body.strip().split("\n\n")[0]
+        named = set(re.findall(r"`([^`]+\.md)`", opening))
+        self.assertEqual(set(prose_lint.INSTRUCTION_DOCS), named)
+
+
+class TestLexerDispatch(BaitCase):
+    """Which lexer a file reads through, and the language data each lexer maps to."""
+
+    def test_a_format_with_no_comment_syntax_is_skipped(self) -> None:
+        for name in ("a.lock", "a.csv", "a.txt"):
+            with self.subTest(file=name):
+                self.assertEqual([], self.flag(name, f"// {self.RUN_ON}\n"))
+
+    def test_a_form_carries_only_in_the_syntax_that_has_it(self) -> None:
+        """A YAML plain scalar's apostrophe is not a string, and a TOML file has no heredoc.
+
+        Carrying either would blank every line below it, and a rule that reads nothing reports
+        nothing, so the file would go quiet rather than fail.
+        """
+        for name, opener in (
+            ("a.yml", "key: don't"),
+            ("a.toml", "s = 'unclosed"),
+            ("a.toml", "cat <<EOF"),
+            ("a.ini", "k = don't"),
+        ):
+            with self.subTest(file=name, opener=opener):
+                self.assertEqual(
+                    ["comment-wrap"], self.flag(name, f"{opener}\n# {self.BAIT}\n// {self.BAIT}\n")
+                )
+
+    def test_a_file_name_selects_its_lexer(self) -> None:
+        """The data file's own mapping first, then Pygments by file name."""
+        for name, lexer in (
+            ("x.sh", "bash"),
+            ("x.bash", "bash"),
+            ("x.yml", "yaml"),
+            ("x.yaml", "yaml"),
+            ("x.ps1", "powershell"),
+            ("x.cs", "csharp"),
+            ("x.py", "python"),
+            ("X.PY", "python"),
+            ("x.toml", "toml"),
+            ("x.json", "json"),
+            ("x.jsonc", "json"),
+            ("x.code-workspace", "json"),
+            ("x.csproj", "xml"),
+            ("x.scss", "css"),
+            ("Dockerfile", "bash"),
+            ("pre-commit", "bash"),
+            (".editorconfig", "ini"),
+            (".gitignore", "bash"),
+            ("x.md", "markdown"),
+            ("X.MD", "markdown"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(lexer, prose_lint.lexer_name(Path(name), ""))
+
+    def test_a_shebang_selects_the_lexer_of_an_extensionless_script(self) -> None:
+        """An extensionless script names its interpreter, through `env` or with its version."""
+        for first, lexer in (
+            ("#!/usr/bin/env python3", "python"),
+            ("#!/bin/sh", "bash"),
+            ("#!/usr/bin/env -S pwsh -NoProfile", "powershell"),
+            ("", "bash"),
+        ):
+            with self.subTest(first=first):
+                self.assertEqual(lexer, prose_lint.lexer_name(Path("tool"), first))
+
+    def test_a_shebang_assignment_is_not_the_interpreter(self) -> None:
+        first = "#!/usr/bin/env -S PYTHONWARNINGS=error python3"
+        self.assertEqual("python", prose_lint.lexer_name(Path("tool"), first))
+
+    def test_a_file_name_outranks_a_shebang(self) -> None:
+        self.assertEqual("python", prose_lint.lexer_name(Path("x.py"), "#!/bin/bash"))
+
+    def test_a_format_holding_no_comments_is_plain_without_a_note(self) -> None:
+        """A lock file or a table has no comment syntax at all, so nothing is missing from it."""
+        for name in ("data.lock", "data.csv", "notes.txt", "image.svg"):
+            with self.subTest(name=name):
+                self.assertIsNone(prose_lint.lexer_name(Path(name), ""))
+                self.assertFalse(prose_lint.extract(Path(name), "# Two things. Here.\n")[2])
+
+    def test_a_lexer_the_data_declares_no_language_for_is_read_as_plain_text(self) -> None:
+        """Pygments knowing a format is not the gate knowing its comment markers."""
+        for name in ("x.unknownsuffix", "x.go", "x.bat"):
+            with self.subTest(name=name):
+                plain: list[Path] = []
+                path = self.tmp / name
+                path.write_text("// Two things. Here.\n# Two things. Here.\n", encoding="utf-8")
+                found = prose_lint.check_file(path, {"comment-wrap", "comment-case"}, plain=plain)
+                self.assertEqual([], found)
+                self.assertEqual([path], plain)
+
+    def test_every_language_names_lexers_that_exist(self) -> None:
+        """A misspelled lexer would silently read its files as plain text."""
+        for language, spec in prose_lint.BASE["languages"].items():
+            for lexer in spec["lexers"]:
+                with self.subTest(language=language, lexer=lexer):
+                    self.assertIsNotNone(prose_lint.lexer_for(lexer))
+
+    def test_every_file_mapping_names_a_declared_language(self) -> None:
+        """A mapping to a lexer with no language would read its files as plain text."""
+        files = prose_lint.BASE["files"]
+        named = [*files["suffix"].values(), *files["name"].values(), files["extensionless"]]
+        for lexer in named:
+            with self.subTest(lexer=lexer):
+                self.assertIsNotNone(prose_lint.language_of(lexer))
+        for spec in prose_lint.BASE["languages"].values():
+            for nested in spec.get("nested", ()):
+                with self.subTest(nested=nested):
+                    self.assertIsNotNone(prose_lint.language_of(nested["lexer"]))
+
+    def test_the_languages_cover_a_plausible_number_of_lexers(self) -> None:
+        """A table that shrank would make every case above pass by reading nothing."""
+        declared = {lexer for s in prose_lint.BASE["languages"].values() for lexer in s["lexers"]}
+        self.assertGreaterEqual(len(declared), 20)
+
+
+class TestPythonLanguage(BaitCase):
+    """Python extraction: comments, docstrings, and the trailing directives a checker reads."""
+
+    COMMENT_RULES: ClassVar[set[str]] = {"comment-wrap", "comment-case", "comment-added"}
+
+    def test_the_prose_in_front_of_a_trailing_directive_is_judged(self) -> None:
+        """A Python checker reads the directive, and the prose in front of it is still prose."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for text, expected in (
+            ("# A new prose comment the reviewer never sees.  # noqa\n", ["comment-added"]),
+            ("# two sentences here. Another one follows.  # noqa: E501\n", both),
+            ("x = 1  # two sentences here. Another one follows.  # noqa\n", ["comment-wrap"]),
+            (
+                "x = 1  # two sentences here. Another one follows.  # type: ignore[arg-type]\n",
+                ["comment-wrap"],
+            ),
+            ("# two sentences here. Another one follows.  # pylint: disable=no-member\n", both),
+            ("# two sentences here. Another one follows, pylint: disable=no-member\n", both),
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_does_not_make_prose_read_as_configuration(self) -> None:
+        """A directive's code ends the body where a full stop would, so the cut comes first."""
+        text = (
+            "# Note: two sentences here. Another one follows.  # noqa: E501\n"
+            "# Note: the value is read once.  # noqa: E501\n"
+        )
+        self.assertEqual(["comment-wrap"], self.kinds(text, {"comment-wrap"}, name="tool.py"))
+
+    def test_what_is_left_before_a_directive_keeps_its_exemptions(self) -> None:
+        """The space in front of the directive is cut with it, so an address or a key is still exempt."""
+        for text in (
+            "# https://example.com/a/very/long/reference/path  # noqa: E501\n",
+            "# Note:  # noqa: E501\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_each_trailing_form_ends_what_is_judged(self) -> None:
+        """A sentence after the directive is cut with it, whichever form it is and however the suffix is cased."""
+        for name, text in (
+            ("tool.py", "x = 1  # Read the row once. pylint: disable=no-member\n"),
+            ("tool.py", "x = 1  # Read the row.  # type: ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # type:ignore. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("TOOL.PY", "x = 1  # Read the row.  # noqa. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NOQA. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NoQA: E501. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # nopep8. Another one follows.\n"),
+            ("tool.py", "x = 1  # Read the row.  # NoPep8: E501. Another one follows.\n"),
+        ):
+            with self.subTest(name=name, text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_trailing_directive_alone_is_still_exempt(self) -> None:
+        """What is left once the directive is cut is empty or a directive already exempt."""
+        for text in (
+            "x = 1  # noqa\n",
+            "x = 1  # pylint: disable=no-member\n",
+            "x = 1  # type: ignore  # noqa: E501\n",
+            "# noqa: E501  # noqa\n",
+            "#  # noqa\n",
+            "#  # NOPEP8\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name="tool.py"))
+
+    def test_a_trailing_directive_is_prose_outside_python(self) -> None:
+        """No other language's checker reads these forms, so a mention of one is part of the sentence."""
+        both = ["comment-wrap", "comment-case", "comment-added"]
+        for name, text in (
+            ("a.toml", "# two sentences here. Each line carries a `# noqa` marker.\n"),
+            ("a.yml", "# two sentences here. Another one follows.  # noqa\n"),
+            ("run.sh", "# two sentences here. Another one follows, pylint: disable=no-member\n"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(both, self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_the_sentence_after_a_mention_is_judged_outside_python(self) -> None:
+        """Only a Python file is cut at the directive, so a run-on after a mention elsewhere is caught."""
+        text = "# Each line carries a `# noqa` marker. Another sentence follows.\n"
+        for name, expected in (
+            ("a.yml", ["comment-wrap", "comment-added"]),
+            ("a.toml", ["comment-wrap", "comment-added"]),
+            ("tool.py", ["comment-added"]),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(expected, self.kinds(text, self.COMMENT_RULES, name=name))
+
+    def test_a_trailing_marker_must_be_the_whole_directive_word(self) -> None:
+        for text in (
+            "x = 1  # Read the row.  # noqable. Another one follows.\n",
+            "x = 1  # Read the row mypylint: once. Another one follows.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(
+                    ["comment-wrap"], self.kinds(text, self.COMMENT_RULES, name="tool.py")
+                )
+
+    def test_a_directive_named_mid_sentence_leaves_no_wrap(self) -> None:
+        """The sentence goes on past a directive it names, so the next line does not continue it."""
+        for text, expected in (
+            ("# Suppress with `# noqa: E501` where needed.\n# max_len - the longest line.\n", []),
+            ("# Lines carry a `# noqa` marker.\n# flake8 reads it.\n", [(2, "comment-case")]),
+            (
+                "# A sentence that keeps  # noqa\n# going onto the next line.\n",
+                [(1, "comment-wrap")],
+            ),
+        ):
+            with self.subTest(text=text.strip()):
+                path = self.tmp / "tool.py"
+                path.write_text(text, encoding="utf-8")
+                found = prose_lint.check_file(path, {"comment-wrap", "comment-case"})
+                self.assertEqual(expected, [(n, kind) for n, kind, _ in found])
+
+    def test_an_uppercase_python_suffix_is_read_as_python(self) -> None:
+        """A `#` inside a triple-quoted string is not a comment, whatever case the suffix is in."""
+        text = '"""\n# two sentences here. Another one follows.\n"""\n'
+        for name in ("tool.py", "Tool.PY"):
+            with self.subTest(name=name):
+                self.assertEqual([], self.kinds(text, {"comment-wrap", "comment-case"}, name=name))
+
+    def test_a_docstring_is_the_first_statement_of_a_body_only(self) -> None:
+        """A later string statement is an expression, and the gate reads it as code."""
+        text = (
+            '"""Module."""\n'
+            "def f(x: int = (1)) -> dict[str, int]:\n"
+            '    """Function."""\n'
+            '    """Not a docstring."""\n'
+            "class C:\n"
+            "    r'''Class.'''\n"
+        )
+        units, _fenced, _plain = prose_lint.extract(Path("a.py"), text)
+        got = [(u.lines[0].number, u.lines[0].text) for u in units if u.kind == "docstring"]
+        self.assertEqual([(1, '"""Module."""'), (3, '"""Function."""'), (6, "r'''Class.'''")], got)
+
+    def test_a_repeated_marker_comes_off_and_a_shebang_is_no_comment(self) -> None:
+        text = "#!/usr/bin/env python3\n## Heading words\n"
+        self.assertEqual([(2, "Heading words", True)], self.comments("a.py", text))
+
+    def test_a_file_that_does_not_parse_is_still_lexed(self) -> None:
+        """The lexer never refuses a file, so a half-written one is read rather than skipped."""
+        self.assertEqual(
+            [(2, "Two things. Here.", True)],
+            self.comments("a.py", "def f(:\n# Two things. Here.\n"),
+        )
+
+
+class TestHashLanguage(BaitCase):
+    """Bash and the other `#` languages: strings, heredocs, and parameter expansion."""
+
+    def test_a_shell_quote_that_does_not_close_spans_lines(self) -> None:
+        """Either quote form carries, and the line that closes it gives back what follows."""
+        for quote in ('"', "'"):
+            with self.subTest(quote=quote):
+                self.assertEqual(
+                    [], self.flag("a.sh", f"s={quote}line one\n# {self.BAIT}\nline three{quote}\n")
+                )
+                self.assertEqual(
+                    ["comment-wrap"],
+                    self.flag("a.sh", f"s={quote}line one\nline two{quote}  # {self.BAIT}\n"),
+                )
+
+    def test_a_shell_single_quoted_string_takes_no_backslash_escape(self) -> None:
+        """Read with C escape rules the trailing backslash eats the closing quote.
+
+        The string would then carry into every line below it, which is the failure the C# verbatim
+        form already had within a line, one newline further on.
+        """
+        self.assertEqual(["comment-wrap"], self.flag("a.sh", f"p='C:\\tmp\\'\n# {self.BAIT}\n"))
+
+    def test_a_shell_backslash_outside_a_string_escapes_the_next_character(self) -> None:
+        r"""`'\''` is how shell embeds a quote in a single-quoted string, and it balances.
+
+        Read without the outside-string escape it leaves one quote open, which then carries and
+        blanks every line below it - a rule that reads nothing reports nothing.
+        """
+        self.assertEqual(["comment-wrap"], self.flag("a.sh", f"echo 'don'\\''t'\n# {self.BAIT}\n"))
+
+    def test_a_heredoc_runs_from_its_label_to_the_line_that_repeats_it(self) -> None:
+        """Bare, quoted, and tab-stripping openers all name the same label."""
+        for opener in ("<<EOF", "<<'EOF'", '<<"EOF"', "<<-EOF", "<< EOF"):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    ["comment-wrap"],
+                    self.flag("a.sh", f"cat {opener}\n# {self.BAIT}\nEOF\n# {self.BAIT}\n"),
+                )
+
+    def test_only_the_exact_terminator_ends_a_heredoc(self) -> None:
+        """An indented line is body content, and ending there resumes scanning inside the string.
+
+        `<<-` strips leading tabs and nothing else, so a space-indented line is body under either
+        form. The bait sits on the line after the near-miss, which a premature end reports.
+        """
+        for opener, near_miss in (
+            ("<<EOF", "  EOF"),
+            ("<<EOF", "\tEOF"),
+            ("<<-EOF", "  EOF"),
+            ("<<EOF", "EOF_NOT"),
+        ):
+            with self.subTest(opener=opener, near_miss=repr(near_miss)):
+                self.assertEqual(
+                    [], self.flag("a.sh", f"cat {opener}\n{near_miss}\n# {self.BAIT}\n")
+                )
+
+    def test_a_tab_indented_terminator_ends_a_dash_heredoc(self) -> None:
+        """That is the whole point of `<<-`, so refusing it would run the heredoc to end of file."""
+        self.assertEqual(
+            ["comment-wrap"], self.flag("a.sh", f"cat <<-EOF\n\tbody\n\tEOF\n# {self.BAIT}\n")
+        )
+
+    def test_a_here_string_and_a_quoted_marker_do_not_open_a_heredoc(self) -> None:
+        """`<<<` is one line, and a `<<` inside a string or a comment is text."""
+        for line in ('jq -r ".x" <<<"$out"', 'echo "cat <<EOF"', "# Match a <<EOF here"):
+            with self.subTest(line=line):
+                self.assertEqual(["comment-wrap"], self.flag("a.sh", f"{line}\n# {self.BAIT}\n"))
+
+    def test_a_parameter_expansion_hash_opens_no_comment(self) -> None:
+        """A `#` after `$` or `${` is bash naming a count, so neither spelling reads as a comment."""
+        for text in ("count=${#items[@]}\n", 'echo "${#items[@]} open."\n', "echo $#\n"):
+            with self.subTest(line=text):
+                self.assertEqual([], self.comments("a.sh", text))
+        self.assertEqual(
+            [(1, "Count the open items.", False)],
+            self.comments("a.sh", "count=${#items[@]} # Count the open items.\n"),
+        )
+
+    def test_a_heredoc_ends_only_on_its_terminator_line(self) -> None:
+        """A later mention of the label, `$STUB_DIR` for `STUB`, is body text."""
+        text = "cat >x <<'STUB'\n$STUB_DIR\n# Body.\nSTUB\n# After the body.\n"
+        self.assertEqual([(5, "After the body.", True)], self.comments("a.sh", text))
+
+    def test_toml_reads_its_hash_comments(self) -> None:
+        self.assertEqual(["comment-wrap"], self.flag("a.toml", 'k = "v"  # Two things. Here.\n'))
+
+    def test_a_shift_is_no_heredoc(self) -> None:
+        """A label opens on a letter, so `<< 2` inside arithmetic hides nothing after it."""
+        self.assertEqual([(2, "After.", True)], self.comments("a.sh", "(( x << 2 ))\n# After.\n"))
+
+
+class TestYamlLanguage(BaitCase):
+    """YAML extraction, its block and quoted scalars, and the scalars it lexes again."""
+
+    def test_a_yaml_block_scalar_is_data_until_the_indentation_drops(self) -> None:
+        """Every header form opens one, and the line that dedents is code again."""
+        for header in ("key: |", "key: >", "key: |-", "key: >-", "key: |2", "  - |"):
+            with self.subTest(header=header):
+                self.assertEqual(
+                    ["comment-wrap"],
+                    self.flag(
+                        "a.yml",
+                        f"{header}\n    # {self.BAIT}\n\n    still data\nnext: 1  # {self.BAIT}\n",
+                    ),
+                )
+
+    def test_a_run_scalar_stays_a_script_the_comment_rules_govern(self) -> None:
+        """Its `#` lines are shell comments, so treating the block as data would stop linting them.
+
+        A data key holds text the reader cannot edit, which is the case the block rule is for.
+        The chomping and indent indicators ride along on the header, so every form of it counts.
+        """
+        for header in (
+            "run: |",
+            "run: |-",
+            "run: |+",
+            "run: |2",
+            "run: >",
+            "run: >-",
+            "      run: |",
+            "      - run: |",
+        ):
+            with self.subTest(header=header):
+                self.assertEqual(
+                    ["comment-wrap"], self.flag("a.yml", f"{header}\n        # {self.BAIT}\n")
+                )
+        # The exemption is anchored to the key, so a key merely ending in the word is still data.
+        for header in (
+            "files: |",
+            "files: |-",
+            "tags: >-",
+            "dry run: |",
+            "first run: |-",
+            "post-run: |",
+        ):
+            with self.subTest(header=header):
+                self.assertEqual([], self.flag("a.yml", f"{header}\n  # {self.BAIT}\n"))
+
+    def test_a_pipe_that_is_not_a_block_header_opens_nothing(self) -> None:
+        """A plain scalar ending in a pipe is a value, not a block indicator."""
+        self.assertEqual(["comment-wrap"], self.flag("a.yml", f"key: a | b\n# {self.BAIT}\n"))
+
+    def test_a_yaml_quote_delimits_only_at_the_start_of_a_value(self) -> None:
+        """A plain scalar's apostrophe is text, so reading it as an opener hides a real comment.
+
+        The masked span would run from the apostrophe to the end of the line, taking the trailing
+        `#` with it, and this repo's own workflow YAML carries the pattern (`the merge-bot's ...`).
+        A quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
+        """
+        for code in (
+            "key: don't",
+            "name: Don't do this",
+            "key: [don't, 'x']",
+            "key: 'quoted'",
+            "  - 'item'",
+            'key: "don\'t"',
+            "key: {k: 'v'}",
+        ):
+            with self.subTest(code=code):
+                self.assertEqual(["comment-wrap"], self.flag("a.yml", f"{code}  # {self.BAIT}\n"))
+
+    def test_a_single_quoted_yaml_or_toml_scalar_takes_no_backslash_escape(self) -> None:
+        r"""A trailing backslash would otherwise consume the closing quote and hide the comment.
+
+        Both languages spell the escape as a doubled quote in the single-quoted form, and both
+        keep the backslash escape in the double-quoted one, so the two forms are read differently
+        in the same file. The bait is a trailing comment, which only survives a correct read.
+        """
+        for name, code in (
+            ("a.yml", "key: 'C:\\tmp\\'"),
+            ("a.yml", "key: 'it''s'"),
+            ("a.toml", "s = 'C:\\tmp\\'"),
+            ("a.toml", "s = 'it''s'"),
+        ):
+            with self.subTest(file=name, code=code):
+                self.assertEqual(["comment-wrap"], self.flag(name, f"{code}  # {self.BAIT}\n"))
+        # The double-quoted form keeps it, so an escaped quote does not close the string early.
+        for name, code in (("a.yml", 'key: "a\\"b"'), ("a.toml", 's = "a\\"b"')):
+            with self.subTest(file=name, code=code):
+                self.assertEqual(["comment-wrap"], self.flag(name, f"{code}  # {self.BAIT}\n"))
+
+    def test_a_parameter_expansion_hash_opens_no_comment_in_a_run_block(self) -> None:
+        """A `run:` block is lexed as bash, so a `#` naming a count is code there too."""
+        for line in ("count=${#items[@]}", 'echo "::error::${#items[@]} open."', "echo $#"):
+            with self.subTest(line=line):
+                self.assertEqual([], self.comments("x.yml", f"run: |\n  {line}\n"))
+        self.assertEqual(
+            [(2, "Count the open items.", False), (3, "Count the open items.", True)],
+            self.comments(
+                "x.yml", "run: |\n  n=${#a[@]} # Count the open items.\n  # Count the open items.\n"
+            ),
+        )
+
+    def test_a_run_block_reads_a_heredoc_body_as_code(self) -> None:
+        """A workflow's inline script is read whole, as the YAML reading of it always was."""
+        text = "run: |\n  python3 - <<'PY'\n  # Two things. Here.\n  PY\n"
+        self.assertEqual(["comment-wrap"], self.flag("x.yml", text))
+
+    def test_a_lambda_block_is_read_as_cpp(self) -> None:
+        """A C++ comment inside a lambda is judged where it is written, on its file line."""
+        text = "sensor:\n  - lambda: |-\n      // returns the value.\n      return x;\n"
+        path = self.tmp / "x.yaml"
+        path.write_text(text, encoding="utf-8")
+        self.assertEqual([3], [n for n, _, _ in prose_lint.check_file(path, {"comment-case"})])
+
+    def test_a_lambda_tag_is_read_as_cpp(self) -> None:
+        for text in (
+            "on_value:\n  - !lambda |-\n      // Two things. Here.\n",
+            "value: !lambda 'return x;  // Two things. Here.'\n",
+            "lambda: 'return x;  // Two things. Here.'\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["comment-wrap"], self.flag("x.yaml", text))
+
+    def test_a_slash_pair_outside_a_lambda_is_data(self) -> None:
+        self.assertEqual([], self.flag("x.yaml", "url: |\n  // Two things. Here.\n"))
+
+    def test_a_double_quoted_scalar_spans_lines(self) -> None:
+        """YAML lets one continue onto the next line, so a `#` inside it is text."""
+        self.assertEqual([], self.flag("x.yml", 'key: "unclosed\n# Two things. Here.\n"\n'))
+
+    def test_a_comment_after_a_block_indicator_leaves_the_script_read(self) -> None:
+        text = "run: | # Install.\n  # lower case.\n"
+        self.assertEqual(["comment-case"], self.kinds(text, {"comment-case"}, name="x.yml"))
+
+
+class TestPowerShellLanguage(BaitCase):
+    """PowerShell extraction: here-strings, both quote forms, and help blocks."""
+
+    def test_a_powershell_here_string_spans_lines_in_both_quote_forms(self) -> None:
+        """It opens on `@"` or `@'` at the end of a line and closes on the matching token."""
+        for quote in ('"', "'"):
+            with self.subTest(quote=quote):
+                self.assertEqual(
+                    [], self.flag("a.ps1", f"$s = @{quote}\n# {self.BAIT}\n{quote}@\n")
+                )
+                # The closing line gives back what follows the token, as a closing quote does.
+                self.assertEqual(
+                    ["comment-wrap"],
+                    self.flag("a.ps1", f"$s = @{quote}\nbody\n{quote}@  # {self.BAIT}\n"),
+                )
+
+    def test_a_powershell_double_quoted_string_is_escaped_and_doubling_at_once(self) -> None:
+        """Its escape is a backtick, and it also embeds the delimiter by doubling it.
+
+        Neither property implies the other, so both are read per string. Missing the backtick ends
+        the string on the escaped quote, and reading a backslash as an escape consumes the closing
+        one. The single-quoted form takes no backtick escape, so its escape is doubling only.
+        """
+        for code in ('$s = "a`"b"', '$s = "a""b"', "$s = 'a`'", "$s = 'a''b'", '$p = "C:\\tmp\\"'):
+            with self.subTest(code=code):
+                self.assertEqual(["comment-wrap"], self.flag("a.ps1", f"{code}  # {self.BAIT}\n"))
+
+    def test_a_here_string_closes_only_on_a_token_at_the_start_of_the_line(self) -> None:
+        """PowerShell requires the closer at column 0, so an indented one is here-string content."""
+        self.assertEqual(
+            [], self.flag("a.ps1", f'$s = @"\n  "@ is not the closer\n# {self.BAIT}\n"@\n')
+        )
+
+    def test_a_powershell_quote_carries_because_the_escape_is_a_backtick(self) -> None:
+        """A backslash is an ordinary character there, so it cannot consume the closing quote."""
+        self.assertEqual([], self.flag("a.ps1", f'$s = "line one\n# {self.BAIT}\nline three"\n'))
+        self.assertEqual(
+            ["comment-wrap"], self.flag("a.ps1", '$p = "C:\\tmp\\"  # ' + self.BAIT + "\n")
+        )
+
+    def test_a_string_opens_from_code_after_a_closed_block_comment(self) -> None:
+        """The code a line holds is every span outside its comments, not only the first one.
+
+        Reading only the code before the first marker misses an opener that sits after a block
+        comment that closed on the same line. The here-string then falls back to an ordinary
+        carried quote, which the first quote in its body closes, and scanning resumes inside it.
+        """
+        for opener in ('<# Note. #> $s = @"', '$s = @"'):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    [], self.flag("a.ps1", f'{opener}\nhe said "hi\n# {self.BAIT}\n"@\n')
+                )
+
+    def test_a_string_does_not_open_under_a_block_comment(self) -> None:
+        """The block comment owns the lines below, so its text cannot open one."""
+        self.assertEqual(
+            ["comment-wrap", "comment-wrap"],
+            self.flag("a.ps1", f'<# Note @"\n   {self.BAIT} #>\n$x = 1 # {self.BAIT}\n'),
+        )
+
+    def test_a_help_block_is_one_comment_through_its_keywords(self) -> None:
+        """The lexer splits a help block at `.SYNOPSIS`, which is still text inside the comment."""
+        found = self.comments("a.ps1", "<#\n.SYNOPSIS\nThe tool.\n#>\n")
+        self.assertEqual(
+            [(1, ""), (2, ".SYNOPSIS"), (3, "The tool."), (4, "")], [f[:2] for f in found]
+        )
+
+
+class TestCLanguage(BaitCase):
+    """The C family: C, C++, C#, JavaScript, and JSON with its comments."""
+
+    def test_json_carries_comments_because_jsonc_is_what_ships(self) -> None:
+        """VS Code tasks, devcontainer, and workspace files ship comments under a plain .json name."""
+        for name in ("a.json", "a.code-workspace", "a.jsonc"):
+            with self.subTest(file=name):
+                self.assertEqual(["comment-wrap"], self.flag(name, f"// {self.RUN_ON}\n"))
+
+    def test_a_closed_block_doc_gives_the_rest_of_the_line_back(self) -> None:
+        """CODESTYLE owns the documentation comment, not the line it happens to sit on.
+
+        A line doc comment does run to end of line, so only the block form gives anything back.
+        """
+        self.assertEqual([], self.flag("a.cs", f"/** {self.RUN_ON} */\n"))
+        self.assertEqual([], self.flag("a.cs", f"/// {self.RUN_ON} // and more\n"))
+        self.assertEqual(["comment-wrap"], self.flag("a.cs", "/** Docs. */ // Two things. Here.\n"))
+
+    def test_a_multi_line_doc_block_owns_every_line_until_it_closes(self) -> None:
+        """A marker in documentation text is prose, so scanning those lines invents comments.
+
+        The closing line still gives back what follows the closer, which is the one finding here.
+        """
+        self.assertEqual(
+            ["comment-wrap"],
+            self.flag(
+                "a.cs",
+                "/** Docs start\n"
+                " * // Two things. Here.\n"
+                " * /* not an opener\n"
+                " */ // Two things. Here.\n",
+            ),
+        )
+
+    def test_a_verbatim_string_spans_lines(self) -> None:
+        """It is the one string form here that carries, so masking per line invents comments.
+
+        The line that closes it still gives back what follows the quote.
+        """
+        # The marker on the second line is string content, so nothing is reported.
+        self.assertEqual(
+            [], self.flag("a.cs", 'var s = @"line one\n// Two things. Here.\nline three";\n')
+        )
+        # The line that closes it still gives back the comment after the quote.
+        self.assertEqual(
+            ["comment-wrap"],
+            self.flag("a.cs", 'var s = @"line one\nline two"; // Two things. Here.\n'),
+        )
+        # A plain string ends on its own line, so the next line is ordinary code.
+        self.assertEqual(
+            ["comment-wrap"], self.flag("a.cs", 'var s = "line one";\n// Two things. Here.\n')
+        )
+        # Closing one and opening another leaves real code between them, which is not string content.
+        self.assertEqual(
+            ["comment-wrap"],
+            self.flag(
+                "a.cs",
+                'var s = @"start\n'
+                'end"; /* Two things. Here. */ var t = @"open again\n'
+                'still string";\n',
+            ),
+        )
+
+    def test_a_quote_in_comment_text_is_prose_rather_than_a_string(self) -> None:
+        """Masking the comment too lets its quote open a string that blanks the markers after it.
+
+        Within the line that costs the block its closer, and across lines the state carries and
+        blanks every marker below until something closes it.
+        """
+        self.assertEqual(
+            ["comment-wrap"],
+            self.flag("a.cs", 'code(); /* note @"x */ code2(); // Two things. Here.\n'),
+        )
+        # Each block line is its own sentence, so the two findings are the recovered comments.
+        self.assertEqual(
+            ["comment-wrap", "comment-wrap"],
+            self.flag(
+                "a.cs",
+                '/* A note about @"paths.\n'
+                "   And more. */ // Two things. Here.\n"
+                "var x = 1; // Two things. Here.\n",
+            ),
+        )
+
+    def test_every_comment_on_a_line_is_read_not_just_the_first(self) -> None:
+        """A ceiling can only describe the first comment, so a later one was unreachable.
+
+        Each case puts the offending sentence in the second comment, which a scan that stops at
+        the first reports as clean.
+        """
+        for name, text in (
+            ("a.cs", "var x = 1; /* Note. */ // Two things. Here.\n"),
+            ("a.cs", "/* Note. */ /* Two things. Here. */\n"),
+            ("a.cs", "/* Start here.\n   Still going. */ // Two things. Here.\n"),
+        ):
+            with self.subTest(line=text.split("\n")[0]):
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_verbatim_string_keeps_its_own_closing_quote(self) -> None:
+        """A backslash is ordinary inside one and a doubled quote is the escape.
+
+        Read with C escape rules the string never closes, so the masker blanks the rest of the
+        line and the trailing comment goes unseen.
+        """
+        # Ending in a backslash, the string swallows its closing quote and hides a real comment.
+        self.assertEqual(
+            ["comment-wrap"], self.flag("a.cs", 'var p = @"C:\\tmp\\"; // Two things. Here.\n')
+        )
+        # Reading a doubled quote as a close then a reopen puts string content outside the string.
+        self.assertEqual(
+            [], self.flag("a.cs", 'var s = @"a""// One thing. Another thing.""b"; // ok\n')
+        )
+        # An interpolated one is spelled either way round, and only one of them abuts the quote.
+        for text in (
+            'var s = $@"C:\\tmp\\"; // Two things. Here.\n',
+            'var s = @$"C:\\tmp\\"; // Two things. Here.\n',
+        ):
+            with self.subTest(line=text.strip()):
+                self.assertEqual(["comment-wrap"], self.flag("a.cs", text))
+
+    def test_only_a_c_style_continuation_loses_its_leading_asterisk(self) -> None:
+        """The `*` continuing a `/* */` line is punctuation, and anywhere else it is prose."""
+        for name, text in (
+            ("a.md", "<!-- *emphasis* leads here -->\n"),
+            ("a.ps1", "<# *emphasis* leads here #>\n"),
+            ("a.cs", "/* *emphasis* leads here */\n"),
+        ):
+            with self.subTest(file=name):
+                self.assertEqual([], self.flag(name, text))
+        self.assertEqual(
+            [(1, "Start here.", True), (2, "Still going.", True)],
+            self.comments("a.cs", "/* Start here.\n * Still going. */\n"),
+        )
+        for text, body in (
+            (" * **bold** here */", "**bold** here"),
+            (" **bold** here */", "**bold** here"),
+            (" *emphasis* here */", "*emphasis* here"),
+        ):
+            with self.subTest(line=text):
+                found = self.comments("a.cs", f"/* Start.\n{text}\n")
+                self.assertEqual([(1, "Start.", True), (2, body, True)], found)
+
+    def test_a_string_hides_a_marker_in_every_c_like_language(self) -> None:
+        """A C escape still hides a marker, and a quote inside a string opens nothing."""
+        for name, text in (
+            ("a.cs", 'var s = "// Two things. Here.";\n'),
+            ("a.c", 'char *s = "/* Two things. Here. */";\n'),
+            ("a.json", '{"a": "// Two things. Here."}\n'),
+        ):
+            with self.subTest(file=name):
+                self.assertEqual([], self.flag(name, text))
+        for name, text in (
+            ("a.cs", 'var s = "a\\"b"; // Two things. Here.\n'),
+            ("a.cs", "var s = 'a';  // Two things. Here.\n"),
+            ("a.c", "char c = '\"';  // Two things. Here.\n"),
+        ):
+            with self.subTest(file=name, text=text):
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_documentation_comment_is_its_own_unit(self) -> None:
+        """A `///` or `/**` comment is a documentation comment, which only `issue-ref` reads."""
+        units, _fenced, _plain = prose_lint.extract(Path("a.cs"), "/// Doc.\n// Code.\n")
+        units = sorted(units, key=lambda u: u.lines[0].number)
+        self.assertEqual(
+            [("doc", 1), ("comment", 2)],
+            [(u.kind, u.lines[0].number) for u in units if u.kind in ("doc", "comment")],
+        )
+
+    def test_a_collection_expression_is_no_attribute(self) -> None:
+        """Pygments read one opening on its own line as an attribute, and its comments with it."""
+        text = "int[] a =\n[\n    1, // Two things. Here.\n];\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.cs", text))
+        text = "[Theory] // Two things. Here.\nvoid T() { }\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.cs", text))
+
+
+class TestCssLanguage(BaitCase):
+    """CSS and SCSS, whose comments are block comments only."""
+
+    def test_css_has_block_comments_only(self) -> None:
+        """A `//` in CSS is the scheme separator of a URL, not a comment marker."""
+        self.assertEqual([], self.flag("a.css", "a { background: url(http://x/y. Z); }\n"))
+        self.assertEqual(["comment-wrap"], self.flag("a.css", "/* One thing. Another thing. */\n"))
+
+    def test_a_block_comment_is_read_in_css_and_scss(self) -> None:
+        for name in ("a.css", "a.scss"):
+            with self.subTest(file=name):
+                text = "a { color: red; } /* Two things. Here. */\n"
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+
+class TestMarkupLanguage(BaitCase):
+    """XML and HTML comments, and the scripts embedded in HTML."""
+
+    def test_an_xml_comment_is_read(self) -> None:
+        for name in ("a.xml", "a.csproj", "a.html"):
+            with self.subTest(file=name):
+                text = '<a b="x"><!-- Two things. Here. --></a>\n'
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_script_comment_inside_html_is_not_read(self) -> None:
+        """A comment opening on no marker the language declares belongs to an embedded language."""
+        text = "<script>\n// Two things. Here.\n</script>\n<style>/* Two things. Here. */</style>\n"
+        self.assertEqual([], self.flag("a.html", text))
+
+
+class TestIniLanguage(BaitCase):
+    """INI, whose comments open on either marker."""
+
+    def test_both_markers_are_read(self) -> None:
+        text = "; Two things. Here.\n\n# Two things. Here.\n"
+        self.assertEqual(["comment-wrap", "comment-wrap"], self.flag("a.ini", text))
+
+
+class TestMarkdown(BaitCase):
+    """Markdown extraction through markdown-it-py: code, blocks, HTML, and front matter."""
+
+    def test_structure_is_not_a_sentence(self) -> None:
+        """A table row, a heading, a link definition, and a blockquote hold no prose sentence.
+
+        A table needs its delimiter row, as GitHub's does, and a definition's title is no prose.
+        """
+        run = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
+        table = f"| a |\n| - |\n| {run} |\n"
+        for text in (table, f"# {run}\n", f'[ref]: ./x.md "{run}"\n', f"> {run}\n"):
+            with self.subTest(text=text[:20]):
+                self.assertEqual([], self.kinds(text, {"sentence-length"}))
+
+    def test_separate_blocks_are_never_joined(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        fence = "```\ncode\n```\n"
+        for text in (
+            f"- {half}\n- {half}\n",
+            f"{half}\n\n{half}\n",
+            f"{half}\n# Head\n{half}\n",
+            f"{half}\n{fence}{half}\n",
+            f"{half}\n| a | b |\n| - | - |\n{half}\n",
+        ):
+            with self.subTest(text=text[:30]):
+                self.assertEqual([], self.found_md(text))
+
+    def test_front_matter_is_not_joined_into_the_body(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"---\nname: {half}\ndescription: {half}\n...\n{half}.\n"
+        self.assertEqual([], self.found_md(text))
+
+    def test_a_long_front_matter_line_is_still_flagged(self) -> None:
+        text = f"---\nname: x\ndescription: {self.over_md()}.\n---\nBody.\n"
+        self.assertEqual([(3, "sentence-length")], self.found_md(text))
+
+    def test_a_block_level_tag_line_interrupts_a_paragraph(self) -> None:
+        a = " ".join(["word"] * 15)
+        self.assertEqual([], self.found_md(f"{a}\n<div>\n{a}.\n"))
+        text = f"<details>\n<summary>S</summary>\n\n- {a}\n</details>\n{a}.\n"
+        self.assertEqual([], self.found_md(text))
+
+    def test_prose_wrapped_in_tags_is_still_measured(self) -> None:
+        over = self.over_md()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found_md(f'<p align="center">{over}.</p>\n'))
+        self.assertEqual(flagged, self.found_md(f"<summary>{over}.</summary>\n"))
+        at_cap = self.sentence_of(prose_lint.SENTENCE_WORD_CAP)
+        self.assertEqual([], self.found_md(f'<p align="center">{at_cap}</p>\n'))
+
+    def test_other_block_boundaries_end_a_block(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        cases = {
+            "setext": f"{half}\n===\n{half}\n",
+            "setext dashes": f"{half}\n---\n{half}\n",
+            "thematic": f"{half}\n***\n{half}\n",
+            "thematic underscores": f"{half}\n___\n{half}\n",
+            "html block": f"<details>\n<summary>{half}</summary>\n{half}\n</details>\n",
+            "html comment": f"{half}\n<!-- {half}\n{half} -->\n{half}\n",
+            "pipeless table": f"a | b\n--- | ---\n{half} | x\n{half} | y\n\n{half}\n",
+            "indented code": f"{half}\n\n    {half}\n    {half}\n\n{half}\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual([], self.found_md(text))
+
+    def test_an_indented_list_continuation_is_not_code(self) -> None:
+        text = f"- Item.\n\n    {self.over_md()}.\n"
+        self.assertEqual([(3, "sentence-length")], self.found_md(text))
+
+    def test_inline_html_and_a_tag_inside_a_paragraph_stay_prose(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        for mid in ("<br>", "<number>", "<https://example.test>", "<kbd>x</kbd>"):
+            with self.subTest(mid=mid):
+                self.assertEqual([(1, "sentence-length")], self.found_md(f"{half}\n{mid} {half}\n"))
+        for lead in ("<kbd>x</kbd>", "<number>", "<https://example.test>"):
+            self.assertEqual([(1, "sentence-length")], self.found_md(f"{lead} {self.over_md()}.\n"))
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        self.assertEqual([(1, "sentence-length")], self.found_md(f"{a}\n<br>\n{c}\n"))
+
+    def test_a_fence_inside_an_html_comment_is_not_a_fence(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        text = f"<!--\n```\n-->\n{half}\n{half}\n"
+        self.assertEqual([(4, "sentence-length")], self.found_md(text))
+
+    def test_a_setext_underline_discards_the_heading_only(self) -> None:
+        over = self.over_md()
+        self.assertEqual([], self.found_md(f"{over}\n===\nShort.\n"))
+        self.assertEqual([], self.found_md(f"{over}\n---\nShort.\n"))
+        self.assertEqual([], self.found_md(f"{over}\n-\nShort.\n"))
+
+    def test_a_thematic_break_flushes_the_paragraph(self) -> None:
+        over = self.over_md()
+        flagged = [(1, "sentence-length")]
+        self.assertEqual(flagged, self.found_md(f"{over}.\n- - -\nShort.\n"))
+        self.assertEqual(flagged, self.found_md(f"{over}.\n***\nShort.\n"))
+        self.assertEqual(flagged, self.found_md(f"- {over}.\n---\nShort.\n"))
+        # Under a paragraph of any length, `---` is a setext underline making the paragraph a heading.
+        self.assertEqual([], self.found_md(f"{over}\nmore words.\n---\nShort.\n"))
+
+    def test_only_the_line_above_a_table_delimiter_is_the_header(self) -> None:
+        text = f"{self.over_md()}.\nhead | x\n--- | ---\nrow | y\n"
+        self.assertEqual([(1, "sentence-length")], self.found_md(text))
+
+    def test_a_column_zero_fence_ends_a_list(self) -> None:
+        text = f"- item\n\n```\ncode\n```\n\n    {self.over_md()}.\n"
+        self.assertEqual([], self.found_md(text))
+
+    def test_code_indented_past_a_list_item_is_code(self) -> None:
+        self.assertEqual([], self.found_md(f"- item\n\n      {self.over_md()}.\n"))
+
+    def test_front_matter_needs_a_closing_line(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual(
+            [(2, "sentence-length")], self.found_md(f"---\nname: x\n{self.over_md()}.\n")
+        )
+        self.assertEqual([(2, "sentence-length")], self.found_md(f"---\n{half} here\n{half}\n"))
+
+    def test_a_thematic_break_with_fences_or_tables_is_not_front_matter(self) -> None:
+        a = " ".join(["word"] * 15)
+        fenced = f"---\n```\n{self.over_md()}\n```\n---\nShort.\n"
+        table = f"---\n| {a} | x |\n| --- | --- |\n---\nShort.\n"
+        self.assertEqual([], self.found_md(fenced))
+        self.assertEqual([], self.found_md(table))
+
+    def test_a_line_github_opens_no_block_on_does_not_interrupt(self) -> None:
+        """A custom element such as `<source-x>` is no block name, though one opens its name.
+
+        The list is CommonMark 0.31's as markdown-it-py implements it, which names `<search>`.
+        """
+        a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
+        for tag in ("</style>", "</pre>", "</textarea>", "<source-x>", "<div-x>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([(1, "sentence-length")], self.found_md(f"{a}\n{tag}\n{c}.\n"))
+
+    def test_front_matter_has_no_line_reach(self) -> None:
+        keys = "".join(f"key{n}: value\n" for n in range(55))
+        text = f"---\n{keys}description: {self.over_md()}.\n---\nBody.\n"
+        self.assertEqual([(57, "sentence-length")], self.found_md(text))
+
+    def test_the_full_block_tag_list_interrupts_a_paragraph(self) -> None:
+        """Each block name ends the paragraph above it, as CommonMark 0.31 lists the names."""
+        a = " ".join(["word"] * 15)
+        tags = ("<dl>", "<figure>", "<style>", "<nav>", "<search>", "<textarea>", "</div>")
+        for tag in (*tags, "<hr/>", "<div\tclass=x>", "<div\vclass=x>"):
+            with self.subTest(tag=tag):
+                self.assertEqual([], self.found_md(f"{a}\n{tag}\n{a}.\n"))
+
+    def test_a_tag_line_indented_past_its_container_continues_the_paragraph(self) -> None:
+        """Four columns past the paragraph's container, a tag line is lazy text on GitHub."""
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found_md(f"{half}\n    <div>\n{half}.\n"))
+        self.assertEqual([], self.found_md(f"{half}\n   <div>\n{half}.\n"))
+        self.assertEqual(
+            [(1, "sentence-length")], self.found_md(f"- {half}\n      <div>\n  {half}.\n")
+        )
+        self.assertEqual([], self.found_md(f"- {half}\n     <div>\n  {half}.\n"))
+        self.assertEqual([], self.found_md(f"- {half}\nlazy\n    <div>\n  {half}.\n"))
+        self.assertEqual([], self.found_md(f"-   {half}\n      <div>\n    {half}.\n"))
+        for empty in ("-", "- "):
+            with self.subTest(empty=empty):
+                self.assertEqual([], self.found_md(f"{empty}\n  {half}\n    <div>\n  {half}.\n"))
+        for empty, pad in (("*", "  "), ("+", "  "), ("1.", "   "), ("1)", "   ")):
+            with self.subTest(empty=empty):
+                text = f"{empty}\n{pad}{half}\n{pad}  <div>\n{pad}{half}.\n"
+                self.assertEqual([], self.found_md(text))
+        self.assertEqual([], self.found_md(f"-\t{half}\n      <div>\n    {half}.\n"))
+        for head in (f"{half}\n*\n", f"{half}\n+\n", f"{half}\n1)\n", f"- {half}\n  *\n  "):
+            with self.subTest(head=head):
+                self.assertEqual([(1, "sentence-length")], self.found_md(f"{head}{half}.\n"))
+        wide = f"-   {half}\n        <div>\n    {half}.\n"
+        self.assertEqual([(1, "sentence-length")], self.found_md(wide))
+
+    def test_only_one_dot_or_paren_interrupts_a_paragraph(self) -> None:
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        self.assertEqual([(1, "sentence-length")], self.found_md(f"{half}\n2) {half}\n"))
+        self.assertEqual([], self.found_md(f"{half}\n1) {half}\n"))
+        self.assertEqual([], self.found_md(f"- a\n  {half}\n2) {half}\n"))
+
+    def test_each_markdown_only_branch_reads_an_uppercase_suffix_alike(self) -> None:
+        over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1)) + "."
+        british = next(iter(prose_lint.BRITISH))
+        for rules, text, expected in (
+            ({"comment-wrap", "comment-case"}, "<!-- group header -->\n", []),
+            (
+                {"sentence-split"},
+                "A sentence that keeps\ngoing onto the next line.\n",
+                ["sentence-split"],
+            ),
+            ({"sentence-length"}, over + "\n", ["sentence-length"]),
+            ({"semicolon"}, f"{SPLICE_BAIT}.\n", ["semicolon"]),
+            ({"dupword"}, f'<!-- Recast "{DUP}" as one. -->\n', []),
+            ({"dash"}, "It runs - and it gates.\n", ["dash"]),
+            ({"dupword"}, f"One {DUP} here.\n", ["dupword"]),
+            ({"spelling"}, f"One {british} here.\n", ["spelling"]),
+        ):
+            for name in ("notes.md", "NOTES.MD"):
+                with self.subTest(rules=sorted(rules), text=text.strip(), name=name):
+                    self.assertEqual(expected, self.kinds(text, rules, name=name))
+
+    def test_a_longer_fence_holds_a_shorter_one(self) -> None:
+        """A fence ends on a fence at least as long, so the inner one is content."""
+        text = "````\n```\nIt runs; it gates.\n```\n````\n"
+        self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_an_indented_code_block_is_code(self) -> None:
+        self.assertEqual([], self.kinds("Text.\n\n    a; b\n", {"semicolon"}))
+
+    def test_an_html_comment_in_a_code_span_is_no_comment(self) -> None:
+        self.assertEqual([], self.flag("a.md", "Use `<!-- two things. Here. -->` here.\n"))
+
+    def test_an_html_comment_is_read_on_its_own_line_and_after_text(self) -> None:
+        text = "<!-- Two things. Here. -->\n\nText <!-- Two things. Here. -->\n"
+        self.assertEqual(
+            [(1, "Two things. Here.", True), (3, "Two things. Here.", False)],
+            self.comments("a.md", text),
+        )
+
+    def test_a_multi_line_html_comment_is_no_paragraph(self) -> None:
+        over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 2))
+        self.assertEqual([], self.found_md(f"<!--\n{over}\n-->\n"))
+
+    def test_an_inline_comment_keeps_its_line_after_a_wrapped_code_span(self) -> None:
+        text = "Run `make\nbuild` now. <!-- check this later. -->\n"
+        self.assertEqual([(2, "check this later.", False)], self.comments("a.md", text))
+        text = "One. <!-- check this later. -->\nTwo. <!-- check this later. -->\n"
+        found = [(1, "check this later.", False), (2, "check this later.", False)]
+        self.assertEqual(found, self.comments("a.md", text))
+
+
+class TestOverrideMerge(BaitCase):
+    """A repository's `.prose-gate.json`, merged over the carried exemptions."""
+
+    def override(self, data: object) -> Path:
+        """A repository root carrying `data` as its `.prose-gate.json`."""
+        root = self.tmp / "repo"
+        root.mkdir(exist_ok=True)
+        text = data if isinstance(data, str) else json.dumps(data)
+        (root / ".prose-gate.json").write_text(text, encoding="utf-8")
+        return root
+
+    def override_kinds(self, root: Path, name: str, text: str, rules: set[str]) -> list[str]:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return [kind for _, kind, _ in prose_lint.check_file(path, rules, root)]
+
+    def test_each_exemption_list_takes_additions(self) -> None:
+        """Each key adds to the carried list, so the carried entries still apply beside it."""
+        twice = "dupword " + "dupword"
+        root = self.override(
+            {
+                "dupword_allow": [twice],
+                "spelling_allow": ["colour"],
+                "service_accounts": ["builder"],
+                "home_path_exempt": ["docs/RUNBOOK.md"],
+            }
+        )
+        self.assertEqual([], self.override_kinds(root, "a.md", f"A {twice} here.\n", {"dupword"}))
+        self.assertEqual([], self.override_kinds(root, "a.md", "The colour here.\n", {"spelling"}))
+        self.assertEqual(
+            ["spelling"], self.override_kinds(root, "b.md", "The behaviour here.\n", {"spelling"})
+        )
+        self.assertEqual(
+            [], self.override_kinds(root, "a.md", "In /home/" + "builder/x.\n", {"home-path"})
+        )
+        home = f"In {NIX_HOME}/x.\n"
+        self.assertEqual([], self.override_kinds(root, "docs/RUNBOOK.md", home, {"home-path"}))
+        self.assertEqual(
+            ["home-path"], self.override_kinds(root, "docs/OTHER.md", home, {"home-path"})
+        )
+        self.assertEqual([], self.override_kinds(root, "OPERATIONS.md", home, {"home-path"}))
+
+    def test_a_directive_name_is_matched_literally(self) -> None:
+        """A name is no pattern, so a dot in one matches a dot and nothing else."""
+        root = self.override({"tool_directives": ["acme.check"]})
+        rules = {"comment-case"}
+        self.assertEqual([], self.override_kinds(root, "a.py", "# acme.check lower\n", rules))
+        self.assertEqual(
+            ["comment-case"], self.override_kinds(root, "b.py", "# acmexcheck lower\n", rules)
+        )
+
+    def test_a_generated_tree_is_left_out_of_a_sweep(self) -> None:
+        root = self.override({"generated_trees": ["out"]})
+        (root / "out").mkdir()
+        (root / "out" / "a.md").write_text("x\n", encoding="utf-8")
+        (root / "b.md").write_text("x\n", encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            found = prose_lint.discover([str(root)], (), root)
+        self.assertEqual([root / "b.md"], [p for p in found if p.name.endswith(".md")])
+
+    def test_a_key_outside_the_exemptions_is_refused(self) -> None:
+        """An override that silently does nothing reads as one that works."""
+        cases: tuple[object, ...] = (
+            {"charset": {}},
+            {"dupword_allow": "x"},
+            {"dupword_allow": [1]},
+            {"tool_directives": [""]},
+            {"hub_hosted": ["  "]},
+            [],
+            "{",
+        )
+        for data in cases:
+            with self.subTest(data=data):
+                root = self.override(data)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    code = prose_lint.main([str(root)])
+                self.assertEqual(2, code)
+                self.assertIn(".prose-gate.json", err.getvalue())
+
+    def test_the_carried_data_is_left_as_it_was(self) -> None:
+        before = json.dumps(prose_lint.BASE, sort_keys=True)
+        prose_lint.merged(prose_lint.BASE, {"hub_hosted": ["x/y.md"]})
+        self.assertEqual(before, json.dumps(prose_lint.BASE, sort_keys=True))
+        self.assertEqual(set(prose_lint.BASE["override_keys"]), set(prose_lint.BASE["exemptions"]))
+
+
+class TestDiscovery(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_sweep_reaches_a_plausible_share_of_the_repo(self) -> None:
+        """A sweep that quietly stops finding files satisfies every rule by having nothing to read."""
+        found = prose_lint.discover([str(REPO)])
+        self.assertGreaterEqual(len(found), prose_lint.LEAST_PLAUSIBLE)
+
+    def test_no_discovered_path_is_git_ignored(self) -> None:
+        """Scoping by `git ls-files` is what keeps generated trees out of the sweep."""
+        found = prose_lint.discover([str(REPO)])
+        r = subprocess.run(
+            ["git", "-C", str(REPO), "check-ignore", "--stdin"],
+            input="\n".join(str(p) for p in found),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            check=False,
+        )
+        self.assertEqual("", r.stdout.strip())
+
+    def test_the_fallback_skips_generated_roots(self) -> None:
+        """`git check-ignore` fails on exactly the machine with no git, so this path names them."""
+        (self.tmp / ".mypy_cache").mkdir()
+        (self.tmp / ".mypy_cache" / "cached.md").write_text(f"{DUP}\n", encoding="utf-8")
+        (self.tmp / "authored.md").write_text("fine\n", encoding="utf-8")
+        found = prose_lint.walk_paths(self.tmp)
+        self.assertEqual(["authored.md"], sorted(p.relative_to(self.tmp).as_posix() for p in found))
+
+    def test_empty_git_output_falls_back_rather_than_scanning_nothing(self) -> None:
+        """An initialized but empty checkout exits 0 with no output.
+
+        Reading that as an empty file set would scan nothing and report success, which is the
+        shape of a gate that has silently stopped gating.
+        """
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(prose_lint.subprocess, "run", return_value=done):
+            self.assertIsNone(prose_lint.tracked_paths(self.tmp))
+
+    def test_a_dot_prefixed_path_keeps_its_prefix(self) -> None:
+        """`lstrip` took a character set and ate the leading dot, so --diff never matched .github."""
+        self.assertEqual(".github/workflows/x.yml", prose_lint.rel(Path(".github/workflows/x.yml")))
+        self.assertEqual(".editorconfig", prose_lint.rel(Path(".editorconfig")))
+        self.assertEqual("GOVERNANCE.md", prose_lint.rel(Path("./GOVERNANCE.md")))
+
+    def test_a_subdirectory_root_yields_paths_that_exist(self) -> None:
+        """`git ls-files` prints paths relative to its `-C` directory, not the repo top level.
+
+        Review read it the other way round, which would make the join in tracked_paths produce
+        broken paths. It does not, and the invariant is pinned here because passing `--full-name`
+        would flip the behavior with nothing else to notice.
+        """
+        for root in (REPO / "spec", REPO / "scripts"):
+            with self.subTest(root=root.name):
+                found = prose_lint.discover([str(root)])
+                self.assertGreaterEqual(len(found), 5)
+                self.assertEqual([], [str(p) for p in found if not p.exists()])
+
+    def test_an_explicit_file_argument_bypasses_discovery(self) -> None:
+        """A single file has to be checkable directly, including one git does not track."""
+        loose = self.tmp / "loose.md"
+        loose.write_text("fine\n", encoding="utf-8")
+        self.assertEqual([loose], prose_lint.discover([str(loose)]))
+
+    def test_a_directory_git_cannot_describe_warns_and_walks_it(self) -> None:
+        """Silently scanning nothing there would report a clean run over an unread tree."""
+        (self.tmp / "authored.md").write_text("fine\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            found = prose_lint.discover([str(self.tmp)])
+        self.assertEqual(["authored.md"], [p.name for p in found])
+        self.assertIn("falling back to a filesystem walk", err.getvalue())
+
+    def test_an_excluded_path_is_dropped(self) -> None:
+        (self.tmp / "keep.md").write_text("fine\n", encoding="utf-8")
+        (self.tmp / "drop.md").write_text("fine\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            found = prose_lint.discover([str(self.tmp)], ("drop.md",))
+        self.assertEqual(["keep.md"], [p.name for p in found])
+
+    def test_a_generated_tree_is_skipped_when_a_wider_scan_expands_into_it(self) -> None:
+        """Its prose is the generator's, so a finding there names no edit an author can make."""
+        (self.tmp / "authored.md").write_text("fine\n", encoding="utf-8")
+        generated = self.tmp / "reports"
+        generated.mkdir()
+        (generated / "audit.md").write_text("fine\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            found = prose_lint.discover([str(self.tmp)])
+        self.assertEqual(["authored.md"], [p.name for p in found])
+
+    def test_a_parent_directory_above_the_checkout_does_not_decide_generated(self) -> None:
+        """The decision is repository-relative, so the filesystem path above it cannot leak in.
+
+        Judged on the absolute path, a checkout under a parent named `reports` carried that
+        parent into every file's parts, which read the whole scan as deliberately requested and
+        put the repository's own generated tree back into an ordinary sweep.
+        """
+        repo = self.tmp / "reports" / "checkout"
+        (repo / "reports").mkdir(parents=True)
+        (repo / "authored.md").write_text("fine\n", encoding="utf-8")
+        (repo / "reports" / "audit.md").write_text("fine\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            found = prose_lint.discover([str(repo)])
+        self.assertEqual(["authored.md"], [p.name for p in found])
+
+    def test_naming_a_generated_tree_directly_still_reads_it(self) -> None:
+        """The skip keeps a wide scan honest, and must not make the tree uncheckable."""
+        generated = self.tmp / "reports"
+        generated.mkdir()
+        (generated / "audit.md").write_text("fine\n", encoding="utf-8")
+        with (
+            mock.patch.object(prose_lint, "tracked_paths", return_value=None),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            found = prose_lint.discover([str(generated)])
+        self.assertEqual(["audit.md"], [p.name for p in found])
+        loose = generated / "audit.md"
+        self.assertEqual([loose], prose_lint.discover([str(loose)]))
+
+    def test_an_unreadable_root_is_not_a_file_set(self) -> None:
+        """`tracked_paths` answers None on the error paths, never an empty list read as clean."""
+        with mock.patch.object(prose_lint.subprocess, "run", side_effect=OSError):
+            self.assertIsNone(prose_lint.tracked_paths(self.tmp))
+        failed = subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="")
+        with mock.patch.object(prose_lint.subprocess, "run", return_value=failed):
+            self.assertIsNone(prose_lint.tracked_paths(self.tmp))
+
+    def test_an_unopenable_path_is_not_text(self) -> None:
+        self.assertFalse(prose_lint.is_text(self.tmp / "absent.md"))
+
+    def test_a_binary_file_is_not_scanned(self) -> None:
+        blob = self.tmp / "payload.md"
+        blob.write_bytes(DUP.encode() + b"\x00binary\n")
+        self.assertFalse(prose_lint.is_text(blob))
 
 
 class TestCarriedContent(unittest.TestCase):
@@ -3368,58 +5037,6 @@ class TestCarriedContent(unittest.TestCase):
         self.assertEqual(
             [], [str(p.relative_to(REPO)) for p in self.verbatim_paths() if not p.exists()]
         )
-
-
-class TestSyntaxDispatch(unittest.TestCase):
-    def test_an_extensionless_file_is_read_as_hash_commented(self) -> None:
-        """A shebang script or a config with no suffix is far more often `#` than nothing."""
-        self.assertEqual(prose_lint.HASH, prose_lint.syntax_for(Path("somescript")))
-
-    def test_a_format_with_no_comments_and_an_unknown_suffix_are_both_skipped(self) -> None:
-        for name in ("data.lock", "data.csv", "image.png", "archive.7z"):
-            with self.subTest(file=name):
-                self.assertIsNone(prose_lint.syntax_for(Path(name)))
-
-    def test_a_name_match_beats_the_suffix_table(self) -> None:
-        self.assertEqual(prose_lint.INI, prose_lint.syntax_for(Path(".editorconfig")))
-
-    def test_python_that_will_not_tokenize_falls_back_to_the_line_scan(self) -> None:
-        """`tokenize` raises on a half-written file, and the rule still has to read its comments."""
-        self.assertIsNone(prose_lint.python_comments("def f(:\n"))
-        self.assertEqual(["comment-wrap"], self.flag("def f(:\n# Two things. Here.\n"))
-
-    def flag(self, text: str) -> list[str]:
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "bait.py"
-            path.write_text(text, encoding="utf-8")
-            return [
-                kind for _, kind, _ in prose_lint.check_file(path, {"comment-wrap", "comment-case"})
-            ]
-
-
-class TestAnUppercaseMarkdownSuffixIsMarkdown(BaitCase):
-    """Every Markdown-only branch reads the suffix case-insensitively, as `syntax_for` does."""
-
-    def test_each_markdown_only_branch_reads_an_uppercase_suffix_alike(self) -> None:
-        over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1)) + "."
-        british = next(iter(prose_lint.BRITISH))
-        for rules, text, expected in (
-            ({"comment-wrap", "comment-case"}, "<!-- group header -->\n", []),
-            (
-                {"sentence-split"},
-                "A sentence that keeps\ngoing onto the next line.\n",
-                ["sentence-split"],
-            ),
-            ({"sentence-length"}, over + "\n", ["sentence-length"]),
-            ({"semicolon"}, f"{SPLICE_BAIT}.\n", ["semicolon"]),
-            ({"dupword"}, f'<!-- Recast "{DUP}" as one. -->\n', []),
-            ({"dash"}, "It runs - and it gates.\n", ["dash"]),
-            ({"dupword"}, f"One {DUP} here.\n", ["dupword"]),
-            ({"spelling"}, f"One {british} here.\n", ["spelling"]),
-        ):
-            for name in ("notes.md", "NOTES.MD"):
-                with self.subTest(rules=sorted(rules), text=text.strip(), name=name):
-                    self.assertEqual(expected, self.kinds(text, rules, name=name))
 
 
 class TestChangedLines(unittest.TestCase):
@@ -3692,9 +5309,6 @@ class TestCli(unittest.TestCase):
         with mock.patch.object(prose_lint, "discover", return_value=[bait]):
             self.assertEqual(1, prose_lint.main([]))
 
-    UNTOKENIZED = 'def f():\n    """A docstring the gate reads."""\n    return (1,\n'
-    UNPARSED = 'def f():\n    """A docstring the gate reads."""\n    return = 1\n'
-
     def scope_line(self, paths: list[Path], argv: list[str]) -> str:
         with (
             mock.patch.object(prose_lint, "discover", return_value=paths),
@@ -3708,43 +5322,7 @@ class TestCli(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def test_a_python_file_the_interpreter_cannot_parse_is_named_by_every_parser_rule(
-        self,
-    ) -> None:
-        """A file the parser-based rules may have misread is not a clean pass, so the line says so.
-
-        On a file `tokenize` refuses, `comment-wrap` and `comment-case` fall back to a line scan,
-        and `comment-added` and `issue-ref` read no comment. On one it accepts and `ast` refuses,
-        `issue-ref` reads no docstring, and a tokenizer older than the grammar can read a newer
-        f-string as an open string and swallow the comments after it. Either way the run exited 0
-        with the scope line a clean tree prints. Neither fixture parses under any interpreter, so
-        the case holds whichever one runs the suite. `comment-added` runs only under `--diff`, so
-        its case is the diff-scoped one.
-        """
-        for name, text in (("open.py", self.UNTOKENIZED), ("newer.py", self.UNPARSED)):
-            bait = self.bait(name, text)
-            for rule in ("comment-wrap", "comment-case", "issue-ref", "sentence-length"):
-                with self.subTest(file=name, rule=rule):
-                    err = self.scope_line([bait], ["--check", rule])
-                    self.assertIn("1 .py file(s) Python", err)
-                    self.assertIn(f"may be misread: {bait.as_posix()!r}", err)
-
-    def test_a_python_file_that_parses_is_not_named(self) -> None:
-        clean = self.bait("clean.py", 'def f():\n    """A docstring the gate reads."""\n')
-        self.assertNotIn("may be misread", self.scope_line([clean], []))
-
-    def test_an_unparsed_file_is_not_named_when_no_parser_based_rule_ran(self) -> None:
-        """A run reading the file only line by line lost nothing to the parse, so names nothing."""
-        bait = self.bait("open.py", self.UNTOKENIZED)
-        self.assertNotIn("may be misread", self.scope_line([bait], ["--check", "dupword"]))
-
     LATIN = b"# caf\xe9 is fine.\nx = 1\n"
-
-    def test_a_python_file_that_is_not_utf8_is_not_blamed_on_the_interpreter(self) -> None:
-        """No rule reads a file the gate cannot decode, so no parse was refused on it."""
-        latin = self.tmp / "latin.py"
-        latin.write_bytes(self.LATIN)
-        self.assertNotIn("may be misread", self.scope_line([latin], []))
 
     def test_a_file_the_gate_cannot_decode_is_named_whatever_rule_ran(self) -> None:
         """No rule reads a file that is not UTF-8, so a run that skipped it is not a clean one.
@@ -3791,24 +5369,22 @@ class TestCli(unittest.TestCase):
         self.assertIn("1 changed line(s)", err)
         self.assertIn("could not open or decode as UTF-8, so no rule read them: 'latin.md'", err)
 
-    def test_a_byte_order_mark_is_not_read_as_an_unparsed_file(self) -> None:
-        """An editor-added mark parses on every interpreter, so its docstrings are still read.
+    def test_a_byte_order_mark_leaves_a_module_docstring_read(self) -> None:
+        """An editor-added mark is dropped before the lexer reads the file, so its docstring is read.
 
-        `ast` refuses the mark in a string, which named the file as one the interpreter could not
-        parse and skipped the reference its module docstring holds. The reference closes the
-        docstring, so a first line sliced at columns that still count the mark loses its digits.
+        The reference closes the docstring, so a first line sliced at columns that still count the
+        mark loses its digits.
         """
         marked = self.bait("marked.py", "\ufeff'See #12'\n")
         with (
             mock.patch.object(prose_lint, "discover", return_value=[marked]),
             contextlib.redirect_stdout(io.StringIO()) as out,
-            contextlib.redirect_stderr(io.StringIO()) as err,
+            contextlib.redirect_stderr(io.StringIO()),
         ):
             self.assertEqual(1, prose_lint.main(["--check", "issue-ref"]))
         self.assertIn(
             "marked.py:1: issue-ref: issue or pull request reference '#12'", out.getvalue()
         )
-        self.assertNotIn("may be misread", err.getvalue())
 
     def test_a_byte_order_mark_leaves_a_first_line_comment_leading_in_every_syntax(self) -> None:
         """The mark is not whitespace, so read as code it made a first-line comment trailing.
@@ -3829,7 +5405,6 @@ class TestCli(unittest.TestCase):
             ("a.ps1", "# See #12 for why."),
             ("a.ps1", "<# See #12 for why. #>"),
             ("a.ini", "; See #12 for why."),
-            ("a.kicad_sch", "# See #12 for why."),
         ):
             with self.subTest(file=name, comment=written):
                 marked = self.bait(name, f"\ufeff{written}\nx\n")
@@ -3848,6 +5423,86 @@ class TestCli(unittest.TestCase):
                 found = prose_lint.check_file(marked, {"comment-added"})
                 self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
 
+    def test_a_missing_package_names_the_remedy_rather_than_a_traceback(self) -> None:
+        """A stale hook imports the gate in-process, where its script block installs nothing.
+
+        The child runs it the way that snippet did, its handler swallowing the exit's message.
+        """
+        stale = (
+            "import runpy, shutil, sys, tempfile\n"
+            "with tempfile.TemporaryDirectory() as tmp:\n"
+            "    script = shutil.copy(sys.argv[1], tmp)\n"
+            "    if sys.argv[2] == 'packages':\n"
+            "        sys.modules['markdown_it'] = None\n"
+            "        shutil.copy(sys.argv[1].replace('prose_lint.py', 'prose-gate.json'), tmp)\n"
+            "    try:\n"
+            "        runpy.run_path(script, run_name='__main__')\n"
+            "    except SystemExit as exc:\n"
+            "        sys.exit(exc.code if isinstance(exc.code, int) else 1)\n"
+        )
+        for missing in ("packages", "data"):
+            with self.subTest(missing=missing):
+                done = subprocess.run(
+                    [sys.executable, "-c", stale, str(PROSE_LINT_SCRIPT), missing],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+                self.assertEqual(1, done.returncode)
+                self.assertNotIn("Traceback", done.stderr)
+                self.assertIn("uv run --no-project --script", done.stderr)
+                self.assertIn("hub_fetch_run.py", done.stderr)
+
+    def test_the_local_shim_offers_the_gate_s_own_command_line(self) -> None:
+        """The shim builds its parser from the same data, and answers `--help` without uv."""
+        shim = REPO / "scripts" / "prose_lint.py"
+        env = dict(os.environ) | {"COLUMNS": "100", "NO_COLOR": "1"}
+        shown = subprocess.run(
+            [sys.executable, str(shim), "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=True,
+        ).stdout
+        with mock.patch.dict(os.environ, {"COLUMNS": "100", "NO_COLOR": "1"}):
+            expected = prose_lint.argument_parser(prose_lint.BASE).format_help()
+        self.assertEqual(expected, shown)
+
+    def test_a_file_with_no_lexer_is_named_as_plain_text(self) -> None:
+        """No comment rule could read it, so a comment rule's clean run over it is no clean pass."""
+        plain = self.bait("notes.unknownsuffix", "# Two things. Here.\n")
+        known = self.bait("tool.sh", "# One thing.\n")
+        err = self.scope_line([plain, known], ["--check", "comment-wrap"])
+        self.assertIn(f"1 file(s) with no lexer read as plain text: {plain.as_posix()!r}", err)
+        self.assertNotIn("tool.sh", err)
+
+    def test_a_format_holding_no_comments_is_not_named(self) -> None:
+        lock = self.bait("data.lock", "x\n")
+        self.assertNotIn("plain text", self.scope_line([lock], []))
+
+    def test_a_long_plain_list_is_cut_to_five_names(self) -> None:
+        baits = [self.bait(f"notes{n}.unknownsuffix", "x\n") for n in range(6)]
+        err = self.scope_line(baits, ["--check", "comment-wrap"])
+        self.assertIn("6 file(s) with no lexer read as plain text", err)
+        self.assertIn(f"{baits[4].as_posix()!r} and more", err)
+        self.assertNotIn(baits[5].as_posix(), err)
+
+    def test_the_diff_scoped_line_names_a_plain_file_too(self) -> None:
+        """The environment override is cleared, since it stands `comment-added` down."""
+        bait = self.bait("notes.unknownsuffix", "# Two things. Here.\n")
+        with (
+            mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}),
+            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
+            mock.patch.object(
+                prose_lint, "changed_lines", return_value={"notes.unknownsuffix": {1}}
+            ),
+        ):
+            err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
+        self.assertIn("1 changed line(s)", err)
+        self.assertIn("read as plain text: 'notes.unknownsuffix'", err)
+
     def test_a_byte_order_mark_leaves_a_first_line_fence_opening(self) -> None:
         """Read as text before the fence, the mark inverted which lines the fence held."""
         marked = self.bait("a.md", "\ufeff```sh\nx; y\n```\n\nOne; two.\n")
@@ -3861,25 +5516,6 @@ class TestCli(unittest.TestCase):
                 marked = self.bait(name, f"\ufeff{text}")
                 found = prose_lint.check_file(marked, {"charset-unknown"})
                 self.assertEqual([1], [line for line, _, message in found if "U+FEFF" in message])
-
-    def test_a_long_unparsed_list_is_cut_to_five_names(self) -> None:
-        baits = [self.bait(f"open{n}.py", self.UNTOKENIZED) for n in range(6)]
-        err = self.scope_line(baits, ["--check", "comment-wrap"])
-        self.assertIn("6 .py file(s) Python", err)
-        self.assertIn(f"{baits[4].as_posix()!r} and more", err)
-        self.assertNotIn(baits[5].as_posix(), err)
-
-    def test_the_diff_scoped_line_names_an_unparsed_file_too(self) -> None:
-        """The environment override is cleared, since it stands `comment-added` down."""
-        bait = self.bait("open.py", self.UNTOKENIZED)
-        with (
-            mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}),
-            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
-            mock.patch.object(prose_lint, "changed_lines", return_value={"open.py": {1}}),
-        ):
-            err = self.scope_line([bait], ["--check", "comment-added", "--diff", "HEAD"])
-        self.assertIn("1 changed line(s)", err)
-        self.assertIn("may be misread: 'open.py'", err)
 
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
@@ -4026,198 +5662,6 @@ class TestCli(unittest.TestCase):
         blob.write_bytes(b"\xff\xfe not utf-8\n")
         self.assertEqual([], prose_lint.check_file(blob, {"dupword"}))
         self.assertEqual([], prose_lint.check_file(self.tmp / "absent.md", {"dupword"}))
-
-
-# The gate reads this file, so a bait path is assembled rather than written.
-# A literal would be a finding in the very file that defines the rule.
-# This file already takes that approach for non-ASCII, which it writes as escapes.
-# `adalovelace` is a constructed account name, never an account on any machine here.
-BAIT_USER = "adalovelace"
-NIX_HOME = f"/home/{BAIT_USER}"
-MAC_HOME = f"/Users/{BAIT_USER}"
-WIN_HOME = f"C:\\Users\\{BAIT_USER}"
-
-
-class TestHomePath(BaitCase):
-    """The pattern-detectable half of the representative-data rule, and only that half.
-
-    Every fixture below uses a constructed account name. Writing the maintainer's own path into
-    a committed test would be the exact exposure the rule exists to prevent, in the file that
-    implements the rule.
-
-    The shapes were chosen against the corpus rather than from the list the backlog recorded. A
-    bare drive letter matched 11 files here and named a path in none of them, because an escaped
-    newline after any word ending in a letter and a colon reads as one, so `jobs:\\n` inside a
-    fixture is a drive letter. The shape kept is a drive letter followed by `Users`.
-    """
-
-    def test_a_home_path_naming_a_person_is_flagged(self) -> None:
-        for text in (
-            f"See {NIX_HOME}/notes.txt for the log.\n",
-            f"See {MAC_HOME}/notes.txt for the log.\n",
-            f"See {WIN_HOME}\\notes.txt for the log.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertIn("home-path", self.kinds(text, {"home-path"}))
-
-    def test_the_documentation_placeholder_is_not_a_finding(self) -> None:
-        """The rule's own wording quotes these shapes to describe them, and must survive its gate.
-
-        A real user segment is required, so the placeholder form does not match and no exemption
-        list has to carry the files that describe the rule. A stale exemption list is what turns
-        a gate into a work list that damages correct documents.
-        """
-        for text in (
-            "The shapes are `/home/<name>` and `C:\\Users\\<name>`.\n",
-            "A path under `/Users/<name>` is the macOS form.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
-
-    def test_a_container_account_is_not_a_personal_home(self) -> None:
-        """`/home/vscode` is a fixed name a devcontainer image ships, so it names no environment.
-
-        Every one of this repository's 15 home-path hits is this shape, from the devcontainer
-        snippets and the doc describing them, so a rule without this exemption would open with a
-        work list of 15 findings and no true positive among them.
-        """
-        for account in ("vscode", "runner", "root", "ubuntu", "node"):
-            with self.subTest(account=account):
-                self.assertNotIn(
-                    "home-path",
-                    self.kinds(f"Mounted at /home/{account}/.ssh here.\n", {"home-path"}),
-                )
-
-    def test_a_path_inside_a_fenced_block_is_still_a_finding(self) -> None:
-        """A transcript pasted from a terminal is the exposure, and it arrives fenced.
-
-        Every other prose rule skips a fenced block because it holds code rather than prose. This
-        one reads it, since the rule gates a literal path rather than a sentence.
-        """
-        self.assertIn(
-            "home-path", self.kinds(f"```text\n$ ls {NIX_HOME}/keys\n```\n", {"home-path"})
-        )
-
-    def test_a_path_in_a_config_value_is_still_a_finding(self) -> None:
-        """A bind mount naming a real home is the exposure in its most consequential form."""
-        self.assertIn(
-            "home-path",
-            self.kinds(
-                f'{{ "target": "{NIX_HOME}/.ssh/id_ed25519.pub" }}\n', {"home-path"}, "a.json"
-            ),
-        )
-
-    def test_a_relative_or_tilde_path_is_not_a_finding(self) -> None:
-        """`~/.ssh` names no account, which is the form the docs are supposed to use."""
-        for text in (
-            "Copy `~/.ssh/id_ed25519.pub` into place.\n",
-            f"The path `home/{BAIT_USER}` is relative.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
-
-    def test_the_windows_branch_is_case_insensitive(self) -> None:
-        """Windows filesystems are case-insensitive, so a pasted path may be any casing."""
-        for form in (f"C:\\users\\{BAIT_USER}", f"c:\\USERS\\{BAIT_USER}"):
-            with self.subTest(form=form):
-                self.assertIn("home-path", self.kinds(f"See {form} here.\n", {"home-path"}))
-
-    def test_the_posix_branch_stays_case_sensitive(self) -> None:
-        """A lowercase `/users/` is the commonest REST path there is, and names no home.
-
-        This is why the case-insensitive fix is scoped to the drive-letter branch rather than
-        applied to the whole pattern: widening it would flag every API route in every doc.
-        """
-        for text in (
-            f"GET https://api.example.com/users/{BAIT_USER} returns the record.\n",
-            f"The route is `/users/{BAIT_USER}` in the API.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
-
-    def test_a_bare_drive_letter_is_not_a_shape(self) -> None:
-        """Kept as a case because the backlog recorded it as one and the corpus rejected it.
-
-        These are the two forms that made it unworkable: an escaped newline in a fixture, and a
-        temporary directory in a string literal.
-        """
-        for text in ("key: 'jobs:\\n  a:'\n", 'var p = "C:\\tmp\\out";\n'):
-            with self.subTest(text=text.strip()):
-                self.assertNotIn("home-path", self.kinds(text, {"home-path"}))
-
-    def test_the_rule_runs_by_default(self) -> None:
-        """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
-        self.assertIn("home-path", prose_lint.DEFAULT_RULES)
-        self.assertIn("home-path", prose_lint.RULES)
-
-    def test_neither_source_file_carries_a_literal_home_path(self) -> None:
-        """Both files are read by the rule they implement, so the bait is assembled.
-
-        This is the same guarantee the tier tables carry for non-ASCII, and it is the reason the
-        constants above exist. Written as literals, the gate would report its own definition and
-        its own cases, and the only repair would be an exemption naming these files, which is the
-        stale-exemption shape that hands out a work list damaging correct documents.
-        """
-        for path in (REPO / "scripts" / "prose_lint.py", Path(__file__)):
-            with self.subTest(source=path.name):
-                found = prose_lint.check_file(path, {"home-path"})
-                self.assertEqual([], found)
-
-
-class TestOperationsRunbookExemption(unittest.TestCase):
-    """The operations runbook carries the literal path an operator types."""
-
-    def setUp(self) -> None:
-        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.enterContext(contextlib.redirect_stdout(io.StringIO()))
-        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
-
-    def _payload(self, *parts: str) -> None:
-        target = self.tmp.joinpath(*parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("{}\n", encoding="utf-8")
-
-    def test_a_checkout_with_the_runbook_is_detected(self) -> None:
-        """Every repository carries the runbook that owns literal operator paths."""
-        self._payload("OPERATIONS.md")
-        self.assertTrue(prose_lint.is_operations_runbook(self.tmp / "OPERATIONS.md", self.tmp))
-
-    def test_a_checkout_without_the_runbook_is_not_detected(self) -> None:
-        self.assertFalse(prose_lint.is_operations_runbook(self.tmp / "README.md", self.tmp))
-
-    def test_configuration_payloads_do_not_select_the_exemption(self) -> None:
-        """Configuration payload names do not identify the operations runbook."""
-        self._payload("repo-config", "develop.json")
-        self._payload("repo-config", "operational", "develop.json")
-        self.assertFalse(
-            prose_lint.is_operations_runbook(self.tmp / "repo-config/develop.json", self.tmp)
-        )
-
-    def test_an_empty_checkout_is_not_detected(self) -> None:
-        self.assertFalse(prose_lint.is_operations_runbook(self.tmp, self.tmp))
-
-    def test_the_runbook_allows_a_literal_operator_path(self) -> None:
-        """The operations runbook owns the literal path an operator types."""
-        bait = self.tmp / "OPERATIONS.md"
-        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
-        self.assertEqual([], prose_lint.check_file(bait, {"home-path"}, self.tmp))
-
-    def test_a_nested_runbook_does_not_receive_the_exemption(self) -> None:
-        """Only the repository-root runbook owns literal operator paths."""
-        bait = self.tmp / "docs" / "OPERATIONS.md"
-        bait.parent.mkdir()
-        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
-        self.assertEqual(1, len(prose_lint.check_file(bait, {"home-path"}, self.tmp)))
-
-    def test_another_file_still_reports_the_finding(self) -> None:
-        """The exemption must not be the whole rule."""
-        bait = self.tmp / "runbook.md"
-        bait.write_text(f"Deploy into {NIX_HOME}/stack here.\n", encoding="utf-8")
-        with (
-            mock.patch.object(prose_lint, "repo_root", return_value=str(self.tmp)),
-            mock.patch.object(prose_lint, "discover", return_value=[bait]),
-        ):
-            self.assertEqual(1, prose_lint.main(["--check", "home-path"]))
 
 
 class TestScanRootDecidesTheRuleSet(unittest.TestCase):
@@ -4918,196 +6362,6 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         self.assertIn("1 of 2 file(s) read, 2 changed line(s)", self.err.getvalue())
 
 
-class TestDeadPath(unittest.TestCase):
-    """The named-path half of the stale-description class (RESYNC.md section 4).
-
-    Every fixture builds a real repository, because the rule keys on git history: a path is
-    reported only when git once tracked it and the tree no longer holds it, which is the
-    deletion-sweep shape. The measured incident named no path at all, and that half stays a
-    manual read, so nothing here asserts coverage the rule does not have.
-    """
-
-    def setUp(self) -> None:
-        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
-
-    def git(self, root: Path, *args: str) -> None:
-        # Signing is disabled explicitly, since a host that signs by default cannot commit here.
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "-c",
-                "user.email=gate@example.invalid",
-                "-c",
-                "user.name=gate test",
-                "-c",
-                "commit.gpgsign=false",
-                *args,
-            ],
-            check=True,
-            capture_output=True,
-        )
-
-    def repo(self) -> Path:
-        """A repository that tracked `scripts/gone.py` once and then deleted it."""
-        root = self.tmp / "repo"
-        (root / "scripts").mkdir(parents=True)
-        (root / "scripts" / "gone.py").write_text("print()\n", encoding="utf-8")
-        (root / "scripts" / "kept.py").write_text("print()\n", encoding="utf-8")
-        self.git(root, "init", "-q")
-        self.git(root, "add", "-A")
-        self.git(root, "commit", "-qm", "base")
-        self.git(root, "rm", "-q", "scripts/gone.py")
-        self.git(root, "commit", "-qm", "delete")
-        return root
-
-    def kinds(self, root: Path, text: str, rel: str = "DOC.md") -> list[str]:
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        return [kind for _, kind, _ in prose_lint.check_file(path, {"dead-path"}, root)]
-
-    def test_a_deleted_path_in_a_span_is_flagged(self) -> None:
-        root = self.repo()
-        self.assertIn("dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
-
-    def test_a_living_path_is_not_a_finding(self) -> None:
-        root = self.repo()
-        self.assertEqual([], self.kinds(root, "Run `scripts/kept.py` to apply.\n"))
-
-    def test_a_path_with_no_history_here_is_not_a_finding(self) -> None:
-        """A proposal in a backlog and another repository's layout both name unborn paths."""
-        root = self.repo()
-        self.assertEqual([], self.kinds(root, "Ship `scripts/future.py` next.\n"))
-
-    def test_a_reference_definition_to_a_deleted_target_is_flagged(self) -> None:
-        root = self.repo()
-        self.assertIn("dead-path", self.kinds(root, "[gone]: ./scripts/gone.py\n"))
-        self.assertEqual([], self.kinds(root, "[kept]: ./scripts/kept.py\n"))
-
-    def test_an_inline_link_to_a_deleted_target_is_flagged(self) -> None:
-        root = self.repo()
-        self.assertIn("dead-path", self.kinds(root, "See [the script](scripts/gone.py).\n"))
-
-    def test_a_relative_mention_anchors_on_the_files_own_directory(self) -> None:
-        root = self.repo()
-        self.assertIn(
-            "dead-path", self.kinds(root, "See [it](../scripts/gone.py).\n", rel="docs/D.md")
-        )
-        self.assertEqual([], self.kinds(root, "See [it](../scripts/kept.py).\n", rel="docs/D.md"))
-
-    def test_an_uppercase_markdown_suffix_is_judged_for_dead_paths(self) -> None:
-        root = self.repo()
-        self.assertIn(
-            "dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n", rel="DOC.MD")
-        )
-
-    def test_a_ref_or_directory_shaped_span_is_not_a_candidate(self) -> None:
-        """`origin/develop` styles a ref and `scripts/` a layout, and neither asserts a file."""
-        root = self.repo()
-        for text in (
-            "Fetched from `origin/develop` here.\n",
-            "The `scripts/` tree holds the tools.\n",
-            "A run like `./scripts/...` is elided.\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.kinds(root, text))
-
-    def test_a_fenced_block_is_skipped(self) -> None:
-        """A fence quotes a transcript or an example, which may legitimately show any path."""
-        root = self.repo()
-        self.assertEqual([], self.kinds(root, "```sh\npython3 scripts/gone.py\n```\n"))
-
-    def test_a_manifest_declared_carried_path_is_exempt(self) -> None:
-        """The hub's instance of a carried file retires to a snippet, and docs still name it."""
-        root = self.repo()
-        (root / "spec").mkdir()
-        (root / "spec" / "files.json").write_text(
-            json.dumps({"baseline": [{"path": "scripts/gone.py"}]}), encoding="utf-8"
-        )
-        prose_lint.carried_paths.cache_clear()
-        self.addCleanup(prose_lint.carried_paths.cache_clear)
-        self.assertEqual([], self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
-
-    def test_a_hub_hosted_path_is_exempt(self) -> None:
-        """A repo that retired its copy still names the hub's, which is the pointer the rule wants.
-
-        The manifest exemption cannot reach this one, since no repository carries `spec/files.json`,
-        so without the literal set every retirement fails its own promotion gate.
-        """
-        root = self.tmp / "retired"
-        (root / "repo-config").mkdir(parents=True)
-        (root / "repo-config" / "configure.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-        self.git(root, "init", "-q")
-        self.git(root, "add", "-A")
-        self.git(root, "commit", "-qm", "base")
-        self.git(root, "rm", "-q", "repo-config/configure.sh")
-        self.git(root, "commit", "-qm", "retire")
-        self.assertEqual([], self.kinds(root, "Run the hub's `repo-config/configure.sh`.\n"))
-
-    def test_the_hub_hosted_set_matches_the_ledger(self) -> None:
-        """The literal is a copy of the ledger, so a retirement that misses it fails here loudly."""
-        ledger = json.loads((REPO / "spec" / "divergences.json").read_text(encoding="utf-8"))
-        retired = {
-            e["path"]
-            for group in ("dispositions", "gaps")
-            for e in ledger.get(group, [])
-            if isinstance(e, dict) and e.get("disposition") == "retire"
-        }
-        self.assertEqual(retired, set(prose_lint.HUB_HOSTED))
-
-    def test_without_git_the_rule_stands_down(self) -> None:
-        """No history means no deletion signature, so nothing is reported rather than guessed."""
-        bare = self.tmp / "bare"
-        bare.mkdir()
-        path = bare / "DOC.md"
-        path.write_text("Run `scripts/gone.py` to apply.\n", encoding="utf-8")
-        self.assertEqual([], [k for _, k, _ in prose_lint.check_file(path, {"dead-path"})])
-
-    def test_a_shallow_clone_stands_down_loudly(self) -> None:
-        """A shallow clone holds no deletion history, so a run there says so and reports nothing.
-
-        Without the announcement a shallow CI checkout would pass every mention forever, which
-        is the silent-stop failure the sweep floor exists to prevent.
-        """
-        root = self.repo()
-        (root / "DOC.md").write_text("Run `scripts/gone.py` to apply.\n", encoding="utf-8")
-        self.git(root, "add", "-A")
-        self.git(root, "commit", "-qm", "doc")
-        shallow = self.tmp / "shallow"
-        subprocess.run(
-            ["git", "clone", "-q", "--depth", "1", f"file://{root}", str(shallow)],
-            check=True,
-            capture_output=True,
-        )
-        err = io.StringIO()
-        with (
-            contextlib.redirect_stdout(io.StringIO()),
-            contextlib.redirect_stderr(err),
-            contextlib.chdir(shallow),
-        ):
-            rc = prose_lint.main([".", "--check", "dead-path"])
-        self.assertEqual(0, rc)
-        self.assertIn("shallow", err.getvalue())
-
-    def test_this_repository_is_clean_of_dead_paths(self) -> None:
-        """The gate ships clean on its own tree, so every finding after this is a regression."""
-        md = [
-            p
-            for p in REPO.rglob("*.md")
-            if not prose_lint.GENERATED_ROOTS.intersection(p.relative_to(REPO).parts)
-            and "reports" not in p.relative_to(REPO).parts
-        ]
-        hits = [
-            (prose_lint.rel(p), ln, msg)
-            for p in md
-            for ln, kind, msg in prose_lint.check_file(p, {"dead-path"}, REPO)
-            if kind == "dead-path"
-        ]
-        self.assertEqual([], hits)
-
-
 class TestAnEmptyExclusionIsRefused(unittest.TestCase):
     """The exclusion that matches everything, refused rather than applied.
 
@@ -5194,10 +6448,10 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         (root / "seed.txt").write_text("seed\n", encoding="utf-8")
         script = root / "prose_lint.py"
-        script.write_text(
-            (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
+        for name in ("prose_lint.py", "prose-gate.json"):
+            (root / name).write_text(
+                (PROSE_LINT_SCRIPT.parent / name).read_text(encoding="utf-8"), encoding="utf-8"
+            )
         add = ["add", "seed.txt", "prose_lint.py"] if tracked else ["add", "seed.txt"]
         for args in (add, ["commit", "-qm", "base"]):
             subprocess.run(
@@ -5301,10 +6555,10 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         """The plain case, a copy extracted to a scratch directory, which the runbook documents."""
         tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
         script = tmp / "prose_lint.py"
-        script.write_text(
-            (REPO / ".github/actions/prose-gate/prose_lint.py").read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
+        for name in ("prose_lint.py", "prose-gate.json"):
+            (tmp / name).write_text(
+                (PROSE_LINT_SCRIPT.parent / name).read_text(encoding="utf-8"), encoding="utf-8"
+            )
         self.assertIn("gate unknown", self.verdict(script))
 
     def test_an_inherited_git_location_does_not_decide_the_answer(self) -> None:
@@ -5415,57 +6669,6 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
         """A repository with no ref names no commit, so it is worse than naming nothing."""
         self.assertNotIn("--provenance", self.run_block({"ACTION_REPOSITORY": "owner/repo"}))
         self.assertNotIn("--provenance", self.run_block({"ACTION_REF": "deadbee"}))
-
-
-# Writes U+014D, whose UTF-8 encoding cp1252 has no mapping for, which is the whole of the bait.
-UNMAPPABLE_SNIPPET = "import sys\nsys.stdout.buffer.write('\\u014d'.encode('utf-8'))\n"
-
-
-@contextlib.contextmanager
-def locale_patched_as_cp1252() -> Iterator[None]:
-    """Report cp1252 from every locale accessor this interpreter defines, for the block's duration.
-
-    Which accessor a text-mode pipe consults has moved between releases, so both are patched
-    rather than the test guessing which one this interpreter reads.
-    """
-    with contextlib.ExitStack() as stack:
-        for name in ("getencoding", "getpreferredencoding"):
-            if hasattr(locale, name):
-                stack.enter_context(mock.patch.object(locale, name, return_value="cp1252"))
-        yield
-
-
-@functools.cache
-def locale_patch_bites() -> bool:
-    """Whether patching the locale actually changes how a text-mode pipe decodes, on this host.
-
-    UTF-8 mode decodes as UTF-8 whatever the locale says, so no patch can reach the decoder
-    there. That is the documented workaround for the very defect these cases cover, and a
-    container started with no LANG enables it on its own, so it is an ordinary host rather than
-    an exotic one. Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of
-    the several ways an interpreter arrives at a UTF-8 default.
-
-    On Windows the pipe decodes in a reader thread, whose UnicodeDecodeError never reaches this
-    thread, so the thread's own exception hook records it too.
-
-    Measured once, since answering it spawns an interpreter.
-    """
-    raised: list[type[BaseException]] = []
-    with (
-        locale_patched_as_cp1252(),
-        mock.patch.object(threading, "excepthook", lambda args: raised.append(args.exc_type)),
-    ):
-        try:
-            # Naming no encoding is the whole of the probe, so a sweep must never fix this call.
-            subprocess.run(
-                [sys.executable, "-c", UNMAPPABLE_SNIPPET],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except UnicodeDecodeError:
-            return True
-    return any(issubclass(kind, UnicodeDecodeError) for kind in raised)
 
 
 class TestGitOutputDecodesAsUtf8(unittest.TestCase):
@@ -5943,702 +7146,6 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
-class TestToolDirectivesLeaveCommentCase(BaitCase):
-    """A directive that `TOOL_DIRECTIVE` names is an instruction to a tool, not a sentence to capitalize."""
-
-    def flag(self, name: str, text: str) -> list[str]:
-        return self.kinds(text, {"comment-case"}, name=name)
-
-    def test_a_lowercase_directive_draws_no_case_finding(self) -> None:
-        for text in (
-            "# nosec B404\n",
-            "# hadolint ignore=DL3008\n",
-        ):
-            with self.subTest(text=text.strip()):
-                self.assertEqual([], self.flag("tool.py", text))
-
-    def test_a_punctuated_sentence_opening_on_a_directive_name_is_still_judged(self) -> None:
-        self.assertEqual(
-            ["comment-case"], self.flag("tool.py", "# nosec the value is read once.\n")
-        )
-
-    def test_an_ordinary_lowercase_comment_still_draws_the_finding(self) -> None:
-        self.assertEqual(["comment-case"], self.flag("tool.py", "# details are allowed here.\n"))
-
-
-class TestToolDirectivesLeaveCommentWrap(BaitCase):
-    """A directive that `TOOL_DIRECTIVE` names is not a sentence, so it cannot wrap into the next line."""
-
-    def flag(self, text: str) -> list[str]:
-        return self.kinds(text, {"comment-wrap"}, name="tool.py")
-
-    def test_the_line_after_a_directive_is_not_its_continuation(self) -> None:
-        self.assertEqual([], self.flag("# nosec B404\n# the next call is checked below.\nx = 1\n"))
-
-    def test_a_lowercase_line_after_a_directive_is_judged_for_case_instead(self) -> None:
-        self.assertEqual(
-            ["comment-case"],
-            self.kinds(
-                "# nosec B404\n# the next call is checked below.\nx = 1\n",
-                {"comment-wrap", "comment-case"},
-                name="tool.py",
-            ),
-        )
-
-    def test_a_trailing_directive_is_not_a_continuation_either(self) -> None:
-        self.assertEqual(
-            [],
-            self.flag("import os  # nosec B404\n# the call is checked below.\n"),
-        )
-
-    def test_a_directive_followed_by_a_directive_draws_nothing(self) -> None:
-        self.assertEqual([], self.flag("# nosec B404\n# hadolint ignore=DL3008\nx = 1\n"))
-
-    def test_a_two_line_wrap_with_no_directive_is_still_reported(self) -> None:
-        self.assertEqual(
-            ["comment-wrap"], self.flag("# the next call is\n# checked below.\nx = 1\n")
-        )
-
-    def test_a_sentence_wrapping_into_a_directive_is_still_reported(self) -> None:
-        self.assertEqual(["comment-wrap"], self.flag("# the value is\n# nosec B404\nx = 1\n"))
-
-
-class TestTheCommentAddedRule(BaitCase):
-    """The rule that refuses a comment line a change adds to code or config.
-
-    Every case reads a whole file, because that is what `check_file` is given. What makes the rule
-    report an added comment rather than every comment is the diff scope `main` applies afterwards,
-    and the cases below that exercise `main` are where that half is proved.
-    """
-
-    PROSE = "# The value is read once, since the second read can disagree with the first.\n"
-
-    def test_a_comment_line_in_code_is_reported(self) -> None:
-        self.assertEqual(
-            ["comment-added"], self.kinds(self.PROSE, {"comment-added"}, name="tool.py")
-        )
-
-    def test_only_a_comment_that_opens_its_line_is_read(self) -> None:
-        """A trailing comment is out of scope, and the languages below are why.
-
-        Which mid-line marker opens a comment is a parser fact that differs by language: TOML and
-        HCL carry a `#` inside a multi-line string, a git pattern file holds no trailing comment at
-        all, PowerShell opens one after almost anything, and shell after its metacharacters. Six
-        attempts at deciding it from the marker's neighbourhood each got a language wrong, and each
-        wrong answer either reported a line holding no comment or silenced one that held several.
-        A marker opening its line is unambiguous in every language.
-        """
-        for text, name in (
-            ("value = read()  # The second read can disagree.\n", "tool.py"),
-            ("while [[ $# -gt 0 ]]; do\n", "t.sh"),
-            ("- name: Check C# formatting step\n", "t.yml"),
-            ("note: See (#1234) for the discussion of this change.\n", "a.yml"),
-            ('description = """\nReference owner/repo#1234 when it lands.\n"""\n', "a.toml"),
-            ("build/ # The output tree is ignored.\n", ".gitignore"),
-            ("run_gate;# The gate is run once here.\n", "t.sh"),
-        ):
-            with self.subTest(name=name, text=text.strip().splitlines()[0]):
-                self.assertEqual([], self.kinds(text, {"comment-added"}, name=name))
-
-    def test_a_comment_opening_its_line_is_read_in_every_syntax(self) -> None:
-        """The other half, so the narrowing cannot pass by reporting nothing at all."""
-        for text, name in (
-            ("# The store is read once here.\n", "t.sh"),
-            ("# The store is read once here.\n", "t.yml"),
-            ("// The store is read once here.\nlet x = 1;\n", "a.ts"),
-            ("/* The store is read once here. */\n", "a.css"),
-            ("<!-- The store is read once here. -->\n", "a.xml"),
-            ("; The store is read once here.\n", "x.ini"),
-            ("# The store is read once here.\n", "a.ps1"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
-
-    def test_config_carries_the_rule_as_code_does(self) -> None:
-        for name, text in (
-            (
-                "workflow.yml",
-                "# The base is the pull request's own, not the branch tip.\njobs: {}\n",
-            ),
-            ("settings.json", "// The base is the pull request's own, not the branch tip.\n{}\n"),
-            ("deploy.sh", "# The base is the pull request's own, not the branch tip.\n"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
-
-    def test_an_instruction_to_a_tool_is_not_prose(self) -> None:
-        """Deleting one of these changes what the file does, which is not what the rule asks for."""
-        for line in (
-            "#!/usr/bin/env python3\n",
-            "value = read()  # noqa: E501\n",
-            "value = read()  # type: ignore[arg-type]\n",
-            "# ruff: noqa\n",
-            "# shellcheck disable=SC2086\n",
-        ):
-            with self.subTest(line=line.strip()):
-                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
-
-    def test_a_directive_name_opening_a_sentence_is_still_prose(self) -> None:
-        """Anchoring the name alone let a directive open a sentence and exempt the whole comment."""
-        for line, expected in (
-            ("# nosec B404\n", []),
-            ("# hadolint ignore=DL3008\n", []),
-            (
-                "# nosec The value is read once, since the second read can disagree.\n",
-                ["comment-added"],
-            ),
-            ("# hadolint cannot read this stage, so the pin is inline.\n", ["comment-added"]),
-            # Unpunctuated, so the sentence half cannot be what reports these.
-            # The name has to open the body, and `search` in place of `match` exempts them.
-            (
-                "# The pyright: ignore form is written per line rather than per file\n",
-                ["comment-added"],
-            ),
-            (
-                "# A nosec marker would silence the whole call rather than this one\n",
-                ["comment-added"],
-            ),
-            # A reason written as an argument is exempt.
-            # The same reason punctuated as a sentence is not, which is one test reading one body.
-            ("# nosec B608 - the query is parameterized\n", []),
-            ("# nosec B608 - the query is parameterized.\n", ["comment-added"]),
-            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it\n", []),
-            ("# checkov:skip=CKV_DOCKER_2:The orchestrator handles it.\n", ["comment-added"]),
-        ):
-            with self.subTest(line=line.strip()):
-                self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
-
-    def test_a_reference_and_a_key_are_not_prose(self) -> None:
-        for line in ("# https://example.invalid/spec\n", "# ignore:\n"):
-            with self.subTest(line=line.strip()):
-                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
-
-    def test_a_powershell_help_block_is_a_documentation_comment(self) -> None:
-        """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
-
-        PowerShell documents two help forms. The `<# ... #>` block is read as documentation here,
-        the way `///` is in C#. The `#` form is read as the ordinary comment lines it is written
-        as, which the last case pins, because telling it from a remark needs a second grammar in a
-        rule that holds none.
-        """
-        # Written so `comment-wrap` has something to find here.
-        # That is what makes the second assertion prove the skip is this rule's own.
-        block = (
-            "<#\n"
-            ".SYNOPSIS\n"
-            "Returns the thing the caller asked for\n"
-            "once the store has answered.\n"
-            "#>\n"
-            "param()\n"
-        )
-        self.assertEqual([], self.kinds(block, {"comment-added"}, name="Tool.ps1"))
-        self.assertEqual(["comment-wrap"], self.kinds(block, {"comment-wrap"}, name="Tool.ps1"))
-        # An ordinary remark is not documentation, so the rule still reads it, after a block too.
-        # A marker inside a string is not an opener, which two hand-written scans each missed.
-        # The first stood the rule down to end of file, the second to the next block's terminator.
-        for name, text in (
-            ("alone", "# The store is read once, since a second read can disagree.\nparam()\n"),
-            ("after a block", "<#\n.SYNOPSIS\nDoc.\n#>\n# The store is read once here.\n"),
-            ("after a one-line block", "<# .SYNOPSIS Doc. #>\n# The store is read once here.\n"),
-            ("under an opener in a string", "$p = '<#'\n# The store is read once here.\n"),
-            ("under an opener in a here-string", "$s = @'\n<#\n'@\n# The store is read once.\n"),
-            (
-                "between an opener in a string and a later block",
-                "$m = '<#'\n# The marker is written out here.\n<#\n.SYNOPSIS\nDoc.\n#>\n",
-            ),
-            ("after a stray closer", "# The store is read once here.\n#>\nparam()\n"),
-            (
-                "past an opener inside a block",
-                "<#\n.SYNOPSIS\nUse <# to open.\n#>\n# The store is read once here.\n",
-            ),
-            (
-                "on a line naming both markers",
-                "# A block is written <# like this #> above a function.\n",
-            ),
-        ):
-            with self.subTest(case=name):
-                self.assertEqual(
-                    ["comment-added"], self.kinds(text, {"comment-added"}, name="Tool.ps1")
-                )
-        # An opener that never closes puts the rest of the file inside a comment, which is what
-        # PowerShell itself reads there, so the rule follows the parser rather than guessing.
-        self.assertEqual(
-            [], self.kinds("<#\n# The store is read once here.\n", {"comment-added"}, name="T.ps1")
-        )
-        # The `#` help form is reported, deliberately rather than by oversight.
-        # It is a run of comment lines, and the label is what a change writing one carries.
-        hash_help = "# .SYNOPSIS\n# Returns the thing the caller asked for.\nfunction G {}\n"
-        self.assertEqual(
-            ["comment-added", "comment-added"],
-            self.kinds(hash_help, {"comment-added"}, name="T.ps1"),
-        )
-
-    def test_markdown_is_out_of_scope(self) -> None:
-        """Markdown prose is the document, and its HTML comments are markers a tool matches."""
-        text = "<!-- The section below is generated. -->\n\nOrdinary prose.\n"
-        self.assertEqual([], self.kinds(text, {"comment-added"}, name="doc.md"))
-
-    def test_a_file_that_carries_no_comments_is_left_alone(self) -> None:
-        self.assertEqual([], self.kinds("a,b\n1,2\n", {"comment-added"}, name="data.csv"))
-
-    def test_a_line_that_looks_like_a_fence_does_not_silence_the_rule(self) -> None:
-        """One unbalanced fence line suppressed every comment after it, in a refusing gate.
-
-        A fence is a Markdown construct and Markdown is out of scope, so the rule reads a file's
-        comments as its own syntax defines them. Reached here through a heredoc, which is where a
-        code or config file holds such a line.
-        """
-        text = "cat <<EOF\n```\nEOF\n" + self.PROSE
-        self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name="tool.sh"))
-
-    # A triple-quoted string the fallback scan does not carry across lines.
-    # That is what makes the two extraction paths disagree.
-    # The marker opens its line, so the `leading` filter cannot be what drops it.
-    # Written mid-line it was, and the cases below then passed with their guard removed.
-    DOCSTRING = 'def f():\n    """Sharp usage:\n\n# to the parser and it stops.\n    """\n'
-
-    def test_the_fallback_scan_reads_a_docstring_as_a_comment(self) -> None:
-        """The premise the two cases below rest on, asserted rather than assumed."""
-        path = self._write(self.DOCSTRING, "shape.py")
-        found = prose_lint.extracted_comments(path, self.DOCSTRING.split("\n"))
-        # Leading, since a comment the `leading` filter drops anyway proves nothing here.
-        self.assertTrue(
-            any(c.leading for c in found),
-            "the fallback scan must read the docstring line as a leading comment",
-        )
-
-    def test_a_python_file_that_does_not_tokenize_is_left_alone(self) -> None:
-        """Falling back would read the `#` inside the docstring as a comment and report it."""
-        self.assertEqual(
-            [], self.kinds("x = (1\n" + self.DOCSTRING, {"comment-added"}, name="bad.py")
-        )
-
-    def test_this_rule_reads_a_python_suffix_in_either_case(self) -> None:
-        """A case-insensitive filesystem hands the same file back under either spelling."""
-        for name in ("mixed.py", "mixed.PY"):
-            with self.subTest(name=name):
-                self.assertEqual([], self.kinds(self.DOCSTRING, {"comment-added"}, name=name))
-
-    def test_a_known_tool_directive_is_not_prose(self) -> None:
-        """Deleting one changes what the file does, which the rule's first remedy would have done."""
-        for line in (
-            "# syntax=docker/dockerfile:1\n",
-            "# fmt: off\n",
-            "# pragma: no cover\n",
-            "# nosec B404\n",
-            "# yaml-language-server: $schema=https://example.invalid/s.json\n",
-            "# renovate: datasource=github-releases depName=owner/name\n",
-            "value = read()  # fmt: skip\n",
-            "value = read()  # pyright: ignore[reportUnknownMemberType]\n",
-            "# isort: skip_file\n",
-            "# codespell:ignore fo\n",
-            "value = read()  # doctest: +SKIP\n",
-        ):
-            with self.subTest(line=line.strip()):
-                self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
-
-    def test_the_rule_list_says_what_the_rule_does(self) -> None:
-        """`--summary` and `--help` print this line, and it said the rule fires on an addition.
-
-        A diff counts a modified line as an added one, so a reworded comment is reported, and a
-        reader told otherwise by the rule list meets the finding without expecting it.
-        """
-        self.assertIn("adds or edits", prose_lint.RULES["comment-added"])
-        findings = prose_lint.check_file(
-            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
-        )
-        self.assertIn("adds or edits", findings[0][2])
-
-    def test_the_rule_runs_by_default(self) -> None:
-        """A rule outside DEFAULT_RULES reads as enforced while nothing runs it."""
-        self.assertIn("comment-added", prose_lint.DEFAULT_RULES)
-        self.assertIn("comment-added", prose_lint.RULES)
-
-    def test_the_message_names_the_label_that_stands_it_down(self) -> None:
-        """A finding a reader cannot act on is a finding that gets worked around.
-
-        The label is looked for as the quoted name the message builds from the constant, since the
-        bare word also appears in the message's closing clause and matched there instead.
-        """
-        findings = prose_lint.check_file(
-            self._write(self.PROSE, "tool.py"), {"comment-added"}, None
-        )
-        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), findings[0][2])
-        self.assertIn(prose_lint.COMMENT_ENV_NAME, findings[0][2])
-        # The flag belongs beside them, since the message prints on a run by hand too.
-        # There no pull request carries a label, and a variable is the clumsier way to pass one.
-        self.assertIn("--allow-comments", findings[0][2])
-
-    def _write(self, text: str, name: str) -> Path:
-        path = self.tmp / name
-        path.write_text(text, encoding="utf-8")
-        return path
-
-
-class TestTheCommentAddedStandDowns(unittest.TestCase):
-    """Both ways the rule stops running, each announced rather than silent.
-
-    A gate that stands down without saying so reports the same clean run as a gate that found
-    nothing, which is the reading `GOVERNANCE.md` "Verification Discipline" refuses.
-    """
-
-    def setUp(self) -> None:
-        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
-        self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
-        self.bait = self.tmp / "tool.py"
-        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
-
-    def test_without_a_diff_the_rule_stands_down_and_says_so(self) -> None:
-        """Read over a whole tree it would report every comment the repository already holds.
-
-        The environment override is cleared for this case, since the note it prints is the other
-        stand-down's, and the docs tell a developer to export that variable.
-        """
-        self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
-        with mock.patch.object(prose_lint, "discover", return_value=[self.bait]):
-            self.assertEqual(0, prose_lint.main(["--check", "comment-added", str(self.tmp)]))
-        self.assertIn("comment-added is not checked without --diff", self.err.getvalue())
-
-    def test_a_value_spelled_false_does_not_stand_the_rule_down(self) -> None:
-        """The composite action's input reads `true`, so mirroring it here turned the rule off."""
-        self.bait.write_text("# A comment line nobody asked for.\n", encoding="utf-8")
-        for value, expected in (
-            ("false", 1),
-            ("0", 1),
-            ("off", 1),
-            ("no", 1),
-            (" false ", 1),
-            ("False", 1),
-            ("1", 0),
-            ("yes", 0),
-            ("true", 0),
-        ):
-            with (
-                self.subTest(value=value),
-                mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": value}),
-                mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
-                mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
-            ):
-                code = prose_lint.main(
-                    ["--check", "comment-added", "--diff", "HEAD", str(self.tmp)]
-                )
-                self.assertEqual(expected, code)
-
-    def test_the_override_stands_it_down_and_names_the_label(self) -> None:
-        """The local escape is not the one CI honors, so the note says which is which."""
-        with (
-            mock.patch.object(prose_lint, "discover", return_value=[self.bait]),
-            mock.patch.object(prose_lint, "changed_lines", return_value={"tool.py": {1}}),
-        ):
-            code = prose_lint.main(
-                ["--check", "comment-added", "--allow-comments", "--diff", "HEAD", str(self.tmp)]
-            )
-        self.assertEqual(0, code)
-        note = self.err.getvalue()
-        self.assertIn("stood down by --allow-comments", note)
-        # The quoted name, since the bare word is a substring of the flag named on the same line.
-        self.assertIn(repr(prose_lint.COMMENT_LABEL_NAME), note)
-        self.assertIn(f"clears {prose_lint.COMMENT_ENV_NAME}", note)
-
-
-class TestTheOverrideReachesTheGateFromTheLabel(unittest.TestCase):
-    """The label, the action input, and the flag are one path, driven end to end.
-
-    Each of the three was wired by hand, so a case that asserts only the flag proves nothing about
-    whether a labeled pull request actually reaches it.
-    """
-
-    def setUp(self) -> None:
-        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
-        (self.root / "tool.py").write_text("value = 1\n", encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "base")
-        (self.root / "tool.py").write_text(
-            "# The value is read once, since the second read can disagree.\nvalue = 1\n",
-            encoding="utf-8",
-        )
-
-    def git(self, *args: str) -> None:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.root),
-                "-c",
-                "user.email=gate@example.invalid",
-                "-c",
-                "user.name=gate test",
-                "-c",
-                "commit.gpgsign=false",
-                *args,
-            ],
-            check=True,
-            capture_output=True,
-        )
-
-    def test_an_unlabeled_change_fails_on_the_comment_it_adds(self) -> None:
-        result = run_prose_gate_action(self.root)
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("tool.py:1: comment-added", result.stdout)
-
-    def test_a_labeled_change_passes_and_the_run_says_it_stood_down(self) -> None:
-        result = run_prose_gate_action(self.root, ALLOW_COMMENTS="true")
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("stands down", result.stdout)
-
-    def test_anything_other_than_true_runs_the_gate(self) -> None:
-        """A label expression that matched nothing renders false, and so does a misspelled input."""
-        for value in ("false", "", "True", "yes"):
-            with self.subTest(value=value):
-                result = run_prose_gate_action(self.root, ALLOW_COMMENTS=value)
-                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-
-    def test_a_code_edit_beside_a_comment_reports_that_comment(self) -> None:
-        """The rule's stated cost, asserted rather than left to be discovered.
-
-        `git diff --unified=0` counts a modified line as an added one, so re-indenting a comment
-        that opens its line puts it in scope. The label is the remedy, the same one a wanted
-        comment takes. A trailing comment is out of scope for a different reason, which
-        `test_only_a_comment_that_opens_its_line_is_read` carries.
-        """
-        held = "# The upper limit is fixed by the protocol.\nLIMIT = 1\n"
-        (self.root / "held.py").write_text(held, encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "held")
-        (self.root / "held.py").write_text(
-            "if True:\n    # The upper limit is fixed by the protocol.\n    LIMIT = 1\n",
-            encoding="utf-8",
-        )
-        result = run_prose_gate_action(self.root)
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("held.py:2: comment-added", result.stdout)
-
-    def test_a_comment_the_change_does_not_touch_is_not_reported(self) -> None:
-        """The diff scope is the whole of what narrows this rule, so it is asserted directly."""
-        (self.root / "held.py").write_text(
-            "# The upper limit is fixed by the protocol.\nLIMIT = 1\n", encoding="utf-8"
-        )
-        self.git("add", "-A")
-        self.git("commit", "-qm", "held")
-        (self.root / "held.py").write_text(
-            "# The upper limit is fixed by the protocol.\nLIMIT = 2\n", encoding="utf-8"
-        )
-        result = run_prose_gate_action(self.root)
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-
-    def test_the_environment_override_reaches_a_caller_with_no_flag_to_pass(self) -> None:
-        """A hook entry is one command string, and a downstream one runs this file from the hub.
-
-        Deleting the whole environment stand-down passed the suite before this case existed, and it
-        is the only local escape there is.
-        """
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(PROSE_GATE_ACTION.parent / "prose_lint.py"),
-                ".",
-                "--diff",
-                "HEAD",
-                "--check",
-                "comment-added",
-            ],
-            cwd=self.root,
-            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1"},
-            text=True,
-            encoding="utf-8",
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        # The naming clause, since the variable is also named in the note's closing sentence.
-        self.assertIn(f"stood down by {prose_lint.COMMENT_ENV_NAME}", result.stderr)
-
-    def test_the_action_clears_the_environment_override(self) -> None:
-        """Otherwise a runner's own environment decides a pull request the label was meant to.
-
-        Deleting the action's `unset` passed the suite before this case existed, and an org-level
-        `env:` would then disarm the gate on every pull request while the run still exits 0.
-        """
-        result = run_prose_gate_action(self.root, PROSE_ALLOW_COMMENTS="1")
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertIn("tool.py:1: comment-added", result.stdout)
-
-    def test_the_workflow_reads_the_label_the_fleet_declares(self) -> None:
-        """Four surfaces name this label, and a rename that misses one silently disarms it."""
-        declared = {label["name"] for label in json.loads(FLEET_LABELS.read_text(encoding="utf-8"))}
-        self.assertIn(prose_lint.COMMENT_LABEL_NAME, declared)
-        step = yaml_step(
-            VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Read comments label step"
-        )
-        self.assertEqual("comments-label", yaml_value(step, "id"))
-        self.assertEqual(
-            "${{ contains(github.event.pull_request.labels.*.name, "
-            f"'{prose_lint.COMMENT_LABEL_NAME}') }}}}",
-            yaml_value(step, "env", "PAYLOAD_LABELED"),
-        )
-        self.assertEqual(
-            ("0", "labeled=true"),
-            run_comments_label_step(prose_lint.COMMENT_LABEL_NAME + "\n", "false")[:2],
-        )
-
-    def test_the_action_delivers_its_input_to_the_script(self) -> None:
-        """The harness feeds the variable, so nothing else reads the action's own wiring.
-
-        Two mutations survived the whole suite before this: deleting the `env:` mapping, after
-        which the label and the promotion stand-down never reach the gate and a labeled pull
-        request is still refused, and flipping the input's default to `'true'`, after which any
-        caller that omits the input has the rule stood down on every run and says nothing. Both are
-        read off the structure, since a substring match over the file also passed with the `env:`
-        entry commented out.
-        """
-        action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
-        self.assertEqual(
-            "${{ inputs.allow-comments }}",
-            yaml_value(yaml_step(action, "Check prose step"), "env", "ALLOW_COMMENTS"),
-        )
-        self.assertEqual("'false'", yaml_value(action, "inputs", "allow-comments", "default"))
-
-    def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
-        """Asserted whole, since a fragment of it left two disarming mutations green.
-
-        Flipping the `||` to `&&` refuses every labeled pull request, and passed while this read
-        one fragment. It is read under the prose step's own `with:`, since the same line moved to a
-        sibling step passed a substring match while the gate fell back to the input's default. The
-        promotion's own terms live in the stand-down step, whose cases run its script.
-        """
-        step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Check prose step")
-        self.assertEqual(
-            "${{ steps.comments-label.outputs.labeled == 'true' || "
-            "steps.comment-stand-down.outputs.stand-down == 'true' }}",
-            yaml_value(step, "with", "allow-comments"),
-        )
-
-    def test_the_promotion_stands_down_only_on_the_release_model(self) -> None:
-        """An operational promotion may be the first review its lines get, so the rule runs there.
-
-        Each row after the first varies the release promotion that stands down, so dropping any one
-        term of the test, the workflow model's above all, turns a row green that must stay red.
-        """
-        promotion = {
-            "HEAD_REPOSITORY": "example/widget",
-            "REPOSITORY": "example/widget",
-            "HEAD_REF": "develop",
-            "BASE_REF": "main",
-            "DEFAULT_BRANCH": "main",
-        }
-        for label, model, changed, expected in (
-            ("release promotion", "release", {}, "true"),
-            ("operational promotion", "operational", {}, "false"),
-            ("feature branch into main", "release", {"HEAD_REF": "feature/widget"}, "false"),
-            ("fork branch named develop", "release", {"HEAD_REPOSITORY": "fork/widget"}, "false"),
-            ("develop into another base", "release", {"BASE_REF": "next"}, "false"),
-            (
-                "a push, carrying no pull request",
-                "release",
-                {"HEAD_REPOSITORY": "", "HEAD_REF": "", "BASE_REF": ""},
-                "false",
-            ),
-        ):
-            with self.subTest(label):
-                code, output, log = run_comment_stand_down_step(model, promotion | changed)
-                self.assertEqual(("0", f"stand-down={expected}"), (code, output), log)
-                self.assertIn(f"Workflow model: {model}", log)
-
-    def test_only_the_release_model_stands_the_promotion_down(self) -> None:
-        """A value other than `release` runs the rule, so a misspelling reports comments rather than hiding them."""
-        promotion = {"HEAD_REPOSITORY": "example/widget", "HEAD_REF": "develop", "BASE_REF": "main"}
-        for model in ("", "Release", "release ", "operational"):
-            with self.subTest(model=model):
-                code, output, log = run_comment_stand_down_step(model, promotion)
-                self.assertEqual(("0", "stand-down=false"), (code, output), log)
-
-    def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
-        """The harness feeds the variables, so nothing else reads the step's own wiring.
-
-        The default is pinned too, since a caller declaring nothing is a release repository by the
-        registry's own default, and flipping it would run the rule on every such promotion.
-        """
-        text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
-        step = yaml_step(text, "Resolve comment stand-down step")
-        self.assertEqual("comment-stand-down", yaml_value(step, "id"))
-        for name, expression in (
-            ("WORKFLOW_MODEL", "inputs.workflow-model"),
-            ("HEAD_REPOSITORY", "github.event.pull_request.head.repo.full_name"),
-            ("REPOSITORY", "github.repository"),
-            ("HEAD_REF", "github.head_ref"),
-            ("BASE_REF", "github.base_ref"),
-            ("DEFAULT_BRANCH", "github.event.repository.default_branch"),
-        ):
-            self.assertEqual(f"${{{{ {expression} }}}}", yaml_value(step, "env", name), name)
-        self.assertEqual(
-            "release",
-            yaml_value(text, "on", "workflow_call", "inputs", "workflow-model", "default"),
-        )
-
-    def test_the_structure_reader_sees_only_a_live_entry_under_its_own_step(self) -> None:
-        """The two mutations the substring matches let through, against the reader the cases use."""
-        steps = (
-            "steps:\n"
-            "  - name: Gate step\n"
-            "    env:\n"
-            "      # FLAG: on\n"
-            "      OTHER: off\n"
-            "    with:\n"
-            "      base: main\n"
-            "  - name: Sibling step\n"
-            "    with:\n"
-            "      flag: on\n"
-        )
-        gate = yaml_step(steps, "Gate step")
-        self.assertIsNone(yaml_value(gate, "env", "FLAG"))
-        self.assertEqual("off", yaml_value(gate, "env", "OTHER"))
-        self.assertIsNone(yaml_value(gate, "with", "flag"))
-        self.assertEqual("main", yaml_value(gate, "with", "base"))
-        self.assertEqual("on", yaml_value(yaml_step(steps, "Sibling step"), "with", "flag"))
-
-    def test_the_label_is_read_live_rather_than_off_the_payload(self) -> None:
-        """The payload is a snapshot from the event, which a label applied after it never reaches.
-
-        The live answer wins in both directions, so a payload that predates the label, or one
-        that predates its removal, decides nothing while the read succeeds. It ignores case, as
-        the payload's contains() does. The log line is the one the skills tell a driver to look for.
-        The harness sets the labels path and stubs gh, so the step's own path and token are read
-        off the step itself.
-        """
-        for live, payload, expected in (
-            ("bug\ncomments\n", "false", "true"),
-            ("Comments\n", "false", "true"),
-            ("bug\n", "true", "false"),
-            ("", "true", "false"),
-            ("comments-wanted\n", "false", "false"),
-        ):
-            with self.subTest(live=live, payload=payload):
-                code, output, log, called = run_comments_label_step(live, payload)
-                self.assertEqual(("0", f"labeled={expected}"), (code, output), log)
-                self.assertIn("Read the pull request's labels live", log)
-                self.assertIn("repos/example/widget/issues/7/labels", called)
-                self.assertIn("--paginate", called)
-                self.assertIn(".[].name", called)
-        step = yaml_step(
-            VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Read comments label step"
-        )
-        self.assertEqual("${{ github.token }}", yaml_value(step, "env", "GH_TOKEN"))
-        self.assertEqual(
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels",
-            yaml_value(step, "env", "LABELS_PATH"),
-        )
-
-    def test_a_failed_read_falls_back_to_the_payload_and_says_so(self) -> None:
-        """A token that cannot read the labels keeps the payload's answer rather than a silent false."""
-        for payload in ("true", "false"):
-            with self.subTest(payload=payload):
-                code, output, log, _ = run_comments_label_step(None, payload)
-                self.assertEqual(("0", f"labeled={payload}"), (code, output), log)
-                self.assertIn("could not be read live", log)
-
-
 class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
     """A pull request is gated on its own change, whatever base the event recorded.
 
@@ -6741,363 +7248,16 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         )
 
 
-class TestTheIssueRefRule(unittest.TestCase):
-    """A reference to an issue or a pull request, on the surfaces the ban reaches and no others.
-
-    `root` is passed on every call, since which Markdown file is instruction text is decided from
-    the repository-relative key rather than from the name alone.
-    """
-
-    def setUp(self) -> None:
-        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
-
-    def kinds(self, name: str, text: str) -> list[str]:
-        path = self.tmp / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        return [kind for _, kind, _ in prose_lint.check_file(path, {"issue-ref"}, self.tmp)]
-
-    def test_a_comment_carries_the_finding_in_every_syntax(self) -> None:
-        for name, text in (
-            ("a.py", "# The retry is one character in (#1011).\nx = 1\n"),
-            ("a.sh", "# The retry is one character in (#1011).\nx=1\n"),
-            ("a.yml", "# The retry is one character in (#1011).\nx: 1\n"),
-            ("a.ps1", "# The retry is one character in (#1011).\n$x = 1\n"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(["issue-ref"], self.kinds(name, text))
-
-    def test_a_trailing_line_comment_is_out_of_scope(self) -> None:
-        """The same bound `comment-added` carries, and for the same reason it carries it."""
-        self.assertEqual([], self.kinds("a.py", "x = 1  # per #1011\n"))
-
-    def test_a_wrapped_block_comment_is_read_from_its_second_line(self) -> None:
-        """A continuation line opens its own line, so the leading test reads it as one.
-
-        `extracted_comments` reports a non-empty continuation line of an open block as leading,
-        whatever preceded the opener, since such a line carries no marker of its own to judge. The
-        finding is wanted, the comment being a real one carrying a real reference, and this case is
-        what a later change to that continuation branch has to meet.
-        """
-        self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
-        self.assertEqual(
-            ["issue-ref"], self.kinds("b.c", "int x = 1; /* see\n   #1234 for why */\n")
-        )
-
-    def test_a_block_opener_that_swallows_the_reference_hash_is_read(self) -> None:
-        """PowerShell's `<#` is the one opener in the syntax table ending in the marker character.
-
-        The body loses that `#` with the opener, so only the comment as written carries it, and
-        only a block comment bounded by its closer can be read that way without taking in code.
-        """
-        self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#1011 was the cause. #>\n"))
-        self.assertEqual([], self.kinds("b.ps1", '<# Doc. #> $x = "#1011"\n'))
-
-    def test_a_docstring_carries_it_and_reports_its_own_line(self) -> None:
-        text = '"""Module.\n\nThe walk was O(N^2) once (#1011).\n"""\n\n\ndef f() -> None:\n    """Body (#973)."""\n'
-        path = self.tmp / "a.py"
-        path.write_text(text, encoding="utf-8")
-        found = prose_lint.check_file(path, {"issue-ref"}, self.tmp)
-        self.assertEqual([3, 8], [line for line, _, _ in found])
-
-    def test_a_string_literal_is_left_alone(self) -> None:
-        """A test builds the numbers it asserts against, so reading one reports a fixture."""
-        self.assertEqual([], self.kinds("a.py", 'assert "#11 already succeeds #10" in err\n'))
-
-    def test_a_reference_hugging_a_leading_comment_marker_is_read(self) -> None:
-        """The body has the marker off, so the reference's own `#` is gone with it.
-
-        The comment is read as written as well, which is what tells `#N was the cause` from the
-        `# N items` the same body spells once the marker and the space are stripped. Only where the
-        marker opens the line, since mid-line the scan's own marker is a guess.
-        """
-        for name, text in (
-            ("a.py", "#1011 was the cause.\nx = 1\n"),
-            ("a.sh", "#1011 was the cause.\nx=1\n"),
-            ("a.yml", "#1011 was the cause.\nkey: 1\n"),
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(["issue-ref"], self.kinds(name, text))
-        self.assertEqual([], self.kinds("c.py", "# 1011 items were read.\nx = 1\n"))
-
-    def test_a_marker_the_language_does_not_read_as_one_reports_nothing(self) -> None:
-        """Only a marker that opens the line is read as written, since mid-line it is a guess.
-
-        The parser takes the first `#` on a line whatever the language does with it, so the written
-        spelling of a URI fragment in a YAML value, of a shell parameter expansion, and of a
-        trailing comment each carry a `#` the body does not. A leading marker is a comment in every
-        language the gate knows, and that is the position this reads.
-        """
-        for name, text in (
-            ("a.yml", "docs: https://example.invalid/spec#4217\n"),
-            ("a.yml", "other: a#1011\n"),
-            ("a.sh", "curl https://example.invalid/spec#4217 -o f\n"),
-            ("b.sh", "n=${#12}\n"),
-            ("a.toml", 'docs = "https://example.invalid/spec#4217"\n'),
-            ("b.py", "x = 1  #1011 caused it\n"),
-            ("c.yml", "other: some#thing#1011\n"),
-            ("d.yml", "run: sed -i 's#build#1011#g' f\n"),
-            (".gitattributes", "* text=auto eol=lf#a#1011\n"),
-            ("c.sh", "echo a#b#1011\n"),
-        ):
-            with self.subTest(name=name, text=text):
-                self.assertEqual([], self.kinds(name, text))
-
-    def test_a_non_ascii_docstring_line_does_not_shift_the_span(self) -> None:
-        """`ast` reports a column as a UTF-8 byte offset, so a slice on the string mis-cuts.
-
-        Over-running pulls the code beside the closing quote in, which reports a string literal.
-        Under-running cuts the opening of the text, which drops the reference this rule is for.
-        """
-        wide = "\u00b5" * 10
-        self.assertEqual([], self.kinds("a.py", f'def f():\n    """{wide}"""; y = "#2022"\n'))
-        self.assertEqual(
-            ["issue-ref"], self.kinds("b.py", 'def f(x="\u00b5\u00b5\u00b5\u00b5"): """#1011."""\n')
-        )
-
-    def test_a_uri_fragment_is_not_a_reference(self) -> None:
-        """A fragment is a number after a `#` and names a heading rather than an issue."""
-        self.assertEqual(
-            [], self.kinds("a.py", "# See https://example.invalid/spec#4217 here.\nx = 1\n")
-        )
-        self.assertEqual([], self.kinds("AGENTS.md", "See <https://example.invalid/spec#4217>.\n"))
-
-    def test_a_reference_definition_label_is_read(self) -> None:
-        """Only the destination is blanked, and a label renders as prose the reader sees."""
-        self.assertEqual(["issue-ref"], self.kinds("CLAUDE.md", "[#1011]: #1011\n"))
-
-    def test_a_file_that_will_not_parse_reports_nothing_rather_than_raising(self) -> None:
-        self.assertEqual([], self.kinds("a.py", "def f(:\n    # per #1011\n"))
-
-    def test_instruction_text_is_read_whole(self) -> None:
-        for name in (
-            "GOVERNANCE.md",
-            "AGENTS.md",
-            "OPERATIONS.md",
-            ".github/copilot-instructions.md",
-            ".agents/skills/x/SKILL.md",
-            ".github/skills/x/SKILL.md",
-        ):
-            with self.subTest(name=name):
-                self.assertEqual(
-                    ["issue-ref"], self.kinds(name, "The rule was settled in #1011.\n")
-                )
-
-    def test_the_repository_own_narrative_keeps_its_references(self) -> None:
-        """A tracker and a history exist to carry exactly these, and a README is not rule text."""
-        for name in ("README.md", "TODO.md", "HISTORY.md", "docs/rollout.md", "scripts/README.md"):
-            with self.subTest(name=name):
-                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
-        # A README under a Skills root is rule text by its root, which the rule says in so many words.
-        self.assertEqual(
-            ["issue-ref"], self.kinds(".agents/skills/README.md", "Shipped in #1011.\n")
-        )
-
-    def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
-        """A fence is quoted content rather than the document's own prose, as every rule reads it.
-
-        An inline code span is not exempt, and deliberately so, since backticks around a reference
-        are how one is ordinarily written rather than a signal that it is being quoted.
-        """
-        self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
-        self.assertEqual(
-            ["issue-ref"], self.kinds("AGENTS.md", "A commit message reads `Fixes #1011`.\n")
-        )
-
-    def test_the_cross_repository_spelling_is_caught(self) -> None:
-        self.assertEqual(
-            ["issue-ref"], self.kinds("a.py", "# Settled in owner/repo#1011.\nx = 1\n")
-        )
-
-    def test_the_placeholder_the_rule_text_uses_escapes_its_own_gate(self) -> None:
-        """`#N` is the fleet placeholder, so a rule showing the form it bans stays clean."""
-        self.assertEqual([], self.kinds("GOVERNANCE.md", "Render it as `[#N](url/pull/N)`.\n"))
-
-    def test_a_shape_that_is_not_a_reference_is_not_matched(self) -> None:
-        for body in ("#1a2b3c", "# 1011", "ISO 1011", "#123456"):
-            with self.subTest(body=body):
-                self.assertEqual([], self.kinds("a.py", f"# Reads {body} here.\nx = 1\n"))
-
-    def test_the_digit_bounds_are_choices_rather_than_facts_about_a_reference(self) -> None:
-        """Both bounds let a real reference through, which the rule text covers and this does not.
-
-        One digit is the shape of an ordinal and of an enumeration, and six is the shape of a hex
-        color, so each bound trades a detection for the false positives the other side carries.
-        """
-        for body in ("#5", "#123456"):
-            with self.subTest(body=body):
-                self.assertEqual([], self.kinds("a.py", f"# Settled in {body}.\nx = 1\n"))
-        self.assertEqual(["issue-ref"], self.kinds("b.py", "# Settled in #12.\nx = 1\n"))
-        self.assertEqual(["issue-ref"], self.kinds("c.py", "# Settled in #12345.\nx = 1\n"))
-
-    def test_a_documentation_comment_is_read_like_any_other(self) -> None:
-        """`comment-added` skips one and this rule must not, or C# escapes what PowerShell carries.
-
-        C# is the case that carries the widening. `syntax_for` gives PowerShell no documentation
-        marker to clear, since only `comment-added` reaches the spelling that has one.
-        """
-        self.assertEqual(
-            ["issue-ref"], self.kinds("a.cs", "/// <summary>See #1011</summary>\nint x = 1;\n")
-        )
-
-    def test_a_statement_sharing_the_closing_quote_line_is_not_read(self) -> None:
-        """The docstring span is sliced at its own columns, so the string beside it stays code."""
-        self.assertEqual([], self.kinds("a.py", 'def f() -> None:\n    """Doc."""; y = "#1011"\n'))
-
-    def test_one_reference_on_one_line_reports_once(self) -> None:
-        """The line is the unit, so one reference on it is one finding however many reads see it.
-
-        A docstring line carrying a comment is read twice over, and a comment is read twice again,
-        as written and with its marker off. Two distinct comments on one line collapse the same
-        way, which is what `comment-added` already does for the same reason.
-        """
-        self.assertEqual(
-            ["issue-ref"],
-            self.kinds("a.py", 'def f() -> None:\n    """Body #1011."""  # per #1011\n'),
-        )
-
-    def test_an_anchor_to_a_heading_is_not_a_reference(self) -> None:
-        """A heading that opens on a number anchors to a link destination carrying the same shape.
-
-        The blanking that hides it is also what hid every URL spelling of a real reference, which
-        the forge pattern reads off the unblanked line instead. A destination naming no tracker is
-        untouched by that pattern, so both halves hold at once: the anchor passes and the link text
-        beside it still reports.
-        """
-        self.assertEqual([], self.kinds("AUDIT.md", "[section 10](#10-converge-apply-the-fixes)\n"))
-        self.assertEqual([], self.kinds("AGENTS.md", "[s]: #10-converge\n"))
-        self.assertEqual(
-            ["issue-ref"],
-            self.kinds("GOVERNANCE.md", "See [#1011](https://x.invalid/pull/1011).\n"),
-        )
-
-    def test_one_reference_on_one_line_is_one_finding_in_either_spelling(self) -> None:
-        """The line is the unit, and a link carries the same reference twice over.
-
-        The destination names it and the link text spells it bare, so a key on the matched text
-        reports one reference as two. The number both patterns capture is the key instead.
-        """
-        url = "https://github.com/acme/widget/issues/4242"
-        self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", f"See [#4242]({url}) today.\n"))
-        self.assertEqual(
-            ["issue-ref", "issue-ref"],
-            self.kinds("CODESTYLE.md", f"See [#4243]({url}) today.\n"),
-        )
-
-    def test_a_service_subdomain_is_not_the_forge_host(self) -> None:
-        """The tracker is served from the bare host, so a service beside it is a different service.
-
-        `www` is that host's own alias rather than a service of its own, which is why it reads as
-        the host and the two constructed service names below do not.
-        """
-        for url in (
-            "https://docs.github.com/acme/widget/issues/4242",
-            "https://raw.github.com/acme/widget/issues/4242",
-        ):
-            with self.subTest(url=url):
-                self.assertEqual([], self.kinds("CODESTYLE.md", f"See {url} today.\n"))
-        self.assertEqual(
-            ["issue-ref"],
-            self.kinds("CODESTYLE.md", "See https://www.github.com/acme/widget/pull/4242 now.\n"),
-        )
-
-    def test_two_references_sharing_a_number_on_one_line_report_once(self) -> None:
-        """The digit key's own cost, pinned so a later change meets it rather than finds it.
-
-        Two projects number their trackers independently, so one line can name two references under
-        one number and the key cannot tell them apart. The second reports on the run after the first
-        is fixed, which is a round rather than a lost detection, and it is written down either way.
-        """
-        text = (
-            "See https://github.com/acme/widget/issues/4242 and "
-            "https://github.com/other/thing/issues/4242 now.\n"
-        )
-        self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", text))
-
-    def test_only_the_skill_roots_are_instruction_text(self) -> None:
-        """A product with a `skills/` directory of its own is not carrying fleet law in it."""
-        for name in ("src/skills/notes.md", "docs/skills/guide.md", "skills/top.md"):
-            with self.subTest(name=name):
-                self.assertEqual([], self.kinds(name, "Shipped in #1011.\n"))
-        self.assertEqual(
-            ["issue-ref"],
-            self.kinds(".claude-plugin/fleet-skills/skills/x/SKILL.md", "Shipped in #1011.\n"),
-        )
-
-    def test_the_link_spelling_is_read_in_instruction_text(self) -> None:
-        """Every link form of one reference, each of which passed while the bare form reported."""
-        url = "https://github.com/acme/widget/pull/4242"
-        for label, text in (
-            ("inline", f"The [pull request]({url}) landed.\n"),
-            ("bare", f"See {url} for the history.\n"),
-            ("definition", f"The [pull request][pr-a] landed.\n\n[pr-a]: {url}\n"),
-            ("issues", "See https://github.com/acme/widget/issues/4242 today.\n"),
-        ):
-            with self.subTest(form=label):
-                self.assertEqual(["issue-ref"], self.kinds("CODESTYLE.md", text))
-
-    def test_a_link_naming_another_tracker_is_kept_in_code(self) -> None:
-        """The surface split the rule turns on: in code the link is the citation for the line."""
-        text = (
-            "# Raise the frequency to clear the timeout.\n"
-            "# https://github.com/acme/widget/issues/4242\n"
-            "frequency: 400kHz\n"
-        )
-        self.assertEqual([], self.kinds("a.yml", text))
-
-    def test_a_link_in_a_narrative_document_is_kept(self) -> None:
-        """A tracker, a history and a README exist to carry exactly these references."""
-        text = "Landed in https://github.com/acme/widget/pull/4242 upstream.\n"
-        for name in ("README.md", "HISTORY.md", "TODO.md"):
-            with self.subTest(name=name):
-                self.assertEqual([], self.kinds(name, text))
-
-    def test_a_fenced_link_is_quoted_rather_than_stated(self) -> None:
-        """The same bound the bare form already carries, a fence quoting content."""
-        text = "Text.\n\n```\nhttps://github.com/acme/widget/pull/4242\n```\n"
-        self.assertEqual([], self.kinds("CODESTYLE.md", text))
-
-    def test_a_link_to_something_other_than_a_tracker_is_not_a_reference(self) -> None:
-        """The path decides it, so a link to a file, a release or a repository is untouched."""
-        for url in (
-            "https://github.com/acme/widget",
-            "https://github.com/acme/widget/blob/main/README.md",
-            "https://github.com/acme/widget/releases/tag/4242",
-            "https://example.com/acme/widget/pull/4242",
-        ):
-            with self.subTest(url=url):
-                self.assertEqual([], self.kinds("CODESTYLE.md", f"See {url} today.\n"))
-
-    def test_the_rule_gates_a_pull_request_rather_than_waiting_to_be_named(self) -> None:
-        self.assertIn("issue-ref", prose_lint.RULES)
-        self.assertIn("issue-ref", prose_lint.DEFAULT_RULES)
-
-    def test_the_skill_states_the_rule_this_gate_reads(self) -> None:
-        """The gate reads one half of the ban, so the rule text has to carry the other."""
-        doc = COMMENT_AND_DOC_STYLE_SKILL.read_text(encoding="utf-8")
-        section = re.search(
-            r"^## Issue, pull request, and commit references$(.*?)^## ",
-            doc,
-            re.MULTILINE | re.DOTALL,
-        )
-        if section is None:
-            self.fail("the reference-ban heading moved, so the parse is blind")
-        body = section.group(1)
-        self.assertIn("issue-ref", body)
-        self.assertIn("docstring", body)
-        # The enumeration is read out of the opening paragraph and compared both ways.
-        # Asserting only that each name appears somewhere in the section was satisfiable elsewhere.
-        # A name the surfaces sentence had dropped passed on the carve-out paragraph mentioning it.
-        opening = body.strip().split("\n\n")[0]
-        named = set(re.findall(r"`([^`]+\.md)`", opening))
-        self.assertEqual(set(prose_lint.INSTRUCTION_DOCS), named)
-
-
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
         self.assertGreaterEqual(loaded.countTestCases(), 100)
+
+    def test_the_gate_stays_under_its_size_ceiling(self) -> None:
+        """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
+        lines = PROSE_LINT_SCRIPT.read_text(encoding="utf-8").count("\n")
+        self.assertLessEqual(lines, 1800)
 
 
 if __name__ == "__main__":

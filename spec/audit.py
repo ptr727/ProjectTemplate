@@ -1321,7 +1321,7 @@ def hub_last_change(rel_path):
 
 def intent_canonical_rel(item, path):
     """The hub path an intent unit's copy is judged against for staleness."""
-    # spec/validate.py shape-checks these fields, but this engine runs standalone and does not invoke it first.
+    # Validation in spec/validate.py shape-checks these fields, but this engine runs standalone and does not invoke it first.
     ref = item.get("reference")
     if isinstance(ref, str) and ref:
         return ref

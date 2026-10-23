@@ -1,15 +1,17 @@
-"""Fetch a ptr727/ProjectTemplate script fresh from `main` and run it in-process.
+"""Fetch a ptr727/ProjectTemplate script fresh from `main` and run it through uv.
 
 Never pinned or vendored: a pin nothing keeps current goes stale by construction, and CI
 (this repo's own, and the hub's) is the backstop for a change that lands broken on `main`.
 A fetch failure fails the caller loudly rather than silently skipping the gate it guards.
+The script runs as `uv run --no-project --script`, so the packages its PEP 723 block declares
+resolve, beside the data files it reads, which are fetched from the same ref.
 Usage: hub_fetch_run.py <hub-relative-path> [script-args...]
 Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
 """
 
 import os
 import re
-import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,8 @@ HUB_RAW_BASE = f"https://raw.githubusercontent.com/{HUB_REPO}"
 HUB_MAIN_SHA_URL = f"https://api.github.com/repos/{HUB_REPO}/commits/main"
 PROVENANCE_VAR = "PROSE_GATE_PROVENANCE"
 PROSE_GATE_PATH = ".github/actions/prose-gate/prose_lint.py"
+# The files a script reads beside itself, fetched into the same directory before it runs.
+COMPANIONS = {PROSE_GATE_PATH: (".github/actions/prose-gate/prose-gate.json",)}
 PROBE_TIMEOUT = 30
 LOOKUP_TIMEOUT = 5
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -117,40 +121,31 @@ def main(argv: list[str]) -> int:
     is_prose_gate = hub_path == PROSE_GATE_PATH
     commit = resolve_main_commit() if is_prose_gate else None
     ref = commit or "main"
-    url = f"{HUB_RAW_BASE}/{ref}/{hub_path}"
-    try:
-        with urllib.request.urlopen(url, timeout=30) as response:
-            content = response.read()
-    except (urllib.error.URLError, OSError) as exc:
-        print(f"hub_fetch_run: could not fetch {url}: {exc}", file=sys.stderr)
-        print("hub_fetch_run: the gate did not run.", file=sys.stderr)
+    uv = shutil.which("uv")
+    if uv is None:
+        print("hub_fetch_run: uv is not on PATH, so the gate did not run.", file=sys.stderr)
         return 1
-    with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as handle:
-        handle.write(content)
-        tmp_path = Path(handle.name)
-    old_argv = sys.argv
-    old_provenance = os.environ.get(PROVENANCE_VAR)
-    if is_prose_gate and not (old_provenance or "").strip():
+    env = dict(os.environ)
+    if is_prose_gate and not env.get(PROVENANCE_VAR, "").strip():
         if commit:
-            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub-fetch-run main)"
+            env[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub-fetch-run main)"
         else:
-            os.environ[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
-    try:
-        sys.argv = [str(tmp_path), *script_args]
-        try:
-            runpy.run_path(str(tmp_path), run_name="__main__")
-        except SystemExit as exc:
-            if exc.code is None:
-                return 0
-            return exc.code if isinstance(exc.code, int) else 1
-        return 0
-    finally:
-        sys.argv = old_argv
-        if old_provenance is None:
-            os.environ.pop(PROVENANCE_VAR, None)
-        else:
-            os.environ[PROVENANCE_VAR] = old_provenance
-        tmp_path.unlink(missing_ok=True)
+            env[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
+    with tempfile.TemporaryDirectory() as scratch:
+        # The script is fetched last, so a companion it needs is in place before it can run.
+        for path in (*COMPANIONS.get(hub_path, ()), hub_path):
+            url = f"{HUB_RAW_BASE}/{ref}/{path}"
+            try:
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    content = response.read()
+            except (urllib.error.URLError, OSError) as exc:
+                print(f"hub_fetch_run: could not fetch {url}: {exc}", file=sys.stderr)
+                print("hub_fetch_run: the gate did not run.", file=sys.stderr)
+                return 1
+            (Path(scratch) / Path(path).name).write_bytes(content)
+        script = Path(scratch) / Path(hub_path).name
+        cmd = [uv, "run", "--no-project", "--script", str(script), *script_args]
+        return subprocess.run(cmd, env=env, check=False).returncode
 
 
 if __name__ == "__main__":
