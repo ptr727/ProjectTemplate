@@ -11,9 +11,9 @@ The directory separates its kinds by name and by tree. A gate checks and exits n
 ```sh
 python3 tests/test_prose_lint.py
 python3 tests/test_repo_gate.py
-python3 tests/test_pr_review.py
-python3 tests/test_pr_review_copilot.py
-python3 tests/test_pr_cleanup.py
+uv run --no-project --with-requirements tests/requirements.txt python tests/test_pr_review.py
+uv run --no-project --with-requirements tests/requirements.txt python tests/test_pr_review_copilot.py
+uv run --no-project --with-requirements tests/requirements.txt python tests/test_pr_cleanup.py
 python3 tests/test_handoff.py
 python3 tests/test_backlog_metrics.py
 python3 tests/test_gh_graphql.py
@@ -22,8 +22,8 @@ python3 tests/test_canonical_review.py
 python3 tests/test_build_dist.py
 python3 tests/test_skills_install.py
 python3 tests/test_carry.py
-python3 -m unittest discover -s tests    # all of them, and exits 5 if the suite vanishes
-uvx coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests && uvx coverage@latest report
+uv run --no-project --with-requirements tests/requirements.txt python -m unittest discover -s tests    # all of them, and exits 5 if the suite vanishes
+uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests && uvx coverage@latest report
 ```
 
 ## `docker_lint.py`

@@ -71,7 +71,8 @@ configuration alone marks the lint-only one:
   coverage report to Codecov. The hub validator runs them in each directory the caller declares
   in its `python-directories` input, which the registry's `pythonDirectories` mirrors. From inside
   a lint-only directory it runs `uvx ruff@latest check`, `uvx ruff@latest format --check`,
-  `uvx mypy@latest`, and `uvx coverage@latest run -m unittest discover -s tests`, then writes
+  `uvx mypy@latest`, and `uvx coverage@latest run -m unittest discover -s tests`, adding
+  `--with-requirements tests/requirements.txt` to that last where the directory carries one, then writes
   `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold adopted. A
   declared directory with no `tests/` fails that job.
 

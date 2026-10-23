@@ -1,0 +1,3 @@
+# Third-party libraries the scripts under test import, installed before the suite runs.
+# A change that adds a library to a script's inline metadata adds it here too.
+markdown-it-py>=4

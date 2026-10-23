@@ -680,7 +680,7 @@ jobs:
           leg: ${{ toJSON(matrix) }}
           directories: ${{ steps.python.outputs.projects }}
 
-      # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, the lint-only profile being stdlib-only.
+      # A directory's dependency manifest decides how its suite runs, a committed uv.lock or a requirements*.txt through pytest, and neither through unittest, which takes any library from tests/requirements.txt.
       # No --cov selector here, and the report is checked, per D1.6.
       # The pre-run delete makes the report check one on what this run wrote, since a committed coverage.xml would otherwise satisfy it without any measurement.
       # Each directory's run reads /dev/null, since the loop's own list is its stdin and a suite reading stdin would swallow the directories after it.
@@ -749,7 +749,11 @@ jobs:
                 ;;
               lint-only)
                 status=0
-                uvx coverage@latest run -m unittest discover -s tests || status=$?
+                extra=()
+                if [ -f tests/requirements.txt ]; then
+                  extra=(--with-requirements tests/requirements.txt)
+                fi
+                uvx "${extra[@]}" coverage@latest run -m unittest discover -s tests || status=$?
                 if [ "$status" -eq 5 ]; then
                   echo "::error::unittest found no tests in $dir/tests. Discovery collects only unittest.TestCase subclasses, so a pytest-style plain test function does not count, it reads only files named test*.py, and it skips a nested test directory that has no __init__.py."
                 fi
