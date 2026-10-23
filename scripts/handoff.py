@@ -31,8 +31,8 @@ open issue carries the `handoff` label for a given track in a given repository, 
 metadata block rather than from the label, since an issue carrying the label and no block belongs
 to no readable track. Zero open is two states rather than one: a track that has never had a
 handoff, and a lane closed out whose newest issue is closed. `new` continues from that closed
-issue where one exists. Two or more open on one track is a defect to report, never one to resolve by picking,
-so every command that would have to choose refuses and names both.
+issue where one exists. Two or more open on one track is a defect to report, never one to resolve
+by picking, so every command that would have to choose refuses and names both.
 
 A head resolved that way can still be one the track has moved past, where another issue already
 names it as predecessor, holds a higher round, or holds the same round. `new` and `close` refuse
@@ -150,6 +150,8 @@ ROUND_MARK = re.compile(
 )
 
 TITLE = "Session Handoff [{track}]: {subject}"
+
+WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 # GitHub's own issue body limit is 65536 characters.
 # The hard cap sits under it, so a refusal names the handoff rather than the API.
@@ -507,13 +509,13 @@ def round_text(body: str) -> str:
     return MARKER.sub("", body or "").strip()
 
 
-def archive(body: str, track: str, round_: int, closed: str, subject: str) -> str:
+def archive(body: str, track: str, round_: int, closed: str, title: str) -> str:
     """The comment that keeps an outgoing round on the issue once its body is replaced.
 
-    The heading keeps the round's own subject, since `new` replaces the title with the next one.
+    The heading keeps the round's own title, since `new` replaces the title with the next one.
     """
     mark = f"<!-- handoff-round: v1 track={track} round={round_} closed={closed} -->"
-    heading = f"## Round {round_}, closed {closed}: {subject}"
+    heading = f"## Round {round_}, closed {closed}: {title}"
     return f"{heading}\n\n{round_text(body)}\n\n{mark}\n"
 
 
@@ -522,14 +524,6 @@ def archived_text(comment_body: str) -> str:
     text = ROUND_MARK.sub("", comment_body or "").strip()
     first, _, rest = text.partition("\n")
     return rest.strip() if first.startswith("## Round ") else text
-
-
-def subject_of(title: str, track: str) -> str:
-    """The human half of a handoff title, the part a session wrote."""
-    return title.removeprefix(TITLE.format(track=track, subject=""))
-
-
-WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 
 def rounds_of(comments: list[dict], track: str) -> list[dict]:
@@ -548,8 +542,8 @@ def rounds_of(comments: list[dict], track: str) -> list[dict]:
         marks = list(ROUND_MARK.finditer(row.get("body") or ""))
         if len(marks) == 1 and marks[0]["track"] == track:
             heading = (row.get("body") or "").strip().partition("\n")[0]
-            _, _, subject = heading.partition(": ")
-            found.append({**row, "mark": marks[0].groupdict(), "subject": subject})
+            _, _, title = heading.partition(": ")
+            found.append({**row, "mark": marks[0].groupdict(), "title": title})
     found.reverse()
     return found
 
@@ -784,7 +778,7 @@ def walk(
             links.append(
                 {
                     "number": data["number"],
-                    "title": row["subject"],
+                    "title": row["title"],
                     "state": "ROUND",
                     "createdAt": row["mark"]["closed"],
                     "url": row.get("url"),
@@ -1249,8 +1243,10 @@ def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> i
     else:
         stamp = head.get("lastEditedAt") or head.get("createdAt") or fresh.get("createdAt")
         print(f"1. archive round {round_} as a comment on #{number}")
-        subject = subject_of(fresh.get("title") or "", a.track)
-        comment(a.repo, number, archive(outgoing, a.track, round_, day(stamp), subject), a.dry_run)
+        title_then = fresh.get("title") or ""
+        comment(
+            a.repo, number, archive(outgoing, a.track, round_, day(stamp), title_then), a.dry_run
+        )
     print(f"2. write round {round_ + 1} over the body of #{number}")
     if not a.dry_run and not same_text(issue(a.repo, number).get("body") or "", outgoing):
         raise Refusal(
@@ -1270,6 +1266,11 @@ def outcome_from(path: Path) -> str:
         raise Refusal(f"could not read the outcome file {path}: {exc}") from exc
     if not text:
         raise Refusal("the outcome file is empty, and a track closes with its outcome stated.")
+    if ROUND_MARK.search(text):
+        raise Refusal(
+            "the outcome carries a handoff round mark, which would read as an archived round of "
+            "the track. Remove it."
+        )
     size = len(text.encode("utf-8"))
     if size > MAX_BYTES:
         raise Refusal(f"the outcome is {size} bytes, over the {MAX_BYTES}-byte cap.")

@@ -954,7 +954,11 @@ class NewCase(unittest.TestCase):
         self.assertEqual(handoff.round_text(fake.issues[30]["body"]), "work")
         self.assertEqual(fake.issues[30]["title"], "Session Handoff [default]: Next")
         archived = fake.issues[30]["comments"][0]["body"]
-        self.assertTrue(archived.startswith("## Round 2, closed 2026-09-01: round 2\n"))
+        self.assertTrue(
+            archived.startswith(
+                "## Round 2, closed 2026-09-01: Session Handoff [default]: round 2\n"
+            )
+        )
         self.assertIn("body of round 2", archived)
         self.assertIn("track=default round=2 closed=2026-09-01", archived)
         self.assertEqual(out.splitlines()[-1], "#30")
@@ -1452,6 +1456,15 @@ class CloseCase(unittest.TestCase):
         code, _, err = self.close(fake, "done\n" + handoff.render_marker("default", 2, None))
         self.assertEqual(code, 0)
         self.assertEqual(err, "")
+
+    def test_an_outcome_carrying_a_round_mark_refuses(self) -> None:
+        """Posted by a writer, such a line would read as an archived round of the closed track."""
+        fake = FakeGh({30: link(30, "default", 2, None)})
+        mark = handoff.archive("x", "default", 2, "2026-09-01", "t").splitlines()[-1]
+        code, _, err = self.close(fake, f"done\n{mark}")
+        self.assertEqual(code, 1)
+        self.assertIn("round mark", err)
+        self.assertEqual(writes_of(fake), [])
 
     def test_an_empty_outcome_refuses(self) -> None:
         fake = FakeGh({30: link(30, "default", 2, None)})
