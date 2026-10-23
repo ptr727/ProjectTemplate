@@ -2000,6 +2000,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("review_on_head=yes ", out)
         self.assertIn("refusal=no ", out)
         self.assertIn("the reader failed on this body (ValueError)", out)
+        self.assertIn("COVERAGE IS UNKNOWN: the reader failed on this body (ValueError)", out)
 
     def test_a_flagging_verdict_that_counts_nothing_exits_fifty(self) -> None:
         text = overview_v2(

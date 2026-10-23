@@ -52,8 +52,9 @@ Subcommands
            answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
            HEADLINE`, which changes no exit code.
            `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
-           states it, `UNKNOWN` for a statement this cannot believe, `table` where a round
-           covering the head names exactly the changed files in its own file table,
+           states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
+           on, `table` where a round covering the head names exactly the changed files in its own
+           file table,
            `carried:table` where the newest round carrying a table does, `local` where an attested
            local pass covers a head on a pull request into a branch other than the default, and
            `none` otherwise. A table stands in only where no round on record states partial

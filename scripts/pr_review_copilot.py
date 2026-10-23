@@ -283,9 +283,8 @@ def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None =
         return _read(body or "", reviewer, threads)
     # A shape the reader trips on is a note in the digest, never a crash in the gate.
     except Exception as exc:  # noqa: BLE001
-        return Reading(
-            refusal="none", notes=(f"the reader failed on this body ({type(exc).__name__})",)
-        )
+        failed = f"the reader failed on this body ({type(exc).__name__})"
+        return Reading(refusal="none", coverage_line=failed, notes=(failed,))
 
 
 @functools.lru_cache(maxsize=512)
