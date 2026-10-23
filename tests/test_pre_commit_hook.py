@@ -62,6 +62,7 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         for source, dest in (
             (HOOK, ".husky/pre-commit"),
             (GATE, ".github/actions/prose-gate/prose_lint.py"),
+            (GATE.with_name("prose-gate.json"), ".github/actions/prose-gate/prose-gate.json"),
         ):
             target = self.root / dest
             target.parent.mkdir(parents=True, exist_ok=True)

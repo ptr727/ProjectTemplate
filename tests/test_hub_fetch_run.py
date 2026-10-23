@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, and provenance handoff.
+"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, provenance, and uv run.
 
 The git cases run in constructed temp repositories, and the snippet bounds its own git probe with
 a timeout. The network is stubbed, so nothing here reaches GitHub.
@@ -14,6 +14,7 @@ import http.client
 import importlib.util
 import io
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -195,7 +196,17 @@ ENV_KEYS = ("PROSE_GATE_PROVENANCE", "GH_TOKEN", "GITHUB_TOKEN")
 
 
 class ProvenanceTests(unittest.TestCase):
+    # These stand uv in with a stub, so they run on the host lacking it, the one they are about.
+    STUBBED = frozenset(
+        {
+            "test_the_script_runs_through_uv_with_no_project",
+            "test_a_missing_uv_is_the_gate_not_running",
+        }
+    )
+
     def setUp(self) -> None:
+        if shutil.which("uv") is None and self._testMethodName not in self.STUBBED:
+            self.skipTest("the fetched script runs through uv")
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.out = Path(self._tmp.name) / "seen.txt"
@@ -311,19 +322,49 @@ class ProvenanceTests(unittest.TestCase):
     def test_whitespace_only_caller_value_is_overwritten(self) -> None:
         self.assertEqual(self.run_main(env={"PROSE_GATE_PROVENANCE": "  "}), RESOLVED)
 
-    def test_environment_is_restored_when_the_script_raises(self) -> None:
+    def test_a_failing_script_passes_its_exit_code_through(self) -> None:
+        """The script runs in its own process, so this one's environment is never touched."""
         for caller, expected in (("  ", "  "), (None, None)):
             with self.subTest(caller=caller):
                 env = {} if caller is None else {"PROSE_GATE_PROVENANCE": caller}
                 with (
                     self.environment(env),
                     mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RAISE)),
-                    self.assertRaises(RuntimeError),
+                    contextlib.redirect_stderr(io.StringIO()),
                 ):
-                    try:
-                        hub.main([PROSE_PATH])
-                    finally:
-                        self.assertEqual(os.environ.get("PROSE_GATE_PROVENANCE"), expected)
+                    self.assertEqual(1, hub.main([PROSE_PATH]))
+                    self.assertEqual(os.environ.get("PROSE_GATE_PROVENANCE"), expected)
+
+    def test_the_gate_data_file_is_fetched_from_the_same_commit(self) -> None:
+        """The gate reads its data file beside itself, so a single-file fetch cannot run it."""
+        self.run_main()
+        data = ".github/actions/prose-gate/prose-gate.json"
+        self.assertTrue(self.urls()[-2].endswith(f"/{SHA}/{data}"), self.urls())
+
+    def test_the_script_runs_through_uv_with_no_project(self) -> None:
+        """A project sync would write a lock file and an environment into the caller's tree."""
+        done: subprocess.CompletedProcess[bytes] = subprocess.CompletedProcess([], 3)
+        with (
+            self.environment(),
+            mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
+            mock.patch.object(hub.subprocess, "run", return_value=done) as run,
+            mock.patch.object(hub.shutil, "which", return_value="uv"),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            self.assertEqual(3, hub.main([".github/actions/repo-gate/repo_gate.py", "--x"]))
+        cmd = run.call_args.args[0]
+        self.assertEqual(["run", "--no-project", "--script"], cmd[1:4])
+        self.assertEqual(["--x"], cmd[5:])
+
+    def test_a_missing_uv_is_the_gate_not_running(self) -> None:
+        with (
+            self.environment(),
+            mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
+            mock.patch.object(hub.shutil, "which", return_value=None),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            self.assertEqual(1, hub.main([PROSE_PATH]))
+        self.assertIn("uv is not on PATH, so the gate did not run", self.stderr.getvalue())
 
     def test_lookup_and_fetch_use_separate_timeouts(self) -> None:
         self.run_main()

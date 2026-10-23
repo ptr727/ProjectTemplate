@@ -1,220 +1,225 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4.2.0", "pygments>=2.21.0"]
+# ///
 """Enforce the GOVERNANCE.md "Documentation Style Conventions" rules no other linter checks.
 
-markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
-these rules, so nothing enforced them before this script. Rules implemented:
-  charset        Non-ASCII judged against the tiers the charset rule defines, tier 4 being emoji markers.
-  charset-unknown Non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics.
-  semicolon      No semicolon in prose, outside a series or labeled pair carrying a comma.
-  dash           No spaced hyphen joining or interrupting a sentence.
-  comment-wrap   One sentence per comment line, never wrapped and never two on a line.
-  comment-case   A comment sentence starts with a capital, not a lowercase word.
-  comment-added  No comment line opening its own line added or edited, unless the change says so.
-  dupword        No duplicated consecutive word.
-  sentence-split A sentence must not wrap across lines (one sentence per line).
-  sentence-length A Markdown, comment, or docstring sentence must not exceed the word cap.
-  spelling       No British spelling, the repo-wide convention being US English.
-  home-path      No absolute home path naming a real account, per the representative-data rule.
-  dead-path      No mention of a path git once tracked and the tree no longer holds.
-  issue-ref      No issue or pull request reference in a leading comment, a docstring, or rule text.
+Three layers: extract text units through Pygments and markdown-it-py, normalize them per language
+from the `prose-gate.json` beside this script, and evaluate each rule in `RULE_TABLE` on a unit. The
+JSON holds the language data, each rule's message and default, and the vocabulary and exemptions.
 
-Exit 1 if any violation is found. Read-only, never edits.
+A repository may carry `.prose-gate.json` at its root with additions to the carried exemptions and
+nothing else, each a list merged over the carried one: `hub_hosted` and `home_path_exempt` take
+paths, `generated_trees` directory names, `service_accounts` account names, `dupword_allow` and
+`spelling_allow` phrases and words, and `tool_directives` directive names matched literally. Any
+other key is refused, since an override that silently does nothing reads as one that works.
 
-Every git read below names its encoding rather than taking the locale's. On Windows the
-locale encoding is the ANSI code page, which cannot map every byte git emits, and the
-handlers around these calls catch no decode failure. Surrogateescape rather than strict, so
-such a byte does not end the read either. A name round-trips to the same name on disk, and a
-diff's content reaches no further than the hunk headers this file reads out of it.
+Exit 1 on a finding, 2 when the run cannot be scoped. Read-only. Every git read names its encoding,
+with surrogateescape, so a byte the locale cannot map neither ends the read nor changes a name.
 """
 
 from __future__ import annotations
 
 import argparse
-import ast
+import contextlib
 import functools
-import io
 import json
 import os
 import re
 import subprocess
 import sys
-import tokenize
 import unicodedata
 from bisect import bisect_right
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import Any, NamedTuple
 
-# One source of truth for the rule names, so the CLI choices cannot drift from check_file.
-RULES = {
-    "charset": "a non-ASCII character its tier does not permit here",
-    "charset-unknown": "non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics",
-    "semicolon": "a semicolon in prose, outside a series or labeled pair carrying a comma",
-    "dash": "a spaced hyphen joining or interrupting a sentence",
-    "comment-wrap": "a comment sentence wrapped across lines, or two on one line",
-    "comment-case": "a comment sentence opening in lowercase",
-    "comment-added": "a comment line this change adds or edits, opening its own line",
-    "dupword": "a duplicated consecutive word",
-    "sentence-split": "a sentence wrapping across lines",
-    "sentence-length": "a sentence over the word cap",
-    "spelling": "a British spelling where the repo convention is US English",
-    "home-path": "an absolute home path naming a real account",
-    "dead-path": "a mention of a path git once tracked and the tree no longer holds",
-    "issue-ref": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text",
-}
-DEFAULT_RULES = frozenset(
-    {
-        "charset",
-        "charset-unknown",
-        "semicolon",
-        "dash",
-        "dupword",
-        "spelling",
-        "comment-wrap",
-        "comment-case",
-        "comment-added",
-        "home-path",
-        "dead-path",
-        "issue-ref",
-    }
-)
-
-# Trees this repo generates rather than authors, skipped when a wider scan expands into them.
-# The gate then measures hand-written prose.
-# `spec/audit.py` writes `reports/`, so a finding there is the engine's phrasing, not an author's.
-# No edit to that tree can fix one.
-# Naming one of these paths directly still reads it, so nothing becomes uncheckable.
-GENERATED_TREES = frozenset({"reports"})
-
-# Produced rather than authored trees, consulted only on the no-git fallback path.
-# Where git can answer, its own ignore rules are the better answer.
-GENERATED_ROOTS = frozenset(
-    {
-        ".git",
-        ".artifacts",
-        ".mypy_cache",
-        ".ruff_cache",
-        ".pytest_cache",
-        ".venv",
-        "__pycache__",
-        "node_modules",
-        "bin",
-        "obj",
-        "dist",
-    }
-)
-
+MISSING = ""
+try:
+    from markdown_it import MarkdownIt
+    from markdown_it.token import Token
+    from pygments.lexer import Lexer, RegexLexer, bygroups
+    from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
+    from pygments.lexers.dotnet import CSharpLexer
+    from pygments.lexers.shell import BashLexer
+    from pygments.token import Comment, Keyword, Name, Punctuation, String, Text, Whitespace
+    from pygments.util import ClassNotFound
+except ImportError as missing:
+    MISSING = f"{missing.name} is not installed"
+DATA_PATH = Path(__file__).resolve().with_name("prose-gate.json")
+if MISSING or not DATA_PATH.is_file():
+    # Printed rather than passed to `sys.exit`, since a stale in-process caller drops that message.
+    print(
+        f"prose_lint.py: {MISSING or 'prose-gate.json is not beside the script'}. The gate runs as "
+        "`uv run --no-project --script` beside its data file, and a hook importing it in-process "
+        "carries a stale hub_fetch_run.py snippet to resync from the hub.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+BASE: dict[str, Any] = json.loads(DATA_PATH.read_text(encoding="utf-8"))
+OVERRIDE_NAME = ".prose-gate.json"
+RULES: dict[str, str] = {name: rule["summary"] for name, rule in BASE["rules"].items()}
+DEFAULT_RULES = frozenset(name for name, rule in BASE["rules"].items() if rule["default"])
+MESSAGES: dict[str, str] = BASE["messages"]
+SENTENCE_WORD_CAP: int = BASE["sentence_word_cap"]
+# The data file names each character as `U+XXXX`, which keeps the file itself ASCII.
+TIER1 = {chr(int(k.removeprefix("U+"), 16)): v for k, v in BASE["charset"]["tier1"].items()}
+TIER2 = {chr(int(k.removeprefix("U+"), 16)): v for k, v in BASE["charset"]["tier2"].items()}
+TIER3 = frozenset(chr(int(k.removeprefix("U+"), 16)) for k in BASE["charset"]["tier3"])
+TIER4 = frozenset(chr(int(k.removeprefix("U+"), 16)) for k in BASE["charset"]["tier4"])
+VARIATION_SELECTOR_16 = chr(0xFE0F)
+GENERATED_ROOTS = frozenset(BASE["generated_roots"])
+INSTRUCTION_DOCS = frozenset(BASE["instruction_docs"])
+DUP_ALLOW = frozenset(BASE["exemptions"]["dupword_allow"])
 # A floor on what a healthy sweep of this repo reaches, asserted by the tests.
-# A sweep that quietly stops finding files satisfies every rule by having nothing to read.
 LEAST_PLAUSIBLE = 60
+# The label and the variable that stand `comment-added` down, and the values that read as off.
+# The workflow and `repo-config/labels.json` spell the label out separately, which a case asserts.
+COMMENT_LABEL_NAME = "comments"
+COMMENT_ENV_NAME = "PROSE_ALLOW_COMMENTS"
+COMMENT_ENV_OFF = frozenset({"", "0", "false", "no", "off"})
+Finding = tuple[int, str, str]
 
-# The pattern-detectable half of the representative-data rule, and only that half.
-# A real user segment is required, so a documented placeholder describes the shape unmatched.
-# That is how the rule's own wording escapes its own gate, with no exemption naming files.
-# A bare drive letter is deliberately not a shape here.
-# Measured against this repo it matched 11 files and named a path in none of them.
-# An escaped newline after a word ending in a letter and a colon reads as a drive letter.
-# `Users` is matched case-insensitively on the Windows branch alone, since that filesystem is.
-# The POSIX branches stay case-sensitive, since a lowercase `/users/` is a common REST path.
-# An API route is not a home directory, and widening this would flag one in every doc.
-HOME_PATH = re.compile(
-    r"(?:/home/|/Users/|[A-Za-z]:\\(?i:users)\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)"
-)
 
-# Accounts that belong to a container or a runner rather than to a person.
-# Every one is a fixed name an image ships, so a path under it names no environment.
-# `vscode` is the devcontainer user this repo's own snippets mount into.
-# `runner` is the GitHub Actions user, and the rest are stock image accounts.
-SERVICE_ACCOUNTS = frozenset({"vscode", "runner", "root", "ubuntu", "node", "shared", "public"})
+def say(message: str, **fields: Any) -> str:
+    """The data file's text for `message`, its fields filled in."""
+    return MESSAGES[message].format(label=COMMENT_LABEL_NAME, env=COMMENT_ENV_NAME, **fields)
+
+
+def finding(line: int, rule: str, message: str | None = None, **fields: Any) -> Finding:
+    """A finding, its message the data file's text for `message`, or for the rule itself."""
+    return line, rule, say(message or rule, **fields)
+
+
+def british_spellings(spelling: dict[str, Any]) -> dict[str, str]:
+    """Every banned spelling mapped to its US form, each family generating its own inflections."""
+    words = dict(spelling["odd"])
+    for stem in spelling["ise_stems"]:
+        words.update({stem + gb: stem + us for gb, us in spelling["ise_endings"]})
+    for stem in spelling["our_stems"]:
+        words.update({f"{stem}our{end}": f"{stem}or{end}" for end in spelling["our_endings"]})
+    for stem in spelling["re_stems"]:
+        words.update({stem + gb: stem + us for gb, us in spelling["re_endings"]})
+    return words
+
+
+BRITISH = british_spellings(BASE["spelling"])
+
+
+class Config(NamedTuple):
+    """The carried data with a repository's exemptions merged in, and the patterns built from it."""
+
+    exempt: dict[str, frozenset[str]]
+    british: dict[str, str]
+    british_re: re.Pattern[str]
+    not_prose: re.Pattern[str]
+    tool_directive: re.Pattern[str]
+
+
+def build_config(data: dict[str, Any]) -> Config:
+    exempt = {k: frozenset(v) for k, v in data["exemptions"].items()}
+    british = {
+        gb: us
+        for gb, us in british_spellings(data["spelling"]).items()
+        if gb not in exempt["spelling_allow"]
+    }
+    # Longest alternative first, so an inflection is read whole rather than as its base word.
+    alternatives = "|".join(sorted(british, key=len, reverse=True))
+    return Config(
+        exempt,
+        british,
+        re.compile(rf"\b(?:{alternatives})\b", re.IGNORECASE),
+        re.compile("^(?:" + "|".join(data["not_prose"]) + ")"),
+        re.compile("^(?:" + "|".join(data["exemptions"]["tool_directives"]) + ")"),
+    )
+
+
+class OverrideError(ValueError):
+    """A repository's `.prose-gate.json` that cannot be honored as written."""
+
+
+def merged(base: dict[str, Any], override: object) -> dict[str, Any]:
+    """The carried data with each override list added to its exemption, a directive name escaped."""
+    if not isinstance(override, dict):
+        raise OverrideError("is not a JSON object")
+    unknown = sorted(set(override) - set(BASE["override_keys"]))
+    if unknown:
+        raise OverrideError(f"holds keys it may not: {quoted(unknown)}")
+    out = json.loads(json.dumps(base))
+    for key, vals in override.items():
+        if not isinstance(vals, list) or not all(isinstance(v, str) and v.strip() for v in vals):
+            raise OverrideError(f"holds {key!r} as other than a list of nonblank strings")
+        add = [re.escape(v) for v in vals] if key == "tool_directives" else vals
+        out["exemptions"][key] = [*out["exemptions"][key], *add]
+    return out
+
+
+@functools.cache
+def config_for(root: str | None) -> Config:
+    """The configuration a scan of `root` reads, its `.prose-gate.json` merged where one exists."""
+    path = Path(root) / OVERRIDE_NAME if root else None
+    if path is None or not path.is_file():
+        return build_config(BASE)
+    try:
+        override = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise OverrideError(f"cannot be read as JSON: {exc}") from exc
+    return build_config(merged(BASE, override))
+
+
+# File scope and diff handling.
 
 
 def rel(path: Path) -> str:
-    """The repo-relative posix key a git diff uses for this path.
-
-    `removeprefix` rather than `lstrip`, which takes a character set and ate the leading dot of
-    every dotfile - it turned `.github/workflows/x.yml` into `github/workflows/x.yml`, so --diff
-    could never match a path under a dot directory.
-    """
+    """The repo-relative posix key a git diff uses, keeping the leading dot of a dotfile."""
     return path.as_posix().removeprefix("./")
 
 
 def repo_key(path: Path, root: Path) -> str:
-    """The repository-relative posix key that joins a scanned file to a diff entry.
-
-    A diff names every file relative to the repository top level, while a path argument arrives
-    absolute, relative to a subdirectory, or dotted. The two are compared here and nowhere else,
-    since comparing them in whatever form each happened to arrive in is what let an absolute path
-    argument match no diff entry at all and report a clean run over a tree it had read in full.
-
-    A path outside `root` has no repository-relative form and keeps its own, so nothing in a diff
-    can match it. That is the honest answer rather than a coincidental one.
-    """
+    """The repository-relative key joining a file to a diff entry, or its own where it is outside."""
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
     except (ValueError, OSError):
         return rel(path)
 
 
-def all_lines(path: Path) -> set[int]:
-    """Every line number in `path`, which is the changed scope of a file that is entirely new."""
-    try:
-        return set(range(1, len(path.read_bytes().splitlines()) + 1))
-    except OSError:
-        return set()
-
-
-def untracked_paths(root: Path) -> list[str]:
-    """Paths relative to `root` that git holds no history for and is not ignoring.
-
-    They are repository-relative only where `root` is the repository top level, which is how
-    `changed_lines` calls it, since a diff key is repository-relative. `discover` passes the
-    directory it was asked about and joins the names onto it, so both readings hold at once.
-
-    An untracked file is the whole of what a change adds and `git diff` never names one, so a
-    scope built from the diff alone reads a new file as absent rather than as new. `git ls-files`
-    omits it too, so this is not a diff-mode quirk: a whole-tree sweep passed over it as well.
-    Ignored paths stay out, since a build output is not authored text.
-    """
+def git_text(*args: str, env: dict[str, str] | None = None) -> str | None:
+    """A git command's standard output, or None where git cannot run or fails."""
     try:
         r = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z", "--others", "--exclude-standard"],
+            ["git", *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="surrogateescape",
             check=False,
+            env=env,
         )
     except (OSError, ValueError):
-        return []
-    if r.returncode != 0:
-        return []
-    return [name for name in r.stdout.split("\0") if name]
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def git_bytes(root: Path, args: str, base: str) -> str | None:
+    """A diff against `base`, captured as bytes so a lone carriage return breaks no line."""
+    try:
+        cmd = ["git", "-C", str(root), *args.split(), base, "--"]
+        raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return raw.decode("utf-8", "surrogateescape")
+
+
+def untracked_paths(root: Path) -> list[str]:
+    """Paths under `root` that git holds no history for and is not ignoring, which no diff names."""
+    out = git_text("-C", str(root), "ls-files", "-z", "--others", "--exclude-standard")
+    return [name for name in (out or "").split("\0") if name]
 
 
 def diff_header_path(field: str) -> str | None:
-    """The repository-relative path a `+++` header names, or None where it names no file.
-
-    Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
-    or a control character, escaping it the way C does. Reading the quoted form as a literal path
-    dropped the file from scope, and an empty scope is falsy, so `main`'s no-match refusal did
-    not fire either and the run reported a clean gate on a file it never read.
-
-    The caller pins `core.quotePath=true`, which is what makes a quoted field ASCII and so what
-    this decode assumes. Turning the setting off instead would not do: it stops git quoting the
-    first of those three routes and leaves the other two quoting a name whose non-ASCII bytes sit
-    raw inside the quotes, which this decode cannot carry.
-
-    A header naming no `b/` path adds nothing to scope, which is how a deletion's `/dev/null`
-    leaves the caller with no file to credit the hunk that follows it.
-
-    Git appends a literal tab to mark where a path holding a space ends, quoted or not, and
-    escapes a literal tab inside the name itself as `\\t` rather than ever emitting it raw. A
-    tab in the field is therefore always that terminator, so the field is truncated at its first
-    tab before the quoting check runs, letting a spaced name reach this decode the same as one
-    with no space in it.
-    """
-    tab = field.find("\t")
-    if tab != -1:
-        field = field[:tab]
+    """The path a `+++` header names, its C-quoted form decoded, or None where it names no file."""
+    field = field.split("\t", 1)[0]
     if field.startswith('"') and field.endswith('"') and len(field) > 1:
         # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
         unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
@@ -223,190 +228,75 @@ def diff_header_path(field: str) -> str | None:
 
 
 def undiffable_paths(base: str, root: Path) -> set[str] | None:
-    """Repository-relative paths, `-C root` diffed against `base`, that git declines to diff.
-
-    `git diff --numstat` reports `-` for both the added and removed counts on a path it treats as
-    binary, whether genuinely binary or marked `-diff`, and in patch mode emits no `+++` header
-    for such a path at all, only a `Binary files ... differ` prose line naming it. That prose
-    joins the two paths with " and ", so a name holding that exact substring cannot be split back
-    into its two paths without guessing, and a name a shell would quote fares no better either.
-    `-z` sidesteps both problems: every path arrives NUL-terminated and never quoted, whatever
-    bytes it holds, so nothing here needs decoding beyond the raw diff output itself.
-
-    A renamed or copied path's own record carries no path at all, an empty field where one
-    normally sits, and the old and new paths follow as two further NUL-terminated fields in that
-    order. The new path is the one kept, since that is where the working tree holds the file now.
-
-    None if git fails, the same failure `changed_lines` already handles for its own invocation.
-    """
-    try:
-        raw = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "diff",
-                "--numstat",
-                "-z",
-                # Matches the main invocation's own guards, so the two agree on what is binary.
-                "--no-ext-diff",
-                "--no-textconv",
-                base,
-                "--",
-            ],
-            capture_output=True,
-            check=True,
-        ).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    """Paths git declines to diff against `base`, as `--numstat -z` names them, None if git fails."""
+    raw = git_bytes(root, "diff --numstat -z --no-ext-diff --no-textconv", base)
+    if raw is None:
         return None
-    fields = raw.decode("utf-8", "surrogateescape").split("\0")
+    fields = raw.split("\0")
     if fields and fields[-1] == "":
         fields.pop()
     paths: set[str] = set()
     i = 0
     while i < len(fields):
-        record = fields[i]
-        i += 1
-        added, _, rest = record.partition("\t")
+        added, _, rest = fields[i].partition("\t")
         removed, _, path = rest.partition("\t")
+        i += 1
         if not path:
-            # A rename's two trailing fields are the old path and the new one, in that order.
-            # A stream ending between them is refused rather than parsed on, since dropping the records after it would under-report exactly the paths this function exists to name.
+            # A stream ending between a rename's two paths is refused rather than parsed on.
             if i + 1 >= len(fields):
                 return None
-            i += 1  # the old path, unused since the new path is where the content now lives
-            path = fields[i]
-            i += 1
+            path, i = fields[i + 1], i + 2
         if added == "-" and removed == "-":
             paths.add(path)
     return paths
 
 
+# Each option pins a setting a host may change, quoting and prefixes and hunk context among them.
+# The external and textconv drivers would otherwise replace the body this parse reads.
+DIFF_ARGS = (
+    "-c core.quotePath=true diff --unified=0 --inter-hunk-context=0 --no-color "
+    "--ignore-cr-at-eol --src-prefix=a/ --dst-prefix=b/ --no-ext-diff --no-textconv"
+)
+
+
 def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
-    """Map repository-relative path -> line numbers this working tree adds vs `base`.
-
-    None if git fails. The diff is taken at `root`, the repository being scanned, rather than
-    wherever the process happens to stand. Keys anchored on the working directory match nothing
-    once the two differ, and a `diff.relative` setting would re-anchor them the same way.
-
-    An untracked file counts as added in full, since a change whose whole point is adding a file
-    otherwise scopes to nothing and reports a clean run on exactly the file it added.
-
-    A name git quotes even with `core.quotePath=false`, one holding a quote, a backslash, or a
-    control character, is unquoted here rather than left to miss the same way.
-
-    Captured as bytes and decoded explicitly rather than read in text mode, since text mode's
-    universal-newline translation turns a lone `\\r` inside added content into a line break of
-    its own, letting one added line forge a second `+++` or `@@` header the parse below then acts on.
-
-    A `+++` header naming a path that exists in the working tree and that `is_text` rejects
-    builds no entry for it. A `diff` attribute can force git to treat a genuinely binary file as
-    text, emitting that header and a full range of hunks for it the same as for a text file, and
-    `discover` and `unread_diff_files` both drop such a path later regardless, so the verdict does
-    not change, but the line numbers would otherwise have already been accumulated for a file
-    this gate can never read. A path that does not exist in the working tree is left in scope
-    rather than dropped, so a deleted or otherwise unreadable file this gate could still credit
-    before this check keeps being credited.
-
-    Without `--text`, git reports no `+++` header at all for a path it declines to diff, a real
-    binary or one a `-diff` attribute marks the same way, so no hunk ever adds it to `out` through
-    the loop below. `undiffable_paths` names those paths from a second invocation, and `is_text`
-    then tells apart the two reasons git could have declined one: a `-diff` attribute on a file
-    that reads as text, which is credited in full since no hunk will describe its lines, and a
-    file that is genuinely binary, which is left out of the map.
-    """
-    try:
-        raw = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                # `diff_header_path` decodes a quoted name as ASCII, and this is what makes it so.
-                # An inherited `false` leaves a high byte raw inside the quotes git still adds.
-                # That field is then not ASCII, and the decode either corrupts it or raises.
-                "-c",
-                "core.quotePath=true",
-                "diff",
-                "--unified=0",
-                # Outranks diff.interHunkContext, whose nonzero host default merges nearby hunks and pulls the unchanged lines between them into scope.
-                "--inter-hunk-context=0",
-                "--no-color",
-                "--ignore-cr-at-eol",
-                # `--src-prefix=a/` pins diff.srcPrefix for symmetry with the dst side and has no parse consequence, since only `+++` is read.
-                "--src-prefix=a/",
-                # Pins diff.dstPrefix, and outruns diff.noprefix and diff.mnemonicPrefix, so `+++` keeps naming a `b/` this parse keys on.
-                "--dst-prefix=b/",
-                # Bypasses diff.external, which would otherwise replace the parsed body with an arbitrary command's output.
-                "--no-ext-diff",
-                # Disables textconv, on by default for a porcelain diff, whose driver can shift every line number this parse reads.
-                "--no-textconv",
-                base,
-                "--",
-            ],
-            capture_output=True,
-            check=True,
-        ).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    """Map path -> lines this tree adds vs `base`, an untracked or undiffable text file in full."""
+    raw = git_bytes(root, DIFF_ARGS, base)
+    undiffable = undiffable_paths(base, root) if raw is not None else None
+    if raw is None or undiffable is None:
         return None
-    undiffable = undiffable_paths(base, root)
-    if undiffable is None:
-        return None
-    d = raw.decode("utf-8", "surrogateescape")
     out: dict[str, set[int]] = {}
     cur = None
-    # A `+++` or `@@` line is honored only while it opens the block a `diff --git` line just started.
-    # Content can never open a line with `diff --git `, so it can never forge that opening either.
+    # A header is honored only in the block a `diff --git` line opens, which content cannot forge.
     in_header = False
-    for line in d.split("\n"):
+    for line in raw.split("\n"):
         if line.startswith("diff --git "):
-            in_header = True
-            cur = None
-            continue
-        if in_header and line.startswith("+++ "):
+            in_header, cur = True, None
+        elif in_header and line.startswith("+++ "):
             in_header = False
             cur = diff_header_path(line[4:])
-            if cur is None:
-                continue
-            target = root / cur
-            if target.is_file() and not is_text(target):
-                # A `diff` attribute can force git to emit a full patch for a genuinely binary file, so this stays reachable even though most binaries never reach `+++` at all now.
-                # Dropped here rather than left as an empty entry, since `discover` and `unread_diff_files` would drop it later anyway.
+            if cur is not None and (root / cur).is_file() and not is_text(root / cur):
                 cur = None
-                continue
-            out.setdefault(cur, set())
+            if cur is not None:
+                out.setdefault(cur, set())
         elif line.startswith("@@") and cur:
             in_header = False
             m = re.search(r"\+(\d+)(?:,(\d+))?", line)
             if m:
                 start = int(m.group(1))
-                count = int(m.group(2) or 1)
-                out[cur].update(range(start, start + count))
-    for path in undiffable:
-        target = root / path
-        if is_text(target):
-            # No hunk will describe this path, since git declined to diff it, so credit it whole.
-            out[path] = all_lines(target)
-    for name in untracked_paths(root):
-        target = root / name
-        if is_text(target):
-            out[name] = all_lines(target)
+                out[cur].update(range(start, start + int(m.group(2) or 1)))
+    for name in [*undiffable, *untracked_paths(root)]:
+        if is_text(root / name):
+            out[name] = set(range(1, len((root / name).read_bytes().splitlines()) + 1))
     return out
 
 
 def asked_about(key: str, paths: list[str]) -> bool:
-    """Whether a repository-relative diff key falls under one of the requested paths.
-
-    The floor below compares the diff's file list against what the run matched, and a caller who
-    narrowed the scan on purpose must not be told the narrowing is a defect. Anything the request
-    did not cover is not a file this run failed to read.
-    """
+    """Whether a repository-relative diff key falls under one of the requested paths."""
     for raw in paths:
-        # `Path` drops a trailing separator, so the test appends one rather than stripping it.
-        # Comparing the bare prefix would let `catalog` claim `catalogue/x.md`.
         r = rel(Path(raw))
-        if r in ("", "."):
-            return True
-        if key == r or key.startswith(r + "/"):
+        # A separator is appended, so `catalog` cannot claim `catalogue/x.md`.
+        if r in ("", ".") or key == r or key.startswith(r + "/"):
             return True
     return False
 
@@ -414,121 +304,54 @@ def asked_about(key: str, paths: list[str]) -> bool:
 def unread_diff_files(
     scope: dict[str, set[int]], paths: list[str], excludes: tuple[str, ...], root: Path
 ) -> list[str]:
-    """Files the diff names that this run was asked about and could have read, in sorted order.
-
-    Both sides are read against `root`, the repository being scanned, because `git diff` reports
-    repository-relative paths while a request arrives in whatever form the caller typed. Reading
-    either against the working directory empties this list from a subdirectory and empties it for
-    an absolute path argument, which are the two places it most needs to be full.
-    """
+    """Files the diff names that this run was asked about and could have read, in sorted order."""
     asked = [repo_key(Path(p), root) for p in paths]
-    out: list[str] = []
-    for key in sorted(scope):
-        if not asked_about(key, asked):
-            continue
-        if any(x in key for x in excludes):
-            continue
-        if not GENERATED_TREES.isdisjoint(Path(key).parts):
-            continue
-        target = root / key
-        if target.is_file() and is_text(target):
-            out.append(key)
-    return out
+    trees = config_for(str(root)).exempt["generated_trees"]
+    return [
+        key
+        for key in sorted(scope)
+        if asked_about(key, asked)
+        and not any(x in key for x in excludes)
+        and trees.isdisjoint(Path(key).parts)
+        and (root / key).is_file()
+        and is_text(root / key)
+    ]
 
 
 def gate_provenance(explicit: str | None = None) -> str:
-    """Which copy of this gate produced the verdict, named so a finding can be attributed to one.
-
-    A repository reaches this gate through a pinned hub commit, so the copy CI runs is the one
-    that pin names rather than the one a hub checkout holds. The two disagree from the moment a
-    rule changes until the pin moves, and a finding raised by the older copy then reproduces
-    against no local run at all. Unattributed, that reads as a defect in the gate rather than as
-    a version gap, which is the reading it actually got: three dead-path findings were carried
-    into a resync as real work, and the pin was a single commit behind the exemption that
-    silenced them.
-
-    Three sources answer, in the order they can be trusted. An explicit value is the composite
-    action stating its own `owner/repo@ref`, which is the only source that knows the pin, since
-    a checked-out action carries no history of its own. The environment carries the same value
-    for a caller that invokes the script directly. Otherwise this script's own checkout answers,
-    under the conditions `checkout_provenance` states. None of the three resolving is reported as
-    unknown rather than guessed, since a wrong attribution is worse here than an absent one: it
-    sends the next investigation at a copy nobody ran, where no attribution at least leaves the
-    question open.
-    """
-    # Stripped before it is tested rather than after, since a whitespace-only value is truthy and would otherwise pass the test and then empty itself, printing the label with nothing after it.
-    # A source carrying no value falls through to the next one, which is what carrying none means.
+    """Which copy of this gate ran: the action's own pin, the environment's, or this checkout's."""
     if explicit and explicit.strip():
         return explicit.strip()
     env = os.environ.get("PROSE_GATE_PROVENANCE", "").strip()
-    if env:
-        return env
-    return checkout_provenance(Path(__file__).resolve())
+    return env or checkout_provenance(Path(__file__).resolve())
+
+
+GIT_LOCATION = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_WORK_TREE",
+    }
+)
 
 
 def checkout_provenance(script: Path) -> str:
-    """The commit that describes this file's content, or unknown where no commit does.
-
-    A checkout containing the script is not the same fact as a commit describing it, and reading
-    HEAD alone conflates the two. Dropping a copy into an unrelated repository resolves that
-    repository's HEAD, which is a well-formed answer naming content it never held. Editing the
-    file in place resolves the commit before the edit, which is the ordinary state of any branch
-    that changes a rule, so the run that most needs an accurate attribution is the one that would
-    get a stale one.
-
-    Both are narrowed by asking what HEAD says about this path rather than what it says about the
-    repository: an untracked path is attributed to nothing, and a tracked path whose working copy
-    has moved is named as moved rather than as its commit.
-
-    What this does not establish is which repository answered. A copy committed into an unrelated
-    repository is tracked and clean there, so it is named by that repository's HEAD, and the value
-    carries no identity to tell it apart from a hub checkout's own. A `local` value is therefore
-    read as a commit inside the repository that produced it and nowhere else, which is what the
-    explicit and environment sources exist to do better. Closing it properly means naming the
-    repository alongside the commit, and that is a change to the value's shape rather than to
-    this resolution.
-
-    The third way they come apart is the environment rather than the filesystem. Git's location
-    variables outrank `-C`, and a git hook exports them, so a run made from inside one answers
-    about whichever repository invoked the hook rather than about the copy that is running. That
-    is the same wrong attribution arriving by a different route, so the location variables are
-    dropped and the answer keys on the script's own path alone.
-    """
-    located_by_environment = (
-        "GIT_DIR",
-        "GIT_COMMON_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-        "GIT_NAMESPACE",
-        "GIT_PREFIX",
-    )
-    env = {k: v for k, v in os.environ.items() if k not in located_by_environment}
-
-    def git(*args: str) -> str | None:
-        try:
-            r = subprocess.run(
-                ["git", "-C", str(script.parent), *args],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="surrogateescape",
-                check=False,
-                env=env,
-            )
-        except (OSError, ValueError):
-            return None
-        return r.stdout if r.returncode == 0 else None
-
-    if git("ls-files", "--error-unmatch", "--", str(script)) is None:
+    """The commit describing this file, `-dirty` where edited, unknown where git tracks it not."""
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
+    where = ("-C", str(script.parent))
+    if git_text(*where, "ls-files", "--error-unmatch", "--", str(script), env=env) is None:
         return "unknown"
-    head = (git("rev-parse", "--short", "HEAD") or "").strip()
+    head = (git_text(*where, "rev-parse", "--short", "HEAD", env=env) or "").strip()
     if not head:
         return "unknown"
-    moved = (git("status", "--porcelain", "--", str(script)) or "").strip()
+    moved = (git_text(*where, "status", "--porcelain", "--", str(script), env=env) or "").strip()
     return f"local {head}-dirty" if moved else f"local {head}"
 
 
@@ -538,361 +361,19 @@ def scope_note(
     lines: int | None,
     base: str | None,
     provenance: str,
-    unparsed: list[str] | None = None,
+    plain: list[str] | None = None,
     undecoded: list[str] | None = None,
 ) -> str:
-    """What the run actually read, stated on every verdict rather than only on a busy one.
-
-    Five routes to a false clean are on record and every one of them exits 0 in silence: an
-    unresolvable base widening to a whole-tree scan, a diff taken in one repository while scanning
-    another, a path under no repository, an absolute path argument whose keys matched no diff
-    entry, and an untracked file no diff names. Each guard so far closes the route a reviewer
-    happened to see, and the sixth is found that way or not at all. What every one of them shares
-    is that a scope of nothing prints exactly what a clean tree prints, which is a property of the
-    output and not of any single route. Stating the scope is what a reader needs to tell "read
-    nothing" from "found nothing", so it is printed even when the count is the whole tree.
-
-    The copy that read that scope is named beside it for the same reason. A scope answers what
-    was read and a provenance answers what read it, and a verdict reproducing nowhere is a
-    question about the second rather than about the first.
-
-    A `.py` file the running interpreter cannot parse is named beside them too, where a rule that
-    reads Python through a parser ran. Such a rule reads that file by a line scan, not at all, or
-    through a tokenizer older than its grammar, so a pass under an interpreter older than the code
-    it reads is otherwise the same line as a clean one.
-
-    A file the gate cannot read as UTF-8 is named the same way. No rule reads it, yet it is counted
-    among the files read, so the line names it.
-    """
-    if base is None:
-        note = f"scope: {read} file(s) read, whole tree, gate {provenance}"
-    else:
-        note = (
-            f"scope: {read} of {discovered} file(s) read, {lines} changed line(s), "
-            f"diff against {base!r}, gate {provenance}"
-        )
-    if unparsed:
-        version = f"{sys.version_info.major}.{sys.version_info.minor}"
-        note += (
-            f", {len(unparsed)} .py file(s) Python {version} cannot parse, "
-            f"so their comments and docstrings may be misread: {quoted(unparsed, 5)}"
-        )
-    if undecoded:
-        note += (
-            f", {len(undecoded)} file(s) the gate could not open or decode as UTF-8, so no rule read them: "
-            f"{quoted(undecoded, 5)}"
-        )
-    return note
+    """What the run read and which copy read it, files read as plain text or not at all named."""
+    fields = {"read": read, "discovered": discovered, "lines": lines, "base": base}
+    text = say("scope-whole" if base is None else "scope-diff", gate=provenance, **fields)
+    for key, names in (("scope-plain", plain), ("scope-undecoded", undecoded)):
+        text += say(key, count=len(names), paths=quoted(names, 5)) if names else ""
+    return text
 
 
-def home_path_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
-    """Absolute home paths on this line that name a real account.
-
-    The exposure this gates was a maintainer's own path reaching a public comment, so the unit
-    is the raw line rather than stripped prose. A path is the same exposure in a JSON config
-    value, in a fenced transcript pasted from a terminal, and in a sentence.
-    """
-    out = []
-    for m in HOME_PATH.finditer(line):
-        if m.group("user").lower() in SERVICE_ACCOUNTS:
-            continue
-        out.append(
-            (
-                lineno,
-                "home-path",
-                (
-                    f"absolute home path {m.group(0)!r} -> use a constructed path, not an "
-                    "observed one"
-                ),
-            )
-        )
-    return out
-
-
-# The named-path half of the stale-description class, and only that half (RESYNC.md section 4).
-# The measured incident named no path at all, and no pattern reaches a description without one.
-# A backtick span, an inline link target, and a reference definition each assert a path.
-INLINE_SPAN = re.compile(r"`([^`\n]+)`")
-LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
-REF_DEF = re.compile(r"^\s*\[[^\]]+\]:\s+(\S+)")
-# A character that marks a token as a placeholder, a glob, an expansion, or a scheme.
-# The colon covers every URL scheme, a drive letter, and an image tag in one stroke.
-PATH_FOREIGN = frozenset("<>{}$*?\"'\\:!|,;")
-
-
-def path_candidate(token: str, in_span: bool = True) -> str | None:
-    """The relative path a token asserts, or None when it asserts none.
-
-    A backtick span holds prose as often as a path, so it qualifies only when it is shaped
-    like a file: a single word carrying a separator and a suffix, which is what tells
-    `spec/audit.py` from a ref like `origin/develop` and from a bare directory pattern like
-    `references/`, a shape docs use for any repository's layout rather than this one's. A
-    link target or a reference definition is a path by construction, so only a foreign
-    character disqualifies it there.
-    """
-    token = token.split("#", 1)[0]
-    if not token or any(c.isspace() for c in token) or PATH_FOREIGN & set(token):
-        return None
-    if token.startswith(("/", "~", "-", "#")):
-        return None
-    if in_span:
-        if "/" not in token:
-            return None
-        last = token.rsplit("/", 1)[-1]
-        if "." not in last or not last.strip("."):
-            return None
-    return token.removeprefix("./")
-
-
-# The ASCII whitespace the composite action's trim always removes from an exclusions line, whatever locale it runs under.
-# Its `[[:space:]]` is a superset of this in a UTF-8 locale and Python's own `str.strip` is a superset again, so judging blank by either would refuse a value the action does build and pass.
-# Naming the smallest of the three keeps the divergence one way, which is the direction where the guard cannot fail a repository over an exclusion that is merely inert.
-ASCII_BLANK = " \t\n\r\v\f"
-
-# Paths with a `retire` disposition remain valid references to a hub-hosted tool or a declared deletion.
-# The action fetches this file without the hub tree, so a test keeps this literal set equal to the ledger.
-HUB_HOSTED = frozenset(
-    {
-        "repo-config/configure.sh",
-        "repo-config/develop.json",
-        "repo-config/operational/develop.json",
-        "repo-config/main.json",
-        "repo-config/README.md",
-        "repo-config/settings.json",
-        "repo-config/labels.json",
-        "spec/secrets.json",
-        ".github/workflows/get-version-task.yml",
-        ".github/workflows/publish-plan-task.yml",
-        ".github/workflows/build-release-task.yml",
-        ".github/workflows/build-docker-task.yml",
-        ".github/workflows/validate-task.yml",
-        ".github/workflows/deploy-site-task.yml",
-        ".github/workflows/publish-docker-readme-task.yml",
-        ".github/workflows/check-upstream-version-task.yml",
-        ".github/workflows/run-codegen-pull-request-task.yml",
-        ".github/workflows/build-datebadge-task.yml",
-    }
-)
-
-
-@functools.cache
-def carried_paths(root: str) -> frozenset[str]:
-    """Paths the manifest declares as carried, exempt because docs name them as fleet layout.
-
-    The hub's own instance of a carried file retires to a catalog snippet, so its history
-    reads as a deletion while every mention legitimately describes the file a repository
-    carries. Whether a repository actually carries one is the audit's finding, not prose's.
-    """
-    try:
-        data = json.loads((Path(root) / "spec" / "files.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return frozenset()
-    return frozenset(
-        e["path"]
-        for e in data.get("baseline", [])
-        if isinstance(e, dict) and isinstance(e.get("path"), str)
-    )
-
-
-@functools.cache
-def once_tracked(root: str, rel_path: str) -> bool:
-    """Whether git at `root` ever recorded `rel_path`, the deletion signature this rule keys on."""
-    try:
-        r = subprocess.run(
-            ["git", "-C", root, "log", "-1", "--format=%H", "--", rel_path],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            check=False,
-        )
-    except (OSError, ValueError):
-        return False
-    return r.returncode == 0 and bool(r.stdout.strip())
-
-
-def dead_path_findings(
-    root: Path, base: Path, lineno: int, line: str
-) -> list[tuple[int, str, str]]:
-    """Named paths on this line that git once tracked and the tree no longer holds.
-
-    Requiring a history is what scopes this to the deletion-sweep shape, a file removed with
-    its describing prose left standing. A path another repository holds, a proposed file a
-    backlog names, and a layout pattern each have no history here, so none is reported. A
-    carried path and a hub-hosted one are exempt with a history, since each names a file that
-    lives elsewhere by design rather than a description this tree left behind.
-    """
-    m = REF_DEF.match(line)
-    if m:
-        # A definition line holds one target and no prose, so nothing else on it is read.
-        tokens = [(m.group(1), False)]
-    else:
-        tokens = [(s.group(1), True) for s in INLINE_SPAN.finditer(line)]
-        tokens += [(t.group(1), False) for t in LINK_TARGET.finditer(strip_inline_code(line))]
-    out = []
-    for token, in_span in tokens:
-        rel_path = path_candidate(token, in_span)
-        if rel_path is None:
-            continue
-        # A mention is anchored where it resolves, the file's own directory or the root.
-        if (root / rel_path).exists() or (base / rel_path).exists():
-            continue
-        for anchor in {root, base}:
-            try:
-                tracked_rel = (anchor / rel_path).resolve().relative_to(root.resolve())
-            except ValueError:
-                continue
-            # Both exemption sets are keyed by the posix path the manifest and the ledger hold.
-            # A git pathspec is posix too, which `rel` already relies on for the diff scope.
-            # So one key serves both, rather than the platform's separator reaching either.
-            key = tracked_rel.as_posix()
-            if key in carried_paths(str(root)) or key in HUB_HOSTED:
-                continue
-            if once_tracked(str(root), key):
-                out.append(
-                    (
-                        lineno,
-                        "dead-path",
-                        (
-                            f"path {token!r} is deleted from this tree -> re-point, rewrite, "
-                            "or remove the stale mention"
-                        ),
-                    )
-                )
-                break
-    return out
-
-
-def shallow_checkout(root: Path) -> bool:
-    """Whether the checkout at `root` is shallow, which holds no deletion history to key on."""
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--is-shallow-repository"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            check=False,
-        )
-    except (OSError, ValueError):
-        return False
-    return r.returncode == 0 and r.stdout.strip() == "true"
-
-
-def is_operations_runbook(path: Path, root: Path | None) -> bool:
-    """Whether this path is the repository operations runbook."""
-    return root is not None and path.resolve() == (root / "OPERATIONS.md").resolve()
-
-
-# The pattern-detectable half of the reference ban, and only that half.
-# An issue or a pull request reference has one shape, and a commit does not.
-# A short SHA is the same shape as a blob id, a version fragment, and a fixture hash.
-# Telling those apart needs the meaning rather than the shape, so the rule text covers that half.
-# Five digits is the ceiling and two is the floor, and each bound trades a detection for a shape.
-# One digit is the shape of an ordinal and of an enumeration.
-# Six is the shape of the hex color a stylesheet writes, and so are three and four.
-# A color in one of those two lengths with no letter in it is reported, which is the rule's cost.
-# So is a hash-delimited expression a leading comment quotes and whose text opens on digits.
-# A `sed` script and a pattern file's own commented-out entry are the two shapes of that.
-# A repository whose numbering reaches either bound states a reference the rule text still bans.
-ISSUE_REF = re.compile(r"(?<!#)#([0-9]{2,5})(?!\w)")
-
-# A URI, whose fragment is a number after a `#` and is not a reference to anything here.
-URI_SPAN = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\])]+", re.IGNORECASE)
-
-# The link spelling of the same reference, read in instruction text and nowhere else.
-# `without_lookalikes` blanks a URI and a link destination before `ISSUE_REF` reads the line.
-# That is why an anchor and a fragment opening on digits go unreported.
-# It is also why every link form of a real reference passed.
-# A destination names what it points at, so it is as detectable as the bare form.
-# An author met by the bare form's finding reaches for the link form next.
-# The host enumeration is one forge rather than every forge.
-# Each forge spells its own paths differently, and encoding several grammars here grows defects.
-# The rule text bans the reference whatever spells it, so an unmatched forge is unlicensed.
-# That is the relationship the rule already holds with a commit SHA.
-# The host is the bare one and its `www` alias, never an arbitrary subdomain of it.
-# The tracker is served from the bare host, and a subdomain is a different service on that domain.
-# No subdomain was measured to serve a tracker-shaped path, so this is the bound that was measured.
-# A wildcard host is the wider claim, and the wider claim is the one that has to be earned.
-# The digits are captured so a line naming one reference twice over reports it once.
-# That key collapses two different references sharing a number on one line as well.
-# The second is reported once the first is fixed, so it is a round rather than a lost detection.
-# Those digits are unbounded in length, where `ISSUE_REF` bounds its own at two through five.
-# Each of that pattern's bounds trades a detection for a shape the bare form is confusable with.
-# A path segment after `/issues/` or `/pull/` is confusable with nothing, so it trades neither.
-# The two disagree deliberately, and the URL form reads a number the bare form is bounded out of.
-FORGE_REF = re.compile(
-    r"https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/([0-9]+)",
-    re.IGNORECASE,
-)
-
-# The Skills roots, source and both generated distributions, whose every Markdown file is rule text.
-# A plugin tree carries one root per plugin, so that one is matched by its two fixed ends.
-# Matching any directory named `skills` instead would gate a product's own source tree as fleet law.
-SKILL_ROOTS = (".agents/skills/", ".github/skills/")
-PLUGIN_ROOT = ".claude-plugin/"
-PLUGIN_SKILLS = "/skills/"
-
-# Markdown an agent reads as instructions, where the ban reaches the document and not only its comments.
-# A skill is law wherever it loads, and these documents are the fleet's own rule text.
-# A README, a tracker, a history, and a plan are the repository's own narrative and keep their references.
-INSTRUCTION_DOCS = frozenset(
-    {
-        "AGENTS.md",
-        "AUDIT.md",
-        "CLAUDE.md",
-        "CODESTYLE.md",
-        "GOVERNANCE.md",
-        "OPERATIONS.md",
-        "RESYNC.md",
-        "STANDUP.md",
-        "WORKFLOW.md",
-        ".github/copilot-instructions.md",
-    }
-)
-
-
-def is_markdown(path: Path) -> bool:
-    """Whether the file is Markdown, its suffix read in any case as `syntax_for` reads it."""
-    return path.suffix.lower() == ".md"
-
-
-def is_instruction_text(path: Path, root: Path | None) -> bool:
-    """Whether this Markdown file is instruction text rather than the repository's own narrative.
-
-    A skill is matched by its root rather than by its name, since the source tree and each
-    generated distribution carry the same file under a root of its own.
-    """
-    if not is_markdown(path):
-        return False
-    key = repo_key(path, root) if root is not None else rel(path)
-    if key in INSTRUCTION_DOCS or key.startswith(SKILL_ROOTS):
-        return True
-    return key.startswith(PLUGIN_ROOT) and PLUGIN_SKILLS in key[len(PLUGIN_ROOT) :]
-
-
-def comment_syntax_including_docs(path: Path) -> Syntax | None:
-    """This file's comment syntax with its documentation markers cleared, or None where it has none.
-
-    `comment-added` skips a documentation comment because CODESTYLE governs its shape. A reference
-    in one is the same defect as a reference in any other comment, and the markers are not declared
-    evenly: a C# `///` block is one and goes unread, while `syntax_for` gives PowerShell none, so
-    the `<# #>` block beside it is read. Clearing them is what makes the two agree.
-    """
-    spec = syntax_for(path)
-    if spec is None:
-        return None
-    widened: Syntax = {**spec, "doc": ()}
-    return widened
-
-
-def quoted(paths, cap: int | None = None) -> str:
-    """Paths as a sorted, quoted, comma-joined list for an error message.
-
-    Quoted because a path holding a space or a comma is indistinguishable from two paths once
-    joined, which makes the message unreadable exactly when it names something unexpected. With a
-    `cap`, only the first that many are listed, followed by a marker where the list ran longer.
-    """
+def quoted(paths: Iterable[Any], cap: int | None = None) -> str:
+    """Paths as a sorted, quoted, comma-joined list, the first `cap` of them where one is given."""
     ordered = sorted(paths)
     shown = ordered if cap is None else ordered[:cap]
     more = " and more" if len(shown) < len(ordered) else ""
@@ -905,14 +386,7 @@ LEGACY_COMMAND = "##["
 
 
 def printable(line: str) -> str:
-    """`line` spelled so it prints as one line of this gate's output and nothing else.
-
-    A tracked name and a file's own text both reach a finding, and either may hold a newline, an
-    escape sequence, or a workflow command. The Actions runner executes a line opening on `::`
-    once leading whitespace is trimmed, and a line holding `##[` anywhere. So each C0 or C1
-    control and DEL is escaped, as are the colon opening such a line and the bracket of each
-    `##[`. A lone surrogate from a name that is not UTF-8 is escaped too, for a strict stream.
-    """
+    """`line` spelled as one line of output that runs no workflow command, a control escaped."""
     escaped = CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", line)
     escaped = COMMAND_LEAD.sub(lambda m: f"{m.group(1)}\\x3a", escaped)
     escaped = escaped.replace(LEGACY_COMMAND, "##\\x5b")
@@ -922,48 +396,19 @@ def printable(line: str) -> str:
 def repo_root(path: Path) -> str:
     """The repository top level containing `path`, or '' when git cannot say."""
     start = path if path.is_dir() else path.parent
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            check=False,
-        )
-    except (OSError, ValueError):
-        return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
+    return (git_text("-C", str(start), "rev-parse", "--show-toplevel") or "").strip()
 
 
 def tracked_paths(root: Path) -> list[Path] | None:
-    """Paths git tracks under `root`, or None when git cannot answer.
-
-    Empty output is a None too. `git ls-files` succeeds with no output in an initialized but
-    empty checkout, and reading that as an empty file set would scan nothing and report success.
-    """
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            check=False,
-        )
-    except (OSError, ValueError):
+    """Paths git tracks under `root`, or None when git cannot answer or answers with nothing."""
+    out = git_text("-C", str(root), "ls-files", "-z")
+    if out is None or not out.strip("\0"):
         return None
-    if r.returncode != 0 or not r.stdout.strip("\0"):
-        return None
-    return [root / name for name in r.stdout.split("\0") if name]
+    return [root / name for name in out.split("\0") if name]
 
 
 def walk_paths(root: Path) -> list[Path]:
-    """Every file under `root` minus the generated trees, for a checkout git cannot describe.
-
-    `git check-ignore` fails on exactly the machine that has no git, so this path asserts the
-    generated-root rule by name instead of asking git which paths are ignored.
-    """
+    """Every file under `root` minus the generated roots, for a checkout git cannot describe."""
     return [
         p
         for p in root.rglob("*")
@@ -980,752 +425,522 @@ def is_text(path: Path) -> bool:
         return False
 
 
+def shallow_checkout(root: Path) -> bool:
+    """Whether the checkout at `root` is shallow, which holds no deletion history to key on."""
+    answer = git_text("-C", str(root), "rev-parse", "--is-shallow-repository") or ""
+    return answer.strip() == "true"
+
+
 def discover(
     paths: list[str], excludes: tuple[str, ...] = (), root: Path | None = None
 ) -> list[Path]:
-    """Every authored text file the rules govern, scoped by git where git can answer.
-
-    Where it cannot, the fallback walk applies no ignore rules at all and asserts the generated
-    roots by name instead, so the scoping there is weaker than the paragraph below describes. It
-    warns on stderr, since a quieter file set that reads the same is how a sweep stops covering
-    what it claims to.
-
-    The line-endings rule already requires a repo-wide sweep be scoped to `git ls-files` rather
-    than a directory list, which covers what its author thought of and silently stops covering
-    whatever is added next. An extension allowlist has that same defect, so the filter here is
-    whether the file is text, not whether its suffix was thought of. An untracked file is authored
-    text the same way, and reading only the tracked list passed over a new file until it was
-    staged, so a clean sweep proved nothing about the one file a change existed to add.
-
-    `root` is the repository every path is judged against, passed in so that the caller's verdict
-    and this file set are keyed alike. Judging against the filesystem path instead lets a
-    directory *above* the checkout decide: a repository cloned under a parent named `reports` had
-    its own `reports/` tree scanned as authored, and an absolute argument carried its whole parent
-    chain into every `--exclude` test.
-
-    An explicit file argument bypasses discovery, so a single file can always be checked directly.
-    """
+    """Every authored text file under the paths, scoped by git where git can describe the tree."""
     found: list[tuple[Path, str]] = []
     for raw in paths:
         p = Path(raw)
         base = p if p.is_dir() else (p.parent if p.is_file() else Path("."))
         anchor = root if root is not None else Path(repo_root(base) or base)
+        trees = config_for(str(anchor)).exempt["generated_trees"]
         if p.is_file():
             found.append((p, repo_key(p, anchor)))
             continue
         candidates = tracked_paths(base)
-        # `tracked_paths` answers None for a tree git cannot describe and for an empty answer.
-        # Only the first of those justifies a walk.
         # Whether git can describe a tree is settled by asking git, never by its answer's size.
-        # Read as emptiness, a subtree of new files fell back and scanned the ignored ones under it.
-        # It also printed that git could not describe a tree git describes fine.
         if candidates is None and not repo_root(base):
-            print(
-                printable(
-                    f"warning: git cannot describe {base}, falling back to a filesystem walk"
-                ),
-                file=sys.stderr,
-            )
-            # A walk reports what is on disk, so it carries the untracked files already.
-            # It applies no ignore rules, which is why it is reserved for having no other answer.
+            warning = f"warning: git cannot describe {base}, falling back to a filesystem walk"
+            print(printable(warning), file=sys.stderr)
             candidates = walk_paths(base)
         else:
             candidates = (candidates or []) + [base / name for name in untracked_paths(base)]
-        # The path named is itself inside a generated tree, so that tree was asked for.
-        asked_inside_generated = not GENERATED_TREES.isdisjoint(Path(repo_key(base, anchor)).parts)
+        # A path named inside a generated tree asks for that tree.
+        inside = not trees.isdisjoint(Path(repo_key(base, anchor)).parts)
         for q in candidates:
             key = repo_key(q, anchor)
-            if GENERATED_TREES.isdisjoint(Path(key).parts) or asked_inside_generated:
+            if inside or trees.isdisjoint(Path(key).parts):
                 found.append((q, key))
-    keep = [
-        q for q, key in found if not any(x in key for x in excludes) and q.is_file() and is_text(q)
+    keep = {q for q, key in found if not any(x in key for x in excludes)}
+    return sorted(q for q in keep if q.is_file() and is_text(q))
+
+
+# Extract: a file becomes text units.
+
+
+class Line(NamedTuple):
+    """One source line of a unit, a comment's text without its marker and `raw` with it."""
+
+    number: int
+    text: str
+    leading: bool = True
+    raw: str = ""
+    help: bool = False
+
+
+class Unit(NamedTuple):
+    """A run of text one kind of rule reads.
+
+    `source` is every line, and `prose` and `code` the unfenced ones. `paragraph` is a Markdown
+    sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
+    documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
+    """
+
+    kind: str
+    lines: tuple[Line, ...]
+    column: int = 0
+
+
+# The units a file holds, its fenced lines, and whether it was read as plain text.
+Extracted = tuple[list[Unit], frozenset[int], bool]
+
+
+CODE_FENCE = re.compile(r"^\s*(```|~~~)")
+SHEBANG = re.compile(r"^#!\s*(?:\S*/)?([\w.+-]+)(?:\s+(?:-\S+\s+|\w+=\S*\s+)*([\w.+-]+))?")
+
+
+def language_of(lexer: str | None) -> dict[str, Any] | None:
+    """The normalization data for a lexer, or None where the gate reads no comments through it."""
+    return next((s for s in BASE["languages"].values() if lexer in s["lexers"]), None)
+
+
+def lexer_name(path: Path, first: str) -> str | None:
+    """The lexer a file reads through, `markdown`, or None for a format holding no comments.
+
+    The data file's own mapping wins, then Pygments by file name, then the shebang.
+    """
+    files = BASE["files"]
+    name, suffix = path.name.lower(), path.suffix.lower()
+    if suffix in files["markdown"]:
+        return "markdown"
+    if name in files["name"] or suffix in files["plain"]:
+        return files["name"].get(name)
+    if suffix in files["suffix"]:
+        return files["suffix"][suffix]
+    for candidate in (path.name, path.name.lower()):
+        with contextlib.suppress(ClassNotFound):
+            return get_lexer_for_filename(candidate).aliases[0]
+    m = SHEBANG.match(first)
+    if m:
+        program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
+        with contextlib.suppress(ClassNotFound):
+            return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
+    return None if suffix else files["extensionless"]
+
+
+# Pygments ends a heredoc at any later `STUB` in a `$STUB_DIR`, and reads no double-quoted label.
+# This rule ends one only on its terminator line, tab-indented for `<<-`.
+HEREDOC = (
+    r"(?s)<<(-)?[ \t]*(['\"]?)\\?([A-Za-z_]\w*)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
+)
+# Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
+# The comments inside it are lost, so an attribute here is read within its own line.
+ATTRIBUTE = r"^([ \t]*)(\[[^\n]*?\])"
+
+
+def patched(base: type[RegexLexer], stock: str, rule: tuple[str, Any] | None) -> type[Lexer]:
+    """`base` with the rule it spells as `stock` replaced by `rule`, or removed where that is None."""
+
+    def fix(states: dict[str, list[Any]]) -> dict[str, list[Any]]:
+        hit = lambda r: isinstance(r, tuple) and r[0] == stock
+        return {
+            k: [rule if hit(r) else r for r in v if rule or not hit(r)] for k, v in states.items()
+        }
+
+    variants = getattr(base, "token_variants", False)
+    tokens = {k: fix(v) for k, v in base.tokens.items()} if variants else fix(base.tokens)
+    if tokens == base.tokens:
+        raise RuntimeError(f"this Pygments release spells {base.__name__}'s rule differently")
+    extra: dict[str, Any] = {"tokens": tokens, "aliases": [], "filenames": [], "_all_tokens": {}}
+    return type(f"Fleet{base.__name__}", (base,), extra)
+
+
+STOCK_HEREDOC = r"<<-?\s*(\'?)\\?(\w+)[\w\W]+?\2"
+PATCHED = {
+    "bash": patched(BashLexer, STOCK_HEREDOC, (HEREDOC, String.Heredoc)),
+    "bash-heredoc-as-code": patched(BashLexer, STOCK_HEREDOC, None),
+    "csharp": patched(
+        CSharpLexer, r"^(\s*)(\[.*?\])", (ATTRIBUTE, bygroups(Whitespace, Name.Attribute))
+    ),
+}
+
+
+@functools.cache
+def lexer_for(name: str) -> Lexer:
+    if name in PATCHED:
+        return PATCHED[name](stripnl=False, ensurenl=False)
+    return get_lexer_by_name(name, stripnl=False, ensurenl=False)
+
+
+class Starts:
+    """Line and column of a character offset into one text, and the text of a line."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.starts = [0] + [m.end() for m in re.finditer("\n", text)]
+
+    def at(self, offset: int) -> tuple[int, int]:
+        row = bisect_right(self.starts, offset) - 1
+        return row + 1, offset - self.starts[row]
+
+    def line(self, number: int) -> str:
+        end = self.starts[number] - 1 if number < len(self.starts) else len(self.text)
+        return self.text[self.starts[number - 1] : end]
+
+
+def comment_tokens(text: str, lexer: str) -> list[tuple[int, str]]:
+    """Each comment as (offset, text), the pieces PowerShell's lexer splits a comment into joined."""
+    out: list[tuple[int, str]] = []
+    state = ""
+    for offset, kind, value in lexer_for(lexer).get_tokens_unprocessed(text):
+        block = kind in Comment.Multiline
+        joined = out and out[-1][0] + len(out[-1][1]) == offset
+        if joined and ((block and state == "block") or (kind in String.Doc and state)):
+            out[-1] = (out[-1][0], out[-1][1] + value)
+        elif kind in Comment and not (kind in Comment.Preproc or kind in Comment.Hashbang):
+            stripped = value.lstrip(" \t")
+            out.append((offset + len(value) - len(stripped), stripped))
+            state = "block" if block else "line"
+        else:
+            state = ""
+    return out
+
+
+def comment_lines(
+    text: str, lexer: str, spec: dict[str, Any], shift: int = 0
+) -> list[tuple[Line, bool]]:
+    """Every comment line in `text`, and whether it is a documentation comment.
+
+    A comment opening on no marker the language declares belongs to a language embedded in it,
+    such as a script in HTML, and is left out. `shift` is the line `text` starts after.
+    """
+    starts = Starts(text)
+    out: list[tuple[Line, bool]] = []
+    blocks = sorted(spec.get("block", ()), key=lambda b: -len(b[0]))
+    markers = sorted(spec.get("line", ()), key=len, reverse=True)
+    for offset, value in comment_tokens(text, lexer):
+        value = value.rstrip("\r\n")
+        number, col = starts.at(offset)
+        leading = not starts.line(number)[:col].strip()
+        doc = value.startswith(tuple(spec.get("doc_markers", ())))
+        help_form = value.startswith(tuple(spec.get("help_markers", ())))
+        block = next((b for b in blocks if value.startswith(b[0])), None)
+        marker = next((m for m in markers if value.startswith(m)), None)
+        if block is None and marker is None:
+            continue
+        if block is None and marker is not None:
+            body = value[len(marker) :]
+            body = body.lstrip(marker) if spec.get("repeat_marker") else body
+            out.append((Line(number + shift, body.strip(), leading, value, help_form), doc))
+            continue
+        opener, closer, *cont = block or ("", "")
+        for i, part in enumerate(value[len(opener) :].removesuffix(closer).split("\n")):
+            body = part.strip()
+            if i and cont and body.startswith(cont[0]) and body[1:2].isspace():
+                body = body[1:].strip()
+            elif i and cont and body == cont[0]:
+                body = ""
+            row = starts.line(number + i)
+            raw = row[min(col, len(row) - len(row.lstrip())) :] if i else value.split("\n")[0]
+            out.append((Line(number + i + shift, body, leading or i > 0, raw, help_form), doc))
+    return out
+
+
+def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int, str]]:
+    """The YAML scalars under a key or a tag the data names, as (start, end, lexer) offsets."""
+    keys = {r["key"]: r["lexer"] for r in rules if "key" in r}
+    tags = {r["tag"]: r["lexer"] for r in rules if "tag" in r}
+    tokens = list(lexer_for("yaml").get_tokens_unprocessed(text))
+    out: list[tuple[int, int, str]] = []
+    pending: str | None = None
+    i = 0
+    while i < len(tokens):
+        offset, kind, value = tokens[i]
+        i += 1
+        if kind in Name.Tag and value in keys:
+            pending = keys[value]
+        elif kind in Keyword.Type and value in tags:
+            pending = tags[value]
+        elif pending and kind in Punctuation.Indicator and value in "|>":
+            # The rest of the header line, a comment after the indicator included, opens nothing.
+            while i < len(tokens) and "\n" not in tokens[i][2]:
+                i += 1
+            j = i
+            while j < len(tokens) and (
+                tokens[j][1] in Text.Whitespace or tokens[j][1] in Name.Constant
+            ):
+                j += 1
+            if j > i:
+                # The span opens after the header's own line break, so its lines map one to one.
+                start = text.index("\n", offset) + 1
+                out.append((start, max(start, tokens[j - 1][0] + len(tokens[j - 1][2])), pending))
+            i, pending = j, None
+        elif pending and kind in String and value in "'\"":
+            j = i
+            while j < len(tokens) and not (tokens[j][1] in String and tokens[j][2] == value):
+                j += 1
+            if j < len(tokens):
+                out.append((offset + 1, tokens[j][0], pending))
+            i, pending = j + 1, None
+        elif not (kind in Text.Whitespace or kind in Punctuation or kind in Keyword.Type):
+            pending = None
+    return out
+
+
+def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
+    """Comments in the scalars a YAML file hands to another lexer, numbered by the file's lines."""
+    starts = Starts(text)
+    out: list[tuple[Line, bool]] = []
+    for start, end, lexer in nested_spans(text, spec.get("nested", [])):
+        number, col = starts.at(start)
+        inner = language_of(lexer) or {}
+        # The column pad keeps a one-line scalar's comment trailing, and C++ ends a comment on a break.
+        out += comment_lines("x" * col + text[start:end] + "\n", lexer, inner, number - 1)
+    return out
+
+
+def python_docstrings(text: str) -> list[Unit]:
+    """Each docstring, the first statement of a module, class, or function, as its source lines."""
+    starts = Starts(text)
+    units: list[Unit] = []
+    expect, header, depth = True, False, 0
+    tokens = list(lexer_for("python").get_tokens_unprocessed(text))
+    i = 0
+    while i < len(tokens):
+        offset, kind, value = tokens[i]
+        i += 1
+        if kind in Text or kind in Comment:
+            continue
+        if expect and kind in String:
+            j = i
+            while j < len(tokens) and tokens[j][1] in String:
+                j += 1
+            units.append(docstring_unit(starts, offset, tokens[j - 1][0] + len(tokens[j - 1][2])))
+            i = j
+        elif kind in Keyword and value in ("def", "class"):
+            header = True
+        elif kind in Punctuation and value in "([{)]}":
+            depth += 1 if value in "([{" else -1
+        elif header and depth == 0 and kind in Punctuation and value == ":":
+            header, expect = False, True
+            continue
+        expect = False
+    return units
+
+
+def docstring_unit(starts: Starts, start: int, end: int) -> Unit:
+    """One docstring's lines, and the column its text is measured from."""
+    first, col = starts.at(start)
+    last, end_col = starts.at(end)
+    lines = tuple(
+        Line(n, starts.line(n)[(col if n == first else 0) : (end_col if n == last else None)])
+        for n in range(first, last + 1)
+    )
+    before = starts.line(first)[:col].expandtabs(4)
+    column = len(before) if not before.strip() else leading_indent(before) + INDENT_BLOCK
+    return Unit("docstring", lines, column)
+
+
+def blocks(kind: str, found: list[Line]) -> list[Unit]:
+    """Comment lines grouped into runs on the same or the next line, each run one unit."""
+    out: list[list[Line]] = []
+    for line in found:
+        if out and line.number - out[-1][-1].number in (0, 1):
+            out[-1].append(line)
+        else:
+            out.append([line])
+    return [Unit(kind, tuple(group)) for group in out]
+
+
+def line_units(kind: str, lines: list[str], skip: frozenset[int]) -> list[Unit]:
+    """The lines outside `skip`, one unit per run between skipped lines."""
+    runs: list[list[Line]] = [[]]
+    for n, text in enumerate(lines, 1):
+        if n in skip:
+            runs.append([])
+        else:
+            runs[-1].append(Line(n, text))
+    return [Unit(kind, tuple(run)) for run in runs if run]
+
+
+def fenced_lines(lines: list[str]) -> frozenset[int]:
+    """Lines in a fenced example inside a code file's comment or string, quoted rather than stated."""
+    out: set[int] = set()
+    inside = False
+    for n, line in enumerate(lines, 1):
+        fence = bool(CODE_FENCE.match(line))
+        inside ^= fence
+        if fence or inside:
+            out.add(n)
+    return frozenset(out)
+
+
+YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
+
+
+def front_matter_end(lines: list[str]) -> int:
+    """The index after a leading `---` block closed by `---` or `...`, or 0 when there is none."""
+    if not lines or lines[0] != "---":
+        return 0
+    for j in range(1, len(lines)):
+        if lines[j] in ("---", "..."):
+            return j + 1
+        if not YAML_LINE.match(lines[j]):
+            return 0
+    return 0
+
+
+MARKDOWN = MarkdownIt("commonmark").enable("table")
+HTML = BASE["languages"]["markup"]
+TAG = re.compile(r"<[^<>]*>")
+
+
+def extract_markdown(lines: list[str]) -> Extracted:
+    """Markdown units from markdown-it-py's block line maps, front matter lines read alone."""
+    matter = front_matter_end(lines)
+    code: set[int] = set()
+    paragraphs = [
+        Unit("paragraph", (Line(n, line.strip()),))
+        for n, line in enumerate(lines[:matter], 1)
+        if line.strip() and not line.strip().startswith("#")
     ]
-    return sorted(set(keep))
+    markup: list[Line] = []
+    parents: list[str] = []
+    for tok in MARKDOWN.parse("\n".join([""] * matter + lines[matter:])):
+        if tok.nesting:
+            parents = [*parents, tok.type] if tok.nesting == 1 else parents[:-1]
+        if not tok.map:
+            continue
+        first, last = tok.map[0] + 1, tok.map[1]
+        if tok.type in ("fence", "code_block"):
+            code.update(range(first, last + 1))
+        elif tok.type == "html_block":
+            found = [line for line, _ in comment_lines(tok.content, "html", HTML, first - 1)]
+            markup += found
+            inside = {line.number for line in found}
+            for n in range(first, last + 1):
+                span = TAG.sub(lambda m: " " * len(m.group()), lines[n - 1]).strip()
+                if span and n not in inside:
+                    paragraphs.append(Unit("paragraph", (Line(n, span),)))
+        elif tok.type == "inline":
+            markup += inline_comments(tok, lines)
+            if parents[-1:] == ["paragraph_open"] and "blockquote_open" not in parents:
+                spans = enumerate(tok.content.split("\n"))
+                paragraphs.append(
+                    Unit("paragraph", tuple(Line(first + i, s.strip()) for i, s in spans))
+                )
+    skip = frozenset(code)
+    units = [
+        Unit("source", tuple(Line(n, t) for n, t in enumerate(lines, 1))),
+        *line_units("prose", lines, skip),
+        *paragraphs,
+        *blocks("markup", sorted(markup, key=lambda m: m.number)),
+    ]
+    return units, skip, False
 
 
-# A non-ASCII character is typography in one place and meaning in another, so it is read by tier.
-# Escapes, never literals: this file is scanned by the rule it implements.
-#
-# Tier 1 carries no meaning its ASCII form loses, so it always flags.
-TIER1 = {
-    "\u2014": "restructure",
-    "\u2013": "restructure",
-    "\u2018": "'",
-    "\u2019": "'",
-    "\u201c": '"',
-    "\u201d": '"',
-    "\u2026": "...",
-    "\u2022": "-",
-    "\u00a0": " ",
-    "\u2011": "-",
-    "\u2192": "->",
-    "\u21d2": "=>",
-}
+def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
+    """The HTML comments inside one inline token, numbered by the source line each opens on."""
+    out: list[Line] = []
+    number, col = (tok.map or [0, 1])[0] + 1, 0
+    for child in tok.children or ():
+        if child.type == "html_inline" and child.content.startswith("<!--"):
+            # The source line is found by the comment's own text, searched on from the last one.
+            head = child.content.split("\n")[0]
+            for n in range(number, (tok.map or [0, 1])[1] + 1):
+                at = lines[n - 1].find(head, col if n == number else 0)
+                if at >= 0:
+                    number, col = n, at + len(head)
+                    break
+            before = lines[number - 1][: max(col - len(head), 0)]
+            for line, _ in comment_lines(child.content, "html", HTML, number - 1):
+                out.append(line._replace(leading=line.number > number or not before.strip()))
+    return out
 
-# Tier 2 is an operator, and only its use between two words is a finding.
-TIER2 = {
-    "\u2264": "<=",
-    "\u2265": ">=",
-    "\u2260": "!=",
-    "\u00b1": "+/-",
-    "\u2212": "-",
-    "\u00d7": "x",
-    "\u00f7": "/",
-    "\u00b7": ".",
-}
 
-# Tier 3 is a unit symbol whose ASCII form would be a lie, so it never flags.
-TIER3 = frozenset(
-    {
-        "\u00b5",
-        "\u00b0",
-        "\u2126",
-        "\u03c0",
-        "\u00b2",
-        "\u00b3",
-        "\u00a7",
-    }
-)
+def extract(path: Path, text: str, lex: bool = True) -> Extracted:
+    """The units the rules read in this file, and whether it was read as plain text.
 
-# Tier 4 is a fixed set of emoji callout markers, each admitted alone or before VARIATION SELECTOR-16.
-# They are warning, information, check mark, cross mark, memo (note), and light bulb.
-# Every other emoji flags, and so does a selector not directly after one of these.
-TIER4 = frozenset({"\u26a0", "\u2139", "\u2705", "\u274c", "\U0001f4dd", "\U0001f4a1"})
-VARIATION_SELECTOR_16 = "\ufe0f"
+    Without `lex`, a code file's comments and docstrings are left unread, no rule asking for them.
+    """
+    lines = [line.rstrip("\r") for line in text.split("\n")]
+    lexer = lexer_name(path, lines[0])
+    if lexer == "markdown":
+        return extract_markdown(lines)
+    fenced = fenced_lines(lines)
+    units = [
+        Unit("source", tuple(Line(n, t) for n, t in enumerate(lines, 1))),
+        *line_units("code", lines, fenced),
+    ]
+    spec = language_of(lexer)
+    if spec is None or lexer is None or not lex:
+        return units, fenced, lex and path.suffix.lower() not in BASE["files"]["plain"]
+    clean = text.replace("\r\n", "\n")
+    found = comment_lines(clean, lexer, spec)
+    if spec.get("nested"):
+        found = sorted(found + nested_comments(clean, spec), key=lambda f: f[0].number)
+    units += blocks("comment", [line for line, doc in found if not doc])
+    units += blocks("doc", [line for line, doc in found if doc])
+    if spec.get("docstrings"):
+        units += python_docstrings(clean)
+    return units, fenced, False
 
-CHARSET_CLASSIFY = (
-    "classify it in ptr727/ProjectTemplate:"
-    ' the comment-and-doc-style skill\'s "Character set" section'
-    " and prose_lint.py's TIER1, TIER2, TIER3, or TIER4 table"
-)
 
-COMBINING_DIACRITICS = frozenset(chr(c) for c in range(0x300, 0x370)) - {
-    unicodedata.lookup("COMBINING GRAPHEME JOINER")
-}
+# Normalize and evaluate: the rules.
 
-# A digit, unit, or operator on either side makes a tier-2 character the range it describes.
-NUMERIC = re.compile(r"[0-9]")
 
-# The rule bans the construction, not a detectable subset, so a prose semicolon flags by default.
-# A pronoun-keyed pattern found 170 of 493 and missed every imperative splice.
-SEMICOLON = re.compile(r";")
+class Context(NamedTuple):
+    """What a rule knows about the file a unit came from, and the lines a diff scopes it to."""
 
-# A lone semicolon separates a list only between labeled items, as in `Inputs: a, b; outputs: c`.
-# A colon that explains rather than labels otherwise exempted the splice after it.
-LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
-LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
+    path: Path
+    root: Path | None
+    fenced: frozenset[int]
+    language: dict[str, Any]
+    config: Config
+    allowed: set[int] | None = None
 
+
+# The one sentence boundary every reader shares, a terminator that no initial or abbreviation ends.
+# The last dot of an ellipsis ends nothing either.
+TERMINATOR = r"(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)(?:(?<!\.)\.|[!?])"
+# In Markdown a sentence may close inside emphasis, a code span, a quotation, or a bracket.
+SENTENCE_BREAK = re.compile(TERMINATOR + r"[*_`\"')\]]*\s+")
+# On a comment line the second sentence opens on a letter, in either case.
+RUN_ON = re.compile(TERMINATOR + r"\s+(?=[A-Za-z])")
+# Text that closes as a sentence does, or, with the colon, as a lead-in to what follows does.
+SNIPPET_END = re.compile(r"[.!?][\"')\]]?\s*$")
+SENT_END = re.compile(r"[.!?:][\"')\]]?\s*$")
 # A spaced hyphen, the em-dash-style clause break and the paired aside alike.
 # A compound word carries no spaces, and a range is digit-bounded.
-# A list marker has only whitespace before it, once QUOTE_PREFIX blanks a blockquote's `>`.
 DASH = re.compile(r"(?<=[^\s\d])\s+-\s+(?=[^\s\d])")
 QUOTE_PREFIX = re.compile(r"^\s*(?:>\s*)+")
-
 LIST_MARKER_TOKEN = r"(?:[-*+]|([0-9]+)[.)])"
-
 STRONG_LABEL_TOKEN = (
     r"(?P<outer>[*_]?)(?:(?P<star>\*\*)(?P<si>_?)|__(?P<ui>\*?))"
     r"(?(star)[^*\n]|[^_\n])+?(?P<inner_colon>:\s*)?"
     r"(?(star)(?P=si)\*\*|(?P=ui)__)(?P=outer)"
 )
-
-# `- **Label** - explanation` is a definition separator, structurally a colon.
-# Flagging it would restructure the document format rather than the prose.
-# The first dash on such a line is skipped, and any later one still counts.
+# `- **Label** - explanation` is a definition separator, structurally a colon, so its dash is skipped.
 LABEL_DASH = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}[.:]?\s+-\s+")
-
-# The negative lookbehind keeps a word-joining character from starting a repetition:
-# "either/or or must-pair" is one phrase followed by a conjunction, not a doubled word.
+# A bullet's `**Label**:` or `**Label:**` introduces the bullet rather than a list.
+LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inner_colon)|\s*:)")
+# A lone semicolon separates a list only between labeled items, as in `Inputs: a, b; outputs: c`.
+LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
+LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
+LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+# A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
 DUPWORD = re.compile(r"(?<![\w/-])(\w+)\s+\1\b", re.IGNORECASE)
-SENT_END = re.compile(r'[.!?:]["\')\]]?\s*$')
-
-# US English is a repo-wide rule, and the cspell gate reads README and HISTORY only.
-# A British spelling anywhere else in the tree therefore reaches main unchallenged.
-# Each family generates its own inflections, since an inflected spelling is as wrong as its base.
-# A hand-listed family drifts the moment one form is added without the others.
-# The cross product also generates forms no stem takes, which simply never match.
-# `analyses` is omitted, being the US plural of `analysis` as much as a British verb form.
-# `cancelled` is omitted, being the GitHub Actions job status rather than prose.
-ISE_STEMS = (
-    "author",
-    "custom",
-    "initial",
-    "maxim",
-    "minim",
-    "normal",
-    "optim",
-    "organ",
-    "priorit",
-    "recogn",
-    "serial",
-    "special",
-    "standard",
-    "summar",
-    "synchron",
-    "util",
-    "visual",
-)
-ISE_ENDINGS = (
-    ("ise", "ize"),
-    ("ised", "ized"),
-    ("ises", "izes"),
-    ("ising", "izing"),
-    ("isation", "ization"),
-    ("isations", "izations"),
-)
-OUR_STEMS = ("behavi", "col", "fav", "flav", "hon", "lab", "neighb")
-OUR_ENDINGS = ("", "s", "ed", "ing", "al", "ally", "ful", "ite", "ites")
-RE_STEMS = ("cent", "fib", "lit", "met", "theat")
-RE_ENDINGS = (("re", "er"), ("res", "ers"), ("red", "ered"))
-# The spellings that follow no family, each with the US form that replaces it.
-BRITISH_ODD = {
-    "analyse": "analyze",
-    "analysed": "analyzed",
-    "analysing": "analyzing",
-    "artefact": "artifact",
-    "artefacts": "artifacts",
-    "catalogue": "catalog",
-    "catalogues": "catalogs",
-    "catalogued": "cataloged",
-    "defence": "defense",
-    "defences": "defenses",
-    "fulfil": "fulfill",
-    "fulfils": "fulfills",
-    "fulfilment": "fulfillment",
-    "judgement": "judgment",
-    "judgements": "judgments",
-    "labelled": "labeled",
-    "labelling": "labeling",
-    "licence": "license",
-    "licences": "licenses",
-    "modelled": "modeled",
-    "modelling": "modeling",
-    "offence": "offense",
-    "offences": "offenses",
-    "practise": "practice",
-    "practised": "practiced",
-    "practising": "practicing",
-    "programme": "program",
-    "programmes": "programs",
-    "signalled": "signaled",
-    "signalling": "signaling",
-    "travelled": "traveled",
-    "travelling": "traveling",
-    "whilst": "while",
-}
-
-
-def british_spellings() -> dict[str, str]:
-    """Every banned spelling mapped to the US form that replaces it."""
-    words = dict(BRITISH_ODD)
-    for stem in ISE_STEMS:
-        words.update({stem + gb: stem + us for gb, us in ISE_ENDINGS})
-    for stem in OUR_STEMS:
-        words.update({f"{stem}our{end}": f"{stem}or{end}" for end in OUR_ENDINGS})
-    for stem in RE_STEMS:
-        words.update({stem + gb: stem + us for gb, us in RE_ENDINGS})
-    return words
-
-
-BRITISH = british_spellings()
-# Longest alternative first, so an inflection is read whole rather than as its base word.
-BRITISH_RE = re.compile(
-    r"\b(?:" + "|".join(sorted(BRITISH, key=len, reverse=True)) + r")\b", re.IGNORECASE
-)
-
-
-def us_form(found: str) -> str:
-    """The US spelling for a match, carrying the case the source wrote it in."""
-    us = BRITISH[found.lower()]
-    if found.isupper():
-        return us.upper()
-    return us.capitalize() if found[0].isupper() else us
-
-
-# Comment syntax per language, since the rule governs every comment the fleet's types carry.
-# A `doc` marker opens a documentation comment, which CODESTYLE governs and may run to paragraphs.
-# `raw` names the quotes whose strings embed the delimiter by doubling it.
-# `quote_after` names what a quote must follow to delimit a string, empty where any quote does.
-# `escape` is the character that escapes the next one.
-# `escape_in` names the quotes it works inside, and `escape_out` whether it works outside one.
-# `carry` names the forms that survive a newline, so a marker inside one is string content.
-class Syntax(TypedDict):
-    line: tuple[str, ...]
-    block: tuple[tuple[str, str], ...]
-    doc: tuple[str, ...]
-    quotes: str
-    verbatim: bool
-    raw: str
-    quote_after: str
-    escape: str
-    escape_in: str
-    escape_out: bool
-    carry: frozenset[str]
-
-
-PLAIN: Syntax = {
-    "line": (),
-    "block": (),
-    "doc": (),
-    "quotes": "\"'",
-    "verbatim": False,
-    "raw": "",
-    "quote_after": "",
-    "escape": "\\",
-    "escape_in": "\"'",
-    "escape_out": False,
-    "carry": frozenset(),
-}
-HASH: Syntax = {**PLAIN, "line": ("#",)}
-# A shell single-quoted string takes no escape and cannot embed its own delimiter.
-# It is neither doubling nor escaped, so `'a''b'` is two adjacent strings rather than one.
-# Outside a string a backslash escapes the next character, which is how `'\''` embeds a quote.
-# A heredoc runs from its label to the line that repeats it, and either quote form spans lines.
-SHELL: Syntax = {
-    **HASH,
-    "escape_in": '"',
-    "escape_out": True,
-    "carry": frozenset({"quote", "label"}),
-}
-# A YAML block scalar is the multi-line form.
-# A quote delimits a scalar only at the start of a value, so a plain scalar's apostrophe is text.
-# Such a quote must also not carry, since one `don't` would blank the rest of the file.
-# The dash leads `quote_after` so the set does not read as a character range.
-YAML: Syntax = {
-    **HASH,
-    "raw": "'",
-    "quote_after": "-:,[{",
-    "escape_in": '"',
-    "carry": frozenset({"block"}),
-}
-# A TOML literal string is raw the same way, while its basic string keeps the backslash escape.
-TOML: Syntax = {**HASH, "raw": "'", "escape_in": '"'}
-C_LIKE: Syntax = {**PLAIN, "line": ("//",), "block": (("/*", "*/"),), "doc": ("///", "/**")}
-# C# alone carries the verbatim string, where a backslash is ordinary and a doubled quote escapes.
-CSHARP: Syntax = {**C_LIKE, "verbatim": True, "carry": frozenset({"verbatim"})}
-XML_LIKE: Syntax = {**PLAIN, "block": (("<!--", "-->"),), "quotes": '"'}
-# PowerShell escapes with a backtick, and both quote forms double the delimiter to embed it.
-# Its double-quoted string is therefore escaped and doubling at once.
-# Both forms span lines, and the here-string (`@"` to `"@`) is the delimited one.
-POWERSHELL: Syntax = {
-    **PLAIN,
-    "line": ("#",),
-    "block": (("<#", "#>"),),
-    "raw": "\"'",
-    "escape": "`",
-    "escape_in": '"',
-    "escape_out": True,
-    "carry": frozenset({"quote", "here"}),
-}
-# PowerShell documents two comment-based help forms, a `<# ... #>` block and a run of `#` lines.
-# `comment-added` reads the block form as documentation, the way C# declares `///`.
-# The `#` form is a run of ordinary comment lines and is read as the comments it is written as.
-# So a change writing one carries the label, `.SYNOPSIS` being a keyword no author may delete.
-# Telling the two apart needs the `.`-keyword shape, a second grammar in a rule that holds none.
-# The other two comment rules keep the plain spelling, where a block comment is a comment they read.
-POWERSHELL_DOC: Syntax = {**POWERSHELL, "doc": ("<#",)}
-INI: Syntax = {**PLAIN, "line": ("#", ";")}
-LISP_LIKE: Syntax = {**PLAIN, "line": ("#",), "quotes": '"'}
-# CSS has block comments only, so a `//` in it is the scheme separator of a URL.
-CSS: Syntax = {**PLAIN, "block": (("/*", "*/"),)}
-
-SYNTAX: dict[str, Syntax] = {
-    # Python, shell, and the hash-commented configs
-    ".py": HASH,
-    ".sh": SHELL,
-    ".bash": SHELL,
-    ".yml": YAML,
-    ".yaml": YAML,
-    ".toml": TOML,
-    ".tf": HASH,
-    ".gitattributes": HASH,
-    ".gitignore": HASH,
-    # C#, C, and C++
-    ".cs": CSHARP,
-    ".c": C_LIKE,
-    ".cpp": C_LIKE,
-    ".cc": C_LIKE,
-    ".cxx": C_LIKE,
-    ".h": C_LIKE,
-    ".hpp": C_LIKE,
-    ".jsonc": C_LIKE,
-    ".json5": C_LIKE,
-    ".js": C_LIKE,
-    ".ts": C_LIKE,
-    ".css": CSS,
-    ".scss": CSS,
-    # JSON carries comments in practice, which is what JSONC names.
-    # VS Code tasks, launch, devcontainer, and workspace files ship them under a plain .json name.
-    ".json": C_LIKE,
-    ".code-workspace": C_LIKE,
-    # Markup and project files
-    ".md": XML_LIKE,
-    ".html": XML_LIKE,
-    ".xml": XML_LIKE,
-    ".csproj": XML_LIKE,
-    ".props": XML_LIKE,
-    ".targets": XML_LIKE,
-    ".slnx": XML_LIKE,
-    ".resx": XML_LIKE,
-    # PowerShell, INI, and EDA
-    ".ps1": POWERSHELL,
-    ".psm1": POWERSHELL,
-    ".ini": INI,
-    ".cfg": INI,
-    ".conf": INI,
-    ".editorconfig": INI,
-    ".kicad_sch": LISP_LIKE,
-    ".kicad_pcb": LISP_LIKE,
-    ".kicad_mod": LISP_LIKE,
-}
-
-# Extensionless files whose name fixes the syntax.
-# A Dockerfile, a makefile recipe, and a git hook all hold shell, heredocs included.
-BY_NAME = {
-    "dockerfile": SHELL,
-    "makefile": SHELL,
-    "pre-commit": SHELL,
-    "gemfile": HASH,
-    "caddyfile": HASH,
-    ".gitattributes": HASH,
-    ".editorconfig": INI,
-    ".gitignore": HASH,
-}
-
-# JSON proper carries no comments, so a `//` in one is data.
-NO_COMMENTS = frozenset({".lock", ".csv", ".tsv", ".txt", ".svg", ".min"})
-
-
-def syntax_for(path: Path) -> Syntax | None:
-    """The comment syntax for this file, or None when it carries no comments."""
-    name = path.name.lower()
-    if name in BY_NAME:
-        return BY_NAME[name]
-    suffix = path.suffix.lower()
-    if suffix in NO_COMMENTS:
-        return None
-    if suffix in SYNTAX:
-        return SYNTAX[suffix]
-    return HASH if not suffix else None
-
-
-class Comment(NamedTuple):
-    """A comment the parser found, and whether its marker opens the line.
-
-    `raw` carries the comment as written, marker included, where the parser has it. The body has
-    the marker and the space after it taken off, which makes `# N items` and `#N was the cause` the
-    same string, and only the second one names an issue.
-    """
-
-    line: int
-    body: str
-    leading: bool
-    raw: str = ""
-
-
-class Carried(NamedTuple):
-    """A string left open at the end of a line, and what it takes to close it.
-
-    `kind` is `quote` for an ordinary one still open, `verbatim` for the doubled-quote form,
-    `here` for a PowerShell here-string, `label` for a heredoc, and `block` for a YAML block
-    scalar. `text` holds the open quote or the closing token, `indent` a block scalar's parent
-    column, `dedent` whether a heredoc opened with `<<-`, and `queued` the (label, dedent) pairs
-    stacked behind this one on the same line.
-    """
-
-    kind: str = ""
-    text: str = ""
-    indent: int = 0
-    dedent: bool = False
-    queued: tuple[tuple[str, bool], ...] = ()
-
-
-CLEAR = Carried()
-
-# The forms whose whole line is string content, judged before the line is scanned for a marker.
-WHOLE_LINE = frozenset({"here", "label", "block"})
-
-
-def opens_a_string(line: str, i: int, quote_after: str) -> bool:
-    """Whether the quote at `i` delimits a string rather than sitting inside a bare word.
-
-    YAML is the case this exists for: a plain scalar's apostrophe is text, and a quote delimits
-    only at the start of a value. Reading one as an opener masks the rest of the line and hides a
-    real trailing comment. An empty `quote_after` means the syntax has no bare-word form, so every
-    quote delimits.
-    """
-    if not quote_after:
-        return True
-    j = i - 1
-    while j >= 0 and line[j].isspace():
-        j -= 1
-    return j < 0 or line[j] in quote_after
-
-
-def strip_strings(
-    line: str,
-    quotes: str,
-    verbatim: bool = False,
-    carried: Carried = CLEAR,
-    raw: str = "",
-    escape: str = "\\",
-    escape_in: str = "\"'",
-    escape_out: bool = False,
-    quote_after: str = "",
-) -> tuple[str, Carried]:
-    """Blank quoted spans so a comment marker inside a string is not read as one.
-
-    Length-preserving, so an offset into the result is an offset into the line.
-    Two properties are read per string as it opens, because they are independent. A **doubled**
-    string embeds its delimiter by repeating it, and C# spells one with an `@` prefix while shell,
-    PowerShell, YAML, and TOML have forms that always are. An **escaped** string reads one
-    character as escaping the next, which is a backslash almost everywhere and a backtick in
-    PowerShell. PowerShell's double-quoted string is both at once, and the C# verbatim string is
-    doubled and not escaped, so neither property implies the other. Reading an escape a string
-    does not have consumes its closing quote and blanks the rest of the line, and missing one it
-    does have ends the string early on the escaped quote. `carried` reopens a string the line
-    above left open, and the second return says what this line leaves open in turn.
-    """
-    out = list(line)
-    quote = carried.text if carried.kind in ("quote", "verbatim") else ""
-    at_verbatim = carried.kind == "verbatim"
-    doubled = at_verbatim or (quote != "" and quote in raw)
-    escapes = quote != "" and not at_verbatim and quote in escape_in
-    escaped = False
-    i = 0
-    while i < len(line):
-        ch = line[i]
-        if escaped:
-            escaped = False
-            out[i] = " "
-        elif quote and escapes and ch == escape:
-            escaped = True
-            out[i] = " "
-        elif doubled:
-            if ch == quote and line[i + 1 : i + 2] == quote:  # a doubled quote is one character
-                out[i] = out[i + 1] = " "
-                i += 2
-                continue
-            out[i] = " " if ch != quote else ch
-            if ch == quote:
-                quote, doubled, escapes, at_verbatim = "", False, False, False
-        elif quote:
-            out[i] = " " if ch != quote else ch
-            if ch == quote:
-                quote, escapes = "", False
-        elif escape_out and ch == escape:  # outside a string it escapes the next character
-            escaped = True
-            out[i] = " "
-        elif ch in quotes and opens_a_string(line, i, quote_after):
-            quote = ch
-            # An interpolated one is spelled either way round, so read the whole prefix.
-            # Only the double-quoted form has a verbatim spelling, so a char literal is ordinary.
-            start = i
-            while start > 0 and line[start - 1] in "@$":
-                start -= 1
-            at_verbatim = verbatim and ch == '"' and "@" in line[start:i]
-            doubled = at_verbatim or ch in raw
-            escapes = not at_verbatim and ch in escape_in
-        i += 1
-    if not quote:
-        return "".join(out), CLEAR
-    return "".join(out), Carried("verbatim" if at_verbatim else "quote", quote)
-
-
-# A shell heredoc opener, read off masked code so a `<<` inside a string does not open one.
-# `<<<` is a bash here-string, which is one line, so both lookarounds exclude it.
-HEREDOC = re.compile(r"(?<!<)<<(-?)(?!<)")
-HEREDOC_LABEL = re.compile(r'\s*(?:"([^"\n]+)"|\'([^\'\n]+)\'|([A-Za-z_][A-Za-z0-9_]*))')
-
-# A PowerShell here-string opens on `@"` or `@'` as the last thing on its line.
-HERE_STRING = re.compile(r'@(["\'])\s*$')
-
-# A YAML block scalar: a value that is `|` or `>`, with the optional chomping and indent indicators.
-# Anchored to the `:` or the sequence dash, so a plain scalar merely ending in a pipe is not one.
-BLOCK_SCALAR = re.compile(r"(?::|^\s*-)\s*[|>][+-]?\d?\s*$")
-
-# `run:` holds a script rather than data, so its `#` lines are comments this rule governs.
-# Anchored to the key position, since a key merely ending in the word (`dry run:`) is data.
-SCRIPT_SCALAR = re.compile(r"^\s*(?:-\s+)?run:\s*[|>]")
-
-
-def opened_string(spec: Syntax, head: str, line: str) -> Carried:
-    """The multi-line string this line's code opens, for the forms this syntax carries.
-
-    `head` is the masked code ahead of any comment, so a marker inside a string cannot open one.
-    A quoted heredoc label is read off the raw line at the same offset, since masking blanks it.
-    """
-    if "label" in spec["carry"]:
-        opens = [
-            (HEREDOC_LABEL.match(line, h.end()), h.group(1) == "-") for h in HEREDOC.finditer(head)
-        ]
-        labels = [(next(g for g in m.groups() if g), dedent) for m, dedent in opens if m]
-        if labels:
-            return Carried("label", labels[0][0], 0, labels[0][1], tuple(labels[1:]))
-    if "here" in spec["carry"]:
-        m = HERE_STRING.search(head)
-        if m:
-            return Carried("here", m.group(1) + "@")
-    if "block" in spec["carry"] and BLOCK_SCALAR.search(head) and not SCRIPT_SCALAR.search(head):
-        return Carried("block", "", len(line) - len(line.lstrip()))
-    return CLEAR
-
-
-def resume_at(carry: Carried, line: str) -> tuple[Carried, int | None]:
-    """Where code resumes on this line, or None while the whole line is still string content.
-
-    A heredoc's terminator is the label on a line of its own, so that line is content too. A
-    here-string gives back what follows its closer, matching how a closing quote does. A block
-    scalar ends by dedent rather than by a delimiter, on a line that is ordinary code.
-    """
-    if carry.kind == "label":
-        # `<<-` strips leading tabs from the terminator, and a plain `<<` needs it at column 0.
-        # An indented line is body content under either form, so ending there resumes inside it.
-        if (line.lstrip("\t") if carry.dedent else line) != carry.text:
-            return carry, None
-        if carry.queued:
-            head, dedent = carry.queued[0]
-            return Carried("label", head, 0, dedent, carry.queued[1:]), None
-        return CLEAR, None
-    if carry.kind == "here":
-        # The closing token starts the line, so an indented one is here-string content.
-        if not line.startswith(carry.text):
-            return carry, None
-        return CLEAR, len(carry.text)
-    if not line.strip() or len(line) - len(line.lstrip()) > carry.indent:
-        return carry, None  # a blank line belongs to the scalar as well
-    return CLEAR, 0
-
-
-# A pragma, shebang, or divider is machinery rather than prose.
-# A tool's name is anchored at the body's start, since a comment naming one mid-sentence is prose.
-NOT_PROSE = re.compile(
-    r"^(?:!|\s*[-=#*/<>]+\s*$|ruff:|mypy:|(?i:flake8)[:=]|v\d+(?:\.\d+)*$"
-    r"|(?:(?i:noqa|nopep8)|type:\s*ignore|pylint|shellcheck|markdownlint|omit from toc|prettier|eslint"
-    r"|SPDX|Copyright)\b|(?i:c?spell|spell-?checker):)"
-)
-
-TRAILING_DIRECTIVE = re.compile(r"#\s*(?:(?i:noqa|nopep8)|type:\s*ignore)\b|\bpylint:")
-
-# A comment that is only a URI is a reference, not a sentence, so neither case nor wrap applies.
-# It cannot be capitalized or restructured without corrupting the address it exists to carry.
-# A URI inside a sentence is still prose, so the whole body has to be the address and nothing else.
-# The angle brackets are matched as a pair or not at all.
-# One bracket alone is a typo, and exempting it would hide the typo rather than report it.
-# The scheme is case-insensitive per RFC 3986, so an uppercase one is the same reference.
-BARE_URI = re.compile(r"^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)$", re.IGNORECASE)
-
-# Two sentences on one line, guarded against an abbreviation, an initial, or a dotted identifier.
-# The initial guard anchors on a word boundary, so `J. Smith` reads as one name.
-# A sentence ending in an acronym such as CI is two sentences and has to be caught.
-# The second sentence may open in either case, since a lowercase opening is still a second sentence.
-# An ellipsis marks an elision inside one sentence, so its closing dot is not a terminator.
-# The guard is that a dot preceded by a dot never terminates.
-# That reads a schematic such as `... end_of_line = lf` as the one line it is.
-# Splitting such a line would break the fragment it exists to show.
-# It is scoped to the dot alternative, since a `?` or `!` after an ellipsis does terminate.
-# Guarding the whole class would read `Really...? Yes.` as one sentence and miss a real run-on.
-RUN_ON = re.compile(
-    r"(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)(?:(?<!\.)\.|[!?])\s+(?=[A-Za-z])"
-)
-
-# A step marker opening a comment is a label on the sentence that follows, not a sentence of its own.
-# `# 1. Deploy the hook.` is one sentence, and reading the marker's dot as a terminator made it two.
-# It is stripped before the sentence checks so both the run-on and the opening-case test see the prose.
+# A step marker is a label on the sentence that follows, so its dot terminates nothing.
 ENUM_PREFIX = re.compile(r"^\d+[.)]\s+")
-
-# A comment body that is one token closing on a colon is a key or a heading, not a sentence.
-# `# ignore:` above a commented-out block is disabled configuration.
-# Capitalizing it corrupts the key a reader uncomments, so the rule would damage the file.
-# The token count carries the test, since a colon ending real prose always has words before it.
+# A body that is only a URI is a reference, and a lone key is disabled configuration.
+BARE_URI = re.compile(r"^(?:<(?:https?|ftp)://[^>\s]+>|(?:https?|ftp)://[^>\s]+)$", re.IGNORECASE)
 KEY_ONLY = re.compile(r"^\S+:$")
-
-# One key, a colon, and one value is a line of configuration a reader pastes, not a sentence.
-# `comment-case` reads the first character, so every key opening lowercase was rejected.
-# The keys that passed are the ones opening on anything else, and each changes what is pasted.
-# A capitalized key changes the key, and a quoted or underscored one changes how it is written.
-# A leading dash is a different YAML construct from the mapping the line belongs to.
-# The same snippet already passes inside a Markdown fence, which is what makes this a gap.
-# A value carrying a space is not exempt, which keeps the shape to a key-value line.
-# A body ending as a sentence is judged as one, the exemption pairing a guard with its anchor.
-# `is_tool_directive` pairs one for the same reason, an anchor alone having exempted such a body.
-# The exemption reads `SNIPPET_END` rather than `SENT_END`, whose set carries the colon.
-# A colon ends configuration rather than a sentence here, which is why `KEY_ONLY` exists above.
-# Read with the colon in, `address: fd00::` and `image: ghcr.io/o/n:` were refused.
-# The exemption costs two detections and the guard refuses one shape, all stated here.
-# The common cost is a marker comment, `todo: refactor` and `note: obsolete` being exempt now.
-# The second is a two-token body with no terminator inside a sentence that wraps.
-# A sentence wrapping through one reports the line under it for case instead of the wrap.
-# A sentence ending on one loses its wrap with nothing reported at all.
-# The guard refuses a value ending in a full stop, an FQDN being the case.
-# Dropping the full stop from `SNIPPET_END` leaves `!` and `?` guarded.
-# It re-exempts a wrapped sentence whose continuation ends in one, which the guard is for.
-# So the full stop stays in that set, and the refusal of an FQDN stands with it.
-# This repository carries no instance of any of the three, so measuring it bounds none of them.
-# `is_comment_prose` deliberately does not carry this exemption, unlike its three siblings.
-# `comment-added` reads a body of any case, so exempting the shape there frees `Owner: alice`.
-# Pricing an added comment is what that rule is for.
+# One key with one value is a line a reader pastes, unless it closes as a sentence does.
 SNIPPET = re.compile(r"^\S+:\s+\S+$")
-SNIPPET_END = re.compile(r"[.!?][\"')\]]?\s*$")
-
-# A key, a separator, a space, and the rest of the line, the shape `SNIPPET` could not reach.
-# `SNIPPET` bounds the value at one whitespace-free token, so three real shapes split on a space.
-# A YAML tag value splits on the space between the tag and its argument.
-# A quoted value carrying a space splits on that space.
-# A key-value line with a trailing comment splits on the space before the marker.
-# None of the three is prose under any reading, and each is a line a reader pastes.
-# `=` is accepted beside `:` because the spaced form spells the same shape, TOML writing one.
-# The space after the separator is required, which is what keeps a bare URI from being a key.
-# So the unspaced `key=value` an environment file writes is not this shape and is not exempt.
+# A key, a separator, a space, and a value read as configuration only in a run of two or more.
+# One such line alone is as often a marker comment like `note: obsolete`.
 CONFIG_LINE = re.compile(r"^\S+\s*[:=]\s+\S")
-
-# How many configuration lines a contiguous comment run needs before the run is exempt.
-# `CONFIG_LINE` alone reads a marker comment as configuration.
-# `note: obsolete` and `todo: refactor` carry exactly the shape of one.
-# So an anchor read line by line would exempt every marker comment in the tree.
-# A marker comment is one line and a configuration block is not.
-# The count is what separates them, and two is the smallest count that does.
 CONFIG_RUN_MIN = 2
-
-# A label opening a definition names the thing being defined, so it is not the sentence's first word.
-# `#   publish - 'true' when ...` documents an output named `publish`.
-# Capitalizing it renames the output the workflow declares.
-# This is the comment spelling of the `- **Label** - text` construct LABEL_DASH exempts in Markdown.
-# It is tested where a line opens a definition, never where one continues a wrapped sentence.
-# A continuation whose first word is followed by a spaced dash is a parenthetical instead.
-# That is the construction the dash rule exists to catch, so exempting it would hide the violation.
-# Both live instances in the tree are continuations, which is what scoped this to the case branch.
+# A label opening a definition names the thing defined, so its lowercase is no sentence opening.
 COMMENT_LABEL = re.compile(r"^[A-Za-z_][\w.-]*\s+-\s+")
-CODE_FENCE = re.compile(r"^\s*(```|~~~)")
-
-# A directive a tool reads, exempt because deleting one changes what the file does.
-# Anchored at the body's start, since a comment that merely names one of these is prose.
-# Read by `comment-added`, `comment-case`, and `comment-wrap` rather than added to the shared `NOT_PROSE`.
-# So a name here is exempt from the first two rules, and a name in `NOT_PROSE` from every reader.
-# `comment-wrap` only declines to read a directive line as a sentence that wraps.
-TOOL_DIRECTIVE = re.compile(
-    r"^(?:syntax=|escape=|fmt:\s*(?:on|off|skip)\b|pragma:|nosec\b|checkov:|hadolint\b"
-    r"|renovate:|yaml-language-server:|-\*-\s*coding[:=]|pyright:|isort:"
-    r"|codespell:|doctest:)"
-)
-
-# The pull request label that stands `comment-added` down.
-# The workflow and `repo-config/labels.json` spell it out separately, which a case asserts.
-COMMENT_LABEL_NAME = "comments"
-
-# The environment form of the same override, read here rather than passed by each caller.
-# A hook entry is often one command string with nowhere to put a conditional flag.
-# A downstream repository also runs this file straight from the hub, unedited.
-# So a caller-side escape would reach only the hooks somebody edited to carry one.
-COMMENT_ENV_NAME = "PROSE_ALLOW_COMMENTS"
-
-# The spellings that read as off.
-# The composite action's own input spells its off value `false`.
-# A value mirroring that here stood the rule down at every commit while it was exported.
-COMMENT_ENV_OFF = frozenset({"", "0", "false", "no", "off"})
-
-# Both are correct English. `the the` is always a typo, so it is not here.
-DUP_ALLOW = frozenset({"that that", "had had"})
+INDENT_BLOCK = 4
 
 
 def strip_inline_code(s: str) -> str:
@@ -1733,330 +948,8 @@ def strip_inline_code(s: str) -> str:
 
 
 def strip_quoted(s: str) -> str:
-    """Blank double-quoted spans, which hold a quotation rather than agent-authored prose.
-
-    A rule that states its own counter-example quotes the construction it bans, so scanning the
-    quotation reports the doc that documents the rule. Markdown only: in data and code files a
-    double quote is structural, and blanking those spans would hide the prose inside them.
-    A terminator ending the quotation survives outside the blank, since US English closes a
-    sentence inside the quotes and blanking it merged that sentence into its neighbor.
-    """
-
-    def blank(m: re.Match[str]) -> str:
-        inner = m.group(1)
-        return '""' + (inner[-1] if inner and inner[-1] in ".!?" else "")
-
-    return re.sub(r'"([^"\n]*)"', blank, s)
-
-
-# A bullet's `**Label**:` opens the text the same way `- **Label** -` does.
-# Its colon introduces the bullet rather than a list, and reading it as one excused the splice.
-# The colon is written inside the emphasis as often as outside it, and both spell one construct.
-# Matching `**Label**:` alone left `**Label:**` announcing a list it never announced.
-LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inner_colon)|\s*:)")
-
-# A sentence boundary inside one line, so a list exemption is scoped to the sentence holding it.
-# The guards are the run-on rule's, so an initial or an abbreviation ends nothing.
-# The trailing class is the emphasis or bracket a Markdown sentence closes inside.
-# Reading a bare `. ` instead left `.**` and `.)` joining a bullet's every sentence into one span.
-SENTENCE_BREAK = re.compile(
-    r"(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)"
-    r'[.!?][*_`"\')\]]*\s+'
-)
-
-# The word cap one Markdown prose sentence may reach, the first structural house-style check.
-# ASD-STE100's descriptive cap is the one adopted, since no pattern tells a procedure step apart.
-# Opt-in like sentence-split, because the corpus predates the cap and a default gate would fail it.
-SENTENCE_WORD_CAP = 25
-
-
-def sentences(span: str) -> list[str]:
-    """The span split at its sentence boundaries, empty pieces dropped.
-
-    A list lives inside one sentence, so the sentence is the unit an exemption may be judged on.
-    Judged over a whole bullet instead, a colon anywhere before the first semicolon marked the
-    bullet a list and exempted every semicolon after it, however plainly one joined two clauses.
-    The colon and the semicolon did not have to be near each other, or related at all.
-    """
-    return [s for s in SENTENCE_BREAK.split(span) if s.strip()]
-
-
-LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
-ITEM_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}(?:\s|$)")
-INDENT_BLOCK = 4
-
-
-def strip_list_marker(text: str) -> str:
-    """The text without a leading bullet or number marker, which is no word of the sentence.
-
-    Every reader hands its item text through here, so an item of exactly the cap stays at the cap.
-    """
-    return LIST_MARKER.sub("", text, count=1).strip()
-
-
-def indented_past(indent: int, reference: int) -> bool:
-    """Whether a line sits far enough past its reference indent to be an indented block."""
-    return indent >= reference + INDENT_BLOCK
-
-
-SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
-THEMATIC_BREAK = re.compile(r"^ {0,3}([-*_])(?:\s*\1){2,}\s*$")
-TABLE_DELIMITER = re.compile(
-    r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$|^\s*\|\s*:?-+:?\s*\|?\s*$"
-)
-HTML_COMMENT = re.compile(r"^\s*<!--")
-INTERRUPTING_TAGS = (
-    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details"
-    "|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head"
-    "|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p"
-    "|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
-)
-RAW_TEXT_TAGS = "pre|script|style|textarea"
-STANDALONE_TAGS = "br|img|picture"
-BLOCK_SPACE = r"[ \t\n\v\f\r]"
-TAGS_ONLY = re.compile(r"^\s*(?:<[^<>]*>\s*)+$")
-OPENING_TAG = re.compile(
-    rf"^\s*(?:</?({INTERRUPTING_TAGS})(?={BLOCK_SPACE}|/?>|$)"
-    rf"|<({RAW_TEXT_TAGS})(?={BLOCK_SPACE}|>|$)"
-    rf"|</?(?:{STANDALONE_TAGS})\b)",
-    re.IGNORECASE,
-)
-YAML_LINE = re.compile(r"^(?:\s*$|\s+\S|\s*-(?:\s|$)|#|[^\s:#][^:]*:(?:\s.*)?$)")
-TAG = re.compile(r"<[^<>]*>")
-
-
-def front_matter_end(lines: list[str]) -> int:
-    """The index after a leading `---` block closed by `---` or `...`, or 0 when there is none."""
-    if not lines or lines[0].rstrip("\r") != "---":
-        return 0
-    for j in range(1, len(lines)):
-        if lines[j].rstrip("\r") in ("---", "..."):
-            return j + 1
-        if not YAML_LINE.match(lines[j].rstrip("\r")):
-            return 0
-    return 0
-
-
-def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
-    """The text with each code span and quotation blanked to one token of the same length.
-
-    A code span may wrap across lines, so backticks pair over the joined block.
-    A quotation pairs within one line, so a stray inch mark never blanks prose on later lines.
-    The length is kept so an offset in the result is still an offset in the original.
-    A terminator ending a quotation survives, as `strip_quoted` keeps it.
-    """
-
-    def code(m: re.Match[str]) -> str:
-        return "`" * len(m.group())
-
-    def quote(m: re.Match[str]) -> str:
-        inner = m.group(1)
-        if inner and inner[-1] in ".!?":
-            return '"' * (len(inner) + 1) + inner[-1]
-        return '"' * len(m.group())
-
-    text = re.sub(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", code, text, flags=re.DOTALL)
-    out = list(text)
-    for start, length in zip(starts, lengths, strict=True):
-        masked = re.sub(r'"([^"]*)"', quote, text[start : start + length])
-        out[start : start + length] = masked
-    return "".join(out)
-
-
-def over_cap_findings(
-    block: list[tuple[int, str]], allowed: set[int] | None = None
-) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in one block of `(line number, text)` pairs, each judged whole.
-
-    The pairs are joined before the split, so a sentence wrapped across lines is counted once.
-    Both the Markdown reader and the comment reader hand their blocks here.
-    """
-    if not block:
-        return []
-    raw = ""
-    starts: list[int] = []
-    for _, span in block:
-        if raw:
-            raw += " "
-        starts.append(len(raw))
-        raw += span
-    numbers = [n for n, _ in block]
-    lengths = [len(span) for _, span in block]
-    text = mask_code_and_quotes(raw, starts, lengths)
-    out: list[tuple[int, str, str]] = []
-    pos = 0
-    for m in [*SENTENCE_BREAK.finditer(text), None]:
-        end = m.start() if m else len(text)
-        words = len(text[pos:end].split())
-        if words > SENTENCE_WORD_CAP:
-            first = bisect_right(starts, pos) - 1
-            last = bisect_right(starts, max(end - 1, pos)) - 1
-            rows = numbers[first : last + 1]
-            hit = rows[0] if allowed is None else next((n for n in rows if n in allowed), 0)
-            if hit:
-                msg = (
-                    f"{words} words in one sentence -> "
-                    f"sentences of {SENTENCE_WORD_CAP} words or fewer"
-                )
-                out.append((hit, "sentence-length", msg))
-        if m:
-            pos = m.end()
-    return out
-
-
-def sentence_length_findings(
-    lines: list[str], allowed: set[int] | None = None
-) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in Markdown prose, each judged whole.
-
-    A paragraph, or a list item with its continuation lines, is one block joined before the split.
-    Block detection is a heuristic approximation of CommonMark, fit for an opt-in check.
-    Parser edge cases beyond the covered ones are accepted rather than chased.
-    A sentence is reported on its first line, so the finding sits where the sentence starts.
-    Given the changed lines, it is reported on its first changed line, or dropped when none changed.
-    That keeps an edit to a continuation line from hiding the sentence it pushed over the cap.
-    """
-    out: list[tuple[int, str, str]] = []
-    block: list[tuple[int, str]] = []
-    block_is_item = False
-
-    def flush() -> None:
-        nonlocal block_is_item
-        block_is_item = False
-        out.extend(over_cap_findings(block, allowed))
-        block.clear()
-
-    start = front_matter_end(lines)
-    for i, line in enumerate(lines[:start], 1):
-        span = line.rstrip("\r").strip()
-        if span and not span.startswith("#"):
-            block.append((i, span))
-            flush()
-    in_fence = in_comment = in_table = in_code = in_list = False
-    item_offset = block_offset = 0
-    code_indent = INDENT_BLOCK
-    prev_blank = True
-    for i, line in enumerate(lines[start:], start + 1):
-        line = line.rstrip("\r")
-        blank = not line.strip()
-        was_blank, prev_blank = prev_blank, blank
-        if in_comment:
-            in_comment = "-->" not in line
-            continue
-        if CODE_FENCE.match(line):
-            in_fence = not in_fence
-            flush()
-            if not line.startswith((" ", "\t")):
-                in_list = False
-            continue
-        if in_fence:
-            continue
-        if blank:
-            flush()
-            in_table = False
-            continue
-        indent = leading_indent(line)
-        if in_code:
-            if indent >= code_indent:
-                continue
-            in_code = False
-        if in_table:
-            continue
-        marker = ITEM_MARKER.match(line)
-        number = marker.group(1) if marker else None
-        empty = marker is not None and not line[marker.end() :].strip()
-        is_item = bool(
-            marker
-            and (number is None or in_list or not block or number.lstrip("0") == "1")
-            and (not empty or not block or indent < block_offset)
-        )
-        if not block and was_blank:
-            code_indent = INDENT_BLOCK + (item_offset if in_list else 0)
-            if indent >= code_indent and not is_item:
-                in_code = True
-                continue
-        if indent == 0 and not is_item:
-            in_list = False
-        if HTML_COMMENT.match(line):
-            flush()
-            in_comment = "-->" not in line
-            continue
-        tag = OPENING_TAG.match(line)
-        if tag and block and indented_past(indent, block_offset):
-            tag = None
-        if tag and TAGS_ONLY.match(line):
-            if tag.group(1) or tag.group(2):
-                flush()
-                continue
-            if not block:
-                continue
-        elif tag and (tag.group(1) or tag.group(2)):
-            flush()
-            text = TAG.sub(lambda m: " " * len(m.group()), line).strip()
-            if text:
-                block.append((i, text))
-                flush()
-            continue
-        if TABLE_DELIMITER.match(line) and "|" in line:
-            if block and block[-1][0] == i - 1:
-                block.pop()
-            flush()
-            in_table = True
-            continue
-        if len(block) == 1 and not block_is_item and SETEXT_UNDERLINE.match(line):
-            block.clear()
-            continue
-        if THEMATIC_BREAK.match(line) or SETEXT_UNDERLINE.match(line):
-            if not block and line.strip() == "-":
-                in_list, item_offset = True, indent + 2
-            flush()
-            continue
-        span = line.strip()
-        if span.startswith(("|", ">", "#")) or re.match(r"^\[[^\]]+\]:", span):
-            flush()
-            continue
-        if is_item:
-            flush()
-            in_list = True
-            item_offset = content_offset(line, marker) if marker else 0
-            if empty:
-                continue
-            block_is_item = True
-            span = strip_list_marker(span)
-        if not block:
-            block_offset = item_offset if in_list else 0
-        block.append((i, span))
-    flush()
-    return out
-
-
-def list_spans(s: str) -> list[str]:
-    """Split a line into the spans that each hold their own list.
-
-    A Markdown table row is a record of fields rather than one sentence, so judging the row whole
-    let a comma in one column excuse a semicolon in another.
-    """
-    cells = s.strip().strip("|").split("|") if s.lstrip().startswith("|") else [s]
-    return [LABEL_COLON.sub("", cell) for cell in cells]
-
-
-def in_numeric_context(line: str, pos: int) -> bool:
-    """Whether the character at `pos` sits in an expression rather than in a sentence.
-
-    The discriminator is what flanks it once spaces are skipped. A digit, a tier-3 unit, or
-    another operator on either side makes it the range it describes. A word on both sides makes
-    it prose, which is the case the ASCII form is for.
-    """
-
-    def neighbor(step: int) -> str:
-        j = pos + step
-        while 0 <= j < len(line) and line[j].isspace():
-            j += step
-        return line[j] if 0 <= j < len(line) else ""
-
-    return any(
-        c and (NUMERIC.match(c) or c in TIER3 or c in TIER2) for c in (neighbor(-1), neighbor(1))
-    )
+    """Blank a Markdown quotation, keeping the terminator US English closes a sentence inside."""
+    return re.sub(r'"([^"\n]*?)([.!?]?)"', r'""\2', s)
 
 
 def starts_lowercase(text: str) -> bool:
@@ -2064,19 +957,37 @@ def starts_lowercase(text: str) -> bool:
     return text[:1].islower() and text[0] not in TIER4
 
 
-def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
-    """Every non-ASCII character on the line, judged against its tier.
+def leading_indent(line: str) -> int:
+    """The columns of leading space on a source line, tabs read as four."""
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
 
-    An unrecognized character is reported rather than passed. A gate that allows whatever it does
-    not recognize stops gating as the character set grows. A Latin letter, with any U+0300-U+036F
-    diacritic it carries, is the one exception, since it may spell a recorded name. A letter of
-    another script, a compatibility form such as a ligature, any other mark, and a diacritic
-    standing alone are still reported, so the gate covers the Latin part of that rule and nothing
-    wider.
-    """
-    out: list[tuple[int, str, str]] = []
-    carrier = False
-    marker = False
+
+def strip_list_marker(text: str) -> str:
+    return LIST_MARKER.sub("", text, count=1).strip()
+
+
+def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
+    """Each line's number, its text without code spans, and that text without quotations either."""
+    for line in unit.lines:
+        txt = strip_inline_code(line.text)
+        prose = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), strip_quoted(txt), count=1)
+        yield line.number, txt, prose
+
+
+def in_numeric_context(line: str, pos: int) -> bool:
+    """Whether a tier-2 character is flanked by a digit, a unit, or an operator, past any spaces."""
+    flanks = (line[:pos].rstrip()[-1:], line[pos + 1 :].lstrip()[:1])
+    return any(c and (c in "0123456789" or c in TIER3 or c in TIER2) for c in flanks)
+
+
+COMBINING_DIACRITICS = frozenset(map(chr, range(0x300, 0x370))) - {chr(0x34F)}
+
+
+def charset_findings(lineno: int, line: str) -> list[Finding]:
+    """Each non-ASCII character judged by its tier, a Latin letter and its diacritics passed."""
+    out: list[Finding] = []
+    carrier = marker = False
     for pos, ch in enumerate(line):
         after_marker, marker = marker, ch in TIER4
         if ch.isascii():
@@ -2086,9 +997,8 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
             carrier = False
             continue
         name = unicodedata.name(ch, f"U+{ord(ch):04X}")
-        category = unicodedata.category(ch)
         if (
-            category.startswith("L")
+            unicodedata.category(ch).startswith("L")
             and name.startswith("LATIN ")
             and not unicodedata.decomposition(ch).startswith("<")
         ):
@@ -2097,677 +1007,457 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
         if carrier and ch in COMBINING_DIACRITICS:
             continue
         carrier = False
-        if ch in TIER3:
-            continue
+        code = f"{ord(ch):04X}"
         if ch in TIER1:
             fix = TIER1[ch]
             hint = "restructure the sentence" if fix == "restructure" else f"use '{fix}'"
-            out.append((lineno, "charset", f"{name} (U+{ord(ch):04X}) -> {hint}"))
-        elif ch in TIER2:
-            if not in_numeric_context(line, pos):
-                out.append(
-                    (lineno, "charset", f"{name} (U+{ord(ch):04X}) in prose -> use '{TIER2[ch]}'")
-                )
-        else:
+            out.append(finding(lineno, "charset", name=name, code=code, hint=hint))
+        elif ch in TIER2 and not in_numeric_context(line, pos):
             out.append(
-                (
-                    lineno,
-                    "charset-unknown",
-                    f"{name} (U+{ord(ch):04X}) is in no tier - {CHARSET_CLASSIFY}",
-                )
+                finding(lineno, "charset", "charset-tier2", name=name, code=code, fix=TIER2[ch])
             )
+        elif ch not in TIER2 and ch not in TIER3:
+            out.append(finding(lineno, "charset-unknown", name=name, code=code))
     return out
 
 
-def python_comments(raw: str) -> list[Comment] | None:
-    """Every comment in Python source, or None if it will not parse.
+def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
+    return [f for line in unit.lines for f in charset_findings(line.number, line.text)]
 
-    `tokenize` rather than a regex because a `#` inside a string literal is not a comment, and a
-    trailing comment is one a line-anchored pattern never sees.
-    """
-    out: list[Comment] = []
-    try:
-        source = io.StringIO(raw)
-        for tok in tokenize.generate_tokens(source.readline):
-            if tok.type == tokenize.COMMENT:
-                col = tok.start[1]
-                leading = not tok.line[:col].strip()
-                body = tok.string.lstrip("#").strip()
-                out.append(Comment(tok.start[0], body, leading, tok.string))
-    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
-        return None
+
+def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
+    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one."""
+    out: list[Finding] = []
+    for n, _txt, line in prose_lines(unit):
+        cells = line.strip().strip("|").split("|") if line.lstrip().startswith("|") else [line]
+        pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
+        for sentence in (s for s in pieces if s.strip()):
+            head, _, tail = sentence.partition(";")
+            listish = sentence.count(";") > 1 or (
+                LABELED_ITEM.match(LIST_MARKER.sub("", head, count=1)) is not None
+                and LABELED_ITEM.match(tail) is not None
+            )
+            if not (listish and "," in sentence):
+                out += [finding(n, "semicolon")] * sentence.count(";")
     return out
 
 
-PARAMETER_HASH = ("$", "${")
+def rule_dash(unit: Unit, ctx: Context) -> list[Finding]:
+    out: list[Finding] = []
+    for n, _txt, line in prose_lines(unit):
+        skip = LABEL_DASH.match(line)
+        out += [
+            finding(n, "dash") for m in DASH.finditer(line) if not (skip and m.start() < skip.end())
+        ]
+    return out
 
 
-def line_marker(line: str, masked: str, marker: str, pos: int) -> int:
-    """Where the first line comment marker at or after `pos` sits, or -1 when there is none.
-
-    A `#` right after `$` or `${` names a parameter, as in `$#` or `${#items[@]}`, not a comment.
-    The prefix is read off the raw line, since an escaped `$` is blanked in the masked one.
-    """
-    where = masked.find(marker, pos)
-    while marker == "#" and where >= 0 and line[:where].endswith(PARAMETER_HASH):
-        where = masked.find(marker, where + 1)
-    return where
+def unit_texts(unit: Unit, ctx: Context) -> Iterable[tuple[int, str]]:
+    """Each unfenced line's prose: Markdown without code spans or quotations, a comment as written."""
+    for line in unit.lines:
+        if line.number in ctx.fenced:
+            continue
+        text = strip_quoted(strip_inline_code(line.text)) if unit.kind == "prose" else line.text
+        yield line.number, strip_inline_code(text)
 
 
-def extracted_comments(path: Path, lines: list[str], spec: Syntax | None = None) -> list[Comment]:
-    """Every comment in the file as (line, text, starts-the-line), for any syntax the fleet uses.
+def rule_dupword(unit: Unit, ctx: Context) -> list[Finding]:
+    """A duplicated word, each comment judged on its own so a neighbor's last word is no repeat."""
+    allow = ctx.config.exempt["dupword_allow"]
+    return [
+        finding(n, "dupword", word=m.group(1))
+        for n, text in unit_texts(unit, ctx)
+        for m in DUPWORD.finditer(text)
+        if m.group(0).lower() not in allow
+    ]
 
-    A marker inside a string literal is not a comment, so each line is scanned with quoted spans
-    blanked first. A documentation comment is skipped: CODESTYLE governs those and permits the
-    paragraphs this rule forbids.
 
-    `spec` overrides what the path resolves to, which is how one rule reads a file's comments by a
-    definition of its own without changing what every other rule sees.
-    """
-    if spec is None:
-        spec = syntax_for(path)
-    if spec is None:
+def rule_spelling(unit: Unit, ctx: Context) -> list[Finding]:
+    joined: dict[int, list[str]] = {}
+    for n, text in unit_texts(unit, ctx):
+        joined.setdefault(n, []).append(text)
+    out: list[Finding] = []
+    for n, texts in joined.items():
+        for m in ctx.config.british_re.finditer(" ".join(texts)):
+            found = m.group(0)
+            us = ctx.config.british[found.lower()]
+            us = us.upper() if found.isupper() else us.capitalize() if found[0].isupper() else us
+            out.append(finding(n, "spelling", found=found, us=us))
+    return out
+
+
+def rule_sentence_split(unit: Unit, ctx: Context) -> list[Finding]:
+    """A Markdown line ending mid-sentence that the next prose line continues in lowercase."""
+    out: list[Finding] = []
+    prev, prev_no = "", 0
+    for n, txt, _prose in prose_lines(unit):
+        stripped = txt.strip()
+        is_prose = bool(stripped) and not stripped.startswith(("|", ">", "#"))
+        is_prose = is_prose and not re.match(r"^\s*\[[^\]]+\]:", stripped)
+        p = prev.strip()
+        ended = not p or SENT_END.search(p) or p.endswith((":", "-", "|"))
+        if is_prose and not ended and starts_lowercase(stripped):
+            out.append(finding(prev_no, "sentence-split"))
+        prev, prev_no = (txt if is_prose else ""), n
+    return out
+
+
+HOME_PATH = re.compile(
+    r"(?:/home/|/Users/|[A-Za-z]:\\(?i:users)\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)"
+)
+
+
+def rule_home_path(unit: Unit, ctx: Context) -> list[Finding]:
+    """An absolute home path naming a real account, on any line, a fenced transcript included."""
+    exempt = ctx.config.exempt
+    if ctx.root is not None and ctx.path.resolve() in {
+        (ctx.root / p).resolve() for p in exempt["home_path_exempt"]
+    }:
         return []
-    out: list[Comment] = []
-    closing = ""
-    block_col = 0
-    doc_closing = ""
-    carry = CLEAR
-    for n, raw in enumerate(lines, 1):
-        line = raw.rstrip("\r")
-        pos = 0
-        # Every code span on the line, comments blanked, for a string this line opens.
-        # Built up rather than captured once, since code after a closed block comment is code.
-        code = [" "] * len(line)
-        if carry.kind in WHOLE_LINE:  # the line is string content until it closes
-            carry, resumed = resume_at(carry, line)
-            if resumed is None:
-                continue
-            pos = resumed
-        if doc_closing:  # CODESTYLE owns every line until it closes
-            end = line.find(doc_closing)
-            if end < 0:
-                continue
-            pos, doc_closing = end + len(doc_closing), ""
-        elif closing:  # carried in from an unclosed block
-            end = line.find(closing)
-            body = (line if end < 0 else line[:end]).strip()
-            # Only `/* */` continues a line with a leading `*`, and only on a line it continues.
-            # Taking it off anywhere else edits the prose the rules then judge.
-            # The marker is one `*` against whitespace, so `**bold**` and `*emphasis*` keep theirs.
-            if closing == "*/" and body.startswith("*") and body[1:2].isspace():
-                body = body[1:].strip()
-            if body:
-                written = line if end < 0 else line[:end]
-                cut = min(block_col, len(line) - len(line.lstrip()))
-                out.append(Comment(n, body, True, written[cut:]))
-            if end < 0:
-                continue
-            pos, closing = end + len(closing), ""
-        # Scan left to right and take whichever marker comes first.
-        # A ceiling can only describe the first comment, so a later one was unreachable.
-        while pos < len(line):
-            # Mask from here rather than once per line, so comment text never sets string state.
-            # A quote in a comment is prose, and reading it as a string blanks the markers after it.
-            tail, tail_state = strip_strings(
-                line[pos:],
-                spec["quotes"],
-                spec["verbatim"],
-                carry,
-                spec["raw"],
-                spec["escape"],
-                spec["escape_in"],
-                spec["escape_out"],
-                spec["quote_after"],
-            )
-            masked = " " * pos + tail
-            found: str | tuple[str, str] | None = None
-            at = len(line)
-            for marker in spec["line"]:
-                where = line_marker(line, masked, marker, pos)
-                if 0 <= where < at:
-                    at, found = where, marker
-            for opener, closer in spec["block"]:
-                where = masked.find(opener, pos)
-                if 0 <= where < at:
-                    at, found = where, (opener, closer)
-            code[pos:at] = masked[pos:at]
-            if found is None:
-                carry = tail_state  # the rest of the line is code
-                break
-            # Only the code before the marker advances the string state.
-            _, carry = strip_strings(
-                line[pos:at],
-                spec["quotes"],
-                spec["verbatim"],
-                carry,
-                spec["raw"],
-                spec["escape"],
-                spec["escape_in"],
-                spec["escape_out"],
-                spec["quote_after"],
-            )
-            # CODESTYLE owns a documentation comment, so this rule skips over it.
-            # A line one runs to end of line, while a closed block one gives the rest back.
-            if any(line[at:].startswith(d) for d in spec["doc"]):
-                if isinstance(found, str):
-                    break
-                end = line.find(found[1], at + len(found[0]))
-                if end < 0:
-                    doc_closing = found[1]  # it carries on into the lines below
-                    break
-                pos = end + len(found[1])
-                continue
-            leading = not line[:at].strip()
-            if isinstance(found, str):  # a line comment runs to end of line
-                body = line[at + len(found) :].strip()
-                if body:
-                    out.append(Comment(n, body, leading, line[at:]))
-                break
-            opener, closer = found
-            end = line.find(closer, at + len(opener))  # a quote in the comment is prose
-            body = (line[at + len(opener) : end if end >= 0 else None]).strip()
-            if body:
-                written = line[at : end + len(closer)] if end >= 0 else line[at:]
-                out.append(Comment(n, body, leading, written))
-            if end < 0:
-                closing, block_col = closer, at
-                break
-            pos = end + len(closer)
-        # A string opened here carries into the lines below only where the syntax has that form.
-        # A block comment left open owns them instead, so nothing opens under one.
-        form = CLEAR if (closing or doc_closing) else opened_string(spec, "".join(code), line)
-        carry = form if form.kind else (carry if carry.kind in spec["carry"] else CLEAR)
-    return out
+    return [
+        finding(line.number, "home-path", path=m.group(0))
+        for line in unit.lines
+        for m in HOME_PATH.finditer(line.text)
+        if m.group("user").lower() not in exempt["service_accounts"]
+    ]
 
 
-def fenced_lines(lines: list[str]) -> set[int]:
-    """Line numbers inside a fenced block, which every rule skips.
-
-    A fenced example is quoted code rather than this file's own prose, so a comment in one belongs
-    to whatever is being shown.
-    """
-    out: set[int] = set()
-    in_fence = False
-    for n, raw in enumerate(lines, 1):
-        if CODE_FENCE.match(raw.rstrip("\r")):
-            in_fence = not in_fence
-            out.add(n)
-            continue
-        if in_fence:
-            out.add(n)
-    return out
+# A backtick span, an inline link target, and a reference definition each assert a path.
+INLINE_SPAN = re.compile(r"`([^`\n]+)`")
+LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
+REF_DEF = re.compile(r"^\s*\[[^\]]+\]:\s+(\S+)")
+# A placeholder, a glob, an expansion, or a scheme, the colon covering URLs and drive letters.
+PATH_FOREIGN = frozenset("<>{}$*?\"'\\:!|,;")
 
 
-def is_config_line(body: str) -> bool:
-    """Whether a comment body is one line of configuration rather than a sentence.
-
-    The guard is the one `SNIPPET` already pairs with its own anchor: a body closing as a sentence
-    does is judged as one, so `Note: the value is read once.` is prose whose first word happens to
-    take a colon. What follows a real key is a value, and a value does not end in a full stop.
-    """
-    return bool(CONFIG_LINE.match(body)) and not SNIPPET_END.search(body)
-
-
-def config_run_lines(comments: list[Comment]) -> set[int]:
-    """The lines of every run of `CONFIG_RUN_MIN` or more adjacent configuration comment lines.
-
-    The run is the unit rather than the line, and the run is the configuration lines themselves
-    rather than the comment block holding them. A usage block is the case that decides it: three
-    sentences of prose above two `Run:` lines is one comment block, and exempting the block would
-    stop both comment rules reading the prose. So a line joins only by being configuration itself.
-
-    A block's own non-key-value lines need no membership of their own, wherever the block holds a
-    run at all. A PEP 723 block opens on `# /// script`, whose body draws a finding only because the
-    key-value line under it reads as a continuation, and exempting that line is what clears the
-    opener with it. Its closing `# ///` is already exempt as `NOT_PROSE`, being punctuation alone.
-    A block declaring one key is not a run, so its opener still reports, and the count is what that
-    costs rather than a case this misses.
-
-    A trailing comment breaks a run and joins none, since it annotates the code on its own line
-    rather than continuing the comment above it.
-    """
-    out: set[int] = set()
-    run: list[int] = []
-
-    def flush() -> None:
-        if len(run) >= CONFIG_RUN_MIN:
-            out.update(run)
-        run.clear()
-
-    for comment in comments:
-        if not (comment.leading and is_config_line(comment.body)):
-            flush()
-            continue
-        if run and comment.line != run[-1] + 1:
-            flush()
-        run.append(comment.line)
-    flush()
-    return out
+def path_candidate(token: str, in_span: bool = True) -> str | None:
+    """The relative path a token asserts, a backtick span only where it is shaped like a file."""
+    token = token.split("#", 1)[0]
+    if not token or any(c.isspace() for c in token) or PATH_FOREIGN & set(token):
+        return None
+    if token.startswith(("/", "~", "-", "#")):
+        return None
+    last = token.rsplit("/", 1)[-1]
+    if in_span and ("/" not in token or "." not in last or not last.strip(".")):
+        return None
+    return token.removeprefix("./")
 
 
-def prose_comment_candidates(
-    path: Path, raw: str, lines: list[str]
-) -> tuple[list[Comment], list[Comment], set[int]]:
-    """The comments a prose rule reads, the originals beside them, and the config-run lines.
-
-    The bodies have a trailing checker directive cut off, and fenced lines are dropped.
-    """
-    comments = python_comments(raw) if path.suffix.lower() == ".py" else None
-    if comments is None:
-        comments = extracted_comments(path, lines)
-    skip = fenced_lines(lines)
-    kept = [c for c in comments if c[0] not in skip]
-    trimmed = [c._replace(body=without_trailing_directive(path, c.body)) for c in kept]
-    return trimmed, kept, config_run_lines(trimmed)
-
-
-def is_non_prose_comment(n: int, body: str, configured: set[int]) -> bool:
-    """Whether a comment body is not a sentence, so no prose rule judges it."""
-    return bool(
-        not body
-        or n in configured
-        or NOT_PROSE.search(body)
-        or BARE_URI.match(body.strip())
-        or KEY_ONLY.match(body)
-        or (SNIPPET.match(body) and not SNIPPET_END.search(body))
+@functools.cache
+def carried_paths(root: str) -> frozenset[str]:
+    """Paths the manifest declares as carried, which docs name as fleet layout."""
+    try:
+        data = json.loads((Path(root) / "spec" / "files.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    entries = data.get("baseline", [])
+    return frozenset(
+        e["path"] for e in entries if isinstance(e, dict) and isinstance(e.get("path"), str)
     )
 
 
-def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[int, str, str]]:
-    """Comment lines whose sentence wraps into the next, or that carry two sentences.
+@functools.cache
+def once_tracked(root: str, rel_path: str) -> bool:
+    """Whether git at `root` ever recorded `rel_path`, the deletion signature this rule keys on."""
+    return bool((git_text("-C", root, "log", "-1", "--format=%H", "--", rel_path) or "").strip())
 
-    The rule is one sentence per comment line. A wrapped sentence is the common failure, and a
-    run-on is the other half of the same rule, so both are reported.
 
-    A body cut at a trailing directive continues into the next line only where the whole body does
-    not end a sentence either, since a directive named mid-sentence leaves a fragment the sentence
-    goes on past.
-
-    A line that `is_tool_directive` matches is an instruction to a tool, so it never becomes the previous
-    body and the comment line after it is not read as that line's continuation.
-    """
-    comments, kept, configured = prose_comment_candidates(path, raw, lines)
-    markdown = is_markdown(path)
-
-    out: list[tuple[int, str, str]] = []
-    prev_body = ""
-    prev_whole = ""
-    prev_no = 0
-    for (n, body, leading, _raw), whole in zip(comments, kept, strict=True):
-        if is_non_prose_comment(n, body, configured):
-            prev_body = ""
-            continue
-        # An unpunctuated Markdown HTML comment is a structural marker, not commentary.
-        # It is a label, so it takes neither a capital nor a sentence split.
-        # A tool matches each one verbatim, so rewriting it breaks whatever reads it.
-        # Group headers, the ToC-omit directive, and the agent-safety markers are the cases.
-        # A comment that does punctuate a sentence is prose and is judged as prose.
-        if markdown and not SENT_END.search(body):
-            prev_body = ""
-            continue
-        body = ENUM_PREFIX.sub("", body)
-        if RUN_ON.search(strip_inline_code(body)):
-            out.append((n, "comment-wrap", "two sentences on one comment line -> split them"))
-        # A continuation is the very next line: two comments with code between them are separate.
-        adjacent = n == prev_no + 1
-        continuation = (
-            adjacent
-            and leading
-            and prev_body
-            and not SENT_END.search(prev_body)
-            and not SENT_END.search(prev_whole)
-            and starts_lowercase(body)
+def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
+    """A Markdown path git once tracked and the tree no longer holds, unless it lives elsewhere."""
+    root = ctx.root or (Path(found) if (found := repo_root(ctx.path)) else None)
+    if root is None:
+        return []
+    base = ctx.path.resolve().parent
+    exempt = carried_paths(str(root)) | ctx.config.exempt["hub_hosted"]
+    out: list[Finding] = []
+    for line in unit.lines:
+        m = REF_DEF.match(line.text)
+        tokens = (
+            [(m.group(1), False)]
+            if m
+            else [(s.group(1), True) for s in INLINE_SPAN.finditer(line.text)]
         )
-        if continuation:
-            out.append(
-                (
-                    prev_no,
-                    "comment-wrap",
-                    "comment sentence wraps into the next line -> one sentence per line",
-                )
-            )
-        # A lowercase opening that is not a continuation is a sentence that failed to start.
-        # A label opening a definition is exempt, since the lowercase word is the name being defined.
-        elif (
-            leading
-            and starts_lowercase(body)
-            and not COMMENT_LABEL.match(body)
-            and not is_tool_directive(body)
-        ):
-            out.append(
-                (
-                    n,
-                    "comment-case",
-                    (
-                        "comment sentence opens in lowercase -> capitalize, or restructure so it "
-                        "does not open on a lowercase name"
-                    ),
-                )
-            )
-        # A trailing comment can start a sentence the next full-line comment continues.
-        # The continuation has to be a full-line comment, since a trailing one annotates its own.
-        prev_body = "" if is_tool_directive(body) else body
-        prev_whole = whole.body
-        prev_no = n
-    return out
-
-
-def is_tool_directive(body: str) -> bool:
-    """Whether a comment body is an instruction to a tool rather than a sentence.
-
-    The name has to open the body, since a comment naming a tool mid-sentence is prose about it.
-    And the body must not close as a sentence does, since anchoring the opening alone let a
-    directive's own name open one and exempt the whole comment with it: `# nosec The value is read
-    once.` is prose whose first word happens to be a directive name. What follows a real directive
-    is an argument, and an argument does not end in a full stop.
-
-    A directive carrying a written reason, which `checkov:skip=` and `nosec` both allow, is exempt
-    while that reason is written as an argument and reported once it is punctuated as a sentence,
-    which is the same test applied to the same body. So `# nosec B608 - the query is parameterized`
-    is exempt and the period-terminated spelling of it is not. That is the rule's cost landing on a
-    real case rather than a defect, and the label is its remedy. Recognizing the reason-carrying
-    forms instead means encoding two tools' grammars here, which was tried and got four of them
-    wrong in one commit: an id that is not `CKV`-prefixed, a space after `skip=`, bandit's `nosec:`
-    spelling, and its test-name form.
-    """
-    return bool(TOOL_DIRECTIVE.match(body)) and not SENT_END.search(body)
-
-
-def without_trailing_directive(path: Path, body: str) -> str:
-    """The comment body up to the first directive a Python checker reads.
-
-    A Python checker reads `noqa`, `nopep8`, and `type: ignore` behind their own `#` after prose on
-    the same line, and `pylint:` anywhere in it. Exempting the whole body let a directive appended to
-    any comment switch every comment rule off for that line. The prose can be deleted and the
-    directive kept, so the directive and anything after it are cut off, and what is left is judged by
-    the same exemptions as any other body, an empty one included.
-
-    No other language's checker reads these forms, so in any other file a mention of one is part of
-    the sentence holding it.
-    """
-    if path.suffix.lower() != ".py":
-        return body
-    match = TRAILING_DIRECTIVE.search(body)
-    return body[: match.start()].rstrip() if match else body
-
-
-def is_comment_prose(body: str) -> bool:
-    """Whether a comment body is prose a reader judges rather than an instruction a tool reads."""
-    return bool(
-        body
-        and not NOT_PROSE.search(body)
-        and not is_tool_directive(body)
-        and not BARE_URI.match(body)
-        and not KEY_ONLY.match(body)
-    )
-
-
-def comment_bodies(path: Path, raw: str, spec: Syntax | None = None) -> list[Comment] | None:
-    """The file's comments, or None where none can be read.
-
-    A `.py` whose source does not tokenize returns None rather than falling back to the
-    hash-anchored scan. That scan carries an open single-line string across the line, and a
-    triple-quoted one it does not, so it reads a `#` inside a docstring as a comment.
-    """
-    if path.suffix.lower() == ".py":
-        comments = python_comments(raw)
-        if comments is None:
-            return None
-    else:
-        comments = extracted_comments(path, raw.split("\n"), spec)
-    return comments
-
-
-def comment_added_findings(path: Path, raw: str) -> list[tuple[int, str, str]]:
-    """Every prose comment line the file holds, which the diff scope narrows to the ones in a change.
-
-    The whole file is read and `main` keeps only the lines the diff touches, which is the path every
-    other rule already takes. Read without a diff the rule would report the tree's every comment, so
-    `main` stands it down there instead.
-
-    `git diff --unified=0` counts a modified line as an added one, so a change that edits the code on
-    a line carrying a trailing comment, re-indents a commented block, or rewords a comment reports
-    that comment. That is the rule's cost rather than a defect in it, and the label is the answer: an
-    earlier shape read the file at the diff's base to tell those apart, and four review passes spent
-    on the rename, duplicate, and prose-filter cases it opened bought precision this rule does not
-    need, since the remedy for a wanted comment is the same label either way.
-
-    Markdown is out of scope. Its prose is the document rather than a comment on one, and its HTML
-    comments are structural markers a tool matches verbatim. A PowerShell `<# ... #>` block is out
-    of scope the way a C# `///` comment is, both being the language's documentation form rather
-    than a remark on code. It is read out by `POWERSHELL_DOC`, which is the syntax the parser already implements rather
-    than a scan of this rule's own. Two such scans were written and each missed a marker inside a
-    string, one standing the rule down to end of file and one to the next block's terminator.
-
-    A bare URI and a key are not prose, and a tool directive is an instruction rather than prose,
-    since deleting a `# noqa` or a `# syntax=` line changes what the file does. `NOT_PROSE` and
-    `TOOL_DIRECTIVE` are the forms that are known. A directive neither names is reported, and the
-    label is the remedy, since a directive whose written reason is punctuated as a sentence reads
-    as one, and `TOOL_DIRECTIVE` cannot take it without encoding that tool's grammar.
-    """
-    if is_markdown(path) or syntax_for(path) is None:
-        return []
-    spec = POWERSHELL_DOC if path.suffix.lower() in {".ps1", ".psm1"} else None
-    bodies = comment_bodies(path, raw, spec)
-    if bodies is None:
-        return []
-    # A comment whose marker opens the line, and no other.
-    # Which mid-line marker opens a comment is a parser fact that differs by language.
-    # TOML and HCL carry a `#` inside a multi-line string.
-    # A git pattern file holds no trailing comment at all.
-    # PowerShell opens one after almost anything, and shell after its metacharacters.
-    # Six attempts at deciding it from the marker's neighbourhood each got a language wrong.
-    # A marker at the start of its line is unambiguous in every one of them.
-    # `comment-wrap` and `comment-case` have judged only leading comments for years.
-    # That is why neither ever met any of those defects.
-    bodies = [c for c in bodies if c.leading]
-    # One finding per line rather than one per comment, since the rule is about the line.
-    # A line can carry two comments, and reporting it twice counts one line as two violations.
-    seen: set[int] = set()
-    out: list[tuple[int, str, str]] = []
-    for comment in bodies:
-        n = comment.line
-        if n in seen or not is_comment_prose(without_trailing_directive(path, comment.body)):
-            continue
-        seen.add(n)
-        out.append(
-            (
-                n,
-                "comment-added",
-                (
-                    "a comment line this change adds or edits -> delete it, or allow it: the "
-                    f"{COMMENT_LABEL_NAME!r} label on the pull request, {COMMENT_ENV_NAME} at a "
-                    "commit, --allow-comments on a run by hand"
-                ),
-            )
-        )
-    return out
-
-
-@functools.lru_cache(maxsize=1)
-def python_tree(raw: str) -> ast.Module | None:
-    """The parsed module, or None where this interpreter cannot parse the source.
-
-    Cached for the one file in hand, which `check_file` and `issue-ref` both parse.
-    """
-    try:
-        return ast.parse(raw)
-    except (SyntaxError, ValueError):
-        return None
-
-
-def python_docstrings(raw: str, lines: list[str]) -> list[tuple[int, dict[int, str]]]:
-    """Each docstring as the column its quotes open at and a map of line to its text on that line.
-
-    `ast` rather than a scan for a triple quote, since a triple-quoted string is a docstring only
-    where it opens a body, and a docstring's own text may hold one. Empty where the source will
-    not parse. One map per string node, so two docstrings on adjacent lines stay two.
-
-    The source text is returned rather than the docstring's value, so a reference is reported on
-    the line that carries it. A value has its escapes resolved, which no longer maps to a line.
-    Sliced at the node's own columns rather than taken as whole lines, since a statement can share
-    a line with the closing quote and reading it would report a string literal this rule excludes.
-    """
-    tree = python_tree(raw)
-    if tree is None:
-        return []
-    out: list[tuple[int, dict[int, str]]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if not node.body or not isinstance(node.body[0], ast.Expr):
-            continue
-        first = node.body[0].value
-        if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
-            continue
-        last = first.end_lineno or first.lineno
-        spans: dict[int, str] = {}
-        for n in range(first.lineno, last + 1):
-            if n > len(lines):
+        if not m:
+            tokens += [
+                (t.group(1), False) for t in LINK_TARGET.finditer(strip_inline_code(line.text))
+            ]
+        for token, in_span in tokens:
+            rel_path = path_candidate(token, in_span)
+            if rel_path is None or (root / rel_path).exists() or (base / rel_path).exists():
                 continue
-            # `ast` reports a column as a UTF-8 byte offset, so the slice is taken on the bytes.
-            # On the string one non-ASCII character before the closing quote over-runs the span.
-            # One before the opening quote under-runs it and cuts the text this rule reads.
-            data = lines[n - 1].encode("utf-8")
-            end = first.end_col_offset if n == last and first.end_col_offset is not None else None
-            start = first.col_offset if n == first.lineno else 0
-            spans[n] = data[start:end].decode("utf-8", "replace")
-        if spans:
-            prefix = lines[first.lineno - 1].encode("utf-8")[: first.col_offset]
-            text_before = prefix.decode("utf-8", "replace").expandtabs(4)
-            column = (
-                len(text_before)
-                if not text_before.strip()
-                else leading_indent(text_before) + INDENT_BLOCK
-            )
-            out.append((column, spans))
+            for anchor in {root, base}:
+                try:
+                    key = (anchor / rel_path).resolve().relative_to(root.resolve()).as_posix()
+                except ValueError:
+                    continue
+                if key not in exempt and once_tracked(str(root), key):
+                    out.append(finding(line.number, "dead-path", token=token))
+                    break
     return out
 
 
-def python_docstring_spans(raw: str, lines: list[str]) -> dict[int, list[str]]:
-    """Each source line a docstring occupies, mapped to the docstring text on that line."""
-    out: dict[int, list[str]] = {}
-    for _column, spans in python_docstrings(raw, lines):
-        for n, text in spans.items():
-            out.setdefault(n, []).append(text)
-    return out
+def is_instruction_text(path: Path, root: Path | None) -> bool:
+    """Whether this Markdown file is instruction text, a skill matched by its root."""
+    if path.suffix.lower() not in BASE["files"]["markdown"]:
+        return False
+    key = repo_key(path, root) if root is not None else rel(path)
+    if key in INSTRUCTION_DOCS or key.startswith(tuple(BASE["skill_roots"])):
+        return True
+    plugin, skills = BASE["plugin_skills"]
+    return key.startswith(plugin) and skills in key[len(plugin) :]
+
+
+# A bare reference, two to five digits: one is an ordinal, and six is a hex color.
+ISSUE_REF = re.compile(r"(?<!#)#([0-9]{2,5})(?!\w)")
+# A URI, whose fragment is a number after a `#` and is not a reference to anything here.
+URI_SPAN = re.compile(r"[a-z][a-z0-9+.-]*://[^\s<>\])]+", re.IGNORECASE)
+# The link spelling, read in instruction text only, on the one forge the rule text names.
+FORGE_REF = re.compile(
+    r"https?://(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/([0-9]+)", re.IGNORECASE
+)
 
 
 def without_lookalikes(text: str, markdown: bool) -> str:
-    """This span with the runs a reference cannot legitimately sit in blanked out.
-
-    A URI fragment is a number after a `#` and is not a reference, and in Markdown neither is a
-    link destination, an in-document anchor to a heading that opens on a number carrying the same
-    shape. Blanked rather than spliced out, so one pass over a span holding several of them cannot
-    shift the bounds of the next.
-    """
+    """The span with a URI, and in Markdown a link destination, blanked to the same length."""
     spans = [(m.start(), m.end()) for m in URI_SPAN.finditer(text)]
     if markdown:
-        for pattern in (LINK_TARGET, REF_DEF):
-            spans += [(m.start(1), m.end(1)) for m in pattern.finditer(text)]
-    if not spans:
-        return text
+        spans += [(m.start(1), m.end(1)) for p in (LINK_TARGET, REF_DEF) for m in p.finditer(text)]
     chars = list(text)
     for start, end in spans:
         chars[start:end] = " " * (end - start)
     return "".join(chars)
 
 
-def issue_ref_findings(
-    path: Path, raw: str, lines: list[str], root: Path | None
-) -> list[tuple[int, str, str]]:
-    """Every issue or pull request reference on a surface the ban reaches.
+def rule_issue_ref(unit: Unit, ctx: Context) -> list[Finding]:
+    """An issue or pull request reference on a surface the ban reaches.
 
-    Instruction text is read outside its fenced blocks, since a fence quotes content rather than
-    stating it, and every other Markdown file is left alone, since a tracker and a history exist to
-    carry exactly these references. Every line of such a document is read, so a trailing HTML
-    comment in one is read with the prose around it rather than through the comment parser.
-
-    Instruction text is also read for the link spelling, an inline destination, a reference
-    definition, and a bare URL alike, each being a substring of the line the scan already holds.
-    That scan reads the line as written rather than the blanked copy `ISSUE_REF` reads, since the
-    blanking exists to hide exactly the destinations this half is looking for. Nowhere else is read
-    for it, and the rule is what decides that rather than the scan. In a code or workflow comment it
-    carves out a link naming an issue or a pull request on a public repository other than this one,
-    the source citation for the line under it. A docstring and a documentation comment fall under no
-    carve-out, so a link there is banned and goes unread, as one in a code comment does whenever the
-    carve-out's own terms are not met.
-
-    Elsewhere a comment is read where `comment_bodies` reports its marker as opening its line,
-    which a continuation line of an open block comment is reported as doing, having no marker of
-    its own to judge. A `.py` that does not tokenize yields no comment at all there, so a reference
-    in one of its comments goes unread.
-
-    Elsewhere the comments and the Python docstrings are read, and the code between them is not. A
-    reference in a string literal is fixture data as often as it is prose: a test asserting on a
-    handoff's own chain builds the numbers it asserts against, and reading them would report the
-    fixture rather than a claim about this repository. A documentation comment is read like any
-    other comment, unlike in `comment-added`, since a reference in one is the same defect.
+    Instruction text is read outside its fences, for the bare form and the forge link. Elsewhere
+    a leading comment is read with and without its marker, and a docstring as source. A string
+    literal is not, being fixture data as often as not. A line reports each number once.
     """
-    out: list[tuple[int, str, str]] = []
     spans: dict[int, list[str]] = {}
     links: dict[int, list[str]] = {}
-    if is_markdown(path):
-        if not is_instruction_text(path, root):
-            return out
-        fenced = fenced_lines(lines)
-        for n, line in enumerate(lines, 1):
-            if n not in fenced:
-                spans.setdefault(n, []).append(without_lookalikes(line, True))
-                links.setdefault(n, []).append(line)
-    else:
-        for comment in comment_bodies(path, raw, comment_syntax_including_docs(path)) or ():
-            # A comment whose marker opens its line, and no other.
-            # Which mid-line marker opens a comment is a parser fact that differs by language.
-            # The scan takes the first one on the line whatever that language does with it.
-            # A URI fragment in a YAML value, a `sed` delimiter and a shell expansion all arrive here.
-            # A marker at the start of its line is unambiguous in every language the gate knows.
-            # `comment-added` judges a leading comment only, for this same reason.
-            # Reading the whole pre-scrub tree both ways reported the same findings either way.
-            if not comment.leading:
-                continue
-            # Both spellings, since the body has the marker off and `#N` is then just its digits.
-            spans.setdefault(comment.line, []).append(without_lookalikes(comment.body, False))
-            if comment.raw:
-                spans[comment.line].append(without_lookalikes(comment.raw, False))
-        if path.suffix.lower() == ".py":
-            for n, texts in python_docstring_spans(raw, lines).items():
-                spans.setdefault(n, []).extend(without_lookalikes(t, False) for t in texts)
-    # One finding per line per distinct reference, the line being the unit this rule reports on.
-    # `comment-added` counts a line once for the same reason, a line with two comments being one line.
-    # Here one comment is read twice over as well, as written and with its marker off.
-    # The key is the number both patterns capture rather than the text that spelled it.
-    # A link carries its reference in the destination and the bare form of it in the link text.
-    # Keyed on the text, the two spellings of one reference never collide and the line reports twice.
-    # The bare scan runs first, so a line carrying both is reported as the spelling to fix first.
-    # The cost is a line naming two different projects' references under one number, reported once.
-    # The second reports on the run after the first is fixed, which the author is already making.
+    if unit.kind == "prose" and not is_instruction_text(ctx.path, ctx.root):
+        return []
+    for line in unit.lines:
+        if unit.kind == "prose":
+            spans.setdefault(line.number, []).append(without_lookalikes(line.text, True))
+            links.setdefault(line.number, []).append(line.text)
+        elif unit.kind == "docstring" or line.leading:
+            texts = [line.text, line.raw] if line.raw else [line.text]
+            spans.setdefault(line.number, []).extend(without_lookalikes(t, False) for t in texts)
+    out: list[Finding] = []
     seen: set[tuple[int, str]] = set()
     for n in sorted(set(spans) | set(links)):
-        found = [(ISSUE_REF, t) for t in spans.get(n, ())]
-        found += [(FORGE_REF, t) for t in links.get(n, ())]
-        for pattern, text in found:
-            for m in pattern.finditer(text):
-                if (n, m.group(1)) in seen:
-                    continue
+        found = [(ISSUE_REF, t) for t in spans.get(n, ())] + [
+            (FORGE_REF, t) for t in links.get(n, ())
+        ]
+        for m in (m for pattern, text in found for m in pattern.finditer(text)):
+            if (n, m.group(1)) not in seen:
                 seen.add((n, m.group(1)))
-                out.append(
-                    (
-                        n,
-                        "issue-ref",
-                        (
-                            f"issue or pull request reference {m.group(0)!r} -> "
-                            "state the constraint it stands for, or drop the clause"
-                        ),
-                    )
-                )
+                out.append(finding(n, "issue-ref", ref=m.group(0)))
     return out
 
 
-PARSED_RULES = frozenset(
-    {"comment-wrap", "comment-case", "comment-added", "issue-ref", "sentence-length"}
-)
+def without_trailing_directive(ctx: Context, body: str) -> str:
+    """The body up to the first directive this language's checker reads after prose on a line."""
+    for pattern in ctx.language.get("trailing_directives", ()):
+        m = re.search(pattern, body)
+        body = body[: m.start()].rstrip() if m else body
+    return body
+
+
+def is_tool_directive(body: str, config: Config) -> bool:
+    """Whether a body opens on a directive's name and does not close as a sentence does."""
+    return bool(config.tool_directive.match(body)) and not SENT_END.search(body)
+
+
+def is_config_line(line: Line) -> bool:
+    return line.leading and bool(CONFIG_LINE.match(line.text)) and not SNIPPET_END.search(line.text)
+
+
+def config_run_lines(lines: list[Line]) -> set[int]:
+    """The lines of each run of `CONFIG_RUN_MIN` or more adjacent leading configuration comments."""
+    out: set[int] = set()
+    run: list[int] = []
+    for line in [*lines, None]:
+        if line is None or not is_config_line(line) or (run and line.number != run[-1] + 1):
+            out.update(run if len(run) >= CONFIG_RUN_MIN else ())
+            run = []
+        if line is not None and is_config_line(line):
+            run.append(line.number)
+    return out
+
+
+def prose_comments(unit: Unit, ctx: Context) -> tuple[list[Line], list[Line], set[int]]:
+    """The unfenced lines cut at a trailing directive, the lines as written, and the config runs."""
+    kept = [line for line in unit.lines if line.number not in ctx.fenced]
+    trimmed = [line._replace(text=without_trailing_directive(ctx, line.text)) for line in kept]
+    return trimmed, kept, config_run_lines(trimmed)
+
+
+def is_non_prose_comment(line: Line, configured: set[int], config: Config) -> bool:
+    body = line.text
+    return bool(
+        not body
+        or line.number in configured
+        or config.not_prose.search(body)
+        or BARE_URI.match(body.strip())
+        or KEY_ONLY.match(body)
+        or (SNIPPET.match(body) and not SNIPPET_END.search(body))
+    )
+
+
+def rule_comment_wrap(unit: Unit, ctx: Context) -> list[Finding]:
+    """One sentence per comment line, read as `comment-wrap` and `comment-case`.
+
+    A sentence wrapped into the next line and two on one line are wraps, and a lowercase opening
+    continuing nothing is a case finding. An unpunctuated Markdown HTML comment is a marker.
+    """
+    comments, kept, configured = prose_comments(unit, ctx)
+    out: list[Finding] = []
+    prev_body = prev_whole = ""
+    prev_no = 0
+    for line, whole in zip(comments, kept, strict=True):
+        if is_non_prose_comment(line, configured, ctx.config) or (
+            unit.kind == "markup" and not SENT_END.search(line.text)
+        ):
+            prev_body = ""
+            continue
+        n, body = line.number, ENUM_PREFIX.sub("", line.text)
+        if RUN_ON.search(strip_inline_code(body)):
+            out.append(finding(n, "comment-wrap", "comment-run-on"))
+        directive = is_tool_directive(body, ctx.config)
+        lower = line.leading and starts_lowercase(body)
+        ended = SENT_END.search(prev_body) or SENT_END.search(prev_whole)
+        if lower and n == prev_no + 1 and prev_body and not ended:
+            out.append(finding(prev_no, "comment-wrap"))
+        elif lower and not COMMENT_LABEL.match(body) and not directive:
+            out.append(finding(n, "comment-case"))
+        prev_body = "" if directive else body
+        prev_whole, prev_no = whole.text, n
+    return out
+
+
+def is_comment_prose(body: str, config: Config) -> bool:
+    """Whether a body is prose, a key-value snippet included, pricing one being this rule's job."""
+    return bool(
+        body
+        and not config.not_prose.search(body)
+        and not is_tool_directive(body, config)
+        and not BARE_URI.match(body)
+        and not KEY_ONLY.match(body)
+    )
+
+
+def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
+    """Every prose comment line opening its own line, which the diff scope narrows to a change.
+
+    A modified line counts as added, the label being the answer. A help block, a documentation
+    comment, and a trailing comment are out of scope.
+    """
+    lines = {
+        line.number
+        for line in unit.lines
+        if line.leading
+        and not line.help
+        and is_comment_prose(without_trailing_directive(ctx, line.text), ctx.config)
+    }
+    return [finding(n, "comment-added") for n in sorted(lines)]
+
+
+def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
+    """The text with code spans and each line's quotations blanked, a closing terminator kept."""
+    code = r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)"
+    text = re.sub(code, lambda m: "`" * len(m.group()), text, flags=re.DOTALL)
+    out = list(text)
+    for start, length in zip(starts, lengths, strict=True):
+        out[start : start + length] = re.sub(
+            r'"([^"]*?)([.!?]?)"',
+            lambda m: '"' * (len(m.group()) - len(m.group(2))) + m.group(2),
+            text[start : start + length],
+        )
+    return "".join(out)
+
+
+def over_cap(block: list[tuple[int, str]], allowed: set[int] | None) -> list[Finding]:
+    """Over-cap sentences in one block, reported on the first line, or the first changed line."""
+    if not block:
+        return []
+    starts = []
+    raw = ""
+    for _, span in block:
+        raw += " " if raw else ""
+        starts.append(len(raw))
+        raw += span
+    numbers = [n for n, _ in block]
+    text = mask_code_and_quotes(raw, starts, [len(span) for _, span in block])
+    out: list[Finding] = []
+    pos = 0
+    for m in [*SENTENCE_BREAK.finditer(text), None]:
+        end = m.start() if m else len(text)
+        words = len(text[pos:end].split())
+        rows = numbers[bisect_right(starts, pos) - 1 : bisect_right(starts, max(end - 1, pos))]
+        hit = rows[0] if allowed is None else next((n for n in rows if n in allowed), 0)
+        if words > SENTENCE_WORD_CAP and hit:
+            out.append(finding(hit, "sentence-length", words=words, cap=SENTENCE_WORD_CAP))
+        pos = m.end() if m else pos
+    return out
+
+
+FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
+
+
+def comment_indent(line: Line) -> int:
+    """The columns a comment's text sits past its marker, or 0 where no raw form was kept."""
+    at = line.raw.find(line.text) if line.text else -1
+    lead = line.raw[: max(at, 0)].expandtabs(4)
+    return len(lead) - len(lead.rstrip(" ")) if at > 0 else 0
+
+
+def comment_sentences(unit: Unit, ctx: Context) -> list[Finding]:
+    """Over-cap sentences in a comment run, a command or table indented under a colon skipped."""
+    comments, _kept, configured = prose_comments(unit, ctx)
+    out: list[Finding] = []
+    block: list[tuple[int, str]] = []
+    prev_no = reference = 0
+    in_code = prev_colon = False
+    for line in comments:
+        n, body, leading = line.number, line.text, line.leading
+        indent = comment_indent(line)
+        if not body and leading:
+            out += over_cap(block, ctx.allowed)
+            block, prev_no = [], n
+            continue
+        follows = leading and n == prev_no + 1
+        if is_non_prose_comment(line, configured, ctx.config):
+            out += over_cap(block, ctx.allowed)
+            block = []
+            if follows and (in_code or prev_colon) and indent >= reference + INDENT_BLOCK:
+                in_code, prev_no = True, n
+                continue
+            in_code = False
+            prev_colon = leading and body.rstrip().endswith(":")
+            if prev_colon:
+                prev_no, reference = n, indent
+            continue
+        if not follows:
+            in_code = prev_colon = False
+        if follows and (in_code or prev_colon) and indent >= reference + INDENT_BLOCK:
+            out += over_cap(block, ctx.allowed)
+            block, in_code, prev_no = [], True, n
+            continue
+        in_code = False
+        if not follows or LIST_MARKER.match(body) or FIELD_LINE.match(body) or body[:1].isupper():
+            out += over_cap(block, ctx.allowed)
+            block = []
+        block.append((n, strip_list_marker(body)))
+        prev_no, reference = n, indent
+        prev_colon = body.rstrip().endswith(":")
+        if not leading or prev_colon:
+            out += over_cap(block, ctx.allowed)
+            block = []
+    return out + over_cap(block, ctx.allowed)
 
 
 DOCSTRING_OPEN = re.compile(r"^\s*[rRuU]?(?:\"\"\"|\'\'\'|\"|\')")
@@ -2775,336 +1465,178 @@ DOCSTRING_CLOSE = re.compile(r"(?:\"\"\"|\'\'\'|\"|\')\s*$")
 DOCTEST_PROMPT = re.compile(r"^\s*>>>(?:\s|$)")
 NUMPY_HEAD_WORDS = 6
 NUMPY_UNDERLINE = re.compile(r"^\s*-{3,}\s*$")
-NUMPY_STRUCTURED = frozenset(
-    {
-        "parameters",
-        "other parameters",
-        "returns",
-        "yields",
-        "receives",
-        "raises",
-        "warns",
-        "attributes",
-        "methods",
-    }
-)
-GOOGLE_HEADER = re.compile(
-    r"^\s*(?:Args|Arguments|Keyword Args|Keyword Arguments|Parameters|Other Parameters|Attributes|Raise|Raises|Return|Returns|Warns|Yield|Yields|Methods):\s*$"
-)
 GOOGLE_ENTRY = re.compile(r"^\s*\*{0,2}\w[\w.]*(?:\s*\(.*?\))?:\s+(?=\S)")
-GOOGLE_PROSE_HEADER = re.compile(
-    r"^\s*(?:Attention|Caution|Danger|Error|Hint|Important|Notes?|References|See Also|Tip|Todo|Warnings?):\s*$"
-)
-FIELD_LINE = re.compile(r"^\s*(?::\w+[^:]*:|\w+(?:\s*\([^)]*\))?:)(?:\s|$)")
-
-
-def comment_indent(comment: Comment) -> int:
-    """The columns a comment's text sits past its marker, or 0 where the parser kept no raw form."""
-    at = comment.raw.find(comment.body) if comment.body else -1
-    if at <= 0:
-        return 0
-    lead = comment.raw[:at].expandtabs(4)
-    return len(lead) - len(lead.rstrip(" "))
-
-
-def comment_sentence_findings(
-    path: Path, raw: str, lines: list[str], allowed: set[int] | None = None
-) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in the comments of a source file, each judged whole.
-
-    Comment lines on consecutive source lines are one block, so a wrapped sentence counts once.
-    A line that is not prose, a trailing comment, or a gap ends the block.
-    The prose filters are shared with `comment_wrap_findings`, so both rules agree on what a comment is.
-    A comment run indented past its own text after a colon line, or after a gap that follows one, is a command or table.
-    A star-only line inside a block comment is such a gap, as a bare marker is.
-    The indent is read from the comment as written, since extraction strips it from the body.
-    """
-    comments, _kept, configured = prose_comment_candidates(path, raw, lines)
-    spec = syntax_for(path)
-    markers = list(spec["line"]) if spec else []
-    out: list[tuple[int, str, str]] = []
-    block: list[tuple[int, str]] = []
-    prev_no = 0
-    reference = 0
-    in_code = False
-    prev_colon = False
-
-    def flush() -> None:
-        out.extend(over_cap_findings(block, allowed))
-        block.clear()
-
-    for comment in comments:
-        n, body, leading = comment.line, comment.body, comment.leading
-        if body == "*" and leading and lines[n - 1].strip() == "*":
-            body = ""
-        indent = comment_indent(comment)
-        if leading and prev_no and bare_marker_gap(lines, prev_no, n, markers):
-            flush()
-            prev_no = n - 1
-        if not body and leading:
-            flush()
-            prev_no = n
-            continue
-        if is_non_prose_comment(n, body, configured):
-            flush()
-            if (
-                leading
-                and n == prev_no + 1
-                and (in_code or prev_colon)
-                and indented_past(indent, reference)
-            ):
-                in_code = True
-                prev_no = n
-                continue
-            opens = leading and body.rstrip().endswith(":")
-            in_code, prev_colon = False, opens
-            if opens:
-                prev_no, reference = n, indent
-            continue
-        fresh = not leading or n != prev_no + 1
-        if fresh:
-            in_code = prev_colon = False
-        if not fresh and (in_code or prev_colon) and indented_past(indent, reference):
-            flush()
-            in_code = True
-            prev_no = n
-            continue
-        in_code = False
-        if fresh or LIST_MARKER.match(body) or FIELD_LINE.match(body) or body[:1].isupper():
-            flush()
-        block.append((n, strip_list_marker(body)))
-        prev_no = n
-        reference = indent
-        prev_colon = body.rstrip().endswith(":")
-        if not leading or prev_colon:
-            flush()
-    flush()
-    return out
 
 
 def is_numpy_head(text: str, below: int, mid_sentence: bool = False, after_blank: int = -1) -> bool:
-    """Whether a line at a NumPy entry's indent heads an entry rather than being prose.
-
-    A head is a `name : type` line, a line with an indented description right under it, or a single
-    token with no closing punctuation, which is a name or a type and never a sentence.
-    `below` is the indent of the next line, or -1 where it is blank or absent.
-    A single token is no head when `mid_sentence`, the prose above it sitting at the entry indent.
-    A line ending in punctuation or a colon is a sentence, so an indented line under it is code.
-    A short unpunctuated line, a blank, then an indented line is a bare type over its description.
-    `after_blank` is the indent of the next line past a blank, or -1.
-    """
+    """Whether a line at a NumPy entry's indent heads an entry rather than being prose."""
     words = text.split()
     indent = len(text) - len(text.lstrip())
     sentence = text.rstrip().rstrip("*_`\"')]").endswith((".", "!", "?", ":"))
+    lone = len(words) == 1 and not words[0].rstrip("*_`\"')]").endswith((".", "!", "?"))
+    short = after_blank > indent and len(words) <= NUMPY_HEAD_WORDS
     return (
         " : " in text
         or (below > indent and not sentence)
-        or (
-            after_blank > indent
-            and not sentence
-            and not mid_sentence
-            and len(words) <= NUMPY_HEAD_WORDS
-        )
-        or (
-            len(words) == 1
-            and not mid_sentence
-            and not words[0].rstrip("*_`\"')]").endswith((".", "!", "?"))
-        )
+        or (not mid_sentence and (lone or (short and not sentence)))
     )
 
 
-def bare_marker_gap(lines: list[str], before: int, after: int, markers: list[str]) -> bool:
-    """Whether every source line strictly between two comment lines is a bare comment marker."""
-    return after > before + 1 and all(lines[i].strip() in markers for i in range(before, after - 1))
+def indent_at(texts: list[str], idx: int) -> int:
+    """The indent of `texts[idx]`, or -1 where it is blank or absent."""
+    return leading_indent(texts[idx]) if idx < len(texts) and texts[idx].strip() else -1
 
 
-def next_indent(texts: list[str], idx: int) -> int:
-    """The indent of the line after `idx`, or -1 when it is blank or absent."""
-    if idx + 1 < len(texts) and texts[idx + 1].strip():
-        return leading_indent(texts[idx + 1])
-    return -1
-
-
-def indent_past_blank(texts: list[str], idx: int) -> int:
-    """The indent of the line after one blank line following `idx`, or -1 when there is none."""
-    if idx + 2 < len(texts) and not texts[idx + 1].strip() and texts[idx + 2].strip():
-        return leading_indent(texts[idx + 2])
-    return -1
-
-
-def content_offset(line: str, marker: re.Match[str]) -> int:
-    """The column a list item's text starts at, the marker's run of up to four spaces included.
-
-    Five or more spaces, or none before the line ends, leave the text one column past the marker.
-    Columns count a tab to its next stop, as `leading_indent` does.
-    """
-    width = len(line[: marker.end()].rstrip().expandtabs(4))
-    rest = line.expandtabs(4)[width:]
-    spaces = len(rest) - len(rest.lstrip(" "))
-    return width + spaces if 0 < spaces <= INDENT_BLOCK and rest.strip() else width + 1
-
-
-def leading_indent(line: str) -> int:
-    """The columns of leading space on a source line, tabs read as four."""
-    expanded = line.expandtabs(4)
-    return len(expanded) - len(expanded.lstrip(" "))
-
-
-def docstring_sentence_findings(
-    raw: str, lines: list[str], allowed: set[int] | None = None
-) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in Python docstrings, each judged whole.
-
-    Each docstring is one string node, so adjacent ones are judged apart.
-    """
-    out: list[tuple[int, str, str]] = []
-    for column, spans in python_docstrings(raw, lines):
-        out.extend(one_docstring_findings(column, spans, allowed))
-    return out
-
-
-def one_docstring_findings(
-    base: int, spans: dict[int, str], allowed: set[int] | None
-) -> list[tuple[int, str, str]]:
-    """Over-cap sentences in one docstring opening at column `base`.
-
-    A blank docstring line ends a paragraph, as a blank line does in Markdown.
-    A doctest and the output under it, and an indented code block, are code and are not counted.
-    Its text is measured from the column its quotes open at, so a trailing code line sets nothing.
-    A NumPy section header and its underline, and a Google section header, are not prose.
-    A NumPy `name : type` line is structural, and a Google `name:` lead is not a word.
-    The description under either is prose, each entry its own unit.
-    A Google free-text section such as `Note:` is prose with no entry leads to strip.
-    Lines after the first are measured from the least indented of them, as `inspect.cleandoc` does.
-    A docstring whose every later line is an indented code block, closing quotes included, reads it as prose.
-    A bare URL left of the quotes is a stray line that sets no margin, and closing quotes left of them set none.
-    A body past a blank sits at the margin, not past a colon summary.
-    """
-    out: list[tuple[int, str, str]] = []
-    group = sorted(spans)
-    texts = [spans[n].expandtabs(4) for n in group]
-    texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
-    closer = texts[-1]
-    texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
-    quote = base
+def docstring_margin(unit: Unit, texts: list[str], closer: str) -> int:
+    """The column later docstring lines are measured from, as `inspect.cleandoc` measures it."""
+    quote = unit.column
     later = [
         len(t) - len(t.lstrip())
         for t in texts[1:]
         if t.strip() and not (leading_indent(t) < quote and BARE_URI.match(t.strip()))
     ]
+    alone = len(texts) > 1 and closer.strip() and not texts[-1].strip()
     if (
-        len(texts) > 1
-        and closer.strip()
-        and not texts[-1].strip()
+        alone
         and leading_indent(closer) >= quote
         and (texts[0].strip() or leading_indent(closer) > quote)
     ):
-        later.append(len(closer) - len(closer.lstrip()))  # closing quotes alone on their line
-    elif len(texts) > 1 and texts[0].strip() and not texts[-1].strip() and closer.strip():
+        later.append(len(closer) - len(closer.lstrip()))
+    elif alone and texts[0].strip():
         later.append(quote)
-    if later:
-        base = min(later)
+    return min(later) if later else quote
+
+
+def docstring_sentences(unit: Unit, ctx: Context) -> list[Finding]:
+    """Over-cap docstring sentences, its doctests, code blocks, and section structure skipped."""
+    language = ctx.language
+    numpy = {s.lower() for s in language.get("numpy_sections", ())}
+    google, google_prose = (
+        re.compile(r"^\s*(?:" + "|".join(map(re.escape, language.get(k, ()))) + r"):\s*$")
+        for k in ("google_sections", "google_prose_sections")
+    )
+    texts = [line.text.expandtabs(4) for line in unit.lines]
+    texts[0] = DOCSTRING_OPEN.sub("", texts[0], count=1)
+    closer = texts[-1]
+    texts[-1] = DOCSTRING_CLOSE.sub("", texts[-1], count=1)
+    quote, base = unit.column, docstring_margin(unit, texts, closer)
+    out: list[Finding] = []
     block: list[tuple[int, str]] = []
-
-    def flush() -> None:
-        out.extend(over_cap_findings(block, allowed))
-        block.clear()
-
-    in_doctest = in_code = False
+    in_doctest = in_code = prev_colon = False
     prev_blank = True
-    prev_colon = False
-    section = ""  # "numpy" or "google" while inside a structured section
-    section_indent = base
-    code_at = base
+    section = ""
+    section_indent = 0
+    code_at = colon_ref = base
     skip = 0
-    colon_ref = base
     entry_indent: dict[int, int] = {}
-    for idx, (n, text) in enumerate(zip(group, texts, strict=True)):
+    for idx, (n, text) in enumerate(zip((line.number for line in unit.lines), texts, strict=True)):
         if skip:
             skip -= 1
             continue
         indent = len(text) - len(text.lstrip()) if idx else min(quote, base)
         if not text.strip():
-            flush()
-            in_doctest = in_code = False
-            prev_blank = True
+            out += over_cap(block, ctx.allowed)
+            block, in_doctest, in_code, prev_blank = [], False, False, True
             colon_ref = max(colon_ref, base)
             continue
         following = texts[idx + 1] if idx + 1 < len(texts) else ""
+        header = None
         if indent <= base and NUMPY_UNDERLINE.match(following) and not NUMPY_UNDERLINE.match(text):
-            flush()
-            in_doctest = in_code = False
-            skip = 1
-            section = "numpy" if text.strip().lower() in NUMPY_STRUCTURED else ""
+            header, skip = ("numpy" if text.strip().lower() in numpy else ""), 1
             code_at = base + 2 * INDENT_BLOCK
-            prev_blank = prev_colon = False
-            continue
-        if indent <= base and GOOGLE_HEADER.match(text):
-            flush()
-            in_doctest = in_code = False
-            section, section_indent = "google", 0
-            prev_blank = prev_colon = False
-            continue
-        if indent <= base and GOOGLE_PROSE_HEADER.match(text):
-            flush()
-            in_doctest = in_code = False
-            section, section_indent = "text", 0
-            prev_blank = prev_colon = False
+        elif indent <= base and google.match(text):
+            header, section_indent = "google", 0
+        elif indent <= base and google_prose.match(text):
+            header, section_indent = "text", 0
+        if header is not None:
+            out += over_cap(block, ctx.allowed)
+            block, section = [], header
+            in_doctest = in_code = prev_blank = prev_colon = False
             continue
         if section in ("google", "text") and indent <= base:
             section, code_at = "", base
-        if (
-            section == "numpy"
-            and indent <= base
-            and is_numpy_head(
-                text,
-                next_indent(texts, idx),
-                bool(block) and entry_indent[block[-1][0]] <= base,
-                indent_past_blank(texts, idx),
-            )
-        ):
-            flush()
-            in_doctest = in_code = False
-            prev_blank = False
+        mid = bool(block) and entry_indent[block[-1][0]] <= base
+        head = is_numpy_head(
+            text,
+            indent_at(texts, idx + 1),
+            mid,
+            indent_at(texts, idx + 2) if not following.strip() else -1,
+        )
+        if section == "numpy" and indent <= base and head:
+            out += over_cap(block, ctx.allowed)
+            block, in_doctest, in_code, prev_blank = [], False, False, False
             prev_colon = text.rstrip().endswith(":")
             continue
         if section in ("google", "text"):
             if not section_indent:
                 section_indent = indent
                 code_at = indent + (2 if section == "google" else 1) * INDENT_BLOCK
-            if section == "google" and indent <= section_indent:
-                lead = GOOGLE_ENTRY.match(text)
-                if lead:
-                    flush()
-                    text = text[lead.end() :]
-                    indent = section_indent
-                    in_code = False
+            lead = (
+                GOOGLE_ENTRY.match(text)
+                if section == "google" and indent <= section_indent
+                else None
+            )
+            if lead:
+                out += over_cap(block, ctx.allowed)
+                block, text, indent, in_code = [], text[lead.end() :], section_indent, False
         threshold = code_at if section else base + INDENT_BLOCK
+        colon_at = (section_indent if section in ("google", "text") else colon_ref) + INDENT_BLOCK
         if DOCTEST_PROMPT.match(text):
-            flush()
-            in_doctest = True
+            out += over_cap(block, ctx.allowed)
+            block, in_doctest = [], True
         elif in_doctest or (in_code and indent >= threshold):
             pass
-        elif (prev_blank and indent >= threshold) or (
-            prev_colon
-            and indent
-            >= (section_indent if section in ("google", "text") else colon_ref) + INDENT_BLOCK
-        ):
-            flush()
-            in_code = True
+        elif (prev_blank and indent >= threshold) or (prev_colon and indent >= colon_at):
+            out += over_cap(block, ctx.allowed)
+            block, in_code = [], True
         else:
             in_code = False
             if LIST_MARKER.match(text) or FIELD_LINE.match(text):
-                flush()
+                out += over_cap(block, ctx.allowed)
+                block = []
             block.append((n, strip_list_marker(text.strip())))
             entry_indent[n] = indent
             if text.rstrip().endswith(":"):
-                flush()
+                out += over_cap(block, ctx.allowed)
+                block = []
         prev_blank = False
         prev_colon = text.rstrip().endswith(":")
         colon_ref = quote if idx == 0 else base
-    flush()
-    return out
+    return out + over_cap(block, ctx.allowed)
+
+
+def rule_sentence_length(unit: Unit, ctx: Context) -> list[Finding]:
+    """A sentence over the word cap, in a Markdown block, a comment run, or a docstring."""
+    if unit.kind == "paragraph":
+        return over_cap(
+            [(line.number, strip_list_marker(line.text)) for line in unit.lines], ctx.allowed
+        )
+    if unit.kind == "docstring":
+        return docstring_sentences(unit, ctx)
+    return comment_sentences(unit, ctx)
+
+
+Rule = Callable[[Unit, Context], list[Finding]]
+
+# Each rule and the unit kinds it reads, rules sharing a function sharing one pass over a unit.
+# The rules from `home-path` on read line by line, so their findings are reported in line order.
+RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
+    "comment-wrap": (rule_comment_wrap, frozenset({"comment", "markup"})),
+    "comment-case": (rule_comment_wrap, frozenset({"comment", "markup"})),
+    "comment-added": (rule_comment_added, frozenset({"comment"})),
+    "issue-ref": (rule_issue_ref, frozenset({"prose", "comment", "doc", "docstring"})),
+    "sentence-length": (rule_sentence_length, frozenset({"paragraph", "comment", "docstring"})),
+    "home-path": (rule_home_path, frozenset({"source"})),
+    "charset": (rule_charset, frozenset({"prose", "code"})),
+    "charset-unknown": (rule_charset, frozenset({"prose", "code"})),
+    "dead-path": (rule_dead_path, frozenset({"prose"})),
+    "semicolon": (rule_semicolon, frozenset({"prose"})),
+    "dash": (rule_dash, frozenset({"prose"})),
+    "dupword": (rule_dupword, frozenset({"prose", "comment"})),
+    "spelling": (rule_spelling, frozenset({"prose", "comment"})),
+    "sentence-split": (rule_sentence_split, frozenset({"prose"})),
+}
+LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
 
 
 def check_file(
@@ -3112,376 +1644,136 @@ def check_file(
     rules: set[str],
     root: Path | None = None,
     allowed: set[int] | None = None,
-    unparsed: list[Path] | None = None,
+    plain: list[Path] | None = None,
     undecoded: list[Path] | None = None,
-) -> list[tuple[int, str, str]]:
+) -> list[Finding]:
     """Every finding the rules in `rules` make on `path`.
 
-    `unparsed` collects a `.py` this interpreter cannot parse where a rule in `PARSED_RULES` ran.
-    The parse is the test even for a rule that only tokenizes, since a tokenizer older than the
-    grammar can read a newer f-string as an open string and swallow the comments after it without
-    refusing anything.
-
-    `undecoded` collects a file this function cannot read as UTF-8, whatever rules ran, since no
-    rule reads it and the file is otherwise counted as read with nothing found.
-
-    A leading byte order mark is dropped once, here, since it is not whitespace and every reader
-    that judges line 1's structure would read it as content. The character-set rule is given the
-    mark on its own, where a fence opening line 1 cannot hide it.
+    `plain` collects a file with no lexer and `undecoded` one that is not UTF-8, since each is
+    otherwise counted as read with nothing found. A byte order mark is judged on its own.
     """
-    out: list[tuple[int, str, str]] = []
     try:
         decoded = path.read_bytes().decode("utf-8")
     except (UnicodeDecodeError, OSError):
         if undecoded is not None:
             undecoded.append(path)
-        return out
-    raw = decoded.removeprefix("\ufeff")
-    if raw != decoded and {"charset", "charset-unknown"} & rules:
-        out.extend(f for f in charset_findings(1, "\ufeff") if f[1] in rules)
-    lines = raw.split("\n")
-    markdown = is_markdown(path)
-    # Only Markdown describes what the repo holds, so only Markdown is judged for dead paths.
-    # The file's own directory anchors a relative link, the repository root anchors the rest.
-    # No git means no deletion history to key on, so the rule stands down rather than guess.
-    dead_root: Path | None = None
-    if "dead-path" in rules and markdown:
-        found = str(root) if root else repo_root(path)
-        if found:
-            dead_root = Path(found)
-    if {"comment-wrap", "comment-case"} & rules:
-        out.extend(f for f in comment_wrap_findings(path, raw, lines) if f[1] in rules)
-    if "comment-added" in rules:
-        out.extend(comment_added_findings(path, raw))
-    if "issue-ref" in rules:
-        out.extend(issue_ref_findings(path, raw, lines, root))
-    if (
-        unparsed is not None
-        and PARSED_RULES & rules
-        and path.suffix.lower() == ".py"
-        and python_tree(raw) is None
-    ):
-        unparsed.append(path)
-    # Outside Markdown the prose lives in the comments, and both rules judge prose, not code.
-    # A source line holds identifiers and literals, and an attribute value may legally repeat.
-    # Reading it rejects correct work, `class="gallery gallery-cols-1"` being the reported case.
-    comments: dict[int, list[str]] = {}
-    if {"spelling", "dupword"} & rules and not markdown:
-        for ln, text, _leading, _raw in extracted_comments(path, lines):
-            comments.setdefault(ln, []).append(text)
-    if "sentence-length" in rules:
-        if markdown:
-            out.extend(sentence_length_findings(lines, allowed))
-        else:
-            out.extend(comment_sentence_findings(path, raw, lines, allowed))
-            if path.suffix.lower() == ".py":
-                out.extend(docstring_sentence_findings(raw, lines, allowed))
-    in_fence = False
-    prev_txt = ""
-    prev_no = 0
-    for i, line in enumerate(lines, 1):
-        line = line.rstrip("\r")
-        # Judged before the fence and inline-code handling below, deliberately.
-        # A path pasted inside a fenced transcript is the same exposure as one in a sentence.
-        if "home-path" in rules and not is_operations_runbook(path, root):
-            out.extend(home_path_findings(i, line))
-        if CODE_FENCE.match(line):
-            in_fence = not in_fence
-            prev_txt = ""
-            continue
-        if in_fence:
-            continue
-
-        if "charset" in rules or "charset-unknown" in rules:
-            out.extend(f for f in charset_findings(i, line) if f[1] in rules)
-
-        if dead_root is not None:
-            out.extend(dead_path_findings(dead_root, path.resolve().parent, i, line))
-
-        txt = strip_inline_code(line)
-        prose = strip_quoted(txt) if markdown else txt
-
-        # Both prose rules are Markdown-only until a comment can be told from code.
-        # A shell script carries 78 statement separators that are not prose at all.
-        if markdown:
-            unquoted = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
-            if "semicolon" in rules:
-                for span in list_spans(unquoted):
-                    # The sentence is the unit, since the list an exemption protects lives in one.
-                    # Judged over a whole bullet, one colon exempted every semicolon after it.
-                    for sentence in sentences(span):
-                        # A list keeps its semicolons, announced by a second separator or a label.
-                        # The comma qualifies the list rather than one separator's position.
-                        # An enumeration whose commas fall in a later item keeps every semicolon.
-                        # Read positionally, it split one series and flagged that series' openers.
-                        head, _, tail = sentence.partition(";")
-                        listish = sentence.count(";") > 1 or (
-                            LABELED_ITEM.match(LIST_MARKER.sub("", head, count=1)) is not None
-                            and LABELED_ITEM.match(tail) is not None
-                        )
-                        if listish and "," in sentence:
-                            continue
-                        for _ in SEMICOLON.finditer(sentence):
-                            out.append(
-                                (i, "semicolon", "semicolon in prose -> a comma or two sentences")
-                            )
-            if "dash" in rules:
-                skip = LABEL_DASH.match(unquoted)
-                for m in DASH.finditer(unquoted):
-                    if skip and m.start() < skip.end():
-                        continue
-                    out.append(
-                        (i, "dash", "spaced hyphen -> a comma, two sentences, or parentheses")
-                    )
-
-        if "dupword" in rules:
-            # Each comment on the line is judged on its own rather than joined with its neighbors.
-            # Joining them would read the second's opening word as a repeat of the first's last.
-            texts = [prose] if markdown else [strip_inline_code(c) for c in comments.get(i, [])]
-            for text in texts:
-                for m in DUPWORD.finditer(text):
-                    if m.group(0).lower() in DUP_ALLOW:
-                        continue
-                    out.append((i, "dupword", f"duplicated word '{m.group(1)}'"))
-
-        if "spelling" in rules:
-            texts = [prose] if markdown else comments.get(i, [])
-            for m in BRITISH_RE.finditer(strip_inline_code(" ".join(texts))):
-                found = m.group(0)
-                out.append((i, "spelling", f"British spelling '{found}' -> '{us_form(found)}'"))
-
-        if "sentence-split" in rules and markdown:
-            stripped = txt.strip()
-            is_prose = (
-                stripped
-                and not stripped.startswith(("|", ">", "#"))
-                and not re.match(r"^\s*\[[^\]]+\]:", stripped)
-            )
-            if prev_txt and is_prose:
-                p = prev_txt.strip()
-                # The previous prose line ended mid-sentence, and this line continues it.
-                if (
-                    p
-                    and not SENT_END.search(p)
-                    and not p.endswith((":", "-", "|"))
-                    and starts_lowercase(stripped)
-                ):
-                    out.append(
-                        (
-                            prev_no,
-                            "sentence-split",
-                            "sentence wraps across lines (one sentence per line)",
-                        )
-                    )
-            prev_txt = txt if is_prose else ""
-            prev_no = i
-    return out
+        return []
+    bom = chr(0xFEFF)
+    text = decoded.removeprefix(bom)
+    out = [f for f in charset_findings(1, bom) if f[1] in rules] if text != decoded else []
+    lex = any(RULE_TABLE[r][1] - {"source", "prose", "code"} for r in rules)
+    units, fenced, read_plain = extract(path, text, lex)
+    if read_plain and plain is not None:
+        plain.append(path)
+    lexer = lexer_name(path, text.split("\n", 1)[0].rstrip("\r"))
+    config = config_for(str(root) if root else None)
+    ctx = Context(path, root, fenced, language_of(lexer) or {}, config, allowed)
+    passes: dict[Rule, set[str]] = {}
+    for name in RULE_TABLE:
+        if name in rules:
+            passes.setdefault(RULE_TABLE[name][0], set()).add(name)
+    ordered: list[Finding] = []
+    for func, names in passes.items():
+        kinds = RULE_TABLE[next(iter(names))][1]
+        hits = [f for u in units if u.kind in kinds for f in func(u, ctx) if f[1] in names]
+        (ordered if names & LINE_ORDERED else out).extend(hits)
+    return out + sorted(ordered, key=lambda f: f[0])
 
 
-def report_paths_that_are_not_utf8() -> None:
-    """Let a path holding a byte that is not UTF-8 print rather than ending the run.
+# The ASCII whitespace the composite action's trim removes, the smallest blank set in play.
+# Judged by it, the gate never refuses an exclusion the action builds and passes.
+ASCII_BLANK = " \t\n\r\v\f"
 
-    The git reads above decode with surrogateescape so such a path opens on disk, which leaves
-    the lone surrogate in the name to reach this program's own output. Encoding it strictly
-    raises at the line printing that name, part way through the scan, so every finding after
-    that point is lost along with the run's own verdict, and the exit code becomes a traceback's
-    rather than the gate's. Escaping it costs the reader one unreadable byte in one name.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(errors="backslashreplace")
+
+def refuse(message: str, **fields: Any) -> int:
+    """Print why the run cannot give an honest verdict, and the exit code that says so."""
+    print(printable("error: " + say(message, **fields)), file=sys.stderr)
+    return 2
+
+
+def note(message: str, **fields: Any) -> None:
+    print("note: " + say(message, **fields), file=sys.stderr)
+
+
+def stand_downs(rules: set[str], a: argparse.Namespace, scan_root: Path, in_git: bool) -> None:
+    """Drop a rule this run cannot honestly run, announced, since a quiet stand-down reads as a pass."""
+    by_env = os.environ.get(COMMENT_ENV_NAME, "").strip().lower() not in COMMENT_ENV_OFF
+    if "comment-added" in rules and (a.allow_comments or by_env or a.diff is None):
+        rules.discard("comment-added")
+        named = COMMENT_ENV_NAME if by_env and not a.allow_comments else "--allow-comments"
+        note("note-allowed" if a.allow_comments or by_env else "note-no-diff", named=named)
+    if "dead-path" in rules and in_git and shallow_checkout(scan_root):
+        rules.discard("dead-path")
+        note("note-shallow")
+
+
+def argument_parser(data: dict[str, Any]) -> argparse.ArgumentParser:
+    """The command line the data file declares, which `scripts/prose_lint.py` builds the same way."""
+    ap = argparse.ArgumentParser(prog="prose_lint.py")
+    for flag, spec in data["cli"].items():
+        choices = {"choices": sorted(data["rules"])} if spec.get("choices") == "rules" else {}
+        ap.add_argument(flag, **{**spec, **choices})
+    return ap
 
 
 def main(argv: list[str] | None = None) -> int:
-    report_paths_that_are_not_utf8()
-    ap = argparse.ArgumentParser()
-    ap.add_argument("paths", nargs="*", default=["."])
-    ap.add_argument("--check", action="append", dest="checks", choices=sorted(RULES))
-    ap.add_argument("--exclude", action="append", default=[])
-    ap.add_argument("--summary", action="store_true")
-    ap.add_argument(
-        "--list-files",
-        action="store_true",
-        help="print the discovered file set and exit, for auditing the sweep scope",
-    )
-    ap.add_argument(
-        "--diff",
-        metavar="BASE",
-        help="only report violations on lines changed vs BASE "
-        "(matches the repo policy: fix as each file is next edited, not swept)",
-    )
-    ap.add_argument(
-        "--allow-comments",
-        action="store_true",
-        help="stand `comment-added` down, for a change whose comment lines are wanted. "
-        f"{COMMENT_ENV_NAME} set to anything but a false spelling does the same, for a caller "
-        "with nowhere to pass a flag. What makes a CI run pass it is the calling "
-        "workflow's own condition",
-    )
-    ap.add_argument(
-        "--provenance",
-        metavar="REF",
-        help="name this copy of the gate on the verdict, as the composite action's "
-        "owner/repo@ref, so a finding can be attributed to the commit that raised it",
-    )
-    a = ap.parse_args(argv)
-
+    for stream in (sys.stdout, sys.stderr):
+        # A path holding a byte that is not UTF-8 prints escaped rather than ending the run.
+        if callable(reconfigure := getattr(stream, "reconfigure", None)):
+            reconfigure(errors="backslashreplace")
+    a = argument_parser(BASE).parse_args(argv)
     rules = set(a.checks or DEFAULT_RULES)
-
-    # The invariant: the rule set is decided by what is scanned, and no path here reads the working directory to decide it.
-    # Only a repository declares a model, so two of them refuse and anything else resolves to one anchor.
-    # TestScanRootDecidesTheRuleSet carries the cases and the reason each one exists.
+    # Every input to a verdict is read from the repository scanned, never from the working directory.
+    # TestScanRootDecidesTheRuleSet carries the cases.
     scan_paths = a.paths or ["."]
-    # An exclusion is a substring test, so the empty one matches every key and empties the scan while the run still exits 0.
-    # That is the false clean this gate exists to refuse rather than to emit, arriving through an argument rather than through a resolution.
-    # It is reachable from a blank line in a repository's exclusions file, since the composite action skips those and a reader reproducing its arguments by hand has no such step unless it is stated.
-    # Blank is judged by the ASCII whitespace the action's own trim uses rather than by `str.strip`, whose wider set includes characters that survive that trim.
-    # Judged the wider way this refuses a value the action does build, so a line holding only a non-breaking space would fail that repository's gate on every run instead of passing through as the inert exclusion it is.
+    # An empty exclusion matches every key and empties the scan while the run exits 0.
     if any(not x.strip(ASCII_BLANK) for x in a.exclude):
-        print(
-            "error: --exclude was given an empty value, which matches every path and would "
-            "report a whole-tree scan as clean. Drop the blank entry rather than passing it, "
-            "the way the composite action skips a blank line in .github/prose-gate-excludes.",
-            file=sys.stderr,
-        )
-        return 2
-    # Anything that is not a file or a directory is refused rather than absorbed.
-    # `discover` reads such an argument as `.`, so it scanned the caller's directory while the rule set anchored on the argument's parent.
-    # Tested for what it is rather than for whether it exists, since a FIFO, a socket, and a device all exist and are none of the two.
+        return refuse("error-empty-exclude")
+    # Anything that is not a file or a directory, a FIFO or a socket included, is refused.
     unusable = [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]
     if unusable:
-        # Quoted, since a path holding a space or a comma is unreadable in a bare comma-joined list.
-        print(
-            printable(
-                f"error: requested path(s) are not a file or a directory: {quoted(unusable)}. "
-                "Refusing rather than falling back to the current directory, which would scan "
-                "one tree and choose the rule set from another."
-            ),
-            file=sys.stderr,
-        )
-        return 2
+        return refuse("error-not-a-path", paths=quoted(unusable))
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
-        print(
-            printable(
-                f"error: the requested paths span more than one repository ({quoted(git_roots)}). "
-                "Each declares its own workflow model, so no single rule set is correct for all "
-                "of them. Run the gate once per repository."
-            ),
-            file=sys.stderr,
-        )
-        return 2
-    # A file anchors on its own parent rather than on `.`, which is where the caller stands.
-    if git_roots:
-        scan_root = Path(next(iter(git_roots)))
-    else:
-        first = Path(scan_paths[0])
-        scan_root = first if first.is_dir() else first.parent
+        return refuse("error-many-repositories", roots=quoted(git_roots))
+    first, in_git = Path(scan_paths[0]), bool(git_roots)
+    scan_root = Path(git_roots.pop()) if git_roots else first if first.is_dir() else first.parent
+    try:
+        config_for(str(scan_root))
+    except OverrideError as exc:
+        return refuse("error-override", path=scan_root / OVERRIDE_NAME, why=exc)
+    stand_downs(rules, a, scan_root, in_git)
 
-    # Both stand-downs are announced, since a rule that quietly stops running reads as a pass.
-    # The override is a deliberate act on one change, so the run says which act it honored.
-    if "comment-added" in rules:
-        by_env = os.environ.get(COMMENT_ENV_NAME, "").strip().lower() not in COMMENT_ENV_OFF
-        if a.allow_comments or by_env:
-            rules.discard("comment-added")
-            named = COMMENT_ENV_NAME if by_env and not a.allow_comments else "--allow-comments"
-            print(
-                f"note: comment-added stood down by {named}. In CI the composite action passes "
-                "that flag from its own input instead, which the fleet's caller computes from the "
-                f"{COMMENT_LABEL_NAME!r} label and from the run being a release-model promotion, "
-                f"and it clears {COMMENT_ENV_NAME} so a runner cannot decide one.",
-                file=sys.stderr,
-            )
-        elif a.diff is None:
-            rules.discard("comment-added")
-            print(
-                "note: comment-added is not checked without --diff, which is what tells an added "
-                "comment apart from one the tree already held. Scope the run to a base to run it.",
-                file=sys.stderr,
-            )
-
-    # Announced for the same reason the skip above is, a silent stand-down reads as a pass.
-    if "dead-path" in rules and git_roots and shallow_checkout(scan_root):
-        rules.discard("dead-path")
-        print(
-            "note: dead-path is not checked in a shallow clone, which holds no deletion "
-            "history to key on. Fetch the full history to run it.",
-            file=sys.stderr,
-        )
-
-    # Every input to a verdict is read from the repository scanned rather than from the process.
-    # That covers the rule set above, the file set, the diff, and the keys joining the last two.
-    # An earlier guard refused a scan of one repository while the process stood in another.
-    # The diff was taken where the process stood, which intersected the scan to nothing.
-    # Anchoring the diff on the scan root is what that guard was approximating.
-    # It answers the case correctly rather than refusing it.
-    # A path under no repository now fails at the diff itself, which is the honest error.
-    files = discover(a.paths or ["."], tuple(a.exclude), scan_root)
-    # Computed once, by the helper and the root discovery used.
-    # A key derived twice is a key that can disagree with itself.
+    files = discover(scan_paths, tuple(a.exclude), scan_root)
     keys = {f: repo_key(f, scan_root) for f in files}
-
     if a.list_files:
         for f in files:
             print(printable(keys[f]))
         return 0
-
     discovered = len(files)
     # Presence rather than truthiness, since an empty value is a base that failed to compute.
-    # Reading it as no diff at all is the silent widening the refusal below exists to prevent.
     scope = changed_lines(a.diff, scan_root) if a.diff is not None else None
     if a.diff is not None and scope is None:
-        # Widening to the whole tree answers a different question, and answers it silently.
-        # A caller scoping to a change gets the backlog reported as though the change made it.
-        # A CI adoption hits this first, where an unresolvable base walls off the first run.
-        # Scoping to nothing instead would report a false clean, so neither default is honest.
-        print(
-            printable(
-                f"error: cannot diff against {a.diff!r}, so the run cannot be scoped to changed "
-                "lines. Refusing to scan the whole tree instead, since that reports the existing "
-                "backlog as though this change introduced it. Check the ref exists and that the "
-                "checkout carries its history."
-            ),
-            file=sys.stderr,
-        )
-        return 2
+        return refuse("error-no-diff", base=a.diff)
     if scope is not None:
         matched = [f for f in files if keys[f] in scope]
-        # The floor every verdict below rests on, asserted rather than guarded.
-        # Each route to a false clean so far was closed after a reviewer saw it.
-        # The next is closed that way or not at all, which is what a floor covers.
-        # A run that resolves a non-empty diff and matches none of its files failed to scope.
-        # Zero alone is not the test.
-        # A change touching only files the rules do not read matches nothing and is clean.
-        # An image or a lock file is that case.
-        # So the comparison is against the diff's own list of files this run could have read.
-        if scope and not matched:
-            unread = unread_diff_files(scope, a.paths or ["."], tuple(a.exclude), scan_root)
-            if unread:
-                shown = quoted(unread, 5)
-                print(
-                    printable(
-                        f"error: the diff against {a.diff!r} names {len(unread)} readable "
-                        f"file(s) this run was asked about, and the scan matched none of them: "
-                        f"{shown}. Refusing to report a clean run, since a gate that read nothing "
-                        "is indistinguishable from a gate with nothing to read. Check that the "
-                        "run starts at the repository top level and that the requested paths "
-                        "cover the change."
-                    ),
-                    file=sys.stderr,
-                )
-                return 2
+        # A non-empty diff whose readable files the scan matched none of failed to scope.
+        unread = (
+            [] if matched else unread_diff_files(scope, scan_paths, tuple(a.exclude), scan_root)
+        )
+        if unread:
+            fields = {"base": a.diff, "count": len(unread), "paths": quoted(unread, 5)}
+            return refuse("error-unread-diff", **fields)
         files = matched
 
     total = 0
     bykind: dict[str, int] = {}
     byfile: dict[str, int] = {}
-    refused: list[Path] = []
+    plain: list[Path] = []
     undecoded: list[Path] = []
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
-        for ln, kind, msg in check_file(f, rules, scan_root, allowed, refused, undecoded):
+        for ln, kind, msg in check_file(f, rules, scan_root, allowed, plain, undecoded):
             if allowed is not None and ln not in allowed:
                 continue
             total += 1
@@ -3489,29 +1781,17 @@ def main(argv: list[str] | None = None) -> int:
             byfile[keys[f]] = byfile.get(keys[f], 0) + 1
             if not a.summary:
                 print(printable(f"{keys[f]}:{ln}: {kind}: {msg}"))
-
     inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
-    print(
-        printable(
-            scope_note(
-                len(files),
-                discovered,
-                inscope,
-                a.diff,
-                gate_provenance(a.provenance),
-                [keys[f] for f in refused],
-                [keys[f] for f in undecoded],
-            )
-        ),
-        file=sys.stderr,
-    )
+    provenance = gate_provenance(a.provenance)
+    named = [[keys[f] for f in group] for group in (plain, undecoded)]
+    note_line = scope_note(len(files), discovered, inscope, a.diff, provenance, *named)
+    print(printable(note_line), file=sys.stderr)
     if a.summary or total:
         print(f"\n{total} violation(s) across {len(byfile)} file(s)", file=sys.stderr)
         for k, v in sorted(bykind.items(), key=lambda kv: -kv[1]):
             print(f"  {k:16} {v}", file=sys.stderr)
-        if a.summary:
-            for k, v in sorted(byfile.items(), key=lambda kv: -kv[1])[:15]:
-                print(printable(f"  {v:5}  {k}"), file=sys.stderr)
+        for k, v in sorted(byfile.items(), key=lambda kv: -kv[1])[:15] if a.summary else ():
+            print(printable(f"  {v:5}  {k}"), file=sys.stderr)
     return 1 if total else 0
 
 
