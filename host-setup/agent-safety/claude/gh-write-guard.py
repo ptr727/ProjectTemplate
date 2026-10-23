@@ -21,7 +21,8 @@ harm there is a silent success under the maintainer's admin bypass. The denied s
      the maintainer granted that target in GH_WRITE_GUARD_ALLOW. The target is named by -R/--repo,
      repos/<owner>/<repo>, GH_REPO, a pull request URL, an --org or --owner value, or a linked
      issue's URL. A write whose target the guard does not read fails closed, such as one an eval
-     runs or one to a repositories/<id> endpoint. Sibling
+     runs, one xargs runs on input the guard does not read, or one to a repositories/<id>
+     endpoint. Sibling
      repositories under the same owner are allowed, since the harm this guards is reaching a stranger's
      repository, not working across your own fleet in one session.
   4. a git operation that would only land by bypassing an active branch rule: a direct push to a branch
@@ -1472,27 +1473,15 @@ def _config_override_sources(global_opts):
 def _env_assignments(toks, k=None):
     """The `NAME=value` words in `toks` that reach a git command, as (name, value).
 
-    That is each argument of an `export`, which persists to the commands after it.
+    That is each value an export exports, which persists to the commands after it (see `_export_events`).
     It is also the prefix of the git word at index `k`, or of every git word where `k` is None (see `_git_word_assignments`).
     """
     out = []
+    exports = dict(_export_events(toks))
     for x, t in enumerate(toks):
         if _is_git_exe(t) and k in (None, x):
             out.extend(_git_word_assignments(toks, x))
-        elif t == "export" and _opens_command(toks, x):
-            out.extend(_export_assignments(toks, x))
-    return out
-
-
-def _export_assignments(toks, x):
-    """The `NAME=value` arguments of the `export` at `toks[x]`, as (name, value), up to its first other word."""
-    out = []
-    for word in toks[x + 1 :]:
-        m = _ENV_ASSIGN_RE.match(word)
-        if not (m or word.startswith("-")):
-            break
-        if m:
-            out.append(m.groups())
+        out.extend(exports.get(x, ()))
     return out
 
 
@@ -1560,6 +1549,7 @@ _PRECOMMAND_VALUE_OPTS = {
 
 
 _LAUNCHER_POSITIONALS = {"flock": 1, "watch": 0, "winpty": 0, "coproc": 0, "while": 0, "until": 0}
+_NAME_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _base_name(tok):
@@ -1600,7 +1590,8 @@ def _command_prefix(toks, k):
 def _prefix_walk(toks, k):
     """(the index of the first word `_command_prefix` does not pass, the assignments before it).
 
-    The walk stops there, or at `k`, whichever comes first.
+    The walk stops there, or at `k`, whichever comes first. A named `coproc` passes its name too,
+    since it runs the compound command after it, as in `coproc name { ...; }`.
     """
     start = k
     while start > 0 and not _is_separator(toks[start - 1]):
@@ -1624,11 +1615,14 @@ def _prefix_walk(toks, k):
                 i += 2 if _option_takes_next(toks[i], takes) else 1
         elif _base_name(toks[i]) in _LAUNCHER_POSITIONALS:
             takes = _PRECOMMAND_VALUE_OPTS.get(_base_name(toks[i]), frozenset())
-            positionals = _LAUNCHER_POSITIONALS[_base_name(toks[i])]
+            base = _base_name(toks[i])
+            positionals = _LAUNCHER_POSITIONALS[base]
             i += 1
             while i < k and toks[i].startswith("-"):
                 i += 2 if _option_takes_next(toks[i], takes) else 1
             i += positionals
+            named = base == "coproc" and i + 1 < k and _NAME_WORD.fullmatch(toks[i])
+            i += bool(named and (toks[i + 1] == "{" or toks[i + 1].startswith("(")))
         else:
             return i, out
     return i, out
@@ -1682,14 +1676,19 @@ def _reading_env_config_values(toks):
     Each git word's pairs are read from the exports before it and its own prefix, as git reads them.
     A later command reusing an index then cannot replace an earlier one's key.
     The pairs across every assignment `_env_assignments` returns are read too, so a reading never loses a value it gave before.
+    Behind a launcher, the exports are also read under only the assignments before it, since one
+    after an `env` or `sudo` there may be the launcher's own argument (see `_git_dir_rereading`).
     """
     out = list(_env_config_values(_env_assignments(toks)))
     exported = []
+    exports = dict(_export_events(toks))
     for k, t in enumerate(toks):
-        if t == "export" and _opens_command(toks, k):
-            exported.extend(_export_assignments(toks, k))
-        elif _is_git_exe(t):
+        exported.extend(exports.get(k, ()))
+        if _is_git_exe(t):
             out.extend(_env_config_values(exported + _git_word_assignments(toks, k)))
+            if not _command_prefix(toks, k)[0]:
+                before = _launcher_prefix(toks, k, env_args=False)[1]
+                out.extend(_env_config_values(exported + before))
     return list(dict.fromkeys(out))
 
 
@@ -1862,35 +1861,81 @@ def _git_invocations_at(cmd):
     return out
 
 
-_EXPORTING_BUILTINS = {"export": None, "declare": "-x", "typeset": "-x"}
+_EXPORTING_BUILTINS = {"export": None, "declare": "-x", "typeset": "-x", "local": "-x"}
 
 
-def _exported_states(toks, word):
-    """The exported variables before the git word at `toks[word]`, as one dict after each export.
+def _export_events(toks):
+    """Each place in `toks` where the shell exports variables, as (index, the (name, value) pairs it exports).
 
-    An `export`, or a `declare`/`typeset` given `-x`, exports each `NAME=value` it names, read by
-    `_export_words`. One naming a bare `NAME` exports the value the last command of plain
-    assignments before it set (see `_plain_assignments`). A `builtin` or `command` before it counts.
+    An `export`, or a `declare`, `typeset`, or `local` given `-x`, exports each `NAME=value` it
+    names, read by `_export_words`. One naming a bare `NAME` exports each value a plain
+    assignment, a `declare`, a `typeset`, a `local`, or a `readonly` before it gave that name (see
+    `_plain_assignments`). Each is read, since a function or a branch may hold the one set last.
+    A `builtin` or `command` before it counts. A plain assignment standing as its own command
+    exports its value too. It does where the name was exported before it, or a `set -a` or
+    `set -o allexport` came before it, and so does a `declare` after one. The readers of an
+    exported git variable read these, so each form reaches every rule that reads one. `GH_REPO`
+    keeps its own reader (see `_gh_repo_states`). That reader fails closed on the forms it does
+    not follow (see `_gh_repo_unread_export`).
     """
-    shell, current, states = {}, {}, []
-    for x in range(word):
-        t = toks[x]
-        shell.update(_plain_assignments(toks, x))
+    shell, marked, allexport, out = {}, set(), False, []
+
+    def remember(pairs):
+        for name, value in pairs:
+            shell.setdefault(name, []).append(value)
+
+    for x, t in enumerate(toks):
+        plain = _plain_assignments(toks, x)
+        remember(plain)
+        reached = [(name, value) for name, value in plain if allexport or name in marked]
+        if reached:
+            out.append((x, reached))
         runner = x > 0 and toks[x - 1] in ("builtin", "command") and _opens_command(toks, x - 1)
-        if t not in _EXPORTING_BUILTINS or not (_opens_command(toks, x) or runner):
+        if not (_opens_command(toks, x) or runner):
             continue
-        flag = _EXPORTING_BUILTINS[t]
         options = []
-        for w in toks[x + 1 : word]:
+        for w in toks[x + 1 :]:
             if _is_shell_op(w):
                 break
             options.append(w)
-        if flag and not any(w.startswith("-") and flag[1] in w for w in options):
+        if t == "set":
+            flags = [w for w in options if w[:1] == "-" and w[1:2] not in ("", "-")]
+            allexport = allexport or any("a" in w for w in flags) or "allexport" in options
+            continue
+        if t not in _EXPORTING_BUILTINS and t != "readonly":
             continue
         pairs, names = _export_words(toks, x)
-        current.update({name: shell[name] for name in names if name in shell})
+        remember(pairs)
+        flag = _EXPORTING_BUILTINS.get(t, "-x")
+        if flag and not any(w.startswith("-") and flag[1] in w for w in options):
+            if allexport and pairs:
+                out.append((x, pairs))
+            continue
+        marked.update(names)
+        marked.update(name for name, _value in pairs)
+        named = [(name, v) for name in names for v in dict.fromkeys(shell.get(name, ()))]
+        out.append((x, named + pairs))
+    return out
+
+
+def _exported_states(toks, word):
+    """The exported variables the git word at `toks[word]` may run under, as one dict after each export.
+
+    Each export is read from `_export_events`, in order. Those before the git word are read, and
+    an export giving one name several values gives a state for each. Where
+    a loop or a function may run the git word after a later export, as in `f() { git ...; };
+    export ...; f`, every export in the command is read (see `_reruns`).
+    """
+    end = len(toks) if _reruns(toks, None, subshells=False) else word
+    current, states = {}, []
+    for x, pairs in _export_events(toks):
+        if x >= end:
+            break
+        base = dict(current)
         current.update(pairs)
         states.append(dict(current))
+        alternates = [(n, v) for n, v in pairs if current[n] != v]
+        states.extend({**base, **dict(pairs), n: v} for n, v in alternates)
     return states
 
 
@@ -1904,19 +1949,26 @@ def _git_dir_rereading(toks, word, invocation, inherited=()):
     invocation's own value wins, as git reads it. The caller keeps the first reading as well,
     since an `export` in a subshell or a pipeline does not reach a later command. Such an export
     is still read, as one that may.
+
+    Past a launcher, an assignment after an `env` or `sudo` word may be the launcher's own
+    argument, as `find ./env -name GIT_DIR=x -exec git ...` holds. So each state is also read
+    under only the assignments before the launcher, beside that prefix rather than under it.
     """
     c_dirs, work_tree, git_dir, inline_aliases, sub, args, leading_cd = invocation
-    prefix = _git_word_assignments(toks, word)
+    prefixes = [_git_word_assignments(toks, word)]
+    if not _command_prefix(toks, word)[0]:
+        prefixes.append(_launcher_prefix(toks, word, env_args=False)[1])
     out = []
     for state in [{}, *inherited, *_exported_states(toks, word)]:
-        values = {**state, **dict(prefix)}
-        carried = (
-            work_tree if work_tree is not None else values.get(_GIT_ENV_WORK_TREE_VAR),
-            git_dir if git_dir is not None else values.get(_GIT_ENV_GIT_DIR_VAR),
-        )
-        reading = (c_dirs, *carried, inline_aliases, sub, args, leading_cd)
-        if carried != (work_tree, git_dir) and reading not in out:
-            out.append(reading)
+        for prefix in prefixes:
+            values = {**state, **dict(prefix)}
+            carried = (
+                work_tree if work_tree is not None else values.get(_GIT_ENV_WORK_TREE_VAR),
+                git_dir if git_dir is not None else values.get(_GIT_ENV_GIT_DIR_VAR),
+            )
+            reading = (c_dirs, *carried, inline_aliases, sub, args, leading_cd)
+            if carried != (work_tree, git_dir) and reading not in out:
+                out.append(reading)
     return out
 
 
@@ -1986,7 +2038,7 @@ def _all_git_invocations(cmd, overflow=None):
 def _wrapper_dir_prefixes(text):
     """The (work tree, git dir) a `GIT_WORK_TREE`/`GIT_DIR` gives each shell in `text` whose command string runs git.
 
-    That is the shell's own prefix and each `export` before it (see `_wrapper_env_groups`).
+    That is the shell's own prefix and each export before it (see `_wrapper_env_groups`).
     A shell that is given neither is left out.
     """
     out = []
@@ -2664,6 +2716,19 @@ def _check_primary_checkout_mutation(
                 )
             if dotted is not None:
                 continue
+        unread_dir = next(
+            (v for v in (git_dir, work_tree) if v and _is_run_time_word(_expand_dir(v))), None
+        )
+        if unread_dir is not None:
+            verdict = _primary_checkout_verdict(sub, args, None, lambda _d, _r: False)
+            if verdict or (verdict is None and sub not in _git_command_names()):
+                return "deny", (
+                    f"This `git {sub}` takes its git directory or work tree from a run-time word "
+                    f"({unread_dir}), which the shell expands before git reads it, so the guard "
+                    "cannot tell whether it runs against a primary checkout. Failing closed. "
+                    "Write the directory out as an absolute path in GIT_DIR, GIT_WORK_TREE, "
+                    "--git-dir, or --work-tree."
+                )
         resolved = _resolve_target_dir(c_dirs, work_tree, leading_cd, cwd)
         repo_git_dir = _resolve_repo_dir(git_dir, c_dirs, leading_cd, cwd)
         # This rule tests two independent dimensions of "does this touch a primary checkout", since git's own --work-tree/--git-dir split lets a single invocation mutate one repository's index/refs/HEAD while writing working-tree files into an entirely different directory.
@@ -3829,7 +3894,7 @@ def _export_words(toks, x):
         m = _ENV_ASSIGN_RE.match(word)
         if m:
             pairs.append(m.groups())
-        elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", word):
+        elif _NAME_WORD.fullmatch(word):
             names.append(word)
         elif not word.startswith("-"):
             break
@@ -3933,14 +3998,31 @@ def _gh_word_repo_values(text, inherited):
     for x, argv in invocations:
         if not _takes_gh_repo(argv):
             continue
-        reached, pairs = _command_prefix(toks, x)
-        if not reached:
-            reached, pairs = _launcher_prefix(toks, x, env_args=False)
-        if not reached:
-            continue
-        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"]
-        out += [(v, argv, env) for v, env in prefix or states[x]]
+        reached, values = _gh_repo_reach(toks, x, states)
+        if reached:
+            out += [(v, argv, env) for v, env in values]
     return out
+
+
+def _gh_repo_reach(toks, x, states):
+    """(whether the word at `toks[x]` runs as a command, the `GH_REPO` values reaching it as (value, from_env)).
+
+    Its own prefix replaces the shell's state at `states[x]` (see `_command_prefix`). Behind a
+    launcher `_command_prefix` does not know, the assignments before that launcher do (see
+    `_launcher_prefix`). One after an `env` or `sudo` there is read beside them, since it is
+    either an argument, as in `find ./env -name GH_REPO=x -exec gh ...`, or one that word passes
+    on, as in `uv run env GH_REPO=x gh ...`.
+    """
+    reached, pairs = _command_prefix(toks, x)
+    passed = []
+    if not reached:
+        reached, pairs = _launcher_prefix(toks, x, env_args=False)
+        later = _launcher_prefix(toks, x)[1][len(pairs) :]
+        passed = [(v, False) for name, v in later if name == "GH_REPO"]
+    if not reached:
+        return False, []
+    values = [(v, False) for name, v in pairs if name == "GH_REPO"] or states[x]
+    return True, values + [v for v in passed if v not in values]
 
 
 def _gh_wrapper_repo_values(text, inherited, _depth=0):
@@ -3949,7 +4031,8 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
     A wrapper's bodies run under its own GH_REPO prefix, or else the value its command runs under
     (see `_gh_repo_states`), and a wrapper nested in one inherits from it in turn. A substitution
     body the tokenizer keeps inside one word, as in `"$(...)"`, runs under the value at each word
-    opening it, or at every word where none is found.
+    opening it, or at every word where none is found. Each value reaching a body is read as a
+    reading of its own, since `_gh_repo_states` takes only the latest of the values it inherits.
     """
     if _depth > _WRAPPER_NESTING_LIMIT:
         return []
@@ -3960,21 +4043,20 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
         found = _shell_bodies_at(toks, x)
         if not found:
             continue
-        reached, pairs = _command_prefix(toks, x)
-        if not reached:
-            reached, pairs = _launcher_prefix(toks, x, env_args=False)
-        prefix = [(v, False) for name, v in pairs if name == "GH_REPO"] if reached else []
-        reach = prefix or states[x]
+        reached, reach = _gh_repo_reach(toks, x, states)
+        reach = reach if reached else states[x]
         for body in found[0]:
-            out += _gh_word_repo_values(body, reach)
-            out += _gh_wrapper_repo_values(body, reach, _depth + 1)
+            for each in [[v] for v in reach] or [[]]:
+                out += _gh_word_repo_values(body, each)
+                out += _gh_wrapper_repo_values(body, each, _depth + 1)
     for body in _substitution_bodies(text):
         at = [k for k, t in enumerate(toks) if "$(" + body in t or "`" + body in t] or range(
             len(toks)
         )
         reach = list(dict.fromkeys(v for k in at for v in states[k])) if toks else list(inherited)
-        out += _gh_word_repo_values(body, reach)
-        out += _gh_wrapper_repo_values(body, reach, _depth + 1)
+        for each in [[v] for v in reach] or [[]]:
+            out += _gh_word_repo_values(body, each)
+            out += _gh_wrapper_repo_values(body, each, _depth + 1)
     return out
 
 
@@ -4558,19 +4640,31 @@ def _config_may_change(toks, end, skip=None, mask=None):
     for k in range(end):
         if k == skip:
             continue
-        if _runs_run_time_word(toks, k, mask):
-            return True
-        if _runs_unread_script(toks, k, mask):
+        if _word_may_change_config(toks, k, mask):
             return True
         found = _shell_bodies_at(toks, k)
-        if found and _word_runs(toks, k, mask):
-            if found[0] and _string_read_elsewhere(toks, k):
-                return True
-            if any(_names_config_change(body) for body in found[0]):
-                return True
-        if _config_changing_word(toks, k, mask):
+        if found and _word_runs(toks, k, mask) and any(map(_names_config_change, found[0])):
             return True
     return False
+
+
+def _word_may_change_config(toks, k, mask=None):
+    """True when the word at `toks[k]` runs something that may rewrite git config, read the same in every config scan.
+
+    That is a run-time command word (see `_runs_run_time_word`), a shell given no command string
+    (see `_runs_unread_script`), and a word `_config_changing_word` counts. It is also a shell
+    whose command string it may not run (see `_string_read_elsewhere`). `_config_may_change` and
+    `_names_config_change` both read each word with it, so a wrapper body is read as the outer
+    command is.
+    """
+    if _runs_run_time_word(toks, k, mask) or _runs_unread_script(toks, k, mask):
+        return True
+    if _config_changing_word(toks, k, mask):
+        return True
+    found = _shell_bodies_at(toks, k)
+    return bool(
+        found and found[0] and _word_runs(toks, k, mask) and _string_read_elsewhere(toks, k)
+    )
 
 
 def _word_runs(toks, k, mask=None):
@@ -4607,7 +4701,7 @@ def _string_read_elsewhere(toks, k):
 
     That is where no word follows the option or the word after it is an option, as in `bash -c --`.
     The shell then takes its string from a later word. It is also a string holding the string an
-    `xargs` running the shell replaces with each word it reads (see `_xargs_replace_string`).
+    `xargs` running the shell replaces with each word it reads (see `_xargs_replace_strings`).
     """
     exe = _command_string_exe(toks[k])
     args, _ = _collect_arglist(toks, k + 1)
@@ -4616,32 +4710,66 @@ def _string_read_elsewhere(toks, k):
         return False
     if ci + 1 >= len(args) or args[ci + 1].startswith("-"):
         return True
-    replaced = _xargs_replace_string(toks, k)
-    return bool(replaced) and replaced in args[ci + 1]
+    return any(r in args[ci + 1] for r in _xargs_replace_strings(toks, k))
 
 
-def _xargs_replace_string(toks, k):
-    """The string an `xargs` running `toks[k]` replaces with each word it reads, or None.
+_XARGS_VALUE_LETTERS = "adEILnPsJRS"
 
-    That is the value of `-I`, attached or the next word, or of `-i` or `--replace`, `{}` where
-    they name none.
+
+def _xargs_replace_strings(toks, k, parsed=False, spliced=False):
+    """Each string an `xargs` running `toks[k]` may replace with each word it reads, empty where it replaces none.
+
+    That is the value of `-I` or the BSD `-J`, attached or the next word, or of `-i` or
+    `--replace`, `{}` where they name none. Each is read whole and inside a short-option cluster,
+    as in `-0I{}` or `-rI{}`, where a letter taking a value takes the rest of the word or the
+    next word, as xargs reads it. An option named first is read too, wherever it sits, unless
+    `parsed` asks for xargs's own options alone, as a reader asking whether xargs appends does.
+    With `spliced`, only a `-J` string is given. BSD xargs puts every word it reads there as
+    words of their own, where `-I` puts one whole line there as one word.
     """
     if not _xargs_runs(toks, k):
-        return None
+        return []
     start = max(x for x in range(k) if _base_name(toks[x]) == "xargs")
-    for x in range(start + 1, k):
+    out = []
+    for x in range(start + 1, start + 1 if parsed else k):
         w = toks[x]
         if w == "-I":
-            return toks[x + 1] if x + 1 < k else None
-        if w.startswith("-I"):
-            return w[2:]
-        if w.startswith("--replace="):
-            return w.partition("=")[2] or "{}"
-        if w == "--replace":
-            return "{}"
-        if w.startswith("-i"):
-            return w[2:] or "{}"
-    return None
+            out += [toks[x + 1]] if x + 1 < k else []
+        elif w.startswith("-I"):
+            out.append(w[2:])
+        elif w.startswith("--replace="):
+            out.append(w.partition("=")[2] or "{}")
+        elif w == "--replace":
+            out.append("{}")
+        elif w.startswith("-i"):
+            out.append(w[2:] or "{}")
+        else:
+            continue
+        break
+    splices = []
+    x = start + 1
+    while x < k and toks[x].startswith("-") and toks[x] != "--":
+        w, x = toks[x], x + 1
+        if w.startswith("--replace"):
+            out.append(w.partition("=")[2] or "{}")
+            continue
+        if w.startswith("--"):
+            x += "=" not in w and w in _PRECOMMAND_VALUE_OPTS["xargs"]
+            continue
+        for at, letter in enumerate(w[1:], 2):
+            rest = w[at:]
+            if letter in "IJ":
+                found = [rest] if rest else toks[x : x + 1] if x < k else []
+                out += found
+                splices += found if letter == "J" else []
+            elif letter == "i":
+                out.append(rest or "{}")
+            elif letter in _XARGS_VALUE_LETTERS:
+                x += not rest
+            else:
+                continue
+            break
+    return [r for r in dict.fromkeys(splices if spliced else out) if r]
 
 
 def _xargs_runs(toks, k, mask=None):
@@ -4653,6 +4781,18 @@ def _xargs_runs(toks, k, mask=None):
     while start > 0 and not (_is_separator(toks[start - 1]) and not (mask and mask[start - 1])):
         start -= 1
     return any(_base_name(toks[x]) == "xargs" and not (mask and mask[x]) for x in range(start, k))
+
+
+def _xargs_command(toks, k, mask=None):
+    """True when an `xargs` runs the word at `toks[k]` as the command it runs (see `_xargs_runs`).
+
+    That is the command word past xargs and its options (see `_command_prefix`), or past a
+    launcher after it (see `_launcher_prefix`). A word that is that command's argument, as the
+    `git` of `xargs grep -l git` is, is no command.
+    """
+    return _xargs_runs(toks, k, mask) and (
+        _command_prefix(toks, k)[0] or _launcher_prefix(toks, k)[0]
+    )
 
 
 _CONFIG_READ_ACTIONS = frozenset(
@@ -4708,20 +4848,40 @@ def _git_word_changes_config(toks, k):
     A `git config` or `git remote` that only reads is left out (see `_config_only_reads`). It is a
     bare `git remote`, with or without `-v`, or its `show` or `get-url`. One whose arguments hold a
     substitution is not left out, since the guard does not read what the substitution gives.
+    Nor is one an `xargs` runs as its command (see `_xargs_command`), which appends the words it
+    reads, as `xargs git config` writes the key and value its input gives, unless its own words
+    name a read (see `_config_names_read`), or it is a `git remote` naming its subcommand. A git
+    word an `xargs` runs with no subcommand counts too, since its input gives the subcommand.
     """
     j = _git_subcommand_index(toks, k)
+    appended = _xargs_command(toks, k)
     if j >= len(toks) or _is_shell_op(toks[j]):
-        return False
+        return appended
     sub = toks[j]
     args, _ = _collect_arglist(toks, j + 1)
     if sub in ("config", "remote") and any("`" in a or "$(" in a for a in args):
         return True
     if sub == "config":
+        if appended:
+            return not _config_names_read(args)
         return not _config_only_reads(args)
     if sub == "remote":
         rest = [a for a in args if a not in ("-v", "--verbose")]
-        return bool(rest) and rest[0] not in ("show", "get-url")
+        if not rest:
+            return appended
+        return rest[0] not in ("show", "get-url")
     return _may_be_alias(sub)
+
+
+def _config_names_read(args):
+    """True when a `git config`'s own arguments name a read, so words appended after them cannot make it a write.
+
+    That is a read action such as `--get` or `--list`, or a `get` or `list` subcommand, with no
+    write action beside it. Git refuses a second action, so an appended one runs nothing.
+    """
+    positionals = [a for a in args if not a.startswith("-")]
+    named = positionals[:1] in (["get"], ["list"]) or any(a in _CONFIG_READ_ACTIONS for a in args)
+    return named and _config_only_reads(args)
 
 
 def _config_only_reads(args):
@@ -4754,10 +4914,15 @@ def _runs_run_time_word(toks, k, mask=None):
     That is the command word `_command_prefix` names, or a word right after an unquoted `(`.
     An argument holding one, as in `mkdir -p "$D"`, runs nothing.
     An assignment, or a shell operator such as `(`, is no command word.
+    A command word holding the string an `xargs` running it replaces is one too, as in `xargs
+    -I{} {} config ...`, since each word xargs reads takes its place (see `_xargs_replace_strings`).
     """
     t = toks[k]
-    if _is_shell_op(t) or not _is_run_time_word(t) or _ENV_ASSIGN_RE.match(t):
+    if _is_shell_op(t) or _ENV_ASSIGN_RE.match(t):
         return False
+    if not _is_run_time_word(t):
+        replaced = any(r in t for r in _xargs_replace_strings(toks, k))
+        return replaced and _command_prefix(toks, k)[0]
     if k and toks[k - 1].endswith("(") and not (mask and mask[k - 1]):
         return True
     return _command_prefix(toks, k)[0]
@@ -4798,13 +4963,11 @@ def _names_config_change(text):
     for body in bodies:
         toks = _shell_tokens(body)
         if any(
-            _config_changing_word(toks, k)
-            or _runs_run_time_word(toks, k)
+            _word_may_change_config(toks, k)
             or (
                 toks[k] in ("source", ".")
                 and (_command_prefix(toks, k)[0] or (k > 0 and toks[k - 1] == "builtin"))
             )
-            or _runs_unread_script(toks, k)
             for k in range(len(toks))
         ):
             return True
@@ -5436,7 +5599,7 @@ def _wrapper_env_assignments(toks, runs=None):
 
     `runs` stands in for `_runs_git` where another command's reach is read, as gh's is.
     The shell is a `sh -c`-style wrapper or one `_FOREIGN_SHELL_FLAGS` names, as its simple command's command.
-    That is its own prefix (see `_command_prefix`), and each `export` argument before it.
+    That is its own prefix (see `_command_prefix`), and each value exported before it (see `_export_events`).
     Behind a launcher `_command_prefix` does not know, it is the assignments before that launcher (see `_launcher_prefix`).
     Its command string is read as a command of its own, which these do not reach.
     """
@@ -5444,19 +5607,33 @@ def _wrapper_env_assignments(toks, runs=None):
 
 
 def _wrapper_env_groups(toks, runs=None):
-    """`_wrapper_env_assignments`, as one list of (name, value) per shell, in the order the shells appear."""
+    """`_wrapper_env_assignments`, as one list of (name, value) per shell, in the order the shells appear.
+
+    Where a loop or a function may run a shell after a later export, every export is read as
+    reaching it (see `_exported_states`). Behind a launcher, a shell is also read under only the
+    assignments before it, since one after an `env` or `sudo` there may be the launcher's own
+    argument (see `_git_dir_rereading`).
+    """
     out, exported = [], []
+    exports = dict(_export_events(toks))
+    if _reruns(toks, None, subshells=False):
+        exported = [pair for pairs in exports.values() for pair in pairs]
     for x, t in enumerate(toks):
-        if t == "export" and _opens_command(toks, x):
-            exported.extend(_export_assignments(toks, x))
-            continue
+        if x in exports:
+            exported.extend(exports[x])
+            if t in _EXPORTING_BUILTINS:
+                continue
         found = _shell_bodies_at(toks, x)
         if found and any((runs or _runs_git)(body) for body in found[0]):
             reached, prefix = _command_prefix(toks, x)
+            before = None
             if not reached:
                 reached, prefix = _launcher_prefix(toks, x)
+                before = _launcher_prefix(toks, x, env_args=False)[1]
             if reached:
                 out.append(exported + prefix)
+            if reached and before is not None and before != prefix:
+                out.append(exported + before)
     return out
 
 
@@ -5465,30 +5642,48 @@ def _launcher_prefix(toks, k, env_args=True):
 
     Such a launcher, as `uv run` is, passes its environment to the command it runs.
     The launcher is the first word `_prefix_walk` does not pass, and runs `toks[k]` unless `_NAMES_ITS_ARGUMENTS` names it, as `grep`.
-    With `env_args`, an assignment after an `env` among the words after it is read too, since
-    that `env` passes it on. Any other assignment there is the launcher's own argument, as
-    `find -name A=b` holds. Without it, only the assignments before the launcher are read. A
-    reader that takes them in place of a shell's state then never loses that state to an argument.
+    With `env_args`, an assignment after an `env` or a `sudo` among the words after it is read
+    too, since either passes it on, as in `uv run sudo NAME=value git ...`. Any other assignment
+    there is the launcher's own argument, as `find -name A=b` holds. Without it, only the
+    assignments before the launcher are read. A reader that takes them in place of a shell's
+    state then never loses that state to an argument, and one reading both reads them beside it.
     """
     i, out = _prefix_walk(toks, k)
     if i >= k or _base_name(toks[i]) in _NAMES_ITS_ARGUMENTS:
         return False, []
     if not env_args:
         return True, out
-    env = next((x for x in range(i, k) if _base_name(toks[x]) == "env"), k)
+    env = next((x for x in range(i, k) if _base_name(toks[x]) in ("env", "sudo")), k)
     return True, out + [m.groups() for t in toks[env:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
 
 
-def _runs_git(text):
+def _names_owner_flag(word):
+    """True when a gh word is an owner or repo flag, whole, with `=`, or ending a short cluster.
+
+    That is one of `_GH_OWNER_FLAGS`, `--repo`, `-R`, or `-o`, which take an owner or a repository
+    as their value (see `_gh_owner_words`).
+    """
+    name = word.partition("=")[0]
+    if name in _GH_OWNER_FLAGS or name == "--repo":
+        return True
+    return word[:1] == "-" and word[1:2] not in ("", "-") and ("R" in word or "o" in word)
+
+
+def _runs_git(text, gh=False):
     """True when a git word runs as a command (see `_runs_as_command`) in `text`, or in a command string it embeds.
 
-    The embedded strings are those `_embedded_wrapper_commands` reads.
+    The embedded strings are those `_embedded_wrapper_commands` reads. With `gh`, a gh word
+    counts too, and a body nested past the reading cap counts as one that runs either.
     """
-    for body in [text, *_embedded_wrapper_commands(text)]:
+    overflow = [] if gh else None
+    for body in [text, *_embedded_wrapper_commands(text, overflow=overflow)]:
         toks = _shell_tokens(body)
-        if any(_is_git_exe(t) and _runs_as_command(toks, k) for k, t in enumerate(toks)):
+        if any(
+            (_is_git_exe(t) or (gh and _is_gh_exe(t))) and _runs_as_command(toks, k)
+            for k, t in enumerate(toks)
+        ):
             return True
-    return False
+    return bool(overflow)
 
 
 def _wrapper_env_reason(assignments):
@@ -5890,6 +6085,144 @@ def _xargs_merge(text):
     return False
 
 
+def _xargs_gh_unread(text):
+    """True when `text` runs a gh command under `xargs` whose words the guard cannot read in full.
+
+    xargs appends the words it reads to the command it runs, or puts each where its replace
+    string sits (see `_xargs_replace_strings`). So a gh write it runs, or a gh naming no
+    subcommand, may take a repo flag, a body, or the write itself from its input. So may a gh
+    whose `_GH_WRITE_SUBSUBS` third word is missing, and one holding the replace string in a path
+    word. So may a `gh api` call it appends to, or one holding the replace string in any word but
+    its endpoint, which may then be an option such as `-XPOST` or a GraphQL mutation. A read whose command, subcommand, and options are written out, as in `xargs gh pr view`,
+    takes nothing from its input that makes it a write. Nor does a write whose command and
+    subcommand are written out, where xargs reads only inert words (see `_xargs_reads_inert`), as
+    `printf 5 | xargs gh pr comment --body x` does.
+    """
+    toks = _shell_tokens(text)
+    for k, t in enumerate(toks):
+        if not (_is_gh_exe(t) and _xargs_command(toks, k)):
+            continue
+        args = _api_first(_collect_arglist(toks, k + 1)[0])
+        path, path3 = _gh_path(args), _gh_path(args, 3)
+        replaced = _xargs_replace_strings(toks, k)
+        if len(path) < 2 or (tuple(path[:2]) in _GH_WRITE_SUBSUBS and len(path3) < 3):
+            return True
+        words = path3 if tuple(path[:2]) in _GH_WRITE_SUBSUBS else path
+        if args[0] != "api" and any(r in w for w in words for r in replaced):
+            return True
+        if _gh_argv_is_write(args):
+            xargs = max(x for x in range(k) if _base_name(toks[x]) == "xargs")
+            if args[0] == "api" or not _xargs_reads_inert(toks, xargs, k):
+                return True
+        elif args[0] == "api":
+            at = _gh_path_at(args)
+            endpoint = at[1] if len(at) > 1 else None
+            own = _xargs_replace_strings(toks, k, parsed=True)
+            if not own or _xargs_replace_strings(toks, k, spliced=True):
+                return True
+            if any(r in a for x, a in enumerate(args) if x != endpoint for r in replaced):
+                return True
+    return False
+
+
+_INERT_WORD = re.compile(r"[A-Za-z0-9_.]+")
+
+
+def _xargs_reads_inert(toks, x, k):
+    """True when the `xargs` at `toks[x]`, running the command at `toks[k]`, reads only inert words.
+
+    An inert word is made of letters, digits, `_`, and `.` alone, so it names no option,
+    repository, or URL, wherever xargs puts it. The input must be a pipe from an `echo` or a
+    `printf` of literal words, as `printf 5 | xargs ...` gives. A word the shell rewrites, a
+    redirection, a `printf` format holding a `%` or a backslash other than `\\n` or `\\t`, and
+    an `--arg-file` or a short option holding `a`, which may read another file, each leave the
+    input unread. So does a redirection of the command's input, which takes the pipe's place. A
+    word still names an owner where it is an owner or repo flag's value, as after `--org`, so the
+    input is not inert where the command ends in such a flag, or where the replace string sits in
+    one or its value (see `_names_owner_flag`).
+    """
+    for w in toks[x + 1 : k]:
+        if w.startswith("--a") or (w[:1] == "-" and w[1:2] != "-" and "a" in w):
+            return False
+    start = x
+    while start > 0 and not _is_separator(toks[start - 1]):
+        start -= 1
+    end = next((j for j in range(k, len(toks)) if _is_separator(toks[j])), len(toks))
+    if any(_is_redir_op(t) and "<" in t for t in toks[start:end]):
+        return False
+    args = _collect_arglist(toks, k + 1)[0]
+    if args and _names_owner_flag(args[-1]):
+        return False
+    for i, a in enumerate(args):
+        held = any(r in a for r in _xargs_replace_strings(toks, k))
+        if held and (_names_owner_flag(a) or (i and _names_owner_flag(args[i - 1]))):
+            return False
+    if start == 0 or toks[start - 1] != "|":
+        return False
+    first = start - 1
+    while first > 0 and not _is_separator(toks[first - 1]):
+        first -= 1
+    words = toks[first : start - 1]
+    if not words or any(_is_run_time_word(w) or _is_redir_op(w) for w in words):
+        return False
+    base, args = _base_name(words[0]), words[1:]
+    if base == "echo":
+        while args and re.fullmatch(r"-[neE]+", args[0]):
+            args = args[1:]
+        text = " ".join(args)
+    elif base == "printf":
+        args = args[1:] if args[:1] == ["--"] else args
+        text = args[0] if args else ""
+        if "%" in text:
+            return False
+        text = text.replace("\\n", " ").replace("\\t", " ")
+    else:
+        return False
+    return "\\" not in text and all(_INERT_WORD.fullmatch(w) for w in text.split())
+
+
+def _xargs_filled_body(cmd):
+    """A shell command string in `cmd` that `xargs` fills with the words it reads, where it runs git or gh, else None.
+
+    That is the string of a shell xargs runs as its command whose string holds xargs's replace
+    string, or whose string option the next word does not follow (see `_string_read_elsewhere`).
+    It is also the string a launcher such as `flock -c` hands a shell where it holds the replace
+    string, and that of any `watch` xargs runs, since `watch` joins the words xargs appends into
+    its string (see `_shell_bodies_at`). The inner shell parses each word xargs puts there, so a word holding a separator adds whole
+    commands, as `echo 'x; git push origin develop' | xargs -I{} sh -c 'git status {}'` does.
+    """
+    for text in _data_free_texts(cmd) if _names_git_or_gh(cmd) else []:
+        toks = _shell_tokens(text)
+        for k in range(len(toks)):
+            found = _shell_bodies_at(toks, k)
+            if not (found and found[0] and _xargs_command(toks, k)):
+                continue
+            reps = _xargs_replace_strings(toks, k)
+            filled = _string_read_elsewhere(toks, k) or _base_name(toks[k]) == "watch"
+            if filled or any(r in b for b in found[0] for r in reps):
+                body = next((b for b in found[0] if _runs_git(b, gh=True)), None)
+                if body is not None:
+                    return body
+    return None
+
+
+def _outer_expanded_body(cmd):
+    """A wrapper body in `cmd` the outer shell expands before the inner shell parses it, where it runs git or gh, else None.
+
+    The outer shell expands a `$` or backtick word inside a double-quoted `-c` body, so a value
+    holding a separator adds whole commands the guard never reads, as `B="x; git push origin
+    develop"; sh -c "echo $B"` does. Such a body fails closed only where it runs git or gh
+    itself (see `_runs_git`). A body running neither keeps its verdict, so `bash -c "cd
+    $DIR && ls"` is not denied for its expansion alone, and nor is that first example, whose body
+    runs only `echo`. Heredoc data is not read (see `_data_free_texts`).
+    """
+    for body in _data_free_texts(cmd) if _names_git_or_gh(cmd) else []:
+        expands = isinstance(body, _ExpandedText) and ("$" in body or "`" in body)
+        if expands and _runs_git(body, gh=True):
+            return body
+    return None
+
+
 def _rewritten_git_words(cmd):
     """Name the form when a git command holds a rewritten word where it can change what git runs, else None.
 
@@ -5920,6 +6253,10 @@ def _rewritten_git_words(cmd):
       `commit`, since `G=git; $G push` and `` `which git` push `` each run git
     - an unquoted pathname pattern in a directory value, since it may match several names
     - a push or a commit that `xargs` runs, since it appends words the guard does not read
+    - a git word with no subcommand that `xargs` runs, since its input gives the subcommand
+    - an `xargs` replace string in git's subcommand or a `-c` value, or among the global options
+      of a git command that may mutate, since each word xargs reads takes its place, and among
+      any git command's global options under a BSD `-J`, which splices in words of their own
 
     The text an `eval` runs is read too. A word of any `eval`'s arguments in a text may expand
     outside single quotes. Each payload that text's evals run is then text the shell has already
@@ -5979,12 +6316,20 @@ def _rewritten_git_words(cmd):
                 (mask, raw), masked = _quoting(text, toks), True
             end = _region_end(toks, k, mask)
             j = min(_git_subcommand_index(toks, k), end)
-            if j == k + 1 and j >= end:
+            appended = _xargs_command(toks, k, mask) and toks[k + 1 : k + 2] != ["--version"]
+            if j == k + 1 and j >= end and not appended:
                 continue
             opened = k and toks[k - 1].endswith("(") and not (mask and mask[k - 1])
             if not opened and not _runs_as_command(toks, k, mask):
                 continue
             if j >= end:
+                if appended:
+                    return "a `git` with no subcommand word that `xargs` runs", (
+                        "xargs appends the words it reads from its input to the command it runs, "
+                        "so the guard cannot read them, and they may name any subcommand, a push "
+                        "or a reset among them. Failing closed. Run the git command as its own "
+                        "command with every word written out."
+                    )
                 if any(
                     _is_run_time_word(toks[x]) and not _split_free(x, toks, mask, raw)
                     for x in range(k + 1, end)
@@ -5992,6 +6337,32 @@ def _rewritten_git_words(cmd):
                     return "a run-time word among the options of a `git` with no subcommand word"
                 continue
             sub = toks[j]
+            reps = _xargs_replace_strings(toks, k) if _xargs_command(toks, k, mask) else []
+            held = next((r for r in reps if r in sub), None)
+            configured = any(
+                r in toks[x]
+                and (toks[x - 1] in ("-c", "--config-env") or toks[x].startswith("--config-env"))
+                for x in range(k + 1, j)
+                for r in reps
+            )
+            held = held or (next(iter(reps)) if configured else None)
+            if held is None and any(r in toks[x] for x in range(k + 1, j) for r in reps):
+                verdict = _primary_checkout_verdict(
+                    sub, _collect_arglist(toks, j + 1)[0], None, lambda _d, _r: False
+                )
+                mutates = verdict or (verdict is None and sub not in _git_command_names())
+                spliced = _xargs_replace_strings(toks, k, spliced=True)
+                mutates = mutates or sub in ("push", "commit") or bool(spliced)
+                held = next(r for r in reps) if mutates else None
+            if held is not None:
+                return (
+                    f"an `xargs` replace string, `{held}`, in the subcommand or global options of `git`",
+                    (
+                        "xargs puts each word it reads there, so the guard cannot read the subcommand "
+                        "or the directory git runs. Failing closed. Run the git command as its own "
+                        "command with every word written out."
+                    ),
+                )
             if _is_run_time_word(sub):
                 return f"a run-time word, `{sub}`, where the subcommand of `git` goes"
             redirected = _is_redir_op(sub) or (
@@ -6157,10 +6528,10 @@ def _push_invocations(cmd):
                     repo_unreliable = (
                         wrapped_cd
                         or redirected
-                        or config_moves
                         or _repo_may_move(
                             body_toks, word, leading_cd, quoted if body is text else None
                         )
+                        or (_CONFIG_UNRESOLVED if config_moves else False)
                     )
                     unreliable = extra > 0 or head_moves or repo_unreliable
                     refs_moves = head_moves or repo_unreliable
@@ -6289,6 +6660,7 @@ def _remote_mirrors(cwd, remote):
 
 
 _REMOTE_UNRESOLVED = object()
+_CONFIG_UNRESOLVED = object()
 
 _SCP_LIKE_URL = re.compile(r"^[^/]+:")
 _DOS_DRIVE_PATH = re.compile(r"^[A-Za-z]:")
@@ -7217,8 +7589,12 @@ def _push_repo(cwd, c_dirs, leading_cd, repo_unreliable):
     """The (owner, repo) origin of the checkout a push the command moves to runs in, or `_UNRESOLVED`.
 
     That checkout's origin may differ from the session's. A directory that does not resolve, or a
-    checkout with no origin the guard can read, is `_UNRESOLVED`.
+    checkout with no origin the guard can read, is `_UNRESOLVED`. A push whose repository only
+    an earlier command rewriting its remote config may move is `_CONFIG_UNRESOLVED`, so the deny
+    names that cause.
     """
+    if repo_unreliable is _CONFIG_UNRESOLVED:
+        return _CONFIG_UNRESOLVED
     target = _push_dir(cwd, c_dirs, leading_cd, repo_unreliable)
     repo = None if target is _UNRESOLVED else _origin_owner_repo(target)
     return _UNRESOLVED if repo is None else repo
@@ -7310,7 +7686,7 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                 "<branch>:refs/heads/<branch>)." + _handoff(cmd)
             )
         readings = [None]
-        unnamed = repo is _UNRESOLVED or repo is _REMOTE_UNRESOLVED
+        unnamed = repo in (_UNRESOLVED, _REMOTE_UNRESOLVED, _CONFIG_UNRESOLVED)
         if repo is not None and repo != origin and (unnamed or rules_lookup is None):
             readings.append(repo)
         for checkout in readings:
@@ -7336,6 +7712,13 @@ def _check_push_bypass(cmd, cwd, origin, current_branch=None, rules_lookup=None)
                     "the repository this push runs in could not be determined, so its origin's "
                     "rules could not be read. Run the push from that checkout's own directory, or "
                     "with -C naming a directory that exists"
+                )
+            elif checkout is _CONFIG_UNRESOLVED:
+                rules, where = None, ""
+                reason = (
+                    "an earlier command in it may rewrite the remote config the push reads, so "
+                    "its remote's repository and mirror setting could not be read. Run the push "
+                    "as its own command, after the command that changes the config"
                 )
             elif checkout is _REMOTE_UNRESOLVED:
                 rules, where = None, ""
@@ -8935,6 +9318,25 @@ def classify(
             "commit as its own command with every word written out, and a push with an explicit "
             "refspec (git push origin <branch>:refs/heads/<branch>)." + _handoff(cmd)
         )
+    filled = _xargs_filled_body(cmd)
+    if filled is not None:
+        return "deny", (
+            f"This command runs a shell command string, `{filled}`, that `xargs` fills with the "
+            "words it reads, and the string runs git or gh. The inner shell parses each word, so "
+            "one holding a `;` or a line break adds whole commands the guard cannot read. Failing "
+            "closed. Pass each word as an argument, as in xargs sh -c '... \"$1\"' _, or run the "
+            "command with every word written out." + _handoff(cmd)
+        )
+    expanded = _outer_expanded_body(cmd)
+    if expanded is not None:
+        return "deny", (
+            f"This command runs a double-quoted wrapper body, `{expanded}`, holding a `$` or "
+            "backtick word the outer shell expands before the inner shell parses the body, so a "
+            "value holding a `;` or a line break adds whole commands the guard cannot read, and "
+            "the body runs git or gh. Failing closed. Single-quote the body and pass the value as "
+            'an argument, as in sh -c \'... "$1"\' _ "$VALUE", or run the command directly.'
+            + _handoff(cmd)
+        )
     # The `_push_targets` helper tokenizes with shlex and keys off a real `git push` argv adjacency, so a push named only inside a quoted argument yields no target.
     # The raw substring is just a cheap pre-filter.
     if _names_push(cmd) or _names_include(cmd):
@@ -8964,6 +9366,17 @@ def classify(
                 "handling, or ids. Failing closed. Run the gh command with fewer levels of nesting."
                 + _handoff(cmd)
             )
+    if (
+        _NAMES_GH.search(cmd)
+        and "xargs" in cmd
+        and any(_xargs_gh_unread(t) for t in _data_free_texts(cmd))
+    ):
+        return "deny", (
+            "This runs a gh command under `xargs`, which appends the words it reads from its "
+            "input, or puts them where its replace string sits, where the guard cannot read them. "
+            "They may name a write, a --repo under another owner, or a body. Failing closed. "
+            "Write every word of the gh command out." + _handoff(cmd)
+        )
     payloads = _eval_payload_texts(_data_free_texts(cmd)) if "eval" in cmd else []
     eval_write = any(_names_gh_write(t) for t in payloads)
     if not eval_write and not _is_gh_write(cmd):
@@ -9761,6 +10174,168 @@ _GH_PATH_CASES: list[tuple[str, str, str]] = [
 
 _STRANGER_GH_REPO = {"GH_REPO": "stranger/example"}
 _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
+    (
+        "printf -- '-R stranger/example' | xargs gh pr comment 5 -b x",
+        {},
+        "deny",
+        "a gh write that xargs runs may take a --repo from its input",
+    ),
+    (
+        "echo stranger/example | xargs -I{} gh pr comment 5 -b x -R {}",
+        {},
+        "deny",
+        "a repo flag value an xargs replace string fills is not read",
+    ),
+    (
+        "echo comment 5 -b x | xargs gh pr",
+        {},
+        "deny",
+        "a gh naming no subcommand under xargs may take a write from its input",
+    ),
+    (
+        "echo -XPOST repos/stranger/example/issues | xargs gh api",
+        {},
+        "deny",
+        "a gh api call xargs appends to may take a method and an endpoint from its input",
+    ),
+    (
+        "echo https://github.com/stranger/example/pull/5 | xargs gh pr comment --body x",
+        {},
+        "deny",
+        "an xargs input word naming a URL is not inert",
+    ),
+    (
+        "echo 5 | xargs gh pr view --comments",
+        {},
+        "allow",
+        "control: a gh read whose subcommand is written out takes no write from xargs",
+    ),
+    (
+        "printf '5\\n6\\n' | xargs -n1 gh pr comment --body x",
+        {},
+        "allow",
+        "control: a written-out gh write that xargs feeds only inert literal words is read",
+    ),
+    (
+        "ls | xargs grep -l gh",
+        {},
+        "allow",
+        "control: a gh word that is an argument of the command xargs runs runs nothing",
+    ),
+    (
+        "uv run env GH_REPO=stranger/example gh pr comment 5 --body x",
+        {"GH_REPO": "example/other"},
+        "deny",
+        "a GH_REPO an env passes behind an unknown launcher is read beside the session's own",
+    ),
+    (
+        "uv run sudo GH_REPO=stranger/example gh pr comment 5 --body x",
+        {},
+        "deny",
+        "a GH_REPO a sudo passes behind an unknown launcher is read",
+    ),
+    (
+        "uv run env GH_REPO=example/other gh pr comment 5 --body x",
+        {},
+        "allow",
+        "control: a same-owner GH_REPO an env passes behind an unknown launcher is allowed",
+    ),
+    (
+        "echo '-R stranger/example' | xargs -I{} sh -c 'gh pr comment 5 -b x {}'",
+        {},
+        "deny",
+        "a shell string that xargs fills and that runs gh may take a --repo from its input",
+    ),
+    (
+        "echo delete 5 -R stranger/example | xargs gh repo deploy-key",
+        {},
+        "deny",
+        "a three-word gh write missing its third word under xargs may take it from its input",
+    ),
+    (
+        "echo 'mutation{x}' | xargs -I{} gh api graphql -f query={}",
+        {},
+        "deny",
+        "a gh api field holding the xargs replace string may be a mutation",
+    ),
+    (
+        "printf -- '-XPOST -f title=x' | xargs stdbuf -i0 gh api repos/stranger/example/issues",
+        {},
+        "deny",
+        "a launcher option shaped like a replace option leaves xargs appending to gh api",
+    ),
+    (
+        "printf 5 | xargs --max-args=1 gh pr comment --body x",
+        {},
+        "allow",
+        "control: an xargs long option that reads no file keeps inert input inert",
+    ),
+    (
+        "echo 5 | xargs -I{} gh api repos/example/repo/pulls/{}",
+        {},
+        "allow",
+        "control: a gh api read whose endpoint alone holds the replace string is read",
+    ),
+    (
+        "gh pr list --json number -q '.[].number' | xargs -I{} gh pr view {}",
+        {},
+        "allow",
+        "control: a gh read whose target alone holds the replace string is read",
+    ),
+    (
+        "printf 5 | xargs -I{} gh pr comment {} --body x",
+        {},
+        "allow",
+        "control: a written-out gh write whose target an inert replace fills is read",
+    ),
+    (
+        "echo 5 | xargs --replace gh api repos/example/repo/pulls/{}",
+        {},
+        "allow",
+        "control: a long --replace is read as xargs's own replace option",
+    ),
+    (
+        "printf 5 | xargs gh pr comment --body x <<< '-R stranger/example 9'",
+        {},
+        "deny",
+        "a redirection of xargs's input replaces the inert pipe",
+    ),
+    (
+        "printf stranger | xargs gh secret set TOKEN --body x --org",
+        {},
+        "deny",
+        "an inert word that lands as an owner flag's value names an owner",
+    ),
+    (
+        "printf -- '-XPOST repos/stranger/example/issues -f title=x' | xargs -J% gh api %",
+        {},
+        "deny",
+        "a BSD -J splices words of their own, so a gh api endpoint holding it is no read",
+    ),
+    (
+        "export GH_REPO=stranger/example; find ./env -name GH_REPO=example/x -exec sh -c 'gh pr comment 5 -b x' \\; ; GH_REPO=example/y sh -c 'gh pr view 1'",
+        {},
+        "deny",
+        "each GH_REPO value reaching a wrapper body is read on its own, not collapsed to the last",
+    ),
+    (
+        "printf 5 | </example/args xargs gh pr comment --body x",
+        {},
+        "deny",
+        "a redirection before xargs replaces the inert pipe",
+    ),
+    (
+        "printf stranger | xargs gh repo fork example/x --org",
+        {},
+        "deny",
+        "an inert word xargs appends after a trailing --org names an owner",
+    ),
+    (
+        "printf 5 | xargs gh pr close --delete-branch",
+        {},
+        "allow",
+        "control: a trailing boolean flag takes no inert word as an owner",
+    ),
     (
         "gh pr comment 5 --body hi",
         _STRANGER_GH_REPO,
@@ -13289,6 +13864,166 @@ _GIT_CASES = [
 # (command, cwd, {dir: is_primary_or_None}, {(dir, ref): resolves_as_ref} or None, expected_decision, label) -- is_primary is True (a primary checkout), False (a linked worktree), or None (unresolved, for example when no repository exists or the git query itself fails, such as on a pre-2.31 git lacking `rev-parse --path-format`).
 # A None ref-map means every ref-check in the case resolves True (an ordinary branch name), the common case; only the pathspec-disambiguation cases below need a real map.
 _PRIMARY_CHECKOUT_CASES = [
+    (
+        "cd /worktree && export GIT_DIR=/worktree/.git && GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a plain assignment to an exported GIT_DIR exports its new value",
+    ),
+    (
+        "cd /worktree && export GIT_DIR GIT_WORK_TREE; GIT_DIR=/primary/.git GIT_WORK_TREE=/primary; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/primary": True, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export marks a name a later plain assignment then exports",
+    ),
+    (
+        "cd /worktree && set -a && GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a set -a exports a plain GIT_DIR assignment",
+    ),
+    (
+        "cd /worktree && set -o allexport; GIT_DIR=/primary/.git; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a set -o allexport exports a plain GIT_DIR assignment",
+    ),
+    (
+        "cd /worktree && set -e && GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "allow",
+        "control: a set without -a leaves a plain assignment unexported",
+    ),
+    (
+        "cd /worktree && f() { local -x GIT_DIR=/primary/.git; git reset --hard; }; f",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a local -x exports as export does",
+    ),
+    (
+        "cd /worktree && f() { git reset --hard; }; export GIT_DIR=/primary/.git; f",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "an export after a function's git reaches it when the function runs later",
+    ),
+    (
+        "cd /worktree && for i in 1 2; do git reset --hard; export GIT_DIR=/primary/.git; done",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "an export after a loop's git reaches it on the next pass",
+    ),
+    (
+        "cd /worktree && git reset --hard; export GIT_DIR=/primary/.git",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "allow",
+        "control: an export after a git that nothing runs again does not reach it",
+    ),
+    (
+        "cd /worktree && export GIT_DIR=/primary/.git && find ./env -name GIT_DIR=/worktree/.git -exec git reset --hard \\;",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "an assignment after a path named env is read beside the export, not over it",
+    ),
+    (
+        "cd /worktree && D=/primary/.git && export GIT_DIR=$D && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "an exported GIT_DIR holding a run-time word names no checkout the guard reads",
+    ),
+    (
+        "GIT_DIR=$D git reset --hard",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "a GIT_DIR prefix holding a run-time word fails closed on a mutating command",
+    ),
+    (
+        'GIT_WORK_TREE="$W" git add .',
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "a quoted run-time GIT_WORK_TREE value fails closed on a mutating command",
+    ),
+    (
+        "GIT_DIR=$D git status",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "allow",
+        "control: a run-time GIT_DIR on a command that mutates nothing is allowed",
+    ),
+    (
+        "echo reset --hard | xargs git",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a git with no subcommand that xargs runs fails closed in any checkout",
+    ),
+    (
+        "cd /worktree && declare GIT_DIR=/primary/.git; export GIT_DIR; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export exports the value a declare set before it",
+    ),
+    (
+        "echo /primary | xargs -I{} git --git-dir={}/.git --work-tree={} reset --hard",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "an xargs replace string in a mutating git command's directory options fails closed",
+    ),
+    (
+        "GIT_DIR=/primary/.git find ./sudo -name GIT_DIR=/worktree/.git -exec sh -c 'git reset --hard' \\;",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a wrapper behind a launcher is read under the prefix before it, beside a path named sudo",
+    ),
+    (
+        "GIT_DIR=/primary/.git; f() { local GIT_DIR=/worktree/.git; }; export GIT_DIR; git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export reads every value a name was given, a function's local beside the outer one",
+    ),
+    (
+        "GIT_DIR=/primary/.git; if false; then declare GIT_DIR=/worktree/.git; fi; export GIT_DIR; git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export reads a value an untaken branch's declare gave beside the earlier one",
+    ),
     (
         "git reset --hard origin/main",
         "/primary",
@@ -17566,6 +18301,78 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a -c string an xargs -I runs without its replace string is read as written",
     ),
+    (
+        [],
+        "echo 'git config remote.origin.mirror true' | xargs -0I{} sh -c '{}'; git push --tags origin",
+        "deny",
+        "an xargs replace option inside a short-option cluster is read",
+    ),
+    (
+        [],
+        "echo 'git config remote.origin.mirror true' | xargs -rI{} sh -c '{}'; git push --tags origin",
+        "deny",
+        "an xargs replace option after another letter in a cluster is read",
+    ),
+    (
+        [],
+        "echo 'git config remote.origin.mirror true' | xargs -J{} sh -c '{}'; git push --tags origin",
+        "deny",
+        "the BSD xargs -J replace option is read",
+    ),
+    (
+        [],
+        "echo x | xargs -P4 -I{} sh -c 'echo ok'; git push --tags origin",
+        "allow",
+        "control: a value letter's attached value is no replace option",
+    ),
+    (
+        [],
+        "bash -c \"echo 'git config remote.origin.mirror true' | xargs -I{} sh -c '{}'\"; git push --tags origin",
+        "deny",
+        "a wrapper body is read word by word as the outer command is",
+    ),
+    (
+        [],
+        "echo remote.origin.mirror true | xargs git config; git push --tags origin",
+        "deny",
+        "a git config that xargs runs takes its key and value from its input",
+    ),
+    (
+        [],
+        "echo git | xargs -I{} {} config remote.origin.mirror true; git push --tags origin",
+        "deny",
+        "a command word holding the xargs replace string may run any command",
+    ),
+    (
+        [],
+        "echo remote.origin.url | xargs git config --get; git push --tags origin",
+        "allow",
+        "control: a git config whose own words name a read takes no write from xargs",
+    ),
+    (
+        [],
+        "echo origin | xargs git remote get-url; git push --tags origin",
+        "allow",
+        "control: a git remote naming a read subcommand takes no write from xargs",
+    ),
+    (
+        [],
+        'coproc example { "$CMD"; }; git push --tags origin',
+        "deny",
+        "a run-time command word in a named coproc's group is read",
+    ),
+    (
+        [],
+        "coproc example { echo ok; }; git push --tags origin",
+        "allow",
+        "control: a named coproc group that changes no config is allowed",
+    ),
+    (
+        [],
+        "echo config | xargs -I{} git {} remote.origin.mirror true; git push --tags origin",
+        "deny",
+        "an xargs replace string where git's subcommand goes may name config",
+    ),
 ]
 
 
@@ -17610,6 +18417,28 @@ def _push_config_selftest(origin):
             print(f"  {'ok  ' if got == want else 'FAIL'} [{got:5}] want={want:5} {label}")
         finally:
             shutil.rmtree(root, ignore_errors=True)
+    root = tempfile.mkdtemp(prefix="guard-push-config-")
+    try:
+        repo = os.path.join(root, "repo")
+        if _build_selftest_repo(
+            repo, [["remote", "add", "origin", "https://example.invalid/x.git"]]
+        ):
+            got, reason = classify(
+                "git config remote.origin.mirror true && git push --tags origin",
+                cwd=repo,
+                origin=origin,
+                rules_lookup=lambda br: set(),
+                environ={},
+                primary_checkout_lookup=lambda d: False,
+            )
+            named = got == "deny" and "rewrite the remote config" in reason
+            ok = ok and named
+            mark = "ok  " if named else "FAIL"
+            print(f"  {mark} [{got:5}] want=deny  the config-change deny names its cause")
+        else:
+            print("  skip [push ] could not build the repository for the config-change reason")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
     return ok
 
 
@@ -19631,6 +20460,188 @@ _HIDDEN_GIT_CASES = [
         {},
         "allow",
         "control: two git commands each setting index 0 to a readable value are allowed",
+    ),
+    (
+        "echo 'x; git push origin develop' | xargs -I{} flock /example/lock -c 'git status {}'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a flock -c string holding the xargs replace string is filled by xargs",
+    ),
+    (
+        "echo '; git push origin develop' | xargs watch git status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a watch that xargs runs joins the words xargs appends into its shell string",
+    ),
+    (
+        "echo x | xargs -I{} flock /example/lock -c 'echo {}'",
+        "feature/x",
+        {},
+        "allow",
+        "control: a filled flock -c string running neither git nor gh keeps its verdict",
+    ),
+    (
+        "declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push; git p origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "config a declare -x exports reaches the alias reading",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config; export GIT_CONFIG_GLOBAL; git status",
+        "feature/x",
+        {},
+        "deny",
+        "a bare-name export of an earlier assignment exports a config file",
+    ),
+    (
+        "set -a; GIT_CONFIG_GLOBAL=/example/config; git status",
+        "feature/x",
+        {},
+        "deny",
+        "a plain assignment after set -a exports a config file",
+    ),
+    (
+        "export GIT_CONFIG_GLOBAL; GIT_CONFIG_GLOBAL=/example/config; git status",
+        "feature/x",
+        {},
+        "deny",
+        "a plain assignment to an exported name exports its new value",
+    ),
+    (
+        "declare -x GIT_CONFIG_GLOBAL=/example/config; bash -c 'git status'",
+        "feature/x",
+        {},
+        "deny",
+        "a declare -x before a wrapper shell reaches the git in its body",
+    ),
+    (
+        "uv run sudo GIT_CONFIG_GLOBAL=/example/config git status",
+        "feature/x",
+        {},
+        "deny",
+        "an assignment a sudo passes behind an unknown launcher reaches git",
+    ),
+    (
+        "GIT_CONFIG_GLOBAL=/example/config; git status",
+        "feature/x",
+        {},
+        "allow",
+        "control: a plain assignment never exported reaches no git",
+    ),
+    (
+        "declare GIT_CONFIG_GLOBAL=/example/config; git status",
+        "feature/x",
+        {},
+        "allow",
+        "control: a declare without -x exports nothing",
+    ),
+    (
+        "echo push origin develop | xargs git",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a git with no subcommand that xargs runs takes its subcommand from its input",
+    ),
+    (
+        "git ls-files | xargs grep -l git",
+        "feature/x",
+        {},
+        "allow",
+        "control: a git word that is an argument of the command xargs runs runs nothing",
+    ),
+    (
+        'B="x; git push origin develop"; sh -c "git status $B"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an outer-expanded double-quoted wrapper body running git may hold whole injected commands",
+    ),
+    (
+        'sh -c "gh pr view $N"',
+        "feature/x",
+        {},
+        "deny",
+        "an outer-expanded double-quoted wrapper body running gh fails closed",
+    ),
+    (
+        'B="x; git push origin develop"; sh -c "echo $B"',
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "allow",
+        "control: an outer-expanded wrapper body running neither git nor gh keeps its verdict",
+    ),
+    (
+        'bash -c "cd $DIR && ls"',
+        "feature/x",
+        {},
+        "allow",
+        "control: an ordinary outer-expanded body running neither git nor gh is allowed",
+    ),
+    (
+        "bash -c 'cd \"$DIR\" && git status'",
+        "feature/x",
+        {},
+        "allow",
+        "control: a single-quoted wrapper body is not expanded by the outer shell",
+    ),
+    (
+        "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push; find ./env -name GIT_CONFIG_VALUE_0=status -exec git p origin develop \\;",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a config value after a path named env is read beside the exports, not over them",
+    ),
+    (
+        "echo push | xargs -I{} git {} origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an xargs replace string where git's subcommand goes fails closed",
+    ),
+    (
+        "echo 'x; git push origin develop' | xargs -I{} sh -c 'git status {}'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a shell string that xargs fills and that runs git fails closed",
+    ),
+    (
+        "f() { bash -c 'git status'; }; export GIT_CONFIG_GLOBAL=/example/config; f",
+        "feature/x",
+        {},
+        "deny",
+        "an export before a function's later call reaches the wrapper in its body",
+    ),
+    (
+        "git ls-files | xargs -I{} sh -c 'echo {}'",
+        "feature/x",
+        {},
+        "allow",
+        "control: a shell string xargs fills that runs neither git nor gh keeps its verdict",
+    ),
+    (
+        "find . -name .git | xargs -I{} git -C {} status",
+        "feature/x",
+        {},
+        "allow",
+        "control: a replace string among a read-only git command's options is allowed",
+    ),
+    (
+        "echo 'core.fsmonitor=git push origin develop' | xargs -I{} git -c {} status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a -c value an xargs replace string fills may set any config, whatever the subcommand",
+    ),
+    (
+        "echo x | xargs -J% git -C % status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a BSD -J string among git's global options may splice in a subcommand",
     ),
 ]
 
