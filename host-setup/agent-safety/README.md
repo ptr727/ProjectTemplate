@@ -90,6 +90,8 @@ text says, because the harm it covers was never in the text.
    sits. The exception is a write whose command and subcommand are written out, fed only inert
    words. Those come from a pipe out of an `echo` or `printf` of literal words. Each such word
    holds only letters, digits, `_`, and `.`, as in `printf 5 | xargs gh pr comment --body x`. A
+   redirection of the command's input voids the exception. So does a word that lands as an
+   option's value, as after a trailing `--org`, since an owner name is inert too. A
    gh naming no subcommand under `xargs` is denied. So is one whose path words hold the replace
    string, and a `gh api` call `xargs` appends to. So is a `gh api` call holding the replace
    string in any word but its endpoint. Behind a launcher the hook does not know, an `env` or a
@@ -186,8 +188,9 @@ text says, because the harm it covers was never in the text.
    commit is denied, and so is a comment among a push's words. A push, a commit, or a
    `gh pr merge` that `xargs` runs is denied, since `xargs` appends words the hook does not read.
    So is a git word with no subcommand that `xargs` runs, since its input gives the subcommand.
-   So is an `xargs` replace string in git's subcommand, or in the global options of one that may
-   mutate. Some wrapper bodies are denied where the body runs git or gh. One is a double-quoted
+   So is an `xargs` replace string in git's subcommand or a `-c` value, or in the global options
+   of one that may mutate. Under the BSD `-J`, which splices in each word as a word of its own,
+   it is denied in any git command's global options. Some wrapper bodies are denied where the body runs git or gh. One is a double-quoted
    body holding a `$` or backtick word the outer shell expands. Another is a shell string that
    `xargs` fills with the words it reads. A value holding a `;` or a line break then adds whole
    commands before the inner shell parses the body. A body running neither keeps its verdict, so

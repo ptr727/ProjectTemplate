@@ -4713,7 +4713,7 @@ def _string_read_elsewhere(toks, k):
 _XARGS_VALUE_LETTERS = "adEILnPsJRS"
 
 
-def _xargs_replace_strings(toks, k, parsed=False):
+def _xargs_replace_strings(toks, k, parsed=False, spliced=False):
     """Each string an `xargs` running `toks[k]` may replace with each word it reads, empty where it replaces none.
 
     That is the value of `-I` or the BSD `-J`, attached or the next word, or of `-i` or
@@ -4721,6 +4721,8 @@ def _xargs_replace_strings(toks, k, parsed=False):
     as in `-0I{}` or `-rI{}`, where a letter taking a value takes the rest of the word or the
     next word, as xargs reads it. An option named first is read too, wherever it sits, unless
     `parsed` asks for xargs's own options alone, as a reader asking whether xargs appends does.
+    With `spliced`, only a `-J` string is given. BSD xargs puts every word it reads there as
+    words of their own, where `-I` puts one whole line there as one word.
     """
     if not _xargs_runs(toks, k):
         return []
@@ -4741,6 +4743,7 @@ def _xargs_replace_strings(toks, k, parsed=False):
         else:
             continue
         break
+    splices = []
     x = start + 1
     while x < k and toks[x].startswith("-") and toks[x] != "--":
         w, x = toks[x], x + 1
@@ -4753,7 +4756,9 @@ def _xargs_replace_strings(toks, k, parsed=False):
         for at, letter in enumerate(w[1:], 2):
             rest = w[at:]
             if letter in "IJ":
-                out += [rest] if rest else toks[x : x + 1] if x < k else []
+                found = [rest] if rest else toks[x : x + 1] if x < k else []
+                out += found
+                splices += found if letter == "J" else []
             elif letter == "i":
                 out.append(rest or "{}")
             elif letter in _XARGS_VALUE_LETTERS:
@@ -4761,7 +4766,7 @@ def _xargs_replace_strings(toks, k, parsed=False):
             else:
                 continue
             break
-    return [r for r in dict.fromkeys(out) if r]
+    return [r for r in dict.fromkeys(splices if spliced else out) if r]
 
 
 def _xargs_runs(toks, k, mask=None):
@@ -5602,7 +5607,9 @@ def _wrapper_env_groups(toks, runs=None):
     """`_wrapper_env_assignments`, as one list of (name, value) per shell, in the order the shells appear.
 
     Where a loop or a function may run a shell after a later export, every export is read as
-    reaching it (see `_exported_states`).
+    reaching it (see `_exported_states`). Behind a launcher, a shell is also read under only the
+    assignments before it, since one after an `env` or `sudo` there may be the launcher's own
+    argument (see `_git_dir_rereading`).
     """
     out, exported = [], []
     exports = dict(_export_events(toks))
@@ -5616,10 +5623,14 @@ def _wrapper_env_groups(toks, runs=None):
         found = _shell_bodies_at(toks, x)
         if found and any((runs or _runs_git)(body) for body in found[0]):
             reached, prefix = _command_prefix(toks, x)
+            before = None
             if not reached:
                 reached, prefix = _launcher_prefix(toks, x)
+                before = _launcher_prefix(toks, x, env_args=False)[1]
             if reached:
                 out.append(exported + prefix)
+            if reached and before is not None and before != prefix:
+                out.append(exported + before)
     return out
 
 
@@ -6091,7 +6102,8 @@ def _xargs_gh_unread(text):
         elif args[0] == "api":
             at = _gh_path_at(args)
             endpoint = at[1] if len(at) > 1 else None
-            if not _xargs_replace_strings(toks, k, parsed=True):
+            own = _xargs_replace_strings(toks, k, parsed=True)
+            if not own or _xargs_replace_strings(toks, k, spliced=True):
                 return True
             if any(r in a for x, a in enumerate(args) if x != endpoint for r in replaced):
                 return True
@@ -6109,10 +6121,23 @@ def _xargs_reads_inert(toks, x, k):
     `printf` of literal words, as `printf 5 | xargs ...` gives. A word the shell rewrites, a
     redirection, a `printf` format holding a `%` or a backslash other than `\\n` or `\\t`, and
     an `--arg-file` or a short option holding `a`, which may read another file, each leave the
-    input unread.
+    input unread. So does a redirection of the command's input, which takes the pipe's place. A
+    word still names an owner where it is an option's value, as after `--org`, so the input is
+    not inert where the command's last word is an option taking one, or where the replace string
+    sits in an option or its value.
     """
     for w in toks[x + 1 : k]:
         if w.startswith("--a") or (w[:1] == "-" and w[1:2] != "-" and "a" in w):
+            return False
+    end = next((j for j in range(k, len(toks)) if _is_separator(toks[j])), len(toks))
+    if any(_is_redir_op(t) and "<" in t for t in toks[x:end]):
+        return False
+    args = _collect_arglist(toks, k + 1)[0]
+    if args and args[-1].startswith("-") and "=" not in args[-1]:
+        return False
+    for i, a in enumerate(args):
+        held = any(r in a for r in _xargs_replace_strings(toks, k))
+        if held and (a.startswith("-") or (i and args[i - 1].startswith("-"))):
             return False
     start = x
     while start > 0 and not _is_separator(toks[start - 1]):
@@ -6211,7 +6236,8 @@ def _rewritten_git_words(cmd):
     - a push or a commit that `xargs` runs, since it appends words the guard does not read
     - a git word with no subcommand that `xargs` runs, since its input gives the subcommand
     - an `xargs` replace string in git's subcommand or a `-c` value, or among the global options
-      of a git command that may mutate, since each word xargs reads takes its place
+      of a git command that may mutate, since each word xargs reads takes its place, and among
+      any git command's global options under a BSD `-J`, which splices in words of their own
 
     The text an `eval` runs is read too. A word of any `eval`'s arguments in a text may expand
     outside single quotes. Each payload that text's evals run is then text the shell has already
@@ -6306,7 +6332,9 @@ def _rewritten_git_words(cmd):
                     sub, _collect_arglist(toks, j + 1)[0], None, lambda _d, _r: False
                 )
                 mutates = verdict or (verdict is None and sub not in _git_command_names())
-                held = next(r for r in reps) if mutates or sub in ("push", "commit") else None
+                spliced = _xargs_replace_strings(toks, k, spliced=True)
+                mutates = mutates or sub in ("push", "commit") or bool(spliced)
+                held = next(r for r in reps) if mutates else None
             if held is not None:
                 return (
                     f"an `xargs` replace string, `{held}`, in the subcommand or global options of `git`",
@@ -10887,6 +10915,24 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "allow",
         "control: a long --replace is read as xargs's own replace option",
     ),
+    (
+        "printf 5 | xargs gh pr comment --body x <<< '-R stranger/example 9'",
+        {},
+        "deny",
+        "a redirection of xargs's input replaces the inert pipe",
+    ),
+    (
+        "printf stranger | xargs gh secret set TOKEN --body x --org",
+        {},
+        "deny",
+        "an inert word that lands as an owner flag's value names an owner",
+    ),
+    (
+        "printf -- '-XPOST repos/stranger/example/issues -f title=x' | xargs -J% gh api %",
+        {},
+        "deny",
+        "a BSD -J splices words of their own, so a gh api endpoint holding it is no read",
+    ),
 ]
 
 
@@ -14927,6 +14973,14 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a bare-name export reads a value an untaken branch's declare gave beside the earlier one",
+    ),
+    (
+        "GIT_DIR=/primary/.git find ./sudo -name GIT_DIR=/worktree/.git -exec sh -c 'git reset --hard' \\;",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a wrapper behind a launcher is read under the prefix before it, beside a path named sudo",
     ),
 ]
 
@@ -20517,6 +20571,13 @@ _HIDDEN_GIT_CASES = [
         {"develop": _CODE_RULES},
         "deny",
         "a -c value an xargs replace string fills may set any config, whatever the subcommand",
+    ),
+    (
+        "echo x | xargs -J% git -C % status",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a BSD -J string among git's global options may splice in a subcommand",
     ),
 ]
 
