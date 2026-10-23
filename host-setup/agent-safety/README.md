@@ -85,7 +85,14 @@ text says, because the harm it covers was never in the text.
    may not, every value the command sets is read as reaching its gh write. A run-time segment past a
    literal owner in a `gh api` endpoint is compared by that owner, though it may hold a `..`
    segment. A gh write or a `gh api` call nested in wrappers past the reading cap is denied.
-   None of requirements 1 to 3 can read it there.
+   None of requirements 1 to 3 can read it there. A gh write that `xargs` runs fails closed too,
+   since `xargs` appends the words it reads, such as a `--repo`, or puts them where its replace
+   string sits. The exception is a write whose command and subcommand are written out, fed by a
+   pipe from an `echo` or `printf` of literal words made only of letters, digits, `_`, and `.`,
+   as in `printf 5 | xargs gh pr comment --body x`. A gh naming no subcommand under `xargs` is
+   denied, and so is a `gh api` call it appends to and one whose command words hold the replace
+   string. A `GH_REPO` that an `env` or a `sudo` passes behind a launcher the hook does not know,
+   as in `uv run env GH_REPO=...`, is read beside the shell's own value rather than dropped.
 4. **A git operation that would only succeed by bypassing an active branch rule is denied**: a
    direct push to a branch whose rules require a pull request, a force-push where history is
    protected, a delete where deletion is blocked, or an explicit-bypass flag (`--admin` on a merge,
@@ -176,6 +183,11 @@ text says, because the harm it covers was never in the text.
    `--version` that ends git there. A redirection target spanning several words on a push or a
    commit is denied, and so is a comment among a push's words. A push, a commit, or a
    `gh pr merge` that `xargs` runs is denied, since `xargs` appends words the hook does not read.
+   So is a git word with no subcommand that `xargs` runs, since its input gives the subcommand.
+   A double-quoted wrapper body holding a `$` or backtick word the outer shell expands is denied
+   where the body runs git or gh, since a value holding a `;` or a line break adds whole commands
+   before the inner shell parses the body. A body running neither keeps its verdict, so
+   `bash -c "cd $DIR && ls"` is allowed.
    A command naming git or gh that holds a carriage return is denied, since the shell reads one
    as part of a word. So is one holding a word that a backslash-newline splits. So is one holding
    an escaped backslash before a line break. The shell reads that as a line break where the hook
@@ -239,14 +251,20 @@ text says, because the harm it covers was never in the text.
    `flock` or `watch`, and after `while`, `until`, or `coproc`. A wrapper shell or a substitution
    running one counts, and so does a shell running a script file or its input. A `-c` shell given
    no command string counts as one, since `xargs` may supply it. So does one whose next word is an
-   option, as in `bash -c --`, and one whose string holds the string an `xargs -I` replaces. So
+   option, as in `bash -c --`, and one whose string holds the string an `xargs -I` replaces. That
+   replace option is read inside a short-option cluster such as `-0I{}`, and as the BSD `-J`. So
    does an `eval`, a `source`, or a shell running a script file inside a wrapper body or a
-   substitution.
+   substitution, and a wrapper body is read word by word as the outer command is. A `git config`
+   that `xargs` runs counts unless its own words name a read such as `--get`, since `xargs`
+   appends the key and value. So does a `git remote` naming no subcommand under `xargs`, a git
+   word naming none, and a command word holding the string `xargs -I` replaces. The group a named
+   `coproc` runs is read too.
    After one, the push reads its remote's `mirror` setting and its checkout's origin as
    undetermined. The hook reads both before the command runs, and a checkout or a switch changes
-   neither.
+   neither. A push to a protected default denied for that reason says so, and asks for the push
+   as its own command.
    A launcher in front of a git command, such as `flock <file>`, passes its prefix to that git.
-   An `env` after the launcher does too. A launcher the hook does not know counts unless it only
+   An `env` or a `sudo` after the launcher does too. A launcher the hook does not know counts unless it only
    names its arguments, as `grep` does. A shell such as `pwsh` behind such a launcher is read as
    well.
    A shell whose command string runs git is denied where its prefix or an earlier `export` sets
@@ -356,11 +374,21 @@ text says, because the harm it covers was never in the text.
    real shell export persists into the following command exactly as effectively, confirmed live
    with a real reset that discards a tracked local modification with no redirect at all on the `git`
    invocation itself, a shape an inline-prefix scan alone cannot see.
-   An `export` anywhere before the git command is read too, as is a `declare -x`. An `export` of
-   a bare name exports the value set before it. A `GIT_DIR`/`GIT_WORK_TREE` prefix behind a
-   precommand or a launcher such as `timeout 60` or `flock <file>` is read as well. Each export
-   after the first command gives a reading of its own beside the one without it. An `export` in a
-   subshell does not reach a later command, though one there is still read as one that may.
+   An `export` anywhere before the git command is read too, as is a `declare -x`, a
+   `typeset -x`, and a `local -x`. An `export` of a bare name exports the value set before it. A
+   plain assignment to a name exported before it exports its new value, and so does any plain
+   assignment after a `set -a` or `set -o allexport`. Where a loop or a function may run the git
+   command after a later export, every export in the command is read. Every reader of an exported
+   variable reads these forms, the config and hook settings above included. A
+   `GIT_DIR`/`GIT_WORK_TREE` prefix behind a precommand or a launcher such as `timeout 60` or
+   `flock <file>` is read as well. Behind a launcher the hook does not know, an assignment after
+   an `env` or a `sudo` is read beside each export rather than over it, since it may be the
+   launcher's own argument, as in `find ./env -name GIT_DIR=...`. Each export after the first
+   command gives a reading of its own beside the one without it. An `export` in a subshell does
+   not reach a later command, though one there is still read as one that may. A subcommand this
+   requirement denies whose `GIT_DIR`, `GIT_WORK_TREE`, `--git-dir`, or `--work-tree` value holds
+   a run-time word other than `$HOME` is denied, since that value names no checkout the hook can
+   resolve.
    A leading one is read as above. A subcommand this requirement denies, named in wrappers nested
    past the reading cap, is denied wherever it runs. `--git-dir`/`GIT_DIR=` alone,
    with no `--work-tree`/`GIT_WORK_TREE=` anywhere on the same invocation, never relocates that reported
