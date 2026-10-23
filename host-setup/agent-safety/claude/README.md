@@ -129,9 +129,9 @@ literal `"python3"` shown for `command` is what the installer writes when a `pyt
 available, but it substitutes `sys.executable`'s own absolute path instead when it is not (a
 Windows host with no `python3` shim, most commonly), while `permissions.allow`'s own
 `Bash(python3 scripts/pr_review.py:*)` rule always names `python3` literally regardless, since it
-matches the command Claude Code itself runs `pr_review.py` under, not the hook's own launcher. Its
-`uv run --no-project --script` sibling matches the spelling the fleet's skills print.
+matches a command line rather than the hook's own launcher.
 Run the installer rather than hand-copying this block on a host where the two might differ.
+The `uv run --no-project --script` rule beside it matches the spelling the fleet's skills print.
 
 ```json
 {

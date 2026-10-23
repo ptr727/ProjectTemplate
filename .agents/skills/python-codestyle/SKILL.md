@@ -236,7 +236,7 @@ build-profile conventions, and `references/profiles.md` for the lint-only `unitt
 
 <!-- include: CODESTYLE.md > Tests and Script Dependencies -->
 
-- **A test lives under the repository's `tests/` tree, never inside the production file it tests.** A deployed script may keep a `--selftest` that runs a small smoke check in seconds, and the case matrix lives in `tests/`. A self-test shipped inside the file it tests grows the file every reviewer reads. One such file reached 21,000 lines that way, 11,600 of them cases.
+- **A test lives in a `tests/` directory, never inside the production file it tests.** A deployed script may keep a `--selftest` that runs a small smoke check in seconds, and the case matrix lives in `tests/`. A self-test shipped inside the file it tests grows the file every reviewer reads, and its cases can come to outweigh the code they test.
 - **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --no-project --script <path>`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. `--no-project` keeps uv from syncing the project around a script that has no block yet, where it would write a lockfile and a virtual environment. A script with no such block runs under `python3` and uv alike. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
 
 <!-- /include -->
@@ -263,6 +263,14 @@ Before pushing or opening a PR:
   what CI relaxes for an undeclared root.
 - Markdown in this directory follows CODESTYLE.md's repo-wide Markdown and Spelling rules,
   packaged as the `comment-and-doc-style` Skill.
+
+## Parsing Structured Formats
+
+<!-- include: CODESTYLE.md > Parsing Structured Formats -->
+
+- **A program reading a structured format uses a maintained parser rather than a hand-written one, where a field-tested parser exists for the runtime in use.** That covers YAML, Markdown, TOML, JSON, a programming language's comments or strings, and a shell command line. The standard library's own parsers count, such as Python's `json`, `tomllib`, `ast`, `tokenize`, and `html.parser`. A hand-written reader converges on the format's full grammar one review finding at a time, and every script that grows one pays that cost again.
+
+<!-- /include -->
 
 ## Command-Line Arguments
 
