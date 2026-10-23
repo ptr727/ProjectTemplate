@@ -26,9 +26,7 @@ import posixpath
 import re
 import subprocess
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any

@@ -1390,6 +1390,8 @@ class RenderCase(unittest.TestCase):
         )
         padded = "Runs ` make ` targets with ``a `b` c``."
         self.assertEqual(audit_markdown.strip_md_links(padded), padded, msg)
+        imaged = "Cleans media ![ci](https://img.example/b.svg) fast."
+        self.assertEqual(audit_markdown.strip_md_links(imaged), "Cleans media ci fast.", msg)
         self.assertEqual(audit_markdown.strip_md_links(nested), "See API [docs] for details.", msg)
         self.assertEqual(audit_markdown.strip_md_links(inner_link), "See [docs] for details.", msg)
         self.assertEqual(

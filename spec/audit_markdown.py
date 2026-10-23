@@ -64,13 +64,17 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def strip_md_links(text, references=None):
-    """`text` with each Markdown link reduced to its label, everything else kept as written."""
+    """`text` with each Markdown link reduced to its label and each image to its alt text.
+
+    `references` is the document's reference table, so `[text][ref]` is a link only where `ref` is defined.
+    A text carrying neither comes back unchanged.
+    """
     tokens = _MD.parseInline(text, {"references": dict(references or {})})[0].children or []
-    if not any(tok.type == "link_open" for tok in tokens):
+    if not any(tok.type in ("link_open", "image") for tok in tokens):
         return text
     out = []
     for tok in tokens:
-        if tok.type in ("text", "html_inline"):
+        if tok.type in ("text", "html_inline", "image"):
             out.append(tok.content)
         elif tok.type == "code_inline":
             out.append(tok.markup + tok.content + tok.markup)

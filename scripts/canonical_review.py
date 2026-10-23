@@ -123,7 +123,7 @@ REVIEWERS = local_review.BACKENDS
 def normalize(text: str) -> str:
     """A unit's comparable form, which neutralizes line endings and nothing else.
 
-    Deliberately not `spec/audit.py`'s `normalize`, which also masks Dependabot-owned action pins
+    Deliberately not `spec/carried_text.py`'s `normalize`, which also masks Dependabot-owned action pins
     and per-repo `needs:` lists. Those are governed drift for a fidelity comparison, where the
     question is whether two copies say the same thing. The question here is whether a reviewer has
     read these bytes, and masking any of them would report a read of text nobody saw. Line endings
