@@ -4031,7 +4031,8 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
     A wrapper's bodies run under its own GH_REPO prefix, or else the value its command runs under
     (see `_gh_repo_states`), and a wrapper nested in one inherits from it in turn. A substitution
     body the tokenizer keeps inside one word, as in `"$(...)"`, runs under the value at each word
-    opening it, or at every word where none is found.
+    opening it, or at every word where none is found. Each value reaching a body is read as a
+    reading of its own, since `_gh_repo_states` takes only the latest of the values it inherits.
     """
     if _depth > _WRAPPER_NESTING_LIMIT:
         return []
@@ -4045,15 +4046,17 @@ def _gh_wrapper_repo_values(text, inherited, _depth=0):
         reached, reach = _gh_repo_reach(toks, x, states)
         reach = reach if reached else states[x]
         for body in found[0]:
-            out += _gh_word_repo_values(body, reach)
-            out += _gh_wrapper_repo_values(body, reach, _depth + 1)
+            for each in [[v] for v in reach] or [[]]:
+                out += _gh_word_repo_values(body, each)
+                out += _gh_wrapper_repo_values(body, each, _depth + 1)
     for body in _substitution_bodies(text):
         at = [k for k, t in enumerate(toks) if "$(" + body in t or "`" + body in t] or range(
             len(toks)
         )
         reach = list(dict.fromkeys(v for k in at for v in states[k])) if toks else list(inherited)
-        out += _gh_word_repo_values(body, reach)
-        out += _gh_wrapper_repo_values(body, reach, _depth + 1)
+        for each in [[v] for v in reach] or [[]]:
+            out += _gh_word_repo_values(body, each)
+            out += _gh_wrapper_repo_values(body, each, _depth + 1)
     return out
 
 
@@ -5654,6 +5657,18 @@ def _launcher_prefix(toks, k, env_args=True):
     return True, out + [m.groups() for t in toks[env:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
 
 
+def _names_owner_flag(word):
+    """True when a gh word is an owner or repo flag, whole, with `=`, or ending a short cluster.
+
+    That is one of `_GH_OWNER_FLAGS`, `--repo`, `-R`, or `-o`, which take an owner or a repository
+    as their value (see `_gh_owner_words`).
+    """
+    name = word.partition("=")[0]
+    if name in _GH_OWNER_FLAGS or name == "--repo":
+        return True
+    return word[:1] == "-" and word[1:2] not in ("", "-") and ("R" in word or "o" in word)
+
+
 def _runs_git(text, gh=False):
     """True when a git word runs as a command (see `_runs_as_command`) in `text`, or in a command string it embeds.
 
@@ -6122,26 +6137,26 @@ def _xargs_reads_inert(toks, x, k):
     redirection, a `printf` format holding a `%` or a backslash other than `\\n` or `\\t`, and
     an `--arg-file` or a short option holding `a`, which may read another file, each leave the
     input unread. So does a redirection of the command's input, which takes the pipe's place. A
-    word still names an owner where it is an option's value, as after `--org`, so the input is
-    not inert where the command's last word is an option taking one, or where the replace string
-    sits in an option or its value.
+    word still names an owner where it is an owner or repo flag's value, as after `--org`, so the
+    input is not inert where the command ends in such a flag, or where the replace string sits in
+    one or its value (see `_names_owner_flag`).
     """
     for w in toks[x + 1 : k]:
         if w.startswith("--a") or (w[:1] == "-" and w[1:2] != "-" and "a" in w):
             return False
-    end = next((j for j in range(k, len(toks)) if _is_separator(toks[j])), len(toks))
-    if any(_is_redir_op(t) and "<" in t for t in toks[x:end]):
-        return False
-    args = _collect_arglist(toks, k + 1)[0]
-    if args and args[-1].startswith("-") and "=" not in args[-1]:
-        return False
-    for i, a in enumerate(args):
-        held = any(r in a for r in _xargs_replace_strings(toks, k))
-        if held and (a.startswith("-") or (i and args[i - 1].startswith("-"))):
-            return False
     start = x
     while start > 0 and not _is_separator(toks[start - 1]):
         start -= 1
+    end = next((j for j in range(k, len(toks)) if _is_separator(toks[j])), len(toks))
+    if any(_is_redir_op(t) and "<" in t for t in toks[start:end]):
+        return False
+    args = _collect_arglist(toks, k + 1)[0]
+    if args and _names_owner_flag(args[-1]):
+        return False
+    for i, a in enumerate(args):
+        held = any(r in a for r in _xargs_replace_strings(toks, k))
+        if held and (_names_owner_flag(a) or (i and _names_owner_flag(args[i - 1]))):
+            return False
     if start == 0 or toks[start - 1] != "|":
         return False
     first = start - 1
@@ -10156,6 +10171,168 @@ _GH_PATH_CASES: list[tuple[str, str, str]] = [
 _STRANGER_GH_REPO = {"GH_REPO": "stranger/example"}
 _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
     (
+        "printf -- '-R stranger/example' | xargs gh pr comment 5 -b x",
+        {},
+        "deny",
+        "a gh write that xargs runs may take a --repo from its input",
+    ),
+    (
+        "echo stranger/example | xargs -I{} gh pr comment 5 -b x -R {}",
+        {},
+        "deny",
+        "a repo flag value an xargs replace string fills is not read",
+    ),
+    (
+        "echo comment 5 -b x | xargs gh pr",
+        {},
+        "deny",
+        "a gh naming no subcommand under xargs may take a write from its input",
+    ),
+    (
+        "echo -XPOST repos/stranger/example/issues | xargs gh api",
+        {},
+        "deny",
+        "a gh api call xargs appends to may take a method and an endpoint from its input",
+    ),
+    (
+        "echo https://github.com/stranger/example/pull/5 | xargs gh pr comment --body x",
+        {},
+        "deny",
+        "an xargs input word naming a URL is not inert",
+    ),
+    (
+        "echo 5 | xargs gh pr view --comments",
+        {},
+        "allow",
+        "control: a gh read whose subcommand is written out takes no write from xargs",
+    ),
+    (
+        "printf '5\\n6\\n' | xargs -n1 gh pr comment --body x",
+        {},
+        "allow",
+        "control: a written-out gh write that xargs feeds only inert literal words is read",
+    ),
+    (
+        "ls | xargs grep -l gh",
+        {},
+        "allow",
+        "control: a gh word that is an argument of the command xargs runs runs nothing",
+    ),
+    (
+        "uv run env GH_REPO=stranger/example gh pr comment 5 --body x",
+        {"GH_REPO": "example/other"},
+        "deny",
+        "a GH_REPO an env passes behind an unknown launcher is read beside the session's own",
+    ),
+    (
+        "uv run sudo GH_REPO=stranger/example gh pr comment 5 --body x",
+        {},
+        "deny",
+        "a GH_REPO a sudo passes behind an unknown launcher is read",
+    ),
+    (
+        "uv run env GH_REPO=example/other gh pr comment 5 --body x",
+        {},
+        "allow",
+        "control: a same-owner GH_REPO an env passes behind an unknown launcher is allowed",
+    ),
+    (
+        "echo '-R stranger/example' | xargs -I{} sh -c 'gh pr comment 5 -b x {}'",
+        {},
+        "deny",
+        "a shell string that xargs fills and that runs gh may take a --repo from its input",
+    ),
+    (
+        "echo delete 5 -R stranger/example | xargs gh repo deploy-key",
+        {},
+        "deny",
+        "a three-word gh write missing its third word under xargs may take it from its input",
+    ),
+    (
+        "echo 'mutation{x}' | xargs -I{} gh api graphql -f query={}",
+        {},
+        "deny",
+        "a gh api field holding the xargs replace string may be a mutation",
+    ),
+    (
+        "printf -- '-XPOST -f title=x' | xargs stdbuf -i0 gh api repos/stranger/example/issues",
+        {},
+        "deny",
+        "a launcher option shaped like a replace option leaves xargs appending to gh api",
+    ),
+    (
+        "printf 5 | xargs --max-args=1 gh pr comment --body x",
+        {},
+        "allow",
+        "control: an xargs long option that reads no file keeps inert input inert",
+    ),
+    (
+        "echo 5 | xargs -I{} gh api repos/example/repo/pulls/{}",
+        {},
+        "allow",
+        "control: a gh api read whose endpoint alone holds the replace string is read",
+    ),
+    (
+        "gh pr list --json number -q '.[].number' | xargs -I{} gh pr view {}",
+        {},
+        "allow",
+        "control: a gh read whose target alone holds the replace string is read",
+    ),
+    (
+        "printf 5 | xargs -I{} gh pr comment {} --body x",
+        {},
+        "allow",
+        "control: a written-out gh write whose target an inert replace fills is read",
+    ),
+    (
+        "echo 5 | xargs --replace gh api repos/example/repo/pulls/{}",
+        {},
+        "allow",
+        "control: a long --replace is read as xargs's own replace option",
+    ),
+    (
+        "printf 5 | xargs gh pr comment --body x <<< '-R stranger/example 9'",
+        {},
+        "deny",
+        "a redirection of xargs's input replaces the inert pipe",
+    ),
+    (
+        "printf stranger | xargs gh secret set TOKEN --body x --org",
+        {},
+        "deny",
+        "an inert word that lands as an owner flag's value names an owner",
+    ),
+    (
+        "printf -- '-XPOST repos/stranger/example/issues -f title=x' | xargs -J% gh api %",
+        {},
+        "deny",
+        "a BSD -J splices words of their own, so a gh api endpoint holding it is no read",
+    ),
+    (
+        "export GH_REPO=stranger/example; find ./env -name GH_REPO=example/x -exec sh -c 'gh pr comment 5 -b x' \\; ; GH_REPO=example/y sh -c 'gh pr view 1'",
+        {},
+        "deny",
+        "each GH_REPO value reaching a wrapper body is read on its own, not collapsed to the last",
+    ),
+    (
+        "printf 5 | </example/args xargs gh pr comment --body x",
+        {},
+        "deny",
+        "a redirection before xargs replaces the inert pipe",
+    ),
+    (
+        "printf stranger | xargs gh repo fork example/x --org",
+        {},
+        "deny",
+        "an inert word xargs appends after a trailing --org names an owner",
+    ),
+    (
+        "printf 5 | xargs gh pr close --delete-branch",
+        {},
+        "allow",
+        "control: a trailing boolean flag takes no inert word as an owner",
+    ),
+    (
         "gh pr comment 5 --body hi",
         _STRANGER_GH_REPO,
         "deny",
@@ -10794,144 +10971,6 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "an eval word that is an argument runs nothing",
-    ),
-    (
-        "printf -- '-R stranger/example' | xargs gh pr comment 5 -b x",
-        {},
-        "deny",
-        "a gh write that xargs runs may take a --repo from its input",
-    ),
-    (
-        "echo stranger/example | xargs -I{} gh pr comment 5 -b x -R {}",
-        {},
-        "deny",
-        "a repo flag value an xargs replace string fills is not read",
-    ),
-    (
-        "echo comment 5 -b x | xargs gh pr",
-        {},
-        "deny",
-        "a gh naming no subcommand under xargs may take a write from its input",
-    ),
-    (
-        "echo -XPOST repos/stranger/example/issues | xargs gh api",
-        {},
-        "deny",
-        "a gh api call xargs appends to may take a method and an endpoint from its input",
-    ),
-    (
-        "echo https://github.com/stranger/example/pull/5 | xargs gh pr comment --body x",
-        {},
-        "deny",
-        "an xargs input word naming a URL is not inert",
-    ),
-    (
-        "echo 5 | xargs gh pr view --comments",
-        {},
-        "allow",
-        "control: a gh read whose subcommand is written out takes no write from xargs",
-    ),
-    (
-        "printf '5\\n6\\n' | xargs -n1 gh pr comment --body x",
-        {},
-        "allow",
-        "control: a written-out gh write that xargs feeds only inert literal words is read",
-    ),
-    (
-        "ls | xargs grep -l gh",
-        {},
-        "allow",
-        "control: a gh word that is an argument of the command xargs runs runs nothing",
-    ),
-    (
-        "uv run env GH_REPO=stranger/example gh pr comment 5 --body x",
-        {"GH_REPO": "example/other"},
-        "deny",
-        "a GH_REPO an env passes behind an unknown launcher is read beside the session's own",
-    ),
-    (
-        "uv run sudo GH_REPO=stranger/example gh pr comment 5 --body x",
-        {},
-        "deny",
-        "a GH_REPO a sudo passes behind an unknown launcher is read",
-    ),
-    (
-        "uv run env GH_REPO=example/other gh pr comment 5 --body x",
-        {},
-        "allow",
-        "control: a same-owner GH_REPO an env passes behind an unknown launcher is allowed",
-    ),
-    (
-        "echo '-R stranger/example' | xargs -I{} sh -c 'gh pr comment 5 -b x {}'",
-        {},
-        "deny",
-        "a shell string that xargs fills and that runs gh may take a --repo from its input",
-    ),
-    (
-        "echo delete 5 -R stranger/example | xargs gh repo deploy-key",
-        {},
-        "deny",
-        "a three-word gh write missing its third word under xargs may take it from its input",
-    ),
-    (
-        "echo 'mutation{x}' | xargs -I{} gh api graphql -f query={}",
-        {},
-        "deny",
-        "a gh api field holding the xargs replace string may be a mutation",
-    ),
-    (
-        "printf -- '-XPOST -f title=x' | xargs stdbuf -i0 gh api repos/stranger/example/issues",
-        {},
-        "deny",
-        "a launcher option shaped like a replace option leaves xargs appending to gh api",
-    ),
-    (
-        "printf 5 | xargs --max-args=1 gh pr comment --body x",
-        {},
-        "allow",
-        "control: an xargs long option that reads no file keeps inert input inert",
-    ),
-    (
-        "echo 5 | xargs -I{} gh api repos/example/repo/pulls/{}",
-        {},
-        "allow",
-        "control: a gh api read whose endpoint alone holds the replace string is read",
-    ),
-    (
-        "gh pr list --json number -q '.[].number' | xargs -I{} gh pr view {}",
-        {},
-        "allow",
-        "control: a gh read whose target alone holds the replace string is read",
-    ),
-    (
-        "printf 5 | xargs -I{} gh pr comment {} --body x",
-        {},
-        "allow",
-        "control: a written-out gh write whose target an inert replace fills is read",
-    ),
-    (
-        "echo 5 | xargs --replace gh api repos/example/repo/pulls/{}",
-        {},
-        "allow",
-        "control: a long --replace is read as xargs's own replace option",
-    ),
-    (
-        "printf 5 | xargs gh pr comment --body x <<< '-R stranger/example 9'",
-        {},
-        "deny",
-        "a redirection of xargs's input replaces the inert pipe",
-    ),
-    (
-        "printf stranger | xargs gh secret set TOKEN --body x --org",
-        {},
-        "deny",
-        "an inert word that lands as an owner flag's value names an owner",
-    ),
-    (
-        "printf -- '-XPOST repos/stranger/example/issues -f title=x' | xargs -J% gh api %",
-        {},
-        "deny",
-        "a BSD -J splices words of their own, so a gh api endpoint holding it is no read",
     ),
 ]
 
@@ -13822,6 +13861,166 @@ _GIT_CASES = [
 # A None ref-map means every ref-check in the case resolves True (an ordinary branch name), the common case; only the pathspec-disambiguation cases below need a real map.
 _PRIMARY_CHECKOUT_CASES = [
     (
+        "cd /worktree && export GIT_DIR=/worktree/.git && GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a plain assignment to an exported GIT_DIR exports its new value",
+    ),
+    (
+        "cd /worktree && export GIT_DIR GIT_WORK_TREE; GIT_DIR=/primary/.git GIT_WORK_TREE=/primary; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/primary": True, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export marks a name a later plain assignment then exports",
+    ),
+    (
+        "cd /worktree && set -a && GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a set -a exports a plain GIT_DIR assignment",
+    ),
+    (
+        "cd /worktree && set -o allexport; GIT_DIR=/primary/.git; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a set -o allexport exports a plain GIT_DIR assignment",
+    ),
+    (
+        "cd /worktree && set -e && GIT_DIR=/primary/.git && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "allow",
+        "control: a set without -a leaves a plain assignment unexported",
+    ),
+    (
+        "cd /worktree && f() { local -x GIT_DIR=/primary/.git; git reset --hard; }; f",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a local -x exports as export does",
+    ),
+    (
+        "cd /worktree && f() { git reset --hard; }; export GIT_DIR=/primary/.git; f",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "an export after a function's git reaches it when the function runs later",
+    ),
+    (
+        "cd /worktree && for i in 1 2; do git reset --hard; export GIT_DIR=/primary/.git; done",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "an export after a loop's git reaches it on the next pass",
+    ),
+    (
+        "cd /worktree && git reset --hard; export GIT_DIR=/primary/.git",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "allow",
+        "control: an export after a git that nothing runs again does not reach it",
+    ),
+    (
+        "cd /worktree && export GIT_DIR=/primary/.git && find ./env -name GIT_DIR=/worktree/.git -exec git reset --hard \\;",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "an assignment after a path named env is read beside the export, not over it",
+    ),
+    (
+        "cd /worktree && D=/primary/.git && export GIT_DIR=$D && git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "an exported GIT_DIR holding a run-time word names no checkout the guard reads",
+    ),
+    (
+        "GIT_DIR=$D git reset --hard",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "a GIT_DIR prefix holding a run-time word fails closed on a mutating command",
+    ),
+    (
+        'GIT_WORK_TREE="$W" git add .',
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "a quoted run-time GIT_WORK_TREE value fails closed on a mutating command",
+    ),
+    (
+        "GIT_DIR=$D git status",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "allow",
+        "control: a run-time GIT_DIR on a command that mutates nothing is allowed",
+    ),
+    (
+        "echo reset --hard | xargs git",
+        "/primary",
+        {"/primary": True},
+        None,
+        "deny",
+        "a git with no subcommand that xargs runs fails closed in any checkout",
+    ),
+    (
+        "cd /worktree && declare GIT_DIR=/primary/.git; export GIT_DIR; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export exports the value a declare set before it",
+    ),
+    (
+        "echo /primary | xargs -I{} git --git-dir={}/.git --work-tree={} reset --hard",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "an xargs replace string in a mutating git command's directory options fails closed",
+    ),
+    (
+        "GIT_DIR=/primary/.git find ./sudo -name GIT_DIR=/worktree/.git -exec sh -c 'git reset --hard' \\;",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a wrapper behind a launcher is read under the prefix before it, beside a path named sudo",
+    ),
+    (
+        "GIT_DIR=/primary/.git; f() { local GIT_DIR=/worktree/.git; }; export GIT_DIR; git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export reads every value a name was given, a function's local beside the outer one",
+    ),
+    (
+        "GIT_DIR=/primary/.git; if false; then declare GIT_DIR=/worktree/.git; fi; export GIT_DIR; git reset --hard",
+        "/worktree",
+        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export reads a value an untaken branch's declare gave beside the earlier one",
+    ),
+    (
         "git reset --hard origin/main",
         "/primary",
         {"/primary": True},
@@ -14821,166 +15020,6 @@ _PRIMARY_CHECKOUT_CASES = [
         None,
         "deny",
         "a shell body's comment-ending backslash-newline does not hide a directory value another one splits",
-    ),
-    (
-        "cd /worktree && export GIT_DIR=/worktree/.git && GIT_DIR=/primary/.git && git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
-        None,
-        "deny",
-        "a plain assignment to an exported GIT_DIR exports its new value",
-    ),
-    (
-        "cd /worktree && export GIT_DIR GIT_WORK_TREE; GIT_DIR=/primary/.git GIT_WORK_TREE=/primary; git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/primary": True, "/worktree": False},
-        None,
-        "deny",
-        "a bare-name export marks a name a later plain assignment then exports",
-    ),
-    (
-        "cd /worktree && set -a && GIT_DIR=/primary/.git && git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "a set -a exports a plain GIT_DIR assignment",
-    ),
-    (
-        "cd /worktree && set -o allexport; GIT_DIR=/primary/.git; git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "a set -o allexport exports a plain GIT_DIR assignment",
-    ),
-    (
-        "cd /worktree && set -e && GIT_DIR=/primary/.git && git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "allow",
-        "control: a set without -a leaves a plain assignment unexported",
-    ),
-    (
-        "cd /worktree && f() { local -x GIT_DIR=/primary/.git; git reset --hard; }; f",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "a local -x exports as export does",
-    ),
-    (
-        "cd /worktree && f() { git reset --hard; }; export GIT_DIR=/primary/.git; f",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "an export after a function's git reaches it when the function runs later",
-    ),
-    (
-        "cd /worktree && for i in 1 2; do git reset --hard; export GIT_DIR=/primary/.git; done",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "an export after a loop's git reaches it on the next pass",
-    ),
-    (
-        "cd /worktree && git reset --hard; export GIT_DIR=/primary/.git",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "allow",
-        "control: an export after a git that nothing runs again does not reach it",
-    ),
-    (
-        "cd /worktree && export GIT_DIR=/primary/.git && find ./env -name GIT_DIR=/worktree/.git -exec git reset --hard \\;",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
-        None,
-        "deny",
-        "an assignment after a path named env is read beside the export, not over it",
-    ),
-    (
-        "cd /worktree && D=/primary/.git && export GIT_DIR=$D && git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "an exported GIT_DIR holding a run-time word names no checkout the guard reads",
-    ),
-    (
-        "GIT_DIR=$D git reset --hard",
-        "/worktree",
-        {"/worktree": False},
-        None,
-        "deny",
-        "a GIT_DIR prefix holding a run-time word fails closed on a mutating command",
-    ),
-    (
-        'GIT_WORK_TREE="$W" git add .',
-        "/worktree",
-        {"/worktree": False},
-        None,
-        "deny",
-        "a quoted run-time GIT_WORK_TREE value fails closed on a mutating command",
-    ),
-    (
-        "GIT_DIR=$D git status",
-        "/worktree",
-        {"/worktree": False},
-        None,
-        "allow",
-        "control: a run-time GIT_DIR on a command that mutates nothing is allowed",
-    ),
-    (
-        "echo reset --hard | xargs git",
-        "/primary",
-        {"/primary": True},
-        None,
-        "deny",
-        "a git with no subcommand that xargs runs fails closed in any checkout",
-    ),
-    (
-        "cd /worktree && declare GIT_DIR=/primary/.git; export GIT_DIR; git reset --hard",
-        "/somewhere-else",
-        {"/primary/.git": True, "/worktree": False},
-        None,
-        "deny",
-        "a bare-name export exports the value a declare set before it",
-    ),
-    (
-        "echo /primary | xargs -I{} git --git-dir={}/.git --work-tree={} reset --hard",
-        "/worktree",
-        {"/worktree": False},
-        None,
-        "deny",
-        "an xargs replace string in a mutating git command's directory options fails closed",
-    ),
-    (
-        "GIT_DIR=/primary/.git; f() { local GIT_DIR=/worktree/.git; }; export GIT_DIR; git reset --hard",
-        "/worktree",
-        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
-        None,
-        "deny",
-        "a bare-name export reads every value a name was given, a function's local beside the outer one",
-    ),
-    (
-        "GIT_DIR=/primary/.git; if false; then declare GIT_DIR=/worktree/.git; fi; export GIT_DIR; git reset --hard",
-        "/worktree",
-        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
-        None,
-        "deny",
-        "a bare-name export reads a value an untaken branch's declare gave beside the earlier one",
-    ),
-    (
-        "GIT_DIR=/primary/.git find ./sudo -name GIT_DIR=/worktree/.git -exec sh -c 'git reset --hard' \\;",
-        "/worktree",
-        {"/primary/.git": True, "/worktree/.git": False, "/worktree": False},
-        None,
-        "deny",
-        "a wrapper behind a launcher is read under the prefix before it, beside a path named sudo",
     ),
 ]
 
