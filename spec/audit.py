@@ -49,6 +49,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -82,12 +83,6 @@ RULESET_SUBSET = ["name", "target", "enforcement", "conditions", "rules"]
 # Deliberately specific, so a note recording a permanent deviation must not match.
 # An example of one that must not match is a note reading that there is no get-version-task and validate-task is relied on instead.
 PENDING_MARKERS = ["pending", "not yet", "owed", "todo", "still", "behind", "missing", "absent"]
-# A driftNote may name the check that would retire it, as a parenthesized id: "(hugo.generator.pinned)".
-# Deliberately unanchored.
-# Both notes this form was introduced for end the sentence after the paren, so an end-anchored pattern matches neither of the two it was written to catch.
-# That is the shape a matcher fails at silently: it reports nothing, and a fleet with no such note in it reports exactly the same.
-CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
-DETECTION_SUPPRESSION_IDS = {"python.directories.declared": "python", "filenaming.scripts": None}
 
 
 def load(rel):
@@ -869,12 +864,7 @@ def normalize_ruleset(payload):
 
 
 def check_id_owner(spec, cid):
-    """The project type owning a check id, and whether the catalog defines the id at all.
-
-    Returns (None, True) for a cross-cutting check, which every repo carries and no repo declares.
-    The catalog is a required input rather than an optional one: resolving against an absent
-    catalog would report every id as undefined, which is a louder failure than reporting none.
-    """
+    """`(owning project type or None, whether spec/checks.json or spec/project-types.json defines the id)`."""
     types = spec.get("types")
     if not types:
         raise KeyError(
@@ -883,24 +873,17 @@ def check_id_owner(spec, cid):
     for name, t in types.get("types", {}).items():
         if any(c.get("id") == cid for c in t.get("checks", [])):
             return name, True
-    for dim in types.get("crossCutting", {}).values():
-        if any(c.get("id") == cid for c in dim.get("checks", [])):
-            return None, True
-    return None, False
+    cross = (c for dim in types.get("crossCutting", {}).values() for c in dim.get("checks", []))
+    known = any(c.get("id") == cid for c in cross)
+    return None, known or any(c["id"] == cid for c in registered_checks())
 
 
 def is_suppression_id(entry, cid):
-    """Whether a check id a driftNote names suppresses a finding on this repo, rather than naming a check to judge.
-
-    The note-freshness check skips such a note, and the check it suppresses reports it once stale.
-    DETECTION_SUPPRESSION_IDS maps each id to the type whose declaration ends the suppression, or to
-    None where the note suppresses on every repo. The Python id is the type model's explicit
-    suppression of a discovery advisory rather than a note about a forgotten type. The file-naming id
-    exempts the paths the note names, each a name a tool or platform fixes.
-    """
-    if cid not in DETECTION_SUPPRESSION_IDS:
+    """Whether a driftNote naming `cid` suppresses a registered check's finding on this repo, rather than naming a check to judge."""
+    check = next((c for c in registered_checks() if c["id"] == cid), {})
+    if "suppression" not in check:
         return False
-    ending_type = DETECTION_SUPPRESSION_IDS[cid]
+    ending_type = check["suppression"]["endsWithType"]
     return ending_type is None or ending_type not in declared_types(entry)
 
 
@@ -921,7 +904,7 @@ def driftnote_findings(entry, spec, open_count):
     out = []
     for note in entry.get("driftNotes", []):
         quoted = quote_note(note)
-        for cid in CHECK_ID_RE.findall(note):
+        for cid in validate.CHECK_ID_RE.findall(note):
             if is_suppression_id(entry, cid):
                 continue
             owner, known = check_id_owner(spec, cid)
@@ -929,7 +912,7 @@ def driftnote_findings(entry, spec, open_count):
                 out.append(
                     (
                         "DRIFT",
-                        f"registry: driftNote names check '{cid}', which spec/project-types.json does not define - fix the id or drop the note: {quoted}",
+                        f"registry: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines - fix the id or drop the note: {quoted}",
                     )
                 )
             elif owner and owner not in declared_types(entry):
@@ -2689,138 +2672,246 @@ def ground_branch_of(entry, branch=None, defaults=None):
     return "main"
 
 
-def audit_repo(entry, spec, branch=None):
-    findings = []  # (kind, text)
-    slug = repo_slug(entry)
-    types = declared_types(entry)
-    model = (
-        entry.get("workflowModel")
-        or spec["registry"].get("defaults", {}).get("workflowModel")
-        or "release"
-    )
-    ground = ground_branch_of(entry, branch, spec["registry"].get("defaults", {}))
+@functools.cache
+def registered_checks():
+    """spec/checks.json's checks, in the order the audit runs them."""
+    return tuple(load("spec/checks.json")["checks"])
 
+
+def check_function(check):
+    """The function a registered check names, `check_<id>` with each dot and hyphen as an underscore."""
+    return globals()["check_" + re.sub(r"[.-]", "_", check["id"])]
+
+
+@dataclass
+class Run:
+    """One repository's audit: what every registered check reads, and the findings so far."""
+
+    entry: dict
+    spec: dict
+    slug: str
+    ground: str
+    live: dict
+    main: Any
+    develop: Any
+    head: Any = None
+    findings: list = field(default_factory=list)
+    content: dict = field(default_factory=dict)
+
+    @functools.cached_property
+    def hub(self):
+        return self.entry.get("name") == hub_repo_name()
+
+    @functools.cached_property
+    def sel(self):
+        return repo_selectors(self.entry, self.spec["registry"].get("defaults", {}))
+
+    @functools.cached_property
+    def blobs(self):
+        return repo_tree_blobs(self.slug, self.head)
+
+    @functools.cached_property
+    def entries(self):
+        return blob_field(self.blobs, 0)
+
+    @functools.cached_property
+    def tree(self):
+        return None if self.entries is None else set(self.entries)
+
+    @functools.cached_property
+    def coverage_types(self):
+        candidates = coverage_candidate_types(
+            declared_types(self.entry), self.entry.get("profiles", {})
+        )
+        mechanisms = self.spec["secrets"].get("typeMechanisms", {})
+        return coverage_claiming_types(candidates, mechanisms, self.tree)
+
+    @functools.cached_property
+    def baseline(self):
+        """`{path: (item, sections, verbatim sections)}` for each baseline file applying here, in manifest order.
+
+        Sections union across same-path entries, and the last fidelity-bearing entry for a path is its item.
+        """
+        out = {}
+        for item in self.spec["files"]["baseline"]:
+            path = item["path"]
+            if not applies(item.get("appliesTo", "*"), self.sel):
+                continue
+            # A coverage feature file is N/A where no type claims codecov (spec/type-model.md).
+            if path == "codecov.yml" and not self.coverage_types:
+                continue
+            prior, needed, verbatim = out.get(path, (None, set(), set()))
+            needed |= set(required_sections(item, self.sel))
+            verbatim |= set(verbatim_sections(item, self.sel))
+            fidelity = item.get("fidelity") in ("interface", "verbatim", "intent")
+            out[path] = (item if fidelity else prior, needed, verbatim)
+        return out
+
+    @functools.cached_property
+    def alternatives(self):
+        return declared_alternatives(self.spec["files"]["baseline"])
+
+    @property
+    def docs(self):
+        """README.md and HISTORY.md as read, for the checks that compare the two."""
+        return {
+            p: self.content[p]
+            for p in ("README.md", "HISTORY.md")
+            if self.content.get(p) is not None
+        }
+
+    def read_text(self, path):
+        url = f"repos/{self.slug}/contents/{urllib.parse.quote(path)}?ref={self.ground}"
+        return contents_text(gh(url))
+
+    def unread(self, family, path, purpose):
+        return (
+            "DRIFT",
+            f"{family}: could not read {path} content on {self.ground} to {purpose} (no inline content returned); verify by hand",
+        )
+
+
+def audit_repo(entry, spec, branch=None):
+    """Run every registered check against one repository, returning `(findings, audited sha)`."""
+    slug = repo_slug(entry)
     try:
         live = gh(f"repos/{slug}")
     except RuntimeError as e:
         return [("ERROR", str(e))], ""
+    run = Run(
+        entry,
+        spec,
+        slug,
+        ground_branch_of(entry, branch, spec["registry"].get("defaults", {})),
+        live,
+        gh(f"repos/{slug}/branches/main", ok404=True),
+        gh(f"repos/{slug}/branches/develop", ok404=True),
+    )
+    run.head = {"main": run.main, "develop": run.develop}.get(run.ground)
+    if run.head is None:
+        run.head = gh(f"repos/{slug}/branches/{run.ground}", ok404=True)
+    checks = [c for c in registered_checks() if c["hub"] or not run.hub]
+    if run.head is None:
+        # Every content read would 404, so only what needs none runs.
+        for check in checks:
+            if not check.get("ground", True):
+                run.findings += check_function(check)(run)
+        missing = (
+            f"branch: ground-truth branch {run.ground} does not exist, so nothing could be read"
+        )
+        return run.findings + [("ERROR", missing)], ""
+    for i, check in enumerate(checks):
+        if check["scope"] == "repo":
+            run.findings += check_function(check)(run)
+        elif i == 0 or checks[i - 1]["scope"] == "repo":
+            # A run of per-file checks reads the baseline file by file, so findings group by file.
+            stage = list(itertools.takewhile(lambda c: c["scope"] != "repo", checks[i:]))
+            for path in run.baseline:
+                for each in stage:
+                    if each["scope"] == "baseline" or path in run.content:
+                        run.findings += check_function(each)(run, path)
+    return run.findings, run.head.get("commit", {}).get("sha", "")
 
-    # --- Branch facts ---
-    branch_main = gh(f"repos/{slug}/branches/main", ok404=True)
-    branch_dev = gh(f"repos/{slug}/branches/develop", ok404=True)
-    main_exists, dev_exists = branch_main is not None, branch_dev is not None
-    if not main_exists:
-        findings.append(("DEFECT", "branch: main does not exist"))
-    if bool(entry.get("hasDevelop")) != dev_exists:
+
+def check_branch_facts(run):
+    findings = [] if run.main is not None else [("DEFECT", "branch: main does not exist")]
+    if bool(run.entry.get("hasDevelop")) != (run.develop is not None):
+        state = "exists" if run.develop is not None else "is absent"
+        findings.append(
+            ("DRIFT", f"registry: hasDevelop={run.entry.get('hasDevelop')} but develop {state}")
+        )
+    return findings
+
+
+def check_branch_drift(run):
+    """Main-side changes develop lacks, split by direction, from the merge-base tree rather than the capped compare.
+
+    Identical head trees are the fast path, since a merge-commit promotion leaves main permanently ahead.
+    """
+    if run.main is None or run.develop is None:
+        return []
+    if (
+        run.main["commit"]["commit"]["tree"]["sha"]
+        == run.develop["commit"]["commit"]["tree"]["sha"]
+    ):
+        return []
+    cmp = gh(f"repos/{run.slug}/compare/develop...main", ok404=True)
+    if not cmp or not cmp.get("files"):
+        return []
+    shas = {
+        "base": cmp["merge_base_commit"]["commit"]["tree"]["sha"],
+        "develop": run.develop["commit"]["commit"]["tree"]["sha"],
+        "main": run.main["commit"]["commit"]["tree"]["sha"],
+    }
+    trees = {k: gh(f"repos/{run.slug}/git/trees/{sha}?recursive=1") for k, sha in shas.items()}
+    if not all(isinstance(t, dict) for t in trees.values()) or any(
+        t.get("truncated") for t in trees.values()
+    ):
+        return [
+            (
+                "DRIFT",
+                f"branch: {len(cmp['files'])}+ path(s) differ between main and develop (forward-sync or reconciliation may be needed; tree unavailable or too large to classify direction)",
+            )
+        ]
+    objs = {
+        name: {e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")}
+        for name, t in trees.items()
+    }
+    behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
+    findings = []
+    if behind:
+        shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
         findings.append(
             (
                 "DRIFT",
-                f"registry: hasDevelop={entry.get('hasDevelop')} but develop {'exists' if dev_exists else 'is absent'}",
+                f"branch: {len(behind)} main-side path change(s) develop is behind on (forward-sync needed): {shown}",
             )
         )
-    # Resolve the branch every content read is keyed on, reusing what the branch facts already read.
-    # An unresolvable one is an error rather than a run, since every `?ref=` read would 404 and report the whole baseline as absent, which is a flood of letters describing the ref rather than the repo.
-    # The branch facts above are reported either way, since they are already read and still true.
-    ground_head = {"main": branch_main, "develop": branch_dev}.get(ground)
-    if ground_head is None:
-        ground_head = gh(f"repos/{slug}/branches/{ground}", ok404=True)
-    if ground_head is None:
-        return findings + [
-            (
-                "ERROR",
-                f"branch: ground-truth branch {ground} does not exist, so nothing could be read",
-            )
-        ], ""
-    # Commit counts mislead here, since merge-commit promotions leave main permanently ahead while the head trees are identical, so tree equality is the no-drift fast path.
-    # Where the head trees differ, an empty compare files[] means develop is merely ahead, carrying no main-side changes since the merge-base, which is normal and yields no finding and no further API calls.
-    if (
-        main_exists
-        and dev_exists
-        and branch_main["commit"]["commit"]["tree"]["sha"]
-        != branch_dev["commit"]["commit"]["tree"]["sha"]
-    ):
-        cmp = gh(f"repos/{slug}/compare/develop...main", ok404=True)
-        if cmp and cmp.get("files"):
-            # A non-empty files[] signals main-side changes but is not usable directly.
-            # It is blind to cherry-picked promotions, where develop may already hold identical content under different commit SHAs such as a promote branch, and it is capped at 300 entries.
-            # Derive the main-side change set from the merge-base tree instead, taking paths whose object SHA, a blob or a submodule pointer, differs from base to main, additions and deletions included and with no cap.
-            # Then drop paths whose objects already match at develop, since content develop already has is not content develop lacks.
-            # That is three recursive tree calls, so where any tree is truncated, or unexpectedly not a dict, the filter is skipped and the compare's unfiltered count is kept, which is conservative and marked.
-            trees = {
-                "base": gh(
-                    f"repos/{slug}/git/trees/{cmp['merge_base_commit']['commit']['tree']['sha']}?recursive=1"
-                ),
-                "develop": gh(
-                    f"repos/{slug}/git/trees/{branch_dev['commit']['commit']['tree']['sha']}?recursive=1"
-                ),
-                "main": gh(
-                    f"repos/{slug}/git/trees/{branch_main['commit']['commit']['tree']['sha']}?recursive=1"
-                ),
-            }
-            if not all(isinstance(t, dict) for t in trees.values()) or any(
-                t.get("truncated") for t in trees.values()
-            ):
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"branch: {len(cmp['files'])}+ path(s) differ between main and develop (forward-sync or reconciliation may be needed; tree unavailable or too large to classify direction)",
-                    )
-                )
-            else:
-                objs = {
-                    name: {
-                        e["path"]: e["sha"] for e in t["tree"] if e["type"] in ("blob", "commit")
-                    }
-                    for name, t in trees.items()
-                }
-                # Split main-side drift by direction, never flagging every difference as a develop deficit.
-                # A path develop still holds at the merge-base is a genuine forward-sync gap.
-                # A path both branches moved is diverged, and develop may already supersede main.
-                behind, diverged = classify_branch_drift(
-                    objs["base"], objs["main"], objs["develop"]
-                )
-                if behind:
-                    shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"branch: {len(behind)} main-side path change(s) develop is behind on (forward-sync needed): {shown}",
-                        )
-                    )
-                if diverged:
-                    shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}",
-                        )
-                    )
-
-    # --- General settings ---
-    expected = dict(spec["settings"])
-    expected["has_discussions"] = not live.get("private", True)
-    for key in SETTINGS_KEYS + ["has_discussions"]:
-        if key in expected and live.get(key) != expected[key]:
-            findings.append(
-                ("DEFECT", f"settings: {key} live={live.get(key)} expected={expected[key]}")
-            )
-    if main_exists and live.get("default_branch") != "main":
+    if diverged:
+        shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
         findings.append(
-            ("DEFECT", f"settings: default_branch is {live.get('default_branch')}, expected main")
+            (
+                "DRIFT",
+                f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}",
+            )
         )
+    return findings
 
-    # --- Rulesets ---
+
+def check_settings_general(run):
+    expected = dict(run.spec["settings"])
+    expected["has_discussions"] = not run.live.get("private", True)
+    findings = [
+        ("DEFECT", f"settings: {key} live={run.live.get(key)} expected={expected[key]}")
+        for key in SETTINGS_KEYS + ["has_discussions"]
+        if key in expected and run.live.get(key) != expected[key]
+    ]
+    if run.main is not None and run.live.get("default_branch") != "main":
+        findings.append(
+            (
+                "DEFECT",
+                f"settings: default_branch is {run.live.get('default_branch')}, expected main",
+            )
+        )
+    return findings
+
+
+def check_rulesets_payload(run):
+    model = (
+        run.entry.get("workflowModel")
+        or run.spec["registry"].get("defaults", {}).get("workflowModel")
+        or "release"
+    )
     dev_payload = (
         "repo-config/operational/develop.json"
         if model == "operational"
         else "repo-config/develop.json"
     )
-    expect_rulesets = {"develop": load(dev_payload), "main": load("repo-config/main.json")}
-    # No ok404: a repo with no rulesets returns an empty list, so a 404 means the call failed
-    # (access/rename) and must surface as ERROR, not read as "no rulesets".
-    live_list = gh(f"repos/{slug}/rulesets?per_page=100") or []
-    live_names = [r["name"] for r in live_list]
-    for name, payload in expect_rulesets.items():
+    expect = {"develop": load(dev_payload), "main": load("repo-config/main.json")}
+    # A repo with no rulesets returns an empty list, so a 404 is a failed call and raises.
+    live_list = gh(f"repos/{run.slug}/rulesets?per_page=100") or []
+    findings = []
+    for name, payload in expect.items():
         ids = [r["id"] for r in live_list if r["name"] == name]
         if not ids:
             findings.append(("DEFECT", f"ruleset: {name} missing"))
@@ -2829,80 +2920,74 @@ def audit_repo(entry, spec, branch=None):
             findings.append(
                 ("DRIFT", f"ruleset: {len(ids)} rulesets named {name} (resolve the duplicates)")
             )
-        live_rs = gh(f"repos/{slug}/rulesets/{ids[0]}")
+        live_rs = gh(f"repos/{run.slug}/rulesets/{ids[0]}")
         if normalize_ruleset(live_rs) != normalize_ruleset(payload):
-            findings.append(
-                (
-                    "DEFECT",
-                    f"ruleset: {name} diverges from {dev_payload if name == 'develop' else 'repo-config/main.json'} (normalized diff)",
-                )
-            )
-    for stray in [n for n in live_names if n not in expect_rulesets]:
+            source = dev_payload if name == "develop" else "repo-config/main.json"
+            findings.append(("DEFECT", f"ruleset: {name} diverges from {source} (normalized diff)"))
+    for stray in [r["name"] for r in live_list if r["name"] not in expect]:
         findings.append(("DRIFT", f"ruleset: stray ruleset '{stray}'"))
+    return findings
 
-    # --- Secrets (names only) ---
-    secrets = spec["secrets"]
-    # The codecov coverage requirement, meaning the CODECOV_TOKEN secret and the codecov.yml file, is claimed by a type only where the repo carries tests for that type.
-    # A language with no test suite has none, since the validator's leg never runs and the token and the codecov.yml would gate on a report the pipeline cannot produce.
-    # The tree is read here rather than at the verbatim-tree section below so one call answers both, and the finding for an unreadable tree stays where it was.
-    carried_blobs = repo_tree_blobs(slug, ground_head)
-    carried_entries = blob_field(carried_blobs, 0)
-    tree = None if carried_entries is None else set(carried_entries)
-    coverage_types = coverage_claiming_types(
-        coverage_candidate_types(types, entry.get("profiles", {})),
-        secrets.get("typeMechanisms", {}),
-        tree,
-    )
-    coverage_active = bool(coverage_types)
-    # --- Python presence and directory coverage ---
-    # A tracked .py file is a fact about the tree, read once here and checked against the registry's own
-    # declarations rather than against what any one caller's workflow happens to gate today.
-    findings.extend(python_type_findings(entry, tree))
-    findings.extend(python_directory_coverage_findings(entry, tree))
-    findings.extend(python_undeclared_root_findings(entry, tree))
 
-    def read_text(path):
-        return contents_text(gh(f"repos/{slug}/contents/{urllib.parse.quote(path)}?ref={ground}"))
+def check_python_directories_declared(run):
+    return python_type_findings(run.entry, run.tree)
 
-    findings.extend(file_naming_findings(entry, blob_field(carried_blobs, 1), read_text))
-    findings.extend(secret_stem_findings(tree))
+
+def check_python_directories_coverage(run):
+    return python_directory_coverage_findings(run.entry, run.tree)
+
+
+def check_python_directories_root(run):
+    return python_undeclared_root_findings(run.entry, run.tree)
+
+
+def check_filenaming_scripts(run):
+    return file_naming_findings(run.entry, blob_field(run.blobs, 1), run.read_text)
+
+
+def check_secrets_stems(run):
+    return secret_stem_findings(run.tree)
+
+
+def check_secrets_names(run):
+    """Secret names per store, never values, against what the applicable mechanisms require and forbid.
+
+    The codecov mechanism follows the coverage-claiming types, so a language with no tests requires no token.
+    """
+    secrets = run.spec["secrets"]
     stores = {}
-    # There is no ok404 here, since an empty store returns {"secrets": []}, so a 404 or 403 from permissions or a rename must surface as ERROR rather than cascade into false missing-secret DEFECTs.
-    for store, path in [
-        ("actions", f"repos/{slug}/actions/secrets?per_page=100"),
-        ("dependabot", f"repos/{slug}/dependabot/secrets?per_page=100"),
-    ]:
-        data = gh(path)
+    # No ok404, since an empty store returns an empty list and a 404 is a failed call.
+    for store in ("actions", "dependabot"):
+        data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
     mechanisms = [
-        secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])
+        secrets["targetMechanisms"].get(p.get("target")) for p in run.entry.get("publish", [])
     ]
-    # The codecov mechanism follows coverage_types rather than the profile, so a language with no tests requires no CODECOV_TOKEN.
-    for name in types:
+    for name in declared_types(run.entry):
         mechanism = secrets.get("typeMechanisms", {}).get(name)
-        if mechanism == "codecov" and name not in coverage_types:
-            continue
-        mechanisms.append(mechanism)
+        if mechanism != "codecov" or name in run.coverage_types:
+            mechanisms.append(mechanism)
     claimed = [secrets["mechanisms"][m] for m in mechanisms if m and m in secrets["mechanisms"]]
-    required_by_store = {"actions": set(), "dependabot": set()}
+    required = {"actions": set(), "dependabot": set()}
     for store in secrets["baseline"].get("stores", []):
-        required_by_store[store] |= set(secrets["baseline"].get("requires", []))
+        required[store] |= set(secrets["baseline"].get("requires", []))
     for mech in claimed:
         for store in mech.get("stores", []):
-            required_by_store[store] |= set(mech.get("requires", []))
-    # The registry requiredSecrets entries are the domain-specific additions, per STANDUP.md, being requiredSecrets plus the implicit baseline.
-    # Mechanism-mapped names already carry their stores above, and unmapped ones are expected in the actions store and count as claimed, never stale.
-    required_by_store["actions"] |= set(entry.get("requiredSecrets", []))
+            required[store] |= set(mech.get("requires", []))
+    # The registry requiredSecrets are the domain-specific additions, per STANDUP.md, expected in the actions store.
+    required["actions"] |= set(run.entry.get("requiredSecrets", []))
     forbidden = set(secrets["baseline"].get("forbids", []))
     for mech in claimed:
         forbidden |= set(mech.get("forbids", []))
-    for store, required in required_by_store.items():
-        for name in sorted(required - stores[store]):
-            findings.append(("DEFECT", f"secrets: {name} missing from the {store} store"))
+    findings = [
+        ("DEFECT", f"secrets: {name} missing from the {store} store")
+        for store, names in required.items()
+        for name in sorted(names - stores[store])
+    ]
+    claimed_names = required["actions"] | required["dependabot"]
     for store, present in stores.items():
         for name in sorted(present & forbidden):
             findings.append(("DEFECT", f"secrets: forbidden {name} present in the {store} store"))
-        claimed_names = required_by_store["actions"] | required_by_store["dependabot"]
         for name in sorted(present - claimed_names):
             findings.append(
                 (
@@ -2910,397 +2995,374 @@ def audit_repo(entry, spec, branch=None):
                     f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)",
                 )
             )
+    return findings
 
-    # --- Dependabot ecosystem coverage ---
-    # A repo's tree implies Dependabot ecosystems it must track, being github-actions where it ships workflows and devcontainers where it ships a .devcontainer.
-    # Without the first, the action versions those workflows reference go stale and a merge-bot then has no PRs to auto-merge.
-    # This asserts an implied ecosystem's *presence* only.
-    # Whether each declared ecosystem dual-targets main and develop, which is the fleet norm, is verified by inspection rather than here.
-    # It only runs where dependabot.yml exists, since its absence is already a file-presence LETTER below.
-    # Language ecosystems such as nuget, uv and npm are directory-scoped and not yet cross-checked here.
-    db = gh(f"repos/{slug}/contents/.github/dependabot.yml?ref={ground}", ok404=True)
-    db_text = contents_text(db)
-    if db_text:
-        declared = dependabot_ecosystems(db_text)
-        implied = {}
-        workflows = gh(f"repos/{slug}/contents/.github/workflows?ref={ground}", ok404=True)
-        if isinstance(workflows, list) and any(
-            e["name"].endswith((".yml", ".yaml")) for e in workflows
-        ):
-            implied["github-actions"] = ".github/workflows/ is present"
-        if gh(f"repos/{slug}/contents/.devcontainer?ref={ground}", ok404=True) is not None:
-            implied["devcontainers"] = ".devcontainer/ is present"
-        for eco, why in sorted(implied.items()):
-            if eco not in declared:
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm",
-                    )
-                )
 
-    # --- File and section presence on the ground-truth branch ---
-    # The appliesTo selector is matched against the repo's full selector set, being types, workflowModel, releaseTrigger and consumerModel, so the release and operational develop rulesets are two data entries rather than a code swap.
-    # Required sections union across same-path entries.
-    # A carried Markdown file must contain each heading scoped to this repo.
-    # A rename reads as missing and equivalence is judged by hand, so a missing section is DRIFT, a hint to verify, and never a LETTER.
-    sel = repo_selectors(entry, spec["registry"].get("defaults", {}))
-    wanted_sections = {}  # path -> set of required section names, unioned across applicable entries
-    verbatim_secs = {}  # path -> set of section names checked byte-for-byte against the hub canonical
-    doc_texts = {}  # README.md / HISTORY.md content, retained for the mirror check
-    check_item = {}  # path -> entry, for a fidelity interface/verbatim entry (last applicable wins per path)
-    alternatives = declared_alternatives(spec["files"]["baseline"])
-    path_order = []
-    for item in spec["files"]["baseline"]:
-        if not applies(item.get("appliesTo", "*"), sel):
-            continue
-        path = item["path"]
-        if path == "codecov.yml" and not coverage_active:
-            continue  # coverage feature file: N/A when no type claims codecov at build profile with tests present (spec/type-model.md)
-        if path not in wanted_sections:
-            wanted_sections[path] = set()
-            verbatim_secs[path] = set()
-            path_order.append(path)
-        wanted_sections[path].update(required_sections(item, sel))
-        verbatim_secs[path].update(verbatim_sections(item, sel))
-        if item.get("fidelity") in ("interface", "verbatim", "intent"):
-            check_item[path] = item
-    for path in path_order:
-        item = check_item.get(path)
-        fid = item.get("fidelity") if item else "presence"
-        content, text, file_findings = baseline_file_findings(
-            slug,
-            ground,
-            path,
-            alternatives.get(path, []),
-            item,
-            entry.get("name") == hub_repo_name(),
+def check_dependabot_ecosystems(run):
+    """An ecosystem the tree implies, github-actions for workflows and devcontainers for a .devcontainer, is declared.
+
+    Presence only. An absent dependabot.yml is already a file LETTER.
+    """
+    text = contents_text(
+        gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ground}", ok404=True)
+    )
+    if not text:
+        return []
+    declared = dependabot_ecosystems(text)
+    implied = {}
+    workflows = gh(f"repos/{run.slug}/contents/.github/workflows?ref={run.ground}", ok404=True)
+    if isinstance(workflows, list) and any(
+        e["name"].endswith((".yml", ".yaml")) for e in workflows
+    ):
+        implied["github-actions"] = ".github/workflows/ is present"
+    if gh(f"repos/{run.slug}/contents/.devcontainer?ref={run.ground}", ok404=True) is not None:
+        implied["devcontainers"] = ".devcontainer/ is present"
+    return [
+        (
+            "DRIFT",
+            f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm",
         )
-        findings.extend(file_findings)
-        if content is None:
+        for eco, why in sorted(implied.items())
+        if eco not in declared
+    ]
+
+
+def check_files_presence(run, path):
+    content, text, findings = baseline_file_findings(
+        run.slug, run.ground, path, run.alternatives.get(path, []), run.baseline[path][0], run.hub
+    )
+    if content is not None:
+        run.content[path] = text
+    return findings
+
+
+def _fidelity(run, path):
+    item = run.baseline[path][0]
+    return item, (item or {}).get("fidelity", "presence")
+
+
+def check_interface_contract(run, path):
+    item, fid = _fidelity(run, path)
+    if fid != "interface":
+        return []
+    if run.content[path] is None:
+        return [run.unread("interface", path, "verify its contract")]
+    return check_interface(path, item.get("contract", {}), run.content[path])
+
+
+def check_interface_python_directories(run, path):
+    if _fidelity(run, path)[1] != "interface" or run.content[path] is None:
+        return []
+    return python_directories_caller_findings(path, run.content[path], run.entry)
+
+
+def check_interface_concurrency(run, path):
+    if _fidelity(run, path)[1] != "interface" or run.content[path] is None:
+        return []
+    return concurrency_caller_findings(path, run.content[path])
+
+
+def check_verbatim_jobs(run, path):
+    item, fid = _fidelity(run, path)
+    if fid != "interface" or run.content[path] is None:
+        return []
+    return [
+        finding
+        for job in item.get("contract", {}).get("verbatimJobs", [])
+        for finding in check_verbatim(
+            f"{path} job '{job}'",
+            run.content[path],
+            item.get("reference") or path,
+            extract=lambda t, j=job: split_jobs(t).get(j),
+        )
+    ]
+
+
+def check_verbatim_file(run, path):
+    item, fid = _fidelity(run, path)
+    if fid != "verbatim":
+        return []
+    if run.content[path] is None:
+        return [run.unread("verbatim", path, "compare")]
+    return check_verbatim(path, run.content[path], item.get("reference") or path)
+
+
+def _sections(run, path):
+    """The sections a Markdown file owes here, `(presence, verbatim)`, both empty for any other file."""
+    _, needed, verbatim = run.baseline[path]
+    return (needed, verbatim) if path.endswith(".md") else (set(), set())
+
+
+def check_sections_presence(run, path):
+    needed, verbatim = _sections(run, path)
+    if not (needed or verbatim):
+        return []
+    if run.content[path] is None:
+        return [run.unread("section", path, "verify sections")]
+    present = heading_texts(run.content[path])
+    return [
+        (
+            "DRIFT",
+            f"section: '{name}' not found as a heading in {path} on {run.ground} (renamed or missing; verify intent per AUDIT.md section 7)",
+        )
+        for name in sorted(needed)
+        if name.strip().lower() not in present
+    ]
+
+
+def check_sections_verbatim(run, path):
+    needed, verbatim = _sections(run, path)
+    if not (needed or verbatim) or run.content[path] is None:
+        return []
+    return [
+        finding
+        for name in sorted(verbatim)
+        for finding in check_verbatim(
+            f"{path} section '{name}'",
+            run.content[path],
+            path,
+            extract=lambda t, n=name: extract_section(t, n),
+        )
+    ]
+
+
+def check_sections_undeclared(run, path):
+    """Advisory: an undeclared H2 is a candidate duplicate of a verbatim section, or content to relocate."""
+    needed, verbatim = _sections(run, path)
+    if not (needed or verbatim) or run.content[path] is None:
+        return []
+    if path not in UNDECLARED_HEADING_SCANNED:
+        return []
+    return [
+        (
+            "DRIFT",
+            f"section: '{h}' in {path} is not a declared section - reconcile it (a duplicate of a verbatim section, or repo-specific content that moves to a topical doc), or confirm it is intentional (spec/section-model.md)",
+        )
+        for h in undeclared_h2_headings(run.content[path], needed | verbatim)
+    ]
+
+
+def check_carried_template_ref(run, path):
+    if path not in TEMPLATE_REF_SCANNED:
+        return []
+    if run.content[path] is None:
+        return [run.unread("carried", path, "scan for a coordination reference")]
+    if not template_ref_outside_verbatim(run.content[path], run.baseline[path][2], hub_repo_name()):
+        return []
+    return [
+        (
+            "DRIFT",
+            f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)",
+        )
+    ]
+
+
+def check_carried_version_literal(run, path):
+    if path not in VERSION_LITERAL_SCANNED:
+        return []
+    if run.content[path] is None:
+        return [run.unread("carried", path, "scan for a version literal")]
+    # The hub is scanned whole, since its verbatim sections are the copies every repo carries.
+    excised = set() if run.hub else run.baseline[path][2]
+    literals = version_literals_outside_verbatim(run.content[path], excised)
+    if not literals:
+        return []
+    return [
+        (
+            "DRIFT",
+            f"carried: {path} names a three-part version or a commit SHA, full or abbreviated ({', '.join(literals)}); name a pin by its mechanism, never its value, and write a versioning example with a placeholder such as 1.0.N (GOVERNANCE.md, Documentation Style Conventions, References)",
+        )
+    ]
+
+
+def check_tree_readable(run):
+    if run.entries is not None:
+        return []
+    return [
+        (
+            "DRIFT",
+            f"tree: could not read the file tree for {run.slug}@{run.ground} in full, so verbatim trees, script file names, and secret-file stems are undecided",
+        )
+    ]
+
+
+def check_tree_verbatim(run):
+    if run.entries is None:
+        return []
+    findings = []
+    for declaration in run.spec["files"].get("trees", []):
+        if not applies(declaration.get("appliesTo", "*"), run.sel):
             continue
-        if path in ("README.md", "HISTORY.md") and text is not None:
-            doc_texts[path] = text  # retained for the README/HISTORY mirror check below
-        # Interface conformance (name + wiring) plus any verbatim job regions the contract pins.
-        if item is not None and fid == "interface":
-            if text is None:
+        source_root = declaration["source"].rstrip("/")
+        target_root = declaration["target"].rstrip("/")
+        source_files = {
+            path.removeprefix(source_root + "/"): path
+            for path in hub_tracked()
+            if path.startswith(source_root + "/")
+            and tree_path_included(path.removeprefix(source_root + "/"), declaration["include"])
+        }
+        target_files = {
+            path.removeprefix(target_root + "/"): path
+            for path in run.entries
+            if path.startswith(target_root + "/")
+        }
+        for relative in sorted(set(source_files) - set(target_files)):
+            findings.append(("LETTER", f"tree: {target_root}/{relative} is absent on {run.ground}"))
+        for relative in sorted(set(source_files) & set(target_files)):
+            findings.extend(
+                _tree_file_findings(source_files[relative], target_files[relative], run.entries)
+            )
+        if declaration.get("prune"):
+            for relative in sorted(set(target_files) - set(source_files)):
                 findings.append(
-                    (
-                        "DRIFT",
-                        f"interface: could not read {path} content on {ground} to verify its contract (no inline content returned); verify by hand",
-                    )
+                    ("DRIFT", f"tree: {target_root}/{relative} is extra under a pruned target")
                 )
-            else:
-                contract = item.get("contract", {})
-                findings.extend(check_interface(path, contract, text))
-                findings.extend(python_directories_caller_findings(path, text, entry))
-                findings.extend(concurrency_caller_findings(path, text))
-                canonical_rel = item.get("reference") or path
-                for job in contract.get("verbatimJobs", []):
-                    findings.extend(
-                        check_verbatim(
-                            f"{path} job '{job}'",
-                            text,
-                            canonical_rel,
-                            extract=lambda t, j=job: split_jobs(t).get(j),
-                        )
-                    )
-        # Whole-file verbatim: byte-identical to the hub's canonical after EOL normalization.
-        elif item is not None and fid == "verbatim":
-            if text is None:
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"verbatim: could not read {path} content on {ground} to compare (no inline content returned); verify by hand",
-                    )
-                )
-            else:
-                findings.extend(check_verbatim(path, text, item.get("reference") or path))
-        # Heading-based presence is only meaningful for Markdown.
-        # A section named on a non-md file (a tasks.json task group) is not checked, only the file's presence, and RESYNC.md aligns it by hand.
-        needed = wanted_sections[path]
-        verbatim_needed = verbatim_secs[path]
-        if (needed or verbatim_needed) and path.endswith(".md"):
-            if text is None:
-                # Fail loud rather than skip silently, since the contents API returned no inline content, which happens for an oversized file, a symlink or a submodule.
-                # The section check could not run, so surface that rather than a false clean.
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"section: could not read {path} content on {ground} to verify sections (no inline content returned); verify by hand",
-                    )
-                )
-            else:
-                present = heading_texts(text)
-                for name in sorted(needed):
-                    if name.strip().lower() not in present:
-                        findings.append(
-                            (
-                                "DRIFT",
-                                f"section: '{name}' not found as a heading in {path} on {ground} (renamed or missing; verify intent per AUDIT.md section 7)",
-                            )
-                        )
-                # A verbatim section must match the hub's canonical byte-for-byte once EOL-normalized, like a verbatim file but scoped to the one `## <heading>` region.
-                # A universal rule block then cannot drift or fall behind a newly added rule while its heading still passes the presence check.
-                for name in sorted(verbatim_needed):
-                    findings.extend(
-                        check_verbatim(
-                            f"{path} section '{name}'",
-                            text,
-                            path,
-                            extract=lambda t, n=name: extract_section(t, n),
-                        )
-                    )
-                # The undeclared-section advisory, per spec/section-model.md, treats an H2 the manifest does not declare as a candidate duplicate of a verbatim section, or as repo-specific content to relocate.
-                # It is advisory only, since the reconciliation can end in promoting the rule here or relocating it, so it points at that choice and never fails.
-                # It covers UNDECLARED_HEADING_SCANNED, not only AGENTS.md and GOVERNANCE.md, and never names which destination file an undeclared heading belongs in.
-                # Skip the hub itself, since its copies are the source and legitimately hold hub-only sections, Repository Onboarding and Conformance being one, that are deliberately not carried.
-                # A downstream repo carrying such a section is still flagged, which is the point.
-                if path in UNDECLARED_HEADING_SCANNED and entry.get("name") != hub_repo_name():
-                    declared = {n.strip().lower() for n in (needed | verbatim_needed)}
-                    for h in undeclared_h2_headings(text, declared):
-                        findings.append(
-                            (
-                                "DRIFT",
-                                f"section: '{h}' in {path} is not a declared section - reconcile it (a duplicate of a verbatim section, or repo-specific content that moves to a topical doc), or confirm it is intentional (spec/section-model.md)",
-                            )
-                        )
+    return findings
 
-        # --- Carried files must not reference the template repo ---
-        # The coordination flow is machinery a consumer should not see, so a carried file states the behavior rather than the destination.
-        # A stale "report drift upstream" paragraph once spread this way.
-        # Skip the hub itself, whose own carried files are the source, where naming the repo they live in is correct.
-        # A downstream repo naming it in prose it owns is still flagged, which is the point.
-        # Verbatim sections are excised first, and template_ref_outside_verbatim carries why that is not a loophole.
-        # Sited here, in the file loop, so the scan reuses the content already fetched for the section checks and reads the same selector-resolved verbatim list they were judged against.
-        if path in TEMPLATE_REF_SCANNED and entry.get("name") != hub_repo_name():
-            if text is None:
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"carried: could not read {path} content on {ground} to scan for a coordination reference (no inline content returned); verify by hand",
-                    )
-                )
-            elif template_ref_outside_verbatim(text, verbatim_secs[path], hub_repo_name()):
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"carried: {path} references the template repo by name or link outside its verbatim sections (the coordination flow is machinery this repo's readers should not see; state the behavior, not the destination)",
-                    )
-                )
 
-        # --- Instruction documents carry no version literal or commit SHA ---
-        # The hub is scanned whole, verbatim sections included, since those are the copies every repo carries and no other run can see a literal inside them.
-        if path in VERSION_LITERAL_SCANNED:
-            if text is None:
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"carried: could not read {path} content on {ground} to scan for a version literal (no inline content returned); verify by hand",
-                    )
-                )
-            else:
-                excised = set() if entry.get("name") == hub_repo_name() else verbatim_secs[path]
-                literals = version_literals_outside_verbatim(text, excised)
-                if literals:
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"carried: {path} names a three-part version or a commit SHA, full or abbreviated ({', '.join(literals)}); name a pin by its mechanism, never its value, and write a versioning example with a placeholder such as 1.0.N (GOVERNANCE.md, Documentation Style Conventions, References)",
-                        )
-                    )
-
-    # --- Manifest-owned verbatim trees ---
-    # carried_entries was read once above, where the coverage applicability check needed it first.
-    if carried_entries is None:
-        findings.append(
+def _tree_file_findings(source_path, target_path, entries):
+    try:
+        source_sha = canonical_blob_sha(source_path)
+    except OSError as exc:
+        return [
+            ("DRIFT", f"tree: canonical {source_path} is unreadable, comparison undecided: {exc}")
+        ]
+    target_sha = entries[target_path]
+    if source_sha == target_sha:
+        return []
+    if not target_sha:
+        return [
             (
                 "DRIFT",
-                f"tree: could not read the file tree for {slug}@{ground} in full, so verbatim trees, script file names, and secret-file stems are undecided",
+                f"tree: {target_path} differs but its blob identity is unreadable, comparison undecided",
             )
+        ]
+    if git_blob_in_file_history(source_path, target_sha):
+        return [
+            ("DRIFT", f"tree: {target_path} matches a past hub revision, not the current canonical")
+        ]
+    return [
+        (
+            "DRIFT",
+            f"tree: {target_path} differs from the canonical and matches no past hub revision",
         )
-    elif entry.get("name") != hub_repo_name():
-        for declaration in spec["files"].get("trees", []):
-            if not applies(declaration.get("appliesTo", "*"), sel):
-                continue
-            source_root = declaration["source"].rstrip("/")
-            target_root = declaration["target"].rstrip("/")
-            source_files = {
-                path.removeprefix(source_root + "/"): path
-                for path in hub_tracked()
-                if path.startswith(source_root + "/")
-                and tree_path_included(path.removeprefix(source_root + "/"), declaration["include"])
-            }
-            target_files = {
-                path.removeprefix(target_root + "/"): path
-                for path in carried_entries
-                if path.startswith(target_root + "/")
-            }
-            for relative in sorted(set(source_files) - set(target_files)):
-                findings.append(("LETTER", f"tree: {target_root}/{relative} is absent on {ground}"))
-            for relative in sorted(set(source_files) & set(target_files)):
-                source_path = source_files[relative]
-                try:
-                    source_sha = canonical_blob_sha(source_path)
-                except OSError as exc:
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"tree: canonical {source_path} is unreadable, comparison undecided: {exc}",
-                        )
-                    )
-                    continue
-                target_path = target_files[relative]
-                target_sha = carried_entries[target_path]
-                if source_sha == target_sha:
-                    continue
-                if not target_sha:
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"tree: {target_path} differs but its blob identity is unreadable, comparison undecided",
-                        )
-                    )
-                    continue
-                verdict = (
-                    "stale" if git_blob_in_file_history(source_path, target_sha) else "modified"
-                )
-                if verdict == "stale":
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"tree: {target_path} matches a past hub revision, not the current canonical",
-                        )
-                    )
-                else:
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"tree: {target_path} differs from the canonical and matches no past hub revision",
-                        )
-                    )
-            if declaration.get("prune"):
-                for relative in sorted(set(target_files) - set(source_files)):
-                    findings.append(
-                        ("DRIFT", f"tree: {target_root}/{relative} is extra under a pruned target")
-                    )
+    ]
 
-    # --- Hub-only files a repo carries and should not ---
-    # The manifest declares what a repo carries, so a path the hub tracks and the manifest omits is hub-hosted content per GOVERNANCE.md "Hub-Hosted Tooling".
-    # A downstream copy of one is drift whose remedy is a deletion rather than a re-vendor, which no other check reports: every check above reads a path the manifest names, so nothing looks at what a repo carries beyond the baseline.
-    # Skipped for the hub, whose own tracked files are the source and are all "hub-only" by construction.
-    if entry.get("name") != hub_repo_name():
-        carried = None if carried_entries is None else set(carried_entries)
-        if carried is None:
+
+def check_hubonly_carried(run):
+    """A path the hub tracks and the manifest omits is hub-hosted, so a downstream copy converges by deletion."""
+    if run.tree is None:
+        return [
+            (
+                "DRIFT",
+                f"hub-only: could not read the file tree for {run.slug}@{run.ground} in full, so no hub-hosted file this repo carries was checked; verify by hand",
+            )
+        ]
+    disp = gap_dispositions(run.spec)
+    findings = []
+    for path in sorted(run.tree & hub_only_paths(run.spec)):
+        kind = disp.get(path, ("", ""))[0]
+        if kind == "accepted":
+            continue
+        if kind == "retire":
+            text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+        elif kind:
+            text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"
+        else:
+            text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - read the file and triage it in spec/divergences.json 'gaps' (this repo's own content at a shared path, a carry to declare, or a hub copy to delete)"
+        findings.append(("DRIFT", text))
+    return findings
+
+
+def check_history_mirror(run):
+    """HISTORY.md opens as the README's twin, the same H1 and the same tagline (spec/readme-structure.md)."""
+    if len(run.docs) < 2:
+        return []
+    r_title, r_intro = title_and_intro(run.docs["README.md"])
+    h_title, h_intro = title_and_intro(run.docs["HISTORY.md"])
+    if r_title != h_title:
+        return [
+            (
+                "LETTER",
+                f"history: HISTORY.md title '{h_title}' does not match README.md title '{r_title}' - the changelog opens as the README's twin (spec/readme-structure.md)",
+            )
+        ]
+    if tagline(r_intro) != tagline(h_intro):
+        return [
+            (
+                "LETTER",
+                "history: HISTORY.md tagline does not mirror the README tagline - copy the README's first line after the H1 (spec/readme-structure.md)",
+            )
+        ]
+    return []
+
+
+def check_readme_description(run):
+    return description_findings(run.docs, run.entry, run.live, run.slug)
+
+
+def _readme(run):
+    """The README text where the README model is loaded and the README was read, else None."""
+    return run.docs.get("README.md") if run.spec.get("readme") else None
+
+
+def check_readme_sections(run):
+    text = _readme(run)
+    if text is None:
+        return []
+    return readme_section_findings(
+        text, run.spec["readme"], run.sel, not run.live.get("private", False)
+    )
+
+
+def check_readme_shields(run):
+    text = _readme(run)
+    return [] if text is None else readme_shield_findings(text, run.spec["readme"], run.entry)
+
+
+def check_readme_links(run):
+    text = _readme(run)
+    return [] if text is None else readme_link_findings(text, run.spec["readme"], run.slug)
+
+
+def check_readme_tools(run):
+    text = _readme(run)
+    if text is None or not run.spec.get("tools"):
+        return []
+    return third_party_tool_findings(text, run.spec["tools"])
+
+
+def check_cspell_workspace(run):
+    """cspell.json is the one word list, so a workspace file's own cSpell list duplicates it."""
+    if gh(f"repos/{run.slug}/contents/cspell.json?ref={run.ground}", ok404=True) is None:
+        return []
+    findings = []
+    for it in gh(f"repos/{run.slug}/contents/?ref={run.ground}", ok404=True) or []:
+        ws_name = it.get("name", "") if isinstance(it, dict) else ""
+        if not ws_name.endswith(".code-workspace"):
+            continue
+        ws_text = contents_text(
+            gh(f"repos/{run.slug}/contents/{ws_name}?ref={run.ground}", ok404=True)
+        )
+        if ws_text is None:
             findings.append(
                 (
                     "DRIFT",
-                    f"hub-only: could not read the file tree for {slug}@{ground} in full, so no hub-hosted file this repo carries was checked; verify by hand",
+                    f"cspell: could not read {ws_name} on {run.ground} to check for a duplicated word list; verify by hand",
                 )
             )
-        else:
-            disp = gap_dispositions(spec)
-            for path in sorted(carried & hub_only_paths(spec)):
-                kind = disp.get(path, ("", ""))[0]
-                # The ledger's reason is not quoted here, since slicing a sentence out of it cuts at the first period, which lands inside a filename like GOVERNANCE.md.
-                # The path names the row to read instead.
-                if kind == "accepted":
-                    continue  # a triaged permanent divergence, so not a finding
-                if kind == "retire":
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)",
-                        )
-                    )
-                elif kind:
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging",
-                        )
-                    )
-                else:
-                    findings.append(
-                        (
-                            "DRIFT",
-                            f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - read the file and triage it in spec/divergences.json 'gaps' (this repo's own content at a shared path, a carry to declare, or a hub copy to delete)",
-                        )
-                    )
-
-    # --- HISTORY.md mirrors the README opening ---
-    # Per spec/readme-structure.md "HISTORY.md", the changelog opens as the README's twin, carrying the same H1 title and the same tagline.
-    # The mirror is the tagline alone, not the whole intro region: a README may carry further clarifying paragraphs, and HISTORY.md does not repeat them.
-    # It is checked only where both files were readable, since absence is already a file LETTER above.
-    if "README.md" in doc_texts and "HISTORY.md" in doc_texts:
-        r_title, r_intro = title_and_intro(doc_texts["README.md"])
-        h_title, h_intro = title_and_intro(doc_texts["HISTORY.md"])
-        if r_title != h_title:
+        elif workspace_cspell_words(ws_text):
             findings.append(
                 (
                     "LETTER",
-                    f"history: HISTORY.md title '{h_title}' does not match README.md title '{r_title}' - the changelog opens as the README's twin (spec/readme-structure.md)",
+                    f"cspell: {ws_name} carries a cSpell word list while cspell.json is the single source of truth - delete the workspace copy (CODESTYLE.md Markdown and Spelling)",
                 )
             )
-        elif tagline(r_intro) != tagline(h_intro):
-            findings.append(
-                (
-                    "LETTER",
-                    "history: HISTORY.md tagline does not mirror the README tagline - copy the README's first line after the H1 (spec/readme-structure.md)",
-                )
-            )
+    return findings
 
-    # --- README title and intro are the one canonical short description ---
-    # See description_findings() for the mirror set (README, GitHub About, Docker Hub) and the declared-field precedence.
-    findings += description_findings(doc_texts, entry, live, slug)
 
-    # --- README section order, shield classes, and license-shield placement ---
-    # The readme-structure dimension, driven by the declared model in spec/readme-sections.json rather than by prose.
-    # Sited after the title and intro checks so one README read serves both, and guarded on the model being loaded, since the selftest builds a spec without it.
-    readme_model = spec.get("readme")
-    if readme_model and "README.md" in doc_texts:
-        readme_text = doc_texts["README.md"]
-        findings += readme_section_findings(
-            readme_text, readme_model, sel, not live.get("private", False)
-        )
-        findings += readme_shield_findings(readme_text, readme_model, entry)
-        findings += readme_link_findings(readme_text, readme_model, slug)
-        if spec.get("tools"):
-            findings += third_party_tool_findings(readme_text, spec["tools"])
-
-    # --- cspell single source of truth ---
-    # Per CODESTYLE.md "Markdown and Spelling", cspell.json is the one word list, and a cSpell words block left in a *.code-workspace duplicates it and silently drifts.
-    # It is checked only where cspell.json is carried, since its absence is already a file LETTER above, and a workspace list with no cspell.json is that same finding.
-    if gh(f"repos/{slug}/contents/cspell.json?ref={ground}", ok404=True) is not None:
-        root_entries = gh(f"repos/{slug}/contents/?ref={ground}", ok404=True) or []
-        for it in root_entries:
-            ws_name = it.get("name", "") if isinstance(it, dict) else ""
-            if not ws_name.endswith(".code-workspace"):
-                continue
-            ws = gh(f"repos/{slug}/contents/{ws_name}?ref={ground}", ok404=True)
-            ws_text = contents_text(ws)
-            if ws_text is None:
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"cspell: could not read {ws_name} on {ground} to check for a duplicated word list; verify by hand",
-                    )
-                )
-            elif workspace_cspell_words(ws_text):
-                findings.append(
-                    (
-                        "LETTER",
-                        f"cspell: {ws_name} carries a cSpell word list while cspell.json is the single source of truth - delete the workspace copy (CODESTYLE.md Markdown and Spelling)",
-                    )
-                )
-
-    # --- Registry driftNotes freshness ---
-    findings.extend(driftnote_findings(entry, spec, len(findings)))
-
-    # Stamp the commit actually read for the ground-truth branch.
-    # Never fall back to another branch, since a stamp naming develop while carrying main's sha would misattribute every finding.
-    audited_sha = ground_head.get("commit", {}).get("sha", "")
-    return findings, audited_sha
+def check_registry_driftnotes(run):
+    return driftnote_findings(run.entry, run.spec, len(run.findings))
 
 
 _IS_WINDOWS = sys.platform == "win32"

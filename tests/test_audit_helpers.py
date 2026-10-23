@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import io
 import locale
 import pathlib
@@ -1626,7 +1627,7 @@ NOTE_CASES = [
         ["hugo"],
         ["Theme record (hugo.vendored.provenence)."],
         0,
-        ["does not define"],
+        ["neither spec/checks.json nor spec/project-types.json defines"],
     ),
     # A version string in parentheses is the false positive the id shape has to exclude.
     (
@@ -4311,6 +4312,37 @@ class IntentCanonicalRelCase(unittest.TestCase):
         for label, item, path, want in canonical_cases:
             with self.subTest(label):
                 self.assertEqual(audit.intent_canonical_rel(item, path), want)
+
+
+class RegistryCase(unittest.TestCase):
+    """spec/checks.json and the check functions audit_repo calls from it."""
+
+    def test_every_registered_check_names_a_function_of_its_scope(self) -> None:
+        for check in audit.registered_checks():
+            with self.subTest(check["id"]):
+                arity = len(inspect.signature(audit.check_function(check)).parameters)
+                self.assertEqual(arity, 1 if check["scope"] == "repo" else 2)
+
+    def test_every_check_function_is_registered(self) -> None:
+        named = {audit.check_function(c).__name__ for c in audit.registered_checks()}
+        defined = {n for n in vars(audit) if n.startswith("check_") and callable(vars(audit)[n])}
+        defined -= {"check_function", "check_id_owner", "check_interface", "check_verbatim"}
+        defined -= {"check_intent_staleness"}
+        self.assertEqual(defined - named, set())
+
+    def test_suppression_ids_resolve_against_the_registry(self) -> None:
+        typed = {"types": ["docs"], "driftNotes": []}
+        self.assertTrue(audit.is_suppression_id(typed, "python.directories.declared"))
+        self.assertFalse(
+            audit.is_suppression_id({"types": ["python"]}, "python.directories.declared")
+        )
+        self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
+        self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
+
+    def test_a_registry_id_is_a_known_check_id(self) -> None:
+        spec: dict[str, Any] = {"types": {"types": {}, "crossCutting": {}}}
+        self.assertEqual(audit.check_id_owner(spec, "settings.general"), (None, True))
+        self.assertEqual(audit.check_id_owner(spec, "no.such-check"), (None, False))
 
 
 if __name__ == "__main__":

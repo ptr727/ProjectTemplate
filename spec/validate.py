@@ -117,6 +117,9 @@ CONTRACT_KEYS = {
     "verbatimJobs",
 }
 
+# A driftNote names a check as a parenthesized id, "(hugo.generator.pinned)", anywhere in the note.
+CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
+CHECK_SCOPES = ("repo", "baseline", "file")
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
@@ -384,6 +387,55 @@ def ground_truth_branch_errors_for_repo(repo, name):
         shape = GROUND_TRUTH_BRANCH_SHAPE
         return [f"{name}: groundTruthBranch {ground!r} does not address unencoded ({shape})"]
     return []
+
+
+def check_registry_errors(registry, types, repos):
+    """spec/checks.json's shape, and every check id a driftNote names resolving against it or the catalog."""
+    checks = registry.get("checks") if isinstance(registry, dict) else None
+    if not isinstance(checks, list):
+        return ["checks.json: 'checks' must be an array"]
+    errors = []
+    ids = set()
+    for i, check in enumerate(checks):
+        where = f"checks.json: checks[{i}]"
+        if not isinstance(check, dict):
+            errors.append(f"{where} must be an object")
+            continue
+        cid = check.get("id")
+        if not isinstance(cid, str) or not CHECK_ID_RE.fullmatch(f"({cid})"):
+            errors.append(f"{where} id {cid!r} is not a dotted lowercase check id")
+        elif cid in ids:
+            errors.append(f"{where} id '{cid}' is declared more than once")
+        ids.add(cid)
+        for key in ("family", "description", "spec"):
+            value = check.get(key)
+            if not isinstance(value, str) or not value.strip() or "\n" in value:
+                errors.append(f"{where} {key} must be a one-line, non-empty string")
+        if isinstance(check.get("spec"), str) and not (ROOT / check["spec"]).is_file():
+            errors.append(f"{where} spec '{check['spec']}' is not a file in this repository")
+        if not isinstance(check.get("hub"), bool):
+            errors.append(f"{where} hub must be true or false")
+        if check.get("scope") not in CHECK_SCOPES:
+            errors.append(f"{where} scope must be one of {', '.join(CHECK_SCOPES)}")
+        if not isinstance(check.get("ground", True), bool):
+            errors.append(f"{where} ground must be true or false")
+        suppression = check.get("suppression")
+        ending = suppression.get("endsWithType", 0) if isinstance(suppression, dict) else 0
+        if "suppression" in check and not (ending is None or ending in types.get("types", {})):
+            errors.append(f"{where} suppression.endsWithType must name a project type or be null")
+    catalog = {c.get("id") for t in types.get("types", {}).values() for c in t.get("checks", [])}
+    catalog |= {
+        c.get("id") for d in types.get("crossCutting", {}).values() for c in d.get("checks", [])
+    }
+    for repo in repos.get("repos", []):
+        notes = repo.get("driftNotes") if isinstance(repo, dict) else None
+        for note in notes if isinstance(notes, list) else []:
+            for cid in CHECK_ID_RE.findall(note if isinstance(note, str) else ""):
+                if cid not in ids | catalog:
+                    errors.append(
+                        f"{repo.get('name')}: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines"
+                    )
+    return errors
 
 
 def python_directories_errors_for_repo(repo, name):
@@ -1551,6 +1603,8 @@ def main(argv=()):
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
             errors.extend(investigate_tracking_errors(f"gap '{gp}'", g))
+
+    errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
     if errors:
         print("Spec validation FAILED:")

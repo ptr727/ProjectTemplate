@@ -20,6 +20,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 import audit
 import validate
 
+CHECK_TYPES = {"types": {"python": {"checks": [{"id": "python.typed"}]}}, "crossCutting": {}}
+
+
+class CheckRegistryCase(unittest.TestCase):
+    """spec/checks.json's shape and the driftNote ids that must resolve against it."""
+
+    def check(self, **fields: object) -> dict[str, object]:
+        base: dict[str, object] = {
+            "id": "a.b",
+            "family": "a",
+            "description": "One line.",
+            "spec": "spec/checks.json",
+            "hub": True,
+            "scope": "repo",
+        }
+        return {**base, **fields}
+
+    def errors(self, checks: list[object], notes: tuple[str, ...] = ()) -> list[str]:
+        repos = {"repos": [{"name": "Widget", "driftNotes": list(notes)}]}
+        return validate.check_registry_errors({"checks": checks}, CHECK_TYPES, repos)
+
+    def test_the_shipped_registry_is_clean(self) -> None:
+        self.assertEqual(
+            validate.check_registry_errors(
+                validate.load("spec/checks.json"),
+                validate.load("spec/project-types.json"),
+                validate.load("registry/repos.json"),
+            ),
+            [],
+        )
+
+    def test_each_malformed_field_is_reported(self) -> None:
+        cases: list[tuple[str, list[object], str]] = [
+            ("a duplicate id", [self.check(), self.check()], "more than once"),
+            ("an undotted id", [self.check(id="flat")], "dotted lowercase"),
+            ("a two-line description", [self.check(description="a\nb")], "one-line"),
+            ("a spec that is no file", [self.check(spec="spec/none.json")], "not a file"),
+            ("a string hub flag", [self.check(hub="yes")], "hub must be"),
+            ("an unknown scope", [self.check(scope="tree")], "scope must be"),
+            ("a string ground flag", [self.check(ground="no")], "ground must be"),
+            (
+                "a suppression naming no type",
+                [self.check(suppression={"endsWithType": "rust"})],
+                "endsWithType",
+            ),
+            ("a check that is no object", ["a.b"], "must be an object"),
+        ]
+        for label, checks, needle in cases:
+            with self.subTest(label):
+                errors = self.errors(checks)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(needle, errors[0])
+
+    def test_a_driftnote_id_resolves_against_the_registry_or_the_catalog(self) -> None:
+        notes = ("Vendored (a.b).", "Typed (python.typed).", "Unknown (no.such-check).")
+        errors = self.errors(
+            [self.check(), self.check(id="c.d", suppression={"endsWithType": None})], notes
+        )
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("'no.such-check'", errors[0])
+
 
 class CarriedRelativeLinkCase(unittest.TestCase):
     """A hub-valid relative link must also resolve after its section is carried."""
