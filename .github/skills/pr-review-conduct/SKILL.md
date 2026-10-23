@@ -148,18 +148,19 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    collapse one may have those findings counted by `suppressed=` and again in the shortfall, or may
    have them counted once each, depending on whether its stated total includes them, which no body
    read so far says. Answer what the body holds rather than what the two numbers add up to.
-   What closing a finding owes turns on whether it is `pre-existing`. A finding on text inside a
-   canonical Markdown unit, one the hub's `scripts/canonical_review.py list` names, classed
-   `pre-existing` by the classes `local-strict-review` "Disposing of Findings" defines for a
-   local pass, applied here to a PR-hosted finding, takes the first bullet of outcome 4 of
-   "Every finding ends in a listed outcome" below, once per unit rather than once per finding:
-   the round gathers that unit's such findings onto the unit's tracker, an open hub issue whose
-   title carries the unit key, retitled by the change that moves the key and filed by whichever
-   round first needs it, and answers each finding with that issue's link, resolving a thread on
-   that reply, so a `pre-existing` remark on a sentence the change never touched costs one link
-   rather than a decline or an issue per finding. The batch runs in the hub, which authors the text of every
-   verbatim unit. A carrying repository routes a finding on a verbatim unit by fidelity rather
-   than by class, since a resync writes the whole text there: it declines the finding under
+   What closing a finding owes turns on whether it is `pre-existing`, under the classes
+   `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
+   `pre-existing` finding on text inside a canonical Markdown unit, one the hub's
+   `scripts/canonical_review.py list` names, takes the first bullet of outcome 4 of "Every
+   finding ends in a listed outcome" below. That bullet applies once per unit rather than once
+   per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
+   issue whose title carries the unit key. The change that moves the key retitles it, and
+   whichever round first needs it files it. The round answers each finding with that issue's
+   link, resolving a thread on that reply. So a `pre-existing` remark on a sentence the change
+   never touched costs one link rather than a decline or an issue per finding. The batch runs in
+   the hub, which authors the text of every verbatim unit.
+   A carrying repository routes a finding on a verbatim unit by fidelity rather than by class,
+   since a resync writes the whole text there: it declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker,
    while a finding on an intent unit is filed there too, the carrier adapting its own copy
    meanwhile, since the defect is still fixed at the source. Every other finding, a `style`
@@ -173,9 +174,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    live for that list before judging this item. It has no thread, so answer it as
    "Answering a suppressed finding" below states. Cite the body's list where that section links
    the review round, and the list's length where it states the block's `(N)` count. A line under
-   the body's `Pre-existing findings, not filed` heading is not on that list. It is already its
-   finding's outcome under outcome 4 of that section, and owes only the pointer that outcome
-   names.
+   a heading that outcome 4 of that section names is not on that list. It is already its
+   finding's outcome, and owes only the pointer that outcome names.
 4. Nothing in the review was a shape the tooling could not read (an unrecognized heading, a moved
    section, an unfamiliar coverage wording). An unrecognized shape blocks the gate on its own.
    File an issue naming it and quoting the body, rather than guessing what the new wording
@@ -315,35 +315,38 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
-   A real finding fixable here and deliberately left as is takes outcome 3 instead. The class is
-   the one `local-strict-review` "Disposing of Findings" defines, and the first bullet that fits
-   decides:
+   An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
+   The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
+   bullet that fits decides:
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
    - A `pre-existing` correctness defect with a stated failure is filed once as its own issue,
      labeled `pre-existing`. Such a finding names an input or a state and the wrong output or the
-     crash it produces. Its body line, kept outside the heading below, links that issue.
+     crash it produces. Its body line goes under a `Pre-existing findings, filed` heading and
+     links that issue.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
-     is dropped. It gets one line under the heading below and nothing else. It gets no decline
-     text, no issue, and no reply beyond a pointer to that line, which resolves any thread.
+     is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
+     decline text, no issue, and no reply beyond a pointer to that line, which resolves any
+     thread.
    - Any other `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the
      pull request body with its location and its class. No issue is filed for it. The body line
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
    - Any other deferral is filed as an issue first, and the reply carries its link. A deferral
      noted only in a thread is lost the moment the PR merges.
 
-   The body keeps the listed and dropped lines under one heading, `Pre-existing findings, not
-   filed`. That heading stays apart from the open `introduced` findings a spent edit budget puts
-   in the body, per `local-strict-review` "Disposing of Findings". A pointer to a finding with no
-   thread is a `Listed in the body` answer, per `pr-review-conduct` "Answering a suppressed
-   finding". A sibling found by outcome 1's class sweep is not a finding a review raised, so
-   outcome 1 keeps its own filing rule for it. An issue goes in the repository where the fix has
-   to land. For a finding against carried content, that is the
-   repository authoring the content rather than the one carrying it. An issue filed where nobody
-   may make the fix is a deferral nobody can close. Filing every `pre-existing` finding is the
-   expensive path. From 2026-10-16 to 2026-10-23, 108 of 329 non-handoff issues filed across four
-   fleet repositories carried `pre-existing`. Each one costs a lane, a pull request, and a review
-   once worked.
+   The body keeps every unfiled `pre-existing` line under one heading, `Pre-existing findings,
+   not filed`. Each line under these headings carries its location and its class. The headings
+   stay apart from the open `introduced` findings a spent edit budget puts in the body, per
+   `local-strict-review` "Disposing of Findings". A reviewer's suppressed finding has no thread,
+   so its pointer is a `Listed in the body` answer, per `pr-review-conduct` "Answering a
+   suppressed finding". A local-pass finding owes nothing beyond its body line. A sibling found
+   by outcome 1's class sweep is not a finding a review raised, so outcome 1 keeps its own
+   filing rule for it. An issue goes in the repository where the fix has to land. For a finding
+   against carried content, that is the repository authoring the content rather than the one
+   carrying it. An issue filed where nobody may make the fix is a deferral nobody can close.
+   Filing every `pre-existing` finding is the expensive path. From 2026-10-16 to 2026-10-23, 108
+   of 329 non-handoff issues filed across four fleet repositories carried `pre-existing`. Each
+   one costs a lane, a pull request, and a review once worked.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something: add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.
@@ -384,8 +387,9 @@ A suppressed finding has no thread and no resolved or unresolved state, so an an
 carry its own context. Quote the finding with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
 `No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
-`Awaiting maintainer` answer leaves the finding open until a later answer records the maintainer's decision. State the
-`(N)` count the block gave so answers can be checked against findings, and link the review round.
+`Awaiting maintainer` answer leaves the finding open until a later answer records the
+maintainer's decision. State the `(N)` count the block gave so answers can be checked against
+findings, and link the review round.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
 supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
