@@ -181,15 +181,23 @@ class TestCoverage(unittest.TestCase):
                 self.assertEqual(state, found.coverage)
                 self.assertEqual(noted, any("cannot believe" in n for n in found.notes))
 
-    def test_a_count_directly_under_the_verdict_is_still_read(self) -> None:
+    def test_a_count_directly_under_the_verdict_is_read_and_is_no_headline(self) -> None:
         for line in (
             "**Files reviewed:** 3/4 changed files",
             "Copilot reviewed 3 out of 4 changed files.",
         ):
             with self.subTest(line=line):
-                self.assertEqual("partial", adapter.read(body(headline=line)).coverage)
+                found = adapter.read(body(headline=f"{line}\n\nOne reader still needs a look."))
+                self.assertEqual("partial", found.coverage)
+                self.assertEqual("One reader still needs a look.", found.headline)
 
-    def test_a_sentence_describing_the_count_states_nothing(self) -> None:
+    def test_a_count_in_the_narrative_section_is_read_beside_its_table(self) -> None:
+        extra = "Copilot reviewed 1 out of 2 changed files.\n\n"
+        found = adapter.read(body(sections=what_changed(extra=extra)))
+        self.assertEqual("partial", found.coverage)
+        self.assertEqual(("a.py", "docs/b.md"), found.table)
+
+    def test_a_sentence_naming_the_count_midway_states_nothing(self) -> None:
         for text in (
             body(headline="The reader treats Copilot reviewed 1 of 2 changed files as partial."),
             body(sections="This round reads that Copilot reviewed 1 of 2 changed files."),

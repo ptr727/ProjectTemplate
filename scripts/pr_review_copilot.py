@@ -349,6 +349,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     found = details(tokens)
     sections: list[Section] = []
     claimed: list[tuple[int, int]] = []
+    counted: list[tuple[int, int]] = []
     open_count: int | None = None
     entries = linked = 0
     for node in found:
@@ -366,6 +367,8 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 notes.append(f"a collapsed section this reader has no spelling for: `{name}`")
             continue
         claimed.append((node.start, end + 1))
+        if kind != "vetted":
+            counted.append((node.start, end + 1))
         if kind == "vetted" or any(p.search(summary) for p in vocab["closed_badges"]):
             continue
         count = stated(match)
@@ -399,7 +402,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             kind = next((k for k, ps in vocab["verdicts"].items() if matched(ps, name)), "")
             if kind and verdict == "unknown":
                 verdict, verdict_heading = kind, name
-                headline = headline_after(tokens, i + 3, lines)
+                headline = headline_after(tokens, i + 3, lines, vocab["coverage_prose"])
             elif not kind and vet and not matched(vocab["headings"], name):
                 notes.append(f"a heading this reader has no spelling for: `{name}`")
         elif token.type == "paragraph_open":
@@ -427,10 +430,13 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 table = (table or []) + rows
         i += 1
 
-    # A count the reviewer states in a paragraph of its own, opening on it, outside any section.
-    # The opening anchor keeps a sentence describing the wording out, and a false partial is loud.
+    # A count the reviewer states in a paragraph opening on it, outside any counted finding section.
+    # A sentence opening on the wording reads as a count too, and that false partial is the loud failure.
     for n, token in enumerate(tokens[1:], start=1):
-        if token.type != "inline" or tokens[n - 1].type != "paragraph_open" or inside(token):
+        line = (token.map or [0])[0]
+        if token.type != "inline" or tokens[n - 1].type != "paragraph_open":
+            continue
+        if any(a <= line < b for a, b in counted):
             continue
         parts = [
             c.content if c.type == "text" else " "
@@ -505,15 +511,23 @@ def entries_in(
     return len(links), links
 
 
-def headline_after(tokens: list[Token], start: int, lines: list[str]) -> str:
-    """The paragraph directly under a verdict heading, unless it is a label or a bold count line."""
-    if start >= len(tokens) or tokens[start].type != "paragraph_open":
-        return ""
-    inline = tokens[start + 1]
-    if is_label(inline) or (inline.children and inline.children[0].type == "strong_open"):
-        return ""
-    a, b = tokens[start].map or (0, 0)
-    return " ".join(" ".join(lines[a:b]).split())
+def headline_after(
+    tokens: list[Token], start: int, lines: list[str], counts: list[re.Pattern[str]]
+) -> str:
+    """The first prose paragraph under a verdict heading, a coverage count before it passed over.
+
+    A label or a bold line ends the search, since what follows it is no headline.
+    """
+    while start < len(tokens) and tokens[start].type == "paragraph_open":
+        inline = tokens[start + 1]
+        if is_label(inline) or (inline.children and inline.children[0].type == "strong_open"):
+            if not any(p.match(" ".join(inline_text(inline).split())) for p in counts):
+                return ""
+        elif not any(p.match(" ".join(inline_text(inline).split())) for p in counts):
+            a, b = tokens[start].map or (0, 0)
+            return " ".join(" ".join(lines[a:b]).split())
+        start += 3
+    return ""
 
 
 def is_label(inline: Token) -> bool:
