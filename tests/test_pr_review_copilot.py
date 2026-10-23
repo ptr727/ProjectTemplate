@@ -367,6 +367,12 @@ class TestTableAndEffort(unittest.TestCase):
         found = adapter.read(body(sections=what_changed(("a.py", "docs/\u200bb.md"))))
         self.assertEqual(("a.py", "docs/b.md"), found.table)
 
+    def test_a_table_quoted_inside_a_finding_section_is_not_the_file_table(self) -> None:
+        quoted = collapsed(
+            "1 previously missed issue", "| File | Note |\n|---|---|\n| `x.py` | y |"
+        )
+        self.assertIsNone(adapter.read(body(sections=quoted)).table)
+
     def test_a_table_under_another_header_is_not_the_file_table(self) -> None:
         found = adapter.read(body(sections="| Name | Note |\n|---|---|\n| x | y |"))
         self.assertIsNone(found.table)

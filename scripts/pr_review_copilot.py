@@ -426,7 +426,11 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 listed += items_after(tokens, i + 3)
             elif vet and is_label(inline) and not matched(vocab["labels"], name):
                 notes.append(f"a label this reader has no spelling for: `{name}`")
-        elif token.type == "table_open" and vocab["table_header"]:
+        elif (
+            token.type == "table_open"
+            and vocab["table_header"]
+            and not any(a <= (token.map or [0])[0] < b for a, b in counted)
+        ):
             if (rows := table_paths(tokens, i, vocab["table_header"])) is not None:
                 table = (table or []) + rows
         i += 1
