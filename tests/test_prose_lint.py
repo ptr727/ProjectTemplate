@@ -4464,6 +4464,13 @@ class TestCLanguage(BaitCase):
             [(u.kind, u.lines[0].number) for u in units if u.kind in ("doc", "comment")],
         )
 
+    def test_a_collection_expression_is_no_attribute(self) -> None:
+        """Pygments read one opening on its own line as an attribute, and its comments with it."""
+        text = "int[] a =\n[\n    1, // Two things. Here.\n];\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.cs", text))
+        text = "[Theory] // Two things. Here.\nvoid T() { }\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.cs", text))
+
 
 class TestCssLanguage(BaitCase):
     """CSS and SCSS, whose comments are block comments only."""

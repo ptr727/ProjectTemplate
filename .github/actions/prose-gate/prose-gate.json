@@ -48,6 +48,10 @@
     "scope-undecoded": ", {count} file(s) the gate could not open or decode as UTF-8, so no rule read them: {paths}"
   },
   "cli": {
+    "paths": { "nargs": "*", "default": ["."] },
+    "--check": { "action": "append", "dest": "checks", "choices": "rules" },
+    "--exclude": { "action": "append", "default": [] },
+    "--summary": { "action": "store_true" },
     "--list-files": { "action": "store_true", "help": "print the discovered file set and exit, for auditing the sweep scope" },
     "--diff": {
       "metavar": "BASE",
@@ -55,7 +59,7 @@
     },
     "--allow-comments": {
       "action": "store_true",
-      "help": "stand `comment-added` down, for a change whose comment lines are wanted. {env} set to anything but a false spelling does the same, for a caller with nowhere to pass a flag. What makes a CI run pass it is the calling workflow's own condition"
+      "help": "stand `comment-added` down, for a change whose comment lines are wanted. PROSE_ALLOW_COMMENTS set to anything but a false spelling does the same, for a caller with nowhere to pass a flag. What makes a CI run pass it is the calling workflow's own condition"
     },
     "--provenance": {
       "metavar": "REF",

@@ -41,10 +41,11 @@ from typing import Any, NamedTuple
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
-from pygments.lexer import Lexer
+from pygments.lexer import Lexer, RegexLexer, bygroups
 from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
+from pygments.lexers.dotnet import CSharpLexer
 from pygments.lexers.shell import BashLexer
-from pygments.token import Comment, Keyword, Name, Punctuation, String, Text, _TokenType
+from pygments.token import Comment, Keyword, Name, Punctuation, String, Text, Whitespace
 from pygments.util import ClassNotFound
 
 BASE: dict[str, Any] = json.loads(
@@ -359,11 +360,7 @@ def scope_note(
     plain: list[str] | None = None,
     undecoded: list[str] | None = None,
 ) -> str:
-    """What the run read and which copy read it, so "read nothing" never prints as "found nothing".
-
-    A file read as plain text and one the gate could not decode are named, neither having its
-    comments read.
-    """
+    """What the run read and which copy read it, files read as plain text or not at all named."""
     fields = {"read": read, "discovered": discovered, "lines": lines, "base": base}
     text = say("scope-whole" if base is None else "scope-diff", gate=provenance, **fields)
     for key, names in (("scope-plain", plain), ("scope-undecoded", undecoded)):
@@ -433,11 +430,7 @@ def shallow_checkout(root: Path) -> bool:
 def discover(
     paths: list[str], excludes: tuple[str, ...] = (), root: Path | None = None
 ) -> list[Path]:
-    """Every authored text file the rules govern, scoped by git where git can answer.
-
-    A file counts for being text, untracked or not, and every key is judged against `root`. Where
-    git cannot describe a tree, the walk names the generated roots and warns.
-    """
+    """Every authored text file under the paths, scoped by git where git can describe the tree."""
     found: list[tuple[Path, str]] = []
     for raw in paths:
         p = Path(raw)
@@ -530,25 +523,37 @@ def lexer_name(path: Path, first: str) -> str | None:
 
 # Pygments ends a heredoc at any later `STUB` in a `$STUB_DIR`, and reads no double-quoted label.
 # This rule ends one only on its terminator line, tab-indented for `<<-`.
-HEREDOC = (
-    r"(?s)<<(-)?[ \t]*(['\"]?)\\?(\w+)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)",
-    String.Heredoc,
-)
+HEREDOC = r"(?s)<<(-)?[ \t]*(['\"]?)\\?(\w+)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
+# Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
+# The comments inside it are lost, so an attribute here is read within its own line.
+ATTRIBUTE = r"^([ \t]*)(\[[^\n]*?\])"
+
+
+def patched(base: type[RegexLexer], stock: str, rule: tuple[str, Any] | None) -> type[Lexer]:
+    """`base` with the rule it spells as `stock` replaced by `rule`, or removed where that is None."""
+
+    def fix(states: dict[str, list[Any]]) -> dict[str, list[Any]]:
+        hit = lambda r: isinstance(r, tuple) and r[0] == stock
+        return {
+            k: [rule if hit(r) else r for r in v if rule or not hit(r)] for k, v in states.items()
+        }
+
+    variants = getattr(base, "token_variants", False)
+    tokens = {k: fix(v) for k, v in base.tokens.items()} if variants else fix(base.tokens)
+    if tokens == base.tokens:
+        raise RuntimeError(f"this Pygments release spells {base.__name__}'s rule differently")
+    extra: dict[str, Any] = {"tokens": tokens, "aliases": [], "filenames": [], "_all_tokens": {}}
+    return type(f"Fleet{base.__name__}", (base,), extra)
+
+
 STOCK_HEREDOC = r"<<-?\s*(\'?)\\?(\w+)[\w\W]+?\2"
-
-
-def bash_variant(heredoc: tuple[str, _TokenType] | None) -> type[Lexer]:
-    """Pygments' bash lexer with its heredoc rule replaced, or removed so a body lexes as code."""
-    rules = BashLexer.tokens["basic"]
-    stock = [isinstance(r, tuple) and r[0] == STOCK_HEREDOC for r in rules]
-    if not any(stock):
-        raise RuntimeError("this Pygments release spells its bash heredoc rule differently")
-    basic = [heredoc if hit else r for r, hit in zip(rules, stock, strict=True)]
-    tokens = {**BashLexer.tokens, "basic": [r for r in basic if r is not None]}
-    return type("FleetBash", (BashLexer,), {"tokens": tokens, "aliases": [], "filenames": []})
-
-
-PATCHED = {"bash": bash_variant(HEREDOC), "bash-heredoc-as-code": bash_variant(None)}
+PATCHED = {
+    "bash": patched(BashLexer, STOCK_HEREDOC, (HEREDOC, String.Heredoc)),
+    "bash-heredoc-as-code": patched(BashLexer, STOCK_HEREDOC, None),
+    "csharp": patched(
+        CSharpLexer, r"^(\s*)(\[.*?\])", (ATTRIBUTE, bygroups(Whitespace, Name.Attribute))
+    ),
+}
 
 
 @functools.cache
@@ -781,11 +786,7 @@ TAG = re.compile(r"<[^<>]*>")
 
 
 def extract_markdown(lines: list[str]) -> Extracted:
-    """Markdown units from markdown-it-py's block tokens and their line maps.
-
-    A paragraph outside a blockquote is a sentence block, and so is each line of an HTML block and
-    of front matter, which markdown-it reads as a rule and a heading.
-    """
+    """Markdown units from markdown-it-py's block line maps, front matter lines read alone."""
     matter = front_matter_end(lines)
     code: set[int] = set()
     paragraphs = [
@@ -880,10 +881,11 @@ class Context(NamedTuple):
     allowed: set[int] | None = None
 
 
-# The one sentence boundary every reader shares, a terminator and what a sentence closes inside.
-# An initial, an abbreviation, and the last dot of an ellipsis end nothing.
-TERMINATOR = r"(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)(?:(?<!\.)\.|[!?])[*_`\"')\]]*"
-SENTENCE_BREAK = re.compile(TERMINATOR + r"\s+")
+# The one sentence boundary every reader shares, a terminator that no initial or abbreviation ends.
+# The last dot of an ellipsis ends nothing either.
+TERMINATOR = r"(?<!\b[A-Z])(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\betc)(?:(?<!\.)\.|[!?])"
+# In Markdown a sentence may close inside emphasis, a code span, a quotation, or a bracket.
+SENTENCE_BREAK = re.compile(TERMINATOR + r"[*_`\"')\]]*\s+")
 # On a comment line the second sentence opens on a letter, in either case.
 RUN_ON = re.compile(TERMINATOR + r"\s+(?=[A-Za-z])")
 # Text that closes as a sentence does, or, with the colon, as a lead-in to what follows does.
@@ -1008,10 +1010,7 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
-    """A semicolon in Markdown prose, unless its sentence is a list that needs one.
-
-    A list carries a comma and a second semicolon or labeled items. A table cell holds its own.
-    """
+    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one."""
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
         cells = line.strip().strip("|").split("|") if line.lstrip().startswith("|") else [line]
@@ -1148,10 +1147,7 @@ def once_tracked(root: str, rel_path: str) -> bool:
 
 
 def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
-    """A path a Markdown line names that git once tracked and the tree no longer holds.
-
-    A carried path and a hub-hosted one are exempt, each living elsewhere by design.
-    """
+    """A Markdown path git once tracked and the tree no longer holds, unless it lives elsewhere."""
     root = ctx.root or (Path(found) if (found := repo_root(ctx.path)) else None)
     if root is None:
         return []
@@ -1404,11 +1400,7 @@ def comment_indent(line: Line) -> int:
 
 
 def comment_sentences(unit: Unit, ctx: Context) -> list[Finding]:
-    """Over-cap sentences in a comment run, a wrapped sentence counted once.
-
-    A non-prose line, a trailing comment, or a gap ends a block, and a capital, a list marker, or a
-    field opens one. A run indented past a colon line is a command or a table.
-    """
+    """Over-cap sentences in a comment run, a command or table indented under a colon skipped."""
     comments, _kept, configured = prose_comments(unit, ctx)
     out: list[Finding] = []
     block: list[tuple[int, str]] = []
@@ -1500,11 +1492,7 @@ def docstring_margin(unit: Unit, texts: list[str], closer: str) -> int:
 
 
 def docstring_sentences(unit: Unit, ctx: Context) -> list[Finding]:
-    """Over-cap sentences in one docstring, measured from the column its quotes open at.
-
-    A doctest, an indented block, and a section header are not prose, and each NumPy or Google
-    entry's description is its own unit with its `name :` or `name:` lead dropped.
-    """
+    """Over-cap docstring sentences, its doctests, code blocks, and section structure skipped."""
     language = ctx.language
     numpy = {s.lower() for s in language.get("numpy_sections", ())}
     google, google_prose = (
@@ -1702,19 +1690,21 @@ def stand_downs(rules: set[str], a: argparse.Namespace, scan_root: Path, in_git:
         note("note-shallow")
 
 
+def argument_parser(data: dict[str, Any]) -> argparse.ArgumentParser:
+    """The command line the data file declares, which `scripts/prose_lint.py` builds the same way."""
+    ap = argparse.ArgumentParser(prog="prose_lint.py")
+    for flag, spec in data["cli"].items():
+        choices = {"choices": sorted(data["rules"])} if spec.get("choices") == "rules" else {}
+        ap.add_argument(flag, **{**spec, **choices})
+    return ap
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         # A path holding a byte that is not UTF-8 prints escaped rather than ending the run.
         if callable(reconfigure := getattr(stream, "reconfigure", None)):
             reconfigure(errors="backslashreplace")
-    ap = argparse.ArgumentParser()
-    ap.add_argument("paths", nargs="*", default=["."])
-    ap.add_argument("--check", action="append", dest="checks", choices=sorted(RULES))
-    ap.add_argument("--exclude", action="append", default=[])
-    ap.add_argument("--summary", action="store_true")
-    for flag, spec in BASE["cli"].items():
-        ap.add_argument(flag, **{**spec, "help": spec["help"].format(env=COMMENT_ENV_NAME)})
-    a = ap.parse_args(argv)
+    a = argument_parser(BASE).parse_args(argv)
     rules = set(a.checks or DEFAULT_RULES)
     # Every input to a verdict is read from the repository scanned, never from the working directory.
     # TestScanRootDecidesTheRuleSet carries the cases.
@@ -1729,15 +1719,13 @@ def main(argv: list[str] | None = None) -> int:
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
         return refuse("error-many-repositories", roots=quoted(git_roots))
-    first = Path(scan_paths[0])
-    scan_root = (
-        Path(next(iter(git_roots))) if git_roots else first if first.is_dir() else first.parent
-    )
+    first, in_git = Path(scan_paths[0]), bool(git_roots)
+    scan_root = Path(git_roots.pop()) if git_roots else first if first.is_dir() else first.parent
     try:
         config_for(str(scan_root))
     except OverrideError as exc:
         return refuse("error-override", path=scan_root / OVERRIDE_NAME, why=exc)
-    stand_downs(rules, a, scan_root, bool(git_roots))
+    stand_downs(rules, a, scan_root, in_git)
 
     files = discover(scan_paths, tuple(a.exclude), scan_root)
     keys = {f: repo_key(f, scan_root) for f in files}
@@ -1754,14 +1742,11 @@ def main(argv: list[str] | None = None) -> int:
         matched = [f for f in files if keys[f] in scope]
         # A non-empty diff whose readable files the scan matched none of failed to scope.
         unread = (
-            unread_diff_files(scope, scan_paths, tuple(a.exclude), scan_root)
-            if scope and not matched
-            else []
+            [] if matched else unread_diff_files(scope, scan_paths, tuple(a.exclude), scan_root)
         )
         if unread:
-            return refuse(
-                "error-unread-diff", base=a.diff, count=len(unread), paths=quoted(unread, 5)
-            )
+            fields = {"base": a.diff, "count": len(unread), "paths": quoted(unread, 5)}
+            return refuse("error-unread-diff", **fields)
         files = matched
 
     total = 0
