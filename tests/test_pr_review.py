@@ -9964,6 +9964,7 @@ class TestCli(GqlCase):
                 out = self.out.getvalue()
                 self.assertIn(said, out)
                 self.assertNotIn(unsaid, out)
+                self.assertEqual(not attest, "Run attest once" in out)
                 self.assertIn("status=AWAITING_LOCAL_PASS" if code else "coverage=local", out)
 
     def test_an_attested_head_copilot_refused_is_not_called_covered(self) -> None:
@@ -9975,6 +9976,8 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertEqual(41, code)
         self.assertIn("No attested local pass covers this head yet", out)
+        self.assertIn("a Copilot refusal on this head overrules it", out)
+        self.assertNotIn("Run attest once", out)
         self.assertNotIn("its head is covered by an attested local pass", out)
         self.assertNotIn("coverage=local", out)
 

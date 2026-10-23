@@ -7819,12 +7819,16 @@ def main(argv: list[str] | None = None) -> int:
             "rather than polling --timeout out against a request that does not exist."
         )
     elif held and snapshot is not None and not local_cover(snapshot):
+        why = (
+            "An attestation is published, but a Copilot refusal on this head overrules it."
+            if attested(snapshot)
+            else "Run attest once a recorded pass covers this head."
+        )
         print(
             "note: this pull request merges into a branch other than the default, so its head is "
             "to be covered by an attested local pass rather than a Copilot round, which runs once "
             "per change at the promotion, and this wait requests nothing. No attested local pass "
-            "covers this head yet, so the digest below names what it still owes, the attest step "
-            "where none is published. Pass --request to ask for a round anyway."
+            f"covers this head yet. {why} Pass --request to ask for a round anyway."
         )
     elif held:
         print(
