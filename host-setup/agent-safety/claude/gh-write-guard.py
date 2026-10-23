@@ -1676,6 +1676,8 @@ def _reading_env_config_values(toks):
     Each git word's pairs are read from the exports before it and its own prefix, as git reads them.
     A later command reusing an index then cannot replace an earlier one's key.
     The pairs across every assignment `_env_assignments` returns are read too, so a reading never loses a value it gave before.
+    Behind a launcher, the exports are also read under only the assignments before it, since one
+    after an `env` or `sudo` there may be the launcher's own argument (see `_git_dir_rereading`).
     """
     out = list(_env_config_values(_env_assignments(toks)))
     exported = []
@@ -1684,6 +1686,9 @@ def _reading_env_config_values(toks):
         exported.extend(exports.get(k, ()))
         if _is_git_exe(t):
             out.extend(_env_config_values(exported + _git_word_assignments(toks, k)))
+            if not _command_prefix(toks, k)[0]:
+                before = _launcher_prefix(toks, k, env_args=False)[1]
+                out.extend(_env_config_values(exported + before))
     return list(dict.fromkeys(out))
 
 
@@ -1864,10 +1869,12 @@ def _export_events(toks):
 
     An `export`, or a `declare`, `typeset`, or `local` given `-x`, exports each `NAME=value` it
     names, read by `_export_words`. One naming a bare `NAME` exports the value the last command
-    of plain assignments before it set (see `_plain_assignments`). A `builtin` or `command` before
-    it counts. A plain assignment standing as its own command exports its value too, where the
-    name was exported before it or a `set -a` or `set -o allexport` came before it. Every reader
-    of an exported variable reads these, so each form reaches every rule that reads one.
+    of plain assignments, or the `declare`, `typeset`, `local`, or `readonly` before it, set (see
+    `_plain_assignments`). A `builtin` or `command` before it counts. A plain assignment standing as its own command exports its value too, where the
+    name was exported before it or a `set -a` or `set -o allexport` came before it, and so does a
+    `declare` after one. The readers of an exported git variable read these, so each form reaches
+    every rule that reads one. `GH_REPO` keeps its own reader (see `_gh_repo_states`), which fails
+    closed on the forms it does not follow (see `_gh_repo_unread_export`).
     """
     shell, marked, allexport, out = {}, set(), False, []
     for x, t in enumerate(toks):
@@ -1888,12 +1895,15 @@ def _export_events(toks):
             flags = [w for w in options if w[:1] == "-" and w[1:2] not in ("", "-")]
             allexport = allexport or any("a" in w for w in flags) or "allexport" in options
             continue
-        if t not in _EXPORTING_BUILTINS:
-            continue
-        flag = _EXPORTING_BUILTINS[t]
-        if flag and not any(w.startswith("-") and flag[1] in w for w in options):
+        if t not in _EXPORTING_BUILTINS and t != "readonly":
             continue
         pairs, names = _export_words(toks, x)
+        shell.update(pairs)
+        flag = _EXPORTING_BUILTINS.get(t, "-x")
+        if flag and not any(w.startswith("-") and flag[1] in w for w in options):
+            if allexport and pairs:
+                out.append((x, pairs))
+            continue
         marked.update(names)
         marked.update(name for name, _value in pairs)
         out.append((x, [(name, shell[name]) for name in names if name in shell] + pairs))
@@ -3872,7 +3882,7 @@ def _export_words(toks, x):
         m = _ENV_ASSIGN_RE.match(word)
         if m:
             pairs.append(m.groups())
-        elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", word):
+        elif _NAME_WORD.fullmatch(word):
             names.append(word)
         elif not word.startswith("-"):
             break
@@ -4691,19 +4701,20 @@ def _string_read_elsewhere(toks, k):
 _XARGS_VALUE_LETTERS = "adEILnPsJRS"
 
 
-def _xargs_replace_strings(toks, k):
+def _xargs_replace_strings(toks, k, parsed=False):
     """Each string an `xargs` running `toks[k]` may replace with each word it reads, empty where it replaces none.
 
     That is the value of `-I` or the BSD `-J`, attached or the next word, or of `-i` or
     `--replace`, `{}` where they name none. Each is read whole and inside a short-option cluster,
     as in `-0I{}` or `-rI{}`, where a letter taking a value takes the rest of the word or the
-    next word, as xargs reads it. An option named first is read too, wherever it sits.
+    next word, as xargs reads it. An option named first is read too, wherever it sits, unless
+    `parsed` asks for xargs's own options alone, as a reader asking whether xargs appends does.
     """
     if not _xargs_runs(toks, k):
         return []
     start = max(x for x in range(k) if _base_name(toks[x]) == "xargs")
     out = []
-    for x in range(start + 1, k):
+    for x in range(start + 1, start + 1 if parsed else k):
         w = toks[x]
         if w == "-I":
             out += [toks[x + 1]] if x + 1 < k else []
@@ -5573,9 +5584,15 @@ def _wrapper_env_assignments(toks, runs=None):
 
 
 def _wrapper_env_groups(toks, runs=None):
-    """`_wrapper_env_assignments`, as one list of (name, value) per shell, in the order the shells appear."""
+    """`_wrapper_env_assignments`, as one list of (name, value) per shell, in the order the shells appear.
+
+    Where a loop or a function may run a shell after a later export, every export is read as
+    reaching it (see `_exported_states`).
+    """
     out, exported = [], []
     exports = dict(_export_events(toks))
+    if _reruns(toks, None, subshells=False):
+        exported = [pair for pairs in exports.values() for pair in pairs]
     for x, t in enumerate(toks):
         if x in exports:
             exported.extend(exports[x])
@@ -5611,16 +5628,21 @@ def _launcher_prefix(toks, k, env_args=True):
     return True, out + [m.groups() for t in toks[env:k] for m in [_ENV_ASSIGN_RE.match(t)] if m]
 
 
-def _runs_git(text):
+def _runs_git(text, gh=False):
     """True when a git word runs as a command (see `_runs_as_command`) in `text`, or in a command string it embeds.
 
-    The embedded strings are those `_embedded_wrapper_commands` reads.
+    The embedded strings are those `_embedded_wrapper_commands` reads. With `gh`, a gh word
+    counts too, and a body nested past the reading cap counts as one that runs either.
     """
-    for body in [text, *_embedded_wrapper_commands(text)]:
+    overflow = [] if gh else None
+    for body in [text, *_embedded_wrapper_commands(text, overflow=overflow)]:
         toks = _shell_tokens(body)
-        if any(_is_git_exe(t) and _runs_as_command(toks, k) for k, t in enumerate(toks)):
+        if any(
+            (_is_git_exe(t) or (gh and _is_gh_exe(t))) and _runs_as_command(toks, k)
+            for k, t in enumerate(toks)
+        ):
             return True
-    return False
+    return bool(overflow)
 
 
 def _wrapper_env_reason(assignments):
@@ -6027,10 +6049,10 @@ def _xargs_gh_unread(text):
 
     xargs appends the words it reads to the command it runs, or puts each where its replace
     string sits (see `_xargs_replace_strings`). So a gh write it runs, or a gh naming no
-    subcommand, may take a repo flag, a body, or the write itself from its input. So may a `gh
-    api` call it appends to, or one where a word starts with the replace string, which may then
-    be an option such as `-XPOST`. A replace string in gh's command or subcommand word counts
-    too. A read whose command, subcommand, and options are written out, as in `xargs gh pr view`,
+    subcommand, may take a repo flag, a body, or the write itself from its input. So may a gh
+    whose `_GH_WRITE_SUBSUBS` third word is missing, and one holding the replace string in a path
+    word. So may a `gh api` call it appends to, or one holding the replace string in any word but
+    its endpoint, which may then be an option such as `-XPOST` or a GraphQL mutation. A read whose command, subcommand, and options are written out, as in `xargs gh pr view`,
     takes nothing from its input that makes it a write. Nor does a write whose command and
     subcommand are written out, where xargs reads only inert words (see `_xargs_reads_inert`), as
     `printf 5 | xargs gh pr comment --body x` does.
@@ -6040,22 +6062,23 @@ def _xargs_gh_unread(text):
         if not (_is_gh_exe(t) and _xargs_command(toks, k)):
             continue
         args = _api_first(_collect_arglist(toks, k + 1)[0])
-        path = _gh_path(args)
+        path, path3 = _gh_path(args), _gh_path(args, 3)
         replaced = _xargs_replace_strings(toks, k)
-        if len(path) < 2:
+        if len(path) < 2 or (tuple(path[:2]) in _GH_WRITE_SUBSUBS and len(path3) < 3):
+            return True
+        if args[0] != "api" and any(r in w for w in path3 for r in replaced):
             return True
         if _gh_argv_is_write(args):
-            if args[0] == "api" or any(r in w for w in path for r in replaced):
-                return True
             xargs = max(x for x in range(k) if _base_name(toks[x]) == "xargs")
-            if not _xargs_reads_inert(toks, xargs, k):
+            if args[0] == "api" or not _xargs_reads_inert(toks, xargs, k):
                 return True
-            continue
-        if args[0] == "api":
-            if not replaced or any(a.startswith(r) for a in args for r in replaced):
+        elif args[0] == "api":
+            at = _gh_path_at(args)
+            endpoint = at[1] if len(at) > 1 else None
+            if not _xargs_replace_strings(toks, k, parsed=True):
                 return True
-        elif any(r in w for w in path for r in replaced):
-            return True
+            if any(r in a for x, a in enumerate(args) if x != endpoint for r in replaced):
+                return True
     return False
 
 
@@ -6068,11 +6091,13 @@ def _xargs_reads_inert(toks, x, k):
     An inert word is made of letters, digits, `_`, and `.` alone, so it names no option,
     repository, or URL, wherever xargs puts it. The input must be a pipe from an `echo` or a
     `printf` of literal words, as `printf 5 | xargs ...` gives. A word the shell rewrites, a
-    redirection, a `printf` format holding a `%` or a backslash other than `\\n` or `\\t`,
-    and an xargs option holding `a`, which may read another file, each leave the input unread.
+    redirection, a `printf` format holding a `%` or a backslash other than `\\n` or `\\t`, and
+    an `--arg-file` or a short option holding `a`, which may read another file, each leave the
+    input unread.
     """
-    if any("a" in w for w in toks[x + 1 : k] if w.startswith("-")):
-        return False
+    for w in toks[x + 1 : k]:
+        if w.startswith("--a") or (w[:1] == "-" and w[1:2] != "-" and "a" in w):
+            return False
     start = x
     while start > 0 and not _is_separator(toks[start - 1]):
         start -= 1
@@ -6100,22 +6125,25 @@ def _xargs_reads_inert(toks, x, k):
     return "\\" not in text and all(_INERT_WORD.fullmatch(w) for w in text.split())
 
 
-def _runs_git_or_gh(text):
-    """True when a git or gh word runs as a command in `text`, or in a command string it embeds.
+def _xargs_filled_body(cmd):
+    """A shell command string in `cmd` that `xargs` fills with the words it reads, where it runs git or gh, else None.
 
-    The embedded strings are those `_embedded_wrapper_commands` reads, a substitution's included,
-    as `_runs_git` reads them. A body nested past the cap counts.
+    That is the string of a shell xargs runs as its command whose string holds xargs's replace
+    string, or whose string option the next word does not follow (see `_string_read_elsewhere`).
+    The inner shell parses each word xargs puts there, so a word holding a separator adds whole
+    commands, as `echo 'x; git push origin develop' | xargs -I{} sh -c 'git status {}'` does.
     """
-    overflow = []
-    bodies = [text, *_embedded_wrapper_commands(text, overflow=overflow)]
-    for body in bodies + overflow:
-        toks = _shell_tokens(body)
-        if any(
-            (_is_git_exe(t) or _is_gh_exe(t)) and _runs_as_command(toks, k)
-            for k, t in enumerate(toks)
-        ):
-            return True
-    return bool(overflow)
+    for text in _data_free_texts(cmd) if _names_git_or_gh(cmd) else []:
+        toks = _shell_tokens(text)
+        for k in range(len(toks)):
+            found = _shell_bodies_at(toks, k)
+            if not (found and found[0] and _xargs_command(toks, k)):
+                continue
+            if _string_read_elsewhere(toks, k):
+                body = next((b for b in found[0] if _runs_git(b, gh=True)), None)
+                if body is not None:
+                    return body
+    return None
 
 
 def _outer_expanded_body(cmd):
@@ -6124,13 +6152,13 @@ def _outer_expanded_body(cmd):
     The outer shell expands a `$` or backtick word inside a double-quoted `-c` body, so a value
     holding a separator adds whole commands the guard never reads, as `B="x; git push origin
     develop"; sh -c "echo $B"` does. Such a body fails closed only where it runs git or gh
-    itself (see `_runs_git_or_gh`). A body running neither keeps its verdict, so `bash -c "cd
+    itself (see `_runs_git`). A body running neither keeps its verdict, so `bash -c "cd
     $DIR && ls"` is not denied for its expansion alone, and nor is that first example, whose body
     runs only `echo`. Heredoc data is not read (see `_data_free_texts`).
     """
     for body in _data_free_texts(cmd) if _names_git_or_gh(cmd) else []:
         expands = isinstance(body, _ExpandedText) and ("$" in body or "`" in body)
-        if expands and _runs_git_or_gh(body):
+        if expands and _runs_git(body, gh=True):
             return body
     return None
 
@@ -6166,6 +6194,8 @@ def _rewritten_git_words(cmd):
     - an unquoted pathname pattern in a directory value, since it may match several names
     - a push or a commit that `xargs` runs, since it appends words the guard does not read
     - a git word with no subcommand that `xargs` runs, since its input gives the subcommand
+    - an `xargs` replace string in git's subcommand, or among the global options of a git command
+      that may mutate, since each word xargs reads takes its place
 
     The text an `eval` runs is read too. A word of any `eval`'s arguments in a text may expand
     outside single quotes. Each payload that text's evals run is then text the shell has already
@@ -6246,6 +6276,23 @@ def _rewritten_git_words(cmd):
                     return "a run-time word among the options of a `git` with no subcommand word"
                 continue
             sub = toks[j]
+            reps = _xargs_replace_strings(toks, k) if _xargs_command(toks, k, mask) else []
+            held = next((r for r in reps if r in sub), None)
+            if held is None and any(r in toks[x] for x in range(k + 1, j) for r in reps):
+                verdict = _primary_checkout_verdict(
+                    sub, _collect_arglist(toks, j + 1)[0], None, lambda _d, _r: False
+                )
+                mutates = verdict or (verdict is None and sub not in _git_command_names())
+                held = next(r for r in reps) if mutates or sub in ("push", "commit") else None
+            if held is not None:
+                return (
+                    f"an `xargs` replace string, `{held}`, in the subcommand or global options of `git`",
+                    (
+                        "xargs puts each word it reads there, so the guard cannot read the subcommand "
+                        "or the directory git runs. Failing closed. Run the git command as its own "
+                        "command with every word written out."
+                    ),
+                )
             if _is_run_time_word(sub):
                 return f"a run-time word, `{sub}`, where the subcommand of `git` goes"
             redirected = _is_redir_op(sub) or (
@@ -9201,6 +9248,15 @@ def classify(
             "commit as its own command with every word written out, and a push with an explicit "
             "refspec (git push origin <branch>:refs/heads/<branch>)." + _handoff(cmd)
         )
+    filled = _xargs_filled_body(cmd)
+    if filled is not None:
+        return "deny", (
+            f"This command runs a shell command string, `{filled}`, that `xargs` fills with the "
+            "words it reads, and the string runs git or gh. The inner shell parses each word, so "
+            "one holding a `;` or a line break adds whole commands the guard cannot read. Failing "
+            "closed. Pass each word as an argument, as in xargs sh -c '... \"$1\"' _, or run the "
+            "command with every word written out." + _handoff(cmd)
+        )
     expanded = _outer_expanded_body(cmd)
     if expanded is not None:
         return "deny", (
@@ -10753,6 +10809,42 @@ _GH_TARGET_CASES: list[tuple[str, dict[str, str], str, str]] = [
         {},
         "allow",
         "control: a same-owner GH_REPO an env passes behind an unknown launcher is allowed",
+    ),
+    (
+        "echo '-R stranger/example' | xargs -I{} sh -c 'gh pr comment 5 -b x {}'",
+        {},
+        "deny",
+        "a shell string that xargs fills and that runs gh may take a --repo from its input",
+    ),
+    (
+        "echo delete 5 -R stranger/example | xargs gh repo deploy-key",
+        {},
+        "deny",
+        "a three-word gh write missing its third word under xargs may take it from its input",
+    ),
+    (
+        "echo 'mutation{x}' | xargs -I{} gh api graphql -f query={}",
+        {},
+        "deny",
+        "a gh api field holding the xargs replace string may be a mutation",
+    ),
+    (
+        "printf -- '-XPOST -f title=x' | xargs stdbuf -i0 gh api repos/stranger/example/issues",
+        {},
+        "deny",
+        "a launcher option shaped like a replace option leaves xargs appending to gh api",
+    ),
+    (
+        "printf 5 | xargs --max-args=1 gh pr comment --body x",
+        {},
+        "allow",
+        "control: an xargs long option that reads no file keeps inert input inert",
+    ),
+    (
+        "echo 5 | xargs -I{} gh api repos/example/repo/pulls/{}",
+        {},
+        "allow",
+        "control: a gh api read whose endpoint alone holds the replace string is read",
     ),
 ]
 
@@ -14763,6 +14855,22 @@ _PRIMARY_CHECKOUT_CASES = [
         "deny",
         "a git with no subcommand that xargs runs fails closed in any checkout",
     ),
+    (
+        "cd /worktree && declare GIT_DIR=/primary/.git; export GIT_DIR; git reset --hard",
+        "/somewhere-else",
+        {"/primary/.git": True, "/worktree": False},
+        None,
+        "deny",
+        "a bare-name export exports the value a declare set before it",
+    ),
+    (
+        "echo /primary | xargs -I{} git --git-dir={}/.git --work-tree={} reset --hard",
+        "/worktree",
+        {"/worktree": False},
+        None,
+        "deny",
+        "an xargs replace string in a mutating git command's directory options fails closed",
+    ),
 ]
 
 
@@ -18105,6 +18213,12 @@ _PUSH_CONFIG_CASES = [
         "allow",
         "control: a named coproc group that changes no config is allowed",
     ),
+    (
+        [],
+        "echo config | xargs -I{} git {} remote.origin.mirror true; git push --tags origin",
+        "deny",
+        "an xargs replace string where git's subcommand goes may name config",
+    ),
 ]
 
 
@@ -20297,6 +20411,48 @@ _HIDDEN_GIT_CASES = [
         {},
         "allow",
         "control: a single-quoted wrapper body is not expanded by the outer shell",
+    ),
+    (
+        "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push; find ./env -name GIT_CONFIG_VALUE_0=status -exec git p origin develop \\;",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a config value after a path named env is read beside the exports, not over them",
+    ),
+    (
+        "echo push | xargs -I{} git {} origin develop",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "an xargs replace string where git's subcommand goes fails closed",
+    ),
+    (
+        "echo 'x; git push origin develop' | xargs -I{} sh -c 'git status {}'",
+        "feature/x",
+        {"develop": _CODE_RULES},
+        "deny",
+        "a shell string that xargs fills and that runs git fails closed",
+    ),
+    (
+        "f() { bash -c 'git status'; }; export GIT_CONFIG_GLOBAL=/example/config; f",
+        "feature/x",
+        {},
+        "deny",
+        "an export before a function's later call reaches the wrapper in its body",
+    ),
+    (
+        "git ls-files | xargs -I{} sh -c 'echo {}'",
+        "feature/x",
+        {},
+        "allow",
+        "control: a shell string xargs fills that runs neither git nor gh keeps its verdict",
+    ),
+    (
+        "find . -name .git | xargs -I{} git -C {} status",
+        "feature/x",
+        {},
+        "allow",
+        "control: a replace string among a read-only git command's options is allowed",
     ),
 ]
 
