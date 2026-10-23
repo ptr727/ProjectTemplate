@@ -35,6 +35,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, NamedTuple
 
+MISSING = ""
 try:
     from markdown_it import MarkdownIt
     from markdown_it.token import Token
@@ -45,18 +46,19 @@ try:
     from pygments.token import Comment, Keyword, Name, Punctuation, String, Text, Whitespace
     from pygments.util import ClassNotFound
 except ImportError as missing:
-    sys.exit(
-        f"prose_lint.py: {missing.name} is not installed. The gate runs as `uv run --no-project "
-        "--script`, which installs its packages, and a hook importing it in-process carries a "
-        "stale hub_fetch_run.py snippet to resync from the hub."
+    MISSING = f"{missing.name} is not installed"
+DATA_PATH = Path(__file__).resolve().with_name("prose-gate.json")
+if MISSING or not DATA_PATH.is_file():
+    # Printed rather than passed to `sys.exit`, since a stale in-process caller drops that message.
+    print(
+        f"prose_lint.py: {MISSING or 'prose-gate.json is not beside the script'}. The gate runs as "
+        "`uv run --no-project --script` beside its data file, and a hook importing it in-process "
+        "carries a stale hub_fetch_run.py snippet to resync from the hub.",
+        file=sys.stderr,
     )
-
-BASE: dict[str, Any] = json.loads(
-    Path(__file__).resolve().with_name("prose-gate.json").read_text(encoding="utf-8")
-)
+    sys.exit(1)
+BASE: dict[str, Any] = json.loads(DATA_PATH.read_text(encoding="utf-8"))
 OVERRIDE_NAME = ".prose-gate.json"
-
-
 RULES: dict[str, str] = {name: rule["summary"] for name, rule in BASE["rules"].items()}
 DEFAULT_RULES = frozenset(name for name, rule in BASE["rules"].items() if rule["default"])
 MESSAGES: dict[str, str] = BASE["messages"]

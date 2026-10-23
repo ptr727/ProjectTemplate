@@ -5422,22 +5422,35 @@ class TestCli(unittest.TestCase):
                 self.assertEqual([(1, "comment-added")], [(line, rule) for line, rule, _ in found])
 
     def test_a_missing_package_names_the_remedy_rather_than_a_traceback(self) -> None:
-        """A stale hook imports the gate in-process, where its script block installs nothing."""
-        run = (
-            "import runpy, sys; sys.modules['markdown_it'] = None; "
-            f"runpy.run_path({str(PROSE_LINT_SCRIPT)!r}, run_name='__main__')"
+        """A stale hook imports the gate in-process, where its script block installs nothing.
+
+        The child runs it the way that snippet did, its handler swallowing the exit's message.
+        """
+        stale = (
+            "import runpy, shutil, sys, tempfile\n"
+            "with tempfile.TemporaryDirectory() as tmp:\n"
+            "    script = shutil.copy(sys.argv[1], tmp)\n"
+            "    if sys.argv[2] == 'packages':\n"
+            "        sys.modules['markdown_it'] = None\n"
+            "        shutil.copy(sys.argv[1].replace('prose_lint.py', 'prose-gate.json'), tmp)\n"
+            "    try:\n"
+            "        runpy.run_path(script, run_name='__main__')\n"
+            "    except SystemExit as exc:\n"
+            "        sys.exit(exc.code if isinstance(exc.code, int) else 1)\n"
         )
-        done = subprocess.run(
-            [sys.executable, "-c", run],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        self.assertEqual(1, done.returncode)
-        self.assertNotIn("Traceback", done.stderr)
-        self.assertIn("uv run --no-project --script", done.stderr)
-        self.assertIn("hub_fetch_run.py", done.stderr)
+        for missing in ("packages", "data"):
+            with self.subTest(missing=missing):
+                done = subprocess.run(
+                    [sys.executable, "-c", stale, str(PROSE_LINT_SCRIPT), missing],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+                self.assertEqual(1, done.returncode)
+                self.assertNotIn("Traceback", done.stderr)
+                self.assertIn("uv run --no-project --script", done.stderr)
+                self.assertIn("hub_fetch_run.py", done.stderr)
 
     def test_the_local_shim_offers_the_gate_s_own_command_line(self) -> None:
         """The shim builds its parser from the same data, and answers `--help` without uv."""
