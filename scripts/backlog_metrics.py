@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Render a weekly backlog and review-cost report for the fleet's repositories.
 
-Why this exists: a weekly measure of issues filed against issues closed, issues per merged pull
-request, and review cost per merged pull request lets the backlog's direction be read from a
-report rather than re-counted by hand.
+Why this exists: a weekly measure of issues filed against closed, issues per merged pull request,
+and review cost per merged pull request shows the backlog's direction without a hand count.
 
 The report goes to stdout only, so a server timer can mail it. Nothing here runs from a workflow.
 Counting and rendering are pure functions over parsed `gh` output, and `run_gh` is the one place
@@ -23,12 +22,13 @@ import argparse
 import datetime
 import html
 import json
-import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from gh_graphql import GraphQLError, run_subprocess
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
@@ -36,13 +36,12 @@ LIST_LIMIT = 1000
 HANDOFF_LABEL = "handoff"
 REVIEW_WORKFLOW = "Running Copilot Code Review"
 LABELS = ("pre-existing", "prose", "documentation", "bug", "script", "enhancement", "decision")
-GH_TIMEOUT_SECONDS = 120
 
 Items = Sequence[Mapping[str, Any]]
 
 
 class GhError(RuntimeError):
-    """A `gh` command that exited non-zero or printed something other than JSON."""
+    """A `gh` command that did not run, exited non-zero, or printed something other than JSON."""
 
 
 @dataclass(frozen=True)
@@ -63,19 +62,13 @@ def run_gh(args: Sequence[str]) -> Any:
     """Run `gh` and return its parsed JSON, raising with the stderr on a failure."""
     command = ["gh", *args]
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=GH_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise GhError(f"{' '.join(command)} did not run: {error}") from error
-    if result.returncode != 0:
-        raise GhError(f"{' '.join(command)} exited {result.returncode}: {result.stderr.strip()}")
+        code, stdout, stderr = run_subprocess(command)
+    except GraphQLError as error:
+        raise GhError(str(error)) from error
+    if code != 0:
+        raise GhError(f"{' '.join(command)} exited {code}: {stderr.strip()}")
     try:
-        return json.loads(result.stdout)
+        return json.loads(stdout)
     except json.JSONDecodeError as error:
         raise GhError(f"{' '.join(command)} printed no JSON: {error}") from error
 
@@ -98,7 +91,7 @@ def count_by_label(items: Items, labels: Sequence[str]) -> dict[str, int]:
 
 
 def count_named(runs: Items, workflow: str) -> int:
-    return sum(1 for run in runs if run.get("workflowName") == workflow)
+    return sum(1 for run in runs if run.get("name") == workflow)
 
 
 def per_merged(opened: int, merged: int) -> str:
@@ -290,7 +283,7 @@ def collect(owner: str, name: str, since: datetime.date) -> RepoMetrics:
     )
     runs = run_gh(
         ["run", "list", "--repo", repo, "--created", f">={date}", "--limit", str(LIST_LIMIT)]
-        + ["--json", "workflowName"]
+        + ["--json", "name"]
     )
     return compute_metrics(name, opened, closed, open_now, merged, runs)
 

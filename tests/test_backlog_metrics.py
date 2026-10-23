@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Exercise backlog_metrics.py's counting, rendering, and refusals on constructed fixtures.
 
-No case starts `gh`. The counting and rendering functions take already-parsed lists, and the two
-cases that reach `run_gh` replace the subprocess call, so the fixtures here are invented repository
-names and invented counts.
+No case starts `gh`. The counting and rendering functions take parsed lists, and the cases that
+reach `run_gh` replace the subprocess call. The fixtures are invented names and counts.
 
 Run as `python3 tests/test_backlog_metrics.py`, or under
 `python3 -m unittest discover -s tests`.
@@ -13,7 +12,6 @@ import contextlib
 import datetime
 import io
 import json
-import subprocess
 import sys
 import typing
 import unittest
@@ -69,10 +67,10 @@ class CountingTests(unittest.TestCase):
 
     def test_review_runs_match_the_workflow_name_exactly(self) -> None:
         runs = [
-            {"workflowName": "Running Copilot Code Review"},
-            {"workflowName": "Running Copilot Code Review "},
-            {"workflowName": "running copilot code review"},
-            {"workflowName": "Validate"},
+            {"name": "Running Copilot Code Review"},
+            {"name": "Running Copilot Code Review "},
+            {"name": "running copilot code review"},
+            {"name": "Validate"},
         ]
         result = bm.compute_metrics("alpha", [], [], [], [{"number": 1}], runs)
         self.assertEqual(result.runs, 4)
@@ -177,20 +175,13 @@ class RenderingTests(unittest.TestCase):
 
 
 class RunGhTests(unittest.TestCase):
-    def completed(self, code: int, out: str, err: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(["gh"], code, out, err)
-
     def test_returns_parsed_json(self) -> None:
-        with unittest.mock.patch.object(
-            bm.subprocess, "run", return_value=self.completed(0, '[{"a": 1}]', "")
-        ):
+        with unittest.mock.patch.object(bm, "run_subprocess", return_value=(0, '[{"a": 1}]', "")):
             self.assertEqual(bm.run_gh(["x"]), [{"a": 1}])
 
     def test_non_zero_exit_raises_with_stderr(self) -> None:
         with (
-            unittest.mock.patch.object(
-                bm.subprocess, "run", return_value=self.completed(1, "", "boom")
-            ),
+            unittest.mock.patch.object(bm, "run_subprocess", return_value=(1, "", "boom")),
             self.assertRaisesRegex(bm.GhError, "boom"),
         ):
             bm.run_gh(["x"])
@@ -207,6 +198,28 @@ class RunGhTests(unittest.TestCase):
         run.assert_called_once_with(["api", "/users/o/settings/billing/usage?year=2026&month=03"])
 
 
+class CollectTests(unittest.TestCase):
+    def test_each_call_carries_its_repo_filter_and_limit(self) -> None:
+        with unittest.mock.patch.object(bm, "run_gh", return_value=[]) as run:
+            bm.collect("o", "alpha", datetime.date(2026, 1, 1))
+        calls = [call.args[0] for call in run.call_args_list]
+        joined = [" ".join(args) for args in calls]
+        self.assertEqual(len(calls), 5)
+        for args in calls:
+            self.assertIn("o/alpha", args)
+            self.assertIn("1000", args)
+        self.assertTrue(any("--search created:>=2026-01-01" in text for text in joined))
+        self.assertTrue(
+            any("--state closed --limit 1000 --search closed:>=2026-01-01" in t for t in joined)
+        )
+        self.assertTrue(
+            any("--state merged --search merged:>=2026-01-01" in text for text in joined)
+        )
+        self.assertTrue(any("--created >=2026-01-01" in text for text in joined))
+        self.assertTrue(any("--state open" in text and "--search" not in text for text in joined))
+        self.assertTrue(any(text.endswith("--json name") for text in joined))
+
+
 class MainTests(unittest.TestCase):
     def test_main_writes_the_report_to_stdout(self) -> None:
         def fake(args: list[str]) -> object:
@@ -215,7 +228,7 @@ class MainTests(unittest.TestCase):
             if args[0] == "issue":
                 return [issue("bug")]
             if args[0] == "run":
-                return [{"workflowName": "Running Copilot Code Review"}]
+                return [{"name": "Running Copilot Code Review"}]
             return [{"number": 1}]
 
         out = io.StringIO()
