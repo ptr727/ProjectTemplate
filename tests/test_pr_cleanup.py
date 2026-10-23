@@ -1336,5 +1336,12 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertIn("status=BAD_CHECKOUT", self.out.getvalue())
 
 
+class TestSizeCeiling(unittest.TestCase):
+    def test_the_cleanup_script_stays_under_its_ceiling(self) -> None:
+        """The cleanup contract is its own script and keeps a bound of its own."""
+        path = Path(__file__).resolve().parent.parent / "scripts" / "pr_cleanup.py"
+        self.assertLess(len(path.read_text(encoding="utf-8").splitlines()), 1200)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -77,6 +77,7 @@ BEFORE_FLAG = {
     "scripts/carry.py": ("check", "Example", "--target", "."),
     "scripts/handoff.py": ("current", "--repo", "Example/Example"),
     "scripts/local_review.py": ("status",),
+    "scripts/pr_cleanup.py": ("--repo", "Example/Example", "1"),
     "scripts/pr_review.py": ("--repo", "Example/Example", "status", "1"),
     "spec/resolve_description.py": ("registry/repos.json", "Example"),
 }
