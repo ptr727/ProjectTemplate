@@ -9966,6 +9966,18 @@ class TestCli(GqlCase):
                 self.assertNotIn(unsaid, out)
                 self.assertIn("status=AWAITING_LOCAL_PASS" if code else "coverage=local", out)
 
+    def test_an_attested_head_copilot_refused_is_not_called_covered(self) -> None:
+        """The refusal defeats the local cover, so the note matches the verdict rather than the attestation."""
+        self.answer(self.into(payload([review(body=REFUSED)]), attest=True))
+        self.wire_history([])
+        with mock.patch.object(pr_review.time, "sleep"):
+            code = self.cli(["wait", "7", "--ignore-quota-signal", "--timeout", "0"])
+        out = self.out.getvalue()
+        self.assertNotEqual(0, code)
+        self.assertIn("No attested local pass covers this head yet", out)
+        self.assertNotIn("its head is covered by an attested local pass", out)
+        self.assertNotIn("coverage=local", out)
+
     def test_status_reads_a_feature_pull_request_with_no_round_from_its_attestation(
         self,
     ) -> None:
