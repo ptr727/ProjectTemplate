@@ -75,7 +75,7 @@ _GH_REPO_POSITIONAL = frozenset({"edit", "delete", "rename", "archive", "unarchi
 _GH_BOOL_FLAGS = frozenset(
     {
         *("--admin", "--auto", "--squash", "--merge", "--rebase", "--delete-branch", "--draft"),
-        *("--fill", "--fill-first", "--fill-verbose", "--web", "--yes", "--approve", "--comment"),
+        *("--fill", "--fill-first", "--fill-verbose", "--web", "--yes", "--approve"),
         *("--request-changes", "--paginate", "--slurp", "--include", "--silent", "--verbose"),
         *("--edit-last", "--private", "--public", "--internal", "--clone", "--confirm", "--force"),
         *("--dry-run", "--latest", "--prerelease", "--generate-notes", "--disable-auto"),
@@ -1039,14 +1039,12 @@ def _gh_targets(g: _Gh, env: dict[str, str]) -> list[tuple[str, str | None]]:
         repos += g.positionals[1:2]
     out += [t for r in repos if (t := _repo_value(r))]
     out += [
-        (m.group(1).lower(), m.group(2).lower())
-        for p in g.positionals[:1]
-        if (m := _GH_URL.match(p))
+        (m.group(1).lower(), m.group(2).lower()) for p in g.positionals if (m := _GH_URL.match(p))
     ]
     out += [
         (v.lower(), None)
         for f, v in g.flags
-        if f in ("--org", "--owner", "-o") and v and not v.startswith(("$", "@"))
+        if f in ("--org", "--owner", "-o") and v and v != "@me" and not v.startswith("$")
     ]
     return out
 
@@ -1314,6 +1312,9 @@ _CASES: list[tuple[str, str, str]] = [
     ("gh variable set NAME -o stranger --body x", "deny", "R3"),
     ('gh repo edit -d "CI/CD helpers"', "allow", "R3"),
     ("gh issue close 5 --comment https://github.com/stranger/x/pull/9", "allow", "R3"),
+    ('gh issue close --comment "x" https://github.com/stranger/x/issues/5', "deny", "R3"),
+    ('gh pr close -c "x" https://github.com/stranger/x/pull/5', "deny", "R3"),
+    ("gh pr review 5 --comment -b looks-good", "allow", "R3"),
     ('gh issue comment 5 --repo "$TARGET" --body hi', "allow", "R3 run-time target"),
     ("gh issue comment 5 --body 'see --repo stranger/x'", "allow", "R3"),
     ("gh issue view 5 --repo stranger/x", "allow", "R3"),

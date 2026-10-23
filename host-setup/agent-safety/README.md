@@ -36,7 +36,7 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
    - an `-R`/`--repo` value in any of gh's spellings, read by the owner in `[HOST/]OWNER/REPO`
    - a `repos/<owner>/<repo>` endpoint on a `gh api` write
    - a `GH_REPO` value set before a write carrying no repo flag, in its prefix, earlier in the text, or in the session's environment
-   - a pull request or issue URL as its first argument
+   - a pull request or issue URL among its arguments
    - the repository a `gh repo` write such as `edit` or `delete` takes, and the destination of `gh issue transfer`
    - an `--org`, `--owner`, or `-o` value other than `@me`
 
