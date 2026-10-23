@@ -219,7 +219,7 @@ class TestTierTables(BaitCase):
         [(_, kind, message)] = prose_lint.check_file(path, {"charset-unknown"})
         self.assertEqual("charset-unknown", kind)
         self.assertIn('the comment-and-doc-style skill\'s "Character set" section', message)
-        self.assertIn("prose_lint.py's TIER1, TIER2, or TIER3 table", message)
+        self.assertIn("prose_lint.py's TIER1, TIER2, TIER3, or TIER4 table", message)
         self.assertIn("classify it in ptr727/ProjectTemplate:", message)
         self.assertNotIn("GOVERNANCE.md", message)
 
@@ -245,6 +245,85 @@ class TestTierTables(BaitCase):
             ["charset-unknown"],
             self.kinds("a \u271d here\n", {"charset", "charset-unknown"}),
         )
+
+    def test_a_callout_marker_is_admitted_alone_or_with_variation_selector_16(self) -> None:
+        """Tier 4 admits the documented emoji markers, each bare or followed by VARIATION SELECTOR-16."""
+        rules = {"charset", "charset-unknown"}
+        documented = {0x26A0, 0x2139, 0x2705, 0x274C, 0x1F4DD, 0x1F4A1}
+        self.assertEqual(documented, {ord(ch) for ch in prose_lint.TIER4})
+        for ch in prose_lint.TIER4:
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertEqual([], self.kinds(f"> {ch} **Note:** text\n", rules))
+                self.assertEqual([], self.kinds(f"> {ch}\ufe0f **Note:** text\n", rules))
+
+    def test_the_reported_warning_pair_is_admitted(self) -> None:
+        """The pair that rendered as a finding in the original report now passes."""
+        line = "> \u26a0\ufe0f **Warning:** Example callout.\n"
+        self.assertEqual([], self.kinds(line, {"charset", "charset-unknown"}))
+
+    def test_a_non_callout_emoji_is_still_reported_even_with_variation_selector_16(self) -> None:
+        """Only the fixed set is admitted, so any other emoji flags, selector or not."""
+        rules = {"charset", "charset-unknown"}
+        for ch in ("\U0001f680", "\u2764", "\u2728", "\u2603"):
+            with self.subTest(codepoint=f"U+{ord(ch):04X}"):
+                self.assertNotIn(ch, prose_lint.TIER4)
+                self.assertEqual(["charset-unknown"], self.kinds(f"a {ch} here\n", rules))
+                self.assertEqual(
+                    ["charset-unknown", "charset-unknown"],
+                    self.kinds(f"a {ch}\ufe0f here\n", rules),
+                )
+
+    def test_a_marker_opening_a_comment_or_line_is_not_a_lowercase_letter(self) -> None:
+        """U+2139 is category Ll, yet a marker opening a comment is no lowercase sentence start."""
+        info = chr(0x2139)
+        self.assertTrue(info.islower())
+        self.assertFalse(prose_lint.starts_lowercase(f"{info}\ufe0f Run setup first."))
+        self.assertTrue(prose_lint.starts_lowercase("run setup first."))
+
+    def test_a_marker_opening_a_line_is_no_continuation_or_lowercase_start(self) -> None:
+        """Each caller of the lowercase test treats a marker as a sentence start, end to end."""
+        info = chr(0x2139)
+        comment_rules = {"comment-wrap", "comment-case"}
+        for opener in (info, f"{info}\ufe0f"):
+            with self.subTest(opener=opener):
+                self.assertEqual(
+                    [],
+                    self.kinds(
+                        f"# A sentence that keeps\n# {opener} Run setup first.\n",
+                        comment_rules,
+                        "bait.py",
+                    ),
+                )
+                self.assertEqual(
+                    [], self.kinds(f"# {opener} Run setup first.\n", comment_rules, "bait.py")
+                )
+                self.assertEqual(
+                    [],
+                    self.kinds(
+                        f"A sentence that keeps\n{opener} Run setup first.\n", {"sentence-split"}
+                    ),
+                )
+        self.assertEqual(
+            ["comment-wrap"],
+            self.kinds("# A sentence that keeps\n# going on.\n", comment_rules, "bait.py"),
+        )
+        self.assertEqual(
+            ["sentence-split"],
+            self.kinds("A sentence that keeps\ngoing on.\n", {"sentence-split"}),
+        )
+
+    def test_a_stray_variation_selector_16_is_still_reported(self) -> None:
+        """The selector is admitted only directly after a marker, never alone or after a gap."""
+        rules = {"charset", "charset-unknown"}
+        marker = chr(0x26A0)
+        for text in (
+            "stray \ufe0f here",
+            f"{marker} \ufe0f here",
+            f"{marker}\ufe0f\ufe0f here",
+            "\ufe0f" + marker + " here",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset-unknown"], self.kinds(f"{text}\n", rules))
 
     def test_a_mark_that_spells_no_name_is_still_reported(self) -> None:
         """A mark that is no diacritic, or that no Latin letter carries, is reported, not passed."""
@@ -364,11 +443,22 @@ class TestCommentAndDocStyleSkillCoupling(unittest.TestCase):
                 self.assertNotIn(chr(cp), prose_lint.TIER1)
                 self.assertNotIn(chr(cp), prose_lint.TIER2)
 
+    def test_tier_four_markers_are_exactly_the_skill_text(self) -> None:
+        """The markers the rule text names, less the selector it admits, are the gate's set."""
+        m = re.search(r"^- \*\*Tier 4,(.*?)(?=^- \*\*)", self.section, re.MULTILINE | re.DOTALL)
+        if m is None:
+            self.fail("the Tier 4 bullet moved, so the parse is blind")
+        named = {int(h, 16) for h in re.findall(r"U\+([0-9A-Fa-f]{4,6})\b", m.group(1))}
+        named.discard(ord(prose_lint.VARIATION_SELECTOR_16))
+        self.assertEqual(named, {ord(ch) for ch in prose_lint.TIER4})
+
     def test_the_tiers_do_not_overlap(self) -> None:
         t1, t2, t3 = set(prose_lint.TIER1), set(prose_lint.TIER2), set(prose_lint.TIER3)
+        t4 = set(prose_lint.TIER4)
         self.assertEqual(set(), t1 & t2)
         self.assertEqual(set(), t1 & t3)
         self.assertEqual(set(), t2 & t3)
+        self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
 
 class TestDupword(BaitCase):

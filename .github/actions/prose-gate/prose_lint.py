@@ -3,7 +3,7 @@
 
 markdownlint, cspell, actionlint, and editorconfig-checker all pass on prose that breaks
 these rules, so nothing enforced them before this script. Rules implemented:
-  charset        Non-ASCII judged against the three tiers the charset rule defines.
+  charset        Non-ASCII judged against the tiers the charset rule defines, tier 4 being emoji markers.
   charset-unknown Non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics.
   semicolon      No semicolon in prose, outside a series or labeled pair carrying a comma.
   dash           No spaced hyphen joining or interrupting a sentence.
@@ -1087,10 +1087,16 @@ TIER3 = frozenset(
     }
 )
 
+# Tier 4 is a fixed set of emoji callout markers, each admitted alone or before VARIATION SELECTOR-16.
+# They are warning, information, check mark, cross mark, memo (note), and light bulb.
+# Every other emoji flags, and so does a selector not directly after one of these.
+TIER4 = frozenset({"\u26a0", "\u2139", "\u2705", "\u274c", "\U0001f4dd", "\U0001f4a1"})
+VARIATION_SELECTOR_16 = "\ufe0f"
+
 CHARSET_CLASSIFY = (
     "classify it in ptr727/ProjectTemplate:"
     ' the comment-and-doc-style skill\'s "Character set" section'
-    " and prose_lint.py's TIER1, TIER2, or TIER3 table"
+    " and prose_lint.py's TIER1, TIER2, TIER3, or TIER4 table"
 )
 
 COMBINING_DIACRITICS = frozenset(chr(c) for c in range(0x300, 0x370)) - {
@@ -2053,6 +2059,11 @@ def in_numeric_context(line: str, pos: int) -> bool:
     )
 
 
+def starts_lowercase(text: str) -> bool:
+    """Whether the text opens with a lowercase letter, a tier-4 marker being no letter."""
+    return text[:1].islower() and text[0] not in TIER4
+
+
 def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     """Every non-ASCII character on the line, judged against its tier.
 
@@ -2065,9 +2076,14 @@ def charset_findings(lineno: int, line: str) -> list[tuple[int, str, str]]:
     """
     out: list[tuple[int, str, str]] = []
     carrier = False
+    marker = False
     for pos, ch in enumerate(line):
+        after_marker, marker = marker, ch in TIER4
         if ch.isascii():
             carrier = ch.isalpha()
+            continue
+        if marker or (after_marker and ch == VARIATION_SELECTOR_16):
+            carrier = False
             continue
         name = unicodedata.name(ch, f"U+{ord(ch):04X}")
         category = unicodedata.category(ch)
@@ -2401,7 +2417,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
             and prev_body
             and not SENT_END.search(prev_body)
             and not SENT_END.search(prev_whole)
-            and body[:1].islower()
+            and starts_lowercase(body)
         )
         if continuation:
             out.append(
@@ -2415,7 +2431,7 @@ def comment_wrap_findings(path: Path, raw: str, lines: list[str]) -> list[tuple[
         # A label opening a definition is exempt, since the lowercase word is the name being defined.
         elif (
             leading
-            and body[:1].islower()
+            and starts_lowercase(body)
             and not COMMENT_LABEL.match(body)
             and not is_tool_directive(body)
         ):
@@ -3248,7 +3264,7 @@ def check_file(
                     p
                     and not SENT_END.search(p)
                     and not p.endswith((":", "-", "|"))
-                    and stripped[0].islower()
+                    and starts_lowercase(stripped)
                 ):
                     out.append(
                         (
