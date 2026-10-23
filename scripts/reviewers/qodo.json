@@ -1,0 +1,23 @@
+{
+  "login": "qodo-free-for-open-source-projects",
+  "vetted": false,
+  "format_marker": "",
+  "comment_heading": "<h3>\\s*Code Review by Qodo\\s*</h3>",
+  "refusal_openings": [],
+  "refusal_kinds": {"quota": [], "error": [], "file_count": []},
+  "rate_limit": [],
+  "verdicts": {"clean": [], "flagging": []},
+  "headings": [],
+  "sections": {
+    "open": ["\\d+\\. .+"],
+    "suppressed": [],
+    "previously_missed": [],
+    "vetted": []
+  },
+  "closed_badges": ["<code>[^<]*(?:\u2713 Resolved|\u2717 Dismissed)[^<]*</code>"],
+  "labels": [],
+  "finding_lists": [],
+  "effort": "",
+  "table_header": "",
+  "discussion_link": ""
+}

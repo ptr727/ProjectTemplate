@@ -1,0 +1,45 @@
+{
+  "login": "copilot-pull-request-reviewer",
+  "vetted": true,
+  "format_marker": "ccr-overview-v2",
+  "comment_heading": "",
+  "refusal_openings": ["wasn.t able to review", "was not able to review", "unable to review"],
+  "refusal_kinds": {
+    "quota": ["reached (?:their|its|his|her|your|my) quota limit"],
+    "error": ["encountered an error"],
+    "file_count": ["maximum number of files"]
+  },
+  "rate_limit": [],
+  "verdicts": {
+    "clean": ["approval recommended", "ready to approve"],
+    "flagging": [
+      "changes recommended",
+      "needs a closer look",
+      "not ready to approve",
+      "human review recommended"
+    ]
+  },
+  "headings": ["copilot review overview"],
+  "sections": {
+    "open": ["(?P<n>\\d+|no) open (?:findings?|issues?)", "open \\((?P<n>\\d+)\\)"],
+    "suppressed": [
+      "suppressed comments \\((?P<n>\\d+)\\)",
+      "comments suppressed due to low confidence \\((?P<n>\\d+)\\)"
+    ],
+    "previously_missed": [
+      "previously missed \\((?P<n>\\d+)\\)",
+      "(?P<n>\\d+) previously missed (?:findings?|issues?)"
+    ],
+    "vetted": [
+      "(?P<n>\\d+) resolved since last review",
+      "resolved since last review \\((?P<n>\\d+)\\)",
+      "what changed in this pr"
+    ]
+  },
+  "closed_badges": [],
+  "labels": ["changes:", "review findings:", "findings:", "open findings remain:"],
+  "finding_lists": ["review findings:", "open findings remain:"],
+  "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
+  "table_header": "file",
+  "discussion_link": "#discussion_r(?P<id>\\d+)$"
+}
