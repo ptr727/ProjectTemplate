@@ -181,7 +181,7 @@ since anyone can comment on a public issue. A comment counts as a round where on
 a round mark:
 
 ```sh
-gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | test("(^|\n)<!-- handoff-round: v1 [^>]*-->[ \t]*(\n|$)") | not)) | "\(.createdAt)\n\(.body)\n"'
+gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | test("(^|\n)<!--[ \t]*handoff-round:[ \t]*v1[ \t][^>]*-->[ \t\r]*(\n|$)") | not)) | "\(.createdAt)\n\(.body)\n"'
 ```
 
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
