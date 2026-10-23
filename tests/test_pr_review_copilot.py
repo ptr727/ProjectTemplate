@@ -209,6 +209,12 @@ class TestCoverage(unittest.TestCase):
             with self.subTest(text=text[60:120]):
                 self.assertEqual("none", adapter.read(text).coverage)
 
+    def test_a_count_opening_a_nested_resolved_entry_states_nothing(self) -> None:
+        entry = collapsed("2 resolved since last review", "Done.").replace(
+            "`src/example.py:12`", "Copilot reviewed 4 out of 4 changed files."
+        )
+        self.assertEqual("none", adapter.read(body(sections=entry)).coverage)
+
     def test_a_sentence_naming_the_count_midway_states_nothing(self) -> None:
         for text in (
             body(headline="The reader treats Copilot reviewed 1 of 2 changed files as partial."),

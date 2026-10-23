@@ -1,12 +1,12 @@
 """One GraphQL transport and one cursor walker, shared by the scripts that read through `gh`.
 
-This is a library module and has no command line. `pr_review.py` and `handoff.py` import it as a
-sibling, which works from any working directory because Python puts the running script's own
-directory on `sys.path`.
+This is a library module and has no command line. `pr_review.py`, `pr_cleanup.py`, and
+`handoff.py` import it as a sibling, which works from any working directory because Python puts
+the running script's own directory on `sys.path`.
 
 A failure raises `GraphQLError` and never exits. Each caller maps it to its own exit contract,
-since `pr_review.py` reports a failed read as exit 1 while `handoff.py` reserves 1 for a refusal
-and reports a read that did not run as 2. A transport that exited on its own would pick one of
+since `pr_review.py` reports a failed read as exit 1 while `pr_cleanup.py` and `handoff.py`
+reserve 1 for a refusal and report a read that did not run as 2. A transport that exited on its own would pick one of
 those for both.
 """
 

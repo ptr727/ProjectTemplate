@@ -367,7 +367,8 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 notes.append(f"a collapsed section this reader has no spelling for: `{name}`")
             continue
         claimed.append((node.start, end + 1))
-        if kind != "vetted":
+        # A section counting its entries, resolved ones included, holds findings rather than a statement.
+        if kind != "vetted" or match.groupdict().get("n") is not None:
             counted.append((node.start, end + 1))
         if kind == "vetted" or any(p.search(summary) for p in vocab["closed_badges"]):
             continue
