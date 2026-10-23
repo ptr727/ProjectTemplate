@@ -137,7 +137,7 @@ One pull request deciding what the `hugo` type says about a theme, which it decl
   - **Settled** - Three details the intake predicted are wrong against what Blog runs, so planning from the prediction encodes requirements the repo does not meet: the theme is vendored with no recorded upstream ref rather than a Dependabot-tracked submodule, the generator is pinned by version and hash rather than run at latest, and the deploy is a separate dispatch rather than a tag cut last after the live check.
   - **Settled** - What held is that the deploy is a publish, the type is named for the generator with the generic checks phrased so they do not name it, and the URL parity gate asserting a floor on the golden list length before comparing is the check of record.
   - **Settled** - Promoting the generator-agnostic `hugo` checks to a shared type when a second generator arrives is a registry edit by construction, per [`spec/type-model.md`][type-model] "Generators".
-  - **Settled** - The `copilot_code_review` rule in both ruleset payloads gates no merge today, because gated Copilot review is an invite-only beta, which deserves a sentence near the merge gate so no repo reads the rule as the enforcement and relaxes the manual discipline holding the line.
+  - **Settled** - The `copilot_code_review` rule gates no merge today, because gated Copilot review is an invite-only beta, which deserves a sentence near the merge gate so no repo reads the rule as the enforcement and relaxes the manual discipline holding the line.
 
 ### Locally Required Secrets
 

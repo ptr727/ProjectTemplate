@@ -9344,22 +9344,33 @@ class TestCli(GqlCase):
         self.assertEqual(45, self.cli(["status", "7"]))
         self.assertIn("status=COVERAGE_IS_UNSTATED", self.out.getvalue())
 
-    def test_an_attested_head_the_first_round_landed_on_stays_unstated(self) -> None:
-        """A first round's own head is no fix push, so its attestation gives `status` no cover."""
+    def test_an_attested_head_beside_its_only_round_is_covered_on_a_feature_pull_request(
+        self,
+    ) -> None:
+        """A table-less round on the head reads the attestation, whether or not it is the first."""
         self.answer(self.into(payload([review(body=OVERVIEW)], files=["a.md"]), attest=True))
+        self.assertEqual(0, self.cli(["status", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("review_on_head=yes", out)
+        self.assertIn("coverage=local", out)
+        self.assertNotIn("COVERAGE_IS_UNSTATED", out)
+
+    def test_the_same_head_on_a_promotion_stays_unstated(self) -> None:
+        """A promotion keeps its own Copilot round, so its attestation gives `status` no cover."""
+        pr = self.into(payload([review(body=OVERVIEW)], files=["a.md"]), base="main", attest=True)
+        self.answer(pr)
         self.assertEqual(45, self.cli(["status", "7"]))
         out = self.out.getvalue()
-        self.assertIn("coverage=unstated", out)
         self.assertIn("status=COVERAGE_IS_UNSTATED", out)
         self.assertNotIn("coverage=local", out)
 
-    def test_an_attested_head_the_first_round_landed_on_is_not_held(self) -> None:
-        """Waiting for a second round on that head requests one rather than holding for a pass."""
+    def test_a_second_round_on_a_feature_pull_request_is_not_requested(self) -> None:
+        """Waiting for a second round holds for the local pass rather than requesting one."""
         self.answer(self.into(payload([review(body=OVERVIEW)], files=["a.md"]), attest=True))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.cli(["wait", "7", "--timeout", "0", "--min-rounds", "2"])
-        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
     def test_an_attested_head_beside_a_round_whose_table_skips_a_file_is_not_covered(self) -> None:
         """A table naming fewer files than the diff is the round's own word that it skipped one."""
@@ -9935,11 +9946,44 @@ class TestCli(GqlCase):
             self.cli(["wait", "7", "--timeout", "0", "--request"])
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
-    def test_a_promotion_and_a_first_round_are_still_requested(self) -> None:
+    def test_a_feature_pull_request_with_no_round_is_never_requested(self) -> None:
+        """Into a branch other than the default, the attested local pass alone covers the head."""
+        for attest, code, said in (
+            (False, 49, "status=AWAITING_LOCAL_PASS"),
+            (True, 0, "coverage=local"),
+        ):
+            with self.subTest(attest=attest):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(self.into(payload([]), attest=attest))
+                calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
+                self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+                self.assertIn(said, self.out.getvalue())
+
+    def test_status_reads_a_feature_pull_request_with_no_round_from_its_attestation(
+        self,
+    ) -> None:
+        self.answer(self.into(payload([]), attest=True))
+        self.assertEqual(0, self.cli(["status", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("review_on_head=local", out)
+        self.assertIn("coverage=local", out)
+        self.assertIn("COVERAGE IS READ FROM THE LOCAL PASS", out)
+
+    def test_status_reads_no_local_cover_on_a_promotion_with_no_round(self) -> None:
+        self.answer(self.into(payload([]), base="main", attest=True))
+        self.assertEqual(0, self.cli(["status", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("review_on_head=NO", out)
+        self.assertNotIn("coverage=local", out)
+
+    def test_a_promotion_is_still_requested(self) -> None:
         for name, pr in (
-            ("promotion", self.into(payload([review(oid=OLD)]), base="main", attest=True)),
-            ("first round", self.into(payload([]))),
-            ("attested first round", self.into(payload([]), attest=True)),
+            ("earlier round", self.into(payload([review(oid=OLD)]), base="main", attest=True)),
+            ("no round", self.into(payload([]), base="main")),
+            ("attested, no round", self.into(payload([]), base="main", attest=True)),
         ):
             with self.subTest(case=name):
                 self.out.seek(0)
@@ -12141,7 +12185,7 @@ class TestAttest(unittest.TestCase):
 
 
 class TestAttestationReadings(unittest.TestCase):
-    """What the gate reads an attestation, a promotion, and a first round from."""
+    """What the gate reads an attestation, a promotion, and a hold from."""
 
     def comment(self, body: str, association: str = "OWNER") -> dict:
         return {"body": body, "authorAssociation": association, "author": {"login": "someone"}}
@@ -12194,19 +12238,19 @@ class TestAttestationReadings(unittest.TestCase):
                 }
                 self.assertIs(expected, pr_review.promotion(pr))
 
-    def test_only_a_genuine_round_on_an_earlier_head_comes_before_it(self) -> None:
-        self.assertFalse(pr_review.round_before_head(payload([review(oid=OLD, body=REFUSED)])))
-        self.assertTrue(pr_review.round_before_head(payload([review(oid=OLD)])))
-        self.assertFalse(pr_review.round_before_head(payload([review()])))
-        self.assertFalse(pr_review.round_before_head(payload([])))
-        unnamed = review(oid=OLD)
-        unnamed["commit"] = None
-        self.assertFalse(pr_review.round_before_head(payload([unnamed])))
-        for head in (None, ""):
-            with self.subTest(head=head):
-                unreadable = payload([review(oid=OLD)])
-                unreadable["headRefOid"] = head
-                self.assertFalse(pr_review.round_before_head(unreadable))
+    def test_the_base_branch_alone_decides_the_hold_and_the_local_cover(self) -> None:
+        """No Copilot round is needed first, so an attested head with none is covered off main."""
+        marker = f"<!-- fleet-local-review: head={HEAD} base=develop findings=0 -->"
+        for base, expected in (("develop", True), ("main", False)):
+            with self.subTest(base=base):
+                pr = {
+                    **payload([]),
+                    "baseRefName": base,
+                    "baseRepository": {"defaultBranchRef": {"name": "main"}},
+                    "comments": {"nodes": [self.comment(marker.replace("develop", base))]},
+                }
+                self.assertIs(expected, pr_review.holds(pr))
+                self.assertIs(expected, pr_review.local_cover(pr))
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
