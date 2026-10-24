@@ -1354,7 +1354,7 @@ def coverage(pr: dict) -> tuple[str, str]:
         return worst
     if rounds and partial_on_record(pr):
         none = (
-            "the head states no reading this can rely on"
+            "a round on the head states a reading this cannot believe"
             if worst
             else "no round on the head states any"
         )

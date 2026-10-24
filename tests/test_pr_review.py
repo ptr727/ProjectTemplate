@@ -2013,7 +2013,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         out = self.out.getvalue()
         self.assertIn("coverage=PARTIAL ", out)
         self.assertNotIn("coverage=UNKNOWN", out)
-        self.assertIn("the head states no reading this can rely on", out)
+        self.assertIn("a round on the head states a reading this cannot believe", out)
 
     def test_a_head_stating_full_still_beats_an_earlier_partial(self) -> None:
         part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
