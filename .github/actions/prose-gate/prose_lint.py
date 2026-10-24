@@ -696,8 +696,8 @@ def split_heredocs(text: str) -> list[tuple[int, str]]:
     """
     code, bodies, pos = list(text), [], 0
     while m := HEREDOC_OPEN.search(text, pos):
-        prefix = text[text.rfind("\n", 0, m.start()) + 1 : m.start()]
-        if prefix.count('"') % 2 or "((" in prefix:
+        prefix = "".join(code[: m.start()])
+        if prefix.count('"') % 2 or "((" in prefix[prefix.rfind("\n") + 1 :]:
             # A shift or a quoted `<<WORD` is no heredoc, and reading it as one unbalances a quote.
             pos = m.end()
             continue
@@ -873,15 +873,16 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     out: list[Line] = []
     number, col = (tok.map or [0, 1])[0] + 1, 0
     for child in tok.children or ():
-        if child.type == "code_inline":
+        if child.type == "code_inline" and child.content.split():
             # A span holding a comment's own text must not be where that comment is found.
-            # Its content joins a wrapped span's lines, so only the first word is searched for.
-            head = child.content.split()[0]
-            for n in range(number, (tok.map or [0, 1])[1] + 1):
-                at = lines[n - 1].find(head, col if n == number else 0)
-                if at >= 0:
-                    number, col = n, at + len(head)
-                    break
+            # Its content joins a wrapped span's lines, so its first and last words are searched.
+            words = child.content.split()
+            for word in (words[0], words[-1]):
+                for n in range(number, (tok.map or [0, 1])[1] + 1):
+                    at = lines[n - 1].find(word, col if n == number else 0)
+                    if at >= 0:
+                        number, col = n, at + len(word)
+                        break
         if child.type == "html_inline" and child.content.startswith("<!--"):
             # The source line is found by the comment's own text, searched on from the last one.
             head = child.content.split("\n")[0]
