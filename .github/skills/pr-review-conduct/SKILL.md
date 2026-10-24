@@ -46,8 +46,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    re-review lands, and the matched review is **read**, not just counted. A review can carry the
    head SHA and still decline the PR outright, or say it read only part of the changed files.
    `pr_review.py` reads coverage into the digest's `coverage=` field, and only partial coverage
-   is an exit code, `42`. That is a head round stating partial, or an earlier round stating partial
-   where no head round states full. A round covering the head that states full coverage satisfies
+   is an exit code, `42`. That is a head round stating partial, or a head round reading `UNKNOWN`
+   beside an earlier partial round. So is a head with rounds, none stating coverage, beside one.
+   A round covering the head that states full coverage satisfies
    this item. Where none states any, a round covering the head whose own file table names exactly the
    changed files covers it, `coverage=table`, the reading a Copilot round at Balanced review
    effort gives. Where no round covering the head carries a table of its own, the newest round
