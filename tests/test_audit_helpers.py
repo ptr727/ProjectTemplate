@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import inspect
 import io
@@ -4399,6 +4400,67 @@ class RegistryCase(unittest.TestCase):
         self.assertEqual(verbatim, [("DRIFT", "AGENTS.md section 'Pinned'")])
         with mock.patch.object(audit, "hub_repo_name", lambda: "acme-hub"):
             self.assertEqual(audit.check_carried_template_ref(run, "AGENTS.md"), [])
+
+    def test_the_hub_run_skips_only_the_hub_false_checks(self) -> None:
+        seen: list[str] = []
+
+        def recorder(check: dict[str, Any]) -> Callable[..., list[Any]]:
+            def run_check(run: Any, *path: str) -> list[Any]:
+                seen.append(check["id"])
+                if check["scope"] == "baseline":
+                    run.content[path[0]] = ""
+                return []
+
+            return run_check
+
+        head = {"commit": {"sha": "c0ffee", "commit": {"tree": {"sha": "t"}}}}
+
+        def gh(path: str, ok404: bool = False) -> Any:
+            return {"private": False} if path == "repos/acme/Hub" else head
+
+        entry = {"name": "Hub", "url": "https://github.com/acme/Hub", "types": ["docs"]}
+        spec = {"registry": {"defaults": {}}, "files": {"baseline": [{"path": "AGENTS.md"}]}}
+        with (
+            mock.patch.object(audit, "gh", gh),
+            mock.patch.object(audit, "hub_repo_name", lambda: "Hub"),
+            mock.patch.object(audit, "check_function", recorder),
+        ):
+            audit.audit_repo(entry, spec)
+        skipped = {
+            "sections.undeclared",
+            "carried.template-ref",
+            "tree.verbatim",
+            "hubonly.carried",
+        }
+        self.assertEqual(skipped & set(seen), set())
+        self.assertIn("carried.version-literal", seen)
+        self.assertEqual(seen[-1], "registry.driftnotes")
+
+    def test_an_unparsed_dependabot_file_is_one_finding(self) -> None:
+        run = audit.Run({"name": "Widget"}, {}, "o/r", "main", {}, None, None)
+        bad = {"encoding": "base64", "content": base64.b64encode(b"updates:\n  - [\n").decode()}
+
+        def gh(path: str, ok404: bool = False) -> Any:
+            return bad if path.endswith("dependabot.yml?ref=main") else None
+
+        with mock.patch.object(audit, "gh", gh):
+            got = audit.check_dependabot_ecosystems(run)
+        want = "dependabot: .github/dependabot.yml does not parse as YAML, so its ecosystems are unread"
+        self.assertEqual(got, [("DRIFT", want)])
+
+    def test_a_schedule_trigger_reads_in_each_on_shape(self) -> None:
+        job = (
+            "jobs:\n  publish:\n    uses: acme/hub/.github/workflows/build-release-task.yml@x\n"
+            "    if: ${{ github.event_name == 'workflow_dispatch' }}\n"
+        )
+        for on, want in (
+            ("on: [schedule, workflow_dispatch]\n", True),
+            ("on: schedule\n", True),
+            ("on: [schedule, push]\n", False),
+        ):
+            with self.subTest(on):
+                doc = audit.yaml.safe_load(on + job)
+                self.assertEqual(audit._schedule_never_publishes(doc), want)
 
     def test_the_driftnote_check_runs_last(self) -> None:
         # It counts the findings before it, so a check registered after it would go uncounted.
