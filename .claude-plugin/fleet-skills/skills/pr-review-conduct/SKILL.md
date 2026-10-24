@@ -45,8 +45,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    by commit SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
    re-review lands, and the matched review is **read**, not just counted. A review can carry the
    head SHA and still decline the PR outright, or say it read only part of the changed files.
-   `pr_review.py` reads coverage into the digest's `coverage=` field, and only a stated partial
-   is an exit code, `42`. A round covering the head that states full coverage satisfies this
+   `pr_review.py` reads coverage into the digest's `coverage=` field, and only partial coverage
+   is an exit code, `42`. That covers a round on the head stating partial, and one stating none or
+   reading `UNKNOWN` beside an earlier round stating partial. A round covering the head that states full coverage satisfies this
    item. Where none states any, a round covering the head whose own file table names exactly the
    changed files covers it, `coverage=table`, the reading a Copilot round at Balanced review
    effort gives. Where no round covering the head carries a table of its own, the newest round
