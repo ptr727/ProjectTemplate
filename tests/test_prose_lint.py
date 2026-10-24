@@ -1159,6 +1159,11 @@ class TestCommentWrapRule(BaitCase):
         ):
             self.assertEqual([text.count("\n")], [c[0] for c in self.comments("a.md", text)])
 
+    def test_a_one_word_code_span_is_not_searched_twice(self) -> None:
+        """A second search for the word found it inside the comment and pushed the column past it."""
+        found = self.comments("a.md", "Run `fix` <!-- fix this. -->\n")
+        self.assertEqual([(1, "fix this.", False)], found)
+
     def test_an_inline_code_span_holding_a_comment_text_is_not_its_line(self) -> None:
         """The search for the comment stopped on the code span's line, one line too early."""
         text = "Write `<!-- check this later. -->` here,\nthen <!-- check this later. -->\n"

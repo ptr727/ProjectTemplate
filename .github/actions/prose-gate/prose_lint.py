@@ -877,7 +877,7 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
             # A span holding a comment's own text must not be where that comment is found.
             # Its content joins a wrapped span's lines, so its first and last words are searched.
             words = child.content.split()
-            for word in (words[0], words[-1]):
+            for word in words[:1] + words[-1:] * (len(words) > 1):
                 for n in range(number, (tok.map or [0, 1])[1] + 1):
                     at = lines[n - 1].find(word, col if n == number else 0)
                     if at >= 0:
