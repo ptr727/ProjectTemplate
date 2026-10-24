@@ -599,6 +599,17 @@ class ForbiddenTokenCase(unittest.TestCase):
 class SplitJobsCase(unittest.TestCase):
     """Holds the split_jobs edge cases."""
 
+    def test_a_sibling_key_ends_the_last_job(self) -> None:
+        text = "jobs:\n  a:\n    runs-on: x\n\n  b:\n    runs-on: y\nenv:\n  K: v\n"
+        self.assertEqual(
+            audit.split_jobs(text), {"a": "  a:\n    runs-on: x\n\n", "b": "  b:\n    runs-on: y\n"}
+        )
+
+    def test_the_last_job_keeps_a_final_line_with_no_newline(self) -> None:
+        self.assertEqual(
+            audit.split_jobs("jobs:\n  a:\n    runs-on: x"), {"a": "  a:\n    runs-on: x"}
+        )
+
     def test_trailing_comment(self) -> None:
         trailing = audit.split_jobs(REL_OK + "# a trailing top-level comment\n")
         self.assertEqual(set(trailing), {"get-version", "build-widget", "github-release"})
@@ -1383,8 +1394,10 @@ class RenderCase(unittest.TestCase):
         self.assertEqual(
             audit_markdown.strip_md_links("Plain intro line."), "Plain intro line.", msg
         )
-        padded = "Runs ` make ` targets with ``a `b` c``."
+        padded = "Runs ` make ` targets with `` `b` ``."
         self.assertEqual(audit_markdown.strip_md_links(padded), padded, msg)
+        linked_span = padded + " See [docs](u)."
+        self.assertEqual(audit_markdown.strip_md_links(linked_span), padded + " See docs.", msg)
         imaged = "Cleans media ![ci](https://img.example/b.svg) fast."
         self.assertEqual(audit_markdown.strip_md_links(imaged), "Cleans media ci fast.", msg)
         self.assertEqual(audit_markdown.strip_md_links(nested), "See API [docs] for details.", msg)
@@ -4367,6 +4380,25 @@ class RegistryCase(unittest.TestCase):
         )
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
+
+    def test_only_these_checks_skip_the_hub(self) -> None:
+        skipped = {c["id"] for c in audit.registered_checks() if not c["hub"]}
+        want = {"sections.undeclared", "carried.template-ref", "tree.verbatim", "hubonly.carried"}
+        self.assertEqual(skipped, want)
+
+    def test_file_checks_read_their_own_baseline_slots(self) -> None:
+        run = audit.Run({"name": "Widget"}, {}, "o/r", "main", {}, None, None)
+        run.__dict__["hub"] = False
+        run.__dict__["baseline"] = {"AGENTS.md": (None, {"Absent"}, {"Pinned"})}
+        run.content["AGENTS.md"] = "## Pinned\n\nacme-hub\n"
+        presence = audit.check_sections_presence(run, "AGENTS.md")
+        self.assertEqual(len(presence), 1)
+        self.assertIn("'Absent'", presence[0][1])
+        with mock.patch.object(audit, "check_verbatim", lambda label, *_, **__: [("DRIFT", label)]):
+            verbatim = audit.check_sections_verbatim(run, "AGENTS.md")
+        self.assertEqual(verbatim, [("DRIFT", "AGENTS.md section 'Pinned'")])
+        with mock.patch.object(audit, "hub_repo_name", lambda: "acme-hub"):
+            self.assertEqual(audit.check_carried_template_ref(run, "AGENTS.md"), [])
 
     def test_the_driftnote_check_runs_last(self) -> None:
         # It counts the findings before it, so a check registered after it would go uncounted.

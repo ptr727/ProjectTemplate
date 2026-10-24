@@ -946,9 +946,8 @@ class IncludeCase(TreeCase):
     def test_importing_this_module_does_not_import_carried_text(self) -> None:
         """The laziness `scripts/skills_install.py` depends on, which caching must not give up.
 
-        It imports this module on hosts whose Python predates what the spec scripts need, and installing
-        never fills a region, so importing `carried_text` at module scope would break that path. Run in a
-        fresh interpreter because this test process has already imported it by other means.
+        It imports this module and installing never fills a region, so the install path loads nothing
+        from spec/. Run in a fresh interpreter because this test process has already imported it by other means.
 
         The measurement is the delta across the import rather than the child's absolute state, since
         a `sitecustomize` or `usercustomize` hook runs before `-c` does and could import a module of

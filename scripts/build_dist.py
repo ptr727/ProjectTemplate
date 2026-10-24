@@ -194,8 +194,8 @@ _MAX_INDENT = 3
 def _carried_text():
     """spec/carried_text.py, imported on first use rather than at module import, then held.
 
-    Imported lazily because scripts/skills_install.py imports this module on hosts whose Python
-    predates what the spec scripts need, and installing never fills a region. Held because the caller
+    Imported lazily because scripts/skills_install.py imports this module and installing never
+    fills a region, so the install path loads nothing from spec/. Held because the caller
     below reaches for it once per line, and re-resolving it there costs a sys.path scan and a
     sys.modules lookup every time: one pass over the 24 authored skills, 4644 lines across the 40
     Markdown files they comprise, measured warm in one process, best of five, costs 17.5 ms

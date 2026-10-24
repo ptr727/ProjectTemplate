@@ -72,12 +72,16 @@ def strip_md_links(text, references=None):
     tokens = _MD.parseInline(text, {"references": dict(references or {})})[0].children or []
     if not any(tok.type in ("link_open", "image") for tok in tokens):
         return text
-    out = []
+    out, pos = [], 0
     for tok in tokens:
         if tok.type in ("text", "html_inline", "image"):
             out.append(tok.content)
         elif tok.type == "code_inline":
-            out.append(tok.markup + tok.content + tok.markup)
+            # The parser trims a code span's padding, so the span is taken from the source as written.
+            fence = re.escape(tok.markup)
+            span = re.compile(f"{fence} ?{re.escape(tok.content)} ?{fence}").search(text, pos)
+            out.append(span.group(0) if span else tok.markup + tok.content + tok.markup)
+            pos = span.end() if span else pos
         elif tok.type == "softbreak":
             out.append("\n")
         elif tok.type not in ("link_open", "link_close"):
