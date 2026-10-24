@@ -45,7 +45,7 @@ from audit_markdown import (
     title_and_intro,
     undeclared_h2_headings,
 )
-from carried_text import extract_section, normalize, strip_sections
+from fidelity_text import extract_section, normalize, strip_sections
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 

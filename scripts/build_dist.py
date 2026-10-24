@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4"]
+# ///
 """Generate the GitHub and Claude-compatible copies of .agents/skills/.
 
 .agents/skills/ is the one hand-authored source: Codex and opencode read it directly with no
@@ -18,15 +22,13 @@ script walks, which is the Markdown under each .agents/skills/<name>/ directory 
 plus the files INCLUDE_DESTINATIONS declares, which is how a surface the walk would otherwise miss
 stops restating a rule by hand.
 
-Usage: python3 scripts/build_dist.py           fill include regions, then regenerate distributions
-       python3 scripts/build_dist.py --check   read-only: exit 0 clean, 1 stale, 2 on a real
-                                                 failure (a symlink under .agents/skills/, an
-                                                 unreadable file, an include region it cannot
-                                                 render, an INCLUDE_DESTINATIONS entry that is
-                                                 stale, carried, or measured against a manifest it
-                                                 cannot read), so a caller reading the exit code can
-                                                 tell a finding apart from the check itself not
-                                                 having run.
+Usage: uv run --no-project --script scripts/build_dist.py [--check]
+
+With no flag it fills include regions, then regenerates the distributions. --check is read-only:
+exit 0 clean, 1 stale, 2 on a real failure (a symlink under .agents/skills/, an unreadable file,
+an include region it cannot render, an INCLUDE_DESTINATIONS entry that is stale, carried, or
+measured against a manifest it cannot read), so a caller reading the exit code can tell a finding
+apart from the check itself not having run.
 """
 
 from __future__ import annotations
@@ -180,10 +182,7 @@ _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
 # A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too, and on any run of dashes so the three-dash opener a hand types on both markers is caught rather than read as content.
 _INCLUDE_LIKE = re.compile(r"^<!--+\s*/?\s*include\b", re.IGNORECASE)
-# Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
-_HEADING = re.compile(r"^(#{1,6})\s+(?P<text>\S.*?)\s*$")
-# CommonMark's own bound for a fence, so a marker sitting in an indented code block is content here the way it is there.
-# A heading is matched at any indentation instead, the way spec/carried_text.py and canonical_review.py read one, so the three tools split a document alike.
+# CommonMark's own bound for a block, so a marker line indented past it is content, as an indented code block or a paragraph's continuation is.
 _MAX_INDENT = 3
 
 
@@ -191,34 +190,28 @@ _MAX_INDENT = 3
 # The module scripts/skills_install.py imports this one at module scope, and host-setup/*/install-skills.* and scripts/skills_install.sh each commit to Python 3.7+, because that path runs before the fleet's own toolchain exists to install a newer interpreter.
 # So functools.cache here would raise AttributeError at import on 3.7 and 3.8, breaking the one path that has to survive an old host, and spec/host-tools.json's python3 entry records that 3.7 floor and why it sits below the fleet's own.
 @functools.lru_cache(maxsize=None)  # noqa: UP033
-def _carried_text():
-    """spec/carried_text.py, imported on first use rather than at module import, then held.
+def _fidelity_text():
+    """spec/fidelity_text.py, imported on first use rather than at module import, then held.
 
-    Imported lazily because scripts/skills_install.py imports this module and installing never
-    fills a region, so the install path loads nothing from spec/. Held because the caller
-    below reaches for it once per line, and re-resolving it there costs a sys.path scan and a
-    sys.modules lookup every time: one pass over the 24 authored skills, 4644 lines across the 40
-    Markdown files they comprise, measured warm in one process, best of five, costs 17.5 ms
-    re-resolved against 0.9 ms held, where calling it directly costs 0.7 ms. One --check run
-    makes 18708 of these calls, four times that corpus, because it scans the authored tree and
-    both generated trees, and it runs on every pull request. The cache sits here rather than on
-    _fence_step, whose arguments vary per line and would make one unbounded.
+    Imported lazily because scripts/skills_install.py imports this module under a plain python3,
+    where markdown-it-py may be absent, and installing never fills a region. So the install path
+    loads nothing from spec/ and no third-party library.
     """
     spec = str(ROOT / "spec")
     if spec not in sys.path:
         sys.path.insert(0, spec)
-    import carried_text
+    import fidelity_text
 
-    return carried_text
+    return fidelity_text
 
 
-def _fence_step(line, marker, marker_len):
-    """spec/carried_text.py's fence reading.
+def _code_lines(lines):
+    """The indexes of `lines` inside a code block, read by spec/fidelity_text.py.
 
     One reading of CommonMark across the fidelity checks, the review ledger, and this generator,
     rather than a second one here that could disagree with them.
     """
-    return _carried_text().fence_step(line, marker, marker_len)
+    return _fidelity_text().code_lines("\n".join(lines))
 
 
 def _lf(text):
@@ -245,13 +238,13 @@ def _read_lines(path):
 
 
 def _unindented(line):
-    """The line's text when it sits within CommonMark's three-space bound, else None, since deeper is an indented code block."""
+    """The line's text when it sits within CommonMark's three-space bound, else None, since deeper is code or a paragraph's continuation."""
     stripped = line.lstrip(" ")
     return stripped.rstrip() if len(line) - len(stripped) <= _MAX_INDENT else None
 
 
-def _marker(line, marker, marker_len, where):
-    """One line's marker match under fence state: `(state, start_match, end_match)`, both None inside a fence.
+def _marker(line, in_code, where):
+    """One line's marker match: `(start_match, end_match)`, both None for a line inside a code block.
 
     A marker shown inside a code sample, which is how the skill-lifecycle skill documents the
     syntax, is content rather than a region boundary, whether the sample is fenced or indented.
@@ -259,17 +252,16 @@ def _marker(line, marker, marker_len, where):
     than read as content, since content is exactly what leaves a region unfilled while --check
     exits 0, and `where` names the file and line the refusal reports.
     """
-    marker, marker_len, boundary = _fence_step(line, marker, marker_len)
-    text = None if boundary or marker is not None else _unindented(line)
+    text = None if in_code else _unindented(line)
     if text is None:
-        return (marker, marker_len), None, None
+        return None, None
     opens, closes = _INCLUDE_START.match(text), _INCLUDE_END.match(text)
     if opens is None and closes is None and _INCLUDE_LIKE.match(text):
         raise ValueError(
             f"{where}: {text!r} begins like an include marker and matches neither form,"
             " so it would be read as content and leave a region unfilled"
         )
-    return (marker, marker_len), opens, closes
+    return opens, closes
 
 
 def _exact_case(rel, parts):
@@ -318,24 +310,17 @@ def heading_body(lines, heading, key):
     """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
-    a section of a sibling skill with one vocabulary. Matched the way spec/carried_text.py matches a
-    declared section, on the parsed text case-folded and at any indentation, so a re-cased heading
-    still resolves and the two split a document alike. Two matches are two answers to one
-    question, refused rather than resolved to the first, and a heading inside a fenced code block
-    is content.
+    a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py, the
+    reading the fidelity checks use, and match on the parsed text case-folded, so a re-cased heading
+    still resolves and the two split a document alike. Two matches are two answers to one question,
+    refused rather than resolved to the first, and a heading inside a code block is content.
     """
     want = heading.strip().lower()
-    headings = []
-    state = (None, 0)
-    for index, line in enumerate(lines):
-        state_marker, state_len, boundary = _fence_step(line, *state)
-        state = (state_marker, state_len)
-        if boundary or state_marker is not None:
-            continue
-        m = _HEADING.match(line.strip())
-        if m:
-            headings.append((index, len(m.group(1)), m.group("text").strip().lower()))
-    matches = [(index, depth) for index, depth, text in headings if text == want and depth > 1]
+    reader = _fidelity_text()
+    text = "\n".join(lines)
+    # Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
+    headings = [(h.line, h.level, h.text.lower()) for h in reader.headings(text)]
+    matches = [(index, depth) for index, depth, name in headings if name == want and depth > 1]
     if not matches:
         raise ValueError(f"include {key!r}: no heading {heading.strip()!r} in its source")
     if len(matches) > 1:
@@ -346,29 +331,27 @@ def heading_body(lines, heading, key):
     end = next(
         (index for index, level, _ in headings if index > start and level <= depth), len(lines)
     )
+    blocks = [b for b in reader.code_blocks(text) if start < b.start < end]
+    if any(b.fenced and not b.closed for b in blocks):
+        # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
+        raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
+    code = {line for b in blocks for line in range(b.start, b.end)}
     # The source's own region markers belong to its regions, not to the text they enclose.
     # A copied marker would open a region inside the one being filled on the next scan.
     # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own, and two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.
-    # Inside a fence a doubled blank is the sample's own text, so it stays.
-    # An indented code block has no closing line to track, so the last text line's indentation stands in for its state, erring toward keeping a blank.
+    # Inside a code block a doubled blank is the sample's own text, so it stays.
     body = []
-    state = (None, 0)
-    indented = False
-    for number, line in enumerate(lines[start + 1 : end], start + 2):
-        state, opens, closes = _marker(line, *state, f"include {key!r} source line {number}")
+    for index in range(start + 1, end):
+        line = lines[index]
+        opens, closes = _marker(line, index in code, f"include {key!r} source line {index + 1}")
         blank = not line.strip()
-        if not blank:
-            indented = _unindented(line) is None
-        doubled = state[0] is None and not indented and blank and body and not body[-1].strip()
+        doubled = index not in code and blank and body and not body[-1].strip()
         if opens is None and closes is None and not doubled:
             body.append(line)
     while body and not body[0].strip():
         body.pop(0)
     while body and not body[-1].strip():
         body.pop()
-    if state[0] is not None:
-        # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
-        raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
     if not body:
         # Rendering nothing would leave two blank lines between the markers, which markdownlint refuses in a file nobody may hand-edit.
         raise ValueError(
@@ -401,11 +384,11 @@ def filled_lines(rel, stack=()):
     lines, newline, mixed = _read_lines(path)
     out = []
     has_regions = False
-    state = (None, 0)
+    code = _code_lines(lines)
     index = 0
     while index < len(lines):
         line = lines[index]
-        state, opens, closes = _marker(line, *state, f"{rel}:{index + 1}")
+        opens, closes = _marker(line, index in code, f"{rel}:{index + 1}")
         if closes is not None:
             raise ValueError(f"{rel}:{index + 1}: an include end marker with no region open")
         if opens is None:
@@ -426,9 +409,8 @@ def filled_lines(rel, stack=()):
             )
         key = opens.group("key")
         end = None
-        inner = (None, 0)
         for probe in range(index + 1, len(lines)):
-            inner, nested, closing = _marker(lines[probe], *inner, f"{rel}:{probe + 1}")
+            nested, closing = _marker(lines[probe], probe in code, f"{rel}:{probe + 1}")
             if nested is not None:
                 raise ValueError(
                     f"{rel}:{probe + 1}: an include region opens inside the one at line {index + 1}"
@@ -760,13 +742,13 @@ def main():
         if drift:
             print(
                 f"Include regions differ from their sources in {', '.join(drift)}:"
-                " run `python3 scripts/build_dist.py`.",
+                " run `uv run --no-project --script scripts/build_dist.py`.",
                 file=sys.stderr,
             )
             return 1
         if stale:
             print(
-                "Generated skill distributions are stale: run `python3 scripts/build_dist.py`.",
+                "Generated skill distributions are stale: run `uv run --no-project --script scripts/build_dist.py`.",
                 file=sys.stderr,
             )
             return 1

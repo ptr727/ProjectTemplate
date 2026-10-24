@@ -18,10 +18,10 @@ python3 tests/test_handoff.py
 python3 tests/test_backlog_metrics.py
 python3 tests/test_gh_graphql.py
 python3 tests/test_local_review.py
-python3 tests/test_canonical_review.py
-python3 tests/test_build_dist.py
+uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py
+uv run --no-project --with-requirements tests/requirements.txt python tests/test_build_dist.py
 python3 tests/test_skills_install.py
-python3 tests/test_carry.py
+uv run --no-project --with-requirements tests/requirements.txt python tests/test_carry.py
 uv run --no-project --with-requirements tests/requirements.txt python -m unittest discover -s tests    # all of them, and exits 5 if the suite vanishes
 uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests && uvx coverage@latest report
 ```
@@ -342,11 +342,11 @@ Records and verifies that a full-content review pass covered each unit of the ca
 **Nothing here gates a push or a pull request.** Two weeks of fleet review rounds measured the local passes a push owed as a large share of what a pull request spent, and the maintainer's call on that evidence ([ptr727/ProjectTemplate#1631][review-cost-issue]) was to sweep this read rather than gate it, so [`.husky/pre-push`][pre-push] runs its sibling alone and the hub's own [`.github/actions/validate`][validate-hook] hook renders the burn-down without failing on what it shows, though a boundary still fails that step, since `report` reaches the same manifest and ledger reads every subcommand does. What calls `sweep` instead is [`.github/workflows/canonical-review-sweep.yml`][canonical-sweep-workflow], weekly once the default branch carries it, which files one issue naming the units it asks for that round and closes it once none is owed, the backlog included, so the issue stands until every carried unit has been read once. A schedule fires from the default branch's copy of a workflow, so the first run comes at the promotion rather than at the merge that retires the gate. The read itself is an adversarial agent pass, so the workflow can only hand the list to a session that can run one, and the `local-strict-review` Skill's "The Carried-Content Sweep" is what that session follows.
 
 ```shell
-python3 scripts/canonical_review.py list      # every unit key and its digest. 0 either way
-python3 scripts/canonical_review.py status    # covered, stale, or never read here, as JSON. 0 either way
-python3 scripts/canonical_review.py sweep     # 0 nothing owed, 1 a unit owes a read
-python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --findings 2 --unit '<key>=<digest>'
-python3 scripts/canonical_review.py report    # renders the burn-down from the ledger to standard output
+uv run --no-project --script scripts/canonical_review.py list      # every unit key and its digest. 0 either way
+uv run --no-project --script scripts/canonical_review.py status    # covered, stale, or never read here, as JSON. 0 either way
+uv run --no-project --script scripts/canonical_review.py sweep     # 0 nothing owed, 1 a unit owes a read
+uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop --findings 2 --unit '<key>=<digest>'
+uv run --no-project --script scripts/canonical_review.py report    # renders the burn-down from the ledger to standard output
 ```
 
 `record` holds a lock across its read, merge, and write of the ledger, the lock `local_review.py` guards its receipt with, since two overlapping records would otherwise each read a ledger without the other's pass and the second write would drop one ([#1151][record-lock-issue]). The lock lives in the worktree's own git directory rather than beside the ledger, so a record killed mid-write leaves its lock where no add can stage it. The ledger is tracked and the receipt above is not, so the two records sit on opposite sides of the commit that carries the ledger, and the `local-strict-review` Skill's "The Carried-Content Sweep" gives the order. `record` binds the digest to the read for `--expect-digest`'s reason above: recording a unit by name alone would stamp whatever the file holds at record time, so an edit between the review and the record would be attested to by a reviewer who never saw it. It refuses an unknown unit, a digest the content has moved past, and a reviewer outside `local_review.py`'s own backend vocabulary, since two spellings of one reviewer make the two records impossible to read together. A pass is recorded whatever it found, including nothing, for the same reason a receipt is: the record says a review ran over exactly this text, never that the text is clean.
@@ -368,21 +368,21 @@ A skill has to read whole in isolation and a rule has one home, so the text a sk
 Copies manifest-owned trees, and the verbatim `## heading` regions inside a mixed file, from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
 
 ```shell
-python3 scripts/carry.py check PhotoCleaner --target /path/to/worktree
-python3 scripts/carry.py apply PhotoCleaner --target /path/to/worktree
-python3 scripts/carry.py check-sections PhotoCleaner --target /path/to/worktree
-python3 scripts/carry.py apply-sections PhotoCleaner --target /path/to/worktree
+uv run --no-project --script scripts/carry.py check PhotoCleaner --target /path/to/worktree
+uv run --no-project --script scripts/carry.py apply PhotoCleaner --target /path/to/worktree
+uv run --no-project --script scripts/carry.py check-sections PhotoCleaner --target /path/to/worktree
+uv run --no-project --script scripts/carry.py apply-sections PhotoCleaner --target /path/to/worktree
 ```
 
 The tool validates the registry identity, target origin, feature-branch worktree, development-branch ancestry, unrelated changes, root containment, and symlink-free trees. A pruned declaration authorizes removal only beneath its target root.
 
 The section modes close the gap between the two things that already existed: a tree mode owns a whole tree, and [`spec/audit.py`][audit] names a stale section precisely without writing anything, so the one apply step in [`RESYNC.md`][resync] with no tested tool behind it was the step the AGENTS.md-overwrite incident happened on. `check-sections` reports each declared verbatim section and which of them are stale, and exits `1` while any is. `apply-sections` replaces only those regions and then re-reads the file to assert three things: the level-two heading sequence is unchanged, every line outside the replaced regions is byte-identical to what was there before, and each declared section now matches the hub's canonical. The second of those is the one that earns its keep, since the defect it exists for, one blank line dropped between the preamble and the first heading, is invisible in a diff review, breaks no renderer, and no gate in this repository flags it.
 
-Region boundaries come from `spec/carried_text.py`'s fence reading, which the audit's region extraction shares, rather than a second reading of CommonMark, so a level-two heading marker shown inside a code sample cannot end a region for this tool and not for the check that judges the result. The replacement carries the terminator the section's own heading line carried, so a CRLF repository keeps its endings and the file is never rewritten to one ending it may not use throughout.
+Region boundaries come from `spec/fidelity_text.py`, which reads the document with markdown-it-py for the audit's region extraction too, rather than from a second reading of CommonMark, so a level-two heading marker shown inside a code sample cannot end a region for this tool and not for the check that judges the result. The replacement carries the terminator the section's own heading line carried, so a CRLF repository keeps its endings and the file is never rewritten to one ending it may not use throughout.
 
 Every refusal is raised while planning, before the first file is written, so a refused run leaves nothing re-vendored. What refuses: a section the manifest declares that the repository does not carry (where it belongs is a standup question), a file absent from the target, a file that is not UTF-8 or that carries a bare carriage return, which the fidelity comparison reads as a line break and this tool does not, a file declaring both placeholders and verbatim sections (a verbatim unit carries none, per [`spec/fidelity-model.md`][fidelity-model]), a region holding content the fidelity comparison normalizes away, such as a Dependabot-owned action pin, whose bytes the repository rather than the hub owns, and two declared names resolving to one region. A failure after that point is the write itself or its assertion, and it names the file it was working on, because an earlier file may already hold its re-vendored content.
 
-A region runs to the next level-two heading, so the blank line before that heading sits inside the region and a section ending its file has none. `spec/carried_text.py`'s `extract_section` reads those two as the same content, since it splits the document on LF and joins the region back with LF, so a file-final newline and a blank line before a following heading both render as one trailing empty element. The comparison therefore uses that form, and the write reconciles the boundary to what the target document needs rather than copying it from the hub: a section that ends the hub's file keeps a blank line before whatever follows it downstream, and one that ends the target's file gains no trailing blank line.
+A region runs to the next level-two heading, so the blank line before that heading sits inside the region and a section ending its file has none. `spec/fidelity_text.py`'s `extract_section` reads those two as the same content, since it splits the document on LF and joins the region back with LF, so a file-final newline and a blank line before a following heading both render as one trailing empty element. The comparison therefore uses that form, and the write reconciles the boundary to what the target document needs rather than copying it from the hub: a section that ends the hub's file keeps a blank line before whatever follows it downstream, and one that ends the target's file gains no trailing blank line.
 
 The target is required to be clean, with no owned root exempted from the unrelated-changes check, unlike a tree carry. A tree's root holds nothing but hub-owned content, so exempting it gives up nothing, where these files hold the repository's own sections too and exempting one would let a write land on top of an uncommitted edit to a section the tool never touches.
 

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4"]
+# ///
 """Record and report full-content reviews of the canonical content this hub authors and other repos carry.
 
 The problem this exists for is an ordering one. Hub-owned content under `.agents/skills/`,
@@ -40,12 +44,12 @@ The verdict vocabulary is `scripts/local_review.py`'s, so a caller reading an ex
 either engine need not know which one answered: 0 is covered, 1 is a finding, and 2 is the check
 itself not having run.
 
-Usage:
-    python3 scripts/canonical_review.py list                 every unit and its digest, as JSON
-    python3 scripts/canonical_review.py status               what is covered, stale, or never read
-    python3 scripts/canonical_review.py sweep                the units it asks for this round
-    python3 scripts/canonical_review.py record --reviewer agent-skill --target develop --findings '<count>' --unit '<key>=<digest>'
-    python3 scripts/canonical_review.py report               render the burn-down to standard output
+Usage, each command run as `uv run --no-project --script scripts/canonical_review.py <command>`:
+    list      every unit and its digest, as JSON
+    status    what is covered, stale, or never read
+    sweep     the units it asks for this round
+    record    --reviewer agent-skill --target develop --findings '<count>' --unit '<key>=<digest>'
+    report    render the burn-down to standard output
 """
 
 import argparse
@@ -62,12 +66,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# `spec/carried_text.py` is a script-directory module rather than a package one, so the spec directory has to be importable before it is.
+# `spec/fidelity_text.py` is a script-directory module rather than a package one, so the spec directory has to be importable before it is.
 sys.path.insert(0, str(ROOT / "spec"))
 
 import build_dist
-import carried_text
 import carry
+import fidelity_text
 import local_review
 
 # Reused rather than restated.
@@ -123,7 +127,7 @@ REVIEWERS = local_review.BACKENDS
 def normalize(text: str) -> str:
     """A unit's comparable form, which neutralizes line endings and nothing else.
 
-    Deliberately not `spec/carried_text.py`'s `normalize`, which also masks Dependabot-owned action pins
+    Deliberately not `spec/fidelity_text.py`'s `normalize`, which also masks Dependabot-owned action pins
     and per-repo `needs:` lists. Those are governed drift for a fidelity comparison, where the
     question is whether two copies say the same thing. The question here is whether a reviewer has
     read these bytes, and masking any of them would report a read of text nobody saw. Line endings
@@ -154,24 +158,22 @@ def decode(rel: str, data: bytes) -> str:
 def split_markdown(text: str) -> list[tuple[str | None, str]]:
     """`(heading, region)` pairs: the preamble under `None`, then one region per level-two heading.
 
-    Fence state comes from `spec/carried_text.py`'s step function rather than a second reading of
-    CommonMark, so a `## ` shown inside a code sample cannot split a unit here while leaving the
-    fidelity checks reading the document the other way. A document read two ways by two tools is
-    the failure that helper was extracted to end.
+    Boundaries come from `spec/fidelity_text.py`, the reading the fidelity checks use, so a `## `
+    shown inside a code sample cannot split a unit here while leaving those checks reading the
+    document the other way. A document read two ways by two tools is the failure that shared
+    reading exists to end.
 
     The heading line's exact bytes stay inside its region, so re-casing or re-spacing a heading
     surfaces as a changed unit rather than as an invisible edit.
     """
-    regions: list[tuple[str | None, list[str]]] = [(None, [])]
-    marker: str | None = None
-    marker_len = 0
-    for line in normalize(text).split("\n"):
-        marker, marker_len, boundary = carried_text.fence_step(line, marker, marker_len)
-        stripped = line.strip()
-        if not boundary and marker is None and stripped.startswith("## "):
-            regions.append((stripped[2:].strip(), [line]))
-            continue
-        regions[-1][1].append(line)
+    base = normalize(text)
+    lines = base.split("\n")
+    starts = [h for h in fidelity_text.headings(base) if h.level == 2]
+    bounds = [0, *(h.line for h in starts), len(lines)]
+    regions: list[tuple[str | None, list[str]]] = [
+        (None if index == 0 else starts[index - 1].text, lines[bounds[index] : bounds[index + 1]])
+        for index in range(len(bounds) - 1)
+    ]
     # A document whose first heading is its first line has an empty preamble, which is a region holding nothing rather than a unit a reviewer could read.
     if not regions[0][1] or not "\n".join(regions[0][1]).strip():
         regions.pop(0)
@@ -579,7 +581,7 @@ def render_sweep(
         "",
         (
             "Filed by `.github/workflows/canonical-review-sweep.yml` from"
-            " `python3 scripts/canonical_review.py sweep`. Every unit below is text a repository"
+            " `uv run --no-project --script scripts/canonical_review.py sweep`. Every unit below is text a repository"
             " carrying this content receives without a pass here having read it whole. The"
             ' `local-strict-review` Skill\'s "The Carried-Content Sweep" says how each pass is run'
             " and what its findings are owed."
@@ -619,7 +621,7 @@ def render_sweep(
                 "",
                 "```sh",
                 (
-                    "python3 scripts/canonical_review.py record --reviewer agent-skill"
+                    "uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill"
                     " --target develop --findings '<count>' --unit '<key>=<digest>'"
                 ),
                 "```",
@@ -630,7 +632,7 @@ def render_sweep(
             "",
             (
                 f"{len(current)} units carried, {len(never)} of them never read here, which"
-                " `python3 scripts/canonical_review.py report` renders in full."
+                " `uv run --no-project --script scripts/canonical_review.py report` renders in full."
             ),
             "",
         ]
@@ -764,7 +766,7 @@ def render_report(
         "# Canonical content review coverage",
         "",
         (
-            "Rendered by `python3 scripts/canonical_review.py report` from"
+            "Rendered by `uv run --no-project --script scripts/canonical_review.py report` from"
             " `reports/canonical-review.json`, which `canonical_review.py record` writes. The"
             " ledger is tracked and this rendering is not, so it describes the tree it was"
             " rendered from and nothing older."
