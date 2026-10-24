@@ -134,8 +134,7 @@ def _bracket_matches(text, open_char, close_char):
     nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
     mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
     counting scan per open position: re-scanning from every unmatched open is what made a prior version of
-    this walk O(N^2) on a run of N unmatched opens, as it did in spec/audit.py's sibling
-    implementation. A close pops the most recently pushed open, the same pairing a fresh depth count from
+    this walk O(N^2) on a run of N unmatched opens. A close pops the most recently pushed open, the same pairing a fresh depth count from
     that open would find, so this is one pass, not N. An open with no closing partner, or a close with
     nothing open, is left out of the map, same as before.
 
