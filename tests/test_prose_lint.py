@@ -1138,6 +1138,16 @@ class TestCommentWrapRule(BaitCase):
         lines = [c[0] for c in self.comments("x.yml", text)]
         self.assertEqual([3, 5], lines)
 
+    def test_a_shift_or_quoted_marker_is_no_heredoc_and_hides_no_comment(self) -> None:
+        for body in ('r="$(\n      echo $((1<<bits))\n    )"', 'msg="cat <<EOF\n    then type"'):
+            text = f"- run: |\n    {body}\n    # a later comment.\n"
+            last = text.count("\n")
+            self.assertEqual([last], [c[0] for c in self.comments("x.yml", text)], body)
+
+    def test_a_wrapped_code_span_does_not_move_a_comment_line(self) -> None:
+        text = "See `run\nit` and <!-- fix this. -->\nthen run it again.\n"
+        self.assertEqual([2], [c[0] for c in self.comments("a.md", text)])
+
     def test_an_inline_code_span_holding_a_comment_text_is_not_its_line(self) -> None:
         """The search for the comment stopped on the code span's line, one line too early."""
         text = "Write `<!-- check this later. -->` here,\nthen <!-- check this later. -->\n"

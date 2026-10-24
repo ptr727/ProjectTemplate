@@ -696,6 +696,11 @@ def split_heredocs(text: str) -> list[tuple[int, str]]:
     """
     code, bodies, pos = list(text), [], 0
     while m := HEREDOC_OPEN.search(text, pos):
+        prefix = text[text.rfind("\n", 0, m.start()) + 1 : m.start()]
+        if prefix.count('"') % 2 or "((" in prefix:
+            # A shift or a quoted `<<WORD` is no heredoc, and reading it as one unbalances a quote.
+            pos = m.end()
+            continue
         rest = re.finditer(r"[^\n]*(?:\n|\Z)", text[m.end() :])
         stop = next((r.end() for r in rest if r.group().strip() == m.group(2)), len(text) - m.end())
         pos = m.end() + stop
@@ -870,7 +875,8 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     for child in tok.children or ():
         if child.type == "code_inline":
             # A span holding a comment's own text must not be where that comment is found.
-            head = child.content.split("\n")[0]
+            # Its content joins a wrapped span's lines, so only the first word is searched for.
+            head = child.content.split()[0]
             for n in range(number, (tok.map or [0, 1])[1] + 1):
                 at = lines[n - 1].find(head, col if n == number else 0)
                 if at >= 0:
