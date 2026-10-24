@@ -47,11 +47,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    head SHA and still decline the PR outright, or say it read only part of the changed files.
    `pr_review.py` reads coverage into the digest's `coverage=` field, and only partial coverage
    is an exit code, `42`. That is a head round stating partial, or a head round reading `UNKNOWN`
-   beside an earlier partial round. So is a head with rounds, none stating coverage, beside one.
-   A round covering the head that states full coverage satisfies
-   this item. Where none states any, a round covering the head whose own file table names exactly the
-   changed files covers it, `coverage=table`, the reading a Copilot round at Balanced review
-   effort gives. Where no round covering the head carries a table of its own, the newest round
+   beside an earlier partial round. So is a head with non-refusal rounds, none stating coverage,
+   beside one. A round covering the head that states full coverage satisfies this item where no
+   other head round reads `UNKNOWN` or partial. Where none states any, a round covering the head
+   whose own file table names exactly the changed files covers it, `coverage=table`. That is the
+   reading a Copilot round at Balanced review effort gives. Where no round covering the head carries a table of its own, the newest round
    that does, its table naming exactly the changed files, stands in as `coverage=carried:table`.
    A table stands in only where no Copilot round on the pull request, on any commit, states
    partial coverage, so a pull request that ever had a partial round goes to the maintainer.
