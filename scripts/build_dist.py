@@ -239,7 +239,11 @@ def _read_lines(path):
 
 
 def _unindented(line):
-    """The line's text when it sits within CommonMark's three-space bound, else None, since deeper is code or a paragraph's continuation."""
+    """The line's text when it sits within CommonMark's three-space bound, else None, which reads the line as content.
+
+    The bound is held in every container. So a marker indented four spaces into a list item is content
+    too, though CommonMark reads it as HTML there.
+    """
     stripped = line.lstrip(" ")
     return stripped.rstrip() if len(line) - len(stripped) <= _MAX_INDENT else None
 
@@ -312,7 +316,7 @@ def heading_body(lines, heading, key):
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
     a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py,
-    which the fidelity checks also read with, so a heading inside a code block is content to both.
+    which the fidelity checks also use, so a heading inside a code block is content to both.
     They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
     two answers to one question, refused rather than resolved to the first. A body ends at any
     heading of its level or above, level one included. A fidelity region ends only at the next
@@ -335,9 +339,10 @@ def heading_body(lines, heading, key):
         (index for index, level, _ in headings if index > start and level <= depth), len(lines)
     )
     blocks = [b for b in reader.code_blocks(text) if start < b.start < end]
-    if any(b.fenced and not b.closed for b in blocks):
+    if any(b.fenced and not b.closed and not b.nested for b in blocks):
         # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
-        # One a blockquote ends is refused too, since a fence missing its closing line is a source defect wherever it sits.
+        # One a blockquote or a list item ends is safe.
+        # The blank line the fill writes before the end marker ends that container in the destination too.
         raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
     code = reader.code_lines(text)
     # The source's own region markers belong to its regions, not to the text they enclose.

@@ -936,18 +936,18 @@ class CarryStatusTests(unittest.TestCase):
 
 
 class CarryImportTests(unittest.TestCase):
-    def test_importing_carry_imports_no_markdown_reader(self) -> None:
-        """`scripts/handoff.py` imports this module under a plain python3 for `normalize_eol` alone.
+    def test_importing_handoff_imports_no_markdown_reader(self) -> None:
+        """`scripts/handoff.py` runs under a plain python3 and imports carry for `normalize_eol` alone.
 
         So the region reader, and the markdown-it-py it imports, load only when a region is read.
         A name the interpreter already holds at startup is a boundary rather than a finding.
         """
-        before, after = import_delta(pathlib.Path(carry.__file__).parent, "carry")
+        before, after = import_delta(pathlib.Path(carry.__file__).parent, "handoff")
         if before:
             self.skipTest(
                 f"this interpreter imports {', '.join(before)} at startup, so the import delta cannot be read here"
             )
-        self.assertEqual(after, [], "importing carry pulled in a Markdown reader")
+        self.assertEqual(after, [], "importing handoff pulled in a Markdown reader")
 
 
 if __name__ == "__main__":

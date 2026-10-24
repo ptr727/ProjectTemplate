@@ -158,7 +158,7 @@ def decode(rel: str, data: bytes) -> str:
 def split_markdown(text: str) -> list[tuple[str | None, str]]:
     """`(heading, region)` pairs: the preamble under `None`, then one region per level-two heading.
 
-    Boundaries come from `spec/fidelity_text.py`, which the fidelity checks read with too. So a `## `
+    Boundaries come from `spec/fidelity_text.py`, which the fidelity checks also use. So a `## `
     shown inside a code sample cannot split a unit here while those checks read the document the
     other way. A document read two ways by two tools is the failure that shared reading ends.
 

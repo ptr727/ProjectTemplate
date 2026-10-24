@@ -924,16 +924,29 @@ class IncludeCase(TreeCase):
         self.assertIn("    pass\n\n\ndef b():", self.skill_text())
 
     def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
-        for source in (
-            "## Alpha\n\n```text\nopen\n",
-            "## Alpha\n\n```text\nopen",
-            "## Alpha\n\n> ```text\n> open\n\n## Beta\n",
-        ):
+        for source in ("## Alpha\n\n```text\nopen\n", "## Alpha\n\n```text\nopen"):
             with self.subTest(source=source):
                 (self.tmp / "RULES.md").write_text(source, encoding="utf-8")
                 self.make_skill("foo", self.region("RULES.md > Alpha"))
                 with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
                     build_dist.regenerate()
+
+    def test_a_fence_its_container_ends_is_filled(self) -> None:
+        """The blank line the fill writes before the end marker ends the blockquote, and the fence with it."""
+        (self.tmp / "RULES.md").write_text(
+            "## Alpha\n\n> ```text\n> sample\n\n## Beta\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(),
+            "<!-- include: RULES.md > Alpha -->\n\n> ```text\n> sample\n\n<!-- /include -->\n",
+        )
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(),
+            "<!-- include: RULES.md > Alpha -->\n\n> ```text\n> sample\n\n<!-- /include -->\n",
+        )
 
     def test_the_reader_accessor_adds_the_spec_directory_to_sys_path_once(self) -> None:
         """The cache would otherwise hide this: held, the accessor's body runs once per process, so
@@ -945,8 +958,8 @@ class IncludeCase(TreeCase):
             build_dist._code_lines(["plain"])
         self.assertLessEqual(len(sys.path) - before, 1)
 
-    def test_importing_this_module_imports_no_markdown_reader(self) -> None:
-        """The laziness `scripts/skills_install.py` depends on, since it imports this module under a plain python3.
+    def test_importing_skills_install_imports_no_markdown_reader(self) -> None:
+        """The laziness `scripts/skills_install.py` depends on, since it imports build_dist under a plain python3.
 
         Installing never fills a region, so the install path loads nothing from spec/ and no
         markdown-it-py, which such a host may not have. Run in a fresh interpreter because this test
@@ -957,12 +970,12 @@ class IncludeCase(TreeCase):
         itself. That would be this case failing to run rather than the import being wrong. It is a
         boundary to report rather than a finding to raise, so the case skips and says so.
         """
-        before, after = import_delta(Path(build_dist.__file__).parent, "build_dist")
+        before, after = import_delta(Path(build_dist.__file__).parent, "skills_install")
         if before:
             self.skipTest(
                 f"this interpreter imports {', '.join(before)} at startup, so the import delta cannot be read here"
             )
-        self.assertEqual(after, [], "importing build_dist pulled in a Markdown reader")
+        self.assertEqual(after, [], "importing skills_install pulled in a Markdown reader")
 
 
 class DeclaredDestinationCase(TreeCase):
