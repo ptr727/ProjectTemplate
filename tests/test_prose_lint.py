@@ -1164,6 +1164,76 @@ class TestCommentWrapRule(BaitCase):
         found = self.comments("a.md", "Run `fix` <!-- fix this. -->\n")
         self.assertEqual([(1, "fix this.", False)], found)
 
+    def test_heredoc_bodies_come_from_shell_state_not_a_guess(self) -> None:
+        """Each shape hid or showed the later comment on line 5 or 6 by a guess at what opens a body."""
+        fixtures = {
+            "r1": (
+                "python3 -c '",
+                "mask = 1 << bits",
+                "'",
+                "# a later comment.",
+                "jq -r '.x' o.json",
+            ),
+            "s2": (
+                "# A shift such as 1<<n is fine.",
+                "cat <<EOF",
+                "The build didn't publish.",
+                "EOF",
+                "# retry the upload.",
+            ),
+            "s3": (
+                "python3 -c 'print(1<<n)'",
+                "cat <<EOF",
+                "The build didn't publish.",
+                "EOF",
+                "# retry the upload.",
+            ),
+            "p1": (
+                'echo "a \\" b"',
+                "cat <<EOF",
+                "The build didn't publish.",
+                "EOF",
+                "# retry the upload.",
+            ),
+            "d": (
+                'body="$(cat <<EOF',
+                "The build didn't publish.",
+                "EOF",
+                ')"',
+                "# retry the upload.",
+            ),
+            "hyphen": (
+                "cat <<END-OF-TEXT",
+                "The build didn't publish.",
+                "END-OF-TEXT",
+                "# retry the upload.",
+            ),
+            "indented": (
+                "cat <<EOF",
+                "  EOF",
+                "The build didn't publish.",
+                "EOF",
+                "# retry the upload.",
+            ),
+        }
+        for name, rows in fixtures.items():
+            text = "- run: |\n" + "".join(f"    {r}\n" for r in rows)
+            got = [
+                (c[0], c[1])
+                for c in self.comments("x.yml", text)
+                if c[1].startswith(("retry", "a later"))
+            ]
+            line = 2 + next(i for i, r in enumerate(rows) if r.startswith(("# retry", "# a later")))
+            self.assertEqual([line], [g[0] for g in got], name)
+
+    def test_a_hyphenated_delimiter_ends_a_shell_file_heredoc(self) -> None:
+        text = "#!/usr/bin/env bash\ncat <<END-OF-TEXT\nhi\nEND-OF-TEXT\n# retry the upload.\n"
+        self.assertEqual([5], [c[0] for c in self.comments("h.sh", text)])
+
+    def test_a_code_span_sharing_words_with_earlier_prose_does_not_move_the_comment(self) -> None:
+        text = "I see this, `see <!-- check this. --> this`\n    <!-- check this. -->\n"
+        self.assertEqual([2], [c[0] for c in self.comments("a.md", text)])
+
     def test_an_inline_code_span_holding_a_comment_text_is_not_its_line(self) -> None:
         """The search for the comment stopped on the code span's line, one line too early."""
         text = "Write `<!-- check this later. -->` here,\nthen <!-- check this later. -->\n"
@@ -7307,7 +7377,7 @@ class TestHarness(unittest.TestCase):
     def test_the_gate_stays_under_its_size_ceiling(self) -> None:
         """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
         lines = PROSE_LINT_SCRIPT.read_text(encoding="utf-8").count("\n")
-        self.assertLessEqual(lines, 1850)
+        self.assertLessEqual(lines, 1840)
 
 
 if __name__ == "__main__":

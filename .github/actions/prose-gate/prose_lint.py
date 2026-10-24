@@ -527,9 +527,7 @@ def lexer_name(path: Path, first: str) -> str | None:
 
 # Pygments ends a heredoc at any later `STUB` in a `$STUB_DIR`, and reads no double-quoted label.
 # This rule ends one only on its terminator line, tab-indented for `<<-`.
-HEREDOC = (
-    r"(?s)<<(-)?[ \t]*(['\"]?)\\?([A-Za-z_]\w*)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
-)
+HEREDOC = r"(?s)<<(-)?[ \t]*(['\"]?)\\?([A-Za-z_][\w-]*)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
 # Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
 # The comments inside it are lost, so an attribute here is read within its own line.
 ATTRIBUTE = r"^([ \t]*)(\[[^\n]*?\])"
@@ -684,29 +682,26 @@ def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int,
     return out
 
 
-HEREDOC_OPEN = re.compile(r"(?<!<)<<-?[ \t]*(['\"]?)\\?([A-Za-z_]\w*)\1[^\n]*\n")
-
-
 def split_heredocs(text: str) -> list[tuple[int, str]]:
     """A script as its code with heredoc bodies blanked, then each body, as (line offset, text).
 
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
-    next one anywhere after it. Lexing each body alone ends that string with the body. A terminator
-    is matched on its stripped line, since a YAML block indents it with the rest.
+    next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
+    script without its YAML indent, and each is lexed alone so that string ends with the body.
     """
-    code, bodies, pos = list(text), [], 0
-    while m := HEREDOC_OPEN.search(text, pos):
-        prefix = "".join(code[: m.start()])
-        if prefix.count('"') % 2 or "((" in prefix[prefix.rfind("\n") + 1 :]:
-            # A shift or a quoted `<<WORD` is no heredoc, and reading it as one unbalances a quote.
-            pos = m.end()
-            continue
-        rest = re.finditer(r"[^\n]*(?:\n|\Z)", text[m.end() :])
-        stop = next((r.end() for r in rest if r.group().strip() == m.group(2)), len(text) - m.end())
-        pos = m.end() + stop
-        bodies.append((text.count("\n", 0, m.end()), text[m.end() : pos]))
-        code[m.end() : pos] = [c if c == "\n" else " " for c in text[m.end() : pos]]
-    return [(0, "".join(code)), *bodies]
+    rows = text.splitlines(keepends=True)
+    indent = min((len(r) - len(r.lstrip()) for r in rows if r.strip()), default=0)
+    plain = "".join(r[indent:] if r.strip() else r for r in rows)
+    starts = Starts(plain)
+    spans = []
+    for offset, kind, value in lexer_for("bash").get_tokens_unprocessed(plain):
+        if kind in String.Heredoc:
+            # The opener's own line stays code, so a body is the lines after it.
+            spans.append((starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]))
+    code = list(rows)
+    for first, end in spans:
+        code[first:end] = ["\n"] * (end - first)
+    return [(0, "".join(code)), *((a, "".join(rows[a:b])) for a, b in spans)]
 
 
 def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
@@ -871,23 +866,24 @@ def extract_markdown(lines: list[str]) -> Extracted:
 def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     """The HTML comments inside one inline token, numbered by the source line each opens on."""
     out: list[Line] = []
-    number, col = (tok.map or [0, 1])[0] + 1, 0
+    first, last = (tok.map or [0, 1])[0], (tok.map or [0, 1])[1]
+    number, col = first + 1, 0
+    # A code span can hold a comment's text, so it is blanked, lengths kept, before the search.
+    blank = lambda m: re.sub(r"[^\n]", " ", m.group())
+    seen = re.sub(CODE_SPAN, blank, "\n".join(lines[first:last])).split("\n")
     for child in tok.children or ():
-        if child.type == "code_inline" and child.content.split():
-            # A span holding a comment's own text must not be where that comment is found.
-            # Its content joins a wrapped span's lines, so its first and last words are searched.
-            words = child.content.split()
-            for word in words[:1] + words[-1:] * (len(words) > 1):
-                for n in range(number, (tok.map or [0, 1])[1] + 1):
-                    at = lines[n - 1].find(word, col if n == number else 0)
-                    if at >= 0:
-                        number, col = n, at + len(word)
-                        break
         if child.type == "html_inline" and child.content.startswith("<!--"):
             # The source line is found by the comment's own text, searched on from the last one.
             head = child.content.split("\n")[0]
-            for n in range(number, (tok.map or [0, 1])[1] + 1):
-                at = lines[n - 1].find(head, col if n == number else 0)
+            for rows, word in ((seen, head), (lines[first:last], head)):
+                at, n = next(
+                    (
+                        (r.find(word, col if i == number else 0), i)
+                        for i in range(number, last + 1)
+                        if (r := rows[i - first - 1]).find(word, col if i == number else 0) >= 0
+                    ),
+                    (-1, 0),
+                )
                 if at >= 0:
                     number, col = n, at + len(head)
                     break
@@ -1408,10 +1404,12 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     return [finding(n, "comment-added") for n in sorted(lines)]
 
 
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
+
+
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
     """The text with code spans and each line's quotations blanked, a closing terminator kept."""
-    code = r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)"
-    text = re.sub(code, lambda m: "`" * len(m.group()), text, flags=re.DOTALL)
+    text = re.sub(CODE_SPAN, lambda m: "`" * len(m.group()), text)
     out = list(text)
     for start, length in zip(starts, lengths, strict=True):
         out[start : start + length] = re.sub(
