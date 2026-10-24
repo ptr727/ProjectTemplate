@@ -391,8 +391,9 @@ install_agents() {
 }
 
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
-# Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no interpreter yet can still use every host action, and only the actions that need one name it as their own prerequisite.
-# The prerequisite failure returns 127, bash's own "command not found" convention, so a caller reading a specific exit code from the tool itself (build_dist.py's 0-clean/1-stale contract) can tell "uv never ran" apart from "uv ran and returned 1".
+# Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no uv yet can still use every host action, and only the actions that need one name it as their own prerequisite.
+# The prerequisite failure returns 127, bash's own "command not found" convention.
+# So a caller reading a specific exit code from the tool itself, such as build_dist.py's 0-clean/1-stale contract, can tell "uv never ran" apart from "uv ran and returned 1".
 # Callers hold the reader lock themselves, hub_read_lock_acquire before their own ensure_hub_root call, rather than this function taking it.
 # Every caller pairs this with ensure_hub_root and the lock has to cover both, so taking it only here would still leave ensure_hub_root's own reads unlocked, the gap this whole reader-half addition exists to close.
 # Every hub tool a task runs declares its libraries inline, so uv runs each one rather than a bare python3, which has none of them.

@@ -60,24 +60,25 @@ def normalize(text):
 
 
 def headings(text):
-    """Every ATX heading in `text`, in order, at any nesting depth.
+    """Every ATX heading at the top level of `text`, in order.
 
     A setext heading is left out, since every region this reads is opened by a `#` line. A heading
-    shown inside a code block is content, which is the reason a parser reads this at all.
+    inside a code block is content, which is why a parser reads this at all. So is one quoted in a
+    blockquote or nested in a list item, since neither opens a section of the document.
     """
     tokens = _tokens(text)
     return [
         Heading(t.map[0], int(t.tag[1]), tokens[i + 1].content.strip())
         for i, t in enumerate(tokens)
-        if t.type == "heading_open" and t.markup.startswith("#") and t.map
+        if t.type == "heading_open" and t.markup.startswith("#") and t.map and t.level == 0
     ]
 
 
 def code_blocks(text):
     """Every fenced and indented code block in `text`, in order, at any nesting depth.
 
-    A fence the parser ends at the end of its container rather than at a closing line reads as not
-    `closed`, which is the state a caller copying a region out of its document has to refuse.
+    A fence the parser ends with its container, rather than at a closing line, reads as not `closed`.
+    A caller copying a region out of its document has to refuse that state.
     """
     out = []
     for t in _tokens(text):
@@ -85,8 +86,10 @@ def code_blocks(text):
             continue
         start, end = t.map
         fenced = t.type == "fence"
-        # A closed fence spans its opener, its content lines, and its closer, so one line is left over once the opener and the content are counted.
-        closed = not fenced or end - start - 1 - t.content.count("\n") == 1
+        # A closed fence spans its opener, its content, and its closer, so one line is left over.
+        # A final content line with no newline after it still counts as a line.
+        content = t.content.count("\n") + (1 if t.content and not t.content.endswith("\n") else 0)
+        closed = not fenced or end - start - 1 - content == 1
         out.append(CodeBlock(start, end, fenced, closed))
     return out
 
@@ -99,9 +102,9 @@ def code_lines(text):
 def section_span(text, heading):
     """The `[start, end)` lines of the first `## <heading>` region, or None when `text` has none.
 
-    The heading line is inside the region and the next level-two heading ends it, so `end` is None
-    for a region that runs to the end of the document. The match is on the parsed heading text,
-    case-folded, so a re-cased heading is found rather than read as absent.
+    The heading line is inside the region and the next level-two heading ends it. `end` is None for a
+    region that runs to the end of the document. The match is on the parsed heading text, case-folded,
+    so a re-cased heading is found rather than read as absent.
     """
     want = heading.strip().lower()
     starts = [h for h in headings(text) if h.level == 2]

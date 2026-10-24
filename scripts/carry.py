@@ -473,9 +473,9 @@ def h2_headings(lines: list[str]) -> list[str]:
 def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     """The `[start, end)` line range of the `## <heading>` region, or None when the file has none.
 
-    Boundaries are `spec/fidelity_text.py`'s, the reading the audit's `extract_section` uses, so a
-    `## ` shown inside a code sample ends a region for neither tool. The heading line is inside the
-    region, a sibling level-two heading ends it, and the match is on the parsed heading text
+    Boundaries are `spec/fidelity_text.py`'s, which the audit's `extract_section` reads with too.
+    So a `## ` shown inside a code sample ends a region for neither tool. The heading line is inside
+    the region, and a sibling level-two heading ends it. The match is on the parsed heading text
     case-folded, so a re-cased heading is found rather than read as absent. The range is positional
     rather than the text itself. That lets the caller replace the region without also replacing an
     identical passage quoted elsewhere in the document.

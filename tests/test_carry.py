@@ -13,7 +13,7 @@ from collections.abc import Callable
 from unittest import mock
 
 from host_capability import requires_symlink
-from test_build_dist import import_delta
+from import_probe import import_delta
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))

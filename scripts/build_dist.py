@@ -24,11 +24,11 @@ stops restating a rule by hand.
 
 Usage: uv run --no-project --script scripts/build_dist.py [--check]
 
-With no flag it fills include regions, then regenerates the distributions. --check is read-only:
-exit 0 clean, 1 stale, 2 on a real failure (a symlink under .agents/skills/, an unreadable file,
-an include region it cannot render, an INCLUDE_DESTINATIONS entry that is stale, carried, or
-measured against a manifest it cannot read), so a caller reading the exit code can tell a finding
-apart from the check itself not having run.
+With no flag it fills include regions, then regenerates the distributions. --check is read-only.
+It exits 0 clean, 1 stale, and 2 on a real failure. So a caller reading the exit code can tell a
+finding apart from the check itself not having run. A real failure is a symlink under
+.agents/skills/, an unreadable file, or an include region it cannot render. So is an
+INCLUDE_DESTINATIONS entry that is stale, carried, or measured against a manifest it cannot read.
 """
 
 from __future__ import annotations
@@ -310,10 +310,11 @@ def heading_body(lines, heading, key):
     """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
-    a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py, the
-    reading the fidelity checks use, and match on the parsed text case-folded, so a re-cased heading
-    still resolves and the two split a document alike. Two matches are two answers to one question,
-    refused rather than resolved to the first, and a heading inside a code block is content.
+    a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py,
+    which the fidelity checks also read with. They match on the parsed text case-folded, so a
+    re-cased heading still resolves and the two split a document alike. Two matches are two answers
+    to one question, refused rather than resolved to the first, and a heading inside a code block
+    is content.
     """
     want = heading.strip().lower()
     reader = _fidelity_text()

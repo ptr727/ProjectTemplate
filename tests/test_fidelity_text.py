@@ -19,18 +19,36 @@ class HeadingCase(unittest.TestCase):
             [(0, 2, "One"), (8, 2, "Two")],
         )
 
+    def test_a_quoted_or_listed_heading_opens_no_region(self) -> None:
+        text = "## Keep\n\n> ## Quoted\n\n- item\n\n  ## Listed\n\n## Drop\n\nreal\n"
+        self.assertEqual([h.text for h in fidelity_text.headings(text)], ["Keep", "Drop"])
+        self.assertEqual(fidelity_text.section_span(text, "Drop"), (8, None))
+
     def test_a_setext_heading_opens_no_region(self) -> None:
         self.assertEqual(fidelity_text.headings("Title\n-----\n\n## One\n"), [(3, 2, "One")])
 
 
 class CodeBlockCase(unittest.TestCase):
     def test_a_closed_fence_reads_closed_at_any_depth(self) -> None:
-        for text in ("```\na\n```\n", "> ```\n> a\n> ```\n", "- item\n\n  ~~~\n  a\n  ~~~\n"):
+        for text in (
+            "```\na\n```\n",
+            "```\na\n```",
+            "> ```\n> a\n> ```\n",
+            "- item\n\n  ~~~\n  a\n  ~~~\n",
+        ):
             with self.subTest(text=text):
                 self.assertEqual([b.closed for b in fidelity_text.code_blocks(text)], [True])
 
     def test_a_fence_with_no_closing_line_reads_open(self) -> None:
-        for text in ("```\na\n", "```\n", "```\na\n\n\n", "> ```\n> a\n\nafter\n"):
+        for text in (
+            "```\na\n",
+            "```\na",
+            "```\n",
+            "```",
+            "```\na\n\n\n",
+            "> ```\n> a\n\nafter\n",
+            "> ```\n> a",
+        ):
             with self.subTest(text=text):
                 self.assertEqual([b.closed for b in fidelity_text.code_blocks(text)], [False])
 

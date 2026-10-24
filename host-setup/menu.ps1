@@ -440,7 +440,8 @@ function Invoke-AgentsInstall {
 }
 
 # The Python tools under scripts\ and spec\ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs.
-# Checked here rather than upfront in main: a host with no uv yet can still use every host action, and only the actions that need one name it as their own prerequisite.
+# Checked here rather than upfront in main, since a host with no uv yet can still use every host action.
+# Only the actions that need uv name it as their own prerequisite.
 # Every hub tool a task runs declares its libraries inline, so uv runs each one rather than a bare Python, which has none of them.
 function Invoke-HubUvScript {
     param([Parameter(Mandatory)][string]$ScriptPath, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)

@@ -40,7 +40,8 @@ jobs:
           persist-credentials: false
 
       # The engine declares markdown-it-py inline, which uv resolves for it.
-      # It also imports datetime.UTC at module level, so the interpreter is pinned to the floor spec/host-tools.json declares rather than left as whatever the runner image ships.
+      # It also imports datetime.UTC at module level.
+      # So the interpreter is pinned to the floor spec/host-tools.json declares, rather than left as whatever the runner image ships.
       - name: Setup uv step
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:

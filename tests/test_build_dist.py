@@ -12,13 +12,13 @@ import io
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from host_capability import NO_SYMLINK, can_symlink, requires_symlink
+from import_probe import import_delta
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import build_dist
@@ -924,10 +924,12 @@ class IncludeCase(TreeCase):
         self.assertIn("    pass\n\n\ndef b():", self.skill_text())
 
     def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
-        (self.tmp / "RULES.md").write_text("## Alpha\n\n```text\nopen\n", encoding="utf-8")
-        self.make_skill("foo", self.region("RULES.md > Alpha"))
-        with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
-            build_dist.regenerate()
+        for source in ("## Alpha\n\n```text\nopen\n", "## Alpha\n\n```text\nopen"):
+            with self.subTest(source=source):
+                (self.tmp / "RULES.md").write_text(source, encoding="utf-8")
+                self.make_skill("foo", self.region("RULES.md > Alpha"))
+                with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
+                    build_dist.regenerate()
 
     def test_the_reader_accessor_adds_the_spec_directory_to_sys_path_once(self) -> None:
         """The cache would otherwise hide this: held, the accessor's body runs once per process, so
@@ -946,10 +948,10 @@ class IncludeCase(TreeCase):
         markdown-it-py, which such a host may not have. Run in a fresh interpreter because this test
         process has already imported both by other means.
 
-        The measurement is the delta across the import rather than the child's absolute state, since
-        a `sitecustomize` or `usercustomize` hook runs before `-c` does and could import a module of
-        either name itself. That would be this case failing to run rather than the import being
-        wrong, which is a boundary to report rather than a finding to raise, so it skips and says so.
+        The measurement is the delta across the import rather than the child's absolute state. A
+        `sitecustomize` or `usercustomize` hook runs before `-c` does and could import either name
+        itself. That would be this case failing to run rather than the import being wrong. It is a
+        boundary to report rather than a finding to raise, so the case skips and says so.
         """
         before, after = import_delta(Path(build_dist.__file__).parent, "build_dist")
         if before:
@@ -957,25 +959,6 @@ class IncludeCase(TreeCase):
                 f"this interpreter imports {', '.join(before)} at startup, so the import delta cannot be read here"
             )
         self.assertEqual(after, [], "importing build_dist pulled in a Markdown reader")
-
-
-def import_delta(directory: Path, module: str) -> tuple[list[str], list[str]]:
-    """Which of the Markdown reader modules a fresh interpreter holds before and after importing `module`."""
-    names = ["fidelity_text", "markdown_it"]
-    source = (
-        f"import sys; names = {names!r}; before = [n for n in names if n in sys.modules];"
-        f" sys.path.insert(0, {str(directory)!r}); import {module};"
-        " print(','.join(before) + ' ' + ','.join(n for n in names if n in sys.modules))"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", source],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    before, _, after = result.stdout.strip("\n").partition(" ")
-    return [n for n in before.split(",") if n], [n for n in after.split(",") if n]
 
 
 class DeclaredDestinationCase(TreeCase):

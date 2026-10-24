@@ -158,10 +158,9 @@ def decode(rel: str, data: bytes) -> str:
 def split_markdown(text: str) -> list[tuple[str | None, str]]:
     """`(heading, region)` pairs: the preamble under `None`, then one region per level-two heading.
 
-    Boundaries come from `spec/fidelity_text.py`, the reading the fidelity checks use, so a `## `
-    shown inside a code sample cannot split a unit here while leaving those checks reading the
-    document the other way. A document read two ways by two tools is the failure that shared
-    reading exists to end.
+    Boundaries come from `spec/fidelity_text.py`, which the fidelity checks read with too. So a `## `
+    shown inside a code sample cannot split a unit here while those checks read the document the
+    other way. A document read two ways by two tools is the failure that shared reading ends.
 
     The heading line's exact bytes stay inside its region, so re-casing or re-spacing a heading
     surfaces as a changed unit rather than as an invisible edit.
