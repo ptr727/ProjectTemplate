@@ -35,8 +35,8 @@ EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 def lookup_via_git() -> tuple[str | None, str]:
     """`main`'s commit from `git ls-remote`, which spends no API quota, else None and the cause.
 
-    Stderr is discarded rather than captured, so a remote helper git leaves behind on a timeout holds
-    no pipe this process waits on.
+    Stderr is discarded rather than captured, so a remote helper git leaves behind on a timeout
+    holds no pipe this process waits on.
     """
     try:
         probe = subprocess.run(
