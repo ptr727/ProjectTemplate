@@ -221,7 +221,7 @@ function Lock-Hub {
 }
 
 function Invoke-WithHubLock {
-    # The single lock over $script:DIR\hub, shared by every writer (Invoke-FetchHub, Invoke-Cleanup) and every reader (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) alike.
+    # The single lock over $script:DIR\hub, shared by every writer (Invoke-FetchHub, Invoke-Cleanup) and every reader (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubUvScript span) alike.
     # Unlike menu.sh, which gives readers a genuine shared mode, every caller here takes the same exclusive lock, trading reader concurrency for a locking scheme simple enough to get right.
     # That trade is not always brief: Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade, so a second session waiting here can wait as long as that run takes, not just for a quick read.
     # It still closes the actual TOCTOU: a concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it, since both now hold this same lock for that whole span, not just around the read's own final call.
@@ -249,7 +249,7 @@ function Invoke-FetchHub {
         return $false
     }
     # Held for the fetch's own span rather than for the rest of this session: Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch, and holding the lock that long would block every other menu sharing this -Dir until this session quits.
-    # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race: every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubPython span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
+    # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race: every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubUvScript span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
     return (Invoke-WithHubLock -Failed $false -ScriptBlock { Invoke-FetchHubLocked })
 }
 
@@ -439,35 +439,10 @@ function Invoke-AgentsInstall {
     return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments (@('-Install') + $words))
 }
 
-# The first candidate that is a Python 3.7+, the same probe install-skills.ps1 uses: none of py, python3 or python guarantees that version by construction on Windows.
-function Find-Python {
-    $candidates = @(
-        @{ Exe = 'py'; Arguments = @('-3') },
-        @{ Exe = 'python3'; Arguments = @() },
-        @{ Exe = 'python'; Arguments = @() }
-    )
-    foreach ($candidate in $candidates) {
-        if (-not (Get-Command $candidate.Exe -ErrorAction SilentlyContinue)) { continue }
-        & $candidate.Exe @($candidate.Arguments) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)' 2>$null
-        if ($LASTEXITCODE -eq 0) { return $candidate }
-    }
-    return $null
-}
-
 # The Python tools under scripts\ and spec\ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs.
-# Checked here rather than upfront in main: a host with no interpreter yet can still use every host action, and only the actions that need one name it as their own prerequisite.
-function Invoke-HubPython {
-    param([Parameter(Mandatory)][string]$ScriptPath, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
-    $python = Find-Python
-    if (-not $python) {
-        fail 'Python 3.7+ is required for this task. host-setup\windows\install-tools.ps1 provides it.'
-        return 127
-    }
-    # Out-Host again, for the same reason as Invoke-HostTool.
-    & $python.Exe @($python.Arguments) (Join-Path $script:HUB_ROOT $ScriptPath) @Arguments | Out-Host
-    return $LASTEXITCODE
-}
-
+# Checked here rather than upfront in main, since a host with no uv yet can still use every host action.
+# Only the actions that need uv name it as their own prerequisite.
+# Every hub tool a task runs declares its libraries inline, so uv runs each one rather than a bare Python, which has none of them.
 function Invoke-HubUvScript {
     param([Parameter(Mandatory)][string]$ScriptPath, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -497,7 +472,7 @@ function Invoke-CheckSkillsDist {
         # 2, not 1: scripts\build_dist.py --check documents 1 as its own "stale" result, and the switch below reads that value as a genuine check outcome.
         # A Confirm-HubRoot failure must not collide with it, or a failed confirmation reports as "stale" with exit code 0 instead of the failure it actually is.
         if (-not (Confirm-HubRoot)) { return 2 }
-        return (Invoke-HubPython -ScriptPath 'scripts/build_dist.py' -Arguments '--check')
+        return (Invoke-HubUvScript -ScriptPath 'scripts/build_dist.py' -Arguments '--check')
     }
     # Only 0 (clean) and 1 (stale) are outcomes scripts\build_dist.py --check documents for itself, so only those two read as a check result.
     # Anything else is this task failing to run rather than a finding, Confirm-HubRoot's own failure (2) included.
@@ -528,7 +503,7 @@ function Invoke-CarryAction {
     return (Invoke-WithHubLock -ArgumentList @($Mode, $name) -ScriptBlock {
             param($Mode, $name)
             if (-not (Confirm-HubRoot)) { return 1 }
-            return (Invoke-HubPython -ScriptPath 'scripts/carry.py' -Arguments $Mode, $name, '--target', $script:DOWNSTREAM_ROOT)
+            return (Invoke-HubUvScript -ScriptPath 'scripts/carry.py' -Arguments $Mode, $name, '--target', $script:DOWNSTREAM_ROOT)
         })
 }
 

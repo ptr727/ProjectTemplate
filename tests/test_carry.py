@@ -13,6 +13,7 @@ from collections.abc import Callable
 from unittest import mock
 
 from host_capability import requires_symlink
+from import_probe import import_delta
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
@@ -932,6 +933,21 @@ class CarryStatusTests(unittest.TestCase):
             self.assertRaisesRegex(carry.CarryError, "not a git repository"),
         ):
             carry.git_status_paths(pathlib.Path("."))
+
+
+class CarryImportTests(unittest.TestCase):
+    def test_importing_handoff_imports_no_markdown_reader(self) -> None:
+        """`scripts/handoff.py` runs under a plain python3 and imports carry for `normalize_eol` alone.
+
+        So the region reader, and the markdown-it-py it imports, load only when a region is read.
+        A name the interpreter already holds at startup is a boundary rather than a finding.
+        """
+        before, after = import_delta(pathlib.Path(carry.__file__).parent, "handoff")
+        if before:
+            self.skipTest(
+                f"this interpreter imports {', '.join(before)} at startup, so the import delta cannot be read here"
+            )
+        self.assertEqual(after, [], "importing handoff pulled in a Markdown reader")
 
 
 if __name__ == "__main__":

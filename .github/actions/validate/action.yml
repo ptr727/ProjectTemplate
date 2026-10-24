@@ -39,7 +39,7 @@ runs:
     # Read-only: fails if a generated skill distribution differs from .agents/skills/.
     - name: Check fleet skills are current step
       shell: bash
-      run: python3 scripts/build_dist.py --check
+      run: uv run --no-project --script scripts/build_dist.py --check
 
     # The burn-down goes to the run's job summary rather than into the tree, on every event since it describes the commit rather than a comparison against a base.
     # GOVERNANCE.md "Verification Discipline".
@@ -48,7 +48,7 @@ runs:
     - name: Render the canonical review burn-down step
       if: ${{ !cancelled() }}
       shell: bash
-      run: python3 scripts/canonical_review.py report >> "$GITHUB_STEP_SUMMARY"
+      run: uv run --no-project --script scripts/canonical_review.py report >> "$GITHUB_STEP_SUMMARY"
 
     # Warn-only, and visible rather than absent: an unrun check is one nobody acts on.
     # A finding here names a character no tier covers, and classifying it is a fleet-law edit rather than a prose fix.

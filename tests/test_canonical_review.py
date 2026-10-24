@@ -8,8 +8,8 @@ reason: the mechanism rests on git's own file listing and merge-base rather than
 module could stub convincingly. A third, smaller set reads this repository's own tree, since a unit
 table that silently stops covering a canonical reports exactly what a healthy one does.
 
-Run as `python3 tests/test_canonical_review.py`, or under
-`python3 -m unittest discover -s tests`.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py`,
+or under `-m unittest discover -s tests` the same way.
 """
 
 import contextlib
@@ -516,7 +516,7 @@ class SweepCase(RepoCase):
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         _, output = self.loud(["sweep"])
         line = (
-            "python3 scripts/canonical_review.py record --reviewer agent-skill --target develop"
+            "uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop"
             " --findings '<count>' --unit '<key>=<digest>'"
         )
         self.assertIn(line, output.splitlines(), "the printed command must be one whole line")

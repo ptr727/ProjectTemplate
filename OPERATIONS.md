@@ -27,8 +27,8 @@ uvx --with-requirements tests/requirements.txt coverage@latest run --source=scri
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/gh-write-guard.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
 uvx coverage@latest report
-python3 scripts/build_dist.py --check
-python3 scripts/canonical_review.py status > /dev/null
+uv run --no-project --script scripts/build_dist.py --check
+uv run --no-project --script scripts/canonical_review.py status > /dev/null
 python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path --check issue-ref
 python3 scripts/prose_lint.py . --check charset-unknown --summary
@@ -37,7 +37,7 @@ python3 spec/validate.py
 python3 scripts/docker_lint.py
 ```
 
-`python3 scripts/canonical_review.py report` renders the coverage burn-down from the ledger to standard output, and CI writes the same rendering to the run's job summary. Neither refuses anything over what it shows, and no command above turns a unit's coverage into a verdict, since that read is swept on a schedule rather than owed by a change, per [`GOVERNANCE.md`](./GOVERNANCE.md) "Verification Discipline". The CI step does still fail where the engine could not read what it needs at all, that being a boundary rather than a verdict, and `status` is in the block above for that exit code rather than for its output, which is why the output goes nowhere. The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
+`uv run --no-project --script scripts/canonical_review.py report` renders the coverage burn-down from the ledger to standard output, and CI writes the same rendering to the run's job summary. Neither refuses anything over what it shows, and no command above turns a unit's coverage into a verdict, since that read is swept on a schedule rather than owed by a change, per [`GOVERNANCE.md`](./GOVERNANCE.md) "Verification Discipline". The CI step does still fail where the engine could not read what it needs at all, that being a boundary rather than a verdict, and `status` is in the block above for that exit code rather than for its output, which is why the output goes nowhere. The local block above runs under `set -Eeuo pipefail`, so a failing gate stops it there and the gates below never run, and reaching a second verdict means fixing the first or running the later command on its own.
 
 The cache directory is unique to this verification run and remains outside the checkout. The operating system can reap it with other temporary data. A restricted executor may deny the first `uvx` network request, Docker socket access, or third-party image access to the repository. Record that denial as an execution boundary, then rerun the required command with scoped approval. Persist repository-exposure approval only when the executor constrains the read-only mount, disabled networking, and digest together. Only the rerun's tool output is a lint or test verdict. Provider-specific host configuration lives in [`docs/host-setup.md`](./docs/host-setup.md) "Agent Worktree Access".
 
@@ -139,5 +139,5 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
 - [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.
-- `fence_step()` in [spec/carried_text.py](./spec/carried_text.py) is the fence reading the audit's region extraction, the carry, the skill build, and the review ledger share. Its `extract_section()` and `strip_sections()` are the audit's region reading, and its `normalize()` is the comparable form the audit and the carry share.
+- [spec/fidelity_text.py](./spec/fidelity_text.py) reads headings and code blocks with markdown-it-py for the audit's region extraction, the carry, the skill build, and the review ledger alike. Its `extract_section()` and `strip_sections()` are the audit's region reading, and its `normalize()` is the comparable form the audit and the carry share.
 - `read_regular_file()` and `write_regular_file()` in [host-setup/agent-safety/claude/install.py](./host-setup/agent-safety/claude/install.py) are the shared primitives for reading and replacing a file that must be regular. Each opens without blocking and judges the open descriptor, so a FIFO or a device is refused rather than hanging the call.
