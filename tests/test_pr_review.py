@@ -2067,6 +2067,24 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("Guard the write.", out)
         self.assertIn("suppressed=0 (on_head=0 earlier=0)", out)
 
+    def test_an_unbelievable_previously_missed_count_tallies_as_unknown(self) -> None:
+        missed = (
+            f"{OVERVIEW}\n<details>\n<summary><strong>Previously missed (99999)</strong></summary>"
+            "\n\nIn code that has not changed since last review\n\n[P2] Guard the write.\n</details>"
+        )
+        rounds = [review(oid=OLD, body=missed, rid="A"), review(rid="B")]
+        self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
+        out = self.out.getvalue()
+        self.assertIn("previously_missed=? (on_head=0 earlier=?)", out)
+        self.assertIn("a finding count this reader cannot believe", out)
+
+    def test_an_unbelievable_open_count_reads_unknown_and_holds_the_round(self) -> None:
+        text = overview_v2(open_count="99999 open findings", entries=0)
+        self.assertEqual(50, self.status(payload([review(body=text)], files=["a.py"])))
+        out = self.out.getvalue()
+        self.assertIn("overview=?/0 ", out)
+        self.assertIn("a finding count this reader cannot believe", out)
+
     def test_coderabbit_s_outside_diff_findings_are_its_own_field(self) -> None:
         cr = {
             "author": {"login": pr_review.CODERABBIT_LOGIN},

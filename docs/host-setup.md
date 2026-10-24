@@ -384,7 +384,7 @@ Verified on Windows 11 Pro 10.0.26200 with PowerShell 7.6.4, where `python3 scri
 | --- | --- |
 | Stand up a new repo through [`STANDUP.md`][standup] | step 0 verifies identity and signing, and its window closes at the first commit |
 | Run the four linters locally, matching CI | `docker` runs each as the same pinned image CI uses |
-| Run the repo's own gates and tests | Python 3 and `uv` cover `scripts/`, `spec/`, and `tests/` with no packages to install, `uv` supplying `tests/requirements.txt` |
+| Run the repo's own gates and tests | Python 3 and `uv` cover `scripts/`, `spec/`, and `tests/`, with `uv` installing `tests/requirements.txt` for the tests |
 | Drive the PR and Copilot review loop | `gh` and an authenticated session |
 | Let an agent work with the `gh` credentials live | the host-safety kit is installed |
 | Have the fleet skills surface in every agent session | the skills snapshot is current per `skills_install.py --report` |

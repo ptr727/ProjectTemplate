@@ -83,11 +83,12 @@ Subcommands
            `previously_missed=`, and `cr_outside_diff=N (on_head=X earlier=Y)` count findings
            collapsed into review bodies over every round, split into the head's and earlier ones,
            each printed whole since no thread carries it, a trailing `+` marking a cut reviews
-           window. `qodo_open=N` counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
+           window. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N`
+           counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
            where that comment can sit behind the window. `overview=T/M` is the open findings the
            round covering the head states beside the threads that round opened, `?` where it
-           states no count, and `FINDINGS WITH NO THREAD` names findings the round names that no
-           thread on the pull request carries. Each of these is owed the triage a suppressed
+           states no count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
+           names findings the round names that no thread on the pull request carries. Each of these is owed the triage a suppressed
            finding gets, and none decides an exit code.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
@@ -1403,7 +1404,8 @@ def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.
     """Each section of `kind` in this login's rounds, with where it was raised, and the field.
 
     Every round rather than the head's, since an unanswered finding survives a push. The field
-    reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut.
+    reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut. A tally
+    holding a count the reader cannot believe reads `?`.
     """
     head = pr["headRefOid"]
     found = []
@@ -1417,10 +1419,13 @@ def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.
             else f"raised on {oid[:8]}, earlier round"
         )
         found += [(where, s) for s in reading(node, login).sections if s.kind == kind]
-    total = sum(s.findings for _, s in found)
-    on_head = sum(s.findings for w, s in found if w == "on head")
+
+    def tally(on: bool | None) -> str:
+        n = adapter.total(s.findings for w, s in found if on is None or (w == "on head") == on)
+        return "?" if n is None else str(n)
+
     mark = "+" if reviews_truncated(pr) else ""
-    return found, f"{total}{mark} (on_head={on_head} earlier={total - on_head})"
+    return found, f"{tally(None)}{mark} (on_head={tally(True)} earlier={tally(False)})"
 
 
 def thread_author(t: dict) -> str:

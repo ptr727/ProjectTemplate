@@ -300,6 +300,17 @@ class TestOpenFindings(unittest.TestCase):
     def test_no_count_reads_as_none_rather_than_zero(self) -> None:
         self.assertIsNone(adapter.read(body()).open)
 
+    def test_an_oversized_count_reads_as_none_and_is_noted(self) -> None:
+        for sections in (
+            open_section("99999 open findings"),
+            "**99999 open findings**",
+            f"{open_section('1 open issue', ('101',))}\n\n**99999 open findings**",
+        ):
+            with self.subTest(sections=sections):
+                found = adapter.read(body(sections=sections))
+                self.assertIsNone(found.open)
+                self.assertTrue(any("cannot believe" in n for n in found.notes), found.notes)
+
     def test_an_entry_linking_no_thread_on_the_pull_request_is_unthreaded(self) -> None:
         found = adapter.read(body(sections=open_section()), threads=("101",))
         self.assertEqual(1, found.unthreaded)
@@ -345,6 +356,18 @@ class TestCollapsedSections(unittest.TestCase):
                 self.assertEqual(
                     2, adapter.read(body(sections=collapsed(label))).counts["suppressed"]
                 )
+
+    def test_an_unbelievable_section_count_is_none_beside_a_believed_open_count(self) -> None:
+        for label, kind in (
+            ("Comments suppressed due to low confidence (99999)", "suppressed"),
+            ("Previously missed (99999)", "previously_missed"),
+        ):
+            with self.subTest(label=label):
+                sections = f"{open_section('1 open issue', ('101',))}\n\n{collapsed(label)}"
+                found = adapter.read(body(sections=sections))
+                self.assertIsNone(found.counts[kind])
+                self.assertEqual(1, found.open)
+                self.assertTrue(any("cannot believe" in n for n in found.notes), found.notes)
 
     def test_a_resolved_section_counts_nothing(self) -> None:
         resolved = open_section("3 resolved since last review", ("1", "2", "3"))
