@@ -1348,13 +1348,19 @@ def coverage(pr: dict) -> tuple[str, str]:
     rounds = head_reviews(pr)
     rank = ("full", "unknown", "partial")
     stated = [(r.coverage, r.coverage_line) for n in rounds if (r := reading(n)).coverage != "none"]
-    if stated:
-        return max(stated, key=lambda s: rank.index(s[0]))
+    worst = max(stated, key=lambda s: rank.index(s[0])) if stated else None
+    if worst and worst[0] != "unknown":
+        return worst
     if rounds and partial_on_record(pr):
         return (
             "partial",
-            "an earlier round states partial coverage, and no round on the head states any",
+            "an earlier round states partial coverage, and no round on the head states a reading "
+            "that can be believed"
+            if worst
+            else "an earlier round states partial coverage, and no round on the head states any",
         )
+    if worst:
+        return worst
     why = ""
     if rounds:
         state, why = table_cover(pr)
