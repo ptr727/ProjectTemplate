@@ -146,8 +146,8 @@ Capture the source, verify the capture **against the source**, and hold the veri
 After the baseline files are present, apply every applicable whole-tree declaration from the fetched hub checkout. The carry tool resolves the repository through the registry and refuses a shared or dirty target worktree.
 
 ```shell
-python3 scripts/carry.py check "<Repo>" --target /path/to/worktree
-python3 scripts/carry.py apply "<Repo>" --target /path/to/worktree
+uv run --no-project --script scripts/carry.py check "<Repo>" --target /path/to/worktree
+uv run --no-project --script scripts/carry.py apply "<Repo>" --target /path/to/worktree
 ```
 
 Read every extra-path report before `apply` prunes it. Finish with another `check`. It uses the same comparison as `apply` and must report clean.

@@ -106,7 +106,7 @@ discoverer of a hub defect files an issue first, adds a row to the
 issue `skills`, `agents`, or `docs` as fits, and link it back to the phase that surfaced it.
 
 **Skill edits follow the [`skill-lifecycle`][skill-lifecycle-skill] Skill.** Edit only
-`.agents/skills/`, and regenerate with `python3 scripts/build_dist.py` from a hub checkout.
+`.agents/skills/`, and regenerate with `uv run --no-project --script scripts/build_dist.py` from a hub checkout.
 Commit source plus generated tree in one commit, so the CI `--check` gate passes. Machines serve
 the previous skill set until `scripts/skills_install.py` re-runs, so state that refresh in the
 pull request.

@@ -391,20 +391,13 @@ install_agents() {
 }
 
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
-# Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no interpreter yet can still use every host action, and only the actions that need one name it as their own prerequisite.
-# The prerequisite failure returns 127, bash's own "command not found" convention, so a caller reading a specific exit code from the tool itself (build_dist.py's 0-clean/1-stale contract) can tell "python3 never ran" apart from "python3 ran and returned 1".
+# Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries.
+# A host with no uv yet can still use every host action, and only the actions that need uv name it as their own prerequisite.
+# The prerequisite failure returns 127, bash's own "command not found" convention.
+# So a caller reading a specific exit code from the tool itself, such as build_dist.py's 0-clean/1-stale contract, can tell "uv never ran" apart from "uv ran and returned 1".
 # Callers hold the reader lock themselves, hub_read_lock_acquire before their own ensure_hub_root call, rather than this function taking it.
 # Every caller pairs this with ensure_hub_root and the lock has to cover both, so taking it only here would still leave ensure_hub_root's own reads unlocked, the gap this whole reader-half addition exists to close.
-hub_python() {
-    command -v python3 >/dev/null || {
-        fail "python3 is required for this task. host-setup/linux/install-tools.sh provides it."
-        return 127
-    }
-    local script="$1"
-    shift
-    python3 "$HUB_ROOT/$script" "$@"
-}
-
+# Every hub tool a task runs declares its libraries inline, so uv runs each one rather than a bare python3, which has none of them.
 hub_uv_script() {
     command -v uv >/dev/null || {
         fail "uv is required for this task. host-setup/linux/install-tools.sh provides it."
@@ -415,7 +408,7 @@ hub_uv_script() {
     uv run --no-project --script "$HUB_ROOT/$script" "$@"
 }
 
-# The single reader-lock span for a task that needs ensure_hub_root plus one hub_python or hub_uv_script call, matching host_tool's own wrapper/locked-body split.
+# The single reader-lock span for a task that needs ensure_hub_root plus one hub_uv_script call, matching host_tool's own wrapper/locked-body split.
 # Not reentrant: hub_read_lock_acquire's exec unconditionally overwrites HUB_READ_LOCK_FD, so a nested call would leak the outer fd and silently drop the lock it represented.
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
@@ -452,9 +445,9 @@ audit_repo() {
 
 check_skills_dist() {
     local rc=0
-    with_hub_read_lock hub_python scripts/build_dist.py --check || rc=$?
+    with_hub_read_lock hub_uv_script scripts/build_dist.py --check || rc=$?
     # Only 0 (clean) and 1 (stale) are outcomes scripts/build_dist.py --check documents for itself, so only those two read as a check result.
-    # Anything else, 127 included, is with_hub_read_lock, hub_python, or the tool itself failing to run rather than a finding, and is reported as the task error it is.
+    # Anything else, 127 included, is with_hub_read_lock, hub_uv_script, or the tool itself failing to run rather than a finding, and is reported as the task error it is.
     case "$rc" in
     0) info "Every generated Skills distribution matches .agents/skills/" ;;
     1) info "A generated Skills distribution is stale. This menu does not regenerate it from a fetched checkout, since the result has to be committed in the hub itself." ;;
@@ -483,7 +476,7 @@ carry_action() {
     local name
     read -r -p "Repo name as cataloged in registry/repos.json [$default]: " name
     name="${name:-$default}"
-    with_hub_read_lock hub_python scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT"
+    with_hub_read_lock hub_uv_script scripts/carry.py "$mode" "$name" --target "$DOWNSTREAM_ROOT"
 }
 
 # --- Menu ---

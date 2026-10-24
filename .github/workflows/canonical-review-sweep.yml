@@ -39,9 +39,11 @@ jobs:
           # The job holds issues: write, and checkout persists that token in .git/config by default, where nothing here needs git authentication: every git call here reads local state, in the step below and inside the engines alike, and every gh call takes GH_TOKEN.
           persist-credentials: false
 
-      # The engine imports datetime.UTC at module level, so the interpreter is pinned to the floor spec/host-tools.json declares rather than left as whatever the runner image ships.
-      - name: Setup python step
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The engine declares markdown-it-py inline, which uv resolves for it.
+      # It also imports datetime.UTC at module level.
+      # So the interpreter is pinned to the floor spec/host-tools.json declares, rather than left as whatever the runner image ships.
+      - name: Setup uv step
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: '3.13'
 
@@ -52,7 +54,7 @@ jobs:
           set -Eeuo pipefail
           # The engine's three-valued exit is read rather than folded: 0 is no unit owing a read, 1 is work to file, and 2 is the sweep never having run, which is not a verdict either way.
           status=0
-          python3 scripts/canonical_review.py sweep > "$RUNNER_TEMP/sweep.md" || status=$?
+          uv run --no-project --script scripts/canonical_review.py sweep > "$RUNNER_TEMP/sweep.md" || status=$?
           if [ "$status" -gt 1 ]; then
             echo "::error::canonical_review.py sweep could not run, so this run says nothing about coverage"
             exit 1
@@ -75,7 +77,7 @@ jobs:
           # The renamed text is read again under its new key, which the work list reaches, where the stranded pass is not.
           # Warned rather than filed, since no pass closes an orphan and an issue that cannot be closed is worse than a warning nobody has to act on.
           # `.orphanedPasses | length` answers 0 for an absent key rather than failing, so the field is asserted: a renamed one has to stop the step rather than stop the warning.
-          orphans="$(python3 scripts/canonical_review.py status | jq 'if has("orphanedPasses") then (.orphanedPasses | length) else error("canonical_review.py status carries no orphanedPasses field") end')"
+          orphans="$(uv run --no-project --script scripts/canonical_review.py status | jq 'if has("orphanedPasses") then (.orphanedPasses | length) else error("canonical_review.py status carries no orphanedPasses field") end')"
           if [ "$orphans" -gt 0 ]; then
             echo "::warning::$orphans recorded pass(es) name a unit this tree no longer holds, so a section was renamed or removed, and a renamed one is read again under its new key in the never-read backlog"
           fi

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Exercise build_dist.py's regeneration and staleness detection against a crafted skills tree.
 
-Run as `python3 tests/test_build_dist.py`, or under `python3 -m unittest discover -s tests`.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_build_dist.py`,
+or under `-m unittest discover -s tests` the same way.
 """
 
 from __future__ import annotations
@@ -11,13 +12,13 @@ import io
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from host_capability import NO_SYMLINK, can_symlink, requires_symlink
+from import_probe import import_delta
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import build_dist
@@ -888,15 +889,20 @@ class IncludeCase(TreeCase):
         with self.assertRaisesRegex(ValueError, "no heading 'Title'"):
             build_dist.regenerate()
 
-    def test_an_indented_heading_is_a_boundary_as_it_is_to_the_audit(self) -> None:
-        """spec/audit.py and canonical_review.py split on an indented `## ` line, so the generator does too."""
+    def test_an_indented_heading_splits_as_it_does_for_the_audit(self) -> None:
+        """spec/audit.py and canonical_review.py split where the shared reader does, so the generator does too.
+
+        Three spaces still open a heading, and four open an indented code block, whose `## ` is content.
+        """
         (self.tmp / "RULES.md").write_text(
-            "## A\n\nAlpha.\n\n    ## Indented\n\nnot alpha\n", encoding="utf-8"
+            "## A\n\nAlpha.\n\n    ## Code\n\nstill alpha\n\n   ## Indented\n\nnot alpha\n",
+            encoding="utf-8",
         )
         self.make_skill("foo", self.region("RULES.md > A"))
         build_dist.regenerate()
         self.assertEqual(
-            self.skill_text(), "<!-- include: RULES.md > A -->\n\nAlpha.\n\n<!-- /include -->\n"
+            self.skill_text(),
+            "<!-- include: RULES.md > A -->\n\nAlpha.\n\n    ## Code\n\nstill alpha\n\n<!-- /include -->\n",
         )
 
     def test_a_doubled_blank_line_inside_an_indented_code_block_is_kept(self) -> None:
@@ -918,63 +924,46 @@ class IncludeCase(TreeCase):
         self.assertIn("    pass\n\n\ndef b():", self.skill_text())
 
     def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
-        (self.tmp / "RULES.md").write_text("## Alpha\n\n```text\nopen\n", encoding="utf-8")
-        self.make_skill("foo", self.region("RULES.md > Alpha"))
-        with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
-            build_dist.regenerate()
+        for source in (
+            "## Alpha\n\n```text\nopen\n",
+            "## Alpha\n\n```text\nopen",
+            "## Alpha\n\n- ```text\n  open\n\n## Beta\n",
+            "## Alpha\n\n> ```text\n> open\n\n## Beta\n",
+        ):
+            with self.subTest(source=source):
+                (self.tmp / "RULES.md").write_text(source, encoding="utf-8")
+                self.make_skill("foo", self.region("RULES.md > Alpha"))
+                with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
+                    build_dist.regenerate()
 
-    def test_fence_step_adds_the_spec_directory_to_sys_path_once(self) -> None:
+    def test_the_reader_accessor_adds_the_spec_directory_to_sys_path_once(self) -> None:
         """The cache would otherwise hide this: held, the accessor's body runs once per process, so
         the `not in sys.path` guard could be deleted and the path still grow by only one. Clearing
         between calls makes the body run each time, which is what the guard is there for."""
         before = len(sys.path)
         for _ in range(3):
-            build_dist._carried_text.cache_clear()
-            build_dist._fence_step("plain", None, 0)
+            build_dist._fidelity_text.cache_clear()
+            build_dist._code_lines(["plain"])
         self.assertLessEqual(len(sys.path) - before, 1)
 
-    def test_carried_text_is_resolved_once_however_many_lines_are_read(self) -> None:
-        """`_fence_step` reaches for it per line, so resolving it per line is what this stops."""
-        build_dist._carried_text.cache_clear()
+    def test_importing_skills_install_imports_no_markdown_reader(self) -> None:
+        """The laziness `scripts/skills_install.py` depends on, since it imports build_dist under a plain python3.
 
-        for _ in range(50):
-            build_dist._fence_step("plain", None, 0)
+        Installing never fills a region, so the install path loads nothing from spec/ and no
+        markdown-it-py, which such a host may not have. Run in a fresh interpreter because this test
+        process has already imported both by other means.
 
-        self.assertEqual(build_dist._carried_text.cache_info().misses, 1)
-        self.assertEqual(build_dist._carried_text.cache_info().hits, 49)
-
-    def test_importing_this_module_does_not_import_carried_text(self) -> None:
-        """The laziness `scripts/skills_install.py` depends on, which caching must not give up.
-
-        It imports this module and installing never fills a region, so the install path loads nothing
-        from spec/. Run in a fresh interpreter because this test process has already imported it by other means.
-
-        The measurement is the delta across the import rather than the child's absolute state, since
-        a `sitecustomize` or `usercustomize` hook runs before `-c` does and could import a module of
-        that name itself. That would be this case failing to run rather than the import being wrong,
-        which is a boundary to report rather than a finding to raise, so it skips and says so.
+        The measurement is the delta across the import rather than the child's absolute state. A
+        `sitecustomize` or `usercustomize` hook runs before `-c` does and could import either name
+        itself. That would be this case failing to run rather than the import being wrong. It is a
+        boundary to report rather than a finding to raise, so the case skips and says so.
         """
-        scripts_dir = str(Path(build_dist.__file__).parent)
-        source = (
-            "import sys; before = 'carried_text' in sys.modules;"
-            f" sys.path.insert(0, {scripts_dir!r}); import build_dist;"
-            " print(before, 'carried_text' in sys.modules, end='')"
-        )
-
-        result = subprocess.run(
-            [sys.executable, "-c", source],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=True,
-        )
-
-        before, after = result.stdout.split()
-        if before == "True":
+        before, after = import_delta(Path(build_dist.__file__).parent, "skills_install")
+        if before:
             self.skipTest(
-                "this interpreter imports a module named carried_text at startup, so the import delta cannot be read here"
+                f"this interpreter imports {', '.join(before)} at startup, so the import delta cannot be read here"
             )
-        self.assertEqual(after, "False", "importing build_dist pulled in carried_text")
+        self.assertEqual(after, [], "importing skills_install pulled in a Markdown reader")
 
 
 class DeclaredDestinationCase(TreeCase):

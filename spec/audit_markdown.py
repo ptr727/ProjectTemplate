@@ -7,9 +7,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import fidelity_text
 import markdown_it
 import validate
-from carried_text import extract_section, normalize, strip_sections
+from fidelity_text import extract_section, normalize, strip_sections
 
 
 def docker_hub_description(slug):
@@ -29,7 +30,7 @@ def docker_hub_description(slug):
 
 
 def undeclared_h2_headings(text, declared):
-    """Level-two headings in `text` that `declared` does not name, folded and sorted."""
+    """Top-level `##` headings in `text` that `declared` does not name, folded and sorted."""
     h2s = {h.strip().lower() for level, h, _, _ in _atx_headings(text) if level == 2}
     return sorted(h2s - {d.strip().lower() for d in declared})
 
@@ -39,13 +40,11 @@ _MD = markdown_it.MarkdownIt("commonmark").enable("table").disable("text_join")
 
 
 def _atx_headings(text):
-    """`(level, raw text, first line, last line)` for each ATX heading, the form the region reader splits on."""
-    tokens = _MD.parse(text)
-    return [
-        (int(t.tag[1]), tokens[i + 1].content, t.map[0], t.map[1])
-        for i, t in enumerate(tokens)
-        if t.type == "heading_open" and t.markup.startswith("#") and t.map
-    ]
+    """`(level, text, first line, last line)` for each top-level `#` heading, read by the region reader itself.
+
+    A setext heading is left out, and so is one inside a code block, a blockquote, or a list item.
+    """
+    return [(h.level, h.text, h.line, h.line + 1) for h in fidelity_text.headings(text)]
 
 
 def references(text):
@@ -56,7 +55,7 @@ def references(text):
 
 
 def heading_texts(markdown):
-    """Lowercased heading texts in a Markdown document, for case-insensitive section-presence matching."""
+    """Lowercased texts of the headings `_atx_headings` reads, for case-insensitive section-presence matching."""
     return {h.strip().lower() for _, h, _, _ in _atx_headings(markdown)}
 
 
@@ -118,10 +117,9 @@ _URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.IGNORECASE)
 
 def unfenced_text(text):
     """`text` normalized with every fenced code block's lines removed, since markup in a sample is shown rather than used."""
-    lines = normalize(text).split("\n")
-    fenced = {
-        i for t in _MD.parse("\n".join(lines)) if t.type == "fence" and t.map for i in range(*t.map)
-    }
+    base = normalize(text)
+    lines = base.split("\n")
+    fenced = {i for b in fidelity_text.code_blocks(base) if b.fenced for i in range(b.start, b.end)}
     return "\n".join(ln for i, ln in enumerate(lines) if i not in fenced)
 
 
@@ -162,7 +160,7 @@ def addressed_region(text, address):
 
 
 def ordered_headings(markdown, level):
-    """Heading texts at `level` in document order, HTML comments stripped, fenced blocks skipped."""
+    """Texts of the headings `_atx_headings` reads at `level`, in document order, HTML comments stripped."""
     return [
         _HTML_COMMENT.sub("", h).strip() for lv, h, _, _ in _atx_headings(markdown) if lv == level
     ]
