@@ -2013,6 +2013,19 @@ class TestReadingsThroughTheAdapter(GqlCase):
         out = self.out.getvalue()
         self.assertIn("coverage=PARTIAL ", out)
         self.assertNotIn("coverage=UNKNOWN", out)
+        self.assertIn("the head states no full or partial reading", out)
+
+    def test_a_head_stating_full_still_beats_an_earlier_partial(self) -> None:
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+        rounds = [review(oid=OLD, body=part, rid="A"), review(body=full, rid="B")]
+        self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
+        self.assertNotIn("coverage=PARTIAL", self.out.getvalue())
+
+    def test_an_unknown_head_with_no_partial_on_record_stays_unknown(self) -> None:
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        self.assertEqual(0, self.status(payload([review(body=odd)], files=["a.py"])))
+        self.assertIn("coverage=UNKNOWN ", self.out.getvalue())
 
     def test_a_note_on_an_earlier_round_still_reaches_the_digest(self) -> None:
         odd = "## Pull request overview\n\nThe change is narrow.\n"

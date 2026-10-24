@@ -1342,7 +1342,8 @@ def table_cover(pr: dict) -> tuple[str, str]:
 def coverage(pr: dict) -> tuple[str, str]:
     """The head's coverage reading and the statement or reason it rests on.
 
-    A statement on a round covering the head decides it, the worst winning. Where none states any,
+    A statement on a round covering the head decides it, the worst winning, except that an
+    `unknown` reading yields to a partial stated on any earlier round. Where none states any,
     a file table stands in under `table_cover`, then an attested local pass under `local_cover`.
     """
     rounds = head_reviews(pr)
@@ -1354,8 +1355,8 @@ def coverage(pr: dict) -> tuple[str, str]:
     if rounds and partial_on_record(pr):
         return (
             "partial",
-            "an earlier round states partial coverage, and no round on the head states a reading "
-            "that can be believed"
+            "an earlier round states partial coverage, and the head states no full or partial "
+            "reading"
             if worst
             else "an earlier round states partial coverage, and no round on the head states any",
         )
