@@ -175,6 +175,8 @@ class TestCoverage(unittest.TestCase):
             ("Copilot reviewed 4 out of 4 changed files.", "full", False),
             ("Copilot reviewed 3 out of\n4 changed files.", "partial", False),
             ("Copilot reviewed 5 out of 4 changed files.", "unknown", True),
+            ("Copilot reviewed 12345 out of 12345 changed files.", "unknown", True),
+            ("Copilot reviewed 12340 out of 12349 changed files.", "unknown", True),
         ):
             with self.subTest(line=line):
                 found = adapter.read(body(sections=line))

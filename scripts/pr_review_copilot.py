@@ -192,6 +192,13 @@ def matched(patterns: list[re.Pattern[str]], text: str) -> re.Match[str] | None:
     return next((m for p in patterns if (m := p.fullmatch(text))), None)
 
 
+def count_state(got: str, of: str) -> str:
+    """A reviewed-of-changed count as `full`, `partial`, or `unknown` where either is too long or `got` exceeds `of`."""
+    if len(got) > COUNT_DIGITS or len(of) > COUNT_DIGITS or int(got) > int(of):
+        return "unknown"
+    return "full" if int(got) == int(of) else "partial"
+
+
 def stated(match: re.Match[str]) -> int:
     """The count a matched label states: its `n` group, zero for a spelled none, one without one."""
     value = match.groupdict().get("n")
@@ -347,11 +354,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     rank = {"full": 0, "unknown": 1, "partial": 2}
     for h in html:
         for m in FLEET_REVIEW.finditer(h):
-            got, of = m.group(1), m.group(2)
-            if len(got) > COUNT_DIGITS or len(of) > COUNT_DIGITS or int(got) > int(of):
-                state = "unknown"
-            else:
-                state = "full" if got == of else "partial"
+            state = count_state(m.group(1), m.group(2))
             if coverage == "none" or rank[state] > rank[coverage]:
                 coverage, coverage_line = state, m.group(0)
     # A body in another layout is one note, rather than one note per part of it.
@@ -518,8 +521,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         m = next((m for p in vocab["coverage_prose"] if (m := p.match(said))), None)
         if m is None:
             continue
-        got, of = int(m.group("got")[:COUNT_DIGITS]), int(m.group("of")[:COUNT_DIGITS])
-        state = "partial" if got < of else "full" if got == of else "unknown"
+        state = count_state(m.group("got"), m.group("of"))
         if state == "unknown":
             notes.append(f"a coverage count this reader cannot believe: `{said}`")
         if coverage == "none" or rank[state] > rank[coverage]:
