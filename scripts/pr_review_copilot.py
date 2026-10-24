@@ -26,6 +26,7 @@ import json
 import re
 import sys
 import unicodedata
+from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -131,8 +132,7 @@ class Reading(NamedTuple):
 
     def held(self, kind: str) -> int | None:
         """The findings in sections of `kind`, by their stated counts, None where one is unbelievable."""
-        counts = [s.findings for s in self.sections if s.kind == kind]
-        return None if None in counts else sum(c or 0 for c in counts)
+        return total(s.findings for s in self.sections if s.kind == kind)
 
     @property
     def counts(self) -> dict[str, int | None]:
@@ -195,6 +195,12 @@ def plain(text: str) -> str:
 def matched(patterns: list[re.Pattern[str]], text: str) -> re.Match[str] | None:
     """The first pattern that matches the whole of `text`."""
     return next((m for p in patterns if (m := p.fullmatch(text))), None)
+
+
+def total(counts: Iterable[int | None]) -> int | None:
+    """The sum of `counts`, or None where any of them is a count the reader cannot believe."""
+    found = list(counts)
+    return None if None in found else sum(c or 0 for c in found)
 
 
 def believed(digits: str) -> int | None:
