@@ -684,6 +684,26 @@ def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int,
     return out
 
 
+HEREDOC_OPEN = re.compile(r"(?<!<)<<-?[ \t]*(['\"]?)\\?([A-Za-z_]\w*)\1[^\n]*\n")
+
+
+def split_heredocs(text: str) -> list[tuple[int, str]]:
+    """A script as its code with heredoc bodies blanked, then each body, as (line offset, text).
+
+    A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
+    next one anywhere after it. Lexing each body alone ends that string with the body. A terminator
+    is matched on its stripped line, since a YAML block indents it with the rest.
+    """
+    code, bodies, pos = list(text), [], 0
+    while m := HEREDOC_OPEN.search(text, pos):
+        rest = re.finditer(r"[^\n]*(?:\n|\Z)", text[m.end() :])
+        stop = next((r.end() for r in rest if r.group().strip() == m.group(2)), len(text) - m.end())
+        pos = m.end() + stop
+        bodies.append((text.count("\n", 0, m.end()), text[m.end() : pos]))
+        code[m.end() : pos] = [c if c == "\n" else " " for c in text[m.end() : pos]]
+    return [(0, "".join(code)), *bodies]
+
+
 def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
     """Comments in the scalars a YAML file hands to another lexer, numbered by the file's lines."""
     starts = Starts(text)
@@ -692,7 +712,14 @@ def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
         number, col = starts.at(start)
         inner = language_of(lexer) or {}
         # The column pad keeps a one-line scalar's comment trailing, and C++ ends a comment on a break.
-        out += comment_lines("x" * col + text[start:end] + "\n", lexer, inner, number - 1)
+        body = text[start:end]
+        if lexer == "bash-heredoc-as-code":
+            # Each body starts on a line of its own, so only the code piece takes the column pad.
+            for skip, piece in split_heredocs(body):
+                pad = "x" * col if skip == 0 else ""
+                out += comment_lines(pad + piece + "\n", lexer, inner, number - 1 + skip)
+            continue
+        out += comment_lines("x" * col + body + "\n", lexer, inner, number - 1)
     return out
 
 
@@ -841,6 +868,14 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     out: list[Line] = []
     number, col = (tok.map or [0, 1])[0] + 1, 0
     for child in tok.children or ():
+        if child.type == "code_inline":
+            # A span holding a comment's own text must not be where that comment is found.
+            head = child.content.split("\n")[0]
+            for n in range(number, (tok.map or [0, 1])[1] + 1):
+                at = lines[n - 1].find(head, col if n == number else 0)
+                if at >= 0:
+                    number, col = n, at + len(head)
+                    break
         if child.type == "html_inline" and child.content.startswith("<!--"):
             # The source line is found by the comment's own text, searched on from the last one.
             head = child.content.split("\n")[0]
