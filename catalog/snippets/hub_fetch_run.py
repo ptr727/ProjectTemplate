@@ -22,6 +22,7 @@ from pathlib import Path
 HUB_REPO = "ptr727/ProjectTemplate"
 HUB_RAW_BASE = f"https://raw.githubusercontent.com/{HUB_REPO}"
 HUB_MAIN_SHA_URL = f"https://api.github.com/repos/{HUB_REPO}/commits/main"
+HUB_GIT_URL = f"https://github.com/{HUB_REPO}"
 PROVENANCE_VAR = "PROSE_GATE_PROVENANCE"
 PROSE_GATE_PATH = ".github/actions/prose-gate/prose_lint.py"
 # The files a script reads beside itself, fetched into the same directory before it runs.
@@ -31,10 +32,35 @@ LOOKUP_TIMEOUT = 5
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
-def resolve_main_commit() -> str | None:
-    """Return the full commit hash `main` points at now, or None when it cannot be resolved.
+def lookup_via_git() -> tuple[str | None, str]:
+    """`main`'s commit from `git ls-remote`, which spends no API quota, else None and the cause."""
+    try:
+        probe = subprocess.run(
+            ["git", "ls-remote", HUB_GIT_URL, "refs/heads/main"],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            timeout=LOOKUP_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timed out"
+    except OSError as exc:
+        return None, type(exc).__name__
+    if probe.returncode != 0:
+        return None, f"exit {probe.returncode}"
+    if m := re.fullmatch(r"([0-9a-f]{40})\trefs/heads/main\n?", probe.stdout):
+        return m.group(1), ""
+    return None, "unexpected output"
 
-    Any failure prints one line naming the cause and returns None, so the gate still runs.
+
+def resolve_main_commit() -> str | None:
+    """Return the full commit hash `main` points at now, from the API or else `git ls-remote`.
+
+    Every file a run fetches comes from that one commit, so a script and its data always pair.
+    Where neither resolves, one line names both causes and the gate runs against `main` instead.
+    A hook with no network cannot fetch the gate at all, and the CI gate is the enforcement.
     """
     token = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
     request = urllib.request.Request(
@@ -53,8 +79,12 @@ def resolve_main_commit() -> str | None:
         if re.fullmatch(r"[0-9a-f]{40}", sha):
             return sha
         reason = "unexpected response body"
+    sha, git_reason = lookup_via_git()
+    if sha:
+        return sha
     print(
-        f"hub_fetch_run: could not resolve the main commit ({reason}), using main.",
+        f"hub_fetch_run: could not resolve the main commit (API {reason}, git ls-remote "
+        f"{git_reason}), using main.",
         file=sys.stderr,
     )
     return None
