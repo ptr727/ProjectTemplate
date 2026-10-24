@@ -422,6 +422,7 @@ class GitLookupTests(unittest.TestCase):
         self.assertEqual(args[0], ["git", "ls-remote", hub.HUB_GIT_URL, "refs/heads/main"])
         self.assertEqual(kwargs["timeout"], hub.LOOKUP_TIMEOUT)
         self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
 
     def test_every_other_shape_names_its_cause(self) -> None:
         line = f"{GIT_SHA}\trefs/heads/main\n"

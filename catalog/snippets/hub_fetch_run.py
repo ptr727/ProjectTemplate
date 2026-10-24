@@ -33,11 +33,16 @@ EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def lookup_via_git() -> tuple[str | None, str]:
-    """`main`'s commit from `git ls-remote`, which spends no API quota, else None and the cause."""
+    """`main`'s commit from `git ls-remote`, which spends no API quota, else None and the cause.
+
+    Stderr is discarded rather than captured, so a remote helper git leaves behind on a timeout holds
+    no pipe this process waits on.
+    """
     try:
         probe = subprocess.run(
             ["git", "ls-remote", HUB_GIT_URL, "refs/heads/main"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             check=False,
             encoding="utf-8",
             errors="replace",
@@ -79,9 +84,9 @@ def resolve_main_commit() -> str | None:
         if re.fullmatch(r"[0-9a-f]{40}", sha):
             return sha
         reason = "unexpected response body"
-    sha, git_reason = lookup_via_git()
-    if sha:
-        return sha
+    git_sha, git_reason = lookup_via_git()
+    if git_sha:
+        return git_sha
     print(
         f"hub_fetch_run: could not resolve the main commit (API {reason}, git ls-remote "
         f"{git_reason}), using main.",
