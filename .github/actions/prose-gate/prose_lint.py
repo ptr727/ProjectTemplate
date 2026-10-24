@@ -144,8 +144,7 @@ def merged(base: dict[str, Any], override: object) -> dict[str, Any]:
     """The carried data with each override list added to its exemption, a directive name escaped."""
     if not isinstance(override, dict):
         raise OverrideError("is not a JSON object")
-    unknown = sorted(set(override) - set(BASE["override_keys"]))
-    if unknown:
+    if unknown := sorted(set(override) - set(BASE["override_keys"])):
         raise OverrideError(f"holds keys it may not: {quoted(unknown)}")
     out = json.loads(json.dumps(base))
     for key, vals in override.items():
@@ -518,8 +517,7 @@ def lexer_name(path: Path, first: str) -> str | None:
     for candidate in (path.name, path.name.lower()):
         with contextlib.suppress(ClassNotFound):
             return get_lexer_for_filename(candidate).aliases[0]
-    m = SHEBANG.match(first)
-    if m:
+    if m := SHEBANG.match(first):
         program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
         with contextlib.suppress(ClassNotFound):
             return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
@@ -532,7 +530,7 @@ def lexer_name(path: Path, first: str) -> str | None:
 HEREDOC = (
     r"(?s)<<(-)?[ \t]*(['\"]?)\\?(?:(?=[A-Za-z_])())?(\w[\w-]*+)\2"
     r"(?:[^\n'\"#]*?(?<!<)<<(-)?[ \t]*(['\"]?)\\?(\w[\w-]*+)\6)?[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\4"
-    r"(?=\n|\Z)(?(7)(?:\n(?:[^\n]*\n)*?(?(5)\t*)\7(?=\n|\Z))?)|(?(3).*|(?!)))"
+    r"(?=\n|\Z)()(?(7)(?:\n(?:[^\n]*\n)*?(?(5)\t*)\7(?=\n|\Z))?)|(?(3).*|(?!)))"
 )
 # Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
 # The comments inside it are lost, so an attribute here is read within its own line.
@@ -719,7 +717,9 @@ def split_heredocs(text: str) -> list[tuple[int, str]]:
     for offset, kind, value in lexer_for("bash").get_tokens_unprocessed(plain):
         if kind in String.Heredoc:
             # The opener's own line stays code, so a body is the lines after it.
-            spans.append((starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]))
+            first, end = starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]
+            mid = starts.at(offset + max(next(re.finditer(HEREDOC, value)).end(8), 1) - 1)[0]
+            spans += [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
     code = list(rows)
     for first, end in spans:
         code[first:end] = ["\n"] * (end - first)
@@ -1427,7 +1427,8 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
-MARKDOWN_SPAN = re.compile(rf"\\.|{HTML_TAG_RE.pattern[1:]}|{CODE_SPAN.pattern}", re.DOTALL)
+NON_CODE = r"\\.|<[a-zA-Z][a-zA-Z0-9+.\-]{1,31}:[^<>\x00-\x20]*>"
+MARKDOWN_SPAN = re.compile(rf"{NON_CODE}|{HTML_TAG_RE.pattern[1:]}|{CODE_SPAN.pattern}", re.DOTALL)
 
 
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
@@ -1793,8 +1794,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(not x.strip(ASCII_BLANK) for x in a.exclude):
         return refuse("error-empty-exclude")
     # Anything that is not a file or a directory, a FIFO or a socket included, is refused.
-    unusable = [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]
-    if unusable:
+    if unusable := [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]:
         return refuse("error-not-a-path", paths=quoted(unusable))
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
