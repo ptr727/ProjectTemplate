@@ -391,7 +391,8 @@ install_agents() {
 }
 
 # The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
-# Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries: a host with no uv yet can still use every host action, and only the actions that need one name it as their own prerequisite.
+# Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries.
+# A host with no uv yet can still use every host action, and only the actions that need uv name it as their own prerequisite.
 # The prerequisite failure returns 127, bash's own "command not found" convention.
 # So a caller reading a specific exit code from the tool itself, such as build_dist.py's 0-clean/1-stale contract, can tell "uv never ran" apart from "uv ran and returned 1".
 # Callers hold the reader lock themselves, hub_read_lock_acquire before their own ensure_hub_root call, rather than this function taking it.

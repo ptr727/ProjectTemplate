@@ -182,7 +182,8 @@ _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
 # A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too, and on any run of dashes so the three-dash opener a hand types on both markers is caught rather than read as content.
 _INCLUDE_LIKE = re.compile(r"^<!--+\s*/?\s*include\b", re.IGNORECASE)
-# CommonMark's own bound for a block, so a marker line indented past it is content, as an indented code block or a paragraph's continuation is.
+# CommonMark's three-space bound, held for a marker line in any container.
+# A marker indented past it is content, as it is in an indented code block.
 _MAX_INDENT = 3
 
 

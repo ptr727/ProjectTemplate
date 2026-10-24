@@ -30,7 +30,7 @@ def docker_hub_description(slug):
 
 
 def undeclared_h2_headings(text, declared):
-    """Level-two headings in `text` that `declared` does not name, folded and sorted."""
+    """Top-level `##` headings in `text` that `declared` does not name, folded and sorted."""
     h2s = {h.strip().lower() for level, h, _, _ in _atx_headings(text) if level == 2}
     return sorted(h2s - {d.strip().lower() for d in declared})
 
@@ -40,7 +40,10 @@ _MD = markdown_it.MarkdownIt("commonmark").enable("table").disable("text_join")
 
 
 def _atx_headings(text):
-    """`(level, text, first line, last line)` for each ATX heading, read by the region reader itself."""
+    """`(level, text, first line, last line)` for each top-level `#` heading, read by the region reader itself.
+
+    A setext heading is left out, and so is one inside a code block, a blockquote, or a list item.
+    """
     return [(h.level, h.text, h.line, h.line + 1) for h in fidelity_text.headings(text)]
 
 
@@ -52,10 +55,7 @@ def references(text):
 
 
 def heading_texts(markdown):
-    """Lowercased top-level heading texts, for case-insensitive section-presence matching.
-
-    A heading inside a code block, a blockquote, or a list item is content rather than a section.
-    """
+    """Lowercased texts of the headings `_atx_headings` reads, for case-insensitive section-presence matching."""
     return {h.strip().lower() for _, h, _, _ in _atx_headings(markdown)}
 
 
@@ -160,10 +160,7 @@ def addressed_region(text, address):
 
 
 def ordered_headings(markdown, level):
-    """Top-level heading texts at `level` in document order, HTML comments stripped.
-
-    A heading inside a code block, a blockquote, or a list item is content rather than a section.
-    """
+    """Texts of the headings `_atx_headings` reads at `level`, in document order, HTML comments stripped."""
     return [
         _HTML_COMMENT.sub("", h).strip() for lv, h, _, _ in _atx_headings(markdown) if lv == level
     ]
