@@ -339,10 +339,10 @@ def heading_body(lines, heading, key):
         (index for index, level, _ in headings if index > start and level <= depth), len(lines)
     )
     blocks = [b for b in reader.code_blocks(text) if start < b.start < end]
-    if any(b.fenced and not b.closed and not b.nested for b in blocks):
+    if any(b.fenced and not b.closed for b in blocks):
         # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
-        # One a blockquote or a list item ends is safe.
-        # The blank line the fill writes before the end marker ends that container in the destination too.
+        # One a container ends is refused too.
+        # An end marker indented to a list item's content continues that item past the blank line the fill writes.
         raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
     code = reader.code_lines(text)
     # The source's own region markers belong to its regions, not to the text they enclose.

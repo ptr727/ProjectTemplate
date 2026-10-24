@@ -924,29 +924,17 @@ class IncludeCase(TreeCase):
         self.assertIn("    pass\n\n\ndef b():", self.skill_text())
 
     def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
-        for source in ("## Alpha\n\n```text\nopen\n", "## Alpha\n\n```text\nopen"):
+        for source in (
+            "## Alpha\n\n```text\nopen\n",
+            "## Alpha\n\n```text\nopen",
+            "## Alpha\n\n- ```text\n  open\n\n## Beta\n",
+            "## Alpha\n\n> ```text\n> open\n\n## Beta\n",
+        ):
             with self.subTest(source=source):
                 (self.tmp / "RULES.md").write_text(source, encoding="utf-8")
                 self.make_skill("foo", self.region("RULES.md > Alpha"))
                 with self.assertRaisesRegex(ValueError, "leaves a code fence open"):
                     build_dist.regenerate()
-
-    def test_a_fence_its_container_ends_is_filled(self) -> None:
-        """The blank line the fill writes before the end marker ends the blockquote, and the fence with it."""
-        (self.tmp / "RULES.md").write_text(
-            "## Alpha\n\n> ```text\n> sample\n\n## Beta\n", encoding="utf-8"
-        )
-        self.make_skill("foo", self.region("RULES.md > Alpha"))
-        build_dist.regenerate()
-        self.assertEqual(
-            self.skill_text(),
-            "<!-- include: RULES.md > Alpha -->\n\n> ```text\n> sample\n\n<!-- /include -->\n",
-        )
-        build_dist.regenerate()
-        self.assertEqual(
-            self.skill_text(),
-            "<!-- include: RULES.md > Alpha -->\n\n> ```text\n> sample\n\n<!-- /include -->\n",
-        )
 
     def test_the_reader_accessor_adds_the_spec_directory_to_sys_path_once(self) -> None:
         """The cache would otherwise hide this: held, the accessor's body runs once per process, so

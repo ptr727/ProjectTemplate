@@ -41,13 +41,12 @@ class Heading(NamedTuple):
 
 
 class CodeBlock(NamedTuple):
-    """A fenced or indented code block as the `[start, end)` lines it spans, and whether a container holds it."""
+    """A fenced or indented code block as the `[start, end)` lines it spans."""
 
     start: int
     end: int
     fenced: bool
     closed: bool
-    nested: bool
 
 
 def normalize(text):
@@ -79,7 +78,7 @@ def code_blocks(text):
     """Every fenced and indented code block in `text`, in order, at any nesting depth.
 
     A fence the parser ends with its container, or with the document, rather than at a closing line,
-    reads as not `closed`. Only a top-level one runs on into whatever follows it once copied.
+    reads as not `closed`. Copied elsewhere, such a fence can run on into whatever follows it.
     """
     out = []
     for t in _tokens(text):
@@ -91,7 +90,7 @@ def code_blocks(text):
         # A final content line with no newline after it still counts as a line.
         content = t.content.count("\n") + (1 if t.content and not t.content.endswith("\n") else 0)
         closed = not fenced or end - start - 1 - content == 1
-        out.append(CodeBlock(start, end, fenced, closed, t.level > 0))
+        out.append(CodeBlock(start, end, fenced, closed))
     return out
 
 
