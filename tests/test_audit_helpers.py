@@ -1408,14 +1408,17 @@ class RenderCase(unittest.TestCase):
         )
 
     def test_strip_md_links_stays_linear(self) -> None:
-        pathological = "[" * 20000
-        start = time.monotonic()
-        audit_markdown.strip_md_links(pathological)
-        elapsed = time.monotonic() - start
-        self.assertLessEqual(
-            elapsed,
-            1.0,
-            f"description: strip_md_links took {elapsed:.2f}s on unmatched brackets, expected linear",
+        # A ratio rather than a wall-clock bound, since coverage tracing slows both runs alike.
+        def cost(n: int) -> float:
+            start = time.monotonic()
+            audit_markdown.strip_md_links("[" * n)
+            return time.monotonic() - start
+
+        small, large = cost(5000), cost(20000)
+        self.assertLess(
+            large,
+            8 * small + 0.05,
+            f"description: strip_md_links took {small:.2f}s then {large:.2f}s on 4x the brackets, expected linear",
         )
 
     def test_workspace_cspell_words(self) -> None:
