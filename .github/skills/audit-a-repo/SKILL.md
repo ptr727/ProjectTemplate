@@ -14,7 +14,7 @@ The audit is the fleet's measurement procedure, and the failure shapes it guards
 
 - **Route first.** A repo with no carried instruction set, or a partial one, has a baseline that never arrived rather than drift to report, so it goes to `STANDUP.md` sections 1A and 2 first (`AUDIT.md` section 0). Auditing it anyway produces a report that is all absences and reads as catastrophe.
 - **Verify the host.** Run `python3 scripts/host_gate.py --repo <target-checkout>` from the hub checkout before any hub tool, and pass `--repo`, since a bare run skips the target's own `host-tools.json` overlay. A stale tool answers `--version`, looks healthy, and produces a wrong answer.
-- **Read `main` as ground truth**, for every workflow model, and read `develop` only to detect divergence (`AUDIT.md` section 1). An `operational` repo's `develop` is mid-flight by design, so conformance work sitting there is un-promoted work, not a defect, and it counts when it reaches `main`. Use `spec/audit.py --branch <ref>` to preview in-flight work, which stamps the override so the finding cannot be mistaken for one against ground truth.
+- **Read `main` as ground truth**, for every workflow model, and read `develop` only to detect divergence (`AUDIT.md` section 1). An `operational` repo's `develop` is mid-flight by design, so conformance work sitting there is un-promoted work, not a defect, and it counts when it reaches `main`. Use `uv run --no-project --script spec/audit.py --branch <ref>` to preview in-flight work, which stamps the override so the finding cannot be mistaken for one against ground truth.
 
 ## Measuring
 
@@ -28,7 +28,7 @@ The audit is the fleet's measurement procedure, and the failure shapes it guards
 
 - **Write `reports/<repo>/audit.md` from `reports/_template.md`**, findings ranked most severe first, each with the `file:line` it was judged against, and quote the run stamp, since findings are a point-in-time snapshot (`AUDIT.md` section 8).
 - **The hub authors the report.** A downstream repo never opens a hub pull request to write its own, which would be self-certification. Downstream context goes into issues filed against the hub instead.
-- **Generate a convergence issue, never compose one**: `spec/audit.py --issue <repo>` emits it from live findings. An agent picking such an issue up re-runs the audit first and acts on the live result, not the pasted findings.
+- **Generate a convergence issue, never compose one**: `uv run --no-project --script spec/audit.py --issue <repo>` emits it from live findings. An agent picking such an issue up re-runs the audit first and acts on the live result, not the pasted findings.
 - **Reconcile registry `driftNotes` in the same pass**: a resolved deviation's note is deleted, not left describing finished work, and a note naming a check id is retired by a person, not by a run (`AUDIT.md` section 8).
 - **Stale-versus-modified classification and the intent staleness advisory need a full hub clone with git history.** In a shallow clone the audit reports one ERROR per repo and exits non-zero, so run `git fetch --unshallow origin` in the hub checkout first. To verify one finding without history, compare against the current hub canonical on `main`, which decides current-match only.
 

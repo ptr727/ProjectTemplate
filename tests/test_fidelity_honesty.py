@@ -34,7 +34,7 @@ CODECOV = {
 class FidelityPassAlternativesCase(unittest.TestCase):
     """fidelity_pass passes each unit's declared alternatives into the shared reader.
 
-    The reader's own handling of alternatives is covered by spec/audit.py's --selftest, so what
+    The reader's own handling of alternatives is covered by tests/test_audit_helpers.py, so what
     this adds is the call site. Were it to stop passing them, a repository holding only an
     alternative would land in the unavailable bucket while that self-test still passed.
 

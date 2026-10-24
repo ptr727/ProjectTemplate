@@ -26,7 +26,7 @@ Three states look similar from inside a repository and take different procedures
 - **A partial instruction set.** [`STANDUP.md`][standup] sections 1A and 2. An absent carried file is a baseline that never arrived, not drift, and the two are fixed differently: a baseline is carried, and drift is converged. Resyncing a repository whose `AGENTS.md` never carried the rule sections would re-vendor sections into a document that was never given them, which reads as drift repair and is really a late standup.
 - **A full instruction set, current or stale.** This file. Stale is the normal case and is not a defect, since the hub moves and a repository is a snapshot of the revision it last converged with.
 
-**The distinction is measured, not assumed.** `spec/audit.py <Repo>` reports an absent carried file as a `LETTER` and a present-but-stale one as a `DRIFT`, so the finding kinds themselves say which procedure the repository is owed. A run that is mostly letters is a repository that needs [`STANDUP.md`][standup].
+**The distinction is measured, not assumed.** `uv run --no-project --script spec/audit.py <Repo>` reports an absent carried file as a `LETTER` and a present-but-stale one as a `DRIFT`, so the finding kinds themselves say which procedure the repository is owed. A run that is mostly letters is a repository that needs [`STANDUP.md`][standup].
 
 **A few letters are not that, and the ordinary cause is the baseline having grown.** When the manifest gains an entry, every repository in the fleet reports that one file absent on its next audit, all at once and through no fault of its own. That is a file to carry inside a resync, at the point in section 3 where its class belongs, rather than evidence the repository was never stood up. Read the letters before routing on their count: a handful naming files the hub added recently is a resync, and a baseline's worth naming the instruction set is a standup.
 
@@ -54,7 +54,7 @@ Run [`AUDIT.md`][audit] end to end. Three commands cover the mechanized part, an
 uv run --no-project --script spec/audit.py "<Repo>"                    # the deterministic findings, read at main
 uv run --no-project --script spec/audit.py --branch "<ref>" "<Repo>"   # the same, read at a named ref, for convergence still in flight
 uv run --no-project --script spec/audit.py --issue "<Repo>"            # audits again and renders that run as an issue ready to file, so it can differ from the line above
-python3 spec/fidelity_honesty.py --report         # regenerate reports/divergences.md before using it as a work list
+uv run --no-project --script spec/fidelity_honesty.py --report         # regenerate reports/divergences.md before using it as a work list
 ```
 
 **The branch is `main`, and the registry field naming it is not a choice a resync makes.** The runner reads the repository's `groundTruthBranch`, and [`AUDIT.md`][audit] section 1 owns what that value may be: `main` is the released and gated state for **both** workflow models, so a field naming `develop` contradicts the procedure rather than configuring it. Every cataloged repository declares `main` or omits the field and takes it as the default, so the first line above reads `main` in every case today.

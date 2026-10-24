@@ -57,8 +57,8 @@ class TestSetInsideTheContext(unittest.TestCase):
             self.assertNotIn("GIT_INDEX_FILE", os.environ)
 
 
-class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
-    def test_the_selftest_leaves_the_ambient_repository_unchanged(self) -> None:
+class TestAuditHelperSuiteIgnoresAmbientGitDir(unittest.TestCase):
+    def test_the_helper_suite_leaves_the_ambient_repository_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             scratch = Path(tmp)
             _git(scratch, "init", "-q", "--initial-branch=develop", ".")
@@ -78,7 +78,17 @@ class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
             env["GIT_DIR"] = str(scratch / ".git")
             env["GIT_WORK_TREE"] = str(scratch)
             proc = subprocess.run(
-                [sys.executable, str(REPO / "spec" / "audit.py"), "--selftest"],
+                [
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    "discover",
+                    "-s",
+                    "tests",
+                    "-p",
+                    "test_audit_helpers.py",
+                ],
+                cwd=REPO,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -88,7 +98,6 @@ class TestAuditSelftestIgnoresAmbientGitDir(unittest.TestCase):
             )
 
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            self.assertIn("SELFTEST PASS", proc.stdout)
             self.assertEqual(state(), before)
 
 

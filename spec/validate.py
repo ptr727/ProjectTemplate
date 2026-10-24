@@ -117,6 +117,10 @@ CONTRACT_KEYS = {
     "verbatimJobs",
 }
 
+# A driftNote names a check as a parenthesized id, "(hugo.generator.pinned)", anywhere in the note.
+CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
+CHECK_SCOPES = ("repo", "baseline", "file")
+CHECK_KEYS = {"id", "family", "description", "spec", "hub", "scope", "ground", "suppression"}
 MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
 MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
@@ -130,8 +134,7 @@ def _bracket_matches(text, open_char, close_char):
     nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
     mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
     counting scan per open position: re-scanning from every unmatched open is what made a prior version of
-    this walk O(N^2) on a run of N unmatched opens, as it did in spec/audit.py's sibling
-    implementation. A close pops the most recently pushed open, the same pairing a fresh depth count from
+    this walk O(N^2) on a run of N unmatched opens. A close pops the most recently pushed open, the same pairing a fresh depth count from
     that open would find, so this is one pass, not N. An open with no closing partner, or a close with
     nothing open, is left out of the map, same as before.
 
@@ -157,9 +160,8 @@ def _bracket_matches(text, open_char, close_char):
 def contains_description_markdown_link(text):
     """Whether `text` carries a `[text](url)` or `[text][ref]` use, brackets/parens balanced.
 
-    Kept in sync with spec/audit.py's markdown_link_spans(), which needs the same balanced-nesting rule for
-    the same reason: this is a description-shaped link use inside one short string, not the carried-link
-    regexes above, which find a definition's target inside a whole document.
+    A description-shaped link use inside one short string, not the carried-link regexes above, which find a
+    definition's target inside a whole document.
     """
     bracket_close = _bracket_matches(text, "[", "]")
     paren_close = _bracket_matches(text, "(", ")")
@@ -386,6 +388,76 @@ def ground_truth_branch_errors_for_repo(repo, name):
     return []
 
 
+def check_registry_errors(registry, types, repos):
+    """spec/checks.json's shape, and every check id a driftNote names resolving against it or the catalog."""
+    checks = registry.get("checks") if isinstance(registry, dict) else None
+    if not isinstance(checks, list):
+        return ["checks.json: 'checks' must be an array"]
+    errors = []
+    ids = set()
+    # A file check runs only on what a baseline check before it in its run has read, on the hub's filtered run too.
+    unread = {}
+    for hub_run in (False, True):
+        read = False
+        for i, check in enumerate(checks):
+            if not isinstance(check, dict) or (hub_run and check.get("hub") is not True):
+                continue
+            read = check.get("scope") == "baseline" or (read and check.get("scope") == "file")
+            if check.get("scope") == "file" and not read:
+                unread.setdefault(i, "the hub's run" if hub_run else "its run")
+    for i, run in sorted(unread.items()):
+        errors.append(
+            f"checks.json: checks[{i}] is a file check with no baseline check before it in {run}"
+        )
+    for i, check in enumerate(checks):
+        where = f"checks.json: checks[{i}]"
+        if not isinstance(check, dict):
+            errors.append(f"{where} must be an object")
+            continue
+        cid = check.get("id")
+        if not isinstance(cid, str) or not CHECK_ID_RE.fullmatch(f"({cid})"):
+            errors.append(f"{where} id {cid!r} is not a dotted lowercase check id")
+        elif cid in ids:
+            errors.append(f"{where} id '{cid}' is declared more than once")
+        else:
+            ids.add(cid)
+        for key in ("family", "description", "spec"):
+            value = check.get(key)
+            if not isinstance(value, str) or not value.strip() or "\n" in value:
+                errors.append(f"{where} {key} must be a one-line, non-empty string")
+        if isinstance(check.get("spec"), str) and not (ROOT / check["spec"]).is_file():
+            errors.append(f"{where} spec '{check['spec']}' is not a file in this repository")
+        if not isinstance(check.get("hub"), bool):
+            errors.append(f"{where} hub must be true or false")
+        if check.get("scope") not in CHECK_SCOPES:
+            errors.append(f"{where} scope must be one of {', '.join(CHECK_SCOPES)}")
+        if not isinstance(check.get("ground", True), bool):
+            errors.append(f"{where} ground must be true or false")
+        elif check.get("ground") is False and check.get("scope") != "repo":
+            errors.append(f"{where} ground false applies only to a repo check")
+        unknown = sorted(set(check) - CHECK_KEYS)
+        if unknown:
+            errors.append(f"{where} carries unknown key(s) {', '.join(unknown)}")
+        suppression = check.get("suppression")
+        ending = suppression.get("endsWithType", 0) if isinstance(suppression, dict) else 0
+        named = isinstance(ending, str) and ending in types.get("types", {})
+        if "suppression" in check and not (ending is None or named):
+            errors.append(f"{where} suppression.endsWithType must name a project type or be null")
+    catalog = {c.get("id") for t in types.get("types", {}).values() for c in t.get("checks", [])}
+    catalog |= {
+        c.get("id") for d in types.get("crossCutting", {}).values() for c in d.get("checks", [])
+    }
+    for repo in repos.get("repos", []):
+        notes = repo.get("driftNotes") if isinstance(repo, dict) else None
+        for note in notes if isinstance(notes, list) else []:
+            for cid in CHECK_ID_RE.findall(note if isinstance(note, str) else ""):
+                if cid not in ids | catalog:
+                    errors.append(
+                        f"{repo.get('name')}: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines"
+                    )
+    return errors
+
+
 def python_directories_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `pythonDirectories` (a repo declaring none passes none).
 
@@ -462,7 +534,7 @@ def description_errors(name, desc):
 
     Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
 
-    Link-free is enforced because spec/audit.py's description_findings() strips Markdown links from the README's
+    Link-free is enforced because spec/audit_markdown.py's description_findings() strips Markdown links from the README's
     own tagline before comparing, but never re-strips the declared field it compares that tagline against. A
     declared value carrying a link would therefore report as a permanent readme mismatch, and repo-config/
     configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
@@ -1078,7 +1150,7 @@ def main(argv=()):
                         )
         # Optional, since a repo whose callers pass no python-directories input declares nothing.
         errors.extend(python_directories_errors_for_repo(repo, name))
-        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
+        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit_markdown.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
         # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.
         # CI runs no JSON-schema validation, so the schema's own required-fields and branches-iff-custom rules are enforced here or nowhere.
@@ -1551,6 +1623,8 @@ def main(argv=()):
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
             errors.extend(investigate_tracking_errors(f"gap '{gp}'", g))
+
+    errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
     if errors:
         print("Spec validation FAILED:")

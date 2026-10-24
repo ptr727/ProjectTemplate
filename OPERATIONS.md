@@ -4,7 +4,7 @@ How this repository is run. It ships no application code, so its operations are 
 
 ## Local Verification
 
-What verifying a change here requires, including the part CI cannot perform. The gates below do run in CI, so a local run of them buys an earlier failure rather than a different one, with two exceptions stated where each belongs, the prose gate in the next section and `test_install.py` below the block. The two verifications CI never performs are the fleet audit and the repository-configuration check, because each reads live state in another repository over the API and a pull request runner is given neither the credentials nor a target to read. `python3 spec/audit.py --selftest` is what CI runs of the audit, which exercises the checker against its fixtures and reads no repository at all. So a change to [spec/](./spec/), [registry/](./registry/), [repo-config/](./repo-config/) or [AUDIT.md](./AUDIT.md) is verified by running `uv run --no-project --script spec/audit.py` and `repo-config/configure.sh check` from this checkout before the pull request opens, each from the repository root and each taking the arguments the two runbooks below give it. A green pipeline says nothing about either, and taking it as coverage is the failure this section exists to name.
+What verifying a change here requires, including the part CI cannot perform. The gates below do run in CI, so a local run of them buys an earlier failure rather than a different one, with two exceptions stated where each belongs, the prose gate in the next section and `test_install.py` below the block. The two verifications CI never performs are the fleet audit and the repository-configuration check, because each reads live state in another repository over the API and a pull request runner is given neither the credentials nor a target to read. `tests/test_audit_helpers.py` and `tests/test_audit.py` are what CI runs of the audit. They exercise the checker against fixtures and a faked gh, and read no repository at all. So a change to [spec/](./spec/), [registry/](./registry/), [repo-config/](./repo-config/) or [AUDIT.md](./AUDIT.md) is verified by running `uv run --no-project --script spec/audit.py` and `repo-config/configure.sh check` from this checkout before the pull request opens, each from the repository root and each taking the arguments the two runbooks below give it. A green pipeline says nothing about either, and taking it as coverage is the failure this section exists to name.
 
 ### Run the gates locally, which is wider than CI
 
@@ -22,8 +22,8 @@ uvx ruff@latest check .
 uvx ruff@latest format --check .
 uvx mypy@latest
 uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests
-uvx coverage@latest run --source=scripts,spec,host-setup --append spec/audit.py --selftest
-uvx coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
+uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup --append -m unittest discover -s tests -p test_audit_helpers.py
+uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/gh-write-guard.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
 uvx coverage@latest report
@@ -139,4 +139,5 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
 - [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.
+- `fence_step()` in [spec/carried_text.py](./spec/carried_text.py) is the fence reading the audit's region extraction, the carry, the skill build, and the review ledger share. Its `extract_section()` and `strip_sections()` are the audit's region reading, and its `normalize()` is the comparable form the audit and the carry share.
 - `read_regular_file()` and `write_regular_file()` in [host-setup/agent-safety/claude/install.py](./host-setup/agent-safety/claude/install.py) are the shared primitives for reading and replacing a file that must be regular. Each opens without blocking and judges the open descriptor, so a FIFO or a device is refused rather than hanging the call.

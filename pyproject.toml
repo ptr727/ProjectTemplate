@@ -18,7 +18,7 @@ exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
 # A script declaring a library inline runs through uv, and a type check run with no environment of its own does not install it.
 [[tool.mypy.overrides]]
-module = ["markdown_it", "markdown_it.*", "pygments", "pygments.*"]
+module = ["markdown_it", "markdown_it.*", "pygments", "pygments.*", "yaml"]
 ignore_missing_imports = true
 
 [tool.pyright]
