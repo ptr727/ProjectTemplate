@@ -45,8 +45,8 @@ Subcommands
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet, or the review covering it states no
            partial coverage and its verdict counts what it flags. 42 = the round covering the
-           head states it read fewer files than the pull request changed, or states nothing while
-           an earlier round on record states partial coverage. 50 = that round opens on a verdict
+           head states it read fewer files than the pull request changed, or states nothing or
+           nothing it can believe while an earlier round on record states partial coverage. 50 = that round opens on a verdict
            other than the clean one while it counts no finding, opens no thread, collapses no
            suppressed or previously-missed finding, and no thread is open, so what it flags is
            named in its headline alone, printed under `VERDICT WITH NO COUNTED FINDING`. The code
@@ -57,7 +57,7 @@ Subcommands
            comment acknowledging its fingerprint clears it, `shapes=ACKNOWLEDGED`.
            `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
-           on, `table` where a round covering the head names exactly the changed files in its own
+           on (`PARTIAL` instead where an earlier round states partial coverage), `table` where a round covering the head names exactly the changed files in its own
            file table,
            `carried:table` where the newest round carrying a table does, `local` where an attested
            local pass covers a head on a pull request into a branch other than the default, and
@@ -1355,8 +1355,8 @@ def coverage(pr: dict) -> tuple[str, str]:
     if rounds and partial_on_record(pr):
         return (
             "partial",
-            "an earlier round states partial coverage, and the head states no full or partial "
-            "reading"
+            "an earlier round states partial coverage, and the head states no reading this "
+            "can rely on"
             if worst
             else "an earlier round states partial coverage, and no round on the head states any",
         )
