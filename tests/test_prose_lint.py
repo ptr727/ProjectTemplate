@@ -1261,6 +1261,17 @@ class TestCommentWrapRule(BaitCase):
         text = "cat <<A <<<x y<<z\nbody\nA\n# After.\n"
         self.assertEqual([(4, "After.")], [c[:2] for c in self.comments("a.sh", text)])
 
+    def test_a_quoted_or_commented_opener_queues_no_second_body(self) -> None:
+        """A `<<EOF` after a quote or a `#` ran the body on to a later heredoc's `EOF`."""
+        for opener in ("cat <<EOF | grep -c '<<EOF'", "cat <<EOF  # read up to the <<EOF line"):
+            with self.subTest(opener=opener):
+                text = f"{opener}\nx\nEOF\n# After.\ncat <<EOF\ny\nEOF\n"
+                self.assertEqual([4], [c[0] for c in self.comments("a.sh", text)])
+
+    def test_a_dash_second_opener_ends_on_its_tab_indented_terminator(self) -> None:
+        text = "diff - /dev/fd/3 <<A 3<<-B\none\nA\nThe build didn't.\n\tB\n# After.\njq '.x'\n"
+        self.assertEqual([6], [c[0] for c in self.comments("a.sh", text)])
+
     def test_a_non_shell_run_step_takes_no_heredoc_split(self) -> None:
         """A Python shift by a name read as an opener cut a triple-quoted string in two."""
         script = '    m = 1 << n; s = """\n    # not a comment\n    """\n    # real\n'
@@ -1268,9 +1279,12 @@ class TestCommentWrapRule(BaitCase):
             "- shell: python\n  run: |\n" + script,
             "- name: x\n  run: |\n" + script + "  shell: python\n",
             "- shell: pwsh {0}\n  run: |\n" + script,
+            "- shell: 'python'\n  run: |\n" + script,
+            "- shell: /usr/bin/python3 {0}\n# name: old\n  run: |\n" + script,
         ):
             with self.subTest(step=step):
-                self.assertEqual(["real"], [c[1] for c in self.comments("x.yml", step)])
+                got = [c[1] for c in self.comments("x.yml", step) if c[1] != "name: old"]
+                self.assertEqual(["real"], got)
         for step in ("- shell: bash -e {0}\n  run: |\n", "- shell: python\n- run: |\n"):
             with self.subTest(step=step):
                 got = [c[1] for c in self.comments("x.yml", step + script)]
@@ -1289,9 +1303,15 @@ class TestCommentWrapRule(BaitCase):
                 self.assertEqual([1, 3], got)
 
     def test_a_less_than_sign_opens_no_tag_around_a_code_span(self) -> None:
-        """No tag holds a bare backtick, so the code span after `a<b` is still blanked."""
-        text = "Use a<b then `<!-- x -->` > c,\nthen <!-- x --> two.\n"
-        self.assertEqual([2], [c[0] for c in self.comments("a.md", text) if c[1] == "x"])
+        """A tag is what the Markdown parser reads as one, so the code span after `a<b` is blanked."""
+        for text in (
+            "Use a<b then `<!-- x -->` > c,\nthen <!-- x --> two.\n",
+            'Use a<b "see `<!-- x -->`\nand" > c, then <!-- x --> two.\n',
+            "Start <!--> a `<!-- x -->` b\nthen <!-- x --> two.\n",
+        ):
+            with self.subTest(text=text):
+                got = [c[0] for c in self.comments("a.md", text) if c[1] == "x"]
+                self.assertEqual([2], got)
 
     def test_an_inline_code_span_holding_a_comment_text_is_not_its_line(self) -> None:
         """The search for the comment stopped on the code span's line, one line too early."""

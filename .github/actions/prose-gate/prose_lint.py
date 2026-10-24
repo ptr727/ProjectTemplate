@@ -38,6 +38,7 @@ from typing import Any, NamedTuple
 MISSING = ""
 try:
     from markdown_it import MarkdownIt
+    from markdown_it.common.html_re import HTML_TAG_RE
     from markdown_it.token import Token
     from pygments.lexer import Lexer, RegexLexer, bygroups
     from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
@@ -530,7 +531,7 @@ def lexer_name(path: Path, first: str) -> str | None:
 # A label opening on a digit is more often a shift, `(( x << 2 ))`, so it needs its terminator.
 HEREDOC = (
     r"(?s)<<(-)?[ \t]*(['\"]?)\\?(?:(?=[A-Za-z_])())?(\w[\w-]*+)\2"
-    r"(?:[^\n]*?(?<!<)<<(-)?[ \t]*(['\"]?)\\?(\w[\w-]*+)\6)?[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\4"
+    r"(?:[^\n'\"#]*?(?<!<)<<(-)?[ \t]*(['\"]?)\\?(\w[\w-]*+)\6)?[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\4"
     r"(?=\n|\Z)(?(7)(?:\n(?:[^\n]*\n)*?(?(5)\t*)\7(?=\n|\Z))?)|(?(3).*|(?!)))"
 )
 # Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
@@ -689,17 +690,18 @@ def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int,
     return out
 
 
-def step_shell(text: str, key: int) -> str:
-    """The `shell:` beside the YAML key at offset `key`, or "" where its mapping names none."""
-    lines, (row, col) = text.split("\n"), Starts(text).at(key)
-    top, end = row - 1, row
-    while top and not lines[top][:col].strip():
+def step_shell(starts: Starts, key: int) -> str:
+    """The program `shell:` names beside the YAML key at offset `key`, or "" where none is named."""
+    (row, col), last = starts.at(key), len(starts.starts)
+    inside = lambda n: not starts.line(n)[:col].strip() or starts.line(n).lstrip().startswith("#")
+    top, end = row, row + 1
+    while top > 1 and inside(top):
         top -= 1
-    top += lines[top][:col].strip() not in ("", "-")
-    while end < len(lines) and not lines[end][:col].strip():
+    top += not inside(top) and starts.line(top)[:col].strip() != "-"
+    while end <= last and inside(end):
         end += 1
-    sibling = re.compile(rf"[ \t-]{{{col}}}shell:[ \t]*([\w-]+)")
-    return next((m[1] for line in lines[top:end] if (m := sibling.match(line))), "")
+    sibling = re.compile(rf"[ \t-]{{{col}}}shell:[ \t]*['\"]?(?:\S*/)?([\w-]+)")
+    return next((m[1] for n in range(top, end) if (m := sibling.match(starts.line(n)))), "")
 
 
 def split_heredocs(text: str) -> list[tuple[int, str]]:
@@ -733,7 +735,7 @@ def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
         inner = language_of(lexer) or {}
         # The column pad keeps a one-line scalar's comment trailing, and C++ ends a comment on a break.
         body = text[start:end]
-        if lexer == "bash-heredoc-as-code" and step_shell(text, key) in ("", "bash", "sh"):
+        if lexer == "bash-heredoc-as-code" and step_shell(starts, key) in ("", "bash", "sh"):
             # Each body starts on a line of its own, so only the code piece takes the column pad.
             for skip, piece in split_heredocs(body):
                 pad = "x" * col if skip == 0 else ""
@@ -1425,8 +1427,7 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
-TAG_OR_ESCAPE = r"""\\.|<!--.*?-->|<[A-Za-z](?:[^<>`"']|"[^"]*"|'[^']*')*>|"""
-MARKDOWN_SPAN = re.compile(TAG_OR_ESCAPE + CODE_SPAN.pattern, re.DOTALL)
+MARKDOWN_SPAN = re.compile(rf"\\.|{HTML_TAG_RE.pattern[1:]}|{CODE_SPAN.pattern}", re.DOTALL)
 
 
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
