@@ -78,7 +78,8 @@ def code_blocks(text):
     """Every fenced and indented code block in `text`, in order, at any nesting depth.
 
     A fence the parser ends with its container, rather than at a closing line, reads as not `closed`.
-    A caller copying a region out of its document has to refuse that state.
+    `scripts/build_dist.py` refuses an include body in that state, since copied elsewhere the fence
+    would swallow what follows it.
     """
     out = []
     for t in _tokens(text):
@@ -99,19 +100,25 @@ def code_lines(text):
     return frozenset(line for block in code_blocks(text) for line in range(block.start, block.end))
 
 
+def sections(text):
+    """`(heading, end)` for each level-two region of `text`, in order, the one place a region's extent is decided.
+
+    The heading line is inside the region and the next level-two heading ends it. `end` is that
+    heading's line, or None for a region that runs to the end of the document, so `lines[h.line:end]`
+    slices the region either way.
+    """
+    starts = [h for h in headings(text) if h.level == 2]
+    return [(h, starts[i + 1].line if i + 1 < len(starts) else None) for i, h in enumerate(starts)]
+
+
 def section_span(text, heading):
     """The `[start, end)` lines of the first `## <heading>` region, or None when `text` has none.
 
-    The heading line is inside the region and the next level-two heading ends it. `end` is None for a
-    region that runs to the end of the document. The match is on the parsed heading text, case-folded,
-    so a re-cased heading is found rather than read as absent.
+    `end` is None for a region that runs to the end of the document. The match is on the parsed
+    heading text, case-folded, so a re-cased heading is found rather than read as absent.
     """
     want = heading.strip().lower()
-    starts = [h for h in headings(text) if h.level == 2]
-    for index, h in enumerate(starts):
-        if h.text.lower() == want:
-            return h.line, starts[index + 1].line if index + 1 < len(starts) else None
-    return None
+    return next(((h.line, end) for h, end in sections(text) if h.text.lower() == want), None)
 
 
 def extract_section(text, heading):
@@ -136,9 +143,7 @@ def strip_sections(text, names, keep_pins=False):
     base = text.replace("\r\n", "\n").replace("\r", "\n") if keep_pins else normalize(text)
     lines = base.split("\n")
     dropped = set()
-    starts = [h for h in headings(base) if h.level == 2]
-    for index, h in enumerate(starts):
+    for h, end in sections(base):
         if h.text.lower() in want:
-            end = starts[index + 1].line if index + 1 < len(starts) else len(lines)
-            dropped.update(range(h.line, end))
+            dropped.update(range(h.line, len(lines) if end is None else end))
     return "\n".join(ln for i, ln in enumerate(lines) if i not in dropped)

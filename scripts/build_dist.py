@@ -311,10 +311,11 @@ def heading_body(lines, heading, key):
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
     a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py,
-    which the fidelity checks also read with. They match on the parsed text case-folded, so a
-    re-cased heading still resolves and the two split a document alike. Two matches are two answers
-    to one question, refused rather than resolved to the first, and a heading inside a code block
-    is content.
+    which the fidelity checks also read with, so a heading inside a code block is content to both.
+    They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
+    two answers to one question, refused rather than resolved to the first. A body ends at any
+    heading of its level or above, level one included. A fidelity region ends only at the next
+    level-two heading.
     """
     want = heading.strip().lower()
     reader = _fidelity_text()
@@ -336,7 +337,7 @@ def heading_body(lines, heading, key):
     if any(b.fenced and not b.closed for b in blocks):
         # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
         raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
-    code = {line for b in blocks for line in range(b.start, b.end)}
+    code = reader.code_lines(text)
     # The source's own region markers belong to its regions, not to the text they enclose.
     # A copied marker would open a region inside the one being filled on the next scan.
     # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own, and two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.

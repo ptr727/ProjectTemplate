@@ -167,11 +167,11 @@ def split_markdown(text: str) -> list[tuple[str | None, str]]:
     """
     base = normalize(text)
     lines = base.split("\n")
-    starts = [h for h in fidelity_text.headings(base) if h.level == 2]
-    bounds = [0, *(h.line for h in starts), len(lines)]
+    found = fidelity_text.sections(base)
+    preamble = lines[: found[0][0].line] if found else lines
     regions: list[tuple[str | None, list[str]]] = [
-        (None if index == 0 else starts[index - 1].text, lines[bounds[index] : bounds[index + 1]])
-        for index in range(len(bounds) - 1)
+        (None, preamble),
+        *((h.text, lines[h.line : end]) for h, end in found),
     ]
     # A document whose first heading is its first line has an empty preamble, which is a region holding nothing rather than a unit a reviewer could read.
     if not regions[0][1] or not "\n".join(regions[0][1]).strip():
