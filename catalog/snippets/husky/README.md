@@ -10,7 +10,8 @@ the doc gates to run: it fetches those two checks fresh from `ptr727/ProjectTemp
 branch and runs them, rather than vendoring or pinning a copy. A pin nothing keeps current
 goes stale by construction, and CI (this repo's own, and the hub's) is the backstop for a
 change that lands broken on `main` before it does real damage locally. The prose gate adds one
-`api.github.com` commit lookup to its fetch, and an allow-list permitting only
+`api.github.com` commit lookup to its fetch, with a `git ls-remote` against `github.com`
+where that fails. An allow-list permitting only
 `raw.githubusercontent.com` gets an unresolved-commit fallback. These are network calls
 alongside the Docker pulls the Lint tasks below already do. A fetch failure fails the commit
 rather than silently skipping the gate.
