@@ -251,4 +251,4 @@ instance's outcome is context for the new one, never a standing answer to reuse 
   each escalate per pr-review-conduct's own list, restated there, not duplicated here.
 - A part of the review the digest prints under `UNPLACED ON THE HEAD` holds the gate until its
   outcomes are acknowledged per pr-review-conduct's Merge Gate item 4. Never guess what the new
-  wording probably meant. Only an item that cannot be told to be a finding goes to the maintainer.
+  wording probably meant. Only an item that cannot be told to be a finding or not goes to the maintainer.
