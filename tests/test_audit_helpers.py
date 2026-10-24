@@ -4355,7 +4355,7 @@ class RegistryCase(unittest.TestCase):
     def test_every_check_function_is_registered(self) -> None:
         named = {audit.check_function(c).__name__ for c in audit.registered_checks()}
         defined = {n for n in vars(audit) if n.startswith("check_") and callable(vars(audit)[n])}
-        defined -= {"check_function", "check_id_owner", "check_interface", "check_verbatim"}
+        defined -= {"check_function", "check_interface", "check_verbatim"}
         defined -= {"check_intent_staleness"}
         self.assertEqual(defined - named, set())
 
@@ -4386,8 +4386,9 @@ class RegistryCase(unittest.TestCase):
 
     def test_a_registry_id_is_a_known_check_id(self) -> None:
         spec: dict[str, Any] = {"types": {"types": {}, "crossCutting": {}}}
-        self.assertEqual(audit.check_id_owner(spec, "settings.general"), (None, True))
-        self.assertEqual(audit.check_id_owner(spec, "no.such-check"), (None, False))
+        self.assertEqual(audit.catalog_owner(spec, "settings.general"), (None, False))
+        self.assertEqual(audit.registered_check("settings.general")["id"], "settings.general")
+        self.assertEqual(audit.registered_check("no.such-check"), {})
 
 
 if __name__ == "__main__":

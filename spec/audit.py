@@ -677,12 +677,6 @@ def catalog_owner(spec, cid):
     return None, any(c.get("id") == cid for c in cross)
 
 
-def check_id_owner(spec, cid):
-    """`(owning project type or None, whether spec/project-types.json or spec/checks.json defines the id)`."""
-    owner, known = catalog_owner(spec, cid)
-    return owner, known or bool(registered_check(cid))
-
-
 def is_suppression_id(entry, cid):
     """Whether a driftNote naming `cid` suppresses a registered check's finding on this repo, rather than naming a check to judge."""
     check = registered_check(cid)
@@ -700,15 +694,15 @@ def driftnote_findings(entry, spec, open_count):
         for cid in validate.CHECK_ID_RE.findall(note):
             if is_suppression_id(entry, cid):
                 continue
-            owner, known = check_id_owner(spec, cid)
-            if not known:
+            owner, in_catalog = catalog_owner(spec, cid)
+            if not (in_catalog or registered_check(cid)):
                 out.append(
                     (
                         "DRIFT",
                         f"registry: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines - fix the id or drop the note: {quoted}",
                     )
                 )
-            elif not catalog_owner(spec, cid)[1]:
+            elif not in_catalog:
                 out.append(
                     (
                         "DRIFT",
@@ -845,12 +839,19 @@ def workspace_cspell_words(text):
     )
 
 
-def _compose(text):
-    """The YAML node tree of `text`, or None where it does not parse."""
+def _yaml(text, compose=False):
+    """`(document, True)`, the node tree with `compose`, or `(None, False)` where `text` does not parse."""
     try:
-        return yaml.compose(text, Loader=yaml.SafeLoader)
+        return (
+            yaml.compose(text, Loader=yaml.SafeLoader) if compose else yaml.safe_load(text)
+        ), True
     except yaml.YAMLError:
-        return None
+        return None, False
+
+
+def _compose(text):
+    """The YAML node tree of `text`, or None where it is empty or does not parse."""
+    return _yaml(text, compose=True)[0]
 
 
 def _mapping(node):
@@ -917,12 +918,11 @@ def split_jobs(text):
 
 def check_interface(path, contract, text):
     """DRIFT where a workflow breaks its fixed contract by name and wiring, never its body (spec/fidelity-model.md)."""
-    try:
-        yaml.compose(text, Loader=yaml.SafeLoader)
-    except yaml.YAMLError:
+    root, parsed = _yaml(text, compose=True)
+    if not parsed:
         return [("DRIFT", f"interface: {path} does not parse as YAML, so its contract is unread")]
     findings = []
-    jobs = job_nodes(text)
+    jobs = _mapping(_mapping(root).get("jobs"))
     for k in contract.get("requiredJobKeys", []):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
@@ -937,7 +937,7 @@ def check_interface(path, contract, text):
             )
         )
     tok = contract.get("artifactNameToken")
-    if tok and tok not in code_view(_compose(text)):
+    if tok and tok not in code_view(root):
         findings.append(
             ("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff")
         )
@@ -1087,9 +1087,8 @@ def concurrency_caller_findings(path, text):
             f"concurrency: {path} writes its concurrency in a shape the audit cannot read. Write a block mapping with group and cancel-in-progress, each a single-line scalar.",
         )
     ]
-    try:
-        doc = yaml.safe_load(text)
-    except yaml.YAMLError:
+    doc, parsed = _yaml(text)
+    if not parsed:
         return []
     if not isinstance(doc, dict):
         return unreadable
@@ -1138,9 +1137,8 @@ def concurrency_caller_findings(path, text):
 
 def dependabot_ecosystems(text):
     """The package-ecosystem values a dependabot.yml declares, or None where it does not parse."""
-    try:
-        doc = yaml.safe_load(text)
-    except yaml.YAMLError:
+    doc, parsed = _yaml(text)
+    if not parsed:
         return None
     updates = doc.get("updates") if isinstance(doc, dict) else None
     if not isinstance(updates, list):

@@ -2,7 +2,7 @@
 # The fleet doc-lint block and the Python leg in validate-task.yml, which runs the unittest suite under tests/, do not cover the rest of the hub's own machinery.
 # Carrying this hook makes the hub exercise the override path on every hub pull request, where a repo with no hook of its own exercises the hub default at .github/actions/validate-default.
 name: Validate repository (hub)
-description: Registry and spec validation, the self-tests outside the unittest suite, the fleet-skills freshness check, and the unclassified-character report.
+description: Registry and spec validation, the audit helper suite and the self-tests outside the unittest suite, the fleet-skills freshness check, and the unclassified-character report.
 
 runs:
   using: composite
