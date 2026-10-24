@@ -300,8 +300,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    the lane read finds the promotion held, the round narrows to develop. Otherwise, where a
    `decision` issue blocking that promotion has a `closedAt` at or after the time noted before the
    first read, park. That answer may not be to merge, so the `decision` issue the park files asks
-   whether it lets the promotion merge. Exit `45` on a promotion blocks no merge where the promotion
-   meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a promotion merges with no
+   whether it lets the promotion merge. A digest reading `coverage=none` on a promotion blocks no
+   merge where the promotion meets the one case `pr-review-conduct` Merge Gate item 2 states. Such a promotion merges with no
    `decision` issue, and the worker records that item's evidence on the handoff. Any other shortfall
    parks.
 4. **Wait in the foreground.** Each wait is one bounded command such as `pr_review.py wait`, run in

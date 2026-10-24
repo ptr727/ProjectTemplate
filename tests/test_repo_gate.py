@@ -601,7 +601,7 @@ class TestNamesCannotForgeWorkflowCommands(GitTreeCase):
                 self.assertEqual(line, repo_gate.printable(line))
 
     def test_both_gates_escape_a_line_identically(self) -> None:
-        """Each gate is fetched as one file, so each holds its own copy, and this keeps them equal."""
+        """Each gate is fetched apart from the other, so each holds its own copy, kept equal here."""
         prose_gate = REPO / ".github/actions/prose-gate"
         with mock.patch.object(sys, "path", [str(prose_gate), *sys.path]):
             prose_lint = importlib.import_module("prose_lint")

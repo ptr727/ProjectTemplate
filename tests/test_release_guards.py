@@ -1538,7 +1538,8 @@ gh() {
         # Each dependency shape reaches its own runner, the lint-only one included.
         for arm in ("              uv)\n", "              pip)\n", "              lint-only)\n"):
             self.assertIn(arm, job)
-        self.assertIn("uvx coverage@latest run -m unittest discover -s tests", job)
+        self.assertIn('uvx "${extra[@]}" coverage@latest run -m unittest discover -s tests', job)
+        self.assertIn("--with-requirements tests/requirements.txt", job)
         self.assertIn("has no Python files under tests/", job)
         self.assertIn("cannot install its dependencies", job)
 

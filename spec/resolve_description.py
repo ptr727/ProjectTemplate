@@ -2,7 +2,7 @@
 """Resolve one repo's declared registry/repos.json description, for repo-config/configure.sh.
 
 Delegates to description_errors() (validate.py) so configure.sh validates a declared description
-against the exact same contract spec/audit.py's description_findings() does, rather than a third
+against the exact same contract spec/audit_markdown.py's description_findings() does, rather than a third
 hand-rolled copy of the same rules.
 
 Prints the declared description to stdout and exits 0 when the repo has no declared description

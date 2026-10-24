@@ -405,7 +405,17 @@ hub_python() {
     python3 "$HUB_ROOT/$script" "$@"
 }
 
-# The single reader-lock span for a task that needs ensure_hub_root plus one hub_python call, matching host_tool's own wrapper/locked-body split.
+hub_uv_script() {
+    command -v uv >/dev/null || {
+        fail "uv is required for this task. host-setup/linux/install-tools.sh provides it."
+        return 127
+    }
+    local script="$1"
+    shift
+    uv run --no-project --script "$HUB_ROOT/$script" "$@"
+}
+
+# The single reader-lock span for a task that needs ensure_hub_root plus one hub_python or hub_uv_script call, matching host_tool's own wrapper/locked-body split.
 # Not reentrant: hub_read_lock_acquire's exec unconditionally overwrites HUB_READ_LOCK_FD, so a nested call would leak the outer fd and silently drop the lock it represented.
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
@@ -437,7 +447,7 @@ audit_repo() {
     local name
     read -r -p "Repo to audit [$default]: " name
     name="${name:-$default}"
-    with_hub_read_lock hub_python spec/audit.py "$name"
+    with_hub_read_lock hub_uv_script spec/audit.py "$name"
 }
 
 check_skills_dist() {

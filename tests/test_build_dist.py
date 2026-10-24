@@ -929,26 +929,25 @@ class IncludeCase(TreeCase):
         between calls makes the body run each time, which is what the guard is there for."""
         before = len(sys.path)
         for _ in range(3):
-            build_dist._audit_module.cache_clear()
+            build_dist._carried_text.cache_clear()
             build_dist._fence_step("plain", None, 0)
         self.assertLessEqual(len(sys.path) - before, 1)
 
-    def test_the_audit_module_is_resolved_once_however_many_lines_are_read(self) -> None:
+    def test_carried_text_is_resolved_once_however_many_lines_are_read(self) -> None:
         """`_fence_step` reaches for it per line, so resolving it per line is what this stops."""
-        build_dist._audit_module.cache_clear()
+        build_dist._carried_text.cache_clear()
 
         for _ in range(50):
             build_dist._fence_step("plain", None, 0)
 
-        self.assertEqual(build_dist._audit_module.cache_info().misses, 1)
-        self.assertEqual(build_dist._audit_module.cache_info().hits, 49)
+        self.assertEqual(build_dist._carried_text.cache_info().misses, 1)
+        self.assertEqual(build_dist._carried_text.cache_info().hits, 49)
 
-    def test_importing_this_module_does_not_import_audit(self) -> None:
+    def test_importing_this_module_does_not_import_carried_text(self) -> None:
         """The laziness `scripts/skills_install.py` depends on, which caching must not give up.
 
-        It imports this module on hosts whose Python predates what `audit.py` needs, and installing
-        never fills a region, so importing `audit` at module scope would break that path. Run in a
-        fresh interpreter because this test process has already imported `audit` by other means.
+        It imports this module and installing never fills a region, so the install path loads nothing
+        from spec/. Run in a fresh interpreter because this test process has already imported it by other means.
 
         The measurement is the delta across the import rather than the child's absolute state, since
         a `sitecustomize` or `usercustomize` hook runs before `-c` does and could import a module of
@@ -957,9 +956,9 @@ class IncludeCase(TreeCase):
         """
         scripts_dir = str(Path(build_dist.__file__).parent)
         source = (
-            "import sys; before = 'audit' in sys.modules;"
+            "import sys; before = 'carried_text' in sys.modules;"
             f" sys.path.insert(0, {scripts_dir!r}); import build_dist;"
-            " print(before, 'audit' in sys.modules, end='')"
+            " print(before, 'carried_text' in sys.modules, end='')"
         )
 
         result = subprocess.run(
@@ -973,9 +972,9 @@ class IncludeCase(TreeCase):
         before, after = result.stdout.split()
         if before == "True":
             self.skipTest(
-                "this interpreter imports a module named audit at startup, so the import delta cannot be read here"
+                "this interpreter imports a module named carried_text at startup, so the import delta cannot be read here"
             )
-        self.assertEqual(after, "False", "importing build_dist pulled in audit")
+        self.assertEqual(after, "False", "importing build_dist pulled in carried_text")
 
 
 class DeclaredDestinationCase(TreeCase):

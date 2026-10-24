@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, and provenance handoff.
+"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, provenance, and uv run.
 
 The git cases run in constructed temp repositories, and the snippet bounds its own git probe with
 a timeout. The network is stubbed, so nothing here reaches GitHub.
@@ -14,6 +14,7 @@ import http.client
 import importlib.util
 import io
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SNIPPET = ROOT / "catalog" / "snippets" / "hub_fetch_run.py"
 TIMEOUT = 30
 SHA = "0123456789abcdef0123456789abcdef01234567"
+GIT_SHA = "fedcba9876543210fedcba9876543210fedcba98"
 
 
 def load_snippet() -> ModuleType:
@@ -191,17 +193,33 @@ RECORD = (
     b"    out.write(os.environ.get('PROSE_GATE_PROVENANCE', '<unset>'))\n"
 )
 RAISE = b"raise RuntimeError('gate crashed')\n"
+DATA_PATH = ".github/actions/prose-gate/prose-gate.json"
+RATE_LIMITED = urllib.error.HTTPError("u", 403, "rate limit", {}, None)  # type: ignore[arg-type]
 ENV_KEYS = ("PROSE_GATE_PROVENANCE", "GH_TOKEN", "GITHUB_TOKEN")
 
 
 class ProvenanceTests(unittest.TestCase):
+    # These stand uv in with a stub, so they run on the host lacking it, the one they are about.
+    STUBBED = frozenset(
+        {
+            "test_the_script_runs_through_uv_with_no_project",
+            "test_a_missing_uv_is_the_gate_not_running",
+        }
+    )
+
     def setUp(self) -> None:
+        if shutil.which("uv") is None and self._testMethodName not in self.STUBBED:
+            self.skipTest("the fetched script runs through uv")
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.out = Path(self._tmp.name) / "seen.txt"
         self.requests: list[urllib.request.Request | str] = []
         self.timeouts: list[float | None] = []
         self.stderr = io.StringIO()
+        self.git = mock.Mock(return_value=(None, "exit 128"))
+        patcher = mock.patch.object(hub, "lookup_via_git", self.git)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def urls(self) -> list[str]:
         return [r if isinstance(r, str) else r.full_url for r in self.requests]
@@ -264,6 +282,7 @@ class ProvenanceTests(unittest.TestCase):
         seen = self.run_main(path=".github/actions/repo-gate/repo_gate.py")
         self.assertEqual(seen, "<unset>")
         self.assertEqual(self.lookup_requests(), [])
+        self.git.assert_not_called()
         self.assertTrue(self.urls()[-1].endswith("/main/.github/actions/repo-gate/repo_gate.py"))
 
     def test_fallback_causes_print_a_line_and_the_gate_still_runs(self) -> None:
@@ -286,8 +305,29 @@ class ProvenanceTests(unittest.TestCase):
                 self.assertEqual(self.run_main(lookup), UNRESOLVED)
                 line = self.stderr.getvalue()
                 self.assertIn(cause, line)
+                self.assertIn("git ls-remote exit 128", line)
                 self.assertEqual(line.count("\n"), 1, line)
+                self.assertTrue(self.urls()[-2].endswith(f"/main/{DATA_PATH}"), self.urls())
                 self.assertTrue(self.urls()[-1].endswith(f"/main/{PROSE_PATH}"), self.urls())
+
+    def test_git_fallback_pins_the_script_and_its_data_to_one_commit(self) -> None:
+        """A rate-limited API lookup still fetches both files at one commit, so they pair."""
+        self.git.return_value = (GIT_SHA, "")
+        seen = self.run_main(RATE_LIMITED)
+        self.assertEqual(seen, f"ptr727/ProjectTemplate@{GIT_SHA} (hub-fetch-run main)")
+        fetched = [u for u in self.urls() if u != hub.HUB_MAIN_SHA_URL]
+        self.assertEqual(
+            fetched,
+            [
+                f"{hub.HUB_RAW_BASE}/{GIT_SHA}/{DATA_PATH}",
+                f"{hub.HUB_RAW_BASE}/{GIT_SHA}/{PROSE_PATH}",
+            ],
+        )
+        self.assertEqual(self.stderr.getvalue(), "")
+
+    def test_git_fallback_is_not_run_when_the_api_resolves(self) -> None:
+        self.assertEqual(self.run_main(), RESOLVED)
+        self.git.assert_not_called()
 
     def test_token_header_sent_only_when_set(self) -> None:
         self.run_main()
@@ -311,19 +351,49 @@ class ProvenanceTests(unittest.TestCase):
     def test_whitespace_only_caller_value_is_overwritten(self) -> None:
         self.assertEqual(self.run_main(env={"PROSE_GATE_PROVENANCE": "  "}), RESOLVED)
 
-    def test_environment_is_restored_when_the_script_raises(self) -> None:
+    def test_a_failing_script_passes_its_exit_code_through(self) -> None:
+        """The script runs in its own process, so this one's environment is never touched."""
         for caller, expected in (("  ", "  "), (None, None)):
             with self.subTest(caller=caller):
                 env = {} if caller is None else {"PROSE_GATE_PROVENANCE": caller}
                 with (
                     self.environment(env),
                     mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RAISE)),
-                    self.assertRaises(RuntimeError),
+                    contextlib.redirect_stderr(io.StringIO()),
                 ):
-                    try:
-                        hub.main([PROSE_PATH])
-                    finally:
-                        self.assertEqual(os.environ.get("PROSE_GATE_PROVENANCE"), expected)
+                    self.assertEqual(1, hub.main([PROSE_PATH]))
+                    self.assertEqual(os.environ.get("PROSE_GATE_PROVENANCE"), expected)
+
+    def test_the_gate_data_file_is_fetched_from_the_same_commit(self) -> None:
+        """The gate reads its data file beside itself, so a single-file fetch cannot run it."""
+        self.run_main()
+        data = ".github/actions/prose-gate/prose-gate.json"
+        self.assertTrue(self.urls()[-2].endswith(f"/{SHA}/{data}"), self.urls())
+
+    def test_the_script_runs_through_uv_with_no_project(self) -> None:
+        """A project sync would write a lock file and an environment into the caller's tree."""
+        done: subprocess.CompletedProcess[bytes] = subprocess.CompletedProcess([], 3)
+        with (
+            self.environment(),
+            mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
+            mock.patch.object(hub.subprocess, "run", return_value=done) as run,
+            mock.patch.object(hub.shutil, "which", return_value="uv"),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            self.assertEqual(3, hub.main([".github/actions/repo-gate/repo_gate.py", "--x"]))
+        cmd = run.call_args.args[0]
+        self.assertEqual(["run", "--no-project", "--script"], cmd[1:4])
+        self.assertEqual(["--x"], cmd[5:])
+
+    def test_a_missing_uv_is_the_gate_not_running(self) -> None:
+        with (
+            self.environment(),
+            mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
+            mock.patch.object(hub.shutil, "which", return_value=None),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            self.assertEqual(1, hub.main([PROSE_PATH]))
+        self.assertIn("uv is not on PATH, so the gate did not run", self.stderr.getvalue())
 
     def test_lookup_and_fetch_use_separate_timeouts(self) -> None:
         self.run_main()
@@ -335,6 +405,43 @@ class ProvenanceTests(unittest.TestCase):
         request = self.lookup_requests()[-1]
         self.assertNotIn("Authorization", request.headers)
         self.assertEqual(request.unredirected_hdrs.get("Authorization"), "Bearer tok-one")
+
+
+class GitLookupTests(unittest.TestCase):
+    """lookup_via_git reads one `git ls-remote` line, and every other shape is a named cause."""
+
+    def lookup(self, run: mock.Mock) -> tuple[str | None, str]:
+        with mock.patch.object(hub.subprocess, "run", run):
+            return hub.lookup_via_git()
+
+    def test_one_main_line_is_its_commit(self) -> None:
+        done = subprocess.CompletedProcess([], 0, f"{GIT_SHA}\trefs/heads/main\n", "")
+        run = mock.Mock(return_value=done)
+        self.assertEqual(self.lookup(run), (GIT_SHA, ""))
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], ["git", "ls-remote", hub.HUB_GIT_URL, "refs/heads/main"])
+        self.assertEqual(kwargs["timeout"], hub.LOOKUP_TIMEOUT)
+        self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertIs(kwargs["stderr"], subprocess.DEVNULL)
+
+    def test_every_other_shape_names_its_cause(self) -> None:
+        line = f"{GIT_SHA}\trefs/heads/main\n"
+        cases: list[tuple[str, mock.Mock]] = [
+            ("exit 128", mock.Mock(return_value=subprocess.CompletedProcess([], 128, "", "x"))),
+            ("FileNotFoundError", mock.Mock(side_effect=FileNotFoundError("git"))),
+            ("timed out", mock.Mock(side_effect=subprocess.TimeoutExpired("git", 5))),
+        ]
+        for out in (
+            "",
+            GIT_SHA[:8] + "\trefs/heads/main\n",
+            line + line,
+            GIT_SHA.upper() + line[40:],
+        ):
+            done = subprocess.CompletedProcess([], 0, out, "")
+            cases.append(("unexpected output", mock.Mock(return_value=done)))
+        for cause, run in cases:
+            with self.subTest(cause=cause, run=run):
+                self.assertEqual(self.lookup(run), (None, cause))
 
 
 if __name__ == "__main__":
