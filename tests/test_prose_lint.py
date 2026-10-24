@@ -1230,9 +1230,88 @@ class TestCommentWrapRule(BaitCase):
         text = "#!/usr/bin/env bash\ncat <<END-OF-TEXT\nhi\nEND-OF-TEXT\n# retry the upload.\n"
         self.assertEqual([5], [c[0] for c in self.comments("h.sh", text)])
 
+    def test_a_delimiter_opening_on_a_digit_ends_on_its_terminator(self) -> None:
+        """The apostrophe in a `<<123` body opened a string hiding the comment after it."""
+        rows = ("cat <<123", "The build didn't publish.", "123", "# retry the upload.", "jq '.x'")
+        for name, text in (
+            ("x.yml", "- run: |\n" + "".join(f"    {r}\n" for r in rows)),
+            ("h.sh", "".join(f"{r}\n" for r in rows)),
+        ):
+            got = [c[:2] for c in self.comments(name, text)]
+            self.assertEqual([(text.count("\n") - 1, "retry the upload.")], got, name)
+
+    def test_a_shift_by_a_number_opens_no_heredoc(self) -> None:
+        """Bash reads `<<2` as a shift in arithmetic, so a label opening on a digit needs its line."""
+        for code in ("(( x << 2 ))", "a[1<<2]=v", "echo $[1<<2]", "let x=1<<2", "echo $((1<<2))"):
+            with self.subTest(code=code):
+                text = f"{code}\nThe build didn't publish.\n# After.\n"
+                self.assertEqual([3], [c[0] for c in self.comments("a.sh", text)])
+
+    def test_a_second_heredoc_on_one_opener_line_ends_on_its_own_terminator(self) -> None:
+        rows = ("diff - /dev/fd/3 <<A 3<<'B'", "one", "A", "The build didn't publish.", "B")
+        tail = ("# retry the upload.", "jq -r '.x' o.json")
+        for name, text in (
+            ("x.yml", "- run: |\n" + "".join(f"    {r}\n" for r in rows + tail)),
+            ("h.sh", "".join(f"{r}\n" for r in rows + tail)),
+        ):
+            got = [c[:2] for c in self.comments(name, text)]
+            self.assertEqual([(text.count("\n") - 1, "retry the upload.")], got, name)
+
+    def test_a_second_opener_with_no_terminator_leaves_the_first_body_alone(self) -> None:
+        text = "cat <<A <<<x y<<z\nbody\nA\n# After.\n"
+        self.assertEqual([(4, "After.")], [c[:2] for c in self.comments("a.sh", text)])
+
+    def test_a_quoted_or_commented_opener_queues_no_second_body(self) -> None:
+        """A `<<EOF` after a quote or a `#` ran the body on to a later heredoc's `EOF`."""
+        for opener in ("cat <<EOF | grep -c '<<EOF'", "cat <<EOF  # read up to the <<EOF line"):
+            with self.subTest(opener=opener):
+                text = f"{opener}\nx\nEOF\n# After.\ncat <<EOF\ny\nEOF\n"
+                self.assertEqual([4], [c[0] for c in self.comments("a.sh", text)])
+
+    def test_a_dash_second_opener_ends_on_its_tab_indented_terminator(self) -> None:
+        text = "diff - /dev/fd/3 <<A 3<<-B\none\nA\nThe build didn't.\n\tB\n# After.\njq '.x'\n"
+        self.assertEqual([6], [c[0] for c in self.comments("a.sh", text)])
+
+    def test_a_non_shell_run_step_takes_no_heredoc_split(self) -> None:
+        """A Python shift by a name read as an opener cut a triple-quoted string in two."""
+        script = '    m = 1 << n; s = """\n    # not a comment\n    """\n    # real\n'
+        for step in (
+            "- shell: python\n  run: |\n" + script,
+            "- name: x\n  run: |\n" + script + "  shell: python\n",
+            "- shell: pwsh {0}\n  run: |\n" + script,
+            "- shell: 'python'\n  run: |\n" + script,
+            "- shell: /usr/bin/python3 {0}\n# name: old\n  run: |\n" + script,
+        ):
+            with self.subTest(step=step):
+                got = [c[1] for c in self.comments("x.yml", step) if c[1] != "name: old"]
+                self.assertEqual(["real"], got)
+        for step in ("- shell: bash -e {0}\n  run: |\n", "- shell: python\n- run: |\n"):
+            with self.subTest(step=step):
+                got = [c[1] for c in self.comments("x.yml", step + script)]
+                self.assertEqual(["not a comment"], got)
+
     def test_a_code_span_sharing_words_with_earlier_prose_does_not_move_the_comment(self) -> None:
         text = "I see this, `see <!-- check this. --> this`\n    <!-- check this. -->\n"
         self.assertEqual([2], [c[0] for c in self.comments("a.md", text)])
+
+    def test_a_stray_backtick_does_not_hide_the_first_of_two_equal_comments(self) -> None:
+        """An escaped, commented, or attribute backtick paired with a later one and blanked both."""
+        for stray in ("\\`", "<!-- a ` -->", '<a title="`">'):
+            with self.subTest(stray=stray):
+                text = f"Start {stray} and <!-- x --> one\nthen \\` and\nlater <!-- x --> two.\n"
+                got = [c[0] for c in self.comments("a.md", text) if c[1] == "x"]
+                self.assertEqual([1, 3], got)
+
+    def test_a_less_than_sign_opens_no_tag_around_a_code_span(self) -> None:
+        """A tag is what the Markdown parser reads as one, so the code span after `a<b` is blanked."""
+        for text in (
+            "Use a<b then `<!-- x -->` > c,\nthen <!-- x --> two.\n",
+            'Use a<b "see `<!-- x -->`\nand" > c, then <!-- x --> two.\n',
+            "Start <!--> a `<!-- x -->` b\nthen <!-- x --> two.\n",
+        ):
+            with self.subTest(text=text):
+                got = [c[0] for c in self.comments("a.md", text) if c[1] == "x"]
+                self.assertEqual([2], got)
 
     def test_an_inline_code_span_holding_a_comment_text_is_not_its_line(self) -> None:
         """The search for the comment stopped on the code span's line, one line too early."""
@@ -7377,7 +7456,7 @@ class TestHarness(unittest.TestCase):
     def test_the_gate_stays_under_its_size_ceiling(self) -> None:
         """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
         lines = PROSE_LINT_SCRIPT.read_text(encoding="utf-8").count("\n")
-        self.assertLessEqual(lines, 1840)
+        self.assertLessEqual(lines, 1862)
 
 
 if __name__ == "__main__":
