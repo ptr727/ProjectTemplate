@@ -396,22 +396,32 @@ def check_registry_errors(registry, types, repos):
         return ["checks.json: 'checks' must be an array"]
     errors = []
     ids = set()
-    read = False
+    # A file check runs only on what a baseline check before it in its run has read, on the hub's filtered run too.
+    unread = {}
+    for hub_run in (False, True):
+        read = False
+        for i, check in enumerate(checks):
+            if not isinstance(check, dict) or (hub_run and check.get("hub") is not True):
+                continue
+            read = check.get("scope") == "baseline" or (read and check.get("scope") == "file")
+            if check.get("scope") == "file" and not read:
+                unread.setdefault(i, "the hub's run" if hub_run else "its run")
+    for i, run in sorted(unread.items()):
+        errors.append(
+            f"checks.json: checks[{i}] is a file check with no baseline check before it in {run}"
+        )
     for i, check in enumerate(checks):
         where = f"checks.json: checks[{i}]"
         if not isinstance(check, dict):
             errors.append(f"{where} must be an object")
             continue
-        # A file check runs only on what a baseline check before it in the same run has read.
-        read = check.get("scope") == "baseline" or (read and check.get("scope") == "file")
-        if check.get("scope") == "file" and not read:
-            errors.append(f"{where} is a file check with no baseline check before it in its run")
         cid = check.get("id")
         if not isinstance(cid, str) or not CHECK_ID_RE.fullmatch(f"({cid})"):
             errors.append(f"{where} id {cid!r} is not a dotted lowercase check id")
         elif cid in ids:
             errors.append(f"{where} id '{cid}' is declared more than once")
-        ids.add(cid)
+        else:
+            ids.add(cid)
         for key in ("family", "description", "spec"):
             value = check.get(key)
             if not isinstance(value, str) or not value.strip() or "\n" in value:
@@ -431,7 +441,8 @@ def check_registry_errors(registry, types, repos):
             errors.append(f"{where} carries unknown key(s) {', '.join(unknown)}")
         suppression = check.get("suppression")
         ending = suppression.get("endsWithType", 0) if isinstance(suppression, dict) else 0
-        if "suppression" in check and not (ending is None or ending in types.get("types", {})):
+        named = isinstance(ending, str) and ending in types.get("types", {})
+        if "suppression" in check and not (ending is None or named):
             errors.append(f"{where} suppression.endsWithType must name a project type or be null")
     catalog = {c.get("id") for t in types.get("types", {}).values() for c in t.get("checks", [])}
     catalog |= {

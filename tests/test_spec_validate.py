@@ -68,6 +68,17 @@ class CheckRegistryCase(unittest.TestCase):
             ("a check that is no object", ["a.b"], "must be an object"),
             ("a file check with nothing read", [self.check(scope="file")], "no baseline check"),
             ("a misspelled key", [self.check(grond=False)], "unknown key(s) grond"),
+            ("a list id", [self.check(id=["a.b"])], "dotted lowercase"),
+            (
+                "a list suppression type",
+                [self.check(suppression={"endsWithType": []})],
+                "endsWithType",
+            ),
+            (
+                "a hub-skipped reader before a hub file check",
+                [self.check(scope="baseline", hub=False), self.check(id="c.d", scope="file")],
+                "in the hub's run",
+            ),
             (
                 "ground false on a file check",
                 [self.check(scope="baseline"), self.check(id="c.d", scope="file", ground=False)],

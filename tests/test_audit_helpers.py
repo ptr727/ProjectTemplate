@@ -1012,12 +1012,7 @@ class HubTrackedProbeCase(unittest.TestCase):
         self.assertEqual(error.cmd[:2], ["git", "commit"])
 
 
-GIT_IDENTITY = (
-    ["git", "init", "-q"],
-    ["git", "config", "user.email", "test@test.invalid"],
-    ["git", "config", "user.name", "test"],
-    ["git", "config", "commit.gpgsign", "false"],
-)
+GIT_IDENTITY = (["git", "init", "-q"], *IDENTITY)
 
 
 def clear_history_caches() -> None:
