@@ -139,5 +139,5 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
 - [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.
-- `fence_step()` in [spec/carried_text.py](./spec/carried_text.py) is the fence reading the audit's region extraction, the carry, the skill build, and the review ledger share. Its `extract_section()`, `strip_sections()`, and `normalize()` are the region reading the audit and the carry share.
+- `fence_step()` in [spec/carried_text.py](./spec/carried_text.py) is the fence reading the audit's region extraction, the carry, the skill build, and the review ledger share. Its `extract_section()` and `strip_sections()` are the audit's region reading, and its `normalize()` is the comparable form the audit and the carry share.
 - `read_regular_file()` and `write_regular_file()` in [host-setup/agent-safety/claude/install.py](./host-setup/agent-safety/claude/install.py) are the shared primitives for reading and replacing a file that must be regular. Each opens without blocking and judges the open descriptor, so a FIFO or a device is refused rather than hanging the call.

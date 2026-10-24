@@ -4387,6 +4387,8 @@ class RegistryCase(unittest.TestCase):
     def test_an_unparsed_dependabot_file_reads_as_unparsed(self) -> None:
         self.assertIsNone(audit.dependabot_ecosystems("updates:\n  - [\n"))
         self.assertEqual(audit.dependabot_ecosystems("updates: []\n"), set())
+        declared = "updates:\n  - package-ecosystem: github-actions\n  - package-ecosystem: 'uv'\n"
+        self.assertEqual(audit.dependabot_ecosystems(declared), {"github-actions", "uv"})
 
     def test_a_registry_id_is_a_known_check_id(self) -> None:
         spec: dict[str, Any] = {"types": {"types": {}, "crossCutting": {}}}
