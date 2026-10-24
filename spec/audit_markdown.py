@@ -52,7 +52,10 @@ def references(text):
 
 
 def heading_texts(markdown):
-    """Lowercased heading texts in a Markdown document, for case-insensitive section-presence matching."""
+    """Lowercased top-level heading texts, for case-insensitive section-presence matching.
+
+    A heading inside a code block, a blockquote, or a list item is content rather than a section.
+    """
     return {h.strip().lower() for _, h, _, _ in _atx_headings(markdown)}
 
 
@@ -157,7 +160,10 @@ def addressed_region(text, address):
 
 
 def ordered_headings(markdown, level):
-    """Heading texts at `level` in document order, HTML comments stripped, fenced blocks skipped."""
+    """Top-level heading texts at `level` in document order, HTML comments stripped.
+
+    A heading inside a code block, a blockquote, or a list item is content rather than a section.
+    """
     return [
         _HTML_COMMENT.sub("", h).strip() for lv, h, _, _ in _atx_headings(markdown) if lv == level
     ]

@@ -78,8 +78,7 @@ def code_blocks(text):
     """Every fenced and indented code block in `text`, in order, at any nesting depth.
 
     A fence the parser ends with its container, rather than at a closing line, reads as not `closed`.
-    `scripts/build_dist.py` refuses an include body in that state, since copied elsewhere the fence
-    would swallow what follows it.
+    `scripts/build_dist.py` refuses an include body holding one, whatever its container.
     """
     out = []
     for t in _tokens(text):

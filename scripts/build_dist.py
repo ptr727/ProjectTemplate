@@ -336,6 +336,7 @@ def heading_body(lines, heading, key):
     blocks = [b for b in reader.code_blocks(text) if start < b.start < end]
     if any(b.fenced and not b.closed for b in blocks):
         # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.
+        # One a blockquote ends is refused too, since a fence missing its closing line is a source defect wherever it sits.
         raise ValueError(f"include {key!r}: the heading's body leaves a code fence open")
     code = reader.code_lines(text)
     # The source's own region markers belong to its regions, not to the text they enclose.

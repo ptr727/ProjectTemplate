@@ -924,7 +924,11 @@ class IncludeCase(TreeCase):
         self.assertIn("    pass\n\n\ndef b():", self.skill_text())
 
     def test_a_body_leaving_a_fence_open_is_refused(self) -> None:
-        for source in ("## Alpha\n\n```text\nopen\n", "## Alpha\n\n```text\nopen"):
+        for source in (
+            "## Alpha\n\n```text\nopen\n",
+            "## Alpha\n\n```text\nopen",
+            "## Alpha\n\n> ```text\n> open\n\n## Beta\n",
+        ):
             with self.subTest(source=source):
                 (self.tmp / "RULES.md").write_text(source, encoding="utf-8")
                 self.make_skill("foo", self.region("RULES.md > Alpha"))
