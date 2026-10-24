@@ -241,8 +241,8 @@ def _read_lines(path):
 def _unindented(line):
     """The line's text when it sits within CommonMark's three-space bound, else None, which reads the line as content.
 
-    The bound is held in every container. So a marker indented four spaces into a list item is content
-    too, though CommonMark reads it as HTML there.
+    The bound is held on the line's own indentation in every container. So a marker indented past it
+    inside a list item is content here, although CommonMark can read it as HTML there.
     """
     stripped = line.lstrip(" ")
     return stripped.rstrip() if len(line) - len(stripped) <= _MAX_INDENT else None
@@ -316,7 +316,8 @@ def heading_body(lines, heading, key):
 
     Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
     a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py,
-    which the fidelity checks also use, so a heading inside a code block is content to both.
+    which the fidelity checks also use. Only a top-level `#` heading counts. One inside a code block,
+    a blockquote, or a list item is content to both, and so is a setext heading.
     They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
     two answers to one question, refused rather than resolved to the first. A body ends at any
     heading of its level or above, level one included. A fidelity region ends only at the next
