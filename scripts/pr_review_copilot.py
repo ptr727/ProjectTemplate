@@ -106,8 +106,8 @@ class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
     `open` is the count of open findings the body states, None where it states none or one this
-    reader cannot believe. `unthreaded`
-    is how many findings it names that no thread on the pull request carries. `table` is the
+    reader cannot believe. `unthreaded` is how many findings it names that no thread on the pull
+    request carries. `table` is the
     paths the body's file table names, None where it carries no table. `unplaced` is each part
     the reader cannot place, with its text, the subset of `notes` that can hold a finding.
     """
@@ -398,8 +398,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     claimed: list[tuple[int, int]] = []
     opaque: list[tuple[int, int]] = []
     counted: list[tuple[int, int]] = []
-    open_count: int | None = None
-    unbelieved = False
+    opens: list[int | None] = []
     entries = linked = 0
     for node in found:
         end = node.end if node.end is not None else len(lines)
@@ -434,10 +433,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         )
         sections.append(Section(kind, count, " ".join(plain(summary).split()), content))
         if kind == "open":
-            if count is None:
-                unbelieved = True
-            else:
-                open_count = (open_count or 0) + count
+            opens.append(count)
             got, links = entries_in(tokens, node.body, end, found, vocab)
             entries += got
             linked += sum(
@@ -506,10 +502,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 )
             ):
                 if found_kind[0] == "open":
-                    if (count := count_of(found_kind[1], name)) is None:
-                        unbelieved = True
-                    else:
-                        open_count = (open_count or 0) + count
+                    opens.append(count_of(found_kind[1], name))
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
             elif (
@@ -557,8 +550,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         if coverage == "none" or rank[state] > rank[coverage]:
             coverage, coverage_line = state, said
 
-    if unbelieved:
-        open_count = None
+    open_count = total(opens) if opens else None
     named = max(open_count or 0, listed)
     return Reading(
         coverage=coverage,

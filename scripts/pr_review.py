@@ -83,11 +83,12 @@ Subcommands
            `previously_missed=`, and `cr_outside_diff=N (on_head=X earlier=Y)` count findings
            collapsed into review bodies over every round, split into the head's and earlier ones,
            each printed whole since no thread carries it, a trailing `+` marking a cut reviews
-           window. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N` counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
+           window. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N`
+           counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
            where that comment can sit behind the window. `overview=T/M` is the open findings the
            round covering the head states beside the threads that round opened, `?` where it
-           states no count or one it cannot believe, and `FINDINGS WITH NO THREAD` names findings the round names that no
-           thread on the pull request carries. Each of these is owed the triage a suppressed
+           states no count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
+           names findings the round names that no thread on the pull request carries. Each of these is owed the triage a suppressed
            finding gets, and none decides an exit code.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way: a node id typed into a
