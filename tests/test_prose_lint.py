@@ -1257,6 +1257,20 @@ class TestCommentWrapRule(BaitCase):
             got = [c[:2] for c in self.comments(name, text)]
             self.assertEqual([(text.count("\n") - 1, "retry the upload.")], got, name)
 
+    def test_each_of_two_heredoc_bodies_on_one_opener_is_lexed_alone(self) -> None:
+        """An apostrophe in the first body ran a string through the second body's comment."""
+        rows = (
+            "python - /dev/fd/3 <<A 3<<'B'",
+            "The build didn't publish.",
+            "A",
+            "x = 1  # note it.",
+        )
+        rest = ("print('done')", "B", "# After.")
+        text = "- run: |\n" + "".join(f"    {r}\n" for r in (*rows, *rest))
+        self.assertEqual(
+            [(5, "note it."), (8, "After.")], [c[:2] for c in self.comments("x.yml", text)]
+        )
+
     def test_a_second_opener_with_no_terminator_leaves_the_first_body_alone(self) -> None:
         text = "cat <<A <<<x y<<z\nbody\nA\n# After.\n"
         self.assertEqual([(4, "After.")], [c[:2] for c in self.comments("a.sh", text)])
@@ -1296,7 +1310,7 @@ class TestCommentWrapRule(BaitCase):
 
     def test_a_stray_backtick_does_not_hide_the_first_of_two_equal_comments(self) -> None:
         """An escaped, commented, or attribute backtick paired with a later one and blanked both."""
-        for stray in ("\\`", "<!-- a ` -->", '<a title="`">'):
+        for stray in ("\\`", "<!-- a ` -->", '<a title="`">', "<https://example.test/`>"):
             with self.subTest(stray=stray):
                 text = f"Start {stray} and <!-- x --> one\nthen \\` and\nlater <!-- x --> two.\n"
                 got = [c[0] for c in self.comments("a.md", text) if c[1] == "x"]
