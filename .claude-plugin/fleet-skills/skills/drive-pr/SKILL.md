@@ -82,7 +82,10 @@ promotion PR once the fix lands, is the early exit this skill exists to prevent.
    gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
    that skill's carried-content records instead precede the commit, because that ledger is tracked.
    A driver that cannot dispatch a subagent follows that skill's "Running It".
-   Then push the branch and open the feature -> develop PR if it does not exist yet. Attest the
+   Then push the branch and open the feature -> develop PR if it does not exist yet. Draft its
+   body in a file named for the branch rather than a shared name such as `pr-body.md`, since
+   another driver writing the same name in the same scratch directory publishes its draft here.
+   Attest the
    pass on it, per `pr-review-conduct` "Expected review loop" step 1. A pass's
    edit budget can be spent on this push or a later one. Where it is, write each `introduced`
    finding still open into the pull request's body with its class, per `local-strict-review`
