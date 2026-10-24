@@ -83,10 +83,13 @@ PARSER = MarkdownIt("commonmark").enable("table")
 
 
 class Section(NamedTuple):
-    """One counted section: its kind, the count its label states, its title, and its text."""
+    """One counted section: its kind, the count its label states, its title, and its text.
+
+    `findings` is None where the label states a count this reader cannot believe.
+    """
 
     kind: str
-    findings: int
+    findings: int | None
     title: str
     text: str
 
@@ -101,7 +104,8 @@ class Unplaced(NamedTuple):
 class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
-    `open` is the count of open findings the body states, None where it states none. `unthreaded`
+    `open` is the count of open findings the body states, None where it states none or one this
+    reader cannot believe. `unthreaded`
     is how many findings it names that no thread on the pull request carries. `table` is the
     paths the body's file table names, None where it carries no table. `unplaced` is each part
     the reader cannot place, with its text, the subset of `notes` that can hold a finding.
@@ -125,12 +129,13 @@ class Reading(NamedTuple):
     notes: tuple[str, ...] = ()
     unplaced: tuple[Unplaced, ...] = ()
 
-    def held(self, kind: str) -> int:
-        """The findings this body holds in sections of `kind`, by the counts their labels state."""
-        return sum(s.findings for s in self.sections if s.kind == kind)
+    def held(self, kind: str) -> int | None:
+        """The findings in sections of `kind`, by their stated counts, None where one is unbelievable."""
+        counts = [s.findings for s in self.sections if s.kind == kind]
+        return None if None in counts else sum(c or 0 for c in counts)
 
     @property
-    def counts(self) -> dict[str, int]:
+    def counts(self) -> dict[str, int | None]:
         """The findings by section: threaded, suppressed, and previously missed."""
         return {
             "threaded": self.open or 0,
@@ -192,11 +197,17 @@ def matched(patterns: list[re.Pattern[str]], text: str) -> re.Match[str] | None:
     return next((m for p in patterns if (m := p.fullmatch(text))), None)
 
 
+def believed(digits: str) -> int | None:
+    """`digits` as a count, or None where it is longer than COUNT_DIGITS."""
+    return int(digits) if len(digits) <= COUNT_DIGITS else None
+
+
 def count_state(got: str, of: str) -> str:
     """A reviewed-of-changed count as `full`, `partial`, or `unknown` where either is too long or `got` exceeds `of`."""
-    if len(got) > COUNT_DIGITS or len(of) > COUNT_DIGITS or int(got) > int(of):
+    reviewed, changed = believed(got), believed(of)
+    if reviewed is None or changed is None or reviewed > changed:
         return "unknown"
-    return "full" if int(got) == int(of) else "partial"
+    return "full" if reviewed == changed else "partial"
 
 
 def stated(match: re.Match[str]) -> int | None:
@@ -207,9 +218,7 @@ def stated(match: re.Match[str]) -> int | None:
     value = match.groupdict().get("n")
     if value is None:
         return 1
-    if value.isdigit():
-        return int(value) if len(value) <= COUNT_DIGITS else None
-    return 0
+    return believed(value) if value.isdigit() else 0
 
 
 class _Details:
@@ -324,6 +333,11 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         notes.append(note)
         unplaced.append(Unplaced(note, "\n".join(lines[start:end]).strip()))
 
+    def count_of(match: re.Match[str], name: str) -> int | None:
+        if (count := stated(match)) is None:
+            notes.append(f"a finding count this reader cannot believe: `{name}`")
+        return count
+
     html = [t.content for t in tokens if t.type == "html_block"] + [
         c.content
         for t in tokens
@@ -406,11 +420,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             counted.append((node.start, end + 1))
         if kind == "vetted" or any(p.search(summary) for p in vocab["closed_badges"]):
             continue
-        count = stated(match)
-        if count is None:
-            unbelieved = True
-            notes.append(f"a finding count this reader cannot believe: `{name}`")
-            count = 0
+        count = count_of(match, name)
         content = "\n".join(
             ln.rstrip()
             for raw in lines[node.body : end]
@@ -418,7 +428,10 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         )
         sections.append(Section(kind, count, " ".join(plain(summary).split()), content))
         if kind == "open":
-            open_count = (open_count or 0) + count
+            if count is None:
+                unbelieved = True
+            else:
+                open_count = (open_count or 0) + count
             got, links = entries_in(tokens, node.body, end, found, vocab)
             entries += got
             linked += sum(
@@ -487,9 +500,8 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 )
             ):
                 if found_kind[0] == "open":
-                    if (count := stated(found_kind[1])) is None:
+                    if (count := count_of(found_kind[1], name)) is None:
                         unbelieved = True
-                        notes.append(f"a finding count this reader cannot believe: `{name}`")
                     else:
                         open_count = (open_count or 0) + count
             elif matched(vocab["finding_lists"], name):

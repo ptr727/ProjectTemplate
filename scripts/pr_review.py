@@ -1403,7 +1403,8 @@ def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.
     """Each section of `kind` in this login's rounds, with where it was raised, and the field.
 
     Every round rather than the head's, since an unanswered finding survives a push. The field
-    reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut.
+    reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut. A tally
+    holding a count the reader cannot believe reads `?`.
     """
     head = pr["headRefOid"]
     found = []
@@ -1417,10 +1418,13 @@ def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.
             else f"raised on {oid[:8]}, earlier round"
         )
         found += [(where, s) for s in reading(node, login).sections if s.kind == kind]
-    total = sum(s.findings for _, s in found)
-    on_head = sum(s.findings for w, s in found if w == "on head")
+
+    def tally(on: bool | None) -> str:
+        counts = [s.findings for w, s in found if on is None or (w == "on head") == on]
+        return "?" if None in counts else str(sum(c or 0 for c in counts))
+
     mark = "+" if reviews_truncated(pr) else ""
-    return found, f"{total}{mark} (on_head={on_head} earlier={total - on_head})"
+    return found, f"{tally(None)}{mark} (on_head={tally(True)} earlier={tally(False)})"
 
 
 def thread_author(t: dict) -> str:
