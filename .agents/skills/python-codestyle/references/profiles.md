@@ -61,7 +61,7 @@ configuration alone marks the lint-only one:
   README, and CI all run the unpinned latest here. `.py` files follow the repo's LF line-ending
   default (per GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is
   the runner instead. The directory still owes tests, written with the standard
-  library's `unittest` so they run under bare `python3` with nothing installed, as
+  library's `unittest` so they need no test runner installed, as
   `test_<script>.py` under a `tests/` directory beside the scripts it exercises and their
   `pyproject.toml` (`<scripts-dir>/tests/`), where the validator looks for it, kept apart so a
   test never reads as a tool. Within the scripts directory the name carries the kind: a gate
