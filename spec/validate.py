@@ -534,7 +534,7 @@ def description_errors(name, desc):
 
     Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
 
-    Link-free is enforced because spec/audit.py's description_findings() strips Markdown links from the README's
+    Link-free is enforced because spec/audit_markdown.py's description_findings() strips Markdown links from the README's
     own tagline before comparing, but never re-strips the declared field it compares that tagline against. A
     declared value carrying a link would therefore report as a permanent readme mismatch, and repo-config/
     configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
@@ -1150,7 +1150,7 @@ def main(argv=()):
                         )
         # Optional, since a repo whose callers pass no python-directories input declares nothing.
         errors.extend(python_directories_errors_for_repo(repo, name))
-        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit.py's description_findings() falls back to the README tagline for it.
+        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit_markdown.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
         # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.
         # CI runs no JSON-schema validation, so the schema's own required-fields and branches-iff-custom rules are enforced here or nowhere.

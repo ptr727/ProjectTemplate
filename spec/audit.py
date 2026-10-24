@@ -1084,7 +1084,7 @@ def concurrency_caller_findings(path, text):
     unreadable = [
         (
             "DRIFT",
-            f"concurrency: {path} writes its concurrency in a shape the audit cannot read. Write a block mapping with group and cancel-in-progress, each a single-line scalar.",
+            f"concurrency: {path} writes its concurrency in a shape the audit cannot read. Give it a mapping whose group and cancel-in-progress are scalars, or a group scalar alone.",
         )
     ]
     doc, parsed = _yaml(text)

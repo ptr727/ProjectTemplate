@@ -1,7 +1,6 @@
 """Read one named step out of a workflow or composite action, bounded to that step.
 
-The suites run on the standard library alone, so the readers work by indentation. A step is
-sliced out before any key is looked for in it, so a step missing a key reads as missing rather
+The readers work by indentation. A step is sliced out before any key is looked for in it, so a step missing a key reads as missing rather
 than as the next step's key.
 """
 
