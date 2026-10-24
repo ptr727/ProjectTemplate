@@ -4368,6 +4368,10 @@ class RegistryCase(unittest.TestCase):
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
 
+    def test_the_driftnote_check_runs_last(self) -> None:
+        # It counts the findings before it, so a check registered after it would go uncounted.
+        self.assertEqual(audit.registered_checks()[-1]["id"], "registry.driftnotes")
+
     def test_the_smoke_selftest_passes(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(audit._selftest_cases(), 0, out.getvalue())
