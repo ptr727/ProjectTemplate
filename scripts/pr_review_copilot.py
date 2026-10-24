@@ -199,13 +199,16 @@ def count_state(got: str, of: str) -> str:
     return "full" if int(got) == int(of) else "partial"
 
 
-def stated(match: re.Match[str]) -> int:
-    """The count a matched label states: its `n` group, zero for a spelled none, one without one."""
+def stated(match: re.Match[str]) -> int | None:
+    """The count a matched label states: its `n` group, zero for a spelled none, one without one.
+
+    A count longer than COUNT_DIGITS is None, since reading it as zero would report a clean round.
+    """
     value = match.groupdict().get("n")
     if value is None:
         return 1
     if value.isdigit():
-        return int(value) if len(value) <= COUNT_DIGITS else 0
+        return int(value) if len(value) <= COUNT_DIGITS else None
     return 0
 
 
@@ -376,6 +379,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     opaque: list[tuple[int, int]] = []
     counted: list[tuple[int, int]] = []
     open_count: int | None = None
+    unbelieved = False
     entries = linked = 0
     for node in found:
         end = node.end if node.end is not None else len(lines)
@@ -403,6 +407,10 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         if kind == "vetted" or any(p.search(summary) for p in vocab["closed_badges"]):
             continue
         count = stated(match)
+        if count is None:
+            unbelieved = True
+            notes.append(f"a finding count this reader cannot believe: `{name}`")
+            count = 0
         content = "\n".join(
             ln.rstrip()
             for raw in lines[node.body : end]
@@ -479,7 +487,11 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 )
             ):
                 if found_kind[0] == "open":
-                    open_count = (open_count or 0) + stated(found_kind[1])
+                    if (count := stated(found_kind[1])) is None:
+                        unbelieved = True
+                        notes.append(f"a finding count this reader cannot believe: `{name}`")
+                    else:
+                        open_count = (open_count or 0) + count
             elif matched(vocab["finding_lists"], name):
                 listed += items_after(tokens, i + 3)
             elif (
@@ -527,6 +539,8 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         if coverage == "none" or rank[state] > rank[coverage]:
             coverage, coverage_line = state, said
 
+    if unbelieved:
+        open_count = None
     named = max(open_count or 0, listed)
     return Reading(
         coverage=coverage,

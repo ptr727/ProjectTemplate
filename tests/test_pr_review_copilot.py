@@ -300,6 +300,17 @@ class TestOpenFindings(unittest.TestCase):
     def test_no_count_reads_as_none_rather_than_zero(self) -> None:
         self.assertIsNone(adapter.read(body()).open)
 
+    def test_an_oversized_count_reads_as_none_and_is_noted(self) -> None:
+        for sections in (
+            open_section("99999 open findings"),
+            "**99999 open findings**",
+            f"{open_section('1 open issue', ('101',))}\n\n**99999 open findings**",
+        ):
+            with self.subTest(sections=sections):
+                found = adapter.read(body(sections=sections))
+                self.assertIsNone(found.open)
+                self.assertTrue(any("cannot believe" in n for n in found.notes), found.notes)
+
     def test_an_entry_linking_no_thread_on_the_pull_request_is_unthreaded(self) -> None:
         found = adapter.read(body(sections=open_section()), threads=("101",))
         self.assertEqual(1, found.unthreaded)
