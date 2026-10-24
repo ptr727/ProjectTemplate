@@ -45,11 +45,11 @@ Subcommands
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet, or the review covering it states no
            partial coverage and its verdict counts what it flags. 42 = the round covering the
-           head states it read fewer files than the pull request changed, or states nothing while
-           an earlier round on record states partial coverage. 50 = that round opens on a verdict
-           other than the clean one while it counts no finding, opens no thread, collapses no
-           suppressed or previously-missed finding, and no thread is open, so what it flags is
-           named in its headline alone, printed under `VERDICT WITH NO COUNTED FINDING`. The code
+           head states it read fewer files than the pull request changed, or states nothing it
+           can believe while an earlier round on record states partial coverage. 50 = that round
+           opens on a verdict other than the clean one while it counts no finding, opens no thread,
+           collapses no suppressed or previously-missed finding, and no thread is open, so what it
+           flags is named in its headline alone, printed under `VERDICT WITH NO COUNTED FINDING`. The code
            repeats on that head after the headline is answered, since nothing here reads an
            answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
            HEADLINE`, which changes no exit code. 50 is also a head round's part the adapter
@@ -57,8 +57,8 @@ Subcommands
            comment acknowledging its fingerprint clears it, `shapes=ACKNOWLEDGED`.
            `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
-           on, `table` where a round covering the head names exactly the changed files in its own
-           file table,
+           on (`PARTIAL` instead where an earlier round states partial coverage), `table` where a
+           round covering the head names exactly the changed files in its own file table,
            `carried:table` where the newest round carrying a table does, `local` where an attested
            local pass covers a head on a pull request into a branch other than the default, and
            `none` otherwise. A table stands in only where no round on record states partial
@@ -1342,19 +1342,25 @@ def table_cover(pr: dict) -> tuple[str, str]:
 def coverage(pr: dict) -> tuple[str, str]:
     """The head's coverage reading and the statement or reason it rests on.
 
-    A statement on a round covering the head decides it, the worst winning. Where none states any,
-    a file table stands in under `table_cover`, then an attested local pass under `local_cover`.
+    A statement on a round covering the head decides it, the worst winning, but `unknown` yields to
+    an earlier partial. Where none states any, a file table stands in under `table_cover`, then
+    an attested local pass under `local_cover`.
     """
     rounds = head_reviews(pr)
     rank = ("full", "unknown", "partial")
     stated = [(r.coverage, r.coverage_line) for n in rounds if (r := reading(n)).coverage != "none"]
-    if stated:
-        return max(stated, key=lambda s: rank.index(s[0]))
+    worst = max(stated, key=lambda s: rank.index(s[0])) if stated else None
+    if worst and worst[0] != "unknown":
+        return worst
     if rounds and partial_on_record(pr):
-        return (
-            "partial",
-            "an earlier round states partial coverage, and no round on the head states any",
+        none = (
+            "a round on the head states a reading this cannot believe"
+            if worst
+            else "no round on the head states any"
         )
+        return "partial", f"an earlier round states partial coverage, and {none}"
+    if worst:
+        return worst
     why = ""
     if rounds:
         state, why = table_cover(pr)

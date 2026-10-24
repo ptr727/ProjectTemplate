@@ -2005,6 +2005,37 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("coverage=UNKNOWN ", out)
         self.assertIn("note: no statement, file table, or attested local pass", out)
 
+    def test_an_earlier_partial_outranks_an_unknown_head_reading(self) -> None:
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        rounds = [review(oid=OLD, body=part, rid="A"), review(body=odd, rid="B")]
+        self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
+        out = self.out.getvalue()
+        self.assertIn("coverage=PARTIAL ", out)
+        self.assertNotIn("coverage=UNKNOWN", out)
+        self.assertIn("a round on the head states a reading this cannot believe", out)
+
+    def test_a_head_stating_full_still_beats_an_earlier_partial(self) -> None:
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+        rounds = [review(oid=OLD, body=part, rid="A"), review(body=full, rid="B")]
+        self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
+        self.assertIn("coverage=full ", self.out.getvalue())
+
+    def test_a_head_with_a_full_and_an_unknown_round_beside_a_partial_is_partial(self) -> None:
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        rounds = [
+            review(oid=OLD, body=part, rid="A"),
+            review(body=full, rid="B"),
+            review(body=odd, rid="C"),
+        ]
+        self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
+        out = self.out.getvalue()
+        self.assertIn("status=COVERAGE_IS_PARTIAL", out)
+        self.assertIn("COVERAGE IS PARTIAL:", out)
+
     def test_a_note_on_an_earlier_round_still_reaches_the_digest(self) -> None:
         odd = "## Pull request overview\n\nThe change is narrow.\n"
         rounds = [review(oid=OLD, body=odd, rid="A"), review(rid="B")]
