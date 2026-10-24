@@ -267,8 +267,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line, so a brief that omits it produces a pull request nothing can derive a closing set from.
-  It also has the worker draft that body in a file named for its branch, since workers sharing a
-  scratch directory and one file name each publish the other's draft.
+  It also has the worker draft that body, and each rewrite of it, in a file named for its branch.
+  Workers sharing a scratch directory and one file name each publish the other's draft.
 - **The brief names the files this group owns and the files it must not touch.** A subagent never
   reads this skill, so a claim it was never given is a claim it cannot respect. State this group's
   claimed set, state that any other group's file is out of bounds, and state the duty that makes
