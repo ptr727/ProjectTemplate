@@ -1427,7 +1427,7 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
-NON_CODE = r"\\.|<[A-Za-z][\w+.-]{1,31}:[^<>\s]*>"
+NON_CODE = r"\\.|<[a-zA-Z][a-zA-Z0-9+.\-]{1,31}:[^<>\x00-\x20]*>"
 MARKDOWN_SPAN = re.compile(rf"{NON_CODE}|{HTML_TAG_RE.pattern[1:]}|{CODE_SPAN.pattern}", re.DOTALL)
 
 
