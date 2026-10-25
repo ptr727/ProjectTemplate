@@ -300,7 +300,7 @@ class ReportCase(unittest.TestCase):
         )
 
     def run_report(self, intended=("abc", "refs/remotes/origin/main"), intended_rev=None):
-        mock.patch("skills_install.intended_commit", return_value=intended).start()
+        self.resolver = mock.patch("skills_install.intended_commit", return_value=intended).start()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             exit_code = skills_install.report(self.stamp, intended_rev)
@@ -407,6 +407,7 @@ class ReportCase(unittest.TestCase):
                 arrange()
                 exit_code, out = self.run_report(intended_rev="v1")
                 snapshot = json.loads(out)["snapshot"]
+                self.resolver.assert_called_once_with("v1")
                 self.assertEqual(exit_code, 1)
                 self.assertEqual(set(snapshot), keys)
                 self.assertIsNone(snapshot["installedFrom"])
