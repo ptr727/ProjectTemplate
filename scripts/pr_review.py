@@ -124,8 +124,9 @@ Subcommands
            rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
-           open among them. A BLOCKED hold's note names the rollup's unread part as a place an
-           unmet required check may sit. It is also a round past --min-rounds not yet landed.
+           open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
+           says an unmet required check may sit in its unread part. It is also a round past
+           --min-rounds not yet landed.
            40 = no Copilot review covers the head: the reviewer
            answered outside a formal review, the request returned success and recorded nothing on
            the pull request, or the reviewer writes under a login no query filters on. 41 = the
@@ -149,8 +150,8 @@ Subcommands
            digest, the status says the check may sit there.
            `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
-           30 instead, where the rules were read and the rollup is not `CHECKS TRUNCATED`. An empty
-           rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
+           30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
+           empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
            49 = no Copilot round covers this head and none was requested, the pull request
            merging into a branch other than the default with no attestation vouching for the
            head. 64 = the write scope could not

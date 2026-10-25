@@ -6297,7 +6297,7 @@ class TestRequiredContexts(unittest.TestCase):
             payload([], merge="BLOCKED", checks=[{"__typename": "SomethingNew", "label": "x"}])
         )
         note = pr_review_checks._unmet_note(pr, frozenset({("Gate", 9)}), unread)
-        self.assertIn("Gate, or in the rollup's unread part", note)
+        self.assertIn("Gate, which may sit in the rollup's unread part", note)
         rollup = pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
         rollup["contexts"]["pageInfo"] = {"hasNextPage": True}
         self.assertEqual("", pr_review_checks._unmet_note(pr, frozenset({("Gate", 9)}), nodes))
