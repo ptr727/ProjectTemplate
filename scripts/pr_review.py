@@ -114,11 +114,12 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. 30 = still pending at the timeout, a required check still settling on
-           a held head printed as `status=CHECKS_PENDING`, or a round past --min-rounds not yet
-           landed. 40 = no Copilot review covers the head: the reviewer answered outside a formal
-           review, the request returned success and recorded nothing on the pull request, or the
-           reviewer writes under a login no query filters on. 41 = the newest round is a refusal
+           checks settled and its workflow runs completed. 30 = still pending at the timeout, a
+           required check still settling or a workflow run still open on a held head printed as
+           `status=CHECKS_PENDING`, or a round past --min-rounds not yet landed. 40 = no Copilot
+           review covers the head: the reviewer answered outside a formal review, the request
+           returned success and recorded nothing on the pull request, or the reviewer writes
+           under a login no query filters on. 41 = the newest round is a refusal
            or a quota state, the kind printed in its status line and, for a refusal on this pull
            request, in the digest's `refusal=`: a refusal on the
            head, the pull request's newest review being a quota or error refusal on any head, or
@@ -173,6 +174,7 @@ from pr_review_checks import (
     checks_stuck,
     checks_tally,
     held_checks_open,
+    runs_open,
 )
 from pr_review_rounds import (
     ACK_MARKER,
@@ -1974,6 +1976,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if verdict:
             return verdict
+        runs = runs_open(final)
         if covered and held_checks_open(
             final,
             checks,
@@ -1984,12 +1987,19 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, none had posted, a check the base branch "
-                "requires had not registered or came from another app, or the merge was still "
-                "UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
+                "timeout a check had not concluded, none had posted, a workflow run on the head "
+                "had not completed, a check the base branch requires had not registered or came "
+                "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
+                "wait again, or read the checks above"
                 + _unmet_note(required_for(final, owner, repo), checks)
+                + (f" (runs not completed: {', '.join(map(str, runs))})" if runs else "")
             )
             return 30
+        if covered and (gated := runs_open(final, gated=True)):
+            print(
+                f"note: workflow runs {', '.join(map(str, gated))} on this head wait on a "
+                "reviewer's approval, which no wait clears, so they hold nothing here"
+            )
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
         if final.get("mergeStateStatus") == "BLOCKED" and gates:
