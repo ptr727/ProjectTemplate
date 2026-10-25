@@ -69,11 +69,13 @@ GH_STUB = r"""#!/bin/sh
 here=$(dirname "$0")
 printf '%s\n' "$*" >>"$here/calls"
 case "$*" in
-"auth status --active --hostname github.com")
+"auth status --active --help")
     if [ -e "$here/old" ]; then
         echo "unknown flag: --active" >&2
         exit 1
     fi
+    ;;
+"auth status --active --hostname github.com")
     cat "$here/active"
     exit "$(cat "$here/active.rc")"
     ;;
@@ -216,7 +218,16 @@ class TestLinuxGitHubCli(unittest.TestCase):
         self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}\n", result.stdout)
         self.assertEqual(
             self.calls()[:2],
-            ["auth status --active --hostname github.com", "auth status --hostname github.com"],
+            ["auth status --active --help", "auth status --hostname github.com"],
+        )
+
+    def test_a_gh_taking_active_reads_the_active_listing(self) -> None:
+        self.state(ACCOUNT, "https", second=SECOND)
+        result = self.run_bash("report_gh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.calls()[:2],
+            ["auth status --active --help", "auth status --active --hostname github.com"],
         )
 
     def test_the_opt_in_with_a_broken_active_account_writes_nothing(self) -> None:
@@ -317,15 +328,18 @@ foreach ($statement in $ast.EndBlock.Statements) {
 function die { param([string]$Message) throw "die: $Message" }
 function warn { param([string]$Message) Write-Host "WARNING: $Message" }
 
-# A gh answering the three calls the script makes from $script:Stub, and recording each call.
+# A gh answering the calls the script makes from $script:Stub, and recording each call.
 # Installed as the gh function per case rather than as a file on PATH, so the same stub runs on every platform.
 $GhStub = {
     $script:Calls += ($args -join ' ')
     $global:LASTEXITCODE = 0
     $line = $args -join ' '
     switch ($line) {
-        'auth status --active --hostname github.com' {
+        'auth status --active --help' {
             if ($script:Stub.oldGh) { $global:LASTEXITCODE = 1; return 'unknown flag: --active' }
+            return
+        }
+        'auth status --active --hostname github.com' {
             $global:LASTEXITCODE = $script:Stub.activeRc
             return $script:Stub.active
         }
@@ -603,7 +617,13 @@ class TestWindowsGitHubCli(unittest.TestCase):
         self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}", self.output("two-accounts-old"))
         self.assertEqual(
             self.results["two-accounts-old"]["calls"][:2],
-            ["auth status --active --hostname github.com", "auth status --hostname github.com"],
+            ["auth status --active --help", "auth status --hostname github.com"],
+        )
+
+    def test_a_gh_taking_active_reads_the_active_listing(self) -> None:
+        self.assertEqual(
+            self.results["broken-active"]["calls"][:2],
+            ["auth status --active --help", "auth status --active --hostname github.com"],
         )
 
     def test_the_opt_in_with_a_broken_active_account_writes_nothing(self) -> None:

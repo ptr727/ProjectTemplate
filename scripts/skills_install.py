@@ -330,12 +330,13 @@ def register_claude_marketplace():
                 file=sys.stderr,
             )
             return install_claude_plugin()
-        if not same_directory(location, ROOT):
-            print(
-                f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
-                f"which is no longer a directory. Registering it from {ROOT}.",
-                file=sys.stderr,
-            )
+        if same_directory(location, ROOT):
+            return install_claude_plugin()
+        print(
+            f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
+            f"which is no longer a directory. Registering it from {ROOT}.",
+            file=sys.stderr,
+        )
 
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
@@ -344,20 +345,21 @@ def register_claude_marketplace():
         encoding="utf-8",
         check=False,
     )
-    # Re-adding an already-registered marketplace is expected on a re-run.
-    # Only a genuine failure (not "already exists") is fatal, since idempotence is the point.
-    if (
-        marketplace_add.returncode != 0
-        and "already" not in marketplace_add.stdout.lower()
-        and "already" not in marketplace_add.stderr.lower()
-    ):
+    if marketplace_add.returncode != 0:
         print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
         return False
     return install_claude_plugin()
 
 
 def install_claude_plugin():
-    """Install this marketplace's plugin at user scope, from wherever the marketplace is registered."""
+    """Install this marketplace's plugin at user scope, from wherever the marketplace is registered.
+
+    A plugin the listing already shows installed is left as it is, so a re-run reads that from
+    `claude plugin list` rather than from the wording of a failed install. Where the listing
+    cannot be read, the install runs and its exit status alone decides.
+    """
+    if plugin_state()["installed"]:
+        return True
     install = subprocess.run(
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
         capture_output=True,
@@ -365,11 +367,7 @@ def install_claude_plugin():
         encoding="utf-8",
         check=False,
     )
-    if (
-        install.returncode != 0
-        and "already" not in install.stdout.lower()
-        and "already" not in install.stderr.lower()
-    ):
+    if install.returncode != 0:
         print(install.stdout, install.stderr, file=sys.stderr)
         return False
     return True

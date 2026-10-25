@@ -566,13 +566,17 @@ def hub_repo_name() -> str:
     return hub_name()[0]
 
 
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+
+
 def gh(path, ok404=False) -> Any:
     """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body."""
     r = subprocess.run(
         ["gh", "api", path], capture_output=True, text=True, encoding="utf-8", check=False
     )
     if r.returncode != 0:
-        if ok404 and ("HTTP 404" in r.stderr or "Not Found" in r.stderr):
+        status = HTTP_STATUS.search(r.stderr)
+        if ok404 and status is not None and status.group(1) == "404":
             return None
         raise RuntimeError(
             f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}"
