@@ -7493,7 +7493,11 @@ COLLECTIONS = (ast.Set, ast.List, ast.Tuple, ast.Dict)
 
 
 def is_word(text: str) -> bool:
-    """Whether `text` is letters alone, so flags, paths, and environment variable names are not."""
+    """Whether `text` is letter runs joined by single spaces, hyphens, or apostrophes.
+
+    So "had had" and "sentence-length" are words, while flags, paths with a separator, and
+    environment variable names with an underscore are not.
+    """
     return re.fullmatch(r"[A-Za-z]+(?:[ '-][A-Za-z]+)*", text) is not None
 
 
@@ -7526,7 +7530,7 @@ def vocabulary_in(source: str, data: dict[str, dict[str, Any]]) -> list[str]:
     """Where `source` holds spellings or exemptions that belong in `data`, the gate's data file.
 
     A literal of more than `VOCABULARY_CAP` words reads as a vocabulary rather than as logic. It is
-    reported once, at the outermost literal holding it.
+    reported once, at the outermost literal that counts it.
     """
     entries = data_entries(data)
     nested: set[int] = set()
@@ -7536,7 +7540,11 @@ def vocabulary_in(source: str, data: dict[str, dict[str, Any]]) -> list[str]:
             found.append(f"{node.lineno}: {node.value!r} is a data file entry")
         if not isinstance(node, COLLECTIONS):
             continue
-        children = node.elts if not isinstance(node, ast.Dict) else [*node.keys, *node.values]
+        if isinstance(node, ast.Dict):
+            counted = [key for key, value in zip(node.keys, node.values) if words_in(value)]
+            children: list[ast.expr | None] = [*counted, *node.values]
+        else:
+            children = list(node.elts)
         nested.update(id(child) for child in children if isinstance(child, COLLECTIONS))
         words = words_in(node)
         if id(node) not in nested and words > VOCABULARY_CAP:
@@ -7585,6 +7593,8 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
             ('PAIRS = (("grey", "gray"), ("kerb", "curb"), ("tyre", "tire"))\n', 6),
             ('GROUPS = {"a": ["w", "x", "y"], "b": ["z", "v", "u"]}\n', 8),
             ('INNER = [["a", "b", "c", "d", "e", "f"]]\n', 6),
+            ('KEYED = {("aa", "bb", "cc", "dd", "ee", "ff"): len}\n', 6),
+            ('COUNTED = {("aa", "bb", "cc", "dd", "ee", "ff"): ["x"]}\n', 7),
         ):
             with self.subTest(source=source):
                 found = vocabulary_in(source, self.DATA)
@@ -7596,7 +7606,7 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
         source = f"TABLE = {{{names}}}\nMARKS = ('.', '!', '?', ':', ';', ',', '|')\n"
         self.assertEqual([], vocabulary_in(source, self.DATA))
 
-    def test_flags_and_environment_names_are_not_words(self) -> None:
+    def test_flags_and_environment_names_with_an_underscore_are_not_words(self) -> None:
         source = (
             'ARGS = ("--unified=0", "--no-color", "--no-ext-diff", "-z", "--name-only", "--cached")\n'
             'GIT = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", '
