@@ -2228,11 +2228,14 @@ class TestCommentAddedRule(BaitCase):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
     def test_the_buildkit_check_directive_passes_both_scan_modes(self) -> None:
-        """BuildKit reads `check=` only in lowercase, so neither capitalizing nor deleting it is a fix.
+        """Deleting the BuildKit `check=` line changes the build, so it is not prose in either mode.
 
-        The prose line is the control, showing each mode does judge line 1 of this file.
+        Capitalizing it would quiet only `comment-case`, and `comment-added` would still ask for
+        the deletion. The prose line is the control, showing each mode does judge line 1 here, and
+        the stand-down is pinned off so a developer's exported one cannot drop `comment-added`.
         """
         self.stand_down_setup()
+        self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
         dockerfile = self.tmp / "Dockerfile"
         for line, case_code, added_code in (
             ("# check=skip=CopyIgnoredFile\n", 0, 0),
