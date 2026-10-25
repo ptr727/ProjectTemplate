@@ -293,7 +293,7 @@
         {
             "name": "HolidayLights",
             "url": "https://github.com/ptr727/HolidayLights",
-            "description": "Holiday light show configuration for xLights and FPP.",
+            "description": "Holiday light show configuration for xLights, FPP, and WLED.",
             "status": "cataloged",
             "types": ["source-only"],
             "groundTruthBranch": "main",
