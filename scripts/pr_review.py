@@ -113,11 +113,12 @@ Subcommands
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE, and nothing is requested where neither
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
-           Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. While it is open, every workflow run on that head has also completed.
-           30 = still pending at the timeout. On a held head it is any hold `status=CHECKS_PENDING` names, a required
-           check still settling and a workflow run still open among them. It is also a round past
-           --min-rounds not yet landed. 40 = no Copilot review covers the head: the reviewer
+           Exit 0 = review present, or an attested local pass on an open pull request's held head.
+           Its required checks have settled and every workflow run on that head has completed.
+           30 = still pending at the timeout. On a held head it is any hold
+           `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
+           open among them. It is also a round past --min-rounds not yet landed.
+           40 = no Copilot review covers the head: the reviewer
            answered outside a formal review, the request returned success and recorded nothing on
            the pull request, or the reviewer writes under a login no query filters on. 41 = the
            newest round is a refusal or a quota state, the kind printed in its status line and, for
