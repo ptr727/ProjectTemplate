@@ -42,6 +42,11 @@ STUCK_LINES = {
         "whose poster has not spoken, so no runner is owed it and re-running a workflow here "
         "clears nothing"
     ),
+    "GATED": (
+        "  CHECK WAITING ON ITS ENVIRONMENT ({name!r}, waiting {mins}): a protection rule holds "
+        "it, a reviewer or a timer, so approve it in the run or let the timer pass, since a re-run "
+        "meets the same rule"
+    ),
     "RUNNING_LONG": (
         "  CHECK RUNNING LONG ({name!r}, running {mins}): it has a runner, so it is not starved, "
         "and whether this is hung or merely slow is a judgment against what this job normally "
@@ -193,6 +198,9 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     behind `needs:` is absent from the rollup, so a queue is never dependency-blocked. Inside the
     pickup grace a queued job is simply starting.
 
+    GATED is a job WAITING on its environment's protection rule, a reviewer or a timer. No runner
+    is owed it, so the starved remedy is wrong for it too.
+
     RUNNING_LONG is deliberately weaker, since duration alone cannot separate a stalled job from a
     slow one. The elapsed time is printed for the reader to judge and no fault is asserted.
 
@@ -205,6 +213,8 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     if state in NOT_POSTED:
         # Its own shape, since the starved remedy is wrong for it in both directions.
         return "NOT_POSTED" if elapsed is not None and elapsed > grace else ""
+    if state == "WAITING":
+        return "GATED" if elapsed is not None and elapsed > grace else ""
     if state in NOT_STARTED:
         return "NOT_PICKED_UP" if elapsed is not None and elapsed > grace else ""
     if state == "IN_PROGRESS":
@@ -292,18 +302,25 @@ def held_checks_open(
 def runs_open(pr: dict, gated: bool = False) -> list[str]:
     """The head's workflow runs whose suite has not completed, each named `run <id>`, sorted.
 
-    Read from the suites, since a fresh head's run exists before most of its jobs do. A suite with
-    no workflow run counts for neither side, so an app that never reports holds nothing. Where
-    `workflowRun` was unreadable, an Actions suite in the rollup stands in as `suite <id>`, the
-    fallback `check_nodes` takes too. A run WAITING on its environment's protection rule is
-    returned only where `gated` asks for those.
+    Read from the head's own suites and each rollup check run's suite, since a fresh head's run
+    exists before most of its jobs do. A suite with no workflow run counts for neither side, so
+    another app's suite that never reports holds nothing. Where `workflowRun` was unreadable, an
+    Actions suite from either source stands in as `suite <id>`, the fallback `check_nodes` takes
+    too. A run WAITING on its environment's protection rule counts as gated only while none of its
+    registered jobs is queued or running. Gated runs are returned only where `gated` asks.
     """
     commit = head_commit(pr)
     rollup = ((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes") or []
     suites = [n.get("checkSuite") or {} for n in rollup if n.get("__typename") == "CheckRun"]
+    active = {
+        (n.get("checkSuite") or {}).get("databaseId")
+        for n in rollup
+        if n.get("__typename") == "CheckRun" and n.get("status") in ("QUEUED", "IN_PROGRESS")
+    }
     named = set()
     for s in suites + ((commit.get("checkSuites") or {}).get("nodes") or []):
-        if s.get("status") == "COMPLETED" or (s.get("status") == "WAITING") != gated:
+        waiting = s.get("status") == "WAITING" and s.get("databaseId") not in active
+        if s.get("status") == "COMPLETED" or waiting != gated:
             continue
         if run := (s.get("workflowRun") or {}).get("databaseId"):
             named.add(f"run {run}")

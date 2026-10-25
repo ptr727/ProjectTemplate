@@ -1266,12 +1266,19 @@ class TestCheckShapes(unittest.TestCase):
         )
 
     def test_every_unstarted_spelling_counts_not_only_queued(self) -> None:
-        """Reading QUEUED alone reports a check held at a gate as one that is running."""
-        for state in ("QUEUED", "WAITING", "PENDING", "REQUESTED"):
+        """Reading QUEUED alone reports a check held at a gate as one that is running.
+
+        WAITING is held by its environment rather than starved, so it reads as its own shape.
+        """
+        for state, shape in (
+            ("QUEUED", "NOT_PICKED_UP"),
+            ("WAITING", "GATED"),
+            ("PENDING", "NOT_PICKED_UP"),
+            ("REQUESTED", "NOT_PICKED_UP"),
+        ):
             with self.subTest(state=state):
                 self.assertEqual(
-                    "NOT_PICKED_UP",
-                    self.shape(check(status=state, conclusion="", started=ago(900))),
+                    shape, self.shape(check(status=state, conclusion="", started=ago(900)))
                 )
 
     def test_an_expected_status_is_its_own_shape_not_a_starved_job(self) -> None:
@@ -6182,6 +6189,34 @@ class TestRunsOpen(unittest.TestCase):
         pr = {**self.held("CLEAN", [], suite), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
         self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
         self.assertTrue(self.is_open(pr))
+
+    def test_another_apps_queued_suite_holds_nothing_where_runs_are_unreadable(self) -> None:
+        """Other apps leave suites queued with no job for good, so only an Actions suite stands in."""
+        suite = {"databaseId": 30, "status": "QUEUED", "app": {"slug": "coderabbitai"}}
+        pr = {
+            **self.held("CLEAN", [check()], suite),
+            pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True,
+        }
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_waiting_suite_with_a_job_still_running_holds(self) -> None:
+        """A gated deploy job does not release the run's other jobs while they still run."""
+        running = check(status="IN_PROGRESS", conclusion="", suite=20, workflow=7)
+        running["checkSuite"]["workflowRun"]["databaseId"] = 200
+        pr = self.held("CLEAN", [running], self.suite("WAITING"))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertEqual([], pr_review_checks.runs_open(pr, gated=True))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_job_waiting_on_its_environment_reads_gated_not_starved(self) -> None:
+        """The starved line's re-run is the wrong remedy for a job a protection rule holds."""
+        node = {"name": "deploy", "state": "WAITING", "conclusion": "", "since": ago(900)}
+        self.assertEqual("GATED", pr_review_checks.check_shape(node, NOW, 300, 1800))
+        line = pr_review_checks.check_lines({}, [node], [(node, "GATED")], NOW)[0]
+        self.assertIn("CHECK WAITING ON ITS ENVIRONMENT ('deploy', waiting 15m)", line)
+        inside = {**node, "since": ago(60)}
+        self.assertEqual("", pr_review_checks.check_shape(inside, NOW, 300, 1800))
 
     def test_a_job_no_runner_picked_up_still_holds_its_open_run(self) -> None:
         """A queue past the grace often starts, so releasing on it would exit 0 with jobs unstarted."""

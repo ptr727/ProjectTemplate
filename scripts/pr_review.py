@@ -2010,7 +2010,8 @@ def main(argv: list[str] | None = None) -> int:
                 "BLOCKED, and a required check is in a shape waiting does not clear, "
                 f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
                 "block above, since a starved check wants a re-run, an unposted one its poster, "
-                "a long one a judgment, and a failed one a fix. It need not be all that blocks "
+                "a gated one its approval, a long one a judgment, and a failed one a fix. It need "
+                "not be all that blocks "
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
