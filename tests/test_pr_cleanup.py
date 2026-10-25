@@ -210,7 +210,7 @@ class TestCleanupDeletesOnlyAVerifiedMergedBranch(CleanupCase):
         self.assertIn("reading the ref back did not answer", self.out.getvalue())
         self.assertNotIn("status=DELETED", self.out.getvalue())
 
-    def test_a_settle_read_at_a_new_tip_stops_and_says_the_branch_returned(self) -> None:
+    def test_a_settle_read_at_a_new_tip_stops_and_names_that_tip(self) -> None:
         pushed = "c" * 40
         self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, pushed])
         with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
