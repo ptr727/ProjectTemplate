@@ -994,9 +994,17 @@ def report_verdict(pr: dict) -> int:
         return 0
     state, why = coverage(pr)
     if state == "partial":
+        if any(reading(n).coverage == "partial" for n in head_reviews(pr)):
+            lead = (
+                "the review covering the head states it read fewer files than the pull request "
+                f"changed ({why}), so part of the diff has no review at all"
+            )
+        else:
+            lead = (
+                f"the head reads as partial because {why}, so part of the diff may have no review"
+            )
         print(
-            f"status=COVERAGE_IS_PARTIAL the review covering the head states it read fewer files "
-            f"than the pull request changed ({why}), so part of the diff has no review at all. A "
+            f"status=COVERAGE_IS_PARTIAL {lead}. A "
             "re-request is not the remedy it reads as. Splitting is the remedy where it applies, "
             "and it does not apply to a promotion. Otherwise this is the maintainer's call"
         )
