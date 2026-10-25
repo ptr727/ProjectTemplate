@@ -118,8 +118,9 @@ Subcommands
            workflow run on that head has then completed. It does not prove the required checks ran.
            A payload with no commit matching the head, named `CHECKS UNREADABLE` in the digest,
            reads no run and no check. A required check not yet registered holds only a BLOCKED
-           merge, and an empty rollup only a BLOCKED, BEHIND, or DRAFT one, so a DIRTY merge, or a
-           BEHIND one with some check posted, can exit 0 while a required check has not registered.
+           merge whose base branch rules were read and whose rollup is not `CHECKS TRUNCATED`. An
+           empty rollup holds only a BLOCKED, BEHIND, or DRAFT one. So a DIRTY merge, or a BEHIND or
+           DRAFT one with some check posted, can exit 0 while a required check has not registered.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
