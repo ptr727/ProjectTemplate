@@ -939,6 +939,22 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertIn(CLEANUP_BRANCH, self.branches())
 
 
+class TestCleanupLoadsOneGate(unittest.TestCase):
+    def test_the_gate_run_as_a_script_is_not_imported_again_by_cleanup(self) -> None:
+        """`pr_review.py cleanup` runs the gate as `__main__`, and `pr_cleanup` must reuse it."""
+        script = Path(__file__).resolve().parent.parent / "scripts" / "pr_review.py"
+        result = subprocess.run(
+            [sys.executable, "-X", "importtime", str(script), "cleanup", "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        imported = [ln.rpartition("|")[2].strip() for ln in result.stderr.splitlines()]
+        self.assertIn("pr_cleanup", imported)
+        self.assertNotIn("pr_review", imported)
+
+
 class TestCleanupOriginParsing(unittest.TestCase):
     def test_https_and_ssh_forms_name_the_repository_case_insensitively(self) -> None:
         for url in (
