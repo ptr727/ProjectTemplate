@@ -489,6 +489,24 @@ def windows_case(case: dict[str, object]) -> dict[str, object]:
     return full
 
 
+KNOWN_HOST_HARNESS = r"""
+param([string]$Script, [int]$Code, [string]$Output)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw "setup-github.ps1 does not parse: $($errors[0].Message)" }
+$wanted = @('log', 'info', 'step', 'Add-KnownHost')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function ssh-keygen { $global:LASTEXITCODE = $Code; return $Output }
+$script:DRY_RUN = $true
+Add-KnownHost 6>&1 | ForEach-Object { "$_" }
+"""
+
+
 def run_pwsh(arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["pwsh", "-NoProfile", "-NonInteractive", *arguments],
@@ -498,6 +516,28 @@ def run_pwsh(arguments: list[str]) -> subprocess.CompletedProcess[str]:
         check=False,
         timeout=120,
     )
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows script's own functions")
+class TestWindowsKnownHost(unittest.TestCase):
+    """`Add-KnownHost` reads whether github.com is known from `ssh-keygen -F`'s exit status alone."""
+
+    def add_known_host(self, code: int, output: str) -> str:
+        with tempfile.TemporaryDirectory() as directory:
+            harness = Path(directory, "harness.ps1")
+            harness.write_text(KNOWN_HOST_HARNESS, encoding="utf-8")
+            arguments = ["-Script", str(WINDOWS_SCRIPT), "-Code", str(code), "-Output", output]
+            result = run_pwsh(["-File", str(harness), *arguments])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_a_found_host_is_already_known(self) -> None:
+        self.assertIn("Already known", self.add_known_host(0, "# Host github.com found: line 1"))
+
+    def test_a_failure_whose_output_says_found_is_not_known(self) -> None:
+        output = self.add_known_host(255, "known_hosts not found")
+        self.assertNotIn("Already known", output)
+        self.assertIn("Adding the github.com host keys", output)
 
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows script's own functions")
