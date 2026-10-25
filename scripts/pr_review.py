@@ -114,8 +114,8 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. On an open pull request's attested held head, every workflow run has
-           completed.
+           checks settled. Where an attested local pass covers an open pull request's held head,
+           every workflow run on it has completed.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
