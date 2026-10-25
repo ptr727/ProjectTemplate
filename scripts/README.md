@@ -199,7 +199,7 @@ uv run --no-project --script scripts/pr_review.py cleanup 452 --repo ptr727/Proj
 
 | Code | Command | Meaning |
 | --- | --- | --- |
-| `0` | `status`, `wait` | No Copilot review covers the head yet (`status`), or the review covering it states no partial coverage and its verdict counts what it flags. On a held head, an attested local pass whose checks no longer hold the poll, short of `45`. A review present reads no check, so neither proves the required checks ran. |
+| `0` | `status`, `wait` | No Copilot review covers the head yet (`status`), or the review covering it states no partial coverage and its verdict counts what it flags. On a held head, an attested local pass whose checks no longer hold the poll, short of `45`. Exit `0` on a review present does not poll the checks, so it does not prove the required checks ran. |
 | `30` | `wait` | Still pending at the timeout, which is pending rather than failed. On a held head, `status=CHECKS_PENDING`. A round past `--min-rounds` not yet landed. |
 | `40` | `wait` | No Copilot review covers the head: the reviewer answered outside a formal review, the request returned success and recorded nothing, or the reviewer writes under a login no query filters on. |
 | `41` | `wait` | The newest round is a refusal or a quota state, its kind printed in the status line, and in `refusal=` for a refusal on this pull request. |
