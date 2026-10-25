@@ -148,8 +148,8 @@ Subcommands
            digest, the status says the check may sit there.
            `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
-           30 instead, where the rules were read and the rollup read whole. An empty rollup read
-           off the head holds a BLOCKED, BEHIND, or DRAFT one.
+           30 instead, where the rules were read and the rollup is not `CHECKS TRUNCATED`. An empty
+           rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
            49 = no Copilot round covers this head and none was requested, the pull request
            merging into a branch other than the default with no attestation vouching for the
            head. 64 = the write scope could not
