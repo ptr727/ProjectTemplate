@@ -526,7 +526,7 @@ def lexer_name(path: Path, first: str) -> str | None:
 
 # Pygments ends a heredoc at any later `STUB` in a `$STUB_DIR`, and reads no double-quoted label.
 # This rule ends one only on its terminator line, tab-indented for `<<-`.
-# A label opening on a digit is more often a shift, `(( x << 2 ))`, so it needs its terminator.
+# A digit label is more often a shift, `(( x << 2 ))`, so only the last, unclosed branch drops it.
 HEREDOC = (
     r"(?s)<<(-)?[ \t]*(['\"]?)\\?(?:(?=[A-Za-z_])())?(\w[\w-]*+)\2"
     r"(?:[^\n'\"#]*?(?<!<)<<(-)?[ \t]*(['\"]?)\\?(\w[\w-]*+)\6)?[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\4"
