@@ -293,14 +293,23 @@
         {
             "name": "HolidayLights",
             "url": "https://github.com/ptr727/HolidayLights",
+            "description": "Holiday light show configuration for xLights, FPP, and WLED.",
             "status": "cataloged",
             "types": ["source-only"],
+            "groundTruthBranch": "main",
+            "workflowModel": "operational",
+            "lineEndings": "lf",
             "hasDevelop": true,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["xLights show sequences/models (asset repo).", "main is near-empty - all content lives on develop. Promote to main.", "No CI/governance scaffolding."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": [
+                "xLights show folders, one per year and season (for example 2026/Halloween), edited in place by xLights on develop and uploaded to the FPP controllers with FPP Connect. Rendered .fseq files are tracked, and xLights save backups (*.xbkp, *.jbkp), per-session Backup/ folders, and FPP controller backups (FPP/) stay local.",
+                "Follows the fleet LF default, since xLights writes its XML files LF, and pins only xlights_effectpresets.json to CRLF, which xLights writes CRLF (ptr727/HolidayLights#10).",
+                "main carries the 2021-2024 show folders and the original lint gate. The 2025 and 2026 show folders and the fleet baseline (ptr727/HolidayLights#11 and #13-#16) are on develop pending a develop->main promotion, so an audit of main reports them missing until that promotion lands.",
+                "A rename to HolidayLights-Config, matching the fleet's *-Config naming for config repos, is planned as a follow-up."
+            ]
         },
         {
             "name": "Blog",
