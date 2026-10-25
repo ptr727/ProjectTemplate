@@ -31,6 +31,7 @@ ATTESTATION = re.compile(
 )
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 ACK_MARKER = "<!-- fleet-shape-ack: fingerprint={} -->"
+CARRIED_PARTIAL = "an earlier round states partial coverage"
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -437,7 +438,7 @@ def coverage(pr: dict) -> tuple[str, str]:
             if worst
             else "no round on the head states any"
         )
-        return "partial", f"an earlier round states partial coverage, and {none}"
+        return "partial", f"{CARRIED_PARTIAL}, and {none}"
     if worst:
         return worst
     why = ""

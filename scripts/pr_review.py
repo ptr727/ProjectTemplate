@@ -189,6 +189,7 @@ from pr_review_checks import (
 )
 from pr_review_rounds import (
     ACK_MARKER,
+    CARRIED_PARTIAL,
     CODERABBIT_LOGIN,
     FILES_UNREAD,
     KNOWN_REVIEWERS,
@@ -994,12 +995,21 @@ def report_verdict(pr: dict) -> int:
         return 0
     state, why = coverage(pr)
     if state == "partial":
-        print(
-            f"status=COVERAGE_IS_PARTIAL the review covering the head states it read fewer files "
-            f"than the pull request changed ({why}), so part of the diff has no review at all. A "
-            "re-request is not the remedy it reads as. Splitting is the remedy where it applies, "
-            "and it does not apply to a promotion. Otherwise this is the maintainer's call"
-        )
+        if why.startswith(CARRIED_PARTIAL):
+            print(
+                f"status=COVERAGE_IS_PARTIAL the head reads as partial because {why}, so part of "
+                "the diff may have no review. A round on the head stating full coverage clears "
+                "this, unless a round on it already states a reading this cannot believe. "
+                "Otherwise this is the maintainer's call"
+            )
+        else:
+            print(
+                f"status=COVERAGE_IS_PARTIAL the review covering the head states it read fewer "
+                f"files than the pull request changed ({why}), so part of the diff has no review "
+                "at all. A re-request is not the remedy it reads as. Splitting is the remedy where "
+                "it applies, and it does not apply to a promotion. Otherwise this is the "
+                "maintainer's call"
+            )
         return 42
     if flagged := uncounted_verdict(pr):
         print(
@@ -1638,6 +1648,7 @@ def main(argv: list[str] | None = None) -> int:
     for flag in ("--repo", "--checkout", "--min-age-hours"):
         pre.add_argument(flag)
     if pre.parse_known_args(args)[0].first == "cleanup":
+        sys.modules.setdefault("pr_review", sys.modules[__name__])
         import pr_cleanup
 
         rest = list(args)

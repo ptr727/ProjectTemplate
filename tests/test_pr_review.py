@@ -1989,12 +1989,27 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual(42, self.status(payload([review(body=part)], files=["a.py"])))
         out = self.out.getvalue()
         self.assertIn("coverage=PARTIAL ", out)
-        self.assertIn("status=COVERAGE_IS_PARTIAL", out)
+        self.assertIn("status=COVERAGE_IS_PARTIAL the review covering the head states it", out)
+        self.assertNotIn("may have no review", out)
 
     def test_an_earlier_partial_carries_to_a_head_stating_none(self) -> None:
         part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
         rounds = [review(oid=OLD, body=part, rid="A"), review(body=OVERVIEW, rid="B")]
         self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
+        line = next(ln for ln in self.out.getvalue().splitlines() if ln.startswith("status="))
+        self.assertIn("because an earlier round states partial coverage", line)
+        self.assertNotIn("the review covering the head states", line)
+        self.assertIn("A round on the head stating full coverage clears this", line)
+        self.assertNotIn("A re-request is not the remedy", line)
+
+    def test_an_earlier_partial_carried_past_an_unbelievable_head_says_so(self) -> None:
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        rounds = [review(oid=OLD, body=part, rid="A"), review(body=odd, rid="B")]
+        self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
+        line = next(ln for ln in self.out.getvalue().splitlines() if ln.startswith("status="))
+        self.assertIn("a round on the head states a reading this cannot believe", line)
+        self.assertNotIn("the review covering the head states", line)
 
     def test_a_prose_partial_on_an_earlier_round_keeps_a_table_from_standing_in(self) -> None:
         part = f"{OVERVIEW}\nCopilot reviewed 1 out of 2 changed files.\n"
