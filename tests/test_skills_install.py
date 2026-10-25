@@ -388,6 +388,33 @@ class ReportCase(unittest.TestCase):
         exit_code, _ = self.run_report()
         self.assertEqual(exit_code, 1)
 
+    def test_every_cannot_read_path_emits_the_judged_snapshot_shape(self) -> None:
+        """A parser reads one shape, so a missing, unreadable, or unrecognized stamp carries every
+        key a judged snapshot does, null where the stamp would have said, and resolves intended."""
+        keys = {"installedFrom", "installedDirty", "intended", "intendedRef", "current", "reason"}
+        self.write_stamp({"commit": "abc"})
+        judged = json.loads(self.run_report()[1])["snapshot"]
+        self.assertTrue(keys >= set(judged))
+        cases = {
+            "missing": lambda: self.stamp.unlink(missing_ok=True),
+            "unreadable": lambda: self.stamp.write_text("{{{", encoding="utf-8"),
+            "unrecognized": lambda: self.stamp.write_text(
+                json.dumps({"stampVersion": skills_install.STAMP_VERSION + 1}), encoding="utf-8"
+            ),
+        }
+        for name, arrange in cases.items():
+            with self.subTest(name):
+                arrange()
+                exit_code, out = self.run_report(intended_rev="v1")
+                snapshot = json.loads(out)["snapshot"]
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(set(snapshot), keys)
+                self.assertIsNone(snapshot["installedFrom"])
+                self.assertIsNone(snapshot["installedDirty"])
+                self.assertFalse(snapshot["current"])
+                self.assertEqual(snapshot["intended"], "abc")
+                self.assertEqual(snapshot["intendedRef"], "refs/remotes/origin/main")
+
     def test_an_unrecognized_stamp_version_reports_not_current(self) -> None:
         """A future format bump must not have an old-shaped stamp read as current."""
         self.stamp.write_text(
@@ -800,6 +827,19 @@ class MainExitCodeCase(unittest.TestCase):
         register.assert_not_called()
         stamp = json.loads((self.tmp / "skills-install-stamp.json").read_text(encoding="utf-8"))
         self.assertIsNone(stamp["claudeRegistered"])
+
+    def test_intended_without_report_is_refused_and_installs_nothing(self) -> None:
+        mock.patch("sys.argv", ["skills_install.py", "--intended", "main"]).start()
+        materialize = mock.patch("skills_install.materialize_global_skills").start()
+        register = mock.patch("skills_install.register_claude_marketplace").start()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            skills_install.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("--intended only applies with --report", err.getvalue())
+        materialize.assert_not_called()
+        register.assert_not_called()
+        self.assertFalse((self.tmp / "skills-install-stamp.json").exists())
 
     def test_snapshot_only_is_refused_with_report(self) -> None:
         mock.patch("sys.argv", ["skills_install.py", "--snapshot-only", "--report"]).start()

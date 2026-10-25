@@ -479,26 +479,41 @@ def marketplace_channel():
     }
 
 
-def no_snapshot(reason):
-    """Report a copy that cannot be read, still answering the live channel, which needs no stamp."""
-    snapshot = {"current": False, "reason": reason}
+def no_snapshot(reason, intended_rev=None):
+    """Report a copy that cannot be read, still answering the live channel, which needs no stamp.
+
+    The snapshot carries the same keys as a judged one, null where the stamp would have said, so a
+    parser reads one shape. The intended revision resolves here too, since it needs no stamp either.
+    """
+    intended, intended_ref = intended_commit(intended_rev)
+    snapshot = {
+        "installedFrom": None,
+        "installedDirty": None,
+        "intended": intended,
+        "intendedRef": intended_ref if intended else intended_rev,
+        "current": False,
+        "reason": reason,
+    }
     print(json.dumps({"stamp": None, "snapshot": snapshot, "live": live_channel()}, indent=2))
     return 1
 
 
 def report(stamp_path, intended_rev=None):
     if not stamp_path.is_file():
-        return no_snapshot("Not installed on this machine (no stamp found).")
+        return no_snapshot("Not installed on this machine (no stamp found).", intended_rev)
     try:
         stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return no_snapshot(f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.")
+        return no_snapshot(
+            f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.", intended_rev
+        )
     # A non-dict JSON value (an array, a bare string) is a shape this reader does not know.
     # So is an unrecognized stampVersion, not merely a plain missing/dirty install.
     if not isinstance(stamp, dict) or stamp.get("stampVersion") != STAMP_VERSION:
         return no_snapshot(
             f"Stamp at {stamp_path} is not a recognized shape (stampVersion {STAMP_VERSION} expected). "
-            "Re-run the installer."
+            "Re-run the installer.",
+            intended_rev,
         )
     # A dict-shaped stamp can still carry a non-dict "source" (a stray string, a number).
     # Calling .get("commit") on that would crash instead of reading as not current like every other unrecognized-shape case here does.
