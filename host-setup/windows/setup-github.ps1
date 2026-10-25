@@ -197,11 +197,15 @@ function Test-KeyAcl {
     return ($others.Count -eq 0)
 }
 
+function Test-GitHubKnownHost {
+    $null = (& ssh-keygen -F github.com 2>&1 | Out-String)
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Add-KnownHost {
     step 'Checking that github.com is a known host'
     $known = Join-Path $HOME '.ssh\known_hosts'
-    $null = (& ssh-keygen -F github.com 2>&1 | Out-String)
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-GitHubKnownHost) {
         info 'Already known'
         return
     }
@@ -564,8 +568,7 @@ function Show-Status {
     elseif ($acl) { ok 'the key file is readable only by its owner' }
     else { missing "the key file is readable only by its owner, repair it with: icacls `"$($script:KEY)`" /inheritance:r /grant:r `"`$env:USERNAME:F`"" }
 
-    $null = (& ssh-keygen -F github.com 2>&1 | Out-String)
-    $known = $LASTEXITCODE -eq 0
+    $known = Test-GitHubKnownHost
     Resolve-GitHubUser
     if ($script:GITHUB_USER) { ok "SSH authentication to GitHub, as $($script:GITHUB_USER)" }
     elseif (-not $known) { missing 'SSH authentication to GitHub, unchecked because github.com is not in known_hosts, which -Configure adds' }

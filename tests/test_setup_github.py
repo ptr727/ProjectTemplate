@@ -511,6 +511,7 @@ def windows_case(case: dict[str, object]) -> dict[str, object]:
 KNOWN_HOST_BODY = r"""
 function ssh-keygen { $global:LASTEXITCODE = $Code; return $Output }
 $script:DRY_RUN = $true
+"known=$(Test-GitHubKnownHost)"
 Add-KnownHost 6>&1 | ForEach-Object { "$_" }
 """
 
@@ -528,14 +529,14 @@ def run_pwsh(arguments: list[str]) -> subprocess.CompletedProcess[str]:
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows script's own functions")
 class TestWindowsKnownHost(unittest.TestCase):
-    """`Add-KnownHost` reads whether github.com is known from `ssh-keygen -F`'s exit status alone."""
+    """Whether github.com is known is `ssh-keygen -F`'s exit status alone, for every caller."""
 
     def add_known_host(self, code: int, output: str) -> str:
         with tempfile.TemporaryDirectory() as directory:
             harness = Path(directory, "harness.ps1")
             text = windows_harness(
                 "[int]$Code, [string]$Output",
-                ["log", "info", "step", "Add-KnownHost"],
+                ["log", "info", "step", "Test-GitHubKnownHost", "Add-KnownHost"],
                 KNOWN_HOST_BODY,
             )
             harness.write_text(text, encoding="utf-8")
@@ -545,10 +546,13 @@ class TestWindowsKnownHost(unittest.TestCase):
         return result.stdout
 
     def test_a_found_host_is_already_known(self) -> None:
-        self.assertIn("Already known", self.add_known_host(0, "# Host github.com found: line 1"))
+        output = self.add_known_host(0, "# Host github.com found: line 1")
+        self.assertIn("known=True", output)
+        self.assertIn("Already known", output)
 
     def test_a_failure_whose_output_says_found_is_not_known(self) -> None:
         output = self.add_known_host(255, "known_hosts not found")
+        self.assertIn("known=False", output)
         self.assertNotIn("Already known", output)
         self.assertIn("Adding the github.com host keys", output)
 
