@@ -312,11 +312,13 @@ def checks_never_ran(
     if not nodes:
         return "no check has posted, and a DIRTY merge runs no pull_request workflow until resolved"
     unmet = ", ".join(required_unregistered(pr, nodes, required))
-    unread = ", sits in the rollup's unread part," if checks_unread(nodes) else ""
+    unread = checks_unread(nodes)
+    where = ", sits in the rollup's unread part," if unread else ""
+    read = "read the check runs on the head commit, " if unread else ""
     return unmet and (
-        f"a required check has not registered{unread} or came from another app, {unmet}, so "
-        "update a BEHIND head, resolve a DIRTY one's conflict, or correct the check's poster or "
-        "its rule"
+        f"a required check has not registered{where} or came from another app, {unmet}, so "
+        f"{read}update a BEHIND head, resolve a DIRTY one's conflict, or correct the check's "
+        "poster or its rule"
     )
 
 

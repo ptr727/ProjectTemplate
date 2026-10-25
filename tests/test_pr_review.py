@@ -3718,7 +3718,8 @@ class TestCli(GqlCase):
                 ),
                 45,
                 "has not registered, sits in the rollup's unread part, or came from another app, "
-                + name,
+                + name
+                + ", so read the check runs on the head commit, update a BEHIND head",
             ),
             ("closed", {**closed, "state": "CLOSED"}, 0, ""),
         ] + [
