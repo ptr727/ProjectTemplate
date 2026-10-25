@@ -114,8 +114,7 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. Every workflow run on that head has also completed or waits on its
-           environment. 30 =
+           checks settled. Every workflow run on that head has also completed. 30 =
            still pending at the timeout. On a held head that is a required check still settling or
            a workflow run still open, printed as `status=CHECKS_PENDING`. It is also a round past
            --min-rounds not yet landed. 40 = no Copilot
@@ -1997,11 +1996,6 @@ def main(argv: list[str] | None = None) -> int:
                 + (f" (not completed: {', '.join(runs)})" if runs else "")
             )
             return 30
-        if covered and (gated := runs_open(final, gated=True)):
-            print(
-                f"note: this head has {', '.join(gated)} waiting on an environment's protection "
-                "rule, a reviewer or a timer, and this wait holds nothing for that"
-            )
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
         if final.get("mergeStateStatus") == "BLOCKED" and gates:
@@ -2010,7 +2004,7 @@ def main(argv: list[str] | None = None) -> int:
                 "BLOCKED, and a required check is in a shape waiting does not clear, "
                 f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
                 "block above, since a starved check wants a re-run, an unposted one its poster, "
-                "a gated one its approval, a long one a judgment, and a failed one a fix. It need "
+                "a gated one its approval or its timer, a long one a judgment, and a failed one a fix. It need "
                 "not be all that blocks "
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )

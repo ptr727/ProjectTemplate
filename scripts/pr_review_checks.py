@@ -12,7 +12,7 @@ from datetime import datetime
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
 # A StatusContext's PENDING means the opposite, so `check_nodes` translates it away.
-NOT_STARTED = frozenset({"QUEUED", "WAITING", "PENDING", "REQUESTED"})
+NOT_STARTED = frozenset({"QUEUED", "PENDING", "REQUESTED"})
 
 # A required status nothing has posted, only ever a StatusContext's state, and not a starved job.
 NOT_POSTED = frozenset({"EXPECTED"})
@@ -258,10 +258,11 @@ def held_checks_open(
 ) -> bool:
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
-    A BLOCKED merge with a stuck required check, other than one running long, has its exit 44
-    decided already. Short of that, a workflow run on the head that has not completed holds. A run's
-    later jobs enter the rollup only as their `needs:` finish, so a green rollup proves nothing while
-    one is open. A CLEAN, UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
+    A BLOCKED merge with a stuck required check has its exit 44 decided already. A check running
+    long or gated is the exception, since either can still clear. Short of that, a workflow run on the
+    head that has not completed holds, a gated one included. A run's later jobs enter the rollup
+    only as their `needs:` finish, so a green rollup proves nothing while one is open. A CLEAN,
+    UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
     hold it. Otherwise a required check still settling holds, as does any settling check while no
     required check has posted. A rollup with no check holds while the merge
     reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the rollup carries, and a pull
@@ -276,7 +277,7 @@ def held_checks_open(
     if merge == "UNKNOWN":
         return True
     if merge == "BLOCKED" and any(
-        n.get("required") and shape != "RUNNING_LONG"
+        n.get("required") and shape not in ("RUNNING_LONG", "GATED")
         for n, shape in checks_stuck(nodes, now, grace, stall)
     ):
         return False
@@ -299,28 +300,20 @@ def held_checks_open(
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
-def runs_open(pr: dict, gated: bool = False) -> list[str]:
+def runs_open(pr: dict) -> list[str]:
     """The head's workflow runs whose suite has not completed, each named `run <id>`, sorted.
 
     Read from the head's own suites and each rollup check run's suite, since a fresh head's run
-    exists before most of its jobs do. A suite with no workflow run counts for neither side, so
-    another app's suite that never reports holds nothing. Where `workflowRun` was unreadable, an
-    Actions suite from either source stands in as `suite <id>`, the fallback `check_nodes` takes
-    too. A run WAITING on its environment's protection rule counts as gated only while none of its
-    registered jobs is queued or running. Gated runs are returned only where `gated` asks.
+    exists before most of its jobs do. A suite with no workflow run counts for nothing, so another
+    app's suite that never reports holds nothing. Where `workflowRun` was unreadable, an Actions
+    suite from either source stands in as `suite <id>`, the fallback `check_nodes` takes too.
     """
     commit = head_commit(pr)
     rollup = ((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes") or []
     suites = [n.get("checkSuite") or {} for n in rollup if n.get("__typename") == "CheckRun"]
-    active = {
-        (n.get("checkSuite") or {}).get("databaseId")
-        for n in rollup
-        if n.get("__typename") == "CheckRun" and n.get("status") in ("QUEUED", "IN_PROGRESS")
-    }
     named = set()
     for s in suites + ((commit.get("checkSuites") or {}).get("nodes") or []):
-        waiting = s.get("status") == "WAITING" and s.get("databaseId") not in active
-        if s.get("status") == "COMPLETED" or waiting != gated:
+        if s.get("status") == "COMPLETED":
             continue
         if run := (s.get("workflowRun") or {}).get("databaseId"):
             named.add(f"run {run}")
