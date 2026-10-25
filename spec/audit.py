@@ -1042,16 +1042,18 @@ def workflow_model_caller_findings(path, text, model):
         return []
     node = _mapping(_mapping(validate_job).get("with")).get("workflow-model")
     declared = None if node is None else _scalar_text(_plain(node))
+    structured = node is not None and declared is None
     allowed = {"operational"} if model == "operational" else {None, "release"}
-    if declared in allowed:
+    if declared in allowed and not structured:
         return []
+    if structured:
+        passed = "a mapping or a sequence"
+    else:
+        passed = "none" if declared is None else repr(declared)
     return [
         (
             "DRIFT",
-            (
-                f"workflow-model: {path} validate job passes "
-                f"{'none' if declared is None else repr(declared)}, registry declares {model}"
-            ),
+            f"workflow-model: {path} validate job passes {passed}, registry declares {model}",
         )
     ]
 

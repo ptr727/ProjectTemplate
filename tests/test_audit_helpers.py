@@ -3774,6 +3774,11 @@ class WorkflowModelCallerFindingsCase(unittest.TestCase):
         got = self.findings("    with:\n      workflow-model: ''\n", "release")
         self.assertEqual(len(got), 1)
 
+    def test_a_structured_value_is_not_the_default(self) -> None:
+        got = self.findings("    with:\n      workflow-model: {model: release}\n", "release")
+        self.assertEqual(len(got), 1)
+        self.assertIn("passes a mapping or a sequence, registry declares release", got[0][1])
+
     def test_other_callers_and_jobs_are_not_read(self) -> None:
         publisher = ".github/workflows/publish-release.yml"
         self.assertEqual(self.findings("", "operational", publisher), [])
