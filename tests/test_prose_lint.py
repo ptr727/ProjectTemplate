@@ -10,6 +10,7 @@ Run as `python3 tests/test_prose_lint.py`, or under `python3 -m unittest discove
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import io
@@ -27,7 +28,7 @@ import time
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest import mock
 
 from host_capability import bash_or_skip
@@ -7487,16 +7488,141 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         )
 
 
+VOCABULARY_CAP = 5
+COLLECTIONS = (ast.Set, ast.List, ast.Tuple, ast.Dict)
+
+
+def is_word(text: str) -> bool:
+    """Whether `text` is letters alone, so flags, paths, and environment variable names are not."""
+    return re.fullmatch(r"[A-Za-z]+(?:[ '-][A-Za-z]+)*", text) is not None
+
+
+def words_in(node: ast.expr | None) -> int:
+    """How many words a literal holds, nested literals included and a mapping's keys only beside one."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return int(is_word(node.value))
+    if isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+        return sum(words_in(element) for element in node.elts)
+    if isinstance(node, ast.Dict):
+        held = [words_in(value) for value in node.values]
+        return sum(n + words_in(key) for key, n in zip(node.keys, held) if n)
+    return 0
+
+
+def data_entries(data: dict[str, dict[str, Any]]) -> set[str]:
+    """The banned spellings and the exemption lists' entries, which the script may not spell itself.
+
+    The stems and endings are fragments and the US forms are ordinary words, so neither is an
+    entry. Neither are service accounts, since they are names like `root` an identifier can use.
+    """
+    entries = set(prose_lint.british_spellings(data["spelling"]))
+    for name, values in data["exemptions"].items():
+        if name != "service_accounts":
+            entries.update(values)
+    return entries
+
+
+def vocabulary_in(source: str, data: dict[str, dict[str, Any]]) -> list[str]:
+    """Where `source` holds spellings or exemptions that belong in `data`, the gate's data file.
+
+    A literal of more than `VOCABULARY_CAP` words reads as a vocabulary rather than as logic. It is
+    reported once, at the outermost literal holding it.
+    """
+    entries = data_entries(data)
+    nested: set[int] = set()
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Constant) and node.value in entries:
+            found.append(f"{node.lineno}: {node.value!r} is a data file entry")
+        if not isinstance(node, COLLECTIONS):
+            continue
+        children = node.elts if not isinstance(node, ast.Dict) else [*node.keys, *node.values]
+        nested.update(id(child) for child in children if isinstance(child, COLLECTIONS))
+        words = words_in(node)
+        if id(node) not in nested and words > VOCABULARY_CAP:
+            found.append(f"{node.lineno}: a literal of {words} words")
+    return found
+
+
+class TestVocabularyLivesInTheData(unittest.TestCase):
+    """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
+
+    DATA: ClassVar[dict[str, dict[str, Any]]] = {
+        "spelling": {
+            "odd": {"whilst": "while"},
+            "ise_stems": ["real"],
+            "ise_endings": [["ise", "ize"]],
+            "our_stems": [],
+            "our_endings": [],
+            "re_stems": [],
+            "re_endings": [],
+        },
+        "exemptions": {
+            "dupword_allow": ["had had"],
+            "hub_hosted": ["OPERATIONS.md"],
+            "service_accounts": ["root"],
+        },
+    }
+
+    def test_the_gate_holds_none(self) -> None:
+        data = json.loads(
+            (PROSE_LINT_SCRIPT.parent / "prose-gate.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([], vocabulary_in(PROSE_LINT_SCRIPT.read_text(encoding="utf-8"), data))
+
+    def test_a_word_list_past_the_cap_is_vocabulary(self) -> None:
+        words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+        found = vocabulary_in(f"WORDS = frozenset({set(words)!r})\n", self.DATA)
+        self.assertEqual(["1: a literal of 6 words"], found)
+        self.assertEqual([], vocabulary_in(f"WORDS = {words[:VOCABULARY_CAP]!r}\n", self.DATA))
+
+    def test_a_word_mapping_counts_both_sides(self) -> None:
+        found = vocabulary_in('WORDS = {"aa": "bb", "cc": "dd", "ee": "ff"}\n', self.DATA)
+        self.assertEqual(["1: a literal of 6 words"], found)
+
+    def test_nested_word_lists_count_once_at_the_outermost(self) -> None:
+        for source, words in (
+            ('PAIRS = (("grey", "gray"), ("kerb", "curb"), ("tyre", "tire"))\n', 6),
+            ('GROUPS = {"a": ["w", "x", "y"], "b": ["z", "v", "u"]}\n', 8),
+            ('INNER = [["a", "b", "c", "d", "e", "f"]]\n', 6),
+        ):
+            with self.subTest(source=source):
+                found = vocabulary_in(source, self.DATA)
+                self.assertEqual([f"1: a literal of {words} words"], found)
+
+    def test_a_dispatch_table_and_punctuation_are_logic(self) -> None:
+        rules = ("charset", "dash", "dupword", "semicolon", "spelling", "sentence-length")
+        names = ", ".join(f'"{rule}": (len, frozenset({{"prose", "comment"}}))' for rule in rules)
+        source = f"TABLE = {{{names}}}\nMARKS = ('.', '!', '?', ':', ';', ',', '|')\n"
+        self.assertEqual([], vocabulary_in(source, self.DATA))
+
+    def test_flags_and_environment_names_are_not_words(self) -> None:
+        source = (
+            'ARGS = ("--unified=0", "--no-color", "--no-ext-diff", "-z", "--name-only", "--cached")\n'
+            'GIT = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", '
+            '"GIT_NAMESPACE", "GIT_COMMON_DIR"})\n'
+        )
+        self.assertEqual([], vocabulary_in(source, self.DATA))
+
+    def test_a_data_file_entry_copied_into_the_script(self) -> None:
+        for entry in ("whilst", "realise", "had had", "OPERATIONS.md"):
+            with self.subTest(entry=entry):
+                found = vocabulary_in(f"if word == {entry!r}:\n    pass\n", self.DATA)
+                self.assertEqual([f"1: {entry!r} is a data file entry"], found)
+
+    def test_fragments_us_forms_and_field_names_are_not_entries(self) -> None:
+        for literal in ("while", "real", "ise", "root", "odd", "ise_stems"):
+            with self.subTest(literal=literal):
+                self.assertEqual(
+                    [], vocabulary_in(f"if word == {literal!r}:\n    pass\n", self.DATA)
+                )
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
         self.assertGreaterEqual(loaded.countTestCases(), 100)
-
-    def test_the_gate_stays_under_its_size_ceiling(self) -> None:
-        """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
-        lines = PROSE_LINT_SCRIPT.read_text(encoding="utf-8").count("\n")
-        self.assertLessEqual(lines, 1862)
 
 
 if __name__ == "__main__":
