@@ -2231,8 +2231,8 @@ class TestCommentAddedRule(BaitCase):
         """Deleting the BuildKit `check=` line changes the build, so it is not prose in either mode.
 
         Capitalizing it would quiet only `comment-case`, and `comment-added` would still ask for
-        the deletion. The prose line is the control, showing each mode does judge line 1 here, and
-        the stand-down is pinned off so a developer's exported one cannot drop `comment-added`.
+        the deletion. The prose line is the control, showing each mode does judge line 1 here. The
+        stand-down is pinned off, so a developer's exported one cannot drop `comment-added`.
         """
         self.stand_down_setup()
         self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
