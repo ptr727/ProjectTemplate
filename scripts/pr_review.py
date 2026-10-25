@@ -114,23 +114,28 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. 30 = still pending at the timeout, a required check still settling on
-           a held head printed as `status=CHECKS_PENDING`, or a round past --min-rounds not yet
-           landed. 40 = no Copilot review covers the head: the reviewer answered outside a formal
-           review, the request returned success and recorded nothing on the pull request, or the
-           reviewer writes under a login no query filters on. 41 = the newest round is a refusal
-           or a quota state, the kind printed in its status line and, for a refusal on this pull
-           request, in the digest's `refusal=`: a refusal on the
-           head, the pull request's newest review being a quota or error refusal on any head, or
-           the reviewer's newest activity elsewhere in the repository being a quota refusal
-           nothing answered since while this head carries none of its own. Proceed on the other
-           reviewers' coverage rather than retrying, and pass --ignore-quota-signal once the
-           quota is believed to have reset. 42 and 50 = the review landed and `status`'s readings
+           checks settled. Where an attested local pass covers an open pull request's held head,
+           every workflow run on it has completed.
+           30 = still pending at the timeout. On a held head it is any hold
+           `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
+           open among them. It is also a round past --min-rounds not yet landed.
+           40 = no Copilot review covers the head: the reviewer
+           answered outside a formal review, the request returned success and recorded nothing on
+           the pull request, or the reviewer writes under a login no query filters on. 41 = the
+           newest round is a refusal or a quota state, the kind printed in its status line and, for
+           a refusal on this pull request, in the digest's `refusal=`: a refusal on the head, the
+           pull request's newest review being a quota or error refusal on any head, or the
+           reviewer's newest activity elsewhere in the repository being a quota refusal nothing
+           answered since while this head carries none of its own. Proceed on the other reviewers'
+           coverage rather than retrying, and pass --ignore-quota-signal once the quota is believed
+           to have reset. 42 and 50 = the review landed and `status`'s readings
            apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
-           is in a shape no wait clears, queued with nothing acting on it, expected and never
-           posted, running far past what the job costs, or failed. 49 = no Copilot round covers
-           this head and none was requested, the pull request merging into a branch other than
-           the default with no attestation vouching for the head. 64 = the write scope could not
+           is in a shape no wait clears. It is queued with nothing acting on it, expected and
+           never posted, running far past the job's cost, held by its environment, or failed. On
+           a held head a check running long or held by its environment polls to 30 instead.
+           49 = no Copilot round covers this head and none was requested, the pull request
+           merging into a branch other than the default with no attestation vouching for the
+           head. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
@@ -173,6 +178,7 @@ from pr_review_checks import (
     checks_stuck,
     checks_tally,
     held_checks_open,
+    runs_open,
 )
 from pr_review_rounds import (
     ACK_MARKER,
@@ -320,7 +326,7 @@ HELD_FIELDS = """
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
       }}}
-      checkSuites(last:50){ nodes{ databaseId status workflowRun{ databaseId workflow{ databaseId } } } }
+      checkSuites(last:50){ nodes{ databaseId status app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
     }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
@@ -1974,6 +1980,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if verdict:
             return verdict
+        runs = runs_open(final)
         if covered and held_checks_open(
             final,
             checks,
@@ -1984,10 +1991,12 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, none had posted, a check the base branch "
-                "requires had not registered or came from another app, or the merge was still "
-                "UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
+                "timeout a check had not concluded, none had posted, a workflow run on the head "
+                "had not completed, a check the base branch requires had not registered or came "
+                "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
+                "wait again, or read the checks above"
                 + _unmet_note(required_for(final, owner, repo), checks)
+                + (f" (not completed: {', '.join(runs)})" if runs else "")
             )
             return 30
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
@@ -1998,7 +2007,8 @@ def main(argv: list[str] | None = None) -> int:
                 "BLOCKED, and a required check is in a shape waiting does not clear, "
                 f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
                 "block above, since a starved check wants a re-run, an unposted one its poster, "
-                "a long one a judgment, and a failed one a fix. It need not be all that blocks "
+                "a gated one its approval or its timer, a long one a judgment, and a failed one a fix. It need "
+                "not be all that blocks "
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44

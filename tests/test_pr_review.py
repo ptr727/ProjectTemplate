@@ -1265,13 +1265,20 @@ class TestCheckShapes(unittest.TestCase):
             "NOT_PICKED_UP", self.shape(check(status="QUEUED", conclusion="", started=ago(900)))
         )
 
-    def test_every_unstarted_spelling_counts_not_only_queued(self) -> None:
-        """Reading QUEUED alone reports a check held at a gate as one that is running."""
-        for state in ("QUEUED", "WAITING", "PENDING", "REQUESTED"):
+    def test_every_not_begun_spelling_reads_as_stuck_not_running(self) -> None:
+        """Reading QUEUED alone reports a check that has not begun as one that is running.
+
+        WAITING is held by its environment rather than starved, so it reads as its own shape.
+        """
+        for state, shape in (
+            ("QUEUED", "NOT_PICKED_UP"),
+            ("WAITING", "GATED"),
+            ("PENDING", "NOT_PICKED_UP"),
+            ("REQUESTED", "NOT_PICKED_UP"),
+        ):
             with self.subTest(state=state):
                 self.assertEqual(
-                    "NOT_PICKED_UP",
-                    self.shape(check(status=state, conclusion="", started=ago(900))),
+                    shape, self.shape(check(status=state, conclusion="", started=ago(900)))
                 )
 
     def test_an_expected_status_is_its_own_shape_not_a_starved_job(self) -> None:
@@ -1650,7 +1657,7 @@ class TestCheckShapes(unittest.TestCase):
     def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuites(last:50){ nodes{ databaseId status "
+            "checkSuites(last:50){ nodes{ databaseId status app{ slug } "
             "workflowRun{ databaseId workflow{ databaseId } } } }",
             query,
         )
@@ -3451,6 +3458,50 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_called_once()
         self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
+    def fresh_head(self, run_status: str) -> dict:
+        """A CLEAN head whose first-stage jobs passed while its workflow run has more to start.
+
+        A matrix job's children enter the rollup only once the jobs they need finish. The rollup
+        can therefore be all green while the run itself is not completed.
+        """
+        detect = check(name="changes", suite=20, workflow=7, suite_status=run_status, run=200)
+        pr = self.into(payload([review(oid=OLD)], checks=[detect]), attest=True)
+        suite = {
+            "databaseId": 20,
+            "status": run_status,
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [suite]}
+        return pr
+
+    def test_a_fresh_head_with_its_run_in_progress_is_pending_at_the_timeout(self) -> None:
+        """Read right after a push, a CLEAN merge and a green rollup exited 0 with jobs unstarted."""
+        self.answer(self.fresh_head("IN_PROGRESS"))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertIn("status=CHECKS_PENDING", out)
+        self.assertIn("not completed: run 200", out)
+
+    def test_a_fresh_head_polls_until_its_run_completes(self) -> None:
+        running = self.fresh_head("IN_PROGRESS")
+        done = self.fresh_head("COMPLETED")
+        self.answer(running, running, done)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
+    def test_a_fresh_head_waiting_on_its_environment_is_pending_at_the_timeout(self) -> None:
+        """A gated run's later jobs have not run either, so it holds like any other open run."""
+        self.answer(self.fresh_head("WAITING"))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("not completed: run 200", self.out.getvalue())
 
     def test_a_stuck_check_on_an_attested_head_ends_the_poll(self) -> None:
         """A shape no wait clears is 44 at once, rather than the timeout polled out against it."""
@@ -6069,6 +6120,131 @@ class TestRequiredContexts(unittest.TestCase):
             clean = payload([], merge="CLEAN", checks=[check()])
             self.assertEqual(frozenset(), pr_review.required_for(clean, "o", "r"))
         rest.assert_not_called()
+
+
+class TestRunsOpen(unittest.TestCase):
+    """A head's workflow run that has not completed holds a held wait whatever the merge reads."""
+
+    @staticmethod
+    def suite(status: str, run: int | None = 200, sid: int = 20) -> dict:
+        workflow_run = {"databaseId": run, "workflow": {"databaseId": 7}} if run else None
+        return {"databaseId": sid, "status": status, "workflowRun": workflow_run}
+
+    def held(self, merge: str, checks: list[dict], *suites: dict) -> dict:
+        pr = payload([], merge=merge, checks=checks)
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": list(suites)}
+        return pr
+
+    def is_open(self, pr: dict) -> bool:
+        return pr_review_checks.held_checks_open(
+            pr, pr_review_checks.check_nodes(pr), NOW, 300, 1800
+        )
+
+    def test_a_run_not_completed_holds_a_clean_merge(self) -> None:
+        for status in ("QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED"):
+            with self.subTest(status=status):
+                pr = self.held("CLEAN", [check()], self.suite(status))
+                self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+                self.assertTrue(self.is_open(pr))
+
+    def test_a_completed_run_releases_a_clean_merge(self) -> None:
+        pr = self.held("CLEAN", [check()], self.suite("COMPLETED"))
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_suite_with_no_workflow_run_does_not_hold(self) -> None:
+        """An installed app's suite can sit queued forever with nothing ever reporting."""
+        pr = self.held("CLEAN", [check()], self.suite("QUEUED", run=None))
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_an_unrequired_checks_open_run_holds_a_clean_merge(self) -> None:
+        """CLEAN releases an unrequired check, but not the run it belongs to while that is open."""
+        optional = {
+            **check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="IN_PROGRESS"),
+            "isRequired": False,
+        }
+        optional["checkSuite"]["workflowRun"]["databaseId"] = 200
+        pr = self.held("CLEAN", [optional], self.suite("IN_PROGRESS"))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_run_read_only_through_the_rollup_holds(self) -> None:
+        """A run's suite can fall outside the suites window while its jobs sit in the rollup."""
+        running = check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="IN_PROGRESS")
+        running["checkSuite"]["workflowRun"]["databaseId"] = 200
+        pr = self.held("CLEAN", [running])
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_an_actions_suite_stands_in_where_the_run_is_unreadable(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", suite=20, suite_status="IN_PROGRESS")
+        pr = {**self.held("CLEAN", [running]), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
+        self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+        self.assertEqual([], pr_review_checks.runs_open(self.held("CLEAN", [running])))
+
+    def test_a_fresh_actions_suite_stands_in_with_no_job_registered(self) -> None:
+        """Read right after a push, the suite exists before any job does, and no rollup node carries it."""
+        suite = {"databaseId": 20, "status": "QUEUED", "app": {"slug": "github-actions"}}
+        pr = {**self.held("CLEAN", [], suite), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
+        self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_another_apps_queued_suite_holds_nothing_where_runs_are_unreadable(self) -> None:
+        """Other apps leave suites queued with no job for good, so only an Actions suite stands in."""
+        suite = {"databaseId": 30, "status": "QUEUED", "app": {"slug": "coderabbitai"}}
+        pr = {
+            **self.held("CLEAN", [check()], suite),
+            pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True,
+        }
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_gated_required_check_holds_a_blocked_poll_rather_than_ending_it(self) -> None:
+        """A timer clears by itself and an approval may land, so a gate is not the 44 shape."""
+        gated = check(status="WAITING", conclusion="", started=ago(900))
+        pr = self.held("BLOCKED", [gated], self.suite("WAITING"))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_job_waiting_on_its_environment_reads_gated_not_starved(self) -> None:
+        """The starved line's re-run is the wrong remedy for a job a protection rule holds."""
+        node = {"name": "deploy", "state": "WAITING", "conclusion": "", "since": ago(900)}
+        self.assertEqual("GATED", pr_review_checks.check_shape(node, NOW, 300, 1800))
+        line = pr_review_checks.check_lines({}, [node], [(node, "GATED")], NOW)[0]
+        self.assertIn("CHECK WAITING ON ITS ENVIRONMENT ('deploy', waiting 15m)", line)
+        inside = {**node, "since": ago(60)}
+        self.assertEqual("", pr_review_checks.check_shape(inside, NOW, 300, 1800))
+
+    def test_a_job_no_runner_picked_up_still_holds_its_open_run(self) -> None:
+        """A queue past the grace often starts, so releasing on it would exit 0 with jobs unstarted."""
+        starved = {
+            **check(status="QUEUED", conclusion="", started=ago(900)),
+            "isRequired": False,
+        }
+        pr = self.held("CLEAN", [starved], self.suite("IN_PROGRESS"))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_stuck_required_check_still_ends_a_blocked_poll(self) -> None:
+        """The 44 a failed required check decides is not delayed by a sibling run."""
+        failed = check(conclusion="FAILURE")
+        pr = self.held("BLOCKED", [failed], self.suite("IN_PROGRESS"))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_closed_pull_request_holds_nothing(self) -> None:
+        pr = {**self.held("CLEAN", [check()], self.suite("IN_PROGRESS")), "state": "MERGED"}
+        self.assertFalse(self.is_open(pr))
+
+    def test_each_run_is_named_once(self) -> None:
+        pr = self.held(
+            "CLEAN",
+            [check()],
+            self.suite("IN_PROGRESS", run=300, sid=30),
+            self.suite("QUEUED", run=200),
+            self.suite("IN_PROGRESS", run=300, sid=30),
+        )
+        self.assertEqual(["run 200", "run 300"], pr_review_checks.runs_open(pr))
 
 
 class TestAttest(unittest.TestCase):
