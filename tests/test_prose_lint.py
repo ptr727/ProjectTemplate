@@ -10,6 +10,7 @@ Run as `python3 tests/test_prose_lint.py`, or under `python3 -m unittest discove
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import functools
 import io
@@ -7487,16 +7488,126 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         )
 
 
+VOCABULARY_CAP = 5
+VOCABULARY_EXEMPT = frozenset({"GIT_LOCATION"})
+
+
+def is_word(text: str) -> bool:
+    """Whether `text` reads as a word, so punctuation tables and single-letter endings stay logic."""
+    return re.search(r"[A-Za-z]{2}", text) is not None
+
+
+def data_words(value: object) -> Iterator[str]:
+    """Every word a data file section holds, a mapping's keys included, as `spelling.odd` pairs them."""
+    if isinstance(value, str):
+        if is_word(value):
+            yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from data_words(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from data_words(key)
+            yield from data_words(item)
+
+
+def vocabulary_in(source: str, data: dict[str, dict[str, object]]) -> list[str]:
+    """Where `source` holds vocabulary or exemptions that belong in `data`, the gate's data file.
+
+    A collection literal of more than `VOCABULARY_CAP` words reads as a vocabulary rather than as
+    logic, except one assigned to a name in `VOCABULARY_EXEMPT`, which holds the variables git
+    locates a repository by rather than prose. A section's own field names are what the script
+    reads the section by, so they are left out of the entries a literal may not equal.
+    """
+    tree = ast.parse(source)
+    exempt = {
+        id(inner)
+        for node in tree.body
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        if isinstance(target, ast.Name) and target.id in VOCABULARY_EXEMPT
+        for inner in ast.walk(node.value)
+    }
+    entries = {
+        word
+        for section in ("spelling", "exemptions")
+        for word in data_words(list(data[section].values()))
+    }
+    found = []
+    for node in ast.walk(tree):
+        if id(node) in exempt:
+            continue
+        if isinstance(node, ast.Constant) and node.value in entries:
+            found.append(f"{node.lineno}: {node.value!r} is a data file entry")
+        if isinstance(node, ast.Dict):
+            pairs = [(k, v) for k, v in zip(node.keys, node.values) if isinstance(v, ast.Constant)]
+            elements: list[ast.expr | None] = [part for pair in pairs for part in pair]
+        elif isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+            elements = list(node.elts)
+        else:
+            continue
+        words = [
+            e.value
+            for e in elements
+            if isinstance(e, ast.Constant) and isinstance(e.value, str) and is_word(e.value)
+        ]
+        if len(words) > VOCABULARY_CAP:
+            found.append(f"{node.lineno}: a literal of {len(words)} words")
+    return found
+
+
+class TestVocabularyLivesInTheData(unittest.TestCase):
+    """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
+
+    DATA: ClassVar[dict[str, dict[str, object]]] = {
+        "spelling": {"odd": {"whilst": "while"}, "ise_stems": ["real"]},
+        "exemptions": {"dupword_allow": ["had had"], "hub_hosted": ["OPERATIONS.md"]},
+    }
+
+    def test_the_gate_holds_none(self) -> None:
+        data = json.loads(
+            (PROSE_LINT_SCRIPT.parent / "prose-gate.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([], vocabulary_in(PROSE_LINT_SCRIPT.read_text(encoding="utf-8"), data))
+
+    def test_a_word_list_past_the_cap_is_vocabulary(self) -> None:
+        words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+        found = vocabulary_in(f"WORDS = frozenset({set(words)!r})\n", self.DATA)
+        self.assertEqual(["1: a literal of 6 words"], found)
+        self.assertEqual([], vocabulary_in(f"WORDS = {words[:VOCABULARY_CAP]!r}\n", self.DATA))
+
+    def test_a_word_mapping_counts_both_sides(self) -> None:
+        found = vocabulary_in('WORDS = {"aa": "bb", "cc": "dd", "ee": "ff"}\n', self.DATA)
+        self.assertEqual(["1: a literal of 6 words"], found)
+
+    def test_a_dispatch_table_and_punctuation_are_logic(self) -> None:
+        names = ", ".join(f'"rule{n}": (len, 1)' for n in range(9))
+        source = f"TABLE = {{{names}}}\nMARKS = ('.', '!', '?', ':', ';', ',', '|')\n"
+        self.assertEqual([], vocabulary_in(source, self.DATA))
+
+    def test_a_data_file_entry_copied_into_the_script(self) -> None:
+        for entry in ("whilst", "while", "real", "had had", "OPERATIONS.md"):
+            with self.subTest(entry=entry):
+                found = vocabulary_in(f"if word == {entry!r}:\n    pass\n", self.DATA)
+                self.assertEqual([f"1: {entry!r} is a data file entry"], found)
+
+    def test_a_sections_field_names_are_how_the_script_reads_it(self) -> None:
+        self.assertEqual(
+            [], vocabulary_in('words = data["odd"]\nstems = data["ise_stems"]\n', self.DATA)
+        )
+
+    def test_only_the_named_collection_is_exempt(self) -> None:
+        names = repr({f"GIT_VAR{n}" for n in range(VOCABULARY_CAP + 1)})
+        self.assertEqual([], vocabulary_in(f"GIT_LOCATION = frozenset({names})\n", self.DATA))
+        found = vocabulary_in(f"GIT_OTHER = frozenset({names})\n", self.DATA)
+        self.assertEqual([f"1: a literal of {VOCABULARY_CAP + 1} words"], found)
+
+
 class TestHarness(unittest.TestCase):
     def test_this_module_collects_a_plausible_number_of_cases(self) -> None:
         """A module whose cases fail to load still reports OK, which is a pass proving nothing."""
         loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
         self.assertGreaterEqual(loaded.countTestCases(), 100)
-
-    def test_the_gate_stays_under_its_size_ceiling(self) -> None:
-        """Vocabulary and exemptions live in the data file, so the script holding them is a defect."""
-        lines = PROSE_LINT_SCRIPT.read_text(encoding="utf-8").count("\n")
-        self.assertLessEqual(lines, 1862)
 
 
 if __name__ == "__main__":
