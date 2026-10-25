@@ -354,7 +354,7 @@ def register_claude_marketplace():
 def install_claude_plugin():
     """Install this marketplace's plugin at user scope, from wherever the marketplace is registered.
 
-    A plugin the listing already shows installed is left as it is, so a re-run reads that from
+    A plugin the listing already shows installed is left as it is. A re-run reads that from
     `claude plugin list` rather than from the wording of a failed install. Where the listing
     cannot be read, the install runs and its exit status alone decides.
     """
