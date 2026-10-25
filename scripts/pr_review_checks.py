@@ -303,7 +303,8 @@ def checks_never_ran(
     """Why an open head's gated merge lacks a check it is owed, with its remedy, or "" for none.
 
     A CLEAN, UNSTABLE, or HAS_HOOKS merge is owed nothing. The caller passes `required` only for a
-    merge whose release judges registration, and a context is judged only on a rollup read whole.
+    merge whose release judges registration, and a context is judged only on the head's own
+    rollup, not cut.
     """
     if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
         return ""
@@ -312,9 +313,13 @@ def checks_never_ran(
     if not nodes:
         return "no check has posted, and a DIRTY merge runs no pull_request workflow until resolved"
     unmet = ", ".join(required_unregistered(pr, nodes, required))
+    unread = checks_unread(nodes)
+    where = ", sits in the rollup's unread part," if unread else ""
+    read = "read the head commit's checks and statuses first, then " if unread else ""
     return unmet and (
-        f"a required check has not registered or came from another app, {unmet}, so update a "
-        "BEHIND head, resolve a DIRTY one's conflict, or correct the check's poster or its rule"
+        f"a required check has not registered{where} or came from another app, {unmet}, so "
+        f"{read}update a BEHIND head, resolve a DIRTY one's conflict, or correct the check's "
+        "poster or its rule"
     )
 
 
@@ -343,7 +348,7 @@ def runs_open(pr: dict) -> list[str]:
 def required_unregistered(
     pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
 ) -> list[str]:
-    """The contexts among `required` no rollup node satisfies, sorted, on a rollup read whole."""
+    """The `required` contexts no node satisfies, sorted, on the head's own rollup, not cut."""
     if checks_unreadable(pr) or checks_truncated(pr):
         return []
     seen = [n for n in nodes if not n.get("unreadable")]
@@ -362,7 +367,8 @@ def required_unregistered(
 def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
     """Names the required contexts still unmet, so a reader sees what the hold waits on."""
     unmet = required_unregistered(pr, nodes, required)
-    return f" (required, unmet: {', '.join(unmet)})" if unmet else ""
+    where = ", which may sit in the rollup's unread part" if checks_unread(nodes) else ""
+    return f" (required, unmet: {', '.join(unmet)}{where})" if unmet else ""
 
 
 def checks_truncated(pr: dict) -> bool:
