@@ -7495,8 +7495,8 @@ COLLECTIONS = (ast.Set, ast.List, ast.Tuple, ast.Dict)
 def is_word(text: str) -> bool:
     """Whether `text` is letter runs joined by single spaces, hyphens, or apostrophes.
 
-    So "had had" and "sentence-length" are words, while flags, paths, and environment variable names
-    are not.
+    So "had had" and "sentence-length" are words, while flags, paths with a separator, and
+    environment variable names with an underscore are not.
     """
     return re.fullmatch(r"[A-Za-z]+(?:[ '-][A-Za-z]+)*", text) is not None
 
@@ -7540,7 +7540,11 @@ def vocabulary_in(source: str, data: dict[str, dict[str, Any]]) -> list[str]:
             found.append(f"{node.lineno}: {node.value!r} is a data file entry")
         if not isinstance(node, COLLECTIONS):
             continue
-        children = node.elts if not isinstance(node, ast.Dict) else [*node.keys, *node.values]
+        if isinstance(node, ast.Dict):
+            counted = [key for key, value in zip(node.keys, node.values) if words_in(value)]
+            children: list[ast.expr | None] = [*counted, *node.values]
+        else:
+            children = list(node.elts)
         nested.update(id(child) for child in children if isinstance(child, COLLECTIONS))
         words = words_in(node)
         if id(node) not in nested and words > VOCABULARY_CAP:
@@ -7589,6 +7593,7 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
             ('PAIRS = (("grey", "gray"), ("kerb", "curb"), ("tyre", "tire"))\n', 6),
             ('GROUPS = {"a": ["w", "x", "y"], "b": ["z", "v", "u"]}\n', 8),
             ('INNER = [["a", "b", "c", "d", "e", "f"]]\n', 6),
+            ('KEYED = {("aa", "bb", "cc", "dd", "ee", "ff"): len}\n', 6),
         ):
             with self.subTest(source=source):
                 found = vocabulary_in(source, self.DATA)
