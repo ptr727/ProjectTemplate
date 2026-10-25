@@ -118,10 +118,11 @@ Subcommands
            workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
-           open attested held head nothing holds exits 45 where its rollup was unreadable or none
-           posted. A DIRTY or BEHIND one also exits 45 where a required check is unregistered or
-           from another app. Exit 0 can then leave a required check unregistered only under unread
-           rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request not open.
+           open attested held head nothing holds exits 45 where its rollup was unreadable or, under
+           DIRTY, none posted. A DIRTY or BEHIND one also exits 45 where a required check is
+           unregistered or from another app. Exit 0 can then leave a required check unregistered
+           only under unread rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request
+           not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
