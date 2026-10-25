@@ -202,6 +202,23 @@ class TestCleanupDeletesOnlyAVerifiedMergedBranch(CleanupCase):
         reads = [v for q, v in self.docs if "qualifiedName" in q]
         self.assertEqual(4, len(reads))
 
+    def test_a_settle_read_that_does_not_answer_is_not_reported_deleted(self) -> None:
+        unread = pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, CLEANUP_HEAD, unread])
+        with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
+            self.assertEqual(2, self.run_cleanup())
+        self.assertIn("reading the ref back did not answer", self.out.getvalue())
+        self.assertNotIn("status=DELETED", self.out.getvalue())
+
+    def test_a_settle_read_at_a_new_tip_stops_and_says_the_branch_returned(self) -> None:
+        pushed = "c" * 40
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, pushed])
+        with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
+            self.assertEqual(2, self.run_cleanup())
+        out = self.out.getvalue()
+        self.assertIn(f"reads at {pushed}, a tip other than the one deleted", out)
+        self.assertNotIn("still reads at", out)
+
     def test_a_read_back_that_does_not_answer_is_not_reported_deleted(self) -> None:
         unread = pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
         self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, unread])

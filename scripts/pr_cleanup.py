@@ -306,7 +306,7 @@ def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
         after = core.backoff(
             cleanup_ref(owner, repo, branch),
             lambda: cleanup_ref(owner, repo, branch),
-            lambda ref: ref is not None,
+            lambda ref: ref is not None and ref["target"]["oid"] == tip,
             delays=DELETE_SETTLE_DELAYS,
         )
     except CleanupUnread as exc:
@@ -315,10 +315,16 @@ def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
             f"reading the ref back did not answer: {exc}"
         )
         return 2
+    if after is not None and after["target"]["oid"] != tip:
+        print(
+            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} reads at "
+            f"{after['target']['oid']}, a tip other than the one deleted, so the branch was "
+            "pushed again after the delete"
+        )
+        return 2
     if after is not None:
         print(
-            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} still reads at "
-            f"{after['target']['oid']} after the delete"
+            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} still reads at {tip} after the delete"
         )
         return 2
     print(f"status=DELETED branch={branch} oid={tip}, confirmed by reading the ref back")
