@@ -1648,6 +1648,7 @@ def main(argv: list[str] | None = None) -> int:
     for flag in ("--repo", "--checkout", "--min-age-hours"):
         pre.add_argument(flag)
     if pre.parse_known_args(args)[0].first == "cleanup":
+        sys.modules.setdefault("pr_review", sys.modules[__name__])
         import pr_cleanup
 
         rest = list(args)
