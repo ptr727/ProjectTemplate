@@ -122,7 +122,8 @@ Subcommands
            DIRTY, none posted. A DIRTY or BEHIND one also exits 45 where a required check is
            unregistered or from another app. Exit 0 can then leave a required check unregistered
            only under unread rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request
-           not open.
+           not open. Exit 0 on a review present reads no check, so it does not prove the required
+           checks ran.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
