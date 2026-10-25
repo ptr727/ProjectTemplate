@@ -143,11 +143,11 @@ Subcommands
            a held head a check running long or held by its environment polls to 30 instead.
            45 = an open attested held head that nothing holds, its merge other than CLEAN,
            UNSTABLE, or HAS_HOOKS. Either the payload carries no commit matching the head, named
-           `CHECKS UNREADABLE` in the digest, or no check has posted. Or the merge reads DIRTY or
-           BEHIND and a check the base branch's rules require has not registered, or came from
-           another app. That last needs the rules read and a rollup not `CHECKS TRUNCATED`. Where
-           the rollup holds a type this cannot read, named `CHECKS PARTIALLY UNREAD` in the
-           digest, the status says the check may sit there.
+           `CHECKS UNREADABLE` in the digest, or a DIRTY merge has no check posted. Or the merge
+           reads DIRTY or BEHIND and a check the base branch's rules require has not registered,
+           or came from another app. That last needs the rules read and a rollup not
+           `CHECKS TRUNCATED`. Where the rollup holds a type this cannot read, named
+           `CHECKS PARTIALLY UNREAD` in the digest, the status says the check may sit there.
            `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
            30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An

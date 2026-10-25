@@ -3742,7 +3742,8 @@ class TestCli(GqlCase):
                 self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
                 with mock.patch.object(pr_review.time, "sleep"):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "1"]))
-                self.assertIn(reason, self.out.getvalue())
+                if reason:
+                    self.assertIn(reason, self.out.getvalue())
                 if label == "another app":
                     self.assertNotIn("checks and statuses first", self.out.getvalue())
                 if code == 0:
