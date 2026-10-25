@@ -114,16 +114,16 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
-           hold the poll. On an open held head whose commit the payload carries, every workflow
-           run the read reaches on that head has then completed. The read reaches the
+           hold the poll. Exit 0 on a review present does not poll the checks, so it does not prove
+           the required checks ran. On an open attested held head whose commit the payload carries,
+           every workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
            open attested held head nothing holds exits 45 where its rollup was unreadable or, under
            DIRTY, none posted. A DIRTY or BEHIND one also exits 45 where a required check is
            unregistered or from another app. Exit 0 can then leave a required check unregistered
            only under unread rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request
-           not open. Exit 0 on a review present does not poll the checks, so it does not prove the
-           required checks ran.
+           not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
