@@ -118,10 +118,10 @@ Subcommands
            workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
-           attested held head exits 45 where its checks were unread or none posted. A DIRTY or
-           BEHIND one also exits 45 where a required check has not registered. Exit 0 can then
-           leave a required check unregistered only where the rules were unread, the rollup is
-           `CHECKS TRUNCATED`, or the merge reads DRAFT.
+           attested held head nothing holds exits 45 where its checks were unread or none posted.
+           A DIRTY or BEHIND one also exits 45 where a required check has not registered. Exit 0
+           can then leave a required check unregistered only where the rules were unread, the
+           rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
@@ -144,7 +144,7 @@ Subcommands
            `CHECKS UNREADABLE` in the digest, or no check has posted. Or the merge reads DIRTY or
            BEHIND and a check the base branch's rules require has not registered, or came from
            another app. That last needs the rules read and a rollup read whole.
-           `status=CHECKS_NOT_RUN` names which. A DIRTY merge runs no pull_request workflow until
+           `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
            30 instead, and an empty rollup holds a BLOCKED, BEHIND, or DRAFT one.
            49 = no Copilot round covers this head and none was requested, the pull request
@@ -673,9 +673,11 @@ def parsed_json(proc: subprocess.CompletedProcess) -> object:
         return None
 
 
-def required_for(pr: dict, owner: str, repo: str) -> frozenset[tuple[str, int | None]]:
-    """The required entries a BLOCKED merge can be short of, empty wherever none can matter."""
-    if pr.get("mergeStateStatus") != "BLOCKED":
+def required_for(
+    pr: dict, owner: str, repo: str, gated: frozenset[str] = frozenset({"BLOCKED"})
+) -> frozenset[tuple[str, int | None]]:
+    """The required entries a merge in `gated` can be short of, empty wherever none can matter."""
+    if pr.get("mergeStateStatus") not in gated:
         return frozenset()
     return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
@@ -716,7 +718,7 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[tuple[str, 
     ):
         print(
             f"note: the rules for {base} were unread, so which checks they require is unknown and "
-            "this wait cannot hold for one that has not registered yet."
+            "this wait cannot judge one that has not registered."
         )
         return None
     return frozenset((e[0], e[1]) for e in entries)
@@ -2041,8 +2043,8 @@ def main(argv: list[str] | None = None) -> int:
             return 44
         merge = final.get("mergeStateStatus")
         unrun = checks_never_ran(final, checks) if covered else ""
-        if covered and not unrun and merge in ("DIRTY", "BEHIND"):
-            rules = required_contexts(owner, repo, final.get("baseRefName") or "") or frozenset()
+        if covered and not unrun and final.get("state", "OPEN") == "OPEN":
+            rules = required_for(final, owner, repo, frozenset({"DIRTY", "BEHIND"}))
             if unmet := required_unregistered(final, checks, rules):
                 unrun = (
                     "a check the base branch requires has not registered, or came from "
@@ -2050,11 +2052,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
         if unrun:
             print(
-                f"status=CHECKS_NOT_RUN an attested local pass covers this head and nothing holds "
-                f"the poll, but the merge reads {merge} and {unrun}, so the merge is not ready "
-                "and the poll does not clear it: a DIRTY merge runs no pull_request workflow "
-                "until its conflict is resolved, a BEHIND one may need the head updated from its "
-                "base, and a payload read off another commit wants status run again"
+                f"status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
+                f"the poll, but {unrun}, and the merge reading {merge} is not ready while the "
+                "poll does not clear it: a DIRTY merge runs no pull_request workflow until its "
+                "conflict is resolved, a BEHIND one may need the head updated from its base, and "
+                "a payload read off another commit wants wait run again"
             )
             return 45
         return 0

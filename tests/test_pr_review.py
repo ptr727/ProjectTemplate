@@ -3591,7 +3591,7 @@ class TestCli(GqlCase):
                 with mock.patch.object(pr_review.time, "sleep"):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
                 if code == 45:
-                    self.assertIn("status=CHECKS_NOT_RUN", self.out.getvalue())
+                    self.assertIn("status=CHECKS_MISSING", self.out.getvalue())
                     self.assertIn("no check has posted on the head", self.out.getvalue())
 
     def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
@@ -3691,9 +3691,48 @@ class TestCli(GqlCase):
                     self.assertEqual(45, self.cli(["wait", "7", "--timeout", "1"]))
                 slept.assert_not_called()
                 out = self.out.getvalue()
-                self.assertIn("status=CHECKS_NOT_RUN", out)
-                self.assertIn(f"merge reads {merge}", out)
+                self.assertIn("status=CHECKS_MISSING", out)
+                self.assertIn(f"merge reading {merge}", out)
                 self.assertIn("has not registered, or came from another app: Later workflow", out)
+
+    def test_a_released_head_exits_by_what_its_read_shows(self) -> None:
+        """Another app's check, an unread payload, an ungated merge, and a closed pull request."""
+        name = "Check pull request workflow status job"
+        other_app = json.dumps({"n": 1, "c": [[name, 999]]})
+        unread = payload([review(oid=OLD)], merge="DIRTY", checks=[check()], rollup_oid="d" * 40)
+        closed = payload([review(oid=OLD)], merge="DIRTY", checks=[check()])
+        cases = [
+            (
+                "another app",
+                payload([review(oid=OLD)], merge="BEHIND", checks=[check()]),
+                45,
+                "came from another app: " + name,
+            ),
+            ("unread payload", unread, 45, "no commit matching the head"),
+            ("closed", {**closed, "state": "CLOSED"}, 0, ""),
+        ] + [
+            (merge, payload([review(oid=OLD)], merge=merge, checks=[]), 0, "")
+            for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS")
+        ]
+        for label, pr, code, reason in cases:
+            with self.subTest(label):
+                pr_review.required_contexts.cache_clear()
+                self.out.seek(0)
+                self.out.truncate()
+                self.enterContext(
+                    mock.patch.object(
+                        pr_review,
+                        "gh_rest",
+                        return_value=subprocess.CompletedProcess([], 0, other_app, ""),
+                    )
+                )
+                self.answer(self.into(pr, attest=True))
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7", "--timeout", "1"]))
+                self.assertIn(reason, self.out.getvalue())
+                if code == 0:
+                    self.assertNotIn("status=CHECKS_MISSING", self.out.getvalue())
 
     def test_a_released_merge_exits_0_where_the_unregistered_check_is_unproven(self) -> None:
         """Unread rules, a cut rollup, and a DRAFT merge each leave registration unjudged."""
@@ -4014,7 +4053,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(45, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
-        self.assertIn("status=CHECKS_NOT_RUN", self.out.getvalue())
+        self.assertIn("status=CHECKS_MISSING", self.out.getvalue())
         self.assertIn("no commit matching the head", self.out.getvalue())
 
     def test_an_outside_answer_outranks_pending_after_a_mid_poll_request(self) -> None:
