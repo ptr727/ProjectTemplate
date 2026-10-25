@@ -817,15 +817,23 @@ class RegisterCase(unittest.TestCase):
         self.elsewhere = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.calls: list[list[str]] = []
         self.entries: list[dict[str, str]] | None = []
+        self.plugins: list[dict[str, object]] | None = []
+        self.results: dict[str, tuple[int, str]] = {}
 
     def run_register(self) -> bool:
+        def listing(entries: object) -> mock.Mock:
+            if entries is None:
+                return mock.Mock(returncode=1, stdout="", stderr="")
+            return mock.Mock(returncode=0, stdout=json.dumps(entries), stderr="")
+
         def fake_run(cmd: list[str], **_: object) -> mock.Mock:
             self.calls.append(cmd)
             if cmd[1:4] == ["plugin", "marketplace", "list"]:
-                if self.entries is None:
-                    return mock.Mock(returncode=1, stdout="", stderr="")
-                return mock.Mock(returncode=0, stdout=json.dumps(self.entries), stderr="")
-            return mock.Mock(returncode=0, stdout="", stderr="")
+                return listing(self.entries)
+            if cmd[1:3] == ["plugin", "list"]:
+                return listing(self.plugins)
+            returncode, stderr = self.results.get(cmd[2], (0, ""))
+            return mock.Mock(returncode=returncode, stdout="", stderr=stderr)
 
         mock.patch("subprocess.run", side_effect=fake_run).start()
         with contextlib.redirect_stderr(io.StringIO()) as err:
@@ -849,10 +857,41 @@ class RegisterCase(unittest.TestCase):
         self.assertTrue(self.added())
         self.assertTrue(self.installed())
 
-    def test_a_registration_from_this_checkout_is_re_added(self) -> None:
+    def test_a_registration_from_this_checkout_is_installed_without_a_re_add(self) -> None:
         self.registered_at(skills_install.ROOT)
         self.assertTrue(self.run_register())
-        self.assertTrue(self.added())
+        self.assertFalse(self.added())
+        self.assertTrue(self.installed())
+
+    def test_a_failed_add_fails_whatever_its_message_says(self) -> None:
+        """The exit status decides, so a message saying the marketplace exists is still a failure."""
+        for stderr in ("Marketplace already exists", "network unreachable"):
+            with self.subTest(stderr=stderr):
+                self.calls.clear()
+                self.results = {"marketplace": (1, stderr)}
+                self.assertFalse(self.run_register())
+                self.assertFalse(self.installed())
+                self.assertIn(stderr, self.stderr)
+
+    def test_a_plugin_the_listing_shows_installed_is_not_reinstalled(self) -> None:
+        plugin_id = f"{skills_install.PLUGIN_NAME}@{skills_install.MARKETPLACE_NAME}"
+        self.plugins = [{"id": plugin_id, "scope": "user", "enabled": True}]
+        self.results = {"install": (1, "Plugin already installed")}
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.installed())
+
+    def test_a_failed_install_fails_whatever_its_message_says(self) -> None:
+        """Where the listing shows no install, or cannot be read, the install's status decides."""
+        listings: tuple[list[dict[str, object]] | None, ...] = ([], None)
+        for plugins in listings:
+            for stderr in ("Plugin already installed", "manifest invalid"):
+                with self.subTest(plugins=plugins, stderr=stderr):
+                    self.calls.clear()
+                    self.plugins = plugins
+                    self.results = {"install": (1, stderr)}
+                    self.assertFalse(self.run_register())
+                    self.assertTrue(self.installed())
+                    self.assertIn(stderr, self.stderr)
 
     def test_a_registration_from_another_checkout_is_left_in_place(self) -> None:
         self.registered_at(self.elsewhere)

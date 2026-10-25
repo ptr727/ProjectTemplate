@@ -197,10 +197,15 @@ function Test-KeyAcl {
     return ($others.Count -eq 0)
 }
 
+function Test-GitHubKnownHost {
+    $null = (& ssh-keygen -F github.com 2>&1 | Out-String)
+    return ($LASTEXITCODE -eq 0)
+}
+
 function Add-KnownHost {
     step 'Checking that github.com is a known host'
     $known = Join-Path $HOME '.ssh\known_hosts'
-    if ((& ssh-keygen -F github.com 2>&1 | Out-String) -match 'found') {
+    if (Test-GitHubKnownHost) {
         info 'Already known'
         return
     }
@@ -486,9 +491,13 @@ function Show-AgentStatus {
 # Not being logged in is an answer rather than a failure, so the exit code is not the result.
 # Each entry marks whether it is active, and only the active one is what gh runs as, whichever account is listed first.
 function Get-GhAccount {
-    $auth = (& gh auth status --active --hostname github.com 2>&1 | Out-String)
     # Before 2.57 gh has no --active, and its full listing marks the active entry the same way.
-    if ($auth -match 'unknown flag: --active') { $auth = (& gh auth status --hostname github.com 2>&1 | Out-String) }
+    $null = (& gh auth status --active --help 2>&1 | Out-String)
+    if ($LASTEXITCODE -eq 0) {
+        $auth = (& gh auth status --active --hostname github.com 2>&1 | Out-String)
+    } else {
+        $auth = (& gh auth status --hostname github.com 2>&1 | Out-String)
+    }
     if ($auth -match 'Logged in to \S+ account (\S+)[^\r\n]*\r?\n\s*- Active account: true') { return $Matches[1] }
     return ''
 }
@@ -559,7 +568,7 @@ function Show-Status {
     elseif ($acl) { ok 'the key file is readable only by its owner' }
     else { missing "the key file is readable only by its owner, repair it with: icacls `"$($script:KEY)`" /inheritance:r /grant:r `"`$env:USERNAME:F`"" }
 
-    $known = (& ssh-keygen -F github.com 2>&1 | Out-String) -match 'found'
+    $known = Test-GitHubKnownHost
     Resolve-GitHubUser
     if ($script:GITHUB_USER) { ok "SSH authentication to GitHub, as $($script:GITHUB_USER)" }
     elseif (-not $known) { missing 'SSH authentication to GitHub, unchecked because github.com is not in known_hosts, which -Configure adds' }

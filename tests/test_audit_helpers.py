@@ -4237,6 +4237,33 @@ class OwnerReposCase(unittest.TestCase):
             audit.owner_repos("owner")
 
 
+class GhAbsenceCase(unittest.TestCase):
+    """Holds gh's reading of a 404 by its printed status notation rather than by its prose."""
+
+    def call(self, stderr: str, ok404: bool = True) -> Any:
+        failed = subprocess.CompletedProcess(["gh"], 1, "", stderr)
+        with mock.patch.object(audit.subprocess, "run", return_value=failed):
+            return audit.gh("repos/example/widget/contents/README.md", ok404=ok404)
+
+    def test_a_printed_404_reads_as_absence(self) -> None:
+        self.assertIsNone(self.call("gh: Not Found (HTTP 404)"))
+        self.assertIsNone(self.call("gh: something reworded (HTTP 404)"))
+
+    def test_prose_without_the_notation_is_an_unexpected_failure(self) -> None:
+        for stderr in ("gh: Not Found", "error: HTTP 404 from proxy", "dial tcp: lookup failed"):
+            with self.subTest(stderr=stderr), self.assertRaises(RuntimeError):
+                self.call(stderr)
+
+    def test_another_printed_status_is_an_unexpected_failure(self) -> None:
+        for stderr in ("gh: Forbidden (HTTP 403)", "gh: Validation Failed (HTTP 422)"):
+            with self.subTest(stderr=stderr), self.assertRaises(RuntimeError):
+                self.call(stderr)
+
+    def test_a_404_without_ok404_still_fails(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.call("gh: Not Found (HTTP 404)", ok404=False)
+
+
 class MembershipFindingsCase(unittest.TestCase):
     """Holds the registry membership findings against a faked owner_repos."""
 

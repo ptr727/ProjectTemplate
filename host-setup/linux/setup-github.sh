@@ -455,9 +455,10 @@ signing_works() {
 # Each entry marks whether it is active, and only the active one is what gh runs as, whichever account is listed first.
 gh_account() {
     local auth
-    auth=$(gh auth status --active --hostname github.com 2>&1 || true)
     # Before 2.57 gh has no --active, and its full listing marks the active entry the same way.
-    if [[ $auth == *"unknown flag: --active"* ]]; then
+    if gh auth status --active --help >/dev/null 2>&1; then
+        auth=$(gh auth status --active --hostname github.com 2>&1 || true)
+    else
         auth=$(gh auth status --hostname github.com 2>&1 || true)
     fi
     awk '/Logged in to [^ ]+ account |Failed to log in to / { entry = $0; next }
