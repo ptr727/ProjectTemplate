@@ -1406,19 +1406,23 @@ def baseline_file_findings(slug, ground, path, alternatives, item, is_hub):
     return (
         content,
         text,
-        check_intent_staleness(slug, ground, found, intent_canonical_rel(item, path), text),
+        check_intent_staleness(slug, ground, found, intent_canonical_rel(item, path), text, path),
     )
 
 
-def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
-    """The intent-staleness advisory: a last-modified comparison, since intent has no content check."""
+def check_intent_staleness(slug, ground, path, canonical_rel, down_text, hub_path=None):
+    """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
+
+    A copy content-identical to the canonical, or to the hub's own file at `hub_path` where the hub holds one, is current.
+    """
     hub_change = hub_last_change(canonical_rel)
     if hub_change is None:
         return []
     if down_text is not None:
-        canon_text = canonical_current_text(canonical_rel)
-        if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
-            return []
+        for rel in (canonical_rel, hub_path):
+            canon_text = canonical_current_text(rel) if rel else None
+            if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
+                return []
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ground}&per_page=1")
     if not commits:
         return []
@@ -1430,8 +1434,8 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
         (
             "DRIFT",
             (
-                f"intent: {path} last changed {repo_date} on {ground}, and the hub canonical "
-                f"changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
+                f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
+                f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
                 f"verify intent per AUDIT.md section 7"
             ),
         )
