@@ -2227,6 +2227,29 @@ class TestCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
+    def test_the_buildkit_check_directive_passes_both_scan_modes(self) -> None:
+        """BuildKit reads `check=` only in lowercase, so neither capitalizing nor deleting it is a fix.
+
+        The prose line is the control, showing each mode does judge line 1 of this file.
+        """
+        self.stand_down_setup()
+        dockerfile = self.tmp / "Dockerfile"
+        for line, case_code, added_code in (
+            ("# check=skip=CopyIgnoredFile\n", 0, 0),
+            ("# the base image is read once.\n", 1, 1),
+        ):
+            dockerfile.write_text(line + "\nFROM scratch\n", encoding="utf-8")
+            with (
+                self.subTest(line=line.strip()),
+                mock.patch.object(prose_lint, "discover", return_value=[dockerfile]),
+                mock.patch.object(prose_lint, "changed_lines", return_value={"Dockerfile": {1}}),
+            ):
+                whole = prose_lint.main(["--check", "comment-case", str(self.tmp)])
+                diff = prose_lint.main(
+                    ["--check", "comment-added", "--diff", "HEAD", str(self.tmp)]
+                )
+                self.assertEqual((case_code, added_code), (whole, diff))
+
     def test_the_rule_list_says_what_the_rule_does(self) -> None:
         """`--summary` and `--help` print this line, and it said the rule fires on an addition.
 
