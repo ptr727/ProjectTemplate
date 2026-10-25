@@ -15,7 +15,13 @@ carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending
 are what every repo owes regardless of language. The prose gate's `--diff HEAD` sees the staged
 state under this runner rather than the working tree, since `pre-commit` sets unstaged changes aside
 before it runs a hook, so a partially staged file is judged on its staged edits alone here where
-the Husky.Net shape judges all of them. The pull request gate reads every line the branch changes against its base. A repo with no Python drops the `ruff-format`,
+the Husky.Net shape judges all of them. That set-aside covers tracked files only. So the gate
+reads the paths `pre-commit` passes it rather than scanning `.`, which keeps an untracked file out
+of the check. Those are the staged paths, or the conflicted ones while a merge is in progress.
+`require_serial` keeps `pre-commit` from running the gate in parallel batches, each of which would
+fetch it again. A path named that way is judged even inside a generated tree. So the
+hook's `exclude` mirrors the gate's default `generated_trees`, and a repo adding to that list adds
+the same names there. The pull request gate reads every line the branch changes against its base. A repo with no Python drops the `ruff-format`,
 `ruff-check` and `type-check` hooks and keeps the doc gates, which is what a Docker, config, or
 docs repo wires.
 
@@ -42,8 +48,8 @@ spelling, EditorConfig) stays out of the hook: it runs in CI as pinned action wr
 demand via the VS Code **Lint** tasks. A Python repo takes those from
 `catalog/snippets/configs/vscode-tasks-python.json` (Docker at `:latest`), and a repo with no
 Python takes the Lint group alone rather than that file's Python tasks. Either way they carry
-the same prose/EOL gates in whole-repo mode for on-demand full-tree validation, not just the
-diff-scoped commit-time run.
+the prose gate in whole-repo mode, for on-demand full-tree validation beyond the diff-scoped
+commit-time run. Their `Lint: EOL` task runs the same whole-tree EOL check the hook runs.
 
 No LF pin is needed for `.pre-commit-config.yaml` itself: it is plain YAML, not a shebang
 script, so the fleet's `[*]` `.editorconfig`/`.gitattributes` default already covers it.

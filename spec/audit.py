@@ -566,13 +566,17 @@ def hub_repo_name() -> str:
     return hub_name()[0]
 
 
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+
+
 def gh(path, ok404=False) -> Any:
     """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body."""
     r = subprocess.run(
         ["gh", "api", path], capture_output=True, text=True, encoding="utf-8", check=False
     )
     if r.returncode != 0:
-        if ok404 and ("HTTP 404" in r.stderr or "Not Found" in r.stderr):
+        status = HTTP_STATUS.search(r.stderr)
+        if ok404 and status is not None and status.group(1) == "404":
             return None
         raise RuntimeError(
             f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}"
@@ -762,10 +766,15 @@ def repo_slug(entry):
     return f"{UNRESOLVED_OWNER}/{tail}"
 
 
+def workflow_model_of(entry, defaults):
+    """The registry's workflow model for entry, falling back to the defaults and then to release."""
+    return entry.get("workflowModel") or defaults.get("workflowModel") or "release"
+
+
 def repo_selectors(entry, defaults):
     """The scope-selector set a files.json appliesTo is matched against (see spec/scope-model.md)."""
     sel = set(declared_types(entry))
-    sel.add(entry.get("workflowModel") or defaults.get("workflowModel") or "release")
+    sel.add(workflow_model_of(entry, defaults))
     sel.add(entry.get("releaseTrigger") or defaults.get("releaseTrigger") or "two-phase")
     # The consumerModel field has no defaults fallback, since the registry schema does not allow defaults.consumerModel and validate.py requires it on every cataloged repo.
     cm = entry.get("consumerModel")
@@ -1014,6 +1023,37 @@ def python_directories_caller_findings(path, text, entry):
                 f"python-directories: {path} validate job passes {declared or 'none'}, registry "
                 f"declares {registry or 'none'}"
             ),
+        )
+    ]
+
+
+WORKFLOW_MODEL_CALLER = ".github/workflows/test-pull-request.yml"
+
+
+def workflow_model_caller_findings(path, text, model):
+    """DRIFT where a caller's `workflow-model` input disagrees with the registry's workflow model.
+
+    The input defaults to release, so a release caller may omit it, while an operational one must name itself.
+    """
+    if path != WORKFLOW_MODEL_CALLER:
+        return []
+    validate_job = job_nodes(text).get("validate")
+    if validate_job is None or "validate-task.yml" not in code_view(validate_job):
+        return []
+    node = _mapping(_mapping(validate_job).get("with")).get("workflow-model")
+    declared = None if node is None else _scalar_text(_plain(node))
+    structured = node is not None and declared is None
+    allowed = {"operational"} if model == "operational" else {None, "release"}
+    if declared in allowed and not structured:
+        return []
+    if structured:
+        passed = "a mapping or a sequence"
+    else:
+        passed = "none" if declared is None else repr(declared)
+    return [
+        (
+            "DRIFT",
+            f"workflow-model: {path} validate job passes {passed}, registry declares {model}",
         )
     ]
 
@@ -1406,19 +1446,31 @@ def baseline_file_findings(slug, ground, path, alternatives, item, is_hub):
     return (
         content,
         text,
-        check_intent_staleness(slug, ground, found, intent_canonical_rel(item, path), text),
+        check_intent_staleness(
+            slug,
+            ground,
+            found,
+            intent_canonical_rel(item, path),
+            text,
+            None if item.get("reference") else path,
+        ),
     )
 
 
-def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
-    """The intent-staleness advisory: a last-modified comparison, since intent has no content check."""
+def check_intent_staleness(slug, ground, path, canonical_rel, down_text, hub_path=None):
+    """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
+
+    A copy content-identical to the canonical, or to the hub's own file at `hub_path` where the hub holds one, is current.
+    A unit naming a `reference` passes no `hub_path`, since it is judged against that reference alone.
+    """
     hub_change = hub_last_change(canonical_rel)
     if hub_change is None:
         return []
     if down_text is not None:
-        canon_text = canonical_current_text(canonical_rel)
-        if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
-            return []
+        for rel in (canonical_rel, hub_path):
+            canon_text = canonical_current_text(rel) if rel else None
+            if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
+                return []
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ground}&per_page=1")
     if not commits:
         return []
@@ -1430,8 +1482,8 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text):
         (
             "DRIFT",
             (
-                f"intent: {path} last changed {repo_date} on {ground}, and the hub canonical "
-                f"changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
+                f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
+                f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
                 f"verify intent per AUDIT.md section 7"
             ),
         )
@@ -1717,11 +1769,7 @@ def check_settings_general(run):
 
 
 def check_rulesets_payload(run):
-    model = (
-        run.entry.get("workflowModel")
-        or run.spec["registry"].get("defaults", {}).get("workflowModel")
-        or "release"
-    )
+    model = workflow_model_of(run.entry, run.spec["registry"].get("defaults", {}))
     dev_payload = (
         "repo-config/operational/develop.json"
         if model == "operational"
@@ -1875,6 +1923,13 @@ def check_interface_python_directories(run, path):
     if _fidelity(run, path)[1] != "interface" or run.content[path] is None:
         return []
     return python_directories_caller_findings(path, run.content[path], run.entry)
+
+
+def check_interface_workflow_model(run, path):
+    if _fidelity(run, path)[1] != "interface" or run.content[path] is None:
+        return []
+    model = workflow_model_of(run.entry, run.spec["registry"].get("defaults", {}))
+    return workflow_model_caller_findings(path, run.content[path], model)
 
 
 def check_interface_concurrency(run, path):
@@ -2409,11 +2464,7 @@ def main(argv=None):
         print()
 
     for entry in repos:
-        model = (
-            entry.get("workflowModel")
-            or spec["registry"].get("defaults", {}).get("workflowModel")
-            or "release"
-        )
+        model = workflow_model_of(entry, reg_defaults)
         ground = ground_branch_of(entry, a.branch, reg_defaults)
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)

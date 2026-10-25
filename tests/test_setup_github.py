@@ -69,11 +69,13 @@ GH_STUB = r"""#!/bin/sh
 here=$(dirname "$0")
 printf '%s\n' "$*" >>"$here/calls"
 case "$*" in
-"auth status --active --hostname github.com")
+"auth status --active --help")
     if [ -e "$here/old" ]; then
         echo "unknown flag: --active" >&2
         exit 1
     fi
+    ;;
+"auth status --active --hostname github.com")
     cat "$here/active"
     exit "$(cat "$here/active.rc")"
     ;;
@@ -216,7 +218,16 @@ class TestLinuxGitHubCli(unittest.TestCase):
         self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}\n", result.stdout)
         self.assertEqual(
             self.calls()[:2],
-            ["auth status --active --hostname github.com", "auth status --hostname github.com"],
+            ["auth status --active --help", "auth status --hostname github.com"],
+        )
+
+    def test_a_gh_taking_active_reads_the_active_listing(self) -> None:
+        self.state(ACCOUNT, "https", second=SECOND)
+        result = self.run_bash("report_gh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.calls()[:2],
+            ["auth status --active --help", "auth status --active --hostname github.com"],
         )
 
     def test_the_opt_in_with_a_broken_active_account_writes_nothing(self) -> None:
@@ -296,18 +307,37 @@ class TestLinuxGitHubCli(unittest.TestCase):
         )
 
 
-WINDOWS_HARNESS = r"""
-param([string]$Script, [string]$Cases)
+def windows_harness(params: str, functions: list[str], body: str) -> str:
+    """A pwsh harness taking `params` that dot-sources `functions` out of the script, then runs `body`."""
+    wanted = ", ".join(f"'{name}'" for name in functions)
+    return f"""
+param([string]$Script, {params})
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$tokens, [ref]$errors)
-if ($errors.Count -gt 0) { throw "setup-github.ps1 does not parse: $($errors[0].Message)" }
-$wanted = @('log', 'info', 'step', 'ok', 'missing', 'run', 'Get-GhAccount', 'Get-GhProtocol', 'Show-GhStatus', 'Set-GhProtocol')
-foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+if ($errors.Count -gt 0) {{ throw "setup-github.ps1 does not parse: $($errors[0].Message)" }}
+$wanted = @({wanted})
+foreach ($definition in $ast.FindAll({{ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }}, $true)) {{
     . ([scriptblock]::Create($definition.Extent.Text))
-}
+}}
+{body}"""
+
+
+WINDOWS_FUNCTIONS = [
+    "log",
+    "info",
+    "step",
+    "ok",
+    "missing",
+    "run",
+    "Get-GhAccount",
+    "Get-GhProtocol",
+    "Show-GhStatus",
+    "Set-GhProtocol",
+]
+WINDOWS_BODY = r"""
 # The remedy command is read from the script itself rather than restated, so the two cannot drift apart.
 foreach ($statement in $ast.EndBlock.Statements) {
     if ($statement -is [System.Management.Automation.Language.AssignmentStatementAst] -and $statement.Left.Extent.Text -in '$GH_PROTOCOL_ARGUMENTS', '$GH_PROTOCOL_COMMAND') {
@@ -317,15 +347,18 @@ foreach ($statement in $ast.EndBlock.Statements) {
 function die { param([string]$Message) throw "die: $Message" }
 function warn { param([string]$Message) Write-Host "WARNING: $Message" }
 
-# A gh answering the three calls the script makes from $script:Stub, and recording each call.
+# A gh answering the calls the script makes from $script:Stub, and recording each call.
 # Installed as the gh function per case rather than as a file on PATH, so the same stub runs on every platform.
 $GhStub = {
     $script:Calls += ($args -join ' ')
     $global:LASTEXITCODE = 0
     $line = $args -join ' '
     switch ($line) {
-        'auth status --active --hostname github.com' {
+        'auth status --active --help' {
             if ($script:Stub.oldGh) { $global:LASTEXITCODE = 1; return 'unknown flag: --active' }
+            return
+        }
+        'auth status --active --hostname github.com' {
             $global:LASTEXITCODE = $script:Stub.activeRc
             return $script:Stub.active
         }
@@ -475,6 +508,14 @@ def windows_case(case: dict[str, object]) -> dict[str, object]:
     return full
 
 
+KNOWN_HOST_BODY = r"""
+function ssh-keygen { $global:LASTEXITCODE = $Code; return $Output }
+$script:DRY_RUN = $true
+"known=$(Test-GitHubKnownHost)"
+Add-KnownHost 6>&1 | ForEach-Object { "$_" }
+"""
+
+
 def run_pwsh(arguments: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["pwsh", "-NoProfile", "-NonInteractive", *arguments],
@@ -487,6 +528,36 @@ def run_pwsh(arguments: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows script's own functions")
+class TestWindowsKnownHost(unittest.TestCase):
+    """Whether github.com is known is `ssh-keygen -F`'s exit status alone, for every caller."""
+
+    def add_known_host(self, code: int, output: str) -> str:
+        with tempfile.TemporaryDirectory() as directory:
+            harness = Path(directory, "harness.ps1")
+            text = windows_harness(
+                "[int]$Code, [string]$Output",
+                ["log", "info", "step", "Test-GitHubKnownHost", "Add-KnownHost"],
+                KNOWN_HOST_BODY,
+            )
+            harness.write_text(text, encoding="utf-8")
+            arguments = ["-Script", str(WINDOWS_SCRIPT), "-Code", str(code), "-Output", output]
+            result = run_pwsh(["-File", str(harness), *arguments])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_a_found_host_is_already_known(self) -> None:
+        output = self.add_known_host(0, "# Host github.com found: line 1")
+        self.assertIn("known=True", output)
+        self.assertIn("Already known", output)
+
+    def test_a_failure_whose_output_says_found_is_not_known(self) -> None:
+        output = self.add_known_host(255, "known_hosts not found")
+        self.assertIn("known=False", output)
+        self.assertNotIn("Already known", output)
+        self.assertIn("Adding the github.com host keys", output)
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows script's own functions")
 class TestWindowsGitHubCli(unittest.TestCase):
     """`setup-github.ps1`'s GitHub CLI report and opt-in, with `gh` stubbed as a function."""
 
@@ -496,7 +567,8 @@ class TestWindowsGitHubCli(unittest.TestCase):
     def setUpClass(cls) -> None:
         with tempfile.TemporaryDirectory() as directory:
             harness = Path(directory, "harness.ps1")
-            harness.write_text(WINDOWS_HARNESS, encoding="utf-8")
+            text = windows_harness("[string]$Cases", WINDOWS_FUNCTIONS, WINDOWS_BODY)
+            harness.write_text(text, encoding="utf-8")
             cases = Path(directory, "cases.json")
             # Every case carries every field, since the harness reads them under strict mode.
             full = [windows_case(case) for case in WINDOWS_CASES]
@@ -603,7 +675,13 @@ class TestWindowsGitHubCli(unittest.TestCase):
         self.assertIn(f"  [ ok ] authenticated as {ACCOUNT}", self.output("two-accounts-old"))
         self.assertEqual(
             self.results["two-accounts-old"]["calls"][:2],
-            ["auth status --active --hostname github.com", "auth status --hostname github.com"],
+            ["auth status --active --help", "auth status --hostname github.com"],
+        )
+
+    def test_a_gh_taking_active_reads_the_active_listing(self) -> None:
+        self.assertEqual(
+            self.results["broken-active"]["calls"][:2],
+            ["auth status --active --help", "auth status --active --hostname github.com"],
         )
 
     def test_the_opt_in_with_a_broken_active_account_writes_nothing(self) -> None:

@@ -2792,6 +2792,63 @@ class GroundTruthCase(unittest.TestCase):
             none_findings, want_none, f"baseline_file_findings, neither -> {none_findings}"
         )
 
+    def test_intent_staleness_skips_a_copy_matching_the_hub_file_at_path(self) -> None:
+        unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
+        texts = {"DOC.md": "the doc", "widget.json": "same"}
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
+        for held, want in (
+            (content, 0),
+            ({**content, "content": base64.b64encode(b"x").decode()}, 1),
+        ):
+            with (
+                mock.patch.object(
+                    audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+                ),
+                mock.patch.object(audit, "canonical_current_text", texts.get),
+                mock.patch.object(
+                    audit,
+                    "gh",
+                    lambda ep, ok404=False, held=held: commit if "commits" in ep else held,
+                ),
+            ):
+                _, _, findings = audit.baseline_file_findings(
+                    "o/r", "main", "widget.json", [], unit, False
+                )
+            self.assertEqual(len(findings), want, f"intentRef unit, held={held} -> {findings}")
+
+    def test_intent_staleness_reference_unit_ignores_the_hub_file_at_path(self) -> None:
+        unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
+        texts = {"snip/w.yml": "snippet", "w.yml": "same"}
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
+        with (
+            mock.patch.object(
+                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+            ),
+            mock.patch.object(audit, "canonical_current_text", texts.get),
+            mock.patch.object(
+                audit, "gh", lambda ep, ok404=False: commit if "commits" in ep else content
+            ),
+        ):
+            _, _, findings = audit.baseline_file_findings("o/r", "main", "w.yml", [], unit, False)
+        self.assertEqual(len(findings), 1, f"reference unit -> {findings}")
+
+    def test_intent_staleness_message_names_the_intent_canonical(self) -> None:
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        with (
+            mock.patch.object(
+                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+            ),
+            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
+            mock.patch.object(audit, "gh", lambda ep, ok404=False: commit),
+        ):
+            findings = audit.check_intent_staleness(
+                "o/r", "main", "w.json", "DOC.md", "x", "w.json"
+            )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
+
     def test_declared_alternatives_on_the_live_manifest(self) -> None:
         live_alts = audit.declared_alternatives(audit.load("spec/files.json")["baseline"])
         self.assertEqual(
@@ -3681,6 +3738,70 @@ class PythonDirectoriesCase(unittest.TestCase):
         self.assertEqual(escaped_got, [], "an escaped double-quoted value is decoded")
 
 
+class WorkflowModelCallerFindingsCase(unittest.TestCase):
+    """Holds the pull request caller's workflow-model input against the registry's model."""
+
+    path = ".github/workflows/test-pull-request.yml"
+    caller = (
+        "jobs:\n  validate:\n    uses: o/h/.github/workflows/validate-task.yml@x\n{0}"
+        "  check-workflow-status:\n    runs-on: ubuntu-latest\n"
+    )
+
+    def findings(self, with_block, model, path=None):
+        text = self.caller.format(with_block)
+        return audit.workflow_model_caller_findings(path or self.path, text, model)
+
+    def test_operational_caller_passing_operational_is_clean(self) -> None:
+        got = self.findings("    with:\n      workflow-model: operational\n", "operational")
+        self.assertEqual(got, [])
+
+    def test_operational_caller_without_the_input_drifts(self) -> None:
+        got = self.findings("", "operational")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0][0], "DRIFT")
+        self.assertIn("passes none, registry declares operational", got[0][1])
+
+    def test_release_caller_passing_another_value_drifts(self) -> None:
+        got = self.findings("    with:\n      workflow-model: operational\n", "release")
+        self.assertEqual(len(got), 1)
+        self.assertIn("passes 'operational', registry declares release", got[0][1])
+
+    def test_release_caller_omitting_or_naming_release_is_clean(self) -> None:
+        self.assertEqual(self.findings("", "release"), [])
+        self.assertEqual(self.findings("    with:\n      workflow-model: release\n", "release"), [])
+
+    def test_an_empty_value_is_not_the_default(self) -> None:
+        got = self.findings("    with:\n      workflow-model: ''\n", "release")
+        self.assertEqual(len(got), 1)
+
+    def test_a_structured_value_is_not_the_default(self) -> None:
+        got = self.findings("    with:\n      workflow-model: {model: release}\n", "release")
+        self.assertEqual(len(got), 1)
+        self.assertIn("passes a mapping or a sequence, registry declares release", got[0][1])
+
+    def test_other_callers_and_jobs_are_not_read(self) -> None:
+        publisher = ".github/workflows/publish-release.yml"
+        self.assertEqual(self.findings("", "operational", publisher), [])
+        no_task = "jobs:\n  validate:\n    runs-on: ubuntu-latest\n"
+        self.assertEqual(
+            audit.workflow_model_caller_findings(self.path, no_task, "operational"), []
+        )
+
+    def test_the_no_build_snippet_is_an_operational_caller(self) -> None:
+        snippet = audit.ROOT / "catalog" / "snippets" / "workflows" / "test-pull-request.yml"
+        text = snippet.read_text(encoding="utf-8")
+        self.assertEqual(audit.workflow_model_caller_findings(self.path, text, "operational"), [])
+
+    def test_the_model_falls_back_to_defaults_then_release(self) -> None:
+        self.assertEqual(
+            audit.workflow_model_of({"workflowModel": "operational"}, {}), "operational"
+        )
+        self.assertEqual(
+            audit.workflow_model_of({}, {"workflowModel": "operational"}), "operational"
+        )
+        self.assertEqual(audit.workflow_model_of({}, {}), "release")
+
+
 class ConcurrencyCallerFindingsCase(unittest.TestCase):
     """Holds the publisher and merge-bot concurrency group checks."""
 
@@ -4178,6 +4299,33 @@ class OwnerReposCase(unittest.TestCase):
         fake = lambda path, ok404=False: {"login": "owner"} if path == "user" else None
         with mock.patch.object(audit, "gh", fake), self.assertRaises(RuntimeError):
             audit.owner_repos("owner")
+
+
+class GhAbsenceCase(unittest.TestCase):
+    """Holds gh's reading of a 404 by its printed status notation rather than by its prose."""
+
+    def call(self, stderr: str, ok404: bool = True) -> Any:
+        failed = subprocess.CompletedProcess(["gh"], 1, "", stderr)
+        with mock.patch.object(audit.subprocess, "run", return_value=failed):
+            return audit.gh("repos/example/widget/contents/README.md", ok404=ok404)
+
+    def test_a_printed_404_reads_as_absence(self) -> None:
+        self.assertIsNone(self.call("gh: Not Found (HTTP 404)"))
+        self.assertIsNone(self.call("gh: something reworded (HTTP 404)"))
+
+    def test_prose_without_the_notation_is_an_unexpected_failure(self) -> None:
+        for stderr in ("gh: Not Found", "error: HTTP 404 from proxy", "dial tcp: lookup failed"):
+            with self.subTest(stderr=stderr), self.assertRaises(RuntimeError):
+                self.call(stderr)
+
+    def test_another_printed_status_is_an_unexpected_failure(self) -> None:
+        for stderr in ("gh: Forbidden (HTTP 403)", "gh: Validation Failed (HTTP 422)"):
+            with self.subTest(stderr=stderr), self.assertRaises(RuntimeError):
+                self.call(stderr)
+
+    def test_a_404_without_ok404_still_fails(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.call("gh: Not Found (HTTP 404)", ok404=False)
 
 
 class MembershipFindingsCase(unittest.TestCase):

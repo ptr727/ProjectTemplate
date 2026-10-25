@@ -109,7 +109,7 @@
       "repo-config/main.json", "repo-config/operational/develop.json", "repo-config/settings.json", "spec/secrets.json"
     ],
     "tool_directives": [
-      "syntax=", "escape=", "fmt:\\s*(?:on|off|skip)\\b", "pragma:", "nosec\\b", "checkov:", "hadolint\\b", "renovate:",
+      "syntax=", "escape=", "check=", "fmt:\\s*(?:on|off|skip)\\b", "pragma:", "nosec\\b", "checkov:", "hadolint\\b", "renovate:",
       "yaml-language-server:", "-\\*-\\s*coding[:=]", "pyright:", "isort:", "codespell:", "doctest:"
     ]
   },

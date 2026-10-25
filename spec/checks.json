@@ -15,6 +15,7 @@
         { "id": "files.presence", "family": "files", "description": "Each baseline file, or a declared alternative, is present, with its intent staleness advisory.", "spec": "spec/files.json", "hub": true, "scope": "baseline" },
         { "id": "interface.contract", "family": "interface", "description": "An interface workflow keeps its contract's job keys, check name, and tokens.", "spec": "spec/files.json", "hub": true, "scope": "file" },
         { "id": "interface.python-directories", "family": "interface", "description": "A caller's python-directories input matches the registry's pythonDirectories.", "spec": "registry/repos.json", "hub": true, "scope": "file" },
+        { "id": "interface.workflow-model", "family": "interface", "description": "The pull request caller's workflow-model input matches the registry's workflowModel.", "spec": "registry/repos.json", "hub": true, "scope": "file" },
         { "id": "interface.concurrency", "family": "interface", "description": "The publisher's and the merge-bot's concurrency group is the one WORKFLOW.md pins.", "spec": "WORKFLOW.md", "hub": true, "scope": "file" },
         { "id": "verbatim.jobs", "family": "verbatim", "description": "Each job a contract pins verbatim matches the hub canonical.", "spec": "spec/files.json", "hub": true, "scope": "file" },
         { "id": "verbatim.file", "family": "verbatim", "description": "A verbatim file matches the hub canonical.", "spec": "spec/files.json", "hub": true, "scope": "file" },

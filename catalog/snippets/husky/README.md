@@ -24,12 +24,13 @@ what it runs, and the two shared doc gates are what every repo owes either way.
 
 Full linting (workflow YAML, Markdown, spelling, EditorConfig) is **not** run in the hook. It
 runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tasks in
-`catalog/snippets/configs/vscode-tasks.json` (Docker at `:latest`), which also carries the
-same prose/EOL gates in whole-repo mode for on-demand full-tree validation, not just the
-diff-scoped commit-time run. Keeping the Docker-dependent doc linters out of the hook is what
-keeps it fast, and Docker is the dependency it stays free of: the hook still needs network
-for the two `hub_fetch_run.py` calls above, so a fully offline clone fails the commit loudly
-on the fetch rather than silently skipping the doc gates.
+`catalog/snippets/configs/vscode-tasks.json` (Docker at `:latest`). That file also carries the
+prose gate in whole-repo mode, for on-demand full-tree validation beyond the diff-scoped
+commit-time run. Its `Lint: EOL` task runs the same whole-tree EOL check the hook runs.
+Keeping the Docker-dependent doc linters out of the hook is what keeps it fast. Docker is the
+dependency it stays free of, though the hook still needs network for the two
+`hub_fetch_run.py` calls above. A fully offline clone therefore fails the commit loudly on the
+fetch rather than silently skipping the doc gates.
 
 A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in
 `.gitattributes` (`.husky/pre-commit text eol=lf`), git-level enforcement independent of the

@@ -330,12 +330,13 @@ def register_claude_marketplace():
                 file=sys.stderr,
             )
             return install_claude_plugin()
-        if not same_directory(location, ROOT):
-            print(
-                f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
-                f"which is no longer a directory. Registering it from {ROOT}.",
-                file=sys.stderr,
-            )
+        if same_directory(location, ROOT):
+            return install_claude_plugin()
+        print(
+            f"Claude Code marketplace '{MARKETPLACE_NAME}' was registered from {location}, "
+            f"which is no longer a directory. Registering it from {ROOT}.",
+            file=sys.stderr,
+        )
 
     marketplace_add = subprocess.run(
         ["claude", "plugin", "marketplace", "add", str(ROOT)],
@@ -344,20 +345,21 @@ def register_claude_marketplace():
         encoding="utf-8",
         check=False,
     )
-    # Re-adding an already-registered marketplace is expected on a re-run.
-    # Only a genuine failure (not "already exists") is fatal, since idempotence is the point.
-    if (
-        marketplace_add.returncode != 0
-        and "already" not in marketplace_add.stdout.lower()
-        and "already" not in marketplace_add.stderr.lower()
-    ):
+    if marketplace_add.returncode != 0:
         print(marketplace_add.stdout, marketplace_add.stderr, file=sys.stderr)
         return False
     return install_claude_plugin()
 
 
 def install_claude_plugin():
-    """Install this marketplace's plugin at user scope, from wherever the marketplace is registered."""
+    """Install this marketplace's plugin at user scope, from wherever the marketplace is registered.
+
+    A plugin the listing already shows installed is left as it is. A re-run reads that from
+    `claude plugin list` rather than from the wording of a failed install. Where the listing
+    cannot be read, the install runs and its exit status alone decides.
+    """
+    if plugin_state()["installed"]:
+        return True
     install = subprocess.run(
         ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
         capture_output=True,
@@ -365,11 +367,7 @@ def install_claude_plugin():
         encoding="utf-8",
         check=False,
     )
-    if (
-        install.returncode != 0
-        and "already" not in install.stdout.lower()
-        and "already" not in install.stderr.lower()
-    ):
+    if install.returncode != 0:
         print(install.stdout, install.stderr, file=sys.stderr)
         return False
     return True
@@ -481,26 +479,41 @@ def marketplace_channel():
     }
 
 
-def no_snapshot(reason):
-    """Report a copy that cannot be read, still answering the live channel, which needs no stamp."""
-    snapshot = {"current": False, "reason": reason}
+def no_snapshot(reason, intended_rev=None):
+    """Report a copy that cannot be read, still answering the live channel, which needs no stamp.
+
+    The snapshot carries the same keys as a judged one, null where the stamp would have said, so a
+    parser reads one shape. The intended revision resolves here too, since it needs no stamp either.
+    """
+    intended, intended_ref = intended_commit(intended_rev)
+    snapshot = {
+        "installedFrom": None,
+        "installedDirty": None,
+        "intended": intended,
+        "intendedRef": intended_ref if intended else intended_rev,
+        "current": False,
+        "reason": reason,
+    }
     print(json.dumps({"stamp": None, "snapshot": snapshot, "live": live_channel()}, indent=2))
     return 1
 
 
 def report(stamp_path, intended_rev=None):
     if not stamp_path.is_file():
-        return no_snapshot("Not installed on this machine (no stamp found).")
+        return no_snapshot("Not installed on this machine (no stamp found).", intended_rev)
     try:
         stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return no_snapshot(f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.")
+        return no_snapshot(
+            f"Stamp at {stamp_path} is unreadable ({exc}). Re-run the installer.", intended_rev
+        )
     # A non-dict JSON value (an array, a bare string) is a shape this reader does not know.
     # So is an unrecognized stampVersion, not merely a plain missing/dirty install.
     if not isinstance(stamp, dict) or stamp.get("stampVersion") != STAMP_VERSION:
         return no_snapshot(
             f"Stamp at {stamp_path} is not a recognized shape (stampVersion {STAMP_VERSION} expected). "
-            "Re-run the installer."
+            "Re-run the installer.",
+            intended_rev,
         )
     # A dict-shaped stamp can still carry a non-dict "source" (a stray string, a number).
     # Calling .get("commit") on that would crash instead of reading as not current like every other unrecognized-shape case here does.

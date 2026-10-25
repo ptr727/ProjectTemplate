@@ -2227,6 +2227,32 @@ class TestCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual([], self.kinds(line, {"comment-added"}, name="tool.py"))
 
+    def test_the_buildkit_check_directive_passes_both_scan_modes(self) -> None:
+        """Deleting the BuildKit `check=` line changes the build, so it is not prose in either mode.
+
+        Capitalizing it would quiet only `comment-case`, and `comment-added` would still ask for
+        the deletion. The prose line is the control, showing each mode does judge line 1 here. The
+        stand-down is pinned off, so a developer's exported one cannot drop `comment-added`.
+        """
+        self.stand_down_setup()
+        self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
+        dockerfile = self.tmp / "Dockerfile"
+        for line, case_code, added_code in (
+            ("# check=skip=CopyIgnoredFile\n", 0, 0),
+            ("# the base image is read once.\n", 1, 1),
+        ):
+            dockerfile.write_text(line + "\nFROM scratch\n", encoding="utf-8")
+            with (
+                self.subTest(line=line.strip()),
+                mock.patch.object(prose_lint, "discover", return_value=[dockerfile]),
+                mock.patch.object(prose_lint, "changed_lines", return_value={"Dockerfile": {1}}),
+            ):
+                whole = prose_lint.main(["--check", "comment-case", str(self.tmp)])
+                diff = prose_lint.main(
+                    ["--check", "comment-added", "--diff", "HEAD", str(self.tmp)]
+                )
+                self.assertEqual((case_code, added_code), (whole, diff))
+
     def test_the_rule_list_says_what_the_rule_does(self) -> None:
         """`--summary` and `--help` print this line, and it said the rule fires on an addition.
 

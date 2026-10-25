@@ -13,6 +13,7 @@ Run under `uv run --no-project --with-requirements tests/requirements.txt`, as
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import inspect
 import io
@@ -24,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
@@ -31,11 +33,22 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_review
+import pr_review_checks
+import pr_review_rounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
+from import_probe import import_delta
 
 REPO = Path(__file__).resolve().parent.parent
+# The gate and the reader modules it imports, which every whole-source guard below reads together.
+GATE_SOURCES = ("pr_review.py", "pr_review_checks.py", "pr_review_rounds.py")
+# What a reader module may import: the standard library it parses with, and the reviewer adapter.
+READER_IMPORTS = frozenset({"__future__", "collections", "datetime", "re", "pr_review_copilot"})
+# One import each reader module is known to make, the floor under the allowlist above.
+READER_FLOORS = {"pr_review_checks": "datetime", "pr_review_rounds": "pr_review_copilot"}
+# What a reader must never load, directly or through the adapter.
+REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
 CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "fleet-code-review" / "SKILL.md"
@@ -83,7 +96,7 @@ BACKTRACK_BOUND = 3.0
 
 
 def review(
-    login: str = pr_review.REVIEWER,
+    login: str = pr_review_rounds.REVIEWER,
     oid: str | None = HEAD,
     body: str = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
     at: str = EARLY,
@@ -105,7 +118,7 @@ def request_state(pending: bool = False, events: tuple[str, ...] = ()) -> dict:
     `events` are the ids of review-request events naming the reviewer, oldest first. The request
     set carries the reviewer where `pending` is true.
     """
-    bot = {"__typename": "Bot", "login": pr_review.REVIEWER}
+    bot = {"__typename": "Bot", "login": pr_review_rounds.REVIEWER}
     return {
         "reviewRequests": {"nodes": [{"requestedReviewer": bot}] if pending else []},
         "timelineItems": {"nodes": [{"id": e, "requestedReviewer": bot} for e in events]},
@@ -137,7 +150,11 @@ def hist_review(number: int, body: str, at: str = LATE) -> dict:
         "reviews": {
             "nodes": [
                 {
-                    "author": {"__typename": "Bot", "login": pr_review.REVIEWER, "id": "BOT_1"},
+                    "author": {
+                        "__typename": "Bot",
+                        "login": pr_review_rounds.REVIEWER,
+                        "id": "BOT_1",
+                    },
                     "state": "COMMENTED",
                     "body": body,
                     "submittedAt": at,
@@ -149,7 +166,7 @@ def hist_review(number: int, body: str, at: str = LATE) -> dict:
 
 
 def comment(
-    login: str = pr_review.REVIEWER,
+    login: str = pr_review_rounds.REVIEWER,
     at: str = LATE,
     body: str = "I have reached my quota limit and cannot review this now.",
 ) -> dict:
@@ -166,7 +183,7 @@ def unplaced(finding: str = "The retry bound is off by one.") -> str:
 
 def ack(fp: str, association: str, text: str | None = None) -> dict:
     """A conversation comment acknowledging the unplaced set under `fp`, by `association`."""
-    written = f"Fixed in abc1234: the bound.\n\n{pr_review.ACK_MARKER.format(fp)}"
+    written = f"Fixed in abc1234: the bound.\n\n{pr_review_rounds.ACK_MARKER.format(fp)}"
     return {
         "author": {"login": "maintainer"},
         "authorAssociation": association,
@@ -254,7 +271,7 @@ RATE_LIMITED_REPLY_COMMENT = (
 def thread(
     tid: str,
     resolved: bool = False,
-    login: str = pr_review.REVIEWER,
+    login: str = pr_review_rounds.REVIEWER,
     body: str = "A finding.",
     path: str = "a.py",
     line: int = 1,
@@ -378,7 +395,7 @@ def payload(
     more_threads: bool = False,
 ) -> dict:
     requested = (
-        [{"requestedReviewer": {"__typename": "Bot", "login": pr_review.REVIEWER}}]
+        [{"requestedReviewer": {"__typename": "Bot", "login": pr_review_rounds.REVIEWER}}]
         if pending
         else []
     )
@@ -521,7 +538,7 @@ class TestAnsweredOutsideReview(unittest.TestCase):
     """A refusal answers the request without covering the head, so a wait cannot read it as pending."""
 
     def test_a_reviewer_comment_newer_than_every_review_is_the_answer(self) -> None:
-        answer = pr_review.answered_outside_review(
+        answer = pr_review_rounds.answered_outside_review(
             payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)])
         )
         self.assertIsNotNone(answer)
@@ -530,7 +547,7 @@ class TestAnsweredOutsideReview(unittest.TestCase):
     def test_an_answer_the_reviewer_then_superseded_is_spent(self) -> None:
         """The review it preceded did land, so the comment is history rather than a stop signal."""
         self.assertIsNone(
-            pr_review.answered_outside_review(
+            pr_review_rounds.answered_outside_review(
                 payload([review(at=LATE)], comments=[comment(at=EARLY)])
             )
         )
@@ -540,18 +557,18 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         for login in ("ptr727", "codecov[bot]", "copilot-swe-agent"):
             with self.subTest(login=login):
                 self.assertIsNone(
-                    pr_review.answered_outside_review(
+                    pr_review_rounds.answered_outside_review(
                         payload([review(oid=OLD)], comments=[comment(login=login)])
                     )
                 )
 
     def test_no_comments_at_all_reads_as_no_answer(self) -> None:
-        self.assertIsNone(pr_review.answered_outside_review(payload([review(oid=OLD)])))
+        self.assertIsNone(pr_review_rounds.answered_outside_review(payload([review(oid=OLD)])))
 
     def test_ordinary_discussion_does_not_push_the_answer_out_of_the_window(self) -> None:
         """The window reads the newest comments, not the reviewer's, so others crowd it."""
         chatter = [comment(login="ptr727", at=LATE) for _ in range(pr_review.WINDOW - 1)]
-        found = pr_review.answered_outside_review(
+        found = pr_review_rounds.answered_outside_review(
             payload([review(oid=OLD, at=EARLY)], comments=[comment(at=LATE)] + chatter)
         )
         self.assertIsNotNone(found)
@@ -560,14 +577,18 @@ class TestAnsweredOutsideReview(unittest.TestCase):
         """Finding nothing and having nothing to find are one reading once an answer can hide."""
         full = [comment(login="ptr727") for _ in range(pr_review.WINDOW)]
         self.assertTrue(
-            pr_review.window_blind(payload([review()], comments=full, older=True), "comments")
+            pr_review_rounds.window_blind(
+                payload([review()], comments=full, older=True), "comments"
+            )
         )
 
     def test_a_window_holding_every_comment_is_not_a_gap(self) -> None:
         """A full window and a window holding the lot are the same length, so length cannot say."""
         full = [comment(login="ptr727") for _ in range(pr_review.WINDOW)]
         self.assertFalse(
-            pr_review.window_blind(payload([review()], comments=full, older=False), "comments")
+            pr_review_rounds.window_blind(
+                payload([review()], comments=full, older=False), "comments"
+            )
         )
 
     def test_reviews_behind_the_window_report_nothing_rather_than_a_false_answer(self) -> None:
@@ -581,8 +602,8 @@ class TestAnsweredOutsideReview(unittest.TestCase):
             comments=[comment(at=LATE)],
             older_reviews=True,
         )
-        self.assertTrue(pr_review.window_blind(pr, "reviews"))
-        self.assertIsNone(pr_review.answered_outside_review(pr))
+        self.assertTrue(pr_review_rounds.window_blind(pr, "reviews"))
+        self.assertIsNone(pr_review_rounds.answered_outside_review(pr))
 
     def test_one_reviewer_review_in_view_is_a_baseline_the_answer_can_be_dated_against(
         self,
@@ -594,22 +615,24 @@ class TestAnsweredOutsideReview(unittest.TestCase):
             comments=[comment(at=LATE)],
             older_reviews=True,
         )
-        self.assertFalse(pr_review.window_blind(pr, "reviews"))
-        self.assertIsNotNone(pr_review.answered_outside_review(pr))
+        self.assertFalse(pr_review_rounds.window_blind(pr, "reviews"))
+        self.assertIsNotNone(pr_review_rounds.answered_outside_review(pr))
 
     def test_one_spent_reviewer_comment_in_view_settles_the_question(self) -> None:
         """Comments arrive in creation order, so a hidden one is older than the spent one in view."""
         full = [comment(at=EARLY)] + [comment(login="ptr727") for _ in range(pr_review.WINDOW - 1)]
         pr = payload([review(at=LATE)], comments=full, older=True)
-        self.assertIsNone(pr_review.answered_outside_review(pr))
-        self.assertFalse(pr_review.window_blind(pr, "comments"))
+        self.assertIsNone(pr_review_rounds.answered_outside_review(pr))
+        self.assertFalse(pr_review_rounds.window_blind(pr, "comments"))
 
     def test_threads_truncated_reads_the_review_threads_page_info(self) -> None:
         """Unlike `window_blind`'s `last`-windowed connections, `reviewThreads` reads forward
         from the first page, so `hasNextPage` alone says a page was cut, with nothing in view
         to settle which end."""
-        self.assertTrue(pr_review.threads_truncated(payload([review()], more_threads=True)))
-        self.assertFalse(pr_review.threads_truncated(payload([review()], more_threads=False)))
+        self.assertTrue(pr_review_rounds.threads_truncated(payload([review()], more_threads=True)))
+        self.assertFalse(
+            pr_review_rounds.threads_truncated(payload([review()], more_threads=False))
+        )
 
 
 class TestDigest(GqlCase):
@@ -673,7 +696,7 @@ class TestDigest(GqlCase):
         self.answer(payload([review()], [orphan, thread("T2")]))
         out, unresolved = pr_review.digest("o", "r", 7)
         self.assertEqual(2, unresolved)
-        self.assertIn(f"unresolved=2 ({pr_review.REVIEWER}=1 other=1)", out)
+        self.assertIn(f"unresolved=2 ({pr_review_rounds.REVIEWER}=1 other=1)", out)
         self.assertIn("T1", out)
         self.assertIn("T2", out)
 
@@ -789,7 +812,7 @@ class TestOtherReviewers(GqlCase):
         self.answer(payload([review()], [thread("T1"), thread("T2", login="coderabbitai")]))
         out, unresolved = pr_review.digest("o", "r", 7)
         self.assertEqual(2, unresolved)
-        self.assertIn(f"unresolved=2 ({pr_review.REVIEWER}=1 coderabbitai=1)", out)
+        self.assertIn(f"unresolved=2 ({pr_review_rounds.REVIEWER}=1 coderabbitai=1)", out)
 
     def test_other_reviewed_names_only_the_bots_that_posted_on_this_exact_head(self) -> None:
         self.answer(
@@ -797,13 +820,13 @@ class TestOtherReviewers(GqlCase):
                 [
                     review(),
                     self.other_review("coderabbitai"),
-                    self.other_review(pr_review.QODO_LOGIN, oid=OLD),
+                    self.other_review(pr_review_rounds.QODO_LOGIN, oid=OLD),
                 ]
             )
         )
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("other_reviewed=coderabbitai", out)
-        self.assertNotIn(pr_review.QODO_LOGIN, out)
+        self.assertNotIn(pr_review_rounds.QODO_LOGIN, out)
 
     def test_other_reviewed_is_absent_where_neither_has_posted(self) -> None:
         """The common case, a repository not trialing either, stays silent rather than `none`."""
@@ -813,9 +836,11 @@ class TestOtherReviewers(GqlCase):
 
     def test_reviewer_nodes_defaults_to_copilot_but_reads_any_login_explicitly(self) -> None:
         pr = payload([review(), self.other_review("coderabbitai")])
-        self.assertEqual(1, len(pr_review.reviewer_nodes(pr, "reviews")))
-        self.assertEqual(1, len(pr_review.reviewer_nodes(pr, "reviews", "coderabbitai")))
-        self.assertEqual(0, len(pr_review.reviewer_nodes(pr, "reviews", pr_review.QODO_LOGIN)))
+        self.assertEqual(1, len(pr_review_rounds.reviewer_nodes(pr, "reviews")))
+        self.assertEqual(1, len(pr_review_rounds.reviewer_nodes(pr, "reviews", "coderabbitai")))
+        self.assertEqual(
+            0, len(pr_review_rounds.reviewer_nodes(pr, "reviews", pr_review_rounds.QODO_LOGIN))
+        )
 
     def test_other_rate_limited_reads_the_structural_marker_on_a_plain_comment(self) -> None:
         """The one observed shape: a rate-limit notice riding a PR comment, not a formal review."""
@@ -848,8 +873,8 @@ class TestOtherReviewers(GqlCase):
         pr = payload(
             [review()], comments=[comment(login="coderabbitai", body=RATE_LIMITED_COMMENT)]
         )
-        self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
-        self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
+        self.assertEqual("coderabbit.ai", pr_review_rounds.rate_limited_by(pr, "coderabbitai"))
+        self.assertIsNone(pr_review_rounds.rate_limited_by(pr, pr_review_rounds.QODO_LOGIN))
 
     def test_other_rate_limited_reads_the_command_reply_shape(self) -> None:
         """The command reply's marker says CodeRabbit rather than the service, so the login names it."""
@@ -883,14 +908,14 @@ class TestOtherReviewers(GqlCase):
         ):
             with self.subTest(body=body):
                 pr = payload([review()], comments=[comment(login="coderabbitai", body=body)])
-                self.assertEqual(expected, pr_review.rate_limited_by(pr, "coderabbitai"))
+                self.assertEqual(expected, pr_review_rounds.rate_limited_by(pr, "coderabbitai"))
 
     def test_rate_limited_by_leaves_the_reply_shape_unread_for_an_unmapped_login(self) -> None:
         pr = payload(
             [review()],
-            comments=[comment(login=pr_review.QODO_LOGIN, body=RATE_LIMITED_REPLY_COMMENT)],
+            comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=RATE_LIMITED_REPLY_COMMENT)],
         )
-        self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
+        self.assertIsNone(pr_review_rounds.rate_limited_by(pr, pr_review_rounds.QODO_LOGIN))
 
     def test_rate_limited_by_reads_the_reviews_connection_too(self) -> None:
         """Both observed shapes ride a plain comment, but the reader checks both connections,
@@ -899,14 +924,14 @@ class TestOtherReviewers(GqlCase):
             [review(), self.other_review("coderabbitai", body=RATE_LIMITED_COMMENT)],
             comments=[],
         )
-        self.assertEqual("coderabbit.ai", pr_review.rate_limited_by(pr, "coderabbitai"))
-        self.assertIsNone(pr_review.rate_limited_by(pr, pr_review.QODO_LOGIN))
+        self.assertEqual("coderabbit.ai", pr_review_rounds.rate_limited_by(pr, "coderabbitai"))
+        self.assertIsNone(pr_review_rounds.rate_limited_by(pr, pr_review_rounds.QODO_LOGIN))
 
     def test_thread_author_defaults_a_deleted_account_rather_than_crashing(self) -> None:
         orphan = thread("T1")
         orphan["comments"]["nodes"][0]["author"] = None
-        self.assertEqual("", pr_review.thread_author(orphan))
-        self.assertEqual(pr_review.REVIEWER, pr_review.thread_author(thread("T2")))
+        self.assertEqual("", pr_review_rounds.thread_author(orphan))
+        self.assertEqual(pr_review_rounds.REVIEWER, pr_review_rounds.thread_author(thread("T2")))
 
 
 # Trimmed from CodeRabbit's own review body, one file and one finding rather than the two files the live round carried.
@@ -973,7 +998,7 @@ class TestRefusal(GqlCase):
         # It happened, so it is still a round.
         # What it is not is a review of anything.
         self.assertIn("rounds=1", out)
-        self.assertFalse(pr_review.reviewed_head(payload([review(body=REFUSED)])))
+        self.assertFalse(pr_review_rounds.reviewed_head(payload([review(body=REFUSED)])))
 
     def test_the_body_prints_whole_under_a_marker_naming_the_remedy(self) -> None:
         """Its wording is what separates a file-count refusal from a quota one, so it is not cut."""
@@ -993,7 +1018,7 @@ class TestRefusal(GqlCase):
             "Copilot is unable to review this pull request right now.",
         ):
             with self.subTest(body=body):
-                self.assertEqual(body, pr_review.refusal_of({"body": body}))
+                self.assertEqual(body, pr_review_rounds.refusal_of({"body": body}))
 
     def test_a_clean_pass_and_an_ordinary_review_are_not_refusals(self) -> None:
         for body in (
@@ -1003,7 +1028,7 @@ class TestRefusal(GqlCase):
             "",
         ):
             with self.subTest(body=body[:40]):
-                self.assertEqual("", pr_review.refusal_of({"body": body}))
+                self.assertEqual("", pr_review_rounds.refusal_of({"body": body}))
 
     def test_a_review_quoting_the_wording_below_its_overview_is_not_a_refusal(self) -> None:
         """This pull request's own review body is that quotation, and the shape has bitten once.
@@ -1020,7 +1045,7 @@ class TestRefusal(GqlCase):
             "wasn't able to review a pull request as a terminal state rather than "
             "as coverage.\n\n- The digest now reports `unable to review` separately.\n"
         )
-        self.assertEqual("", pr_review.refusal_of({"body": body}))
+        self.assertEqual("", pr_review_rounds.refusal_of({"body": body}))
         self.answer(payload([review(body=body)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("review_on_head=yes", out)
@@ -1042,7 +1067,7 @@ class TestRefusal(GqlCase):
         and tells an automated one that a state it treats as actionable is outstanding.
         """
         pr = payload([review(body=REFUSED, at=EARLY), review(at=LATE)])
-        self.assertTrue(pr_review.reviewed_head(pr))
+        self.assertTrue(pr_review_rounds.reviewed_head(pr))
         self.answer(pr)
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("review_on_head=yes", out)
@@ -1090,7 +1115,7 @@ class TestQuotaRefusal(GqlCase):
 
     def test_a_file_count_refusal_still_reads_as_the_generic_shape(self) -> None:
         """A regression guard: the new field must not swallow the cause it already had a code for."""
-        self.assertFalse(pr_review.quota_refusal({"body": REFUSED}))
+        self.assertFalse(pr_review_rounds.quota_refusal({"body": REFUSED}))
         self.answer(payload([review(body=REFUSED)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("refusal=YES", out)
@@ -1103,7 +1128,7 @@ class TestQuotaRefusal(GqlCase):
     def test_a_quotation_of_the_wording_is_not_itself_a_refusal(self) -> None:
         """The same opening-line anchor that protects `refusal_of` protects this reading too."""
         body = "## Pull request overview\n\nThis PR documents: " + QUOTA_REFUSED + "\n"
-        self.assertFalse(pr_review.quota_refusal({"body": body}))
+        self.assertFalse(pr_review_rounds.quota_refusal({"body": body}))
 
 
 class TestRawLogRead(unittest.TestCase):
@@ -1230,8 +1255,8 @@ class TestCheckShapes(unittest.TestCase):
         a queued job as a failure. That was this helper's first version, and it failed eight cases
         at once rather than one, which is what said the fault was in the helper.
         """
-        (normalized,) = pr_review.check_nodes(payload([review()], checks=[node]))
-        return pr_review.check_shape(normalized, NOW, grace, stall)
+        (normalized,) = pr_review_checks.check_nodes(payload([review()], checks=[node]))
+        return pr_review_checks.check_shape(normalized, NOW, grace, stall)
 
     def test_a_queued_check_is_starting_inside_the_grace_and_starved_past_it(self) -> None:
         """The two are the same state, and only the clock separates them, so the grace decides."""
@@ -1240,13 +1265,20 @@ class TestCheckShapes(unittest.TestCase):
             "NOT_PICKED_UP", self.shape(check(status="QUEUED", conclusion="", started=ago(900)))
         )
 
-    def test_every_unstarted_spelling_counts_not_only_queued(self) -> None:
-        """Reading QUEUED alone reports a check held at a gate as one that is running."""
-        for state in ("QUEUED", "WAITING", "PENDING", "REQUESTED"):
+    def test_every_not_begun_spelling_reads_as_stuck_not_running(self) -> None:
+        """Reading QUEUED alone reports a check that has not begun as one that is running.
+
+        WAITING is held by its environment rather than starved, so it reads as its own shape.
+        """
+        for state, shape in (
+            ("QUEUED", "NOT_PICKED_UP"),
+            ("WAITING", "GATED"),
+            ("PENDING", "NOT_PICKED_UP"),
+            ("REQUESTED", "NOT_PICKED_UP"),
+        ):
             with self.subTest(state=state):
                 self.assertEqual(
-                    "NOT_PICKED_UP",
-                    self.shape(check(status=state, conclusion="", started=ago(900))),
+                    shape, self.shape(check(status=state, conclusion="", started=ago(900)))
                 )
 
     def test_an_expected_status_is_its_own_shape_not_a_starved_job(self) -> None:
@@ -1300,12 +1332,15 @@ class TestCheckShapes(unittest.TestCase):
                 {"__typename": "SomethingNew", "label": "future-gate", "verdict": "WHO_KNOWS"},
             ],
         )
-        nodes = pr_review.check_nodes(pr)
-        self.assertEqual(["SomethingNew"], pr_review.checks_unread(nodes))
+        nodes = pr_review_checks.check_nodes(pr)
+        self.assertEqual(["SomethingNew"], pr_review_checks.checks_unread(nodes))
         # Neither reader speaks for it, so the tally counts one check and no shape is judged.
-        self.assertEqual((1, 1), pr_review.checks_tally(nodes))
+        self.assertEqual((1, 1), pr_review_checks.checks_tally(nodes))
         self.assertEqual(
-            [], pr_review.checks_stuck([n for n in nodes if n.get("unreadable")], NOW, 300, 1800)
+            [],
+            pr_review_checks.checks_stuck(
+                [n for n in nodes if n.get("unreadable")], NOW, 300, 1800
+            ),
         )
 
     def test_the_digest_names_the_context_type_it_could_not_read(self) -> None:
@@ -1426,9 +1461,9 @@ class TestCheckShapes(unittest.TestCase):
 
     def test_a_zone_less_stamp_returns_none_rather_than_raising(self) -> None:
         """The same guard at the function, since a digest that raises reports nothing at all."""
-        self.assertIsNone(pr_review.age("2026-08-06T17:00:00", NOW))
-        self.assertIsNone(pr_review.age("nonsense", NOW))
-        self.assertEqual(900.0, pr_review.age(ago(900), NOW))
+        self.assertIsNone(pr_review_checks.age("2026-08-06T17:00:00", NOW))
+        self.assertIsNone(pr_review_checks.age("nonsense", NOW))
+        self.assertEqual(900.0, pr_review_checks.age(ago(900), NOW))
 
     def test_a_finished_check_carrying_no_conclusion_yet_is_settling_not_failing(self) -> None:
         """Reading an absent verdict as a failure invents a red check out of a race in the API.
@@ -1446,11 +1481,11 @@ class TestCheckShapes(unittest.TestCase):
         status as a check in no state at all, so neither pending nor failed.
         """
         pr = payload([review()], checks=[check(name="job"), status_context(state="FAILURE")])
-        nodes = pr_review.check_nodes(pr)
+        nodes = pr_review_checks.check_nodes(pr)
         self.assertEqual(["job", "ci/external"], [n["name"] for n in nodes])
         # Judged directly rather than through `self.shape`, which normalizes a second time.
         # A normalized node carries no typename, so that pass would skip it as unknown.
-        self.assertEqual("FAILED", pr_review.check_shape(nodes[1], NOW, 300, 1800))
+        self.assertEqual("FAILED", pr_review_checks.check_shape(nodes[1], NOW, 300, 1800))
 
     def test_a_pending_status_context_is_running_rather_than_unstarted(self) -> None:
         """The same string is two states, and only the node shape says which.
@@ -1471,7 +1506,7 @@ class TestCheckShapes(unittest.TestCase):
 
     def conclusions(self, *runs: dict) -> list[str]:
         """The conclusions the normalizer keeps for one head's runs, in kept order."""
-        nodes = pr_review.check_nodes(payload([review()], checks=list(runs)))
+        nodes = pr_review_checks.check_nodes(payload([review()], checks=list(runs)))
         return [n["conclusion"] for n in nodes]
 
     def test_a_newer_suite_supersedes_an_older_one_in_either_order(self) -> None:
@@ -1508,7 +1543,7 @@ class TestCheckShapes(unittest.TestCase):
         shared_old = check(name="lint", conclusion="FAILURE", suite=10, workflow=7)
         shared_new = check(name="lint", conclusion="SUCCESS", suite=20, workflow=7)
         for runs in ((old_only, shared_old, shared_new), (shared_new, shared_old, old_only)):
-            nodes = pr_review.check_nodes(payload([review()], checks=list(runs)))
+            nodes = pr_review_checks.check_nodes(payload([review()], checks=list(runs)))
             kept = sorted((n["name"], n["conclusion"]) for n in nodes)
             self.assertEqual([("leg", "FAILURE"), ("lint", "SUCCESS")], kept)
 
@@ -1545,21 +1580,23 @@ class TestCheckShapes(unittest.TestCase):
 
     def test_an_older_runs_failure_is_superseded_while_the_newer_run_is_in_progress(self) -> None:
         """The newer run posts its aggregator only once its jobs finish, so the old one waits."""
-        nodes = pr_review.check_nodes(
+        nodes = pr_review_checks.check_nodes(
             payload([review()], checks=self.superseded_rollup("IN_PROGRESS"))
         )
         gate = next(n for n in nodes if n["conclusion"] == "FAILURE")
         self.assertTrue(gate.get("superseded"))
         self.assertEqual(200, gate.get("newer_run"))
-        self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
+        self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
 
     def test_an_older_runs_failure_stands_once_the_newer_run_completes(self) -> None:
         """A name the finished newer run never posted is what the merge gate still reads."""
         rollup = self.superseded_rollup("COMPLETED")
         rollup[2] = check(name="lint", suite=20, workflow=7, suite_status="COMPLETED", run=200)
-        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        nodes = pr_review_checks.check_nodes(payload([review()], checks=rollup))
         self.assertFalse(any(n.get("superseded") for n in nodes))
-        self.assertEqual(["FAILED"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)])
+        self.assertEqual(
+            ["FAILED"], [s for _, s in pr_review_checks.checks_stuck(nodes, NOW, 300, 1800)]
+        )
 
     def test_a_held_wait_polls_on_a_superseded_failure_until_the_newer_run_posts(self) -> None:
         """The newer run's gate replaces the superseded one, and only then does the hold release.
@@ -1569,8 +1606,8 @@ class TestCheckShapes(unittest.TestCase):
         rollup = self.superseded_rollup("IN_PROGRESS")
         rollup[2]["isRequired"] = False
         held = payload([review()], merge="BLOCKED", checks=rollup)
-        nodes = pr_review.check_nodes(held)
-        self.assertTrue(pr_review.held_checks_open(held, nodes, NOW, 300, 1800))
+        nodes = pr_review_checks.check_nodes(held)
+        self.assertTrue(pr_review_checks.held_checks_open(held, nodes, NOW, 300, 1800))
         gate = "Check pull request workflow status job"
         done = payload(
             [review()],
@@ -1581,8 +1618,8 @@ class TestCheckShapes(unittest.TestCase):
                 check(name=gate, suite=20, workflow=7, run=200),
             ],
         )
-        nodes = pr_review.check_nodes(done)
-        self.assertFalse(pr_review.held_checks_open(done, nodes, NOW, 300, 1800))
+        nodes = pr_review_checks.check_nodes(done)
+        self.assertFalse(pr_review_checks.held_checks_open(done, nodes, NOW, 300, 1800))
 
     def test_a_newer_suite_with_no_check_run_yet_still_supersedes_a_failure(self) -> None:
         """A run waiting on its concurrency slot has a suite and no check run in the rollup."""
@@ -1593,11 +1630,11 @@ class TestCheckShapes(unittest.TestCase):
             "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
         }
         pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [waiting]}
-        nodes = pr_review.check_nodes(pr)
+        nodes = pr_review_checks.check_nodes(pr)
         gate = next(n for n in nodes if n["conclusion"] == "FAILURE")
         self.assertTrue(gate.get("superseded"))
         self.assertEqual(200, gate.get("newer_run"))
-        self.assertEqual([], pr_review.checks_stuck(nodes, NOW, 300, 1800))
+        self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
 
     def test_an_unfinished_check_in_an_older_run_keeps_its_stuck_reading(self) -> None:
         """A newer run queued behind the older one cannot start, so the older one's shape stands."""
@@ -1611,16 +1648,16 @@ class TestCheckShapes(unittest.TestCase):
             "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
         }
         pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [waiting]}
-        nodes = pr_review.check_nodes(pr)
+        nodes = pr_review_checks.check_nodes(pr)
         self.assertFalse(any(n.get("superseded") for n in nodes))
         self.assertEqual(
-            ["NOT_PICKED_UP"], [s for _, s in pr_review.checks_stuck(nodes, NOW, 300, 1800)]
+            ["NOT_PICKED_UP"], [s for _, s in pr_review_checks.checks_stuck(nodes, NOW, 300, 1800)]
         )
 
     def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuites(last:50){ nodes{ databaseId status "
+            "checkSuites(last:50){ nodes{ databaseId status app{ slug } "
             "workflowRun{ databaseId workflow{ databaseId } } } }",
             query,
         )
@@ -1635,7 +1672,7 @@ class TestCheckShapes(unittest.TestCase):
             workflow=8,
             suite_status="IN_PROGRESS",
         )
-        nodes = pr_review.check_nodes(payload([review()], checks=rollup))
+        nodes = pr_review_checks.check_nodes(payload([review()], checks=rollup))
         self.assertFalse(any(n.get("superseded") for n in nodes))
 
     def test_the_rollup_query_asks_for_the_suite_and_workflow_identity(self) -> None:
@@ -1656,7 +1693,7 @@ class TestCheckShapes(unittest.TestCase):
 
     def test_a_status_context_reads_its_own_required_flag(self) -> None:
         optional = {**status_context("ci/external", state="PENDING"), "isRequired": False}
-        nodes = pr_review.check_nodes(payload([review()], checks=[optional, check()]))
+        nodes = pr_review_checks.check_nodes(payload([review()], checks=[optional, check()]))
         self.assertEqual([False, True], [n["required"] for n in nodes])
 
     def test_a_check_run_with_no_suite_does_not_crash(self) -> None:
@@ -1667,7 +1704,7 @@ class TestCheckShapes(unittest.TestCase):
 
     def test_the_same_name_in_two_workflows_is_two_checks(self) -> None:
         """Two workflows can each have a `build` job under one app, and neither hides the other."""
-        nodes = pr_review.check_nodes(
+        nodes = pr_review_checks.check_nodes(
             payload(
                 [review()],
                 checks=[
@@ -1676,11 +1713,11 @@ class TestCheckShapes(unittest.TestCase):
                 ],
             )
         )
-        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+        self.assertEqual((1, 2), pr_review_checks.checks_tally(nodes))
 
     def test_the_same_name_under_two_apps_without_a_workflow_is_two_checks(self) -> None:
         """A suite with no workflow run falls back to its app slug."""
-        nodes = pr_review.check_nodes(
+        nodes = pr_review_checks.check_nodes(
             payload(
                 [review()],
                 checks=[
@@ -1689,11 +1726,11 @@ class TestCheckShapes(unittest.TestCase):
                 ],
             )
         )
-        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+        self.assertEqual((1, 2), pr_review_checks.checks_tally(nodes))
 
     def test_different_names_are_each_counted(self) -> None:
         """Two names in one suite are two checks."""
-        nodes = pr_review.check_nodes(
+        nodes = pr_review_checks.check_nodes(
             payload(
                 [review()],
                 checks=[
@@ -1702,15 +1739,20 @@ class TestCheckShapes(unittest.TestCase):
                 ],
             )
         )
-        self.assertEqual((1, 2), pr_review.checks_tally(nodes))
+        self.assertEqual((1, 2), pr_review_checks.checks_tally(nodes))
 
     def test_a_pull_request_with_no_rollup_reads_as_no_checks_not_as_a_failure(self) -> None:
         """A null rollup is a pull request nothing has run on yet, which blocks nothing here."""
-        self.assertEqual([], pr_review.check_nodes(payload([review()])))
+        self.assertEqual([], pr_review_checks.check_nodes(payload([review()])))
         # Both readers take the normalized list, since the digest parses the rollup once.
-        self.assertEqual((0, 0), pr_review.checks_tally(pr_review.check_nodes(payload([review()]))))
         self.assertEqual(
-            [], pr_review.checks_stuck(pr_review.check_nodes(payload([review()])), NOW, 300, 1800)
+            (0, 0), pr_review_checks.checks_tally(pr_review_checks.check_nodes(payload([review()])))
+        )
+        self.assertEqual(
+            [],
+            pr_review_checks.checks_stuck(
+                pr_review_checks.check_nodes(payload([review()])), NOW, 300, 1800
+            ),
         )
 
 
@@ -1801,11 +1843,11 @@ class TestDigestReportsChecks(GqlCase):
         pr = payload(
             [review()], checks=[check(name="stale-run", conclusion="FAILURE")], rollup_oid=OLD
         )
-        self.assertEqual([], pr_review.check_nodes(pr))
-        self.assertEqual((0, 0), pr_review.checks_tally(pr_review.check_nodes(pr)))
+        self.assertEqual([], pr_review_checks.check_nodes(pr))
+        self.assertEqual((0, 0), pr_review_checks.checks_tally(pr_review_checks.check_nodes(pr)))
         # No fallback to another commit's rollup, which is the same stale read by another route.
         # The absence is named rather than left to render as a fact about the head.
-        self.assertTrue(pr_review.checks_unreadable(pr))
+        self.assertTrue(pr_review_checks.checks_unreadable(pr))
         self.assertIn("CHECKS UNREADABLE", self.digest(pr))
 
     def test_a_third_party_rerun_still_dedupes_while_workflow_keys_are_unavailable(self) -> None:
@@ -1813,8 +1855,8 @@ class TestDigestReportsChecks(GqlCase):
         old = check(name="scan", conclusion="FAILURE", suite=10, workflow=None, slug="other-app")
         new = check(name="scan", conclusion="SUCCESS", suite=20, workflow=None, slug="other-app")
         pr = payload([review()], checks=[old, new])
-        pr[pr_review.WORKFLOW_KEYS_UNAVAILABLE] = True
-        self.assertEqual((1, 1), pr_review.checks_tally(pr_review.check_nodes(pr)))
+        pr[pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE] = True
+        self.assertEqual((1, 1), pr_review_checks.checks_tally(pr_review_checks.check_nodes(pr)))
 
     def test_a_tolerated_workflow_run_error_keeps_same_named_jobs_of_two_workflows(self) -> None:
         """With no workflow keys, a failing `build` must not hide behind another workflow's.
@@ -1834,7 +1876,7 @@ class TestDigestReportsChecks(GqlCase):
         ):
             pr = pr_review.gql(pr_review.Q_FULL, "o", "r", 7)
         self.assertIn("workflowRun unreadable", warned.getvalue())
-        self.assertEqual((1, 2), pr_review.checks_tally(pr_review.check_nodes(pr)))
+        self.assertEqual((1, 2), pr_review_checks.checks_tally(pr_review_checks.check_nodes(pr)))
         self.assertIn("CHECKS DEDUPED WITHOUT WORKFLOW KEYS", self.digest(pr))
         self.assertNotIn(
             "CHECKS DEDUPED WITHOUT WORKFLOW KEYS",
@@ -1852,13 +1894,23 @@ class TestDigestReportsChecks(GqlCase):
         pr = payload([review()], merge="BLOCKED", checks=[check(name="lint")])
         rollup = pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
         rollup["contexts"]["pageInfo"] = {"hasNextPage": True}
-        self.assertTrue(pr_review.checks_truncated(pr))
+        self.assertTrue(pr_review_checks.checks_truncated(pr))
         self.assertIn("CHECKS TRUNCATED", self.digest(pr))
 
     def test_a_rollup_inside_the_window_is_not_reported_as_truncated(self) -> None:
         """Otherwise the loudest line in the digest fires on every pull request that has checks."""
-        self.assertFalse(pr_review.checks_truncated(payload([review()], checks=[check()])))
+        self.assertFalse(pr_review_checks.checks_truncated(payload([review()], checks=[check()])))
         self.assertNotIn("CHECKS TRUNCATED", self.digest(payload([review()], checks=[check()])))
+
+    @contextlib.contextmanager
+    def parse_spies(self) -> Iterator[tuple[mock.MagicMock, mock.MagicMock]]:
+        """Count a parse from the gate and from the checks module alike, since each binds its own."""
+        parse = pr_review_checks.check_nodes
+        with (
+            mock.patch.object(pr_review, "check_nodes", side_effect=parse) as gate,
+            mock.patch.object(pr_review_checks, "check_nodes", side_effect=parse) as readers,
+        ):
+            yield gate, readers
 
     def test_the_rollup_is_normalized_once_for_both_readers(self) -> None:
         """Two calls parsed the same rollup twice a digest, and the parse is what this script pays.
@@ -1867,22 +1919,18 @@ class TestDigestReportsChecks(GqlCase):
         the output is identical either way, which is what let the second call go unnoticed.
         """
         pr = payload([review()], merge="BLOCKED", checks=[check(name="lint"), check(name="gate")])
-        with mock.patch.object(
-            pr_review, "check_nodes", side_effect=pr_review.check_nodes
-        ) as parsed:
+        with self.parse_spies() as spies:
             pr_review.digest("o", "r", 7, pr=pr, now=NOW)
-        self.assertEqual(1, parsed.call_count)
+        self.assertEqual(1, sum(s.call_count for s in spies))
 
     def test_a_caller_that_parsed_the_rollup_is_not_made_to_parse_it_again(self) -> None:
         """The first fix left `wait` parsing once to print and once to decide, which is the same
         doubling one caller up. Raised in review here, on the commit that halved it."""
         pr = payload([review()], merge="BLOCKED", checks=[check(name="lint")])
-        with mock.patch.object(
-            pr_review, "check_nodes", side_effect=pr_review.check_nodes
-        ) as parsed:
+        with self.parse_spies() as spies:
             pr_review.digest("o", "r", 7, pr=pr, now=NOW, checks=pr_review.check_nodes(pr))
         # The one call is the case's own, so the digest made none of its own.
-        self.assertEqual(1, parsed.call_count)
+        self.assertEqual(1, sum(s.call_count for s in spies))
 
     def test_the_truncation_line_quotes_the_window_the_query_actually_asks_for(self) -> None:
         """The message borrowed WINDOW, which is the reviews and comments window and not this one.
@@ -1890,12 +1938,12 @@ class TestDigestReportsChecks(GqlCase):
         It read correctly only while the two numbers happened to agree, so a change to either
         would have made the line state a limit the query does not use. Raised in review here.
         """
-        self.assertIn(f"contexts(first:{pr_review.CHECKS_WINDOW})", pr_review.Q_FULL)
+        self.assertIn(f"contexts(first:{pr_review_checks.CHECKS_WINDOW})", pr_review.Q_FULL)
         pr = payload([review()], merge="BLOCKED", checks=[check()])
         pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {
             "hasNextPage": True
         }
-        self.assertIn(f"more than the {pr_review.CHECKS_WINDOW} contexts", self.digest(pr))
+        self.assertIn(f"more than the {pr_review_checks.CHECKS_WINDOW} contexts", self.digest(pr))
 
     def test_one_reader_finds_the_head_commit_for_all_three_callers(self) -> None:
         """Three traversals of one shape drift apart, and a payload change must be caught once.
@@ -1904,17 +1952,17 @@ class TestDigestReportsChecks(GqlCase):
         head that matches nothing, where all three must agree that there is no rollup to read.
         """
         pr = payload([review()], checks=[check()], rollup_oid=OLD)
-        self.assertEqual({}, pr_review.head_commit(pr))
-        self.assertEqual([], pr_review.check_nodes(pr))
-        self.assertFalse(pr_review.checks_truncated(pr))
-        self.assertTrue(pr_review.checks_unreadable(pr))
+        self.assertEqual({}, pr_review_checks.head_commit(pr))
+        self.assertEqual([], pr_review_checks.check_nodes(pr))
+        self.assertFalse(pr_review_checks.checks_truncated(pr))
+        self.assertTrue(pr_review_checks.checks_unreadable(pr))
 
     def test_a_pull_request_with_no_commits_at_all_is_not_reported_as_unreadable(self) -> None:
         """Nothing to match against is not a failed match, or every payload without one says so."""
-        self.assertFalse(pr_review.checks_unreadable(payload([review()], checks=[check()])))
+        self.assertFalse(pr_review_checks.checks_unreadable(payload([review()], checks=[check()])))
         bare = payload([review()])
         bare["commits"] = {"nodes": []}
-        self.assertFalse(pr_review.checks_unreadable(bare))
+        self.assertFalse(pr_review_checks.checks_unreadable(bare))
         self.assertNotIn("CHECKS UNREADABLE", self.digest(bare))
 
     def test_the_head_rollup_is_found_wherever_the_connection_puts_it(self) -> None:
@@ -1922,7 +1970,7 @@ class TestDigestReportsChecks(GqlCase):
         pr = payload([review()], checks=[check(name="lint")])
         head_node = pr["commits"]["nodes"][0]
         pr["commits"]["nodes"] = [{"commit": {"oid": OLD, "statusCheckRollup": None}}, head_node]
-        self.assertEqual(["lint"], [n["name"] for n in pr_review.check_nodes(pr)])
+        self.assertEqual(["lint"], [n["name"] for n in pr_review_checks.check_nodes(pr)])
 
 
 class TestReadingsThroughTheAdapter(GqlCase):
@@ -2118,7 +2166,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
 
     def test_coderabbit_s_outside_diff_findings_are_its_own_field(self) -> None:
         cr = {
-            "author": {"login": pr_review.CODERABBIT_LOGIN},
+            "author": {"login": pr_review_rounds.CODERABBIT_LOGIN},
             "state": "COMMENTED",
             "commit": {"oid": HEAD},
             "body": cr_outside_diff_body(count=2),
@@ -2136,7 +2184,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 "<h3>Code Review by Qodo</h3>\n\n<details>\n<summary>  1.  Bad naming"
                 f"{badge} <code>Bug</code></summary>\n\nThe name misleads.\n</details>\n"
             )
-            return comment(login=pr_review.QODO_LOGIN, body=text)
+            return comment(login=pr_review_rounds.QODO_LOGIN, body=text)
 
         for badge, want in (
             ("", "qodo_open=1 "),
@@ -2147,7 +2195,9 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.out.truncate()
                 self.status(payload([review()], comments=[qodo(badge)], files=["a.py"]))
                 self.assertIn(want, self.out.getvalue())
-        summary = comment(login=pr_review.QODO_LOGIN, body="<h3>PR Summary by Qodo</h3>\n\nAdds.")
+        summary = comment(
+            login=pr_review_rounds.QODO_LOGIN, body="<h3>PR Summary by Qodo</h3>\n\nAdds."
+        )
         self.out.seek(0)
         self.out.truncate()
         self.status(payload([review()], comments=[summary], files=["a.py"]))
@@ -2157,7 +2207,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         pr = payload([review(body=unplaced())], files=["a.py"])
         self.assertEqual(50, self.status(pr))
         out = self.out.getvalue()
-        hold = pr_review.shape_hold(pr)
+        hold = pr_review_rounds.shape_hold(pr)
         assert hold is not None
         self.assertRegex(hold[0], r"^[0-9a-f]{12}$")
         self.assertIn("shapes=HELD ", out)
@@ -2195,7 +2245,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn("shapes=HELD ", self.out.getvalue())
 
     def test_a_marker_with_no_outcome_or_inside_a_fence_does_not_clear_the_hold(self) -> None:
-        marker = pr_review.ACK_MARKER.format(self.fingerprint(unplaced()))
+        marker = pr_review_rounds.ACK_MARKER.format(self.fingerprint(unplaced()))
         for text in (marker, f"Fixed in abc1234.\n\n```text\n{marker}\n```"):
             with self.subTest(text=text):
                 pr = payload(
@@ -2233,7 +2283,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual(50, self.status(pr))
 
     def fingerprint(self, text: str) -> str:
-        hold = pr_review.shape_hold(payload([review(body=text)]))
+        hold = pr_review_rounds.shape_hold(payload([review(body=text)]))
         assert hold is not None
         return hold[0]
 
@@ -2364,7 +2414,7 @@ class TestCli(GqlCase):
             ),
         ]
         pr = payload([review()], merge="BLOCKED", checks=rollup)
-        gate = next(n for n in pr_review.check_nodes(pr) if n["name"] == "gate")
+        gate = next(n for n in pr_review_checks.check_nodes(pr) if n["name"] == "gate")
         self.assertTrue(gate.get("superseded"))
         self.answer(pr)
         with mock.patch.object(pr_review.time, "sleep"):
@@ -2815,7 +2865,13 @@ class TestCli(GqlCase):
             "number": 1,
             "reviews": {
                 "nodes": [
-                    {"author": {"__typename": "Bot", "login": pr_review.REVIEWER, "id": bot_id}}
+                    {
+                        "author": {
+                            "__typename": "Bot",
+                            "login": pr_review_rounds.REVIEWER,
+                            "id": bot_id,
+                        }
+                    }
                 ]
             },
         }
@@ -2863,7 +2919,7 @@ class TestCli(GqlCase):
                             {
                                 "author": {
                                     "__typename": "Bot",
-                                    "login": pr_review.REVIEWER,
+                                    "login": pr_review_rounds.REVIEWER,
                                     "id": "BOT_999",
                                 }
                             }
@@ -2969,23 +3025,29 @@ class TestCli(GqlCase):
             "reviewRequests": {"nodes": [{"requestedReviewer": drifted}]},
             "timelineItems": {"nodes": [{"id": "RRE_1", "requestedReviewer": drifted}]},
         }
-        self.assertIsNone(pr_review.request_recorded(before, after))
+        self.assertIsNone(pr_review_rounds.request_recorded(before, after))
 
     def test_an_answer_carrying_no_request_state_is_not_read_as_unrecorded(self) -> None:
         """An unread state is not a reading of one, so the wait polls as it did before."""
         before = request_state(events=("RRE_1",))
-        self.assertIsNone(pr_review.request_recorded(before, {"id": "PR_test"}))
-        self.assertIsNone(pr_review.request_recorded(before, {"reviewRequests": {"nodes": []}}))
+        self.assertIsNone(pr_review_rounds.request_recorded(before, {"id": "PR_test"}))
+        self.assertIsNone(
+            pr_review_rounds.request_recorded(before, {"reviewRequests": {"nodes": []}})
+        )
 
     def test_a_null_answer_is_not_read_as_unrecorded(self) -> None:
         """A field answered null was not read, the same as one left out."""
         before = request_state(events=("RRE_1",))
         read: dict = {"nodes": []}
         self.assertIsNone(
-            pr_review.request_recorded(before, {"reviewRequests": None, "timelineItems": read})
+            pr_review_rounds.request_recorded(
+                before, {"reviewRequests": None, "timelineItems": read}
+            )
         )
         self.assertIsNone(
-            pr_review.request_recorded(before, {"reviewRequests": read, "timelineItems": None})
+            pr_review_rounds.request_recorded(
+                before, {"reviewRequests": read, "timelineItems": None}
+            )
         )
 
         def fake(query: str, **variables: object) -> dict:
@@ -3396,6 +3458,50 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_called_once()
         self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
+    def fresh_head(self, run_status: str) -> dict:
+        """A CLEAN head whose first-stage jobs passed while its workflow run has more to start.
+
+        A matrix job's children enter the rollup only once the jobs they need finish. The rollup
+        can therefore be all green while the run itself is not completed.
+        """
+        detect = check(name="changes", suite=20, workflow=7, suite_status=run_status, run=200)
+        pr = self.into(payload([review(oid=OLD)], checks=[detect]), attest=True)
+        suite = {
+            "databaseId": 20,
+            "status": run_status,
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [suite]}
+        return pr
+
+    def test_a_fresh_head_with_its_run_in_progress_is_pending_at_the_timeout(self) -> None:
+        """Read right after a push, a CLEAN merge and a green rollup exited 0 with jobs unstarted."""
+        self.answer(self.fresh_head("IN_PROGRESS"))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertIn("status=CHECKS_PENDING", out)
+        self.assertIn("not completed: run 200", out)
+
+    def test_a_fresh_head_polls_until_its_run_completes(self) -> None:
+        running = self.fresh_head("IN_PROGRESS")
+        done = self.fresh_head("COMPLETED")
+        self.answer(running, running, done)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        slept.assert_called_once()
+        self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+
+    def test_a_fresh_head_waiting_on_its_environment_is_pending_at_the_timeout(self) -> None:
+        """A gated run's later jobs have not run either, so it holds like any other open run."""
+        self.answer(self.fresh_head("WAITING"))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertIn("not completed: run 200", self.out.getvalue())
 
     def test_a_stuck_check_on_an_attested_head_ends_the_poll(self) -> None:
         """A shape no wait clears is 44 at once, rather than the timeout polled out against it."""
@@ -3874,7 +3980,7 @@ class TestCli(GqlCase):
         slept.assert_called_once()
 
     def test_settling_is_a_check_waiting_can_still_conclude(self) -> None:
-        nodes = pr_review.check_nodes(
+        nodes = pr_review_checks.check_nodes(
             payload(
                 [review()],
                 checks=[
@@ -3892,7 +3998,7 @@ class TestCli(GqlCase):
                 ],
             )
         )
-        settling = pr_review.checks_settling(nodes, NOW, 300, 1800)
+        settling = pr_review_checks.checks_settling(nodes, NOW, 300, 1800)
         self.assertEqual(
             ["running", "queued", "concluding", "long", "ci/building", "ci/expected"],
             [n["name"] for n in settling],
@@ -4030,7 +4136,7 @@ class TestCli(GqlCase):
 
     def test_a_truncated_review_history_is_no_local_cover(self) -> None:
         pr = self.into(payload([review(oid=OLD)], older_reviews=True), attest=True)
-        self.assertFalse(pr_review.local_cover(pr))
+        self.assertFalse(pr_review_rounds.local_cover(pr))
 
     def test_checkout_belongs_to_attest_alone(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
@@ -4046,7 +4152,7 @@ class TestCli(GqlCase):
             review(body=REFUSED, at=LATE, rid="PRR_b"),
         ]
         pr = self.into(payload(rounds), attest=True)
-        self.assertFalse(pr_review.local_cover(pr))
+        self.assertFalse(pr_review_rounds.local_cover(pr))
 
     def test_a_later_round_on_the_head_lets_an_attestation_past_a_spent_refusal(self) -> None:
         rounds = [
@@ -4055,7 +4161,7 @@ class TestCli(GqlCase):
             review(body=OVERVIEW, at=LATE, rid="PRR_c"),
         ]
         pr = self.into(payload(rounds), attest=True)
-        self.assertTrue(pr_review.local_cover(pr))
+        self.assertTrue(pr_review_rounds.local_cover(pr))
 
     def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
         part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
@@ -4080,7 +4186,7 @@ class TestCli(GqlCase):
             [review(oid=OLD, body=ERROR_REFUSED, at=EARLY)],
             comments=[comment(at=LATE)],
         )
-        self.assertIsNone(pr_review.stopping_refusal(pr))
+        self.assertIsNone(pr_review_rounds.stopping_refusal(pr))
         self.answer(pr)
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("refusal=no", out)
@@ -4170,7 +4276,7 @@ class TestCli(GqlCase):
                 review(oid=OLD, body=OVERVIEW + "\n" + COVERED, at=LATE, rid="PRR_b"),
             ]
         )
-        self.assertIsNone(pr_review.stopping_refusal(pr))
+        self.assertIsNone(pr_review_rounds.stopping_refusal(pr))
 
     def test_the_digest_reads_an_error_round_by_what_its_run_logged(self) -> None:
         for log, field, line in (
@@ -4240,7 +4346,7 @@ class TestCopilotHistoryReadings(GqlCase):
                                             {
                                                 "author": {
                                                     "__typename": "Bot",
-                                                    "login": pr_review.REVIEWER,
+                                                    "login": pr_review_rounds.REVIEWER,
                                                     "id": "BOT_1",
                                                 },
                                                 "state": "COMMENTED",
@@ -4252,7 +4358,7 @@ class TestCopilotHistoryReadings(GqlCase):
                                     "comments": {
                                         "nodes": [
                                             {
-                                                "author": {"login": pr_review.REVIEWER},
+                                                "author": {"login": pr_review_rounds.REVIEWER},
                                                 "body": "Reviewed and it looks fine.",
                                                 "createdAt": LATE,
                                             }
@@ -4267,7 +4373,7 @@ class TestCopilotHistoryReadings(GqlCase):
         )
         history = pr_review.copilot_history("o", "r")
         self.assertEqual("comment", history[0][1]["_kind"])
-        self.assertIsNone(pr_review.quota_signal(history))
+        self.assertIsNone(pr_review_rounds.quota_signal(history))
 
     def test_copilot_history_carries_the_callers_own_pull_request_too(self) -> None:
         """No pull request is special-cased out of the fetch, the caller's own included: an
@@ -4344,7 +4450,7 @@ class TestCopilotHistoryReadings(GqlCase):
         self.enterContext(mock.patch.object(pr_review, "gh_graphql", side_effect=fake))
         history = pr_review.copilot_history("o", "r")
         self.assertEqual([pr_review.HISTORY_PRS, pr_review.HISTORY_PRS_WIDE], seen)
-        self.assertEqual("BOT_1", pr_review.copilot_bot_id(history))
+        self.assertEqual("BOT_1", pr_review_rounds.copilot_bot_id(history))
 
     def test_both_windows_empty_still_carries_no_signal_and_no_bot_id(self) -> None:
         """An outage wide enough to empty HISTORY_PRS_WIDE too is a real, if rarer, case: still
@@ -4359,27 +4465,27 @@ class TestCopilotHistoryReadings(GqlCase):
         )
         history = pr_review.copilot_history("o", "r")
         self.assertEqual([], history)
-        self.assertIsNone(pr_review.copilot_bot_id(history))
+        self.assertIsNone(pr_review_rounds.copilot_bot_id(history))
 
     def test_an_empty_history_carries_no_signal_and_no_bot_id(self) -> None:
-        self.assertIsNone(pr_review.quota_signal([]))
-        self.assertIsNone(pr_review.copilot_bot_id([]))
+        self.assertIsNone(pr_review_rounds.quota_signal([]))
+        self.assertIsNone(pr_review_rounds.copilot_bot_id([]))
 
     def test_the_bot_id_is_read_from_the_first_review_entry_that_carries_one(self) -> None:
         history: list[tuple[int, dict]] = [
             (1, {"_kind": "review", "author": {"id": None}}),
             (2, {"_kind": "review", "author": {"id": "BOT_9"}}),
         ]
-        self.assertEqual("BOT_9", pr_review.copilot_bot_id(history))
+        self.assertEqual("BOT_9", pr_review_rounds.copilot_bot_id(history))
 
     def test_a_comment_entry_carries_no_id_to_read_even_if_it_had_one(self) -> None:
         """The id field belongs to the review connection's `... on Bot{ id }` selection only."""
         history: list[tuple[int, dict]] = [(1, {"_kind": "comment", "author": {"id": "BOT_9"}})]
-        self.assertIsNone(pr_review.copilot_bot_id(history))
+        self.assertIsNone(pr_review_rounds.copilot_bot_id(history))
 
     def test_the_signal_names_the_pull_request_the_refusal_came_from(self) -> None:
         history = [(962, {"_kind": "review", "_at": LATE, "body": QUOTA_REFUSED})]
-        signal = pr_review.quota_signal(history)
+        signal = pr_review_rounds.quota_signal(history)
         self.assertIsNotNone(signal)
         assert signal is not None
         number, node = signal
@@ -4390,7 +4496,7 @@ class TestCopilotHistoryReadings(GqlCase):
         """`_at` is normalized from `createdAt` for a comment, the same as `submittedAt` for a
         review, so the caller printing it needs no branch on which connection it came from."""
         history = [(962, {"_kind": "comment", "_at": LATE, "body": QUOTA_REFUSED})]
-        signal = pr_review.quota_signal(history)
+        signal = pr_review_rounds.quota_signal(history)
         self.assertIsNotNone(signal)
         assert signal is not None
         number, node = signal
@@ -4399,7 +4505,7 @@ class TestCopilotHistoryReadings(GqlCase):
 
     def test_a_generic_refusal_is_not_a_quota_signal(self) -> None:
         history = [(1, {"_kind": "review", "_at": LATE, "body": REFUSED})]
-        self.assertIsNone(pr_review.quota_signal(history))
+        self.assertIsNone(pr_review_rounds.quota_signal(history))
 
 
 def rthread(
@@ -4408,7 +4514,7 @@ def rthread(
     path: str = "a.py",
     line: int = 12,
     resolved: bool = False,
-    login: str = pr_review.REVIEWER,
+    login: str = pr_review_rounds.REVIEWER,
 ) -> dict:
     """A thread as the reply query reads it, with `path` and `line` on the thread itself."""
     return {
@@ -4512,7 +4618,7 @@ class TestCommentConfirmsItsTargetAndResult(CommentCase):
 class TestCommentAcknowledgesAnUnplacedSet(CommentCase):
     def test_the_outcomes_post_with_the_marker_the_gate_reads(self) -> None:
         held = payload([review(body=unplaced())], files=["a.py"])
-        hold = pr_review.shape_hold(held)
+        hold = pr_review_rounds.shape_hold(held)
         assert hold is not None
         sent = f"{COMMENT_BODY}\n\n<!-- fleet-shape-ack: fingerprint={hold[0]} -->"
         self.wire({"id": "PR_from_query", "url": COMMENT["url"]}, {**COMMENT, "body": sent})
@@ -4521,7 +4627,7 @@ class TestCommentAcknowledgesAnUnplacedSet(CommentCase):
         mutation = next((v for q, v in self.calls if "addComment" in q))
         self.assertEqual(sent, mutation["body"])
         answered = {**held, "comments": {"nodes": [ack(hold[0], "OWNER", text=sent)]}}
-        self.assertEqual((hold[0], hold[1], True), pr_review.shape_hold(answered))
+        self.assertEqual((hold[0], hold[1], True), pr_review_rounds.shape_hold(answered))
 
     def test_the_fingerprint_belongs_to_comment_alone(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
@@ -4793,7 +4899,7 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         copied verbatim from that line must still select the thread it was copied from, through
         the line break and the run of spaces the raw body still carries."""
         body = "The helper\nneeds to fold   whitespace before comparing bodies."
-        copied = pr_review.describe(rthread("t1", body=body)).split(": ", 1)[1]
+        copied = pr_review_rounds.describe(rthread("t1", body=body)).split(": ", 1)[1]
         self.wire(page([rthread("t1", body=body)]))
         self.assertEqual(0, self.run_reply("--resolve", "--match", copied))
         self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
@@ -5276,7 +5382,7 @@ class TestContract(unittest.TestCase):
         """
         source = "".join(
             (REPO / "scripts" / name).read_text(encoding="utf-8")
-            for name in ("pr_review.py", "pr_cleanup.py")
+            for name in (*GATE_SOURCES, "pr_cleanup.py")
         )
         for verb in (
             "-X POST",
@@ -5351,7 +5457,9 @@ class TestContract(unittest.TestCase):
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         # A node id literal anywhere in the source is an example a hand copies out of it.
-        self.assertNotIn("PRRT_", source)
+        for name in GATE_SOURCES:
+            with self.subTest(module=name):
+                self.assertNotIn("PRRT_", (REPO / "scripts" / name).read_text(encoding="utf-8"))
         parser_options = re.findall(r"add_argument\(\s*[\"'](--[a-z-]+)[\"']", source)
         # A floor, since a quoting change once emptied this scan and zero options read as a pass.
         self.assertGreaterEqual(len(parser_options), 5)
@@ -5363,10 +5471,37 @@ class TestContract(unittest.TestCase):
 
     def test_no_write_suppresses_or_forces_its_own_result(self) -> None:
         """A mutation whose output is discarded is a write nobody can say landed."""
-        source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
+        source = "".join(
+            (REPO / "scripts" / name).read_text(encoding="utf-8") for name in GATE_SOURCES
+        )
         for tail in (">/dev/null", "2>/dev/null", "&>/dev/null", "|| true", "|| :", "shell=True"):
             with self.subTest(tail=tail):
                 self.assertNotIn(tail, source)
+
+    def test_the_readers_import_nothing_that_reaches_out(self) -> None:
+        """A reader importing the gate loads a second copy of it, and one importing a transport can call."""
+        for name in GATE_SOURCES[1:]:
+            tree = ast.parse((REPO / "scripts" / name).read_text(encoding="utf-8"))
+            imported = {
+                alias.name.split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Import)
+                for alias in node.names
+            } | {
+                (node.module or "").split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)
+            }
+            module = name.removesuffix(".py")
+            with self.subTest(module=name):
+                self.assertLessEqual(imported, READER_IMPORTS, f"{name} imports {imported}")
+                # A floor, since a collector that matched nothing would read as a pass.
+                self.assertIn(READER_FLOORS[module], imported)
+                # The adapter's own imports count too, so the gate and a transport stay unloaded.
+                before, after = import_delta(REPO / "scripts", module, REACHING_OUT)
+                # Clean before the import, or a module loaded at startup reads as never loaded.
+                self.assertEqual([], before)
+                self.assertEqual([], after, f"importing {module} loads {after}")
 
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""
@@ -5428,7 +5563,7 @@ class TestContract(unittest.TestCase):
         The two measure different things, and the grace is short because a pickup is fast while
         the stall is long because a build is not, so an inversion here inverts both readings.
         """
-        self.assertLess(pr_review.CHECK_GRACE, pr_review.CHECK_STALL)
+        self.assertLess(pr_review_checks.CHECK_GRACE, pr_review_checks.CHECK_STALL)
 
     def test_an_inverted_pair_of_check_thresholds_is_rejected_at_the_flags_too(self) -> None:
         """The case above held the constants ordered while the flags could still invert them.
@@ -5911,30 +6046,34 @@ class TestRequiredContexts(unittest.TestCase):
 
     def test_blocked_with_a_required_context_absent_holds(self) -> None:
         pr = payload([], merge="BLOCKED", checks=[check()])
-        nodes = pr_review.check_nodes(pr)
+        nodes = pr_review_checks.check_nodes(pr)
         now = datetime.now(UTC)
         want = frozenset({("Check pull request workflow status job", None), ("Later", None)})
-        self.assertTrue(pr_review.held_checks_open(pr, nodes, now, 600, 3600, want))
+        self.assertTrue(pr_review_checks.held_checks_open(pr, nodes, now, 600, 3600, want))
         self.assertFalse(
-            pr_review.held_checks_open(pr, nodes, now, 600, 3600, want - {("Later", None)})
+            pr_review_checks.held_checks_open(pr, nodes, now, 600, 3600, want - {("Later", None)})
         )
-        self.assertFalse(pr_review.held_checks_open(pr, nodes, now, 600, 3600))
+        self.assertFalse(pr_review_checks.held_checks_open(pr, nodes, now, 600, 3600))
         clean = {**pr, "mergeStateStatus": "CLEAN"}
-        self.assertFalse(pr_review.held_checks_open(clean, nodes, now, 600, 3600, want))
+        self.assertFalse(pr_review_checks.held_checks_open(clean, nodes, now, 600, 3600, want))
 
     def test_a_rollup_not_read_whole_never_holds_on_an_absent_context(self) -> None:
         now = datetime.now(UTC)
         want = frozenset({("Later", None)})
         other = payload([], merge="BLOCKED", checks=[check()], rollup_oid="f" * 40)
         self.assertFalse(
-            pr_review.held_checks_open(other, pr_review.check_nodes(other), now, 600, 3600, want)
+            pr_review_checks.held_checks_open(
+                other, pr_review_checks.check_nodes(other), now, 600, 3600, want
+            )
         )
         cut = payload([], merge="BLOCKED", checks=[check()])
         cut["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {
             "hasNextPage": True
         }
         self.assertFalse(
-            pr_review.held_checks_open(cut, pr_review.check_nodes(cut), now, 600, 3600, want)
+            pr_review_checks.held_checks_open(
+                cut, pr_review_checks.check_nodes(cut), now, 600, 3600, want
+            )
         )
 
     def test_the_rules_filter_projects_the_context_and_integration_id(self) -> None:
@@ -5952,8 +6091,8 @@ class TestRequiredContexts(unittest.TestCase):
 
     def held(self, nodes: list[dict], entry: tuple[str, int | None]) -> bool:
         pr = payload([], merge="BLOCKED", checks=nodes)
-        return pr_review.held_checks_open(
-            pr, pr_review.check_nodes(pr), datetime.now(UTC), 600, 3600, frozenset({entry})
+        return pr_review_checks.held_checks_open(
+            pr, pr_review_checks.check_nodes(pr), datetime.now(UTC), 600, 3600, frozenset({entry})
         )
 
     def test_an_entry_bound_to_an_app_is_not_met_by_another_apps_check(self) -> None:
@@ -5970,15 +6109,142 @@ class TestRequiredContexts(unittest.TestCase):
         self.assertFalse(self.held([status_context("Gate")], ("Gate", None)))
 
     def test_the_unmet_context_is_named(self) -> None:
-        nodes = pr_review.check_nodes(payload([], merge="BLOCKED", checks=[check(name="Gate")]))
-        self.assertEqual("", pr_review._unmet_note(frozenset({("Gate", None)}), nodes))
-        self.assertIn("Gate", pr_review._unmet_note(frozenset({("Gate", 9)}), nodes))
+        nodes = pr_review_checks.check_nodes(
+            payload([], merge="BLOCKED", checks=[check(name="Gate")])
+        )
+        self.assertEqual("", pr_review_checks._unmet_note(frozenset({("Gate", None)}), nodes))
+        self.assertIn("Gate", pr_review_checks._unmet_note(frozenset({("Gate", 9)}), nodes))
 
     def test_the_rules_are_read_only_for_a_blocked_merge(self) -> None:
         with mock.patch.object(pr_review, "gh_rest") as rest:
             clean = payload([], merge="CLEAN", checks=[check()])
             self.assertEqual(frozenset(), pr_review.required_for(clean, "o", "r"))
         rest.assert_not_called()
+
+
+class TestRunsOpen(unittest.TestCase):
+    """A head's workflow run that has not completed holds a held wait whatever the merge reads."""
+
+    @staticmethod
+    def suite(status: str, run: int | None = 200, sid: int = 20) -> dict:
+        workflow_run = {"databaseId": run, "workflow": {"databaseId": 7}} if run else None
+        return {"databaseId": sid, "status": status, "workflowRun": workflow_run}
+
+    def held(self, merge: str, checks: list[dict], *suites: dict) -> dict:
+        pr = payload([], merge=merge, checks=checks)
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": list(suites)}
+        return pr
+
+    def is_open(self, pr: dict) -> bool:
+        return pr_review_checks.held_checks_open(
+            pr, pr_review_checks.check_nodes(pr), NOW, 300, 1800
+        )
+
+    def test_a_run_not_completed_holds_a_clean_merge(self) -> None:
+        for status in ("QUEUED", "IN_PROGRESS", "WAITING", "PENDING", "REQUESTED"):
+            with self.subTest(status=status):
+                pr = self.held("CLEAN", [check()], self.suite(status))
+                self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+                self.assertTrue(self.is_open(pr))
+
+    def test_a_completed_run_releases_a_clean_merge(self) -> None:
+        pr = self.held("CLEAN", [check()], self.suite("COMPLETED"))
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_suite_with_no_workflow_run_does_not_hold(self) -> None:
+        """An installed app's suite can sit queued forever with nothing ever reporting."""
+        pr = self.held("CLEAN", [check()], self.suite("QUEUED", run=None))
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_an_unrequired_checks_open_run_holds_a_clean_merge(self) -> None:
+        """CLEAN releases an unrequired check, but not the run it belongs to while that is open."""
+        optional = {
+            **check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="IN_PROGRESS"),
+            "isRequired": False,
+        }
+        optional["checkSuite"]["workflowRun"]["databaseId"] = 200
+        pr = self.held("CLEAN", [optional], self.suite("IN_PROGRESS"))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_run_read_only_through_the_rollup_holds(self) -> None:
+        """A run's suite can fall outside the suites window while its jobs sit in the rollup."""
+        running = check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="IN_PROGRESS")
+        running["checkSuite"]["workflowRun"]["databaseId"] = 200
+        pr = self.held("CLEAN", [running])
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_an_actions_suite_stands_in_where_the_run_is_unreadable(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", suite=20, suite_status="IN_PROGRESS")
+        pr = {**self.held("CLEAN", [running]), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
+        self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+        self.assertEqual([], pr_review_checks.runs_open(self.held("CLEAN", [running])))
+
+    def test_a_fresh_actions_suite_stands_in_with_no_job_registered(self) -> None:
+        """Read right after a push, the suite exists before any job does, and no rollup node carries it."""
+        suite = {"databaseId": 20, "status": "QUEUED", "app": {"slug": "github-actions"}}
+        pr = {**self.held("CLEAN", [], suite), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
+        self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_another_apps_queued_suite_holds_nothing_where_runs_are_unreadable(self) -> None:
+        """Other apps leave suites queued with no job for good, so only an Actions suite stands in."""
+        suite = {"databaseId": 30, "status": "QUEUED", "app": {"slug": "coderabbitai"}}
+        pr = {
+            **self.held("CLEAN", [check()], suite),
+            pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True,
+        }
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_gated_required_check_holds_a_blocked_poll_rather_than_ending_it(self) -> None:
+        """A timer clears by itself and an approval may land, so a gate is not the 44 shape."""
+        gated = check(status="WAITING", conclusion="", started=ago(900))
+        pr = self.held("BLOCKED", [gated], self.suite("WAITING"))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_job_waiting_on_its_environment_reads_gated_not_starved(self) -> None:
+        """The starved line's re-run is the wrong remedy for a job a protection rule holds."""
+        node = {"name": "deploy", "state": "WAITING", "conclusion": "", "since": ago(900)}
+        self.assertEqual("GATED", pr_review_checks.check_shape(node, NOW, 300, 1800))
+        line = pr_review_checks.check_lines({}, [node], [(node, "GATED")], NOW)[0]
+        self.assertIn("CHECK WAITING ON ITS ENVIRONMENT ('deploy', waiting 15m)", line)
+        inside = {**node, "since": ago(60)}
+        self.assertEqual("", pr_review_checks.check_shape(inside, NOW, 300, 1800))
+
+    def test_a_job_no_runner_picked_up_still_holds_its_open_run(self) -> None:
+        """A queue past the grace often starts, so releasing on it would exit 0 with jobs unstarted."""
+        starved = {
+            **check(status="QUEUED", conclusion="", started=ago(900)),
+            "isRequired": False,
+        }
+        pr = self.held("CLEAN", [starved], self.suite("IN_PROGRESS"))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_stuck_required_check_still_ends_a_blocked_poll(self) -> None:
+        """The 44 a failed required check decides is not delayed by a sibling run."""
+        failed = check(conclusion="FAILURE")
+        pr = self.held("BLOCKED", [failed], self.suite("IN_PROGRESS"))
+        self.assertFalse(self.is_open(pr))
+
+    def test_a_closed_pull_request_holds_nothing(self) -> None:
+        pr = {**self.held("CLEAN", [check()], self.suite("IN_PROGRESS")), "state": "MERGED"}
+        self.assertFalse(self.is_open(pr))
+
+    def test_each_run_is_named_once(self) -> None:
+        pr = self.held(
+            "CLEAN",
+            [check()],
+            self.suite("IN_PROGRESS", run=300, sid=30),
+            self.suite("QUEUED", run=200),
+            self.suite("IN_PROGRESS", run=300, sid=30),
+        )
+        self.assertEqual(["run 200", "run 300"], pr_review_checks.runs_open(pr))
 
 
 class TestAttest(unittest.TestCase):
@@ -6202,7 +6468,7 @@ class TestAttestationReadings(unittest.TestCase):
                     "baseRefName": "develop",
                     "comments": {"nodes": [self.comment(line)]},
                 }
-                self.assertEqual(expected, pr_review.attestation(pr))
+                self.assertEqual(expected, pr_review_rounds.attestation(pr))
 
     def test_only_a_writer_s_marker_for_the_current_head_attests(self) -> None:
         marker = f"<!-- fleet-local-review: head={HEAD} base=develop findings=0 -->"
@@ -6222,7 +6488,7 @@ class TestAttestationReadings(unittest.TestCase):
         ):
             with self.subTest(nodes=nodes):
                 pr = {"headRefOid": HEAD, "baseRefName": "develop", "comments": {"nodes": nodes}}
-                self.assertIs(expected, pr_review.attested(pr))
+                self.assertIs(expected, pr_review_rounds.attested(pr))
 
     def test_a_promotion_is_a_pull_request_into_the_default_branch(self) -> None:
         for base, default, expected in (
@@ -6235,7 +6501,7 @@ class TestAttestationReadings(unittest.TestCase):
                     "baseRefName": base,
                     "baseRepository": {"defaultBranchRef": {"name": default} if default else None},
                 }
-                self.assertIs(expected, pr_review.promotion(pr))
+                self.assertIs(expected, pr_review_rounds.promotion(pr))
 
     def test_the_base_branch_alone_decides_the_hold_and_the_local_cover(self) -> None:
         """No Copilot round is needed first, so an attested head with none is covered off main."""
@@ -6248,8 +6514,8 @@ class TestAttestationReadings(unittest.TestCase):
                     "baseRepository": {"defaultBranchRef": {"name": "main"}},
                     "comments": {"nodes": [self.comment(marker.replace("develop", base))]},
                 }
-                self.assertIs(expected, pr_review.holds(pr))
-                self.assertIs(expected, pr_review.local_cover(pr))
+                self.assertIs(expected, pr_review_rounds.holds(pr))
+                self.assertIs(expected, pr_review_rounds.local_cover(pr))
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
@@ -6352,7 +6618,7 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
         errors = [{"message": "forbidden", "path": self.WORKFLOW_RUN_PATH}]
         with contextlib.redirect_stderr(io.StringIO()):
             got = self.read({"data": data, "errors": errors})
-        self.assertEqual({**data, pr_review.WORKFLOW_KEYS_UNAVAILABLE: True}, got)
+        self.assertEqual({**data, pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}, got)
 
     def test_tolerated_errors_with_null_data_abort(self) -> None:
         errors = [{"message": "forbidden", "path": self.WORKFLOW_RUN_PATH}]
@@ -6399,7 +6665,7 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
             name="lint", conclusion="SUCCESS", suite=20, workflow=None, slug="github-actions"
         )
         other = check(name="lint", conclusion="FAILURE", suite=5, workflow=None, slug="other-app")
-        nodes = pr_review.check_nodes(payload([review()], checks=[old, new, other]))
+        nodes = pr_review_checks.check_nodes(payload([review()], checks=[old, new, other]))
         kept = sorted((n["name"], n["conclusion"]) for n in nodes)
         self.assertEqual([("lint", "FAILURE"), ("lint", "SUCCESS")], kept)
 

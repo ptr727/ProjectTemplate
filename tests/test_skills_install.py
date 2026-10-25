@@ -300,7 +300,7 @@ class ReportCase(unittest.TestCase):
         )
 
     def run_report(self, intended=("abc", "refs/remotes/origin/main"), intended_rev=None):
-        mock.patch("skills_install.intended_commit", return_value=intended).start()
+        self.resolver = mock.patch("skills_install.intended_commit", return_value=intended).start()
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             exit_code = skills_install.report(self.stamp, intended_rev)
@@ -387,6 +387,34 @@ class ReportCase(unittest.TestCase):
         self.write_stamp("oops")
         exit_code, _ = self.run_report()
         self.assertEqual(exit_code, 1)
+
+    def test_every_cannot_read_path_emits_the_judged_snapshot_shape(self) -> None:
+        """A parser reads one shape, so a missing, unreadable, or unrecognized stamp carries every
+        key a judged snapshot does, null where the stamp would have said, and resolves intended."""
+        keys = {"installedFrom", "installedDirty", "intended", "intendedRef", "current", "reason"}
+        self.write_stamp({"commit": "abc"})
+        judged = json.loads(self.run_report()[1])["snapshot"]
+        self.assertTrue(keys >= set(judged))
+        cases = {
+            "missing": lambda: self.stamp.unlink(missing_ok=True),
+            "unreadable": lambda: self.stamp.write_text("{{{", encoding="utf-8"),
+            "unrecognized": lambda: self.stamp.write_text(
+                json.dumps({"stampVersion": skills_install.STAMP_VERSION + 1}), encoding="utf-8"
+            ),
+        }
+        for name, arrange in cases.items():
+            with self.subTest(name):
+                arrange()
+                exit_code, out = self.run_report(intended_rev="v1")
+                snapshot = json.loads(out)["snapshot"]
+                self.resolver.assert_called_once_with("v1")
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(set(snapshot), keys)
+                self.assertIsNone(snapshot["installedFrom"])
+                self.assertIsNone(snapshot["installedDirty"])
+                self.assertFalse(snapshot["current"])
+                self.assertEqual(snapshot["intended"], "abc")
+                self.assertEqual(snapshot["intendedRef"], "refs/remotes/origin/main")
 
     def test_an_unrecognized_stamp_version_reports_not_current(self) -> None:
         """A future format bump must not have an old-shaped stamp read as current."""
@@ -801,6 +829,19 @@ class MainExitCodeCase(unittest.TestCase):
         stamp = json.loads((self.tmp / "skills-install-stamp.json").read_text(encoding="utf-8"))
         self.assertIsNone(stamp["claudeRegistered"])
 
+    def test_intended_without_report_is_refused_and_installs_nothing(self) -> None:
+        mock.patch("sys.argv", ["skills_install.py", "--intended", "main"]).start()
+        materialize = mock.patch("skills_install.materialize_global_skills").start()
+        register = mock.patch("skills_install.register_claude_marketplace").start()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            skills_install.main()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("--intended only applies with --report", err.getvalue())
+        materialize.assert_not_called()
+        register.assert_not_called()
+        self.assertFalse((self.tmp / "skills-install-stamp.json").exists())
+
     def test_snapshot_only_is_refused_with_report(self) -> None:
         mock.patch("sys.argv", ["skills_install.py", "--snapshot-only", "--report"]).start()
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
@@ -817,15 +858,23 @@ class RegisterCase(unittest.TestCase):
         self.elsewhere = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.calls: list[list[str]] = []
         self.entries: list[dict[str, str]] | None = []
+        self.plugins: list[dict[str, object]] | None = []
+        self.results: dict[str, tuple[int, str]] = {}
 
     def run_register(self) -> bool:
+        def listing(entries: object) -> mock.Mock:
+            if entries is None:
+                return mock.Mock(returncode=1, stdout="", stderr="")
+            return mock.Mock(returncode=0, stdout=json.dumps(entries), stderr="")
+
         def fake_run(cmd: list[str], **_: object) -> mock.Mock:
             self.calls.append(cmd)
             if cmd[1:4] == ["plugin", "marketplace", "list"]:
-                if self.entries is None:
-                    return mock.Mock(returncode=1, stdout="", stderr="")
-                return mock.Mock(returncode=0, stdout=json.dumps(self.entries), stderr="")
-            return mock.Mock(returncode=0, stdout="", stderr="")
+                return listing(self.entries)
+            if cmd[1:3] == ["plugin", "list"]:
+                return listing(self.plugins)
+            returncode, stderr = self.results.get(cmd[2], (0, ""))
+            return mock.Mock(returncode=returncode, stdout="", stderr=stderr)
 
         mock.patch("subprocess.run", side_effect=fake_run).start()
         with contextlib.redirect_stderr(io.StringIO()) as err:
@@ -849,10 +898,41 @@ class RegisterCase(unittest.TestCase):
         self.assertTrue(self.added())
         self.assertTrue(self.installed())
 
-    def test_a_registration_from_this_checkout_is_re_added(self) -> None:
+    def test_a_registration_from_this_checkout_is_installed_without_a_re_add(self) -> None:
         self.registered_at(skills_install.ROOT)
         self.assertTrue(self.run_register())
-        self.assertTrue(self.added())
+        self.assertFalse(self.added())
+        self.assertTrue(self.installed())
+
+    def test_a_failed_add_fails_whatever_its_message_says(self) -> None:
+        """The exit status decides, so a message saying the marketplace exists is still a failure."""
+        for stderr in ("Marketplace already exists", "network unreachable"):
+            with self.subTest(stderr=stderr):
+                self.calls.clear()
+                self.results = {"marketplace": (1, stderr)}
+                self.assertFalse(self.run_register())
+                self.assertFalse(self.installed())
+                self.assertIn(stderr, self.stderr)
+
+    def test_a_plugin_the_listing_shows_installed_is_not_reinstalled(self) -> None:
+        plugin_id = f"{skills_install.PLUGIN_NAME}@{skills_install.MARKETPLACE_NAME}"
+        self.plugins = [{"id": plugin_id, "scope": "user", "enabled": True}]
+        self.results = {"install": (1, "Plugin already installed")}
+        self.assertTrue(self.run_register())
+        self.assertFalse(self.installed())
+
+    def test_a_failed_install_fails_whatever_its_message_says(self) -> None:
+        """Where the listing shows no install, or cannot be read, the install's status decides."""
+        listings: tuple[list[dict[str, object]] | None, ...] = ([], None)
+        for plugins in listings:
+            for stderr in ("Plugin already installed", "manifest invalid"):
+                with self.subTest(plugins=plugins, stderr=stderr):
+                    self.calls.clear()
+                    self.plugins = plugins
+                    self.results = {"install": (1, stderr)}
+                    self.assertFalse(self.run_register())
+                    self.assertTrue(self.installed())
+                    self.assertIn(stderr, self.stderr)
 
     def test_a_registration_from_another_checkout_is_left_in_place(self) -> None:
         self.registered_at(self.elsewhere)

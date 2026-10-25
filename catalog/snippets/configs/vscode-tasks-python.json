@@ -132,8 +132,8 @@
         // Lint group, run on demand via Docker, where --pull=always forces each to re-pull :latest.
         // It mirrors the CI lint gate.
         // Broad live spell-checking is the cspell extension's job.
-        // Pre-commit already runs the prose/EOL gates diff-scoped.
-        // Lint: Prose and Lint: EOL below add the same two checks in whole-repo mode, for on-demand full-tree validation.
+        // Pre-commit already runs the prose gate diff-scoped and the EOL gate over the whole tree.
+        // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the hook's own EOL check on demand.
         // Lint: EditorConfig/Workflows/Markdown/Spelling are language-agnostic, identical to the
         // .NET snippet's Lint group.
         // Lint: Prose and Lint: EOL assume the pre-commit-framework layout (hub_fetch_run.py at the workspace root).
