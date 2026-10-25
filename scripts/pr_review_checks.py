@@ -308,7 +308,7 @@ def checks_never_ran(
     if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
         return ""
     if checks_unreadable(pr):
-        return "the payload carries no commit matching the head, so no check was read: run gh pr checks"
+        return "the payload carries no commit matching the head, so read the check runs on the head commit"
     if not nodes:
         return "no check has posted, and a DIRTY merge runs none until its conflict is resolved"
     unmet = ", ".join(required_unregistered(pr, nodes, required))

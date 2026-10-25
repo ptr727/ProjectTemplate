@@ -122,7 +122,7 @@ Subcommands
            posted. A DIRTY or BEHIND one also exits 45 where a required check is unregistered or
            from another app. Exit 0 can then leave a required check unregistered only where the
            rules were unread, the rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT. A pull
-           request no longer open exits 0 as well.
+           request no longer open never exits 45.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
@@ -678,7 +678,7 @@ def required_for(
     pr: dict, owner: str, repo: str, gated: frozenset[str] = frozenset({"BLOCKED"})
 ) -> frozenset[tuple[str, int | None]]:
     """The required entries a merge in `gated` can be short of, empty wherever none can matter."""
-    if pr.get("mergeStateStatus") not in gated:
+    if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") not in gated:
         return frozenset()
     return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
@@ -2049,8 +2049,8 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print(
                 "status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
-                f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, which "
-                "is not ready, and polling longer does not change that"
+                f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, so it is "
+                "not ready to merge"
             )
             return 45
         return 0

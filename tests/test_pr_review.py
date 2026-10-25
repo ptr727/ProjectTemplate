@@ -6293,6 +6293,8 @@ class TestRequiredContexts(unittest.TestCase):
             for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS", "BLOCKED", "DRAFT"):
                 pr = payload([], merge=merge, checks=[check()])
                 self.assertEqual(frozenset(), pr_review.required_for(pr, "o", "r", gated))
+            closed = {**payload([], merge="DIRTY", checks=[check()]), "state": "CLOSED"}
+            self.assertEqual(frozenset(), pr_review.required_for(closed, "o", "r", gated))
         rest.assert_not_called()
 
 
