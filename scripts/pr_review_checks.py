@@ -310,7 +310,7 @@ def checks_never_ran(
     if checks_unreadable(pr):
         return "the payload carries no commit matching the head, so read the check runs on the head commit"
     if not nodes:
-        return "no check has posted, and a DIRTY merge runs none until its conflict is resolved"
+        return "no check has posted, and a DIRTY merge runs no pull_request workflow until resolved"
     unmet = ", ".join(required_unregistered(pr, nodes, required))
     return unmet and (
         f"a required check has not registered or came from another app, {unmet}, so update a "
