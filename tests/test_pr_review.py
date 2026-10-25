@@ -1990,6 +1990,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         out = self.out.getvalue()
         self.assertIn("coverage=PARTIAL ", out)
         self.assertIn("status=COVERAGE_IS_PARTIAL the review covering the head states it", out)
+        self.assertNotIn("may have no review", out)
 
     def test_an_earlier_partial_carries_to_a_head_stating_none(self) -> None:
         part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
@@ -1998,6 +1999,8 @@ class TestReadingsThroughTheAdapter(GqlCase):
         line = next(ln for ln in self.out.getvalue().splitlines() if ln.startswith("status="))
         self.assertIn("because an earlier round states partial coverage", line)
         self.assertNotIn("the review covering the head states", line)
+        self.assertIn("A round on the head stating full coverage clears this", line)
+        self.assertNotIn("A re-request is not the remedy", line)
 
     def test_an_earlier_partial_carried_past_an_unbelievable_head_says_so(self) -> None:
         part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
