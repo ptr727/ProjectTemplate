@@ -117,9 +117,11 @@ Subcommands
            hold the poll. On an open pull request whose head commit the payload carries, every
            workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
-           CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, exit
-           0 means every check the base branch's rules require has registered, except where those
-           rules were unread or the rollup is `CHECKS TRUNCATED`, since 45 takes the rest.
+           CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
+           attested held head exits 45 where its checks were unread or none posted. A DIRTY or
+           BEHIND one also exits 45 where a required check has not registered. Exit 0 can then
+           leave a required check unregistered only where the rules were unread, the rollup is
+           `CHECKS TRUNCATED`, or the merge reads DRAFT.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
@@ -137,14 +139,14 @@ Subcommands
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, or failed. On
            a held head a check running long or held by its environment polls to 30 instead.
-           45 = an attested local pass covers a held head and nothing holds the poll, but the merge
-           reads other than CLEAN, UNSTABLE, or HAS_HOOKS and its required checks have not run.
-           The payload carries no commit matching the head, named `CHECKS UNREADABLE` in the
-           digest, no check has posted, or a context the base branch's rules require has not
-           registered on a rollup read whole. `status=CHECKS_NOT_RUN` names which. A DIRTY merge
-           runs no pull_request workflow until its conflict is resolved. A required check not yet
-           registered holds a BLOCKED merge to 30 instead, and an empty rollup holds a BLOCKED,
-           BEHIND, or DRAFT one.
+           45 = an attested held head that nothing holds, its merge other than CLEAN, UNSTABLE, or
+           HAS_HOOKS. Either the payload carries no commit matching the head, named
+           `CHECKS UNREADABLE` in the digest, or no check has posted. Or the merge reads DIRTY or
+           BEHIND and a check the base branch's rules require has not registered, or came from
+           another app. That last needs the rules read and a rollup read whole.
+           `status=CHECKS_NOT_RUN` names which. A DIRTY merge runs no pull_request workflow until
+           its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
+           30 instead, and an empty rollup holds a BLOCKED, BEHIND, or DRAFT one.
            49 = no Copilot round covers this head and none was requested, the pull request
            merging into a branch other than the default with no attestation vouching for the
            head. 64 = the write scope could not
@@ -182,7 +184,6 @@ from pr_review_checks import (
     CHECK_GRACE,
     CHECK_STALL,
     CHECKS_WINDOW,
-    MERGE_UNGATED,
     WORKFLOW_KEYS_UNAVAILABLE,
     _unmet_note,
     check_lines,
@@ -192,6 +193,7 @@ from pr_review_checks import (
     checks_stuck,
     checks_tally,
     held_checks_open,
+    required_unregistered,
     runs_open,
 )
 from pr_review_rounds import (
@@ -2038,18 +2040,23 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 44
         merge = final.get("mergeStateStatus")
-        if covered and merge not in MERGE_UNGATED:
+        unrun = checks_never_ran(final, checks) if covered else ""
+        if covered and not unrun and merge in ("DIRTY", "BEHIND"):
             rules = required_contexts(owner, repo, final.get("baseRefName") or "") or frozenset()
-            if unrun := checks_never_ran(final, checks, rules):
-                print(
-                    f"status=CHECKS_NOT_RUN an attested local pass covers this head and nothing "
-                    f"holds the poll, but the merge reads {merge} and {unrun}, so the merge is "
-                    "not ready and the poll does not clear it: a DIRTY merge runs no "
-                    "pull_request workflow until its conflict is resolved, a BEHIND one may "
-                    "need the head updated from its base, and a payload read off another "
-                    "commit wants status run again"
+            if unmet := required_unregistered(final, checks, rules):
+                unrun = (
+                    "a check the base branch requires has not registered, or came from "
+                    f"another app: {', '.join(unmet)}"
                 )
-                return 45
+        if unrun:
+            print(
+                f"status=CHECKS_NOT_RUN an attested local pass covers this head and nothing holds "
+                f"the poll, but the merge reads {merge} and {unrun}, so the merge is not ready "
+                "and the poll does not clear it: a DIRTY merge runs no pull_request workflow "
+                "until its conflict is resolved, a BEHIND one may need the head updated from its "
+                "base, and a payload read off another commit wants status run again"
+            )
+            return 45
         return 0
     # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)

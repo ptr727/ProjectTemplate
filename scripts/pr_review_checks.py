@@ -292,34 +292,22 @@ def held_checks_open(
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    if (
-        merge == "BLOCKED"
-        and not checks_unreadable(pr)
-        and not checks_truncated(pr)
-        and required_unmet(required, nodes)
-    ):
+    if merge == "BLOCKED" and required_unregistered(pr, nodes, required):
         return True
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
-def checks_never_ran(
-    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
-) -> str:
-    """Why an open head's merge is waiting on checks that never ran on it, or "" for none known.
+def checks_never_ran(pr: dict, nodes: list[dict]) -> str:
+    """Why an open head's gated merge has no check of its own to settle on, or "" where it has.
 
-    A CLEAN, UNSTABLE, or HAS_HOOKS merge waits on nothing. Short of one, a payload with no commit
-    matching the head read no check, a rollup with none posted ran none, and a context in
-    `required` that the rollup does not carry has not run, judged only on a rollup read whole.
+    A CLEAN, UNSTABLE, or HAS_HOOKS merge is gated by nothing. Under any other merge, a payload with
+    no commit matching the head read no check, and a rollup with none posted ran none.
     """
     if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
         return ""
     if checks_unreadable(pr):
         return "the payload carries no commit matching the head, so no check was read"
-    if not nodes:
-        return "no check has posted on the head"
-    if not checks_truncated(pr) and (unmet := required_unmet(required, nodes)):
-        return f"a check the base branch requires has not registered: {', '.join(unmet)}"
-    return ""
+    return "" if nodes else "no check has posted on the head"
 
 
 def runs_open(pr: dict) -> list[str]:
@@ -357,6 +345,15 @@ def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict
             )
         }
     )
+
+
+def required_unregistered(
+    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
+) -> list[str]:
+    """The contexts among `required` the head's rollup lacks, judged only on a rollup read whole."""
+    if checks_unreadable(pr) or checks_truncated(pr):
+        return []
+    return required_unmet(required, nodes)
 
 
 def _unmet_note(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
