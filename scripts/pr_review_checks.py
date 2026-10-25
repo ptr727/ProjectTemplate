@@ -308,7 +308,7 @@ def checks_never_ran(
     if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
         return ""
     if checks_unreadable(pr):
-        return "the payload carries no commit matching the head, so no check was read: wait again"
+        return "the payload carries no commit matching the head, so no check was read: run gh pr checks"
     if not nodes:
         return "no check has posted, and a DIRTY merge runs none until its conflict is resolved"
     unmet = ", ".join(required_unregistered(pr, nodes, required))
@@ -364,9 +364,9 @@ def required_unregistered(
     return required_unmet(required, nodes)
 
 
-def _unmet_note(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
+def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
     """Names the required contexts still unmet, so a reader sees what the hold waits on."""
-    unmet = required_unmet(required, nodes)
+    unmet = required_unregistered(pr, nodes, required)
     return f" (required, unmet: {', '.join(unmet)})" if unmet else ""
 
 

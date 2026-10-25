@@ -119,9 +119,9 @@ Subcommands
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
            attested held head nothing holds exits 45 where its checks were unread or none posted.
-           A DIRTY or BEHIND one also exits 45 where a required check has not registered. Exit 0
-           can then leave a required check unregistered only where the rules were unread, the
-           rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT.
+           A DIRTY or BEHIND one also exits 45 where a required check is unregistered or from
+           another app. Exit 0 can then leave a required check unregistered only where the rules
+           were unread, the rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
@@ -2024,7 +2024,7 @@ def main(argv: list[str] | None = None) -> int:
                 "had not completed, a check the base branch requires had not registered or came "
                 "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
                 "wait again, or read the checks above"
-                + _unmet_note(required_for(final, owner, repo), checks)
+                + _unmet_note(final, required_for(final, owner, repo), checks)
                 + (f" (not completed: {', '.join(runs)})" if runs else "")
             )
             return 30
@@ -2041,8 +2041,11 @@ def main(argv: list[str] | None = None) -> int:
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
-        rules = required_for(final, owner, repo, frozenset({"DIRTY", "BEHIND"}))
-        if covered and (unrun := checks_never_ran(final, checks, rules)):
+        if covered and (
+            unrun := checks_never_ran(
+                final, checks, required_for(final, owner, repo, frozenset({"DIRTY", "BEHIND"}))
+            )
+        ):
             print(
                 "status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
                 f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, and it "

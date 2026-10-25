@@ -3734,6 +3734,13 @@ class TestCli(GqlCase):
                 if code == 0:
                     self.assertNotIn("status=CHECKS_MISSING", self.out.getvalue())
 
+    def test_a_head_no_attestation_covers_reads_no_rules_for_exit_45(self) -> None:
+        """A Copilot round covering the head ends the wait on its own verdict, judging no check."""
+        self.answer(payload([review()], merge="DIRTY", checks=[]))
+        with mock.patch.object(pr_review, "required_contexts") as read:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        read.assert_not_called()
+
     def test_a_released_merge_exits_0_where_the_unregistered_check_is_unproven(self) -> None:
         """Unread rules, a cut rollup, and a DRAFT merge each leave registration unjudged."""
         cut = self.into(payload([review(oid=OLD)], merge="BEHIND", checks=[check()]), attest=True)
@@ -6266,11 +6273,13 @@ class TestRequiredContexts(unittest.TestCase):
         self.assertFalse(self.held([status_context("Gate")], ("Gate", None)))
 
     def test_the_unmet_context_is_named(self) -> None:
-        nodes = pr_review_checks.check_nodes(
-            payload([], merge="BLOCKED", checks=[check(name="Gate")])
-        )
-        self.assertEqual("", pr_review_checks._unmet_note(frozenset({("Gate", None)}), nodes))
-        self.assertIn("Gate", pr_review_checks._unmet_note(frozenset({("Gate", 9)}), nodes))
+        pr = payload([], merge="BLOCKED", checks=[check(name="Gate")])
+        nodes = pr_review_checks.check_nodes(pr)
+        self.assertEqual("", pr_review_checks._unmet_note(pr, frozenset({("Gate", None)}), nodes))
+        self.assertIn("Gate", pr_review_checks._unmet_note(pr, frozenset({("Gate", 9)}), nodes))
+        rollup = pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
+        rollup["contexts"]["pageInfo"] = {"hasNextPage": True}
+        self.assertEqual("", pr_review_checks._unmet_note(pr, frozenset({("Gate", 9)}), nodes))
 
     def test_the_rules_are_read_only_for_a_blocked_merge(self) -> None:
         with mock.patch.object(pr_review, "gh_rest") as rest:
