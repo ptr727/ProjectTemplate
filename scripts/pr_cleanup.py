@@ -91,6 +91,7 @@ M_DELETE_REF = """
 mutation($refId:ID!){
   deleteRef(input:{refId:$refId}){ clientMutationId }}
 """
+DELETE_SETTLE_DELAYS = (1, 2, 4)
 
 
 class CleanupUnread(Exception):
@@ -286,6 +287,7 @@ def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
     """Delete the remote branch `plan` verified and read it back.
 
     A delete that reports a failure may still have landed, so the read back decides either way.
+    A ref still at the deleted tip is read again on `DELETE_SETTLE_DELAYS` before it is reported.
     """
     target = f"{owner}/{repo}"
     branch = plan.branch
@@ -301,17 +303,29 @@ def cleanup_remote_delete(owner: str, repo: str, plan: CleanupPlan) -> int:
         print(f"  the delete reported a failure: {exc}")
         sys.stderr.write(exc.detail)
     try:
-        after = cleanup_ref(owner, repo, branch)
+        after = core.backoff(
+            cleanup_ref(owner, repo, branch),
+            lambda: cleanup_ref(owner, repo, branch),
+            lambda ref: ref is not None and ref["target"]["oid"] == tip,
+            delays=DELETE_SETTLE_DELAYS,
+        )
     except CleanupUnread as exc:
         print(
             f"status=DELETE_NOT_CONFIRMED the delete of {branch!r} on {target} was sent, and "
             f"reading the ref back did not answer: {exc}"
         )
         return 2
+    if after is not None and after["target"]["oid"] != tip:
+        print(
+            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} reads at "
+            f"{after['target']['oid']}, a tip other than the one deleted, so something pushed to "
+            "the branch"
+        )
+        return 2
     if after is not None:
         print(
-            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} still reads at "
-            f"{after['target']['oid']} after the delete"
+            f"status=DELETE_NOT_CONFIRMED {branch!r} on {target} still reads at {tip} "
+            "after the delete"
         )
         return 2
     print(f"status=DELETED branch={branch} oid={tip}, confirmed by reading the ref back")

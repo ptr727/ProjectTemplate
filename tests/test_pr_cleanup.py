@@ -61,6 +61,7 @@ class CleanupCase(unittest.TestCase):
         self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
         self.enterContext(mock.patch.object(pr_review, "READ_RETRY_DELAYS", ()))
+        self.enterContext(mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", ()))
         self.enterContext(
             mock.patch.object(pr_cleanup.handoff, "registry", return_value=("o", {"r"}))
         )
@@ -185,6 +186,38 @@ class TestCleanupDeletesOnlyAVerifiedMergedBranch(CleanupCase):
         self.assertTrue(self.deleted())
         self.assertIn("status=DELETE_NOT_CONFIRMED", self.out.getvalue())
         self.assertNotIn("status=DELETED", self.out.getvalue())
+
+    def test_a_read_back_lagging_the_delete_settles_to_deleted(self) -> None:
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, CLEANUP_HEAD, None])
+        with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
+            self.assertEqual(0, self.run_cleanup())
+        self.assertIn("status=DELETED", self.out.getvalue())
+        self.assertNotIn("status=DELETE_NOT_CONFIRMED", self.out.getvalue())
+
+    def test_a_ref_present_on_every_settle_read_still_exits_2(self) -> None:
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD] * 4)
+        with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
+            self.assertEqual(2, self.run_cleanup())
+        self.assertIn("status=DELETE_NOT_CONFIRMED", self.out.getvalue())
+        reads = [v for q, v in self.docs if "qualifiedName" in q]
+        self.assertEqual(4, len(reads))
+
+    def test_a_settle_read_that_does_not_answer_is_not_reported_deleted(self) -> None:
+        unread = pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, CLEANUP_HEAD, unread])
+        with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
+            self.assertEqual(2, self.run_cleanup())
+        self.assertIn("reading the ref back did not answer", self.out.getvalue())
+        self.assertNotIn("status=DELETED", self.out.getvalue())
+
+    def test_a_settle_read_at_a_new_tip_stops_and_names_that_tip(self) -> None:
+        pushed = "c" * 40
+        self.wire(cleanup_pr(), refs=[CLEANUP_HEAD, pushed])
+        with mock.patch.object(pr_cleanup, "DELETE_SETTLE_DELAYS", (0, 0)):
+            self.assertEqual(2, self.run_cleanup())
+        out = self.out.getvalue()
+        self.assertIn(f"reads at {pushed}, a tip other than the one deleted", out)
+        self.assertNotIn("still reads at", out)
 
     def test_a_read_back_that_does_not_answer_is_not_reported_deleted(self) -> None:
         unread = pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
