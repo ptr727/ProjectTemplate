@@ -3719,7 +3719,7 @@ class TestCli(GqlCase):
                 45,
                 "has not registered, sits in the rollup's unread part, or came from another app, "
                 + name
-                + ", so read the check runs on the head commit first, then update a BEHIND head",
+                + ", so read the head commit's checks and statuses first, then update a BEHIND head",
             ),
             ("closed", {**closed, "state": "CLOSED"}, 0, ""),
         ] + [
@@ -3744,7 +3744,7 @@ class TestCli(GqlCase):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "1"]))
                 self.assertIn(reason, self.out.getvalue())
                 if label == "another app":
-                    self.assertNotIn("read the check runs on the head commit", self.out.getvalue())
+                    self.assertNotIn("checks and statuses first", self.out.getvalue())
                 if code == 0:
                     self.assertNotIn("status=CHECKS_MISSING", self.out.getvalue())
 
@@ -6291,6 +6291,8 @@ class TestRequiredContexts(unittest.TestCase):
         nodes = pr_review_checks.check_nodes(pr)
         self.assertEqual("", pr_review_checks._unmet_note(pr, frozenset({("Gate", None)}), nodes))
         self.assertIn("Gate", pr_review_checks._unmet_note(pr, frozenset({("Gate", 9)}), nodes))
+        note = pr_review_checks._unmet_note(pr, frozenset({("Gate", 9)}), nodes)
+        self.assertNotIn("unread part", note)
         unread = nodes + pr_review_checks.check_nodes(
             payload([], merge="BLOCKED", checks=[{"__typename": "SomethingNew", "label": "x"}])
         )

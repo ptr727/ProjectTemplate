@@ -314,7 +314,7 @@ def checks_never_ran(
     unmet = ", ".join(required_unregistered(pr, nodes, required))
     unread = checks_unread(nodes)
     where = ", sits in the rollup's unread part," if unread else ""
-    read = "read the check runs on the head commit first, then " if unread else ""
+    read = "read the head commit's checks and statuses first, then " if unread else ""
     return unmet and (
         f"a required check has not registered{where} or came from another app, {unmet}, so "
         f"{read}update a BEHIND head, resolve a DIRTY one's conflict, or correct the check's "

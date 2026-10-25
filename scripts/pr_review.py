@@ -124,7 +124,8 @@ Subcommands
            rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
-           open among them. It is also a round past --min-rounds not yet landed.
+           open among them. A BLOCKED hold's note names the rollup's unread part as a place an
+           unmet required check may sit. It is also a round past --min-rounds not yet landed.
            40 = no Copilot review covers the head: the reviewer
            answered outside a formal review, the request returned success and recorded nothing on
            the pull request, or the reviewer writes under a login no query filters on. 41 = the
