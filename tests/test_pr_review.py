@@ -5448,7 +5448,9 @@ class TestContract(unittest.TestCase):
                 self.assertIn(READER_FLOORS[module], imported)
                 # The adapter's own imports count too, so the gate and a transport stay unloaded.
                 before, after = import_delta(REPO / "scripts", module, REACHING_OUT)
-                self.assertEqual(before, after, f"importing {module} loads {after}")
+                # Clean before the import, or a module loaded at startup reads as never loaded.
+                self.assertEqual([], before)
+                self.assertEqual([], after, f"importing {module} loads {after}")
 
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""
