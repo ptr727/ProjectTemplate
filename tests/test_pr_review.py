@@ -3709,6 +3709,16 @@ class TestCli(GqlCase):
                 "came from another app, " + name,
             ),
             ("unread payload", unread, 45, "no commit matching the head"),
+            (
+                "partly unread rollup",
+                payload(
+                    [review(oid=OLD)],
+                    merge="DIRTY",
+                    checks=[check(name="lint"), {"__typename": "SomethingNew", "label": "x"}],
+                ),
+                45,
+                "is not among the checks read and may sit in the rollup's unread part",
+            ),
             ("closed", {**closed, "state": "CLOSED"}, 0, ""),
         ] + [
             (merge, payload([review(oid=OLD)], merge=merge, checks=[]), 0, "")

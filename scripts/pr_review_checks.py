@@ -312,6 +312,11 @@ def checks_never_ran(
     if not nodes:
         return "no check has posted, and a DIRTY merge runs no pull_request workflow until resolved"
     unmet = ", ".join(required_unregistered(pr, nodes, required))
+    if unmet and checks_unread(nodes):
+        return (
+            f"a required check, {unmet}, is not among the checks read and may sit in the "
+            "rollup's unread part"
+        )
     return unmet and (
         f"a required check has not registered or came from another app, {unmet}, so update a "
         "BEHIND head, resolve a DIRTY one's conflict, or correct the check's poster or its rule"
