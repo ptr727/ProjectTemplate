@@ -307,18 +307,37 @@ class TestLinuxGitHubCli(unittest.TestCase):
         )
 
 
-WINDOWS_HARNESS = r"""
-param([string]$Script, [string]$Cases)
+def windows_harness(params: str, functions: list[str], body: str) -> str:
+    """A pwsh harness taking `params` that dot-sources `functions` out of the script, then runs `body`."""
+    wanted = ", ".join(f"'{name}'" for name in functions)
+    return f"""
+param([string]$Script, {params})
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$tokens, [ref]$errors)
-if ($errors.Count -gt 0) { throw "setup-github.ps1 does not parse: $($errors[0].Message)" }
-$wanted = @('log', 'info', 'step', 'ok', 'missing', 'run', 'Get-GhAccount', 'Get-GhProtocol', 'Show-GhStatus', 'Set-GhProtocol')
-foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+if ($errors.Count -gt 0) {{ throw "setup-github.ps1 does not parse: $($errors[0].Message)" }}
+$wanted = @({wanted})
+foreach ($definition in $ast.FindAll({{ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }}, $true)) {{
     . ([scriptblock]::Create($definition.Extent.Text))
-}
+}}
+{body}"""
+
+
+WINDOWS_FUNCTIONS = [
+    "log",
+    "info",
+    "step",
+    "ok",
+    "missing",
+    "run",
+    "Get-GhAccount",
+    "Get-GhProtocol",
+    "Show-GhStatus",
+    "Set-GhProtocol",
+]
+WINDOWS_BODY = r"""
 # The remedy command is read from the script itself rather than restated, so the two cannot drift apart.
 foreach ($statement in $ast.EndBlock.Statements) {
     if ($statement -is [System.Management.Automation.Language.AssignmentStatementAst] -and $statement.Left.Extent.Text -in '$GH_PROTOCOL_ARGUMENTS', '$GH_PROTOCOL_COMMAND') {
@@ -489,18 +508,7 @@ def windows_case(case: dict[str, object]) -> dict[str, object]:
     return full
 
 
-KNOWN_HOST_HARNESS = r"""
-param([string]$Script, [int]$Code, [string]$Output)
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$tokens, [ref]$errors)
-if ($errors.Count -gt 0) { throw "setup-github.ps1 does not parse: $($errors[0].Message)" }
-$wanted = @('log', 'info', 'step', 'Add-KnownHost')
-foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
+KNOWN_HOST_BODY = r"""
 function ssh-keygen { $global:LASTEXITCODE = $Code; return $Output }
 $script:DRY_RUN = $true
 Add-KnownHost 6>&1 | ForEach-Object { "$_" }
@@ -525,7 +533,12 @@ class TestWindowsKnownHost(unittest.TestCase):
     def add_known_host(self, code: int, output: str) -> str:
         with tempfile.TemporaryDirectory() as directory:
             harness = Path(directory, "harness.ps1")
-            harness.write_text(KNOWN_HOST_HARNESS, encoding="utf-8")
+            text = windows_harness(
+                "[int]$Code, [string]$Output",
+                ["log", "info", "step", "Add-KnownHost"],
+                KNOWN_HOST_BODY,
+            )
+            harness.write_text(text, encoding="utf-8")
             arguments = ["-Script", str(WINDOWS_SCRIPT), "-Code", str(code), "-Output", output]
             result = run_pwsh(["-File", str(harness), *arguments])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -550,7 +563,8 @@ class TestWindowsGitHubCli(unittest.TestCase):
     def setUpClass(cls) -> None:
         with tempfile.TemporaryDirectory() as directory:
             harness = Path(directory, "harness.ps1")
-            harness.write_text(WINDOWS_HARNESS, encoding="utf-8")
+            text = windows_harness("[string]$Cases", WINDOWS_FUNCTIONS, WINDOWS_BODY)
+            harness.write_text(text, encoding="utf-8")
             cases = Path(directory, "cases.json")
             # Every case carries every field, since the harness reads them under strict mode.
             full = [windows_case(case) for case in WINDOWS_CASES]
