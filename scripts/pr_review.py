@@ -120,9 +120,8 @@ Subcommands
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
            open attested held head nothing holds exits 45 where its rollup was unreadable or none
            posted. A DIRTY or BEHIND one also exits 45 where a required check is unregistered or
-           from another app. Exit 0 can then leave a required check unregistered only where the
-           rules were unread, the rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT. A pull
-           request no longer open never exits 45.
+           from another app. Exit 0 can leave a required check unregistered only under unread
+           rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request no longer open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
