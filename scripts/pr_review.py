@@ -115,7 +115,9 @@ Subcommands
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll. On an open pull request whose head commit the payload carries, every
-           workflow run on that head has then completed. It does not prove the required checks ran.
+           workflow run the read reaches on that head has then completed. The read reaches the
+           head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. It
+           does not prove the required checks ran.
            A payload with no commit matching the head, named `CHECKS UNREADABLE` in the digest,
            reads no run and no check. A required check not yet registered holds only a BLOCKED
            merge whose base branch rules were read and whose rollup is not `CHECKS TRUNCATED`. An
