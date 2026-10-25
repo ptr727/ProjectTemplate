@@ -7493,7 +7493,11 @@ COLLECTIONS = (ast.Set, ast.List, ast.Tuple, ast.Dict)
 
 
 def is_word(text: str) -> bool:
-    """Whether `text` is letters alone, so flags, paths, and environment variable names are not."""
+    """Whether `text` is letter runs joined by single spaces, hyphens, or apostrophes.
+
+    So "had had" and "sentence-length" are words, while flags, paths, and environment variable names
+    are not.
+    """
     return re.fullmatch(r"[A-Za-z]+(?:[ '-][A-Za-z]+)*", text) is not None
 
 
