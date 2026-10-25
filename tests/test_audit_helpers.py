@@ -2792,6 +2792,63 @@ class GroundTruthCase(unittest.TestCase):
             none_findings, want_none, f"baseline_file_findings, neither -> {none_findings}"
         )
 
+    def test_intent_staleness_skips_a_copy_matching_the_hub_file_at_path(self) -> None:
+        unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
+        texts = {"DOC.md": "the doc", "widget.json": "same"}
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
+        for held, want in (
+            (content, 0),
+            ({**content, "content": base64.b64encode(b"x").decode()}, 1),
+        ):
+            with (
+                mock.patch.object(
+                    audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+                ),
+                mock.patch.object(audit, "canonical_current_text", texts.get),
+                mock.patch.object(
+                    audit,
+                    "gh",
+                    lambda ep, ok404=False, held=held: commit if "commits" in ep else held,
+                ),
+            ):
+                _, _, findings = audit.baseline_file_findings(
+                    "o/r", "main", "widget.json", [], unit, False
+                )
+            self.assertEqual(len(findings), want, f"intentRef unit, held={held} -> {findings}")
+
+    def test_intent_staleness_reference_unit_ignores_the_hub_file_at_path(self) -> None:
+        unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
+        texts = {"snip/w.yml": "snippet", "w.yml": "same"}
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
+        with (
+            mock.patch.object(
+                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+            ),
+            mock.patch.object(audit, "canonical_current_text", texts.get),
+            mock.patch.object(
+                audit, "gh", lambda ep, ok404=False: commit if "commits" in ep else content
+            ),
+        ):
+            _, _, findings = audit.baseline_file_findings("o/r", "main", "w.yml", [], unit, False)
+        self.assertEqual(len(findings), 1, f"reference unit -> {findings}")
+
+    def test_intent_staleness_message_names_the_intent_canonical(self) -> None:
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        with (
+            mock.patch.object(
+                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+            ),
+            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
+            mock.patch.object(audit, "gh", lambda ep, ok404=False: commit),
+        ):
+            findings = audit.check_intent_staleness(
+                "o/r", "main", "w.json", "DOC.md", "x", "w.json"
+            )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
+
     def test_declared_alternatives_on_the_live_manifest(self) -> None:
         live_alts = audit.declared_alternatives(audit.load("spec/files.json")["baseline"])
         self.assertEqual(
