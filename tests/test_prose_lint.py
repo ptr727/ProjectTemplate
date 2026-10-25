@@ -7584,13 +7584,15 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
         for source, words in (
             ('PAIRS = (("grey", "gray"), ("kerb", "curb"), ("tyre", "tire"))\n', 6),
             ('GROUPS = {"a": ["w", "x", "y"], "b": ["z", "v", "u"]}\n', 8),
+            ('INNER = [["a", "b", "c", "d", "e", "f"]]\n', 6),
         ):
             with self.subTest(source=source):
                 found = vocabulary_in(source, self.DATA)
                 self.assertEqual([f"1: a literal of {words} words"], found)
 
     def test_a_dispatch_table_and_punctuation_are_logic(self) -> None:
-        names = ", ".join(f'"rule{n}": (len, frozenset({{"prose", "comment"}}))' for n in range(9))
+        rules = ("charset", "dash", "dupword", "semicolon", "spelling", "sentence-length")
+        names = ", ".join(f'"{rule}": (len, frozenset({{"prose", "comment"}}))' for rule in rules)
         source = f"TABLE = {{{names}}}\nMARKS = ('.', '!', '?', ':', ';', ',', '|')\n"
         self.assertEqual([], vocabulary_in(source, self.DATA))
 
