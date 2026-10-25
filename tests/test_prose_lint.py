@@ -7606,9 +7606,11 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
         source = f"TABLE = {{{names}}}\nMARKS = ('.', '!', '?', ':', ';', ',', '|')\n"
         self.assertEqual([], vocabulary_in(source, self.DATA))
 
-    def test_flags_and_environment_names_with_an_underscore_are_not_words(self) -> None:
+    def test_flags_paths_and_underscored_names_are_not_words(self) -> None:
         source = (
             'ARGS = ("--unified=0", "--no-color", "--no-ext-diff", "-z", "--name-only", "--cached")\n'
+            'PATHS = ("docs/notes", "src/app", "repo-config/labels", "a/b", "x/y", "lib/core", '
+            '"tests\\\\data")\n'
             'GIT = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", '
             '"GIT_NAMESPACE", "GIT_COMMON_DIR"})\n'
         )
