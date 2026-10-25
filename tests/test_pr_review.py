@@ -3592,7 +3592,10 @@ class TestCli(GqlCase):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
                 if code == 45:
                     self.assertIn("status=CHECKS_MISSING", self.out.getvalue())
-                    self.assertIn("but no check has posted", self.out.getvalue())
+                    self.assertIn(
+                        "but no check has posted, so resolve the head's conflict",
+                        self.out.getvalue(),
+                    )
 
     def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
         """A merge BLOCKED on a thread is not waiting on a check nothing requires."""
@@ -3742,7 +3745,8 @@ class TestCli(GqlCase):
                 self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
                 with mock.patch.object(pr_review.time, "sleep"):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "1"]))
-                self.assertIn(reason, self.out.getvalue())
+                if reason:
+                    self.assertIn(reason, self.out.getvalue())
                 if label == "another app":
                     self.assertNotIn("checks and statuses first", self.out.getvalue())
                 if code == 0:
