@@ -114,9 +114,11 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled and its workflow runs completed. 30 = still pending at the timeout, a
-           required check still settling or a workflow run still open on a held head printed as
-           `status=CHECKS_PENDING`, or a round past --min-rounds not yet landed. 40 = no Copilot
+           checks settled. Every workflow run on that head has also completed or waits on its
+           environment. 30 =
+           still pending at the timeout. On a held head that is a required check still settling or
+           a workflow run still open, printed as `status=CHECKS_PENDING`. It is also a round past
+           --min-rounds not yet landed. 40 = no Copilot
            review covers the head: the reviewer answered outside a formal review, the request
            returned success and recorded nothing on the pull request, or the reviewer writes
            under a login no query filters on. 41 = the newest round is a refusal
@@ -1992,13 +1994,13 @@ def main(argv: list[str] | None = None) -> int:
                 "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
                 "wait again, or read the checks above"
                 + _unmet_note(required_for(final, owner, repo), checks)
-                + (f" (runs not completed: {', '.join(map(str, runs))})" if runs else "")
+                + (f" (not completed: {', '.join(runs)})" if runs else "")
             )
             return 30
         if covered and (gated := runs_open(final, gated=True)):
             print(
-                f"note: workflow runs {', '.join(map(str, gated))} on this head wait on a "
-                "reviewer's approval, which no wait clears, so they hold nothing here"
+                f"note: {', '.join(gated)} on this head wait on an environment's protection "
+                "rule, a reviewer or a timer, and this wait holds nothing for them"
             )
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]

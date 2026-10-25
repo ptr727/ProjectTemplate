@@ -244,9 +244,10 @@ def held_checks_open(
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
     A BLOCKED merge with a stuck required check, other than one running long, has its exit 44
-    decided already. Otherwise a workflow run on the head that has not completed holds whatever the
-    merge reads, since a run's later jobs enter the rollup only as their `needs:` finish. A CLEAN,
-    UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
+    decided already. Short of that, a workflow run on the head that has not completed holds. A run's
+    later jobs enter the rollup only as their `needs:` finish, so a green rollup proves nothing while
+    one is open. A job no runner picked up keeps its run open past any wait, so it holds nothing. A
+    CLEAN, UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
     hold it. Otherwise a required check still settling holds, as does any settling check while no
     required check has posted. A rollup with no check holds while the merge
     reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the rollup carries, and a pull
@@ -265,7 +266,9 @@ def held_checks_open(
         for n, shape in checks_stuck(nodes, now, grace, stall)
     ):
         return False
-    if runs_open(pr):
+    if runs_open(pr) and not any(
+        shape == "NOT_PICKED_UP" for _, shape in checks_stuck(nodes, now, grace, stall)
+    ):
         return True
     if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
         return False
@@ -284,25 +287,31 @@ def held_checks_open(
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
-def runs_open(pr: dict, gated: bool = False) -> list[int]:
-    """The head's workflow runs whose suite has not completed, by run id, sorted.
+def runs_open(pr: dict, gated: bool = False) -> list[str]:
+    """The head's workflow runs whose suite has not completed, each named `run <id>`, sorted.
 
     Read from the suites, since a fresh head's run exists before most of its jobs do. A suite with
-    no workflow run counts for neither side, so an app that never reports holds nothing. A run
-    WAITING on a reviewer's approval is returned only where `gated` asks for those.
+    no workflow run counts for neither side, so an app that never reports holds nothing. Where
+    `workflowRun` was unreadable, an Actions suite in the rollup stands in as `suite <id>`, the
+    fallback `check_nodes` takes too. A run WAITING on its environment's protection rule is
+    returned only where `gated` asks for those.
     """
     commit = head_commit(pr)
     rollup = ((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes") or []
     suites = [n.get("checkSuite") or {} for n in rollup if n.get("__typename") == "CheckRun"]
-    return sorted(
-        {
-            run["databaseId"]
-            for s in suites + ((commit.get("checkSuites") or {}).get("nodes") or [])
-            if (run := s.get("workflowRun") or {}).get("databaseId")
-            and s.get("status") != "COMPLETED"
-            and (s.get("status") == "WAITING") == gated
-        }
-    )
+    named = set()
+    for s in suites + ((commit.get("checkSuites") or {}).get("nodes") or []):
+        if s.get("status") == "COMPLETED" or (s.get("status") == "WAITING") != gated:
+            continue
+        if run := (s.get("workflowRun") or {}).get("databaseId"):
+            named.add(f"run {run}")
+        elif (
+            pr.get(WORKFLOW_KEYS_UNAVAILABLE)
+            and (s.get("app") or {}).get("slug") == "github-actions"
+            and s.get("databaseId")
+        ):
+            named.add(f"suite {s['databaseId']}")
+    return sorted(named)
 
 
 def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> list[str]:

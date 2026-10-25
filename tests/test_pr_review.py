@@ -3455,8 +3455,8 @@ class TestCli(GqlCase):
     def fresh_head(self, run_status: str) -> dict:
         """A CLEAN head whose first-stage jobs passed while its workflow run has more to start.
 
-        A matrix job's children enter the rollup only once the jobs they need finish, so the
-        rollup can be all green while the run itself is not completed.
+        A matrix job's children enter the rollup only once the jobs they need finish. The rollup
+        can therefore be all green while the run itself is not completed.
         """
         detect = check(name="changes", suite=20, workflow=7, suite_status=run_status, run=200)
         pr = self.into(payload([review(oid=OLD)], checks=[detect]), attest=True)
@@ -3476,7 +3476,7 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         out = self.out.getvalue()
         self.assertIn("status=CHECKS_PENDING", out)
-        self.assertIn("runs not completed: 200", out)
+        self.assertIn("not completed: run 200", out)
 
     def test_a_fresh_head_polls_until_its_run_completes(self) -> None:
         running = self.fresh_head("IN_PROGRESS")
@@ -3494,7 +3494,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_not_called()
-        self.assertIn("workflow runs 200 on this head wait on a reviewer's", self.out.getvalue())
+        self.assertIn("run 200 on this head wait on an environment's", self.out.getvalue())
 
     def test_a_stuck_check_on_an_attested_head_ends_the_poll(self) -> None:
         """A shape no wait clears is 44 at once, rather than the timeout polled out against it."""
@@ -6137,7 +6137,7 @@ class TestRunsOpen(unittest.TestCase):
         for status in ("QUEUED", "IN_PROGRESS", "PENDING", "REQUESTED"):
             with self.subTest(status=status):
                 pr = self.held("CLEAN", [check()], self.suite(status))
-                self.assertEqual([200], pr_review_checks.runs_open(pr))
+                self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
                 self.assertTrue(self.is_open(pr))
 
     def test_a_completed_run_releases_a_clean_merge(self) -> None:
@@ -6158,8 +6158,33 @@ class TestRunsOpen(unittest.TestCase):
         }
         optional["checkSuite"]["workflowRun"]["databaseId"] = 200
         pr = self.held("CLEAN", [optional], self.suite("IN_PROGRESS"))
-        self.assertEqual([200], pr_review_checks.runs_open(pr))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
         self.assertTrue(self.is_open(pr))
+
+    def test_a_run_read_only_through_the_rollup_holds(self) -> None:
+        """A run's suite can fall outside the suites window while its jobs sit in the rollup."""
+        running = check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="IN_PROGRESS")
+        running["checkSuite"]["workflowRun"]["databaseId"] = 200
+        pr = self.held("CLEAN", [running])
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_an_actions_suite_stands_in_where_the_run_is_unreadable(self) -> None:
+        running = check(status="IN_PROGRESS", conclusion="", suite=20, suite_status="IN_PROGRESS")
+        pr = {**self.held("CLEAN", [running]), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
+        self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+        self.assertEqual([], pr_review_checks.runs_open(self.held("CLEAN", [running])))
+
+    def test_a_job_no_runner_picked_up_does_not_hold_its_run(self) -> None:
+        """No wait starts it, so polling to the timeout would contradict the digest's own line."""
+        starved = {
+            **check(status="QUEUED", conclusion="", started=ago(900)),
+            "isRequired": False,
+        }
+        pr = self.held("CLEAN", [starved], self.suite("IN_PROGRESS"))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
 
     def test_a_stuck_required_check_still_ends_a_blocked_poll(self) -> None:
         """The 44 a failed required check decides is not delayed by a sibling run."""
@@ -6175,7 +6200,7 @@ class TestRunsOpen(unittest.TestCase):
         """No wait clears a reviewer's gate, so holding on one only times out."""
         pr = self.held("CLEAN", [check()], self.suite("WAITING"))
         self.assertEqual([], pr_review_checks.runs_open(pr))
-        self.assertEqual([200], pr_review_checks.runs_open(pr, gated=True))
+        self.assertEqual(["run 200"], pr_review_checks.runs_open(pr, gated=True))
         self.assertFalse(self.is_open(pr))
 
     def test_each_run_is_named_once(self) -> None:
@@ -6186,7 +6211,7 @@ class TestRunsOpen(unittest.TestCase):
             self.suite("QUEUED", run=200),
             self.suite("IN_PROGRESS", run=300, sid=30),
         )
-        self.assertEqual([200, 300], pr_review_checks.runs_open(pr))
+        self.assertEqual(["run 200", "run 300"], pr_review_checks.runs_open(pr))
 
 
 class TestAttest(unittest.TestCase):
