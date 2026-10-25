@@ -114,20 +114,19 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. Every workflow run on that head has also completed. 30 =
-           still pending at the timeout. On a held head that is a required check still settling or
-           a workflow run still open, printed as `status=CHECKS_PENDING`. It is also a round past
-           --min-rounds not yet landed. 40 = no Copilot
-           review covers the head: the reviewer answered outside a formal review, the request
-           returned success and recorded nothing on the pull request, or the reviewer writes
-           under a login no query filters on. 41 = the newest round is a refusal
-           or a quota state, the kind printed in its status line and, for a refusal on this pull
-           request, in the digest's `refusal=`: a refusal on the
-           head, the pull request's newest review being a quota or error refusal on any head, or
-           the reviewer's newest activity elsewhere in the repository being a quota refusal
-           nothing answered since while this head carries none of its own. Proceed on the other
-           reviewers' coverage rather than retrying, and pass --ignore-quota-signal once the
-           quota is believed to have reset. 42 and 50 = the review landed and `status`'s readings
+           checks settled. Every workflow run on that head has also completed. 30 = still pending at
+           the timeout. On a held head it is any hold `status=CHECKS_PENDING` names, a required
+           check still settling and a workflow run still open among them. It is also a round past
+           --min-rounds not yet landed. 40 = no Copilot review covers the head: the reviewer
+           answered outside a formal review, the request returned success and recorded nothing on
+           the pull request, or the reviewer writes under a login no query filters on. 41 = the
+           newest round is a refusal or a quota state, the kind printed in its status line and, for
+           a refusal on this pull request, in the digest's `refusal=`: a refusal on the head, the
+           pull request's newest review being a quota or error refusal on any head, or the
+           reviewer's newest activity elsewhere in the repository being a quota refusal nothing
+           answered since while this head carries none of its own. Proceed on the other reviewers'
+           coverage rather than retrying, and pass --ignore-quota-signal once the quota is believed
+           to have reset. 42 and 50 = the review landed and `status`'s readings
            apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, or failed. On
