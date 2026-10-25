@@ -7530,7 +7530,7 @@ def vocabulary_in(source: str, data: dict[str, dict[str, Any]]) -> list[str]:
     """Where `source` holds spellings or exemptions that belong in `data`, the gate's data file.
 
     A literal of more than `VOCABULARY_CAP` words reads as a vocabulary rather than as logic. It is
-    reported once, at the outermost literal holding it.
+    reported once, at the outermost literal that counts it.
     """
     entries = data_entries(data)
     nested: set[int] = set()
@@ -7594,6 +7594,7 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
             ('GROUPS = {"a": ["w", "x", "y"], "b": ["z", "v", "u"]}\n', 8),
             ('INNER = [["a", "b", "c", "d", "e", "f"]]\n', 6),
             ('KEYED = {("aa", "bb", "cc", "dd", "ee", "ff"): len}\n', 6),
+            ('COUNTED = {("aa", "bb", "cc", "dd", "ee", "ff"): ["x"]}\n', 7),
         ):
             with self.subTest(source=source):
                 found = vocabulary_in(source, self.DATA)
@@ -7605,7 +7606,7 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
         source = f"TABLE = {{{names}}}\nMARKS = ('.', '!', '?', ':', ';', ',', '|')\n"
         self.assertEqual([], vocabulary_in(source, self.DATA))
 
-    def test_flags_and_environment_names_are_not_words(self) -> None:
+    def test_flags_and_environment_names_with_an_underscore_are_not_words(self) -> None:
         source = (
             'ARGS = ("--unified=0", "--no-color", "--no-ext-diff", "-z", "--name-only", "--cached")\n'
             'GIT = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", '
