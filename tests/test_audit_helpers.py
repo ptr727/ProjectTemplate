@@ -3738,6 +3738,65 @@ class PythonDirectoriesCase(unittest.TestCase):
         self.assertEqual(escaped_got, [], "an escaped double-quoted value is decoded")
 
 
+class WorkflowModelCallerFindingsCase(unittest.TestCase):
+    """Holds the pull request caller's workflow-model input against the registry's model."""
+
+    path = ".github/workflows/test-pull-request.yml"
+    caller = (
+        "jobs:\n  validate:\n    uses: o/h/.github/workflows/validate-task.yml@x\n{0}"
+        "  check-workflow-status:\n    runs-on: ubuntu-latest\n"
+    )
+
+    def findings(self, with_block, model, path=None):
+        text = self.caller.format(with_block)
+        return audit.workflow_model_caller_findings(path or self.path, text, model)
+
+    def test_operational_caller_passing_operational_is_clean(self) -> None:
+        got = self.findings("    with:\n      workflow-model: operational\n", "operational")
+        self.assertEqual(got, [])
+
+    def test_operational_caller_without_the_input_drifts(self) -> None:
+        got = self.findings("", "operational")
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0][0], "DRIFT")
+        self.assertIn("passes none, registry declares operational", got[0][1])
+
+    def test_release_caller_passing_another_value_drifts(self) -> None:
+        got = self.findings("    with:\n      workflow-model: operational\n", "release")
+        self.assertEqual(len(got), 1)
+        self.assertIn("passes 'operational', registry declares release", got[0][1])
+
+    def test_release_caller_omitting_or_naming_release_is_clean(self) -> None:
+        self.assertEqual(self.findings("", "release"), [])
+        self.assertEqual(self.findings("    with:\n      workflow-model: release\n", "release"), [])
+
+    def test_an_empty_value_is_not_the_default(self) -> None:
+        got = self.findings("    with:\n      workflow-model: ''\n", "release")
+        self.assertEqual(len(got), 1)
+
+    def test_other_callers_and_jobs_are_not_read(self) -> None:
+        publisher = ".github/workflows/publish-release.yml"
+        self.assertEqual(self.findings("", "operational", publisher), [])
+        no_task = "jobs:\n  validate:\n    runs-on: ubuntu-latest\n"
+        self.assertEqual(
+            audit.workflow_model_caller_findings(self.path, no_task, "operational"), []
+        )
+
+    def test_the_no_build_snippet_is_an_operational_caller(self) -> None:
+        snippet = audit.ROOT / "catalog" / "snippets" / "workflows" / "test-pull-request.yml"
+        text = snippet.read_text(encoding="utf-8")
+        self.assertEqual(audit.workflow_model_caller_findings(self.path, text, "operational"), [])
+
+    def test_the_model_falls_back_to_defaults_then_release(self) -> None:
+        self.assertEqual(
+            audit.workflow_model_of({"workflowModel": "operational"}, {}), "operational"
+        )
+        self.assertEqual(
+            audit.workflow_model_of({}, {"workflowModel": "operational"}), "operational"
+        )
+        self.assertEqual(audit.workflow_model_of({}, {}), "release")
+
+
 class ConcurrencyCallerFindingsCase(unittest.TestCase):
     """Holds the publisher and merge-bot concurrency group checks."""
 
