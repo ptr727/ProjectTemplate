@@ -3717,7 +3717,8 @@ class TestCli(GqlCase):
                     checks=[check(name="lint"), {"__typename": "SomethingNew", "label": "x"}],
                 ),
                 45,
-                "is not among the checks read and may sit in the rollup's unread part",
+                "has not registered, sits in the rollup's unread part, or came from another app, "
+                + name,
             ),
             ("closed", {**closed, "state": "CLOSED"}, 0, ""),
         ] + [
