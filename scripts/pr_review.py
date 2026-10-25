@@ -118,10 +118,11 @@ Subcommands
            workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
-           attested held head nothing holds exits 45 where its checks were unread or none posted.
-           A DIRTY or BEHIND one also exits 45 where a required check is unregistered or from
-           another app. Exit 0 can then leave a required check unregistered only where the rules
-           were unread, the rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT.
+           open attested held head nothing holds exits 45 where its rollup was unreadable or none
+           posted. A DIRTY or BEHIND one also exits 45 where a required check is unregistered or
+           from another app. Exit 0 can then leave a required check unregistered only where the
+           rules were unread, the rollup is `CHECKS TRUNCATED`, or the merge reads DRAFT. A pull
+           request no longer open exits 0 as well.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
@@ -139,8 +140,8 @@ Subcommands
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, or failed. On
            a held head a check running long or held by its environment polls to 30 instead.
-           45 = an attested held head that nothing holds, its merge other than CLEAN, UNSTABLE, or
-           HAS_HOOKS. Either the payload carries no commit matching the head, named
+           45 = an open attested held head that nothing holds, its merge other than CLEAN,
+           UNSTABLE, or HAS_HOOKS. Either the payload carries no commit matching the head, named
            `CHECKS UNREADABLE` in the digest, or no check has posted. Or the merge reads DIRTY or
            BEHIND and a check the base branch's rules require has not registered, or came from
            another app. That last needs the rules read and a rollup read whole.
@@ -2048,8 +2049,8 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print(
                 "status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
-                f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, and it "
-                "is not ready while the poll does not clear it"
+                f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, which "
+                "is not ready, and polling longer does not change that"
             )
             return 45
         return 0

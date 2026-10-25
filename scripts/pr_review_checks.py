@@ -340,8 +340,12 @@ def runs_open(pr: dict) -> list[str]:
     return sorted(named)
 
 
-def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> list[str]:
-    """The contexts among `required` that no rollup node satisfies, sorted."""
+def required_unregistered(
+    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
+) -> list[str]:
+    """The contexts among `required` no rollup node satisfies, sorted, on a rollup read whole."""
+    if checks_unreadable(pr) or checks_truncated(pr):
+        return []
     seen = [n for n in nodes if not n.get("unreadable")]
     return sorted(
         {
@@ -353,15 +357,6 @@ def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict
             )
         }
     )
-
-
-def required_unregistered(
-    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
-) -> list[str]:
-    """The contexts among `required` the head's rollup lacks, judged only on a rollup read whole."""
-    if checks_unreadable(pr) or checks_truncated(pr):
-        return []
-    return required_unmet(required, nodes)
 
 
 def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:

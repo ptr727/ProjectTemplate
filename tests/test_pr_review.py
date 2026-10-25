@@ -3714,18 +3714,18 @@ class TestCli(GqlCase):
             (merge, payload([review(oid=OLD)], merge=merge, checks=[]), 0, "")
             for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS")
         ]
+        self.enterContext(
+            mock.patch.object(
+                pr_review,
+                "gh_rest",
+                return_value=subprocess.CompletedProcess([], 0, other_app, ""),
+            )
+        )
         for label, pr, code, reason in cases:
             with self.subTest(label):
                 pr_review.required_contexts.cache_clear()
                 self.out.seek(0)
                 self.out.truncate()
-                self.enterContext(
-                    mock.patch.object(
-                        pr_review,
-                        "gh_rest",
-                        return_value=subprocess.CompletedProcess([], 0, other_app, ""),
-                    )
-                )
                 self.answer(self.into(pr, attest=True))
                 self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
                 with mock.patch.object(pr_review.time, "sleep"):
@@ -6285,6 +6285,14 @@ class TestRequiredContexts(unittest.TestCase):
         with mock.patch.object(pr_review, "gh_rest") as rest:
             clean = payload([], merge="CLEAN", checks=[check()])
             self.assertEqual(frozenset(), pr_review.required_for(clean, "o", "r"))
+        rest.assert_not_called()
+
+    def test_the_rules_for_exit_45_are_read_only_for_a_dirty_or_behind_merge(self) -> None:
+        gated = frozenset({"DIRTY", "BEHIND"})
+        with mock.patch.object(pr_review, "gh_rest") as rest:
+            for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS", "BLOCKED", "DRAFT"):
+                pr = payload([], merge=merge, checks=[check()])
+                self.assertEqual(frozenset(), pr_review.required_for(pr, "o", "r", gated))
         rest.assert_not_called()
 
 
