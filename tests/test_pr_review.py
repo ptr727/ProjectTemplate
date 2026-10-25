@@ -3592,7 +3592,7 @@ class TestCli(GqlCase):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
                 if code == 45:
                     self.assertIn("status=CHECKS_MISSING", self.out.getvalue())
-                    self.assertIn("no check has posted on the head", self.out.getvalue())
+                    self.assertIn("but no check has posted", self.out.getvalue())
 
     def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
         """A merge BLOCKED on a thread is not waiting on a check nothing requires."""
@@ -3692,8 +3692,8 @@ class TestCli(GqlCase):
                 slept.assert_not_called()
                 out = self.out.getvalue()
                 self.assertIn("status=CHECKS_MISSING", out)
-                self.assertIn(f"merge reading {merge}", out)
-                self.assertIn("has not registered, or came from another app: Later workflow", out)
+                self.assertIn(f"The merge reads {merge}", out)
+                self.assertIn("came from another app, Later workflow, so update a BEHIND head", out)
 
     def test_a_released_head_exits_by_what_its_read_shows(self) -> None:
         """Another app's check, an unread payload, an ungated merge, and a closed pull request."""
@@ -3706,7 +3706,7 @@ class TestCli(GqlCase):
                 "another app",
                 payload([review(oid=OLD)], merge="BEHIND", checks=[check()]),
                 45,
-                "came from another app: " + name,
+                "came from another app, " + name,
             ),
             ("unread payload", unread, 45, "no commit matching the head"),
             ("closed", {**closed, "state": "CLOSED"}, 0, ""),
@@ -6190,13 +6190,17 @@ class TestRequiredContexts(unittest.TestCase):
 
     def test_checks_never_ran_judges_only_an_open_gated_merge(self) -> None:
         pr = payload([], merge="DIRTY", checks=[])
-        self.assertIn("no check has posted", pr_review_checks.checks_never_ran(pr, []))
+        self.assertIn("no check has posted", pr_review_checks.checks_never_ran(pr, [], frozenset()))
         nodes = pr_review_checks.check_nodes(payload([], merge="DIRTY", checks=[check()]))
-        self.assertEqual("", pr_review_checks.checks_never_ran(pr, nodes))
+        self.assertEqual("", pr_review_checks.checks_never_ran(pr, nodes, frozenset()))
+        later = pr_review_checks.checks_never_ran(pr, nodes, frozenset({("Later", None)}))
+        self.assertIn("has not registered or came from another app, Later", later)
         for ungated in ({**pr, "mergeStateStatus": "CLEAN"}, {**pr, "state": "MERGED"}):
-            self.assertEqual("", pr_review_checks.checks_never_ran(ungated, []))
+            self.assertEqual("", pr_review_checks.checks_never_ran(ungated, [], frozenset()))
         other = payload([], merge="BLOCKED", checks=[check()], rollup_oid="f" * 40)
-        self.assertIn("no commit matching", pr_review_checks.checks_never_ran(other, []))
+        self.assertIn(
+            "no commit matching", pr_review_checks.checks_never_ran(other, [], frozenset())
+        )
 
     def test_required_unregistered_judges_only_a_rollup_read_whole(self) -> None:
         """A cut rollup can hold the absent context past its window, so it proves nothing."""

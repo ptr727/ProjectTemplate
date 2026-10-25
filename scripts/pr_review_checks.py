@@ -297,17 +297,25 @@ def held_checks_open(
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
-def checks_never_ran(pr: dict, nodes: list[dict]) -> str:
-    """Why an open head's gated merge has no check of its own to settle on, or "" where it has.
+def checks_never_ran(
+    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
+) -> str:
+    """Why an open head's gated merge lacks a check it is owed, with its remedy, or "" for none.
 
-    A CLEAN, UNSTABLE, or HAS_HOOKS merge is gated by nothing. Under any other merge, a payload with
-    no commit matching the head read no check, and a rollup with none posted ran none.
+    A CLEAN, UNSTABLE, or HAS_HOOKS merge is owed nothing. The caller passes `required` only for a
+    merge whose release judges registration, and a context is judged only on a rollup read whole.
     """
     if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
         return ""
     if checks_unreadable(pr):
-        return "the payload carries no commit matching the head, so no check was read"
-    return "" if nodes else "no check has posted on the head"
+        return "the payload carries no commit matching the head, so no check was read: wait again"
+    if not nodes:
+        return "no check has posted, and a DIRTY merge runs none until its conflict is resolved"
+    unmet = ", ".join(required_unregistered(pr, nodes, required))
+    return unmet and (
+        f"a required check has not registered or came from another app, {unmet}, so update a "
+        "BEHIND head, resolve a DIRTY one's conflict, or correct the check's poster or its rule"
+    )
 
 
 def runs_open(pr: dict) -> list[str]:

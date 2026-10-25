@@ -146,7 +146,8 @@ Subcommands
            another app. That last needs the rules read and a rollup read whole.
            `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
-           30 instead, and an empty rollup holds a BLOCKED, BEHIND, or DRAFT one.
+           30 instead, where the rules were read and the rollup read whole. An empty rollup read
+           off the head holds a BLOCKED, BEHIND, or DRAFT one.
            49 = no Copilot round covers this head and none was requested, the pull request
            merging into a branch other than the default with no attestation vouching for the
            head. 64 = the write scope could not
@@ -193,7 +194,6 @@ from pr_review_checks import (
     checks_stuck,
     checks_tally,
     held_checks_open,
-    required_unregistered,
     runs_open,
 )
 from pr_review_rounds import (
@@ -2041,22 +2041,12 @@ def main(argv: list[str] | None = None) -> int:
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
-        merge = final.get("mergeStateStatus")
-        unrun = checks_never_ran(final, checks) if covered else ""
-        if covered and not unrun and final.get("state", "OPEN") == "OPEN":
-            rules = required_for(final, owner, repo, frozenset({"DIRTY", "BEHIND"}))
-            if unmet := required_unregistered(final, checks, rules):
-                unrun = (
-                    "a check the base branch requires has not registered, or came from "
-                    f"another app: {', '.join(unmet)}"
-                )
-        if unrun:
+        rules = required_for(final, owner, repo, frozenset({"DIRTY", "BEHIND"}))
+        if covered and (unrun := checks_never_ran(final, checks, rules)):
             print(
-                f"status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
-                f"the poll, but {unrun}, and the merge reading {merge} is not ready while the "
-                "poll does not clear it: a DIRTY merge runs no pull_request workflow until its "
-                "conflict is resolved, a BEHIND one may need the head updated from its base, and "
-                "a payload read off another commit wants wait run again"
+                "status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
+                f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, and it "
+                "is not ready while the poll does not clear it"
             )
             return 45
         return 0
