@@ -48,8 +48,8 @@ spelling, EditorConfig) stays out of the hook: it runs in CI as pinned action wr
 demand via the VS Code **Lint** tasks. A Python repo takes those from
 `catalog/snippets/configs/vscode-tasks-python.json` (Docker at `:latest`), and a repo with no
 Python takes the Lint group alone rather than that file's Python tasks. Either way they carry
-the same prose/EOL gates in whole-repo mode for on-demand full-tree validation, not just the
-diff-scoped commit-time run.
+the prose gate in whole-repo mode, for on-demand full-tree validation beyond the diff-scoped
+commit-time run. Their `Lint: EOL` task runs the same whole-tree EOL check the hook runs.
 
 No LF pin is needed for `.pre-commit-config.yaml` itself: it is plain YAML, not a shebang
 script, so the fleet's `[*]` `.editorconfig`/`.gitattributes` default already covers it.
