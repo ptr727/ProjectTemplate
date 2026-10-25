@@ -20,6 +20,8 @@ NOT_POSTED = frozenset({"EXPECTED"})
 # SKIPPED and NEUTRAL count as passed, since the fleet aggregator skips conditional jobs.
 CHECK_OK = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 
+MERGE_UNGATED = frozenset({"CLEAN", "UNSTABLE", "HAS_HOOKS"})
+
 WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 
 # How long a queued check is simply starting, the pickup grace's five minutes.
@@ -283,21 +285,37 @@ def held_checks_open(
         return False
     if runs_open(pr):
         return True
-    if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+    if merge in MERGE_UNGATED:
         return False
     settling = checks_settling(nodes, now, grace, stall)
     if any(n.get("required") for n in settling):
         return True
     if settling and not any(n.get("required") for n in nodes):
         return True
-    if (
-        merge == "BLOCKED"
-        and not checks_unreadable(pr)
-        and not checks_truncated(pr)
-        and required_unmet(required, nodes)
-    ):
+    if merge == "BLOCKED" and required_unregistered(pr, nodes, required):
         return True
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
+
+
+def checks_never_ran(
+    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
+) -> str:
+    """Why an open head's gated merge lacks a check it is owed, with its remedy, or "" for none.
+
+    A CLEAN, UNSTABLE, or HAS_HOOKS merge is owed nothing. The caller passes `required` only for a
+    merge whose release judges registration, and a context is judged only on a rollup read whole.
+    """
+    if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
+        return ""
+    if checks_unreadable(pr):
+        return "the payload carries no commit matching the head, so read the check runs on the head commit"
+    if not nodes:
+        return "no check has posted, and a DIRTY merge runs no pull_request workflow until resolved"
+    unmet = ", ".join(required_unregistered(pr, nodes, required))
+    return unmet and (
+        f"a required check has not registered or came from another app, {unmet}, so update a "
+        "BEHIND head, resolve a DIRTY one's conflict, or correct the check's poster or its rule"
+    )
 
 
 def runs_open(pr: dict) -> list[str]:
@@ -322,8 +340,12 @@ def runs_open(pr: dict) -> list[str]:
     return sorted(named)
 
 
-def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> list[str]:
-    """The contexts among `required` that no rollup node satisfies, sorted."""
+def required_unregistered(
+    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
+) -> list[str]:
+    """The contexts among `required` no rollup node satisfies, sorted, on a rollup read whole."""
+    if checks_unreadable(pr) or checks_truncated(pr):
+        return []
     seen = [n for n in nodes if not n.get("unreadable")]
     return sorted(
         {
@@ -337,9 +359,9 @@ def required_unmet(required: frozenset[tuple[str, int | None]], nodes: list[dict
     )
 
 
-def _unmet_note(required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
+def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
     """Names the required contexts still unmet, so a reader sees what the hold waits on."""
-    unmet = required_unmet(required, nodes)
+    unmet = required_unregistered(pr, nodes, required)
     return f" (required, unmet: {', '.join(unmet)})" if unmet else ""
 
 
