@@ -7609,8 +7609,8 @@ class TestVocabularyLivesInTheData(unittest.TestCase):
     def test_flags_paths_and_underscored_names_are_not_words(self) -> None:
         source = (
             'ARGS = ("--unified=0", "--no-color", "--no-ext-diff", "-z", "--name-only", "--cached")\n'
-            'PATHS = ("docs/notes", "src/app", "repo-config/labels", "a/b", "x/y", "lib/core", '
-            '"tests\\\\data")\n'
+            'PATHS = ("docs/notes", "src/app", "repo-config/labels", "a/b", "x/y", "lib/core")\n'
+            'WINDOWS = ("docs\\\\notes", "src\\\\app", "a\\\\b", "x\\\\y", "lib\\\\core", "c\\\\d")\n'
             'GIT = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", '
             '"GIT_NAMESPACE", "GIT_COMMON_DIR"})\n'
         )
