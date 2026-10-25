@@ -38,6 +38,7 @@ from typing import Any, NamedTuple
 MISSING = ""
 try:
     from markdown_it import MarkdownIt
+    from markdown_it.common.html_re import HTML_TAG_RE
     from markdown_it.token import Token
     from pygments.lexer import Lexer, RegexLexer, bygroups
     from pygments.lexers import get_lexer_by_name, get_lexer_for_filename
@@ -143,8 +144,7 @@ def merged(base: dict[str, Any], override: object) -> dict[str, Any]:
     """The carried data with each override list added to its exemption, a directive name escaped."""
     if not isinstance(override, dict):
         raise OverrideError("is not a JSON object")
-    unknown = sorted(set(override) - set(BASE["override_keys"]))
-    if unknown:
+    if unknown := sorted(set(override) - set(BASE["override_keys"])):
         raise OverrideError(f"holds keys it may not: {quoted(unknown)}")
     out = json.loads(json.dumps(base))
     for key, vals in override.items():
@@ -517,8 +517,7 @@ def lexer_name(path: Path, first: str) -> str | None:
     for candidate in (path.name, path.name.lower()):
         with contextlib.suppress(ClassNotFound):
             return get_lexer_for_filename(candidate).aliases[0]
-    m = SHEBANG.match(first)
-    if m:
+    if m := SHEBANG.match(first):
         program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
         with contextlib.suppress(ClassNotFound):
             return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
@@ -527,7 +526,12 @@ def lexer_name(path: Path, first: str) -> str | None:
 
 # Pygments ends a heredoc at any later `STUB` in a `$STUB_DIR`, and reads no double-quoted label.
 # This rule ends one only on its terminator line, tab-indented for `<<-`.
-HEREDOC = r"(?s)<<(-)?[ \t]*(['\"]?)\\?([A-Za-z_][\w-]*)\2[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\3(?=\n|\Z)|.*)"
+# A digit label is more often a shift, `(( x << 2 ))`, so only the last, unclosed branch drops it.
+HEREDOC = (
+    r"(?s)<<(-)?[ \t]*(['\"]?)\\?(?:(?=[A-Za-z_])())?(\w[\w-]*+)\2"
+    r"(?:[^\n'\"#]*?(?<!<)<<(-)?[ \t]*(['\"]?)\\?(\w[\w-]*+)\6)?[^\n]*\n(?:(?:[^\n]*\n)*?(?(1)\t*)\4"
+    r"(?=\n|\Z)()(?(7)(?:\n(?:[^\n]*\n)*?(?(5)\t*)\7(?=\n|\Z))?)|(?(3).*|(?!)))"
+)
 # Pygments reads a C# collection expression opening on its own line as an attribute ending at `]`.
 # The comments inside it are lost, so an attribute here is read within its own line.
 ATTRIBUTE = r"^([ \t]*)(\[[^\n]*?\])"
@@ -641,21 +645,21 @@ def comment_lines(
     return out
 
 
-def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int, str]]:
-    """The YAML scalars under a key or a tag the data names, as (start, end, lexer) offsets."""
+def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int, str, int]]:
+    """The YAML scalars under a key or a tag the data names, as (start, end, lexer, key) offsets."""
     keys = {r["key"]: r["lexer"] for r in rules if "key" in r}
     tags = {r["tag"]: r["lexer"] for r in rules if "tag" in r}
     tokens = list(lexer_for("yaml").get_tokens_unprocessed(text))
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, int, str, int]] = []
     pending: str | None = None
-    i = 0
+    i = key = 0
     while i < len(tokens):
         offset, kind, value = tokens[i]
         i += 1
         if kind in Name.Tag and value in keys:
-            pending = keys[value]
+            pending, key = keys[value], offset
         elif kind in Keyword.Type and value in tags:
-            pending = tags[value]
+            pending, key = tags[value], offset
         elif pending and kind in Punctuation.Indicator and value in "|>":
             # The rest of the header line, a comment after the indicator included, opens nothing.
             while i < len(tokens) and "\n" not in tokens[i][2]:
@@ -668,18 +672,34 @@ def nested_spans(text: str, rules: list[dict[str, str]]) -> list[tuple[int, int,
             if j > i:
                 # The span opens after the header's own line break, so its lines map one to one.
                 start = text.index("\n", offset) + 1
-                out.append((start, max(start, tokens[j - 1][0] + len(tokens[j - 1][2])), pending))
+                out.append(
+                    (start, max(start, tokens[j - 1][0] + len(tokens[j - 1][2])), pending, key)
+                )
             i, pending = j, None
         elif pending and kind in String and value in "'\"":
             j = i
             while j < len(tokens) and not (tokens[j][1] in String and tokens[j][2] == value):
                 j += 1
             if j < len(tokens):
-                out.append((offset + 1, tokens[j][0], pending))
+                out.append((offset + 1, tokens[j][0], pending, key))
             i, pending = j + 1, None
         elif not (kind in Text.Whitespace or kind in Punctuation or kind in Keyword.Type):
             pending = None
     return out
+
+
+def step_shell(starts: Starts, key: int) -> str:
+    """The program `shell:` names beside the YAML key at offset `key`, or "" where none is named."""
+    (row, col), last = starts.at(key), len(starts.starts)
+    inside = lambda n: not starts.line(n)[:col].strip() or starts.line(n).lstrip().startswith("#")
+    top, end = row, row + 1
+    while top > 1 and inside(top):
+        top -= 1
+    top += not inside(top) and starts.line(top)[:col].strip() != "-"
+    while end <= last and inside(end):
+        end += 1
+    sibling = re.compile(rf"[ \t-]{{{col}}}shell:[ \t]*['\"]?(?:\S*/)?([\w-]+)")
+    return next((m[1] for n in range(top, end) if (m := sibling.match(starts.line(n)))), "")
 
 
 def split_heredocs(text: str) -> list[tuple[int, str]]:
@@ -697,7 +717,9 @@ def split_heredocs(text: str) -> list[tuple[int, str]]:
     for offset, kind, value in lexer_for("bash").get_tokens_unprocessed(plain):
         if kind in String.Heredoc:
             # The opener's own line stays code, so a body is the lines after it.
-            spans.append((starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]))
+            first, end = starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]
+            mid = starts.at(offset + max(next(re.finditer(HEREDOC, value)).end(8), 1) - 1)[0]
+            spans += [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
     code = list(rows)
     for first, end in spans:
         code[first:end] = ["\n"] * (end - first)
@@ -708,12 +730,12 @@ def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
     """Comments in the scalars a YAML file hands to another lexer, numbered by the file's lines."""
     starts = Starts(text)
     out: list[tuple[Line, bool]] = []
-    for start, end, lexer in nested_spans(text, spec.get("nested", [])):
+    for start, end, lexer, key in nested_spans(text, spec.get("nested", [])):
         number, col = starts.at(start)
         inner = language_of(lexer) or {}
         # The column pad keeps a one-line scalar's comment trailing, and C++ ends a comment on a break.
         body = text[start:end]
-        if lexer == "bash-heredoc-as-code":
+        if lexer == "bash-heredoc-as-code" and step_shell(starts, key) in ("", "bash", "sh"):
             # Each body starts on a line of its own, so only the code piece takes the column pad.
             for skip, piece in split_heredocs(body):
                 pad = "x" * col if skip == 0 else ""
@@ -869,8 +891,8 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     first, last = (tok.map or [0, 1])[0], (tok.map or [0, 1])[1]
     number, col = first + 1, 0
     # A code span can hold a comment's text, so it is blanked, lengths kept, before the search.
-    blank = lambda m: re.sub(r"[^\n]", " ", m.group())
-    seen = re.sub(CODE_SPAN, blank, "\n".join(lines[first:last])).split("\n")
+    blank = lambda m: re.sub(r"[^\n]", " ", m.group()) if m[1] else m.group()
+    seen = re.sub(MARKDOWN_SPAN, blank, "\n".join(lines[first:last])).split("\n")
     for child in tok.children or ():
         if child.type == "html_inline" and child.content.startswith("<!--"):
             # The source line is found by the comment's own text, searched on from the last one.
@@ -1405,6 +1427,8 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
+NON_CODE = r"\\.|<[a-zA-Z][a-zA-Z0-9+.\-]{1,31}:[^<>\x00-\x20]*>"
+MARKDOWN_SPAN = re.compile(rf"{NON_CODE}|{HTML_TAG_RE.pattern[1:]}|{CODE_SPAN.pattern}", re.DOTALL)
 
 
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
@@ -1770,8 +1794,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(not x.strip(ASCII_BLANK) for x in a.exclude):
         return refuse("error-empty-exclude")
     # Anything that is not a file or a directory, a FIFO or a socket included, is refused.
-    unusable = [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]
-    if unusable:
+    if unusable := [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]:
         return refuse("error-not-a-path", paths=quoted(unusable))
     git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
     if len(git_roots) > 1:
