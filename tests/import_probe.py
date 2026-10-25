@@ -10,9 +10,11 @@ from pathlib import Path
 MARKDOWN_READERS = ("fidelity_text", "markdown_it")
 
 
-def import_delta(directory: Path, module: str) -> tuple[list[str], list[str]]:
-    """Which of `MARKDOWN_READERS` a fresh interpreter holds before and after importing `module` from `directory`."""
-    names = list(MARKDOWN_READERS)
+def import_delta(
+    directory: Path, module: str, watched: tuple[str, ...] = MARKDOWN_READERS
+) -> tuple[list[str], list[str]]:
+    """Which of `watched` a fresh interpreter holds before and after importing `module` from `directory`."""
+    names = list(watched)
     source = (
         f"import sys; names = {names!r}; before = [n for n in names if n in sys.modules];"
         f" sys.path.insert(0, {str(directory)!r}); import {module};"

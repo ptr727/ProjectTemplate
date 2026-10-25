@@ -38,12 +38,17 @@ import pr_review_rounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
+from import_probe import import_delta
 
 REPO = Path(__file__).resolve().parent.parent
 # The gate and the reader modules it imports, which every whole-source guard below reads together.
 GATE_SOURCES = ("pr_review.py", "pr_review_checks.py", "pr_review_rounds.py")
 # What a reader module may import: the standard library it parses with, and the reviewer adapter.
 READER_IMPORTS = frozenset({"__future__", "collections", "datetime", "re", "pr_review_copilot"})
+# One import each reader module is known to make, the floor under the allowlist above.
+READER_FLOORS = {"pr_review_checks": "datetime", "pr_review_rounds": "pr_review_copilot"}
+# What a reader must never load, directly or through the adapter.
+REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
 CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "fleet-code-review" / "SKILL.md"
@@ -5401,7 +5406,9 @@ class TestContract(unittest.TestCase):
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         # A node id literal anywhere in the source is an example a hand copies out of it.
-        self.assertNotIn("PRRT_", source)
+        for name in GATE_SOURCES:
+            with self.subTest(module=name):
+                self.assertNotIn("PRRT_", (REPO / "scripts" / name).read_text(encoding="utf-8"))
         parser_options = re.findall(r"add_argument\(\s*[\"'](--[a-z-]+)[\"']", source)
         # A floor, since a quoting change once emptied this scan and zero options read as a pass.
         self.assertGreaterEqual(len(parser_options), 5)
@@ -5434,8 +5441,14 @@ class TestContract(unittest.TestCase):
                 for node in ast.walk(tree)
                 if isinstance(node, ast.ImportFrom)
             }
+            module = name.removesuffix(".py")
             with self.subTest(module=name):
                 self.assertLessEqual(imported, READER_IMPORTS, f"{name} imports {imported}")
+                # A floor, since a collector that matched nothing would read as a pass.
+                self.assertIn(READER_FLOORS[module], imported)
+                # The adapter's own imports count too, so the gate and a transport stay unloaded.
+                before, after = import_delta(REPO / "scripts", module, REACHING_OUT)
+                self.assertEqual(before, after, f"importing {module} loads {after}")
 
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""
