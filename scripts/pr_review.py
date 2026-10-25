@@ -324,7 +324,7 @@ HELD_FIELDS = """
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
       }}}
-      checkSuites(last:50){ nodes{ databaseId status workflowRun{ databaseId workflow{ databaseId } } } }
+      checkSuites(last:50){ nodes{ databaseId status app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
     }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
@@ -1999,8 +1999,8 @@ def main(argv: list[str] | None = None) -> int:
             return 30
         if covered and (gated := runs_open(final, gated=True)):
             print(
-                f"note: {', '.join(gated)} on this head wait on an environment's protection "
-                "rule, a reviewer or a timer, and this wait holds nothing for them"
+                f"note: this head has {', '.join(gated)} waiting on an environment's protection "
+                "rule, a reviewer or a timer, and this wait holds nothing for that"
             )
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]

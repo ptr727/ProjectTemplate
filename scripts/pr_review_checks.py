@@ -78,6 +78,14 @@ def head_commit(pr: dict) -> dict:
     )
 
 
+def unkeyed_actions_suite(pr: dict, suite: dict) -> bool:
+    """True where `suite` is an Actions suite whose workflow run this read could not key it by."""
+    return (
+        bool(pr.get(WORKFLOW_KEYS_UNAVAILABLE))
+        and (suite.get("app") or {}).get("slug") == "github-actions"
+    )
+
+
 def check_nodes(pr: dict) -> list[dict]:
     """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
 
@@ -118,10 +126,7 @@ def check_nodes(pr: dict) -> list[dict]:
             workflow = note_run(suite)
             if workflow:
                 origin: tuple = ("workflow", workflow)
-            elif (
-                pr.get(WORKFLOW_KEYS_UNAVAILABLE)
-                and (suite.get("app") or {}).get("slug") == "github-actions"
-            ):
+            elif unkeyed_actions_suite(pr, suite):
                 origin = ("suite", suite.get("databaseId"))
             else:
                 origin = ("app", (suite.get("app") or {}).get("slug"))
@@ -246,8 +251,7 @@ def held_checks_open(
     A BLOCKED merge with a stuck required check, other than one running long, has its exit 44
     decided already. Short of that, a workflow run on the head that has not completed holds. A run's
     later jobs enter the rollup only as their `needs:` finish, so a green rollup proves nothing while
-    one is open. A job no runner picked up keeps its run open past any wait, so it holds nothing. A
-    CLEAN, UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
+    one is open. A CLEAN, UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
     hold it. Otherwise a required check still settling holds, as does any settling check while no
     required check has posted. A rollup with no check holds while the merge
     reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the rollup carries, and a pull
@@ -266,9 +270,7 @@ def held_checks_open(
         for n, shape in checks_stuck(nodes, now, grace, stall)
     ):
         return False
-    if runs_open(pr) and not any(
-        shape == "NOT_PICKED_UP" for _, shape in checks_stuck(nodes, now, grace, stall)
-    ):
+    if runs_open(pr):
         return True
     if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
         return False
@@ -305,11 +307,7 @@ def runs_open(pr: dict, gated: bool = False) -> list[str]:
             continue
         if run := (s.get("workflowRun") or {}).get("databaseId"):
             named.add(f"run {run}")
-        elif (
-            pr.get(WORKFLOW_KEYS_UNAVAILABLE)
-            and (s.get("app") or {}).get("slug") == "github-actions"
-            and s.get("databaseId")
-        ):
+        elif unkeyed_actions_suite(pr, s) and s.get("databaseId"):
             named.add(f"suite {s['databaseId']}")
     return sorted(named)
 

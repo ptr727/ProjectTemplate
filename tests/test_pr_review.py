@@ -1650,7 +1650,7 @@ class TestCheckShapes(unittest.TestCase):
     def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuites(last:50){ nodes{ databaseId status "
+            "checkSuites(last:50){ nodes{ databaseId status app{ slug } "
             "workflowRun{ databaseId workflow{ databaseId } } } }",
             query,
         )
@@ -3494,7 +3494,7 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_not_called()
-        self.assertIn("run 200 on this head wait on an environment's", self.out.getvalue())
+        self.assertIn("this head has run 200 waiting on an environment's", self.out.getvalue())
 
     def test_a_stuck_check_on_an_attested_head_ends_the_poll(self) -> None:
         """A shape no wait clears is 44 at once, rather than the timeout polled out against it."""
@@ -6176,15 +6176,22 @@ class TestRunsOpen(unittest.TestCase):
         self.assertTrue(self.is_open(pr))
         self.assertEqual([], pr_review_checks.runs_open(self.held("CLEAN", [running])))
 
-    def test_a_job_no_runner_picked_up_does_not_hold_its_run(self) -> None:
-        """No wait starts it, so polling to the timeout would contradict the digest's own line."""
+    def test_a_fresh_actions_suite_stands_in_with_no_job_registered(self) -> None:
+        """Read right after a push, the suite exists before any job does, and no rollup node carries it."""
+        suite = {"databaseId": 20, "status": "QUEUED", "app": {"slug": "github-actions"}}
+        pr = {**self.held("CLEAN", [], suite), pr_review_checks.WORKFLOW_KEYS_UNAVAILABLE: True}
+        self.assertEqual(["suite 20"], pr_review_checks.runs_open(pr))
+        self.assertTrue(self.is_open(pr))
+
+    def test_a_job_no_runner_picked_up_still_holds_its_open_run(self) -> None:
+        """A queue past the grace often starts, so releasing on it would exit 0 with jobs unstarted."""
         starved = {
             **check(status="QUEUED", conclusion="", started=ago(900)),
             "isRequired": False,
         }
         pr = self.held("CLEAN", [starved], self.suite("IN_PROGRESS"))
         self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
-        self.assertFalse(self.is_open(pr))
+        self.assertTrue(self.is_open(pr))
 
     def test_a_stuck_required_check_still_ends_a_blocked_poll(self) -> None:
         """The 44 a failed required check decides is not delayed by a sibling run."""
