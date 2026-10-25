@@ -113,9 +113,16 @@ Subcommands
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE, and nothing is requested where neither
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
-           Exit 0 = review present, or on a held head an attested local pass with its required
-           checks settled. Where an attested local pass covers an open pull request's held head,
-           every workflow run on it has completed.
+           Exit 0 = review present, or on a held head an attested local pass whose checks no longer
+           hold the poll. On an open pull request whose head commit the payload carries, every
+           workflow run the read reaches on that head has then completed. The read reaches the
+           head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. It
+           does not prove the required checks ran.
+           A payload with no commit matching the head, named `CHECKS UNREADABLE` in the digest,
+           reads no run and no check. A required check not yet registered holds only a BLOCKED
+           merge whose base branch rules were read and whose rollup is not `CHECKS TRUNCATED`. An
+           empty rollup holds only a BLOCKED, BEHIND, or DRAFT one. Short of those holds, a merge with
+           some check posted, or a DIRTY one with none, can exit 0 with a required check unregistered.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. It is also a round past --min-rounds not yet landed.
