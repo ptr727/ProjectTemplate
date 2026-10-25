@@ -129,10 +129,12 @@ Subcommands
            reviewers' coverage rather than retrying, and pass --ignore-quota-signal once the
            quota is believed to have reset. 42 and 50 = the review landed and `status`'s readings
            apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
-           is in a shape no wait clears, queued with nothing acting on it, expected and never
-           posted, running far past what the job costs, or failed. 49 = no Copilot round covers
-           this head and none was requested, the pull request merging into a branch other than
-           the default with no attestation vouching for the head. 64 = the write scope could not
+           is in a shape no wait clears. It is queued with nothing acting on it, expected and
+           never posted, running far past the job's cost, held by its environment, or failed. On
+           a held head a check running long or held by its environment polls to 30 instead.
+           49 = no Copilot round covers this head and none was requested, the pull request
+           merging into a branch other than the default with no attestation vouching for the
+           head. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A

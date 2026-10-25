@@ -1265,8 +1265,8 @@ class TestCheckShapes(unittest.TestCase):
             "NOT_PICKED_UP", self.shape(check(status="QUEUED", conclusion="", started=ago(900)))
         )
 
-    def test_every_unstarted_spelling_counts_not_only_queued(self) -> None:
-        """Reading QUEUED alone reports a check held at a gate as one that is running.
+    def test_every_not_begun_spelling_reads_as_stuck_not_running(self) -> None:
+        """Reading QUEUED alone reports a check that has not begun as one that is running.
 
         WAITING is held by its environment rather than starved, so it reads as its own shape.
         """
@@ -6158,7 +6158,8 @@ class TestRunsOpen(unittest.TestCase):
         self.assertEqual([], pr_review_checks.runs_open(pr))
         self.assertFalse(self.is_open(pr))
 
-    def test_a_check_runs_own_suite_is_read_too(self) -> None:
+    def test_an_unrequired_checks_open_run_holds_a_clean_merge(self) -> None:
+        """CLEAN releases an unrequired check, but not the run it belongs to while that is open."""
         optional = {
             **check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="IN_PROGRESS"),
             "isRequired": False,
