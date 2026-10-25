@@ -20,6 +20,8 @@ NOT_POSTED = frozenset({"EXPECTED"})
 # SKIPPED and NEUTRAL count as passed, since the fleet aggregator skips conditional jobs.
 CHECK_OK = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 
+MERGE_UNGATED = frozenset({"CLEAN", "UNSTABLE", "HAS_HOOKS"})
+
 WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 
 # How long a queued check is simply starting, the pickup grace's five minutes.
@@ -283,7 +285,7 @@ def held_checks_open(
         return False
     if runs_open(pr):
         return True
-    if merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+    if merge in MERGE_UNGATED:
         return False
     settling = checks_settling(nodes, now, grace, stall)
     if any(n.get("required") for n in settling):
@@ -298,6 +300,26 @@ def held_checks_open(
     ):
         return True
     return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
+
+
+def checks_never_ran(
+    pr: dict, nodes: list[dict], required: frozenset[tuple[str, int | None]]
+) -> str:
+    """Why an open head's merge is waiting on checks that never ran on it, or "" for none known.
+
+    A CLEAN, UNSTABLE, or HAS_HOOKS merge waits on nothing. Short of one, a payload with no commit
+    matching the head read no check, a rollup with none posted ran none, and a context in
+    `required` that the rollup does not carry has not run, judged only on a rollup read whole.
+    """
+    if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
+        return ""
+    if checks_unreadable(pr):
+        return "the payload carries no commit matching the head, so no check was read"
+    if not nodes:
+        return "no check has posted on the head"
+    if not checks_truncated(pr) and (unmet := required_unmet(required, nodes)):
+        return f"a check the base branch requires has not registered: {', '.join(unmet)}"
+    return ""
 
 
 def runs_open(pr: dict) -> list[str]:

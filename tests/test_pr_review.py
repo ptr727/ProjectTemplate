@@ -3571,13 +3571,15 @@ class TestCli(GqlCase):
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
     def test_an_empty_rollup_holds_any_merge_but_a_conflicted_one(self) -> None:
-        """A conflicted pull request runs no `pull_request` workflow, so none is coming."""
+        """A conflicted pull request runs no `pull_request` workflow, so none is coming, and its
+        release names that rather than exiting 0 over checks that never ran.
+        """
         for merge, code in (
             ("BLOCKED", 30),
             ("BEHIND", 30),
             ("DRAFT", 30),
             ("UNKNOWN", 30),
-            ("DIRTY", 0),
+            ("DIRTY", 45),
         ):
             with self.subTest(merge=merge):
                 pr = self.into(payload([review(oid=OLD)], merge=merge, checks=[]), attest=True)
@@ -3663,6 +3665,40 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep") as slept:
             self.assertNotEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         slept.assert_not_called()
+
+    def test_a_required_check_unregistered_under_a_released_merge_exits_45(self) -> None:
+        """A BEHIND or DIRTY merge is not held on an unregistered required check, so its release
+        names the check rather than exiting 0 as though the required checks settled.
+        """
+        self.rules("Check pull request workflow status job", "Later workflow")
+        for merge in ("BEHIND", "DIRTY"):
+            with self.subTest(merge=merge):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = self.into(
+                    payload([review(oid=OLD)], merge=merge, checks=[check()]), attest=True
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep") as slept:
+                    self.assertEqual(45, self.cli(["wait", "7", "--timeout", "1"]))
+                slept.assert_not_called()
+                out = self.out.getvalue()
+                self.assertIn("status=CHECKS_NOT_RUN", out)
+                self.assertIn(f"merge reads {merge}", out)
+                self.assertIn("has not registered: Later workflow", out)
+
+    def test_a_released_merge_with_every_required_check_registered_exits_0(self) -> None:
+        self.rules("Check pull request workflow status job")
+        for merge in ("BEHIND", "DIRTY"):
+            with self.subTest(merge=merge):
+                pr = self.into(
+                    payload([review(oid=OLD)], merge=merge, checks=[check()]), attest=True
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
 
     def test_an_unread_rules_read_keeps_the_old_result_and_says_so(self) -> None:
         """The suite's default `gh_rest` fails, which must never read as nothing being required."""
@@ -3932,13 +3968,17 @@ class TestCli(GqlCase):
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
     def test_an_unreadable_rollup_is_not_held_as_one_not_yet_registered(self) -> None:
-        """A rollup read off another commit is empty here, and waiting does not clear that."""
+        """A rollup read off another commit is empty here, and waiting does not clear that, so
+        the release names the unread payload rather than exiting 0 over checks it never read.
+        """
         pr = payload([review(oid=OLD)], merge="BLOCKED", checks=[check()], rollup_oid="d" * 40)
         self.answer(self.into(pr, attest=True))
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "1"]))
+            self.assertEqual(45, self.cli(["wait", "7", "--timeout", "1"]))
         slept.assert_not_called()
+        self.assertIn("status=CHECKS_NOT_RUN", self.out.getvalue())
+        self.assertIn("no commit matching the head", self.out.getvalue())
 
     def test_an_outside_answer_outranks_pending_after_a_mid_poll_request(self) -> None:
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
@@ -6071,6 +6111,20 @@ class TestRequiredContexts(unittest.TestCase):
         self.assertFalse(pr_review_checks.held_checks_open(pr, nodes, now, 600, 3600))
         clean = {**pr, "mergeStateStatus": "CLEAN"}
         self.assertFalse(pr_review_checks.held_checks_open(clean, nodes, now, 600, 3600, want))
+
+    def test_checks_never_ran_judges_only_a_gated_open_merge_on_a_rollup_read_whole(self) -> None:
+        """A cut rollup can hold the absent context past its window, so it proves nothing."""
+        want = frozenset({("Later", None)})
+        pr = payload([], merge="BEHIND", checks=[check()])
+        nodes = pr_review_checks.check_nodes(pr)
+        self.assertIn("Later", pr_review_checks.checks_never_ran(pr, nodes, want))
+        self.assertEqual("", pr_review_checks.checks_never_ran(pr, nodes, frozenset()))
+        for ungated in ({**pr, "mergeStateStatus": "CLEAN"}, {**pr, "state": "MERGED"}):
+            self.assertEqual("", pr_review_checks.checks_never_ran(ungated, nodes, want))
+        pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {
+            "hasNextPage": True
+        }
+        self.assertEqual("", pr_review_checks.checks_never_ran(pr, nodes, want))
 
     def test_a_rollup_not_read_whole_never_holds_on_an_absent_context(self) -> None:
         now = datetime.now(UTC)
