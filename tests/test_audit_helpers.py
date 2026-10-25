@@ -2817,6 +2817,23 @@ class GroundTruthCase(unittest.TestCase):
                 )
             self.assertEqual(len(findings), want, f"intentRef unit, held={held} -> {findings}")
 
+    def test_intent_staleness_reference_unit_ignores_the_hub_file_at_path(self) -> None:
+        unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
+        texts = {"snip/w.yml": "snippet", "w.yml": "same"}
+        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
+        with (
+            mock.patch.object(
+                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
+            ),
+            mock.patch.object(audit, "canonical_current_text", texts.get),
+            mock.patch.object(
+                audit, "gh", lambda ep, ok404=False: commit if "commits" in ep else content
+            ),
+        ):
+            _, _, findings = audit.baseline_file_findings("o/r", "main", "w.yml", [], unit, False)
+        self.assertEqual(len(findings), 1, f"reference unit -> {findings}")
+
     def test_intent_staleness_message_names_the_intent_canonical(self) -> None:
         commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
         with (

@@ -1406,7 +1406,14 @@ def baseline_file_findings(slug, ground, path, alternatives, item, is_hub):
     return (
         content,
         text,
-        check_intent_staleness(slug, ground, found, intent_canonical_rel(item, path), text, path),
+        check_intent_staleness(
+            slug,
+            ground,
+            found,
+            intent_canonical_rel(item, path),
+            text,
+            None if item.get("reference") else path,
+        ),
     )
 
 
@@ -1414,6 +1421,7 @@ def check_intent_staleness(slug, ground, path, canonical_rel, down_text, hub_pat
     """The intent-staleness advisory: a last-modified comparison, since intent has no content check.
 
     A copy content-identical to the canonical, or to the hub's own file at `hub_path` where the hub holds one, is current.
+    A unit naming a `reference` passes no `hub_path`, since it is judged against that reference alone.
     """
     hub_change = hub_last_change(canonical_rel)
     if hub_change is None:
