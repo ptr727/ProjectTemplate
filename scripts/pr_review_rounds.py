@@ -3,8 +3,8 @@
 This is a library module and has no command line. `pr_review.py` imports it as a sibling, which
 works from any working directory because Python puts the running script's own directory on
 `sys.path`. It reads reviews, comments, threads, the request state, the reviewer's history, and the
-local attestation from a payload already fetched, and makes no call of its own. What a reviewer's
-body says is still `pr_review_copilot.py`'s, reached here through `reading`.
+local attestation. Each read takes a payload already fetched, and nothing here makes a call. What a
+reviewer's body says is still `pr_review_copilot.py`'s, reached here through `reading`.
 """
 
 from __future__ import annotations

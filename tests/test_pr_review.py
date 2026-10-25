@@ -13,6 +13,7 @@ Run under `uv run --no-project --with-requirements tests/requirements.txt`, as
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import inspect
 import io
@@ -24,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
@@ -38,6 +40,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
 
 REPO = Path(__file__).resolve().parent.parent
+# The gate and the reader modules it imports, which every whole-source guard below reads together.
+GATE_SOURCES = ("pr_review.py", "pr_review_checks.py", "pr_review_rounds.py")
+# What a reader module may import: the standard library it parses with, and the reviewer adapter.
+READER_IMPORTS = frozenset({"__future__", "collections", "datetime", "re", "pr_review_copilot"})
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
 GOVERNANCE = REPO / "GOVERNANCE.md"
 CODE_REVIEW_SKILL = REPO / ".github" / "skills" / "fleet-code-review" / "SKILL.md"
@@ -1884,6 +1890,16 @@ class TestDigestReportsChecks(GqlCase):
         self.assertFalse(pr_review_checks.checks_truncated(payload([review()], checks=[check()])))
         self.assertNotIn("CHECKS TRUNCATED", self.digest(payload([review()], checks=[check()])))
 
+    @contextlib.contextmanager
+    def parse_spies(self) -> Iterator[tuple[mock.MagicMock, mock.MagicMock]]:
+        """Count a parse from the gate and from the checks module alike, since each binds its own."""
+        parse = pr_review_checks.check_nodes
+        with (
+            mock.patch.object(pr_review, "check_nodes", side_effect=parse) as gate,
+            mock.patch.object(pr_review_checks, "check_nodes", side_effect=parse) as readers,
+        ):
+            yield gate, readers
+
     def test_the_rollup_is_normalized_once_for_both_readers(self) -> None:
         """Two calls parsed the same rollup twice a digest, and the parse is what this script pays.
 
@@ -1891,22 +1907,18 @@ class TestDigestReportsChecks(GqlCase):
         the output is identical either way, which is what let the second call go unnoticed.
         """
         pr = payload([review()], merge="BLOCKED", checks=[check(name="lint"), check(name="gate")])
-        with mock.patch.object(
-            pr_review, "check_nodes", side_effect=pr_review_checks.check_nodes
-        ) as parsed:
+        with self.parse_spies() as spies:
             pr_review.digest("o", "r", 7, pr=pr, now=NOW)
-        self.assertEqual(1, parsed.call_count)
+        self.assertEqual(1, sum(s.call_count for s in spies))
 
     def test_a_caller_that_parsed_the_rollup_is_not_made_to_parse_it_again(self) -> None:
         """The first fix left `wait` parsing once to print and once to decide, which is the same
         doubling one caller up. Raised in review here, on the commit that halved it."""
         pr = payload([review()], merge="BLOCKED", checks=[check(name="lint")])
-        with mock.patch.object(
-            pr_review, "check_nodes", side_effect=pr_review_checks.check_nodes
-        ) as parsed:
+        with self.parse_spies() as spies:
             pr_review.digest("o", "r", 7, pr=pr, now=NOW, checks=pr_review.check_nodes(pr))
         # The one call is the case's own, so the digest made none of its own.
-        self.assertEqual(1, parsed.call_count)
+        self.assertEqual(1, sum(s.call_count for s in spies))
 
     def test_the_truncation_line_quotes_the_window_the_query_actually_asks_for(self) -> None:
         """The message borrowed WINDOW, which is the reviews and comments window and not this one.
@@ -5314,7 +5326,7 @@ class TestContract(unittest.TestCase):
         """
         source = "".join(
             (REPO / "scripts" / name).read_text(encoding="utf-8")
-            for name in ("pr_review.py", "pr_cleanup.py")
+            for name in (*GATE_SOURCES, "pr_cleanup.py")
         )
         for verb in (
             "-X POST",
@@ -5401,10 +5413,29 @@ class TestContract(unittest.TestCase):
 
     def test_no_write_suppresses_or_forces_its_own_result(self) -> None:
         """A mutation whose output is discarded is a write nobody can say landed."""
-        source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
+        source = "".join(
+            (REPO / "scripts" / name).read_text(encoding="utf-8") for name in GATE_SOURCES
+        )
         for tail in (">/dev/null", "2>/dev/null", "&>/dev/null", "|| true", "|| :", "shell=True"):
             with self.subTest(tail=tail):
                 self.assertNotIn(tail, source)
+
+    def test_the_readers_import_nothing_that_reaches_out(self) -> None:
+        """A reader importing the gate loads a second copy of it, and one importing a transport can call."""
+        for name in GATE_SOURCES[1:]:
+            tree = ast.parse((REPO / "scripts" / name).read_text(encoding="utf-8"))
+            imported = {
+                alias.name.split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Import)
+                for alias in node.names
+            } | {
+                (node.module or "").split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)
+            }
+            with self.subTest(module=name):
+                self.assertLessEqual(imported, READER_IMPORTS, f"{name} imports {imported}")
 
     def test_the_guard_tests_the_window_the_queries_actually_read(self) -> None:
         """A guard measuring one number while the query fetches another reads clean on drift."""

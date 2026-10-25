@@ -2,8 +2,8 @@
 
 This is a library module and has no command line. `pr_review.py` imports it as a sibling, which
 works from any working directory because Python puts the running script's own directory on
-`sys.path`. Everything here reads a payload already fetched and makes no call of its own, so the
-base branch's rules reach `held_checks_open` as an argument rather than as a read.
+`sys.path`. Everything here reads a payload already fetched and makes no call of its own. The base
+branch's rules therefore reach `held_checks_open` as an argument rather than as a read.
 """
 
 from __future__ import annotations

@@ -8,9 +8,9 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 CEILINGS = {
-    "pr_review.py": 2400,
-    "pr_review_checks.py": 500,
-    "pr_review_rounds.py": 1000,
+    "pr_review.py": 2200,
+    "pr_review_checks.py": 450,
+    "pr_review_rounds.py": 700,
     "pr_review_copilot.py": 1500,
     "pr_cleanup.py": 1200,
 }
