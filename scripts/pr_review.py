@@ -13,7 +13,8 @@ Discipline" for the rule this implements.
 
 This file is the gate: the plumbing, the verdict, the wait loop, and the writes. The head's checks
 are read by `pr_review_checks.py` and its review rounds by `pr_review_rounds.py`, both off a payload
-this file fetched. What a reviewer's body says is read by `pr_review_copilot.py`, whose vocabulary lives in
+this file fetched. `pr_review_digest.py` renders the digest from those readings. What a reviewer's
+body says is read by `pr_review_copilot.py`, whose vocabulary lives in
 `reviewers/<name>.json`, so a change in the reviewer's wording is a data edit there and never
 an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
 written outcomes acknowledge it, and on an earlier round it is a note.
@@ -186,40 +187,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as shared
-import pr_review_copilot as adapter
 from pr_review_checks import (
     CHECK_GRACE,
     CHECK_STALL,
     CHECKS_WINDOW,
     WORKFLOW_KEYS_UNAVAILABLE,
     _unmet_note,
-    check_lines,
     check_nodes,
     checks_never_ran,
     checks_settling,
     checks_stuck,
-    checks_tally,
     held_checks_open,
     runs_open,
 )
+from pr_review_digest import digest_refusal, render
 from pr_review_rounds import (
     ACK_MARKER,
     CARRIED_PARTIAL,
-    CODERABBIT_LOGIN,
     FILES_UNREAD,
-    KNOWN_REVIEWERS,
-    OTHER_REVIEWERS,
-    QODO_LOGIN,
     REVIEWER,
     answered_outside_review,
     attested,
-    collected,
     copilot_bot_id,
     coverage,
     describe,
     files_unread,
     finding_text,
-    first_comment,
     head_review_done,
     head_reviews,
     history_entry,
@@ -227,31 +220,20 @@ from pr_review_rounds import (
     local_cover,
     matching_threads,
     newest_first,
-    newest_of,
     open_threads,
-    opened_by,
     possible_quota,
-    qodo_comment,
-    qodo_comments_blind,
     quota_refusal,
     quota_signal,
-    rate_limited_by,
-    reading,
     refusing_review,
     request_recorded,
-    review_effort,
     reviewed_head,
     reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
-    reviews_truncated,
     shape_hold,
     standing_quota,
     stopping_refusal,
-    thread_author,
-    threads_truncated,
     uncounted_verdict,
-    window_blind,
 )
 
 # The directory this script sits in, the anchor every scope answer is read from.
@@ -758,248 +740,17 @@ def digest(
     stall: float = CHECK_STALL,
     checks: list[dict] | None = None,
 ) -> tuple[str, int]:
-    """Render the digest from a caller's payload and normalized checks when supplied.
+    """Read what the digest needs, unless the caller supplied it, and render it.
 
     The caller passes its own readings so the exit code agrees with what was printed. `now` is a
     parameter so a case can hold a check at a known age.
     """
     pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
-    head = pr["headRefOid"]
-    revs = reviewer_nodes(pr, "reviews")
-    on_head = head_reviews(pr)
-    newest = newest_of(on_head)
-    found = reading(newest, pr=pr) if newest is not None else None
-    effort, effort_source = review_effort(pr)
-    cover, cover_why = coverage(pr)
-    hold = shape_hold(pr)
-    # Every round's notes, since a renamed section on an earlier round hides a finding too.
-    notes = [
-        *dict.fromkeys(
-            f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
-            for node in revs
-            for n in reading(node).notes
-            if node not in on_head or n not in {p.note for p in reading(node).unplaced}
-        ),
-        *reviewer_login_drift(pr),
-    ]
-    threads = pr["reviewThreads"]["nodes"]
-    truncated = threads_truncated(pr)
-    revs_truncated = reviews_truncated(pr)
-    unresolved = open_threads(threads)
-    by_login = {
-        login: sum(1 for t in unresolved if thread_author(t) == login) for login in KNOWN_REVIEWERS
-    }
-    by_login["other"] = sum(1 for t in unresolved if thread_author(t) not in KNOWN_REVIEWERS)
-    contributors = {login: n for login, n in by_login.items() if n}
-    breakdown = (
-        " (" + " ".join(f"{login}={n}" for login, n in contributors.items()) + ")"
-        if len(contributors) > 1 or "other" in contributors
-        else ""
-    )
-    suppressed, suppressed_field = collected(pr, REVIEWER, "suppressed")
-    missed, missed_field = collected(pr, REVIEWER, "previously_missed")
-    outside, outside_field = collected(pr, CODERABBIT_LOGIN, "previously_missed")
-    listed = len(opened_by(pr, newest)) if newest is not None else 0
-    flagged = uncounted_verdict(pr)
-    advisory = uncounted_verdict(pr, "clean")
-    answer = answered_outside_review(pr)
-    refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
-    refusal_field = (
-        "no"
-        if not refusal
-        else "QUOTA"
-        if quota_refusal(refusal) or confirmed_quota(owner, repo, refusal)
-        else "ERROR"
-        if possible_quota(refusal)
-        else "YES"
-    )
-    blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
-    answered = "yes" if answer else ("unknown" if blind else "no")
     checks = check_nodes(pr) if checks is None else checks
-    ok, total = checks_tally(checks)
-    stuck = checks_stuck(checks, now, grace, stall)
-    other_on_head = [
-        login
-        for login in OTHER_REVIEWERS
-        if any(
-            (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
-        )
-    ]
-    other_limited = {
-        login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
-    }
-    qodo = qodo_comment(pr)
-    qodo_open = [s for s in reading(qodo, QODO_LOGIN).sections if s.kind == "open"] if qodo else []
-    lines = [
-        # The repository leads the line, since a digest of the wrong pull request is well-formed.
-        f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
-        f"review_on_head={'yes' if on_head else 'local' if cover == 'local' else 'NO'} "
-        + (f"other_reviewed={','.join(other_on_head)} " if other_on_head else "")
-        + (
-            "other_rate_limited="
-            + ",".join(
-                f"{login}:{name}" if name else login for login, name in other_limited.items()
-            )
-            + " "
-            if other_limited
-            else ""
-        )
-        + f"effort={effort} effort_source={effort_source} "
-        f"coverage={cover.upper() if cover in ('partial', 'unknown') else cover} "
-        f"shapes={('ACKNOWLEDGED' if hold[2] else 'HELD') if hold else 'NOTED' if notes else 'ok'} "
-        f"refusal={refusal_field} "
-        f"threads={len(threads)}{'+' if truncated else ''} "
-        f"unresolved={len(unresolved)}{'+' if truncated else ''}{breakdown} "
-        f"suppressed={suppressed_field} "
-        + (f"previously_missed={missed_field} " if missed or revs_truncated else "")
-        + (
-            f"overview={'?' if found.open is None else found.open}/{listed} "
-            if found is not None and found.marked
-            else ""
-        )
-        + (f"cr_outside_diff={outside_field} " if outside or revs_truncated else "")
-        + (
-            f"qodo_open={len(qodo_open)} "
-            if qodo
-            else ("qodo_open=unknown " if qodo_comments_blind(pr) else "")
-        )
-        + f"answered_outside_review={answered} "
-        f"requested={'yes' if reviewer_requested(pr) else 'no'} "
-        f"merge={pr.get('mergeStateStatus')} "
-        f"checks={ok}/{total}"
-        + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
-    ]
-    if refusal:
-        lines.append(
-            "  COPILOT REFUSED THIS ROUND: the newest Copilot review on this pull request says "
-            "it did not review, so it covers nothing and re-requesting repeats it, and the body "
-            "below is what says which remedy applies"
-        )
-        lines += [
-            f"    {ln.rstrip()}" for ln in (refusal.get("body") or "").splitlines() if ln.strip()
-        ]
-        if limit := confirmed_quota(owner, repo, refusal):
-            lines.append(f"  RATE LIMIT FROM THE REVIEWER'S RUN LOG: {limit}")
-    if notes:
-        lines.append(
-            f"  REVIEWER OUTPUT NOTED ({len(notes)}): the reader placed part of what the reviewer "
-            "sent nowhere, so read the body itself before closing the review loop. A spelling "
-            f"to add belongs in `scripts/reviewers/` on {HUB}, which hosts this script"
-        )
-        lines += [f"    {note}" for note in notes]
-    if hold:
-        lines.append(
-            f"  UNPLACED ON THE HEAD (fingerprint={hold[0]}): a round covering the head carries "
-            + (
-                "parts an owner, member, or collaborator acknowledged with written outcomes"
-                if hold[2]
-                else "text the reader cannot place, where a finding can sit. Read each part whole "
-                "in the review body, the excerpt only locating it, and give each item an outcome, "
-                "fixed with its SHA, declined with evidence, or listed as pre-existing in the PR "
-                f"body. Post them with `comment {num} --repo {owner}/{repo} --fingerprint "
-                f"{hold[0]} --body <outcomes>`"
-            )
-        )
-        for part in hold[1]:
-            lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
-    if found is not None and found.unthreaded:
-        lines.append(
-            f"  FINDINGS WITH NO THREAD ({found.unthreaded}): the round covering the head names "
-            f"more findings than its open entries link to threads on this pull request, so "
-            f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
-            "threads cannot see them. Read the review body and give each the triage a suppressed "
-            "finding gets. A thread past the hundred read here counts too, and `threads=` "
-            "carries a trailing `+` where that page was cut"
-        )
-    if flagged:
-        lines.append(
-            f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
-            f"`{flagged[0]}` and counts no finding, so its headline is the one place what it "
-            "flags is named. Give the headline the triage a suppressed finding gets"
-        )
-        lines.append(f"    {flagged[1] or '(the headline carries no prose)'}")
-    if advisory and advisory[1]:
-        lines.append(
-            f"  CLEAN VERDICT HEADLINE: the round covering the head opens on `{advisory[0]}` and "
-            "counts no finding. Its headline may name a remaining nit, new or already answered, "
-            "which nothing here tells apart, so this is advisory and changes no exit code"
-        )
-        lines.append(f"    {advisory[1]}")
-    if cover in ("table", "carried:table", "local", "partial", "unknown"):
-        lines.append(f"  COVERAGE IS {cover.upper()}: {cover_why}")
-    elif cover == "none" and on_head:
-        lines.append(
-            "  NO COVERAGE IS SHOWN: no round covering the head states coverage, and "
-            f"{cover_why or 'nothing stands in'}. Merge Gate item 2 reads this field"
-        )
-    lines.extend(check_lines(pr, checks, stuck, now))
-    if blind:
-        lines.append(
-            f"  BEHIND THE WINDOW ({' and '.join(blind)}): the newest {WINDOW} carry "
-            "none from the reviewer and older ones exist, so this cannot decide"
-        )
-    if truncated:
-        lines.append(
-            "  THREADS TRUNCATED: this pull request carries more review threads than the "
-            "100 read here, and the connection reads oldest-first, so the ones cut off are "
-            "the newest rather than the oldest, exactly the ones most likely to still be "
-            "open. `threads=` and `unresolved=` above undercount. Read the rest with "
-            "`reply`'s own paginated walk before trusting either number"
-        )
-    if revs_truncated:
-        lines.append(
-            "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read "
-            "here, and the connection reads newest-first, so the ones cut off are the "
-            "oldest, exactly where an unanswered suppressed or outside-diff-range finding is "
-            "most likely to still sit unresolved. `suppressed=` and `cr_outside_diff=` above "
-            "undercount"
-        )
-    if answer:
-        # Printed whole, since its wording is the only thing separating a refusal from a remark.
-        lines.append(
-            f"  COPILOT COMMENT ({answer.get('createdAt')}, newer than any review): "
-            "the reviewer answered without reviewing, so read the body below and "
-            "decide, since a refusal is terminal and a remark is not"
-        )
-        lines += [
-            f"    {ln.rstrip()}" for ln in (answer.get("body") or "").splitlines() if ln.strip()
-        ]
-    new = 0
-    for t in unresolved:
-        c = first_comment(t)
-        tid = t["id"]
-        mark = ""
-        if seen is not None:
-            if tid in seen:
-                continue
-            seen.add(tid)
-            mark = "NEW "
-            new += 1
-        body = " ".join((c.get("body") or "").split())
-        lines.append(f"  {mark}{tid} {c.get('path')}:{c.get('line')} {body[:160]}")
-    # Printed whole, since a finding with no thread appears nowhere but here.
-    for heading, entries in (
-        ("SUPPRESSED", suppressed),
-        ("PREVIOUSLY MISSED", missed),
-        ("CODERABBIT OUTSIDE-DIFF", outside),
-    ):
-        for where, section in entries:
-            lines.append(
-                f"  {heading} ({where}): no thread to resolve, "
-                "answer it in the PR conversation quoting the finding"
-            )
-            lines += [f"    {ln}" for ln in section.text.splitlines() if ln.strip()]
-    for section in qodo_open:
-        lines.append(
-            "  QODO OPEN FINDING: neither Resolved nor Dismissed, no thread to resolve, "
-            "answer it in the PR conversation quoting the finding, and spot-verify Qodo's "
-            "own badge against `gh pr diff` rather than trusting it outright"
-        )
-        lines.append(f"    {section.title}")
-    if seen is not None:
-        lines[0] += f" new={new}"
-    return "\n".join(lines), len(unresolved)
+    refusal = digest_refusal(pr)
+    quota = confirmed_quota(owner, repo, refusal) if refusal else ""
+    return render(owner, repo, num, pr, checks, now, grace, stall, quota, seen, HUB, WINDOW)
 
 
 def report_verdict(pr: dict) -> int:
@@ -1658,192 +1409,8 @@ def utf8_console() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("first", nargs="?")
-    for flag in ("--repo", "--checkout", "--min-age-hours"):
-        pre.add_argument(flag)
-    if pre.parse_known_args(args)[0].first == "cleanup":
-        sys.modules.setdefault("pr_review", sys.modules[__name__])
-        import pr_cleanup
-
-        rest = list(args)
-        rest.remove("cleanup")
-        return pr_cleanup.main(rest)
-    utf8_console()
-    ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
-    )
-    ap.add_argument("number", type=int, nargs="?")
-    # No default, because a default names one repository and every run from elsewhere would read that one.
-    ap.add_argument(
-        "--repo",
-        required=True,
-        metavar="OWNER/NAME",
-        help="the repository the pull request is in, since a pull "
-        "request number identifies no repository on its own",
-    )
-    ap.add_argument("--timeout", type=int, default=2700, help="seconds (default 45m)")
-    ap.add_argument(
-        "--pickup-grace",
-        type=int,
-        default=300,
-        help="deprecated compatibility option, accepted but ignored",
-    )
-    ap.add_argument(
-        "--check-grace",
-        type=int,
-        default=CHECK_GRACE,
-        help="seconds a check may sit queued, or a required status go unposted, "
-        f"before either reads as unstarted (default {CHECK_GRACE // 60}m)",
-    )
-    ap.add_argument(
-        "--check-stall",
-        type=int,
-        default=CHECK_STALL,
-        help="seconds a check may run before its duration is reported "
-        f"(default {CHECK_STALL // 60}m)",
-    )
-    ap.add_argument(
-        "--ignore-quota-signal",
-        action="store_true",
-        help="wait: request and poll the full --timeout even where the reviewer's own most "
-        "recent activity elsewhere in this repository is a quota-limit refusal with nothing "
-        "answering it since, or this pull request's newest Copilot review is a quota or "
-        "error refusal, pass this once the quota is believed to have reset",
-    )
-    ap.add_argument(
-        "--request",
-        action="store_true",
-        help="wait: request a Copilot round even on a pull request into a branch other than the "
-        "default, which an attested local pass otherwise covers",
-    )
-    ap.add_argument(
-        "--min-rounds",
-        type=int,
-        default=0,
-        metavar="N",
-        help="wait: treat the head as covered only once the reviewer's total rounds on this "
-        "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
-        "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
-        "already carries one: `reviewed_head` alone would report that earlier round as done "
-        "at once, never waiting for the fresh one the re-request was for. N is the count "
-        "already seen, not the count to reach: on a pull request reading `rounds=3`, N=3 "
-        "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
-        "unchanged from before this flag existed)",
-    )
-    # `reply` takes the finding's words, and there is no argument an id fits in.
-    ap.add_argument(
-        "--match",
-        metavar="TEXT",
-        help="reply: words from the finding, matched against the thread's opening "
-        "comment, and required to select exactly one unresolved thread",
-    )
-    ap.add_argument(
-        "--path",
-        metavar="FILE",
-        help="reply: narrow --match to one file, for a file with several findings",
-    )
-    ap.add_argument(
-        "--all-identical",
-        action="store_true",
-        help="reply: where --match selects several threads whose opening comments read the "
-        "same, a finding posted twice, answer each of them with --body rather than refusing",
-    )
-    ap.add_argument(
-        "--body",
-        metavar="TEXT",
-        help="comment or reply: the answer to post, carrying the fixing commit SHA or "
-        "the evidence that disproves the finding",
-    )
-    ap.add_argument("--fingerprint", help="comment: acknowledge the unplaced set it names")
-    ap.add_argument(
-        "--resolve",
-        action="store_true",
-        help="reply: resolve the thread once the reply is confirmed",
-    )
-    ap.add_argument(
-        "--checkout",
-        metavar="DIR",
-        help="attest: the checkout holding the pull request's head and its recorded local pass "
-        "(default the current directory)",
-    )
-    a = ap.parse_args(args)
-    # Named for the command they belong to, since an ignored flag reads as one that took effect.
-    reply_only = {
-        "--match": a.match,
-        "--path": a.path,
-        "--resolve": a.resolve or None,
-        "--all-identical": a.all_identical or None,
-    }
-    if a.cmd != "reply":
-        for flag, value in reply_only.items():
-            if value is not None:
-                ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
-    if a.cmd != "wait" and a.request:
-        ap.error(f"--request belongs to `wait`, not `{a.cmd}`")
-    if a.cmd == "cleanup":
-        ap.error("`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`")
-    if a.cmd != "attest" and a.checkout is not None:
-        ap.error(f"--checkout belongs to `attest` or `cleanup`, not `{a.cmd}`")
-    if a.number is None:
-        ap.error("the following arguments are required: number")
-    if a.cmd != "comment" and a.fingerprint is not None:
-        ap.error(f"--fingerprint belongs to `comment`, not `{a.cmd}`")
-    if a.cmd not in ("comment", "reply") and a.body is not None:
-        ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
-    required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
-    if a.cmd in ("comment", "reply"):
-        values = {"--body": a.body, "--match": a.match}
-        for flag in required:
-            if not (values[flag] or "").strip():
-                ap.error(
-                    f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
-                )
-    if a.pickup_grace < 0:
-        ap.error("--pickup-grace cannot be negative")
-    if a.min_rounds < 0:
-        ap.error("--min-rounds cannot be negative")
-    # A negative threshold would report every check in that state on every run.
-    for name in ("check_grace", "check_stall"):
-        if getattr(a, name) < 0:
-            ap.error(f"--{name.replace('_', '-')} cannot be negative")
-    # The two thresholds mean opposite things and the readings invert if the order does.
-    if a.check_grace >= a.check_stall:
-        ap.error(
-            "--check-grace must be less than --check-stall, since a queued check is "
-            f"judged sooner than a running one (got {a.check_grace} and {a.check_stall})"
-        )
-    # A bare name is the near-miss a required argument still admits, and unpacking it raises a
-    # ValueError traceback rather than saying which half is missing.
-    owner, _, repo = a.repo.partition("/")
-    if not owner or not repo or "/" in repo:
-        ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
-
-    if a.cmd == "claims":
-        return check_claims(owner, repo, a.number)
-
-    if a.cmd == "attest":
-        return attest(owner, repo, a.number, a.checkout or ".")
-
-    if a.cmd == "comment":
-        marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
-        return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
-
-    if a.cmd == "status":
-        # One payload renders the digest and decides the code, as in `wait`.
-        pr = full_read(owner, repo, a.number)
-        out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
-        print(out)
-        return report_verdict(pr)
-
-    if a.cmd == "reply":
-        return reply_to_thread(
-            owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
-        )
-
+def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
+    """Request a review where one is owed, poll until it lands or the timeout, and return the code."""
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     ok, why = in_scope(owner)
     if not ok:
@@ -2155,6 +1722,202 @@ def main(argv: list[str] | None = None) -> int:
         return 30
     print("status=PENDING")
     return 30
+
+
+COMMANDS = ("attest", "claims", "cleanup", "comment", "status", "reply", "wait")
+# Each flag listed is refused on a subcommand not owning it, since an ignored flag reads as one that took effect.
+# A late row is checked after the `cleanup` and `number` checks, which fixes the first error printed.
+# `cleanup` owns `--checkout` only once it has dispatched, so its row here only defers to that check.
+FLAG_OWNERS = (
+    ("--match", ("reply",), False),
+    ("--path", ("reply",), False),
+    ("--resolve", ("reply",), False),
+    ("--all-identical", ("reply",), False),
+    ("--request", ("wait",), False),
+    ("--checkout", ("attest", "cleanup"), False),
+    ("--fingerprint", ("comment",), True),
+    ("--body", ("comment", "reply"), True),
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("first", nargs="?")
+    for flag in ("--repo", "--checkout", "--min-age-hours"):
+        pre.add_argument(flag)
+    if pre.parse_known_args(args)[0].first == "cleanup":
+        sys.modules.setdefault("pr_review", sys.modules[__name__])
+        import pr_cleanup
+
+        rest = list(args)
+        rest.remove("cleanup")
+        return pr_cleanup.main(rest)
+    utf8_console()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cmd", choices=COMMANDS)
+    ap.add_argument("number", type=int, nargs="?")
+    # No default, because a default names one repository and every run from elsewhere would read that one.
+    ap.add_argument(
+        "--repo",
+        required=True,
+        metavar="OWNER/NAME",
+        help="the repository the pull request is in, since a pull "
+        "request number identifies no repository on its own",
+    )
+    ap.add_argument("--timeout", type=int, default=2700, help="seconds (default 45m)")
+    ap.add_argument(
+        "--pickup-grace",
+        type=int,
+        default=300,
+        help="deprecated compatibility option, accepted but ignored",
+    )
+    ap.add_argument(
+        "--check-grace",
+        type=int,
+        default=CHECK_GRACE,
+        help="seconds a check may sit queued, or a required status go unposted, "
+        f"before either reads as unstarted (default {CHECK_GRACE // 60}m)",
+    )
+    ap.add_argument(
+        "--check-stall",
+        type=int,
+        default=CHECK_STALL,
+        help="seconds a check may run before its duration is reported "
+        f"(default {CHECK_STALL // 60}m)",
+    )
+    ap.add_argument(
+        "--ignore-quota-signal",
+        action="store_true",
+        help="wait: request and poll the full --timeout even where the reviewer's own most "
+        "recent activity elsewhere in this repository is a quota-limit refusal with nothing "
+        "answering it since, or this pull request's newest Copilot review is a quota or "
+        "error refusal, pass this once the quota is believed to have reset",
+    )
+    ap.add_argument(
+        "--request",
+        action="store_true",
+        help="wait: request a Copilot round even on a pull request into a branch other than the "
+        "default, which an attested local pass otherwise covers",
+    )
+    ap.add_argument(
+        "--min-rounds",
+        type=int,
+        default=0,
+        metavar="N",
+        help="wait: treat the head as covered only once the reviewer's total rounds on this "
+        "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
+        "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
+        "already carries one: `reviewed_head` alone would report that earlier round as done "
+        "at once, never waiting for the fresh one the re-request was for. N is the count "
+        "already seen, not the count to reach: on a pull request reading `rounds=3`, N=3 "
+        "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
+        "unchanged from before this flag existed)",
+    )
+    # `reply` takes the finding's words, and there is no argument an id fits in.
+    ap.add_argument(
+        "--match",
+        metavar="TEXT",
+        help="reply: words from the finding, matched against the thread's opening "
+        "comment, and required to select exactly one unresolved thread",
+    )
+    ap.add_argument(
+        "--path",
+        metavar="FILE",
+        help="reply: narrow --match to one file, for a file with several findings",
+    )
+    ap.add_argument(
+        "--all-identical",
+        action="store_true",
+        help="reply: where --match selects several threads whose opening comments read the "
+        "same, a finding posted twice, answer each of them with --body rather than refusing",
+    )
+    ap.add_argument(
+        "--body",
+        metavar="TEXT",
+        help="comment or reply: the answer to post, carrying the fixing commit SHA or "
+        "the evidence that disproves the finding",
+    )
+    ap.add_argument("--fingerprint", help="comment: acknowledge the unplaced set it names")
+    ap.add_argument(
+        "--resolve",
+        action="store_true",
+        help="reply: resolve the thread once the reply is confirmed",
+    )
+    ap.add_argument(
+        "--checkout",
+        metavar="DIR",
+        help="attest: the checkout holding the pull request's head and its recorded local pass "
+        "(default the current directory)",
+    )
+    a = ap.parse_args(args)
+
+    def refuse_foreign(late: bool) -> None:
+        for flag, owners, row_late in FLAG_OWNERS:
+            value = getattr(a, flag.removeprefix("--").replace("-", "_"))
+            if (
+                row_late is late
+                and a.cmd not in owners
+                and value is not None
+                and value is not False
+            ):
+                ap.error(
+                    f"{flag} belongs to {' or '.join(f'`{o}`' for o in owners)}, not `{a.cmd}`"
+                )
+
+    refuse_foreign(late=False)
+    if a.cmd == "cleanup":
+        ap.error("`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`")
+    if a.number is None:
+        ap.error("the following arguments are required: number")
+    refuse_foreign(late=True)
+    required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
+    if a.cmd in ("comment", "reply"):
+        values = {"--body": a.body, "--match": a.match}
+        for flag in required:
+            if not (values[flag] or "").strip():
+                ap.error(
+                    f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
+                )
+    # None of these four takes a negative value, and a negative check threshold reports every check stuck.
+    for name in ("pickup_grace", "min_rounds", "check_grace", "check_stall"):
+        if getattr(a, name) < 0:
+            ap.error(f"--{name.replace('_', '-')} cannot be negative")
+    # The two thresholds mean opposite things and the readings invert if the order does.
+    if a.check_grace >= a.check_stall:
+        ap.error(
+            "--check-grace must be less than --check-stall, since a queued check is "
+            f"judged sooner than a running one (got {a.check_grace} and {a.check_stall})"
+        )
+    # A bare name is the near-miss a required argument still admits, and unpacking it raises a
+    # ValueError traceback rather than saying which half is missing.
+    owner, _, repo = a.repo.partition("/")
+    if not owner or not repo or "/" in repo:
+        ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
+
+    if a.cmd == "claims":
+        return check_claims(owner, repo, a.number)
+
+    if a.cmd == "attest":
+        return attest(owner, repo, a.number, a.checkout or ".")
+
+    if a.cmd == "comment":
+        marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
+        return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
+
+    if a.cmd == "status":
+        # One payload renders the digest and decides the code, as in `wait`.
+        pr = full_read(owner, repo, a.number)
+        out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
+        print(out)
+        return report_verdict(pr)
+
+    if a.cmd == "reply":
+        return reply_to_thread(
+            owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
+        )
+
+    return run_wait(owner, repo, a)
 
 
 if __name__ == "__main__":

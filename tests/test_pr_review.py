@@ -42,11 +42,25 @@ from import_probe import import_delta
 
 REPO = Path(__file__).resolve().parent.parent
 # The gate and the reader modules it imports, which every whole-source guard below reads together.
-GATE_SOURCES = ("pr_review.py", "pr_review_checks.py", "pr_review_rounds.py")
-# What a reader module may import: the standard library it parses with, and the reviewer adapter.
-READER_IMPORTS = frozenset({"__future__", "collections", "datetime", "re", "pr_review_copilot"})
+GATE_SOURCES = ("pr_review.py", "pr_review_checks.py", "pr_review_rounds.py", "pr_review_digest.py")
+# What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
+READER_IMPORTS = frozenset(
+    {
+        "__future__",
+        "collections",
+        "datetime",
+        "re",
+        "pr_review_copilot",
+        "pr_review_checks",
+        "pr_review_rounds",
+    }
+)
 # One import each reader module is known to make, the floor under the allowlist above.
-READER_FLOORS = {"pr_review_checks": "datetime", "pr_review_rounds": "pr_review_copilot"}
+READER_FLOORS = {
+    "pr_review_checks": "datetime",
+    "pr_review_rounds": "pr_review_copilot",
+    "pr_review_digest": "pr_review_rounds",
+}
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
 RUNBOOK = REPO / ".github" / "copilot-instructions.md"
@@ -731,6 +745,80 @@ class TestDigest(GqlCase):
         body = out.split("\n")[1]
         self.assertIn("one two three", body)
         self.assertLessEqual(len(body.split("a.py:1 ")[1]), 160)
+
+
+CROWDED_DIGEST = "\n".join(
+    (
+        (
+            "repo=o/r pr=7 head=aaaaaaaa rounds=2 review_on_head=yes effort=unknown "
+            "effort_source=unknown coverage=full shapes=ok refusal=no threads=2+ unresolved=2+ "
+            f"({pr_review_rounds.REVIEWER}=1 other=1) suppressed=0+ (on_head=0 earlier=0) "
+            "previously_missed=0+ (on_head=0 earlier=0) overview=?/0 cr_outside_diff=0+ "
+            "(on_head=0 earlier=0) qodo_open=unknown answered_outside_review=unknown requested=no "
+            "merge=BLOCKED checks=0/1 stuck=FAILED new=2"
+        ),
+        (
+            "  CHECK FAILED ('Check pull request workflow status job', COMPLETED/FAILURE): a verdict "
+            "rather than a stuck check, so read the run and fix what failed, since no wait and no "
+            "re-run clears a real failure"
+        ),
+        (
+            "  BEHIND THE WINDOW (comments): the newest 100 carry none from the reviewer and older "
+            "ones exist, so this cannot decide"
+        ),
+        (
+            "  THREADS TRUNCATED: this pull request carries more review threads than the 100 read "
+            "here, and the connection reads oldest-first, so the ones cut off are the newest rather "
+            "than the oldest, exactly the ones most likely to still be open. `threads=` and "
+            "`unresolved=` above undercount. Read the rest with `reply`'s own paginated walk before "
+            "trusting either number"
+        ),
+        (
+            "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read here, and "
+            "the connection reads newest-first, so the ones cut off are the oldest, exactly where an "
+            "unanswered suppressed or outside-diff-range finding is most likely to still sit "
+            "unresolved. `suppressed=` and `cr_outside_diff=` above undercount"
+        ),
+        "  NEW T1 a.py:1 First finding.",
+        "  NEW T2 a.py:1 A finding.",
+    )
+)
+QUIET_DIGEST = (
+    "repo=o/r pr=7 head=aaaaaaaa rounds=1 review_on_head=NO effort=unknown effort_source=unknown "
+    "coverage=none shapes=ok refusal=no threads=0 unresolved=0 suppressed=0 (on_head=0 earlier=0) "
+    "answered_outside_review=no requested=yes merge=CLEAN checks=1/1"
+)
+
+
+class TestDigestRenderIsPinned(GqlCase):
+    """The whole digest, byte for byte, as `pr_review_digest.render` lays it out.
+
+    Each expected text was captured before the rendering moved to the leaf module.
+    A reorder among the fields and lines these two cases print fails here rather than in a parse.
+    """
+
+    def test_a_crowded_digest_keeps_its_field_and_advisory_order(self) -> None:
+        self.answer(
+            payload(
+                [review(), review(oid=OLD, rid="PRR_two")],
+                [thread("T1", body="First finding."), thread("T2", login="ptr727")],
+                merge="BLOCKED",
+                comments=[comment(login="ptr727") for _ in range(pr_review.WINDOW)],
+                older=True,
+                older_reviews=True,
+                checks=[check(conclusion="FAILURE")],
+                more_threads=True,
+            )
+        )
+        out, unresolved = pr_review.digest("o", "r", 7, set(), now=NOW)
+        self.assertEqual(2, unresolved)
+        self.assertEqual(CROWDED_DIGEST, out)
+
+    def test_a_quiet_digest_leaves_out_every_optional_field(self) -> None:
+        self.answer(payload([review(oid=OLD)], checks=[check()], pending=True))
+        out, unresolved = pr_review.digest("o", "r", 7, now=NOW)
+        self.assertEqual(0, unresolved)
+        self.assertEqual(QUIET_DIGEST, out)
 
 
 class TestOtherReviewers(GqlCase):
@@ -2107,7 +2195,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn(f"round {OLD[:8]}: the body carries no", self.out.getvalue())
 
     def test_a_body_the_reader_trips_on_holds_and_is_never_a_refusal(self) -> None:
-        with mock.patch.object(pr_review.adapter, "_read", side_effect=ValueError("boom")):
+        with mock.patch.object(pr_review_rounds.adapter, "_read", side_effect=ValueError("boom")):
             self.assertEqual(50, self.status(payload([review(body="odd body")], files=["a.py"])))
         out = self.out.getvalue()
         self.assertIn("review_on_head=yes ", out)
@@ -5213,6 +5301,58 @@ class TestReplyArguments(unittest.TestCase):
             with self.subTest(flag=flag[0]):
                 self.assertIn(flag[0], self.err(["status", "7", "--repo", "o/r", *flag]))
 
+    def test_a_command_line_with_two_bad_flags_names_the_same_one_first(self) -> None:
+        """Each expected line was printed before the ownership checks became `FLAG_OWNERS`."""
+        cases = (
+            (
+                ["status", "7", "--repo", "o/r", "--body", "b", "--match", "x"],
+                "--match belongs to `reply`, not `status`",
+            ),
+            (
+                ["status", "--repo", "o/r", "--fingerprint", "f", "--checkout", "."],
+                "--checkout belongs to `attest` or `cleanup`, not `status`",
+            ),
+            (
+                ["status", "--repo", "o/r", "--fingerprint", "f", "--body", "b"],
+                "the following arguments are required: number",
+            ),
+            (
+                [
+                    "--timeout",
+                    "5",
+                    "cleanup",
+                    "7",
+                    "--repo",
+                    "o/r",
+                    "--checkout",
+                    ".",
+                    "--body",
+                    "b",
+                ],
+                "`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`",
+            ),
+            (
+                ["wait", "7", "--repo", "o/r", "--min-rounds", "-1", "--pickup-grace", "-1"],
+                "--pickup-grace cannot be negative",
+            ),
+            (
+                ["wait", "7", "--repo", "o/r", "--check-stall", "-1", "--request", "--body", "b"],
+                "--body belongs to `comment` or `reply`, not `wait`",
+            ),
+        )
+        for argv, first in cases:
+            with self.subTest(argv=argv):
+                self.assertTrue(self.err(argv).strip().endswith(f"error: {first}"), argv)
+
+    def test_every_owner_in_the_table_is_a_subcommand(self) -> None:
+        """A misspelled owner would refuse its flag on the one command it belongs to."""
+        commands = set(pr_review.COMMANDS)
+        # A floor, since an emptied table would pass the subset check below.
+        self.assertGreaterEqual(len(pr_review.FLAG_OWNERS), 8)
+        for flag, owners, _ in pr_review.FLAG_OWNERS:
+            with self.subTest(flag=flag):
+                self.assertLessEqual(set(owners), commands)
+
 
 PIN = "actions/checkout@" + "9" * 40
 
@@ -5506,7 +5646,7 @@ class TestContract(unittest.TestCase):
         # Raw, since a marker split over two lines is not the one-line shape the skill asks for.
         self.assertIn(marker, CODE_REVIEW_SKILL.read_text(encoding="utf-8"))
         body = f"{OVERVIEW}\n{marker.replace('N', '1')}"
-        self.assertEqual("full", pr_review.adapter.read(body).coverage)
+        self.assertEqual("full", pr_review_rounds.adapter.read(body).coverage)
 
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
         """A verify step reading `commit.oid` alone is what let five partial rounds merge.
