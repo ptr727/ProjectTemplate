@@ -1428,7 +1428,32 @@ class TestCarriedTrees(TreeCase):
         (self.repo / "lib/fleet/sh").mkdir(parents=True)
         (self.repo / "lib/fleet/sh/secrets.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
         self.run_check(["lib/fleet/sh/secrets.sh"])
-        self.assertIn("1 changed", repo_gate.NOTES[0])
+        self.assertIn("1 changed, 0 missing, 0 extra, first secrets.sh.", repo_gate.NOTES[0])
+
+    @requires_symlink
+    def test_a_link_the_hub_does_not_carry_is_left_alone_by_a_tree_that_does_not_prune(
+        self,
+    ) -> None:
+        self.manifest([self.tree(prune=False)])
+        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
+        (self.repo / "lib/fleet/sh/other.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
+        self.run_check([*files, "lib/fleet/sh/other.sh"])
+        self.assertEqual(len(repo_gate.NOTES), 1)
+
+    def test_a_tracked_file_deleted_from_the_working_tree_is_missing(self) -> None:
+        (self.repo / "lib/fleet/sh").mkdir(parents=True)
+        self.run_check(["lib/fleet/sh/secrets.sh"])
+        self.assertIn("0 changed, 1 missing, 0 extra, first secrets.sh.", repo_gate.NOTES[0])
+
+    def test_a_target_tracked_as_a_link_is_named_rather_than_skipped(self) -> None:
+        for tracked in ("lib/fleet/sh", "lib/fleet"):
+            with self.subTest(tracked=tracked):
+                repo_gate.NOTES.clear()
+                self.assertEqual(self.run_check([tracked]), ([], ""))
+                self.assertEqual(
+                    repo_gate.NOTES[0],
+                    f"lib/fleet/sh was not compared, since {tracked} is tracked as a link or a file.",
+                )
 
     @requires_symlink
     def test_a_link_the_hub_does_not_carry_is_extra_under_a_pruned_tree(self) -> None:
@@ -1533,7 +1558,8 @@ class TestCarriedTrees(TreeCase):
         )
 
     def test_the_annotation_carries_no_name_from_the_scanned_repository(self) -> None:
-        # Named in the tracked list alone, since a Windows file name cannot hold `:`, and a tracked name with no file reads as changed.
+        # Named in the tracked list alone, since a Windows file name cannot hold `:`.
+        # The hub's own file then reads as missing.
         files = ["lib/fleet/sh/x%0A::error::forged"]
         _, printed = self.run_check(files, actions=True)
         self.assertEqual(printed.count("\n"), 1)

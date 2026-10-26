@@ -842,6 +842,13 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     for tree in trees:
         target = tree["target"]
         prefix = target + "/"
+        # Git tracks a link to a directory as one path, so a target or an ancestor tracked that way hides every file beneath it.
+        blocking = next((path for path in files if prefix.startswith(path + "/")), None)
+        if blocking is not None:
+            NOTES.append(
+                f"{target} was not compared, since {blocking} is tracked as a link or a file."
+            )
+            continue
         tracked_here = [path[len(prefix) :] for path in files if path.startswith(prefix)]
         if not tracked_here:
             continue
@@ -851,16 +858,19 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             if not owned:
                 continue
             # A tracked link, or a path that is not a regular file, holds no content to compare, so it is kept out of the inventory and judged apart.
+            # A tracked file deleted from the working tree is left out as well, so it reads as missing.
             irregular = {
                 relative
                 for relative in owned
                 if (root / target / relative).is_symlink()
-                or not (root / target / relative).is_file()
+                or (
+                    (root / target / relative).exists() and not (root / target / relative).is_file()
+                )
             }
             copy = {
                 relative: (root / target / relative).read_bytes()
                 for relative in owned
-                if relative not in irregular
+                if relative not in irregular and (root / target / relative).is_file()
             }
             source = carry.inventory(hub / tree["source"], tree["include"])
             result = carry.compare_declaration(tree, source, carry.Inventory(copy, frozenset(), ""))
