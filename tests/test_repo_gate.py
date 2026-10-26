@@ -1470,17 +1470,23 @@ class TestCarriedTrees(TreeCase):
 
     def test_a_target_tracked_as_a_link_is_named_rather_than_skipped(self) -> None:
         warning = (
-            "::warning title=carried-trees::lib/fleet/sh is tracked as a link or a file, "
+            "::warning title=carried-trees::lib/fleet/sh sits at or below a tracked link or file, "
             "which a carry refuses\n"
         )
-        for tracked, printed in (("lib/fleet/sh", warning), ("lib/fleet", "")):
+        for tracked in ("lib/fleet/sh", "lib/fleet"):
             with self.subTest(tracked=tracked):
                 repo_gate.NOTES.clear()
-                self.assertEqual(self.run_check([tracked], actions=True), ([], printed))
+                self.assertEqual(self.run_check([tracked], actions=True), ([], warning))
                 self.assertEqual(
                     repo_gate.NOTES[0],
                     f"lib/fleet/sh was not compared, since {tracked} is tracked as a link or a file.",
                 )
+
+    def test_a_generic_top_level_path_tracked_as_a_file_is_passed_over(self) -> None:
+        self.assertEqual(self.run_check(["lib"], actions=True), ([], ""))
+        self.assertEqual(
+            repo_gate.NOTES, ["compared 0 carried tree(s) against the hub tree beside this gate."]
+        )
 
     def test_a_tree_the_repository_does_not_carry_is_not_compared(self) -> None:
         self.run_check([self.write(self.repo / "README.md", "")])

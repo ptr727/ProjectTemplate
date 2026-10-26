@@ -48,7 +48,8 @@ class CarryInventoryTests(unittest.TestCase):
     def test_apply_leaves_a_repository_file_under_a_tree_that_does_not_prune(self) -> None:
         """The post-apply comparison reads ownership as the check does, so it accepts what apply kept."""
         with tempfile.TemporaryDirectory() as temp:
-            root = pathlib.Path(temp)
+            # Resolved as `main` resolves its target, since a Windows temp path can be an 8.3 short name that `run` resolves to its long form.
+            root = pathlib.Path(temp).resolve()
             hub = root / "hub"
             (hub / "src").mkdir(parents=True)
             (hub / "src" / "carried.txt").write_text("hub", encoding="utf-8")

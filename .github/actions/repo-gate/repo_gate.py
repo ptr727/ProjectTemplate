@@ -849,11 +849,14 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
         target = tree["target"]
         prefix = target + "/"
         # Git tracks a link to a directory as one path, so a target or an ancestor tracked that way hides every file beneath it.
-        blocking = next((path for path in files if prefix.startswith(path + "/")), None)
+        # A top-level path such as `lib` is generic, so one tracked that way says nothing about a carry and is passed over like an uncarried tree.
+        blocking = next(
+            (path for path in files if "/" in path and prefix.startswith(path + "/")), None
+        )
         if blocking is not None:
-            # Only the target itself warns, since a tracked file at a generic ancestor such as `lib` says nothing about a carry.
-            if blocking == target:
-                warn_carried_tree(f"{target} is tracked as a link or a file, which a carry refuses")
+            warn_carried_tree(
+                f"{target} sits at or below a tracked link or file, which a carry refuses"
+            )
             NOTES.append(
                 f"{target} was not compared, since {blocking} is tracked as a link or a file."
             )
