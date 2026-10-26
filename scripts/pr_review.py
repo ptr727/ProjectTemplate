@@ -1409,192 +1409,8 @@ def utf8_console() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("first", nargs="?")
-    for flag in ("--repo", "--checkout", "--min-age-hours"):
-        pre.add_argument(flag)
-    if pre.parse_known_args(args)[0].first == "cleanup":
-        sys.modules.setdefault("pr_review", sys.modules[__name__])
-        import pr_cleanup
-
-        rest = list(args)
-        rest.remove("cleanup")
-        return pr_cleanup.main(rest)
-    utf8_console()
-    ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
-    )
-    ap.add_argument("number", type=int, nargs="?")
-    # No default, because a default names one repository and every run from elsewhere would read that one.
-    ap.add_argument(
-        "--repo",
-        required=True,
-        metavar="OWNER/NAME",
-        help="the repository the pull request is in, since a pull "
-        "request number identifies no repository on its own",
-    )
-    ap.add_argument("--timeout", type=int, default=2700, help="seconds (default 45m)")
-    ap.add_argument(
-        "--pickup-grace",
-        type=int,
-        default=300,
-        help="deprecated compatibility option, accepted but ignored",
-    )
-    ap.add_argument(
-        "--check-grace",
-        type=int,
-        default=CHECK_GRACE,
-        help="seconds a check may sit queued, or a required status go unposted, "
-        f"before either reads as unstarted (default {CHECK_GRACE // 60}m)",
-    )
-    ap.add_argument(
-        "--check-stall",
-        type=int,
-        default=CHECK_STALL,
-        help="seconds a check may run before its duration is reported "
-        f"(default {CHECK_STALL // 60}m)",
-    )
-    ap.add_argument(
-        "--ignore-quota-signal",
-        action="store_true",
-        help="wait: request and poll the full --timeout even where the reviewer's own most "
-        "recent activity elsewhere in this repository is a quota-limit refusal with nothing "
-        "answering it since, or this pull request's newest Copilot review is a quota or "
-        "error refusal, pass this once the quota is believed to have reset",
-    )
-    ap.add_argument(
-        "--request",
-        action="store_true",
-        help="wait: request a Copilot round even on a pull request into a branch other than the "
-        "default, which an attested local pass otherwise covers",
-    )
-    ap.add_argument(
-        "--min-rounds",
-        type=int,
-        default=0,
-        metavar="N",
-        help="wait: treat the head as covered only once the reviewer's total rounds on this "
-        "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
-        "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
-        "already carries one: `reviewed_head` alone would report that earlier round as done "
-        "at once, never waiting for the fresh one the re-request was for. N is the count "
-        "already seen, not the count to reach: on a pull request reading `rounds=3`, N=3 "
-        "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
-        "unchanged from before this flag existed)",
-    )
-    # `reply` takes the finding's words, and there is no argument an id fits in.
-    ap.add_argument(
-        "--match",
-        metavar="TEXT",
-        help="reply: words from the finding, matched against the thread's opening "
-        "comment, and required to select exactly one unresolved thread",
-    )
-    ap.add_argument(
-        "--path",
-        metavar="FILE",
-        help="reply: narrow --match to one file, for a file with several findings",
-    )
-    ap.add_argument(
-        "--all-identical",
-        action="store_true",
-        help="reply: where --match selects several threads whose opening comments read the "
-        "same, a finding posted twice, answer each of them with --body rather than refusing",
-    )
-    ap.add_argument(
-        "--body",
-        metavar="TEXT",
-        help="comment or reply: the answer to post, carrying the fixing commit SHA or "
-        "the evidence that disproves the finding",
-    )
-    ap.add_argument("--fingerprint", help="comment: acknowledge the unplaced set it names")
-    ap.add_argument(
-        "--resolve",
-        action="store_true",
-        help="reply: resolve the thread once the reply is confirmed",
-    )
-    ap.add_argument(
-        "--checkout",
-        metavar="DIR",
-        help="attest: the checkout holding the pull request's head and its recorded local pass "
-        "(default the current directory)",
-    )
-    a = ap.parse_args(args)
-    # Named for the command they belong to, since an ignored flag reads as one that took effect.
-    reply_only = {
-        "--match": a.match,
-        "--path": a.path,
-        "--resolve": a.resolve or None,
-        "--all-identical": a.all_identical or None,
-    }
-    if a.cmd != "reply":
-        for flag, value in reply_only.items():
-            if value is not None:
-                ap.error(f"{flag} belongs to `reply`, not `{a.cmd}`")
-    if a.cmd != "wait" and a.request:
-        ap.error(f"--request belongs to `wait`, not `{a.cmd}`")
-    if a.cmd == "cleanup":
-        ap.error("`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`")
-    if a.cmd != "attest" and a.checkout is not None:
-        ap.error(f"--checkout belongs to `attest` or `cleanup`, not `{a.cmd}`")
-    if a.number is None:
-        ap.error("the following arguments are required: number")
-    if a.cmd != "comment" and a.fingerprint is not None:
-        ap.error(f"--fingerprint belongs to `comment`, not `{a.cmd}`")
-    if a.cmd not in ("comment", "reply") and a.body is not None:
-        ap.error(f"--body belongs to `comment` or `reply`, not `{a.cmd}`")
-    required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
-    if a.cmd in ("comment", "reply"):
-        values = {"--body": a.body, "--match": a.match}
-        for flag in required:
-            if not (values[flag] or "").strip():
-                ap.error(
-                    f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
-                )
-    if a.pickup_grace < 0:
-        ap.error("--pickup-grace cannot be negative")
-    if a.min_rounds < 0:
-        ap.error("--min-rounds cannot be negative")
-    # A negative threshold would report every check in that state on every run.
-    for name in ("check_grace", "check_stall"):
-        if getattr(a, name) < 0:
-            ap.error(f"--{name.replace('_', '-')} cannot be negative")
-    # The two thresholds mean opposite things and the readings invert if the order does.
-    if a.check_grace >= a.check_stall:
-        ap.error(
-            "--check-grace must be less than --check-stall, since a queued check is "
-            f"judged sooner than a running one (got {a.check_grace} and {a.check_stall})"
-        )
-    # A bare name is the near-miss a required argument still admits, and unpacking it raises a
-    # ValueError traceback rather than saying which half is missing.
-    owner, _, repo = a.repo.partition("/")
-    if not owner or not repo or "/" in repo:
-        ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
-
-    if a.cmd == "claims":
-        return check_claims(owner, repo, a.number)
-
-    if a.cmd == "attest":
-        return attest(owner, repo, a.number, a.checkout or ".")
-
-    if a.cmd == "comment":
-        marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
-        return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
-
-    if a.cmd == "status":
-        # One payload renders the digest and decides the code, as in `wait`.
-        pr = full_read(owner, repo, a.number)
-        out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
-        print(out)
-        return report_verdict(pr)
-
-    if a.cmd == "reply":
-        return reply_to_thread(
-            owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
-        )
-
+def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
+    """Request a review where one is owed, poll until it lands or the timeout, and return the code."""
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     ok, why = in_scope(owner)
     if not ok:
@@ -1906,6 +1722,203 @@ def main(argv: list[str] | None = None) -> int:
         return 30
     print("status=PENDING")
     return 30
+
+
+# Each flag a subcommand owns is refused elsewhere, since an ignored flag reads as one that took effect.
+# A late row is checked after the `cleanup` and `number` checks, which fixes the first error printed.
+# `cleanup` owns `--checkout` only once it has dispatched, so its row here only defers to that check.
+FLAG_OWNERS = (
+    ("--match", ("reply",), False),
+    ("--path", ("reply",), False),
+    ("--resolve", ("reply",), False),
+    ("--all-identical", ("reply",), False),
+    ("--request", ("wait",), False),
+    ("--checkout", ("attest", "cleanup"), False),
+    ("--fingerprint", ("comment",), True),
+    ("--body", ("comment", "reply"), True),
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("first", nargs="?")
+    for flag in ("--repo", "--checkout", "--min-age-hours"):
+        pre.add_argument(flag)
+    if pre.parse_known_args(args)[0].first == "cleanup":
+        sys.modules.setdefault("pr_review", sys.modules[__name__])
+        import pr_cleanup
+
+        rest = list(args)
+        rest.remove("cleanup")
+        return pr_cleanup.main(rest)
+    utf8_console()
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
+    )
+    ap.add_argument("number", type=int, nargs="?")
+    # No default, because a default names one repository and every run from elsewhere would read that one.
+    ap.add_argument(
+        "--repo",
+        required=True,
+        metavar="OWNER/NAME",
+        help="the repository the pull request is in, since a pull "
+        "request number identifies no repository on its own",
+    )
+    ap.add_argument("--timeout", type=int, default=2700, help="seconds (default 45m)")
+    ap.add_argument(
+        "--pickup-grace",
+        type=int,
+        default=300,
+        help="deprecated compatibility option, accepted but ignored",
+    )
+    ap.add_argument(
+        "--check-grace",
+        type=int,
+        default=CHECK_GRACE,
+        help="seconds a check may sit queued, or a required status go unposted, "
+        f"before either reads as unstarted (default {CHECK_GRACE // 60}m)",
+    )
+    ap.add_argument(
+        "--check-stall",
+        type=int,
+        default=CHECK_STALL,
+        help="seconds a check may run before its duration is reported "
+        f"(default {CHECK_STALL // 60}m)",
+    )
+    ap.add_argument(
+        "--ignore-quota-signal",
+        action="store_true",
+        help="wait: request and poll the full --timeout even where the reviewer's own most "
+        "recent activity elsewhere in this repository is a quota-limit refusal with nothing "
+        "answering it since, or this pull request's newest Copilot review is a quota or "
+        "error refusal, pass this once the quota is believed to have reset",
+    )
+    ap.add_argument(
+        "--request",
+        action="store_true",
+        help="wait: request a Copilot round even on a pull request into a branch other than the "
+        "default, which an attested local pass otherwise covers",
+    )
+    ap.add_argument(
+        "--min-rounds",
+        type=int,
+        default=0,
+        metavar="N",
+        help="wait: treat the head as covered only once the reviewer's total rounds on this "
+        "pull request, the same count `status` prints as `rounds=`, exceed N. Pass the "
+        "`rounds=` a prior `status` already read, after re-requesting a review on a head that "
+        "already carries one: `reviewed_head` alone would report that earlier round as done "
+        "at once, never waiting for the fresh one the re-request was for. N is the count "
+        "already seen, not the count to reach: on a pull request reading `rounds=3`, N=3 "
+        "waits for the fourth round and N=4 for a fifth (default 0, so any round counts, "
+        "unchanged from before this flag existed)",
+    )
+    # `reply` takes the finding's words, and there is no argument an id fits in.
+    ap.add_argument(
+        "--match",
+        metavar="TEXT",
+        help="reply: words from the finding, matched against the thread's opening "
+        "comment, and required to select exactly one unresolved thread",
+    )
+    ap.add_argument(
+        "--path",
+        metavar="FILE",
+        help="reply: narrow --match to one file, for a file with several findings",
+    )
+    ap.add_argument(
+        "--all-identical",
+        action="store_true",
+        help="reply: where --match selects several threads whose opening comments read the "
+        "same, a finding posted twice, answer each of them with --body rather than refusing",
+    )
+    ap.add_argument(
+        "--body",
+        metavar="TEXT",
+        help="comment or reply: the answer to post, carrying the fixing commit SHA or "
+        "the evidence that disproves the finding",
+    )
+    ap.add_argument("--fingerprint", help="comment: acknowledge the unplaced set it names")
+    ap.add_argument(
+        "--resolve",
+        action="store_true",
+        help="reply: resolve the thread once the reply is confirmed",
+    )
+    ap.add_argument(
+        "--checkout",
+        metavar="DIR",
+        help="attest: the checkout holding the pull request's head and its recorded local pass "
+        "(default the current directory)",
+    )
+    a = ap.parse_args(args)
+
+    def refuse_foreign(late: bool) -> None:
+        for flag, owners, row_late in FLAG_OWNERS:
+            value = getattr(a, flag.removeprefix("--").replace("-", "_"))
+            if (
+                row_late is late
+                and a.cmd not in owners
+                and value is not None
+                and value is not False
+            ):
+                ap.error(
+                    f"{flag} belongs to {' or '.join(f'`{o}`' for o in owners)}, not `{a.cmd}`"
+                )
+
+    refuse_foreign(late=False)
+    if a.cmd == "cleanup":
+        ap.error("`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`")
+    if a.number is None:
+        ap.error("the following arguments are required: number")
+    refuse_foreign(late=True)
+    required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
+    if a.cmd in ("comment", "reply"):
+        values = {"--body": a.body, "--match": a.match}
+        for flag in required:
+            if not (values[flag] or "").strip():
+                ap.error(
+                    f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
+                )
+    # None takes a negative value, and a negative check threshold would report every check stuck.
+    for name in ("pickup_grace", "min_rounds", "check_grace", "check_stall"):
+        if getattr(a, name) < 0:
+            ap.error(f"--{name.replace('_', '-')} cannot be negative")
+    # The two thresholds mean opposite things and the readings invert if the order does.
+    if a.check_grace >= a.check_stall:
+        ap.error(
+            "--check-grace must be less than --check-stall, since a queued check is "
+            f"judged sooner than a running one (got {a.check_grace} and {a.check_stall})"
+        )
+    # A bare name is the near-miss a required argument still admits, and unpacking it raises a
+    # ValueError traceback rather than saying which half is missing.
+    owner, _, repo = a.repo.partition("/")
+    if not owner or not repo or "/" in repo:
+        ap.error(f"--repo takes OWNER/NAME, not {a.repo!r}")
+
+    if a.cmd == "claims":
+        return check_claims(owner, repo, a.number)
+
+    if a.cmd == "attest":
+        return attest(owner, repo, a.number, a.checkout or ".")
+
+    if a.cmd == "comment":
+        marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
+        return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
+
+    if a.cmd == "status":
+        # One payload renders the digest and decides the code, as in `wait`.
+        pr = full_read(owner, repo, a.number)
+        out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
+        print(out)
+        return report_verdict(pr)
+
+    if a.cmd == "reply":
+        return reply_to_thread(
+            owner, repo, a.number, a.match, a.body, a.path, a.resolve, a.all_identical
+        )
+
+    return run_wait(owner, repo, a)
 
 
 if __name__ == "__main__":
