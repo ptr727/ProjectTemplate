@@ -302,10 +302,10 @@ class ReadEnvValue(Tree):
     def test_nothing_the_file_sets_reaches_the_caller(self) -> None:
         env = write(self.root / "app.env", "APP_TOKEN=one\nAPP_HOST=two\n")
         result = run(
-            'value=$(read_env_value "$1" APP_HOST); printf "%s|%s" "$value" "${APP_TOKEN-unset}"',
+            'read_env_value "$1" APP_HOST >/dev/null; printf "%s" "${APP_TOKEN-unset}"',
             str(env),
         )
-        self.assertEqual(result.stdout, "two|unset")
+        self.assertEqual(result.stdout, "unset")
 
     def test_bash_env_does_not_run_ahead_of_the_file(self) -> None:
         # A function shadows the builtin, so a hook that ran in the reading bash would answer for the file.

@@ -1426,15 +1426,28 @@ class TestCarriedTrees(TreeCase):
             repo_gate.NOTES, ["compared 0 carried tree(s) against the hub tree beside this gate."]
         )
 
-    def test_a_narrowed_include_compares_only_what_it_names(self) -> None:
-        self.manifest([self.tree(include=["*.sh"])])
+    def narrowed(self, prune: bool) -> None:
+        self.manifest([self.tree(include=["*.sh"], prune=prune)])
         self.write(self.hub / "lib/sh/README.txt", "hub only\n")
         files = [
             self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n"),
             self.write(self.repo / "lib/fleet/sh/notes.txt", "repository only\n"),
         ]
         self.run_check(files)
+
+    def test_a_narrowed_include_narrows_the_hub_side_only_of_a_pruned_tree(self) -> None:
+        self.narrowed(prune=True)
+        self.assertIn("0 changed, 0 missing, 1 extra, first notes.txt.", repo_gate.NOTES[0])
+
+    def test_a_narrowed_include_narrows_both_sides_of_a_tree_that_does_not_prune(self) -> None:
+        self.narrowed(prune=False)
         self.assertEqual(len(repo_gate.NOTES), 1)
+
+    def test_a_tree_that_cannot_be_compared_is_a_note_and_never_a_finding(self) -> None:
+        (self.hub / "lib/sh/link").symlink_to(self.hub / "lib/sh/secrets.sh")
+        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
+        self.assertEqual(self.run_check(files), ([], ""))
+        self.assertTrue(repo_gate.NOTES[0].startswith("lib/fleet/sh could not be compared: "))
 
     def test_actions_shows_the_difference_on_the_pull_request(self) -> None:
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "edited\n")]

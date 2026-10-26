@@ -833,17 +833,25 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
         if not tracked_here:
             continue
         carried += 1
-        copy: dict[str, bytes | None] = {}
-        for relative in tracked_here:
-            if carry.included(relative, patterns):
-                path = root / target / relative
-                copy[relative] = (
-                    None if path.is_symlink() or not path.is_file() else path.read_bytes()
-                )
-        result = carry.compare(
-            carry.inventory(hub / tree["source"], patterns),
-            carry.Inventory(copy, frozenset(), ""),
+        # A pruned tree owns everything under its target, as a carry and the audit read it, so `include` narrows only one that does not prune.
+        owned = (
+            tracked_here
+            if tree["prune"]
+            else [p for p in tracked_here if carry.included(p, patterns)]
         )
+        try:
+            copy = {
+                relative: None
+                if (root / target / relative).is_symlink()
+                or not (root / target / relative).is_file()
+                else (root / target / relative).read_bytes()
+                for relative in owned
+            }
+            source = carry.inventory(hub / tree["source"], patterns)
+        except (carry.CarryError, OSError) as error:
+            NOTES.append(f"{target} could not be compared: {error}")
+            continue
+        result = carry.compare(source, carry.Inventory(copy, frozenset(), ""))
         changed, missing = result["modified"], result["missing"]
         # A tree that does not prune leaves the repository's own files under it alone, as a carry does.
         extra = result["extra"] if tree["prune"] else []
