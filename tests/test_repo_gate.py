@@ -1428,23 +1428,26 @@ class TestCarriedTrees(TreeCase):
         )
 
     @requires_symlink
-    def test_a_link_in_the_copy_is_a_change(self) -> None:
-        (self.repo / "lib/fleet/sh").mkdir(parents=True)
-        (self.repo / "lib/fleet/sh/secrets.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
-        self.run_check(["lib/fleet/sh/secrets.sh"])
-        self.assertIn("1 changed, 0 missing, 0 extra, first secrets.sh.", repo_gate.NOTES[0])
-
-    @requires_symlink
-    def test_a_link_the_hub_does_not_carry_is_left_alone_by_a_tree_that_does_not_prune(
-        self,
-    ) -> None:
-        self.manifest([self.tree(prune=False)])
-        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
-        (self.repo / "lib/fleet/sh/other.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
-        self.run_check([*files, "lib/fleet/sh/other.sh"])
-        self.assertEqual(
-            repo_gate.NOTES, ["compared 1 carried tree(s) against the hub tree beside this gate."]
-        )
+    def test_a_link_in_the_copy_is_refused_as_a_carry_refuses_it(self) -> None:
+        for prune in (True, False):
+            with self.subTest(prune=prune):
+                repo_gate.NOTES.clear()
+                self.manifest([self.tree(prune=prune)])
+                (self.repo / "lib/fleet/sh").mkdir(parents=True, exist_ok=True)
+                link = self.repo / "lib/fleet/sh/secrets.sh"
+                link.unlink(missing_ok=True)
+                link.symlink_to(self.hub / "lib/sh/secrets.sh")
+                self.assertEqual(self.run_check(["lib/fleet/sh/secrets.sh"]), ([], ""))
+                self.assertEqual(
+                    repo_gate.NOTES,
+                    [
+                        (
+                            "lib/fleet/sh could not be compared, since secrets.sh is a link, "
+                            "which a carry refuses."
+                        ),
+                        "compared 0 carried tree(s) against the hub tree beside this gate.",
+                    ],
+                )
 
     def test_a_tracked_file_deleted_from_the_working_tree_is_missing(self) -> None:
         (self.repo / "lib/fleet/sh").mkdir(parents=True)
@@ -1460,13 +1463,6 @@ class TestCarriedTrees(TreeCase):
                     repo_gate.NOTES[0],
                     f"lib/fleet/sh was not compared, since {tracked} is tracked as a link or a file.",
                 )
-
-    @requires_symlink
-    def test_a_link_the_hub_does_not_carry_is_extra_under_a_pruned_tree(self) -> None:
-        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
-        (self.repo / "lib/fleet/sh/other.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
-        self.run_check([*files, "lib/fleet/sh/other.sh"])
-        self.assertIn("0 changed, 0 missing, 1 extra, first other.sh.", repo_gate.NOTES[0])
 
     def test_a_tree_the_repository_does_not_carry_is_not_compared(self) -> None:
         self.run_check([self.write(self.repo / "README.md", "")])
