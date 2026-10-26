@@ -1407,7 +1407,9 @@ class TestCarriedTrees(TreeCase):
             self.write(self.repo / "lib/fleet/sh/local.sh", "mine\n"),
         ]
         self.run_check(files)
-        self.assertEqual(len(repo_gate.NOTES), 1)
+        self.assertEqual(
+            repo_gate.NOTES, ["compared 1 carried tree(s) against the hub tree beside this gate."]
+        )
 
     def test_only_files_a_tree_that_does_not_prune_owns_make_it_carried(self) -> None:
         self.manifest([self.tree(include=["fleet_*.sh"], prune=False)])
@@ -1421,7 +1423,9 @@ class TestCarriedTrees(TreeCase):
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
         self.write(self.repo / "lib/fleet/sh/scratch.sh", "untracked\n")
         self.run_check(files)
-        self.assertEqual(len(repo_gate.NOTES), 1)
+        self.assertEqual(
+            repo_gate.NOTES, ["compared 1 carried tree(s) against the hub tree beside this gate."]
+        )
 
     @requires_symlink
     def test_a_link_in_the_copy_is_a_change(self) -> None:
@@ -1438,7 +1442,9 @@ class TestCarriedTrees(TreeCase):
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
         (self.repo / "lib/fleet/sh/other.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
         self.run_check([*files, "lib/fleet/sh/other.sh"])
-        self.assertEqual(len(repo_gate.NOTES), 1)
+        self.assertEqual(
+            repo_gate.NOTES, ["compared 1 carried tree(s) against the hub tree beside this gate."]
+        )
 
     def test_a_tracked_file_deleted_from_the_working_tree_is_missing(self) -> None:
         (self.repo / "lib/fleet/sh").mkdir(parents=True)
@@ -1483,7 +1489,9 @@ class TestCarriedTrees(TreeCase):
 
     def test_a_narrowed_include_narrows_both_sides_of_a_tree_that_does_not_prune(self) -> None:
         self.narrowed(prune=False)
-        self.assertEqual(len(repo_gate.NOTES), 1)
+        self.assertEqual(
+            repo_gate.NOTES, ["compared 1 carried tree(s) against the hub tree beside this gate."]
+        )
 
     @requires_symlink
     def test_a_tree_that_cannot_be_compared_is_a_note_and_never_a_finding(self) -> None:

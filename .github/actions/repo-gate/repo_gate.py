@@ -857,16 +857,9 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             # A tree that does not prune shares its target with the repository's own files, so those alone do not make it carried.
             if not owned:
                 continue
-            # A tracked link, or a path that is not a regular file, holds no content to compare, so it is kept out of the inventory and judged apart.
-            # A tracked file deleted from the working tree is left out as well, so it reads as missing.
-            irregular = {
-                relative
-                for relative in owned
-                if (root / target / relative).is_symlink()
-                or (
-                    (root / target / relative).exists() and not (root / target / relative).is_file()
-                )
-            }
+            # A tracked link holds no content of its own to compare, so it is kept out of the inventory and judged apart.
+            # A tracked file absent from the working tree is left out as well, so it reads as missing.
+            irregular = {relative for relative in owned if (root / target / relative).is_symlink()}
             copy = {
                 relative: (root / target / relative).read_bytes()
                 for relative in owned
