@@ -799,6 +799,12 @@ def hub_carry(hub: Path) -> ModuleType:
     return module
 
 
+def warn_carried_tree(message: str) -> None:
+    """Show `message` on the pull request under Actions, built from manifest values alone so nothing a scanned repository names reaches the command."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning title=carried-trees::{message}")
+
+
 def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     """Report each manifest-owned tree the scanned repository carries that differs from the hub's.
 
@@ -857,9 +863,10 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             # A tree that does not prune shares its target with the repository's own files, so those alone do not make it carried.
             if not owned:
                 continue
-            # A carry refuses a link in a tree, so the gate refuses one too rather than judging it by a rule of its own.
-            link = next((p for p in sorted(owned) if (root / target / p).is_symlink()), None)
+            # A carry refuses a link anywhere under a tree's target, so the gate refuses one too rather than judging it by a rule of its own.
+            link = next((p for p in sorted(tracked_here) if (root / target / p).is_symlink()), None)
             if link is not None:
+                warn_carried_tree(f"{target} holds a link, which a carry refuses")
                 NOTES.append(
                     f"{target} could not be compared, since {link} is a link, which a carry refuses."
                 )
@@ -878,10 +885,7 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
         carried += 1
         changed, missing, extra = result["modified"], result["missing"], result["extra"]
         if changed or missing or extra:
-            if os.environ.get("GITHUB_ACTIONS") == "true":
-                print(
-                    f"::warning title=carried-trees::{target} differs from the hub's {tree['source']}"
-                )
+            warn_carried_tree(f"{target} differs from the hub's {tree['source']}")
             NOTES.append(
                 f"{target} differs from the hub's {tree['source']}: {len(changed)} changed, "
                 f"{len(missing)} missing, {len(extra)} extra, first "

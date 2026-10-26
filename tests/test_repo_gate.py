@@ -1428,6 +1428,20 @@ class TestCarriedTrees(TreeCase):
         )
 
     @requires_symlink
+    @requires_symlink
+    def test_a_link_the_tree_does_not_own_is_refused_as_well(self) -> None:
+        self.manifest([self.tree(include=["*.sh"], prune=False)])
+        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
+        (self.repo / "lib/fleet/sh/notes.txt").symlink_to(self.hub / "lib/sh/secrets.sh")
+        _, printed = self.run_check([*files, "lib/fleet/sh/notes.txt"], actions=True)
+        self.assertEqual(
+            printed,
+            "::warning title=carried-trees::lib/fleet/sh holds a link, which a carry refuses\n",
+        )
+        self.assertTrue(
+            repo_gate.NOTES[0].startswith("lib/fleet/sh could not be compared, since notes.txt")
+        )
+
     def test_a_link_in_the_copy_is_refused_as_a_carry_refuses_it(self) -> None:
         for prune in (True, False):
             with self.subTest(prune=prune):
