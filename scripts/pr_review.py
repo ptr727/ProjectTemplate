@@ -13,7 +13,7 @@ Discipline" for the rule this implements.
 
 This file is the gate: the plumbing, the verdict, the wait loop, and the writes. The head's checks
 are read by `pr_review_checks.py` and its review rounds by `pr_review_rounds.py`, both off a payload
-this file fetched. What a reviewer's body says is read by `pr_review_copilot.py`, whose vocabulary lives in
+this file fetched, and `pr_review_digest.py` renders the digest from them. What a reviewer's body says is read by `pr_review_copilot.py`, whose vocabulary lives in
 `reviewers/<name>.json`, so a change in the reviewer's wording is a data edit there and never
 an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
 written outcomes acknowledge it, and on an earlier round it is a note.
@@ -186,40 +186,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as shared
-import pr_review_copilot as adapter
 from pr_review_checks import (
     CHECK_GRACE,
     CHECK_STALL,
     CHECKS_WINDOW,
     WORKFLOW_KEYS_UNAVAILABLE,
     _unmet_note,
-    check_lines,
     check_nodes,
     checks_never_ran,
     checks_settling,
     checks_stuck,
-    checks_tally,
     held_checks_open,
     runs_open,
 )
+from pr_review_digest import refusal_of, render
 from pr_review_rounds import (
     ACK_MARKER,
     CARRIED_PARTIAL,
-    CODERABBIT_LOGIN,
     FILES_UNREAD,
-    KNOWN_REVIEWERS,
-    OTHER_REVIEWERS,
-    QODO_LOGIN,
     REVIEWER,
     answered_outside_review,
     attested,
-    collected,
     copilot_bot_id,
     coverage,
     describe,
     files_unread,
     finding_text,
-    first_comment,
     head_review_done,
     head_reviews,
     history_entry,
@@ -227,31 +219,20 @@ from pr_review_rounds import (
     local_cover,
     matching_threads,
     newest_first,
-    newest_of,
     open_threads,
-    opened_by,
     possible_quota,
-    qodo_comment,
-    qodo_comments_blind,
     quota_refusal,
     quota_signal,
-    rate_limited_by,
-    reading,
     refusing_review,
     request_recorded,
-    review_effort,
     reviewed_head,
     reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
-    reviews_truncated,
     shape_hold,
     standing_quota,
     stopping_refusal,
-    thread_author,
-    threads_truncated,
     uncounted_verdict,
-    window_blind,
 )
 
 # The directory this script sits in, the anchor every scope answer is read from.
@@ -758,248 +739,17 @@ def digest(
     stall: float = CHECK_STALL,
     checks: list[dict] | None = None,
 ) -> tuple[str, int]:
-    """Render the digest from a caller's payload and normalized checks when supplied.
+    """Read what the digest needs, unless the caller supplied it, and render it.
 
     The caller passes its own readings so the exit code agrees with what was printed. `now` is a
     parameter so a case can hold a check at a known age.
     """
     pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
-    head = pr["headRefOid"]
-    revs = reviewer_nodes(pr, "reviews")
-    on_head = head_reviews(pr)
-    newest = newest_of(on_head)
-    found = reading(newest, pr=pr) if newest is not None else None
-    effort, effort_source = review_effort(pr)
-    cover, cover_why = coverage(pr)
-    hold = shape_hold(pr)
-    # Every round's notes, since a renamed section on an earlier round hides a finding too.
-    notes = [
-        *dict.fromkeys(
-            f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
-            for node in revs
-            for n in reading(node).notes
-            if node not in on_head or n not in {p.note for p in reading(node).unplaced}
-        ),
-        *reviewer_login_drift(pr),
-    ]
-    threads = pr["reviewThreads"]["nodes"]
-    truncated = threads_truncated(pr)
-    revs_truncated = reviews_truncated(pr)
-    unresolved = open_threads(threads)
-    by_login = {
-        login: sum(1 for t in unresolved if thread_author(t) == login) for login in KNOWN_REVIEWERS
-    }
-    by_login["other"] = sum(1 for t in unresolved if thread_author(t) not in KNOWN_REVIEWERS)
-    contributors = {login: n for login, n in by_login.items() if n}
-    breakdown = (
-        " (" + " ".join(f"{login}={n}" for login, n in contributors.items()) + ")"
-        if len(contributors) > 1 or "other" in contributors
-        else ""
-    )
-    suppressed, suppressed_field = collected(pr, REVIEWER, "suppressed")
-    missed, missed_field = collected(pr, REVIEWER, "previously_missed")
-    outside, outside_field = collected(pr, CODERABBIT_LOGIN, "previously_missed")
-    listed = len(opened_by(pr, newest)) if newest is not None else 0
-    flagged = uncounted_verdict(pr)
-    advisory = uncounted_verdict(pr, "clean")
-    answer = answered_outside_review(pr)
-    refusal = stopping_refusal(pr) or (None if on_head else refusing_review(pr))
-    refusal_field = (
-        "no"
-        if not refusal
-        else "QUOTA"
-        if quota_refusal(refusal) or confirmed_quota(owner, repo, refusal)
-        else "ERROR"
-        if possible_quota(refusal)
-        else "YES"
-    )
-    blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
-    answered = "yes" if answer else ("unknown" if blind else "no")
     checks = check_nodes(pr) if checks is None else checks
-    ok, total = checks_tally(checks)
-    stuck = checks_stuck(checks, now, grace, stall)
-    other_on_head = [
-        login
-        for login in OTHER_REVIEWERS
-        if any(
-            (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
-        )
-    ]
-    other_limited = {
-        login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
-    }
-    qodo = qodo_comment(pr)
-    qodo_open = [s for s in reading(qodo, QODO_LOGIN).sections if s.kind == "open"] if qodo else []
-    lines = [
-        # The repository leads the line, since a digest of the wrong pull request is well-formed.
-        f"repo={owner}/{repo} pr={num} head={head[:8]} rounds={len(revs)} "
-        f"review_on_head={'yes' if on_head else 'local' if cover == 'local' else 'NO'} "
-        + (f"other_reviewed={','.join(other_on_head)} " if other_on_head else "")
-        + (
-            "other_rate_limited="
-            + ",".join(
-                f"{login}:{name}" if name else login for login, name in other_limited.items()
-            )
-            + " "
-            if other_limited
-            else ""
-        )
-        + f"effort={effort} effort_source={effort_source} "
-        f"coverage={cover.upper() if cover in ('partial', 'unknown') else cover} "
-        f"shapes={('ACKNOWLEDGED' if hold[2] else 'HELD') if hold else 'NOTED' if notes else 'ok'} "
-        f"refusal={refusal_field} "
-        f"threads={len(threads)}{'+' if truncated else ''} "
-        f"unresolved={len(unresolved)}{'+' if truncated else ''}{breakdown} "
-        f"suppressed={suppressed_field} "
-        + (f"previously_missed={missed_field} " if missed or revs_truncated else "")
-        + (
-            f"overview={'?' if found.open is None else found.open}/{listed} "
-            if found is not None and found.marked
-            else ""
-        )
-        + (f"cr_outside_diff={outside_field} " if outside or revs_truncated else "")
-        + (
-            f"qodo_open={len(qodo_open)} "
-            if qodo
-            else ("qodo_open=unknown " if qodo_comments_blind(pr) else "")
-        )
-        + f"answered_outside_review={answered} "
-        f"requested={'yes' if reviewer_requested(pr) else 'no'} "
-        f"merge={pr.get('mergeStateStatus')} "
-        f"checks={ok}/{total}"
-        + (f" stuck={','.join(sorted({s for _, s in stuck}))}" if stuck else "")
-    ]
-    if refusal:
-        lines.append(
-            "  COPILOT REFUSED THIS ROUND: the newest Copilot review on this pull request says "
-            "it did not review, so it covers nothing and re-requesting repeats it, and the body "
-            "below is what says which remedy applies"
-        )
-        lines += [
-            f"    {ln.rstrip()}" for ln in (refusal.get("body") or "").splitlines() if ln.strip()
-        ]
-        if limit := confirmed_quota(owner, repo, refusal):
-            lines.append(f"  RATE LIMIT FROM THE REVIEWER'S RUN LOG: {limit}")
-    if notes:
-        lines.append(
-            f"  REVIEWER OUTPUT NOTED ({len(notes)}): the reader placed part of what the reviewer "
-            "sent nowhere, so read the body itself before closing the review loop. A spelling "
-            f"to add belongs in `scripts/reviewers/` on {HUB}, which hosts this script"
-        )
-        lines += [f"    {note}" for note in notes]
-    if hold:
-        lines.append(
-            f"  UNPLACED ON THE HEAD (fingerprint={hold[0]}): a round covering the head carries "
-            + (
-                "parts an owner, member, or collaborator acknowledged with written outcomes"
-                if hold[2]
-                else "text the reader cannot place, where a finding can sit. Read each part whole "
-                "in the review body, the excerpt only locating it, and give each item an outcome, "
-                "fixed with its SHA, declined with evidence, or listed as pre-existing in the PR "
-                f"body. Post them with `comment {num} --repo {owner}/{repo} --fingerprint "
-                f"{hold[0]} --body <outcomes>`"
-            )
-        )
-        for part in hold[1]:
-            lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
-    if found is not None and found.unthreaded:
-        lines.append(
-            f"  FINDINGS WITH NO THREAD ({found.unthreaded}): the round covering the head names "
-            f"more findings than its open entries link to threads on this pull request, so "
-            f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
-            "threads cannot see them. Read the review body and give each the triage a suppressed "
-            "finding gets. A thread past the hundred read here counts too, and `threads=` "
-            "carries a trailing `+` where that page was cut"
-        )
-    if flagged:
-        lines.append(
-            f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
-            f"`{flagged[0]}` and counts no finding, so its headline is the one place what it "
-            "flags is named. Give the headline the triage a suppressed finding gets"
-        )
-        lines.append(f"    {flagged[1] or '(the headline carries no prose)'}")
-    if advisory and advisory[1]:
-        lines.append(
-            f"  CLEAN VERDICT HEADLINE: the round covering the head opens on `{advisory[0]}` and "
-            "counts no finding. Its headline may name a remaining nit, new or already answered, "
-            "which nothing here tells apart, so this is advisory and changes no exit code"
-        )
-        lines.append(f"    {advisory[1]}")
-    if cover in ("table", "carried:table", "local", "partial", "unknown"):
-        lines.append(f"  COVERAGE IS {cover.upper()}: {cover_why}")
-    elif cover == "none" and on_head:
-        lines.append(
-            "  NO COVERAGE IS SHOWN: no round covering the head states coverage, and "
-            f"{cover_why or 'nothing stands in'}. Merge Gate item 2 reads this field"
-        )
-    lines.extend(check_lines(pr, checks, stuck, now))
-    if blind:
-        lines.append(
-            f"  BEHIND THE WINDOW ({' and '.join(blind)}): the newest {WINDOW} carry "
-            "none from the reviewer and older ones exist, so this cannot decide"
-        )
-    if truncated:
-        lines.append(
-            "  THREADS TRUNCATED: this pull request carries more review threads than the "
-            "100 read here, and the connection reads oldest-first, so the ones cut off are "
-            "the newest rather than the oldest, exactly the ones most likely to still be "
-            "open. `threads=` and `unresolved=` above undercount. Read the rest with "
-            "`reply`'s own paginated walk before trusting either number"
-        )
-    if revs_truncated:
-        lines.append(
-            "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read "
-            "here, and the connection reads newest-first, so the ones cut off are the "
-            "oldest, exactly where an unanswered suppressed or outside-diff-range finding is "
-            "most likely to still sit unresolved. `suppressed=` and `cr_outside_diff=` above "
-            "undercount"
-        )
-    if answer:
-        # Printed whole, since its wording is the only thing separating a refusal from a remark.
-        lines.append(
-            f"  COPILOT COMMENT ({answer.get('createdAt')}, newer than any review): "
-            "the reviewer answered without reviewing, so read the body below and "
-            "decide, since a refusal is terminal and a remark is not"
-        )
-        lines += [
-            f"    {ln.rstrip()}" for ln in (answer.get("body") or "").splitlines() if ln.strip()
-        ]
-    new = 0
-    for t in unresolved:
-        c = first_comment(t)
-        tid = t["id"]
-        mark = ""
-        if seen is not None:
-            if tid in seen:
-                continue
-            seen.add(tid)
-            mark = "NEW "
-            new += 1
-        body = " ".join((c.get("body") or "").split())
-        lines.append(f"  {mark}{tid} {c.get('path')}:{c.get('line')} {body[:160]}")
-    # Printed whole, since a finding with no thread appears nowhere but here.
-    for heading, entries in (
-        ("SUPPRESSED", suppressed),
-        ("PREVIOUSLY MISSED", missed),
-        ("CODERABBIT OUTSIDE-DIFF", outside),
-    ):
-        for where, section in entries:
-            lines.append(
-                f"  {heading} ({where}): no thread to resolve, "
-                "answer it in the PR conversation quoting the finding"
-            )
-            lines += [f"    {ln}" for ln in section.text.splitlines() if ln.strip()]
-    for section in qodo_open:
-        lines.append(
-            "  QODO OPEN FINDING: neither Resolved nor Dismissed, no thread to resolve, "
-            "answer it in the PR conversation quoting the finding, and spot-verify Qodo's "
-            "own badge against `gh pr diff` rather than trusting it outright"
-        )
-        lines.append(f"    {section.title}")
-    if seen is not None:
-        lines[0] += f" new={new}"
-    return "\n".join(lines), len(unresolved)
+    refusal = refusal_of(pr)
+    quota = confirmed_quota(owner, repo, refusal) if refusal else ""
+    return render(owner, repo, num, pr, checks, now, grace, stall, quota, seen, HUB, WINDOW)
 
 
 def report_verdict(pr: dict) -> int:
