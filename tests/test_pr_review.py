@@ -5301,6 +5301,58 @@ class TestReplyArguments(unittest.TestCase):
             with self.subTest(flag=flag[0]):
                 self.assertIn(flag[0], self.err(["status", "7", "--repo", "o/r", *flag]))
 
+    def test_a_command_line_with_two_bad_flags_names_the_same_one_first(self) -> None:
+        """Each expected line was printed before the ownership checks became `FLAG_OWNERS`."""
+        cases = (
+            (
+                ["status", "7", "--repo", "o/r", "--body", "b", "--match", "x"],
+                "--match belongs to `reply`, not `status`",
+            ),
+            (
+                ["status", "--repo", "o/r", "--fingerprint", "f", "--checkout", "."],
+                "--checkout belongs to `attest` or `cleanup`, not `status`",
+            ),
+            (
+                ["status", "--repo", "o/r", "--fingerprint", "f", "--body", "b"],
+                "the following arguments are required: number",
+            ),
+            (
+                [
+                    "--timeout",
+                    "5",
+                    "cleanup",
+                    "7",
+                    "--repo",
+                    "o/r",
+                    "--checkout",
+                    ".",
+                    "--body",
+                    "b",
+                ],
+                "`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`",
+            ),
+            (
+                ["wait", "7", "--repo", "o/r", "--min-rounds", "-1", "--pickup-grace", "-1"],
+                "--pickup-grace cannot be negative",
+            ),
+            (
+                ["wait", "7", "--repo", "o/r", "--check-stall", "-1", "--request", "--body", "b"],
+                "--body belongs to `comment` or `reply`, not `wait`",
+            ),
+        )
+        for argv, first in cases:
+            with self.subTest(argv=argv):
+                self.assertTrue(self.err(argv).strip().endswith(f"error: {first}"), argv)
+
+    def test_every_owner_in_the_table_is_a_subcommand(self) -> None:
+        """A misspelled owner would refuse its flag on the one command it belongs to."""
+        commands = set(pr_review.COMMANDS)
+        # A floor, since an emptied table would pass the subset check below.
+        self.assertGreaterEqual(len(pr_review.FLAG_OWNERS), 8)
+        for flag, owners, _ in pr_review.FLAG_OWNERS:
+            with self.subTest(flag=flag):
+                self.assertLessEqual(set(owners), commands)
+
 
 PIN = "actions/checkout@" + "9" * 40
 
