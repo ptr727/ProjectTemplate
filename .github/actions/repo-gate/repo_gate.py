@@ -847,6 +847,9 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             continue
         try:
             owned = [p for p in tracked_here if carry.included(p, carry.target_patterns(tree))]
+            # A tree that does not prune shares its target with the repository's own files, so those alone do not make it carried.
+            if not owned:
+                continue
             copy = {
                 relative: None
                 if (root / target / relative).is_symlink()

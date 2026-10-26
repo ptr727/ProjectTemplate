@@ -28,7 +28,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github/actions/repo-gate"))
 import repo_gate
-from host_capability import requires_symlink
+from host_capability import requires_python_3_12, requires_symlink
 from runner_commands import FORGING_LINES, FORGING_NAMES, ORDINARY_LINES, forged_lines
 
 REPO = Path(__file__).resolve().parent.parent
@@ -1339,19 +1339,6 @@ class TestCompositeActions(TreeCase):
         self.assertTrue(any(h.startswith("schema:") for h in hits))
 
 
-def python_3_12_installed() -> bool:
-    """Whether uv finds a 3.12 already installed, so the case below never downloads one."""
-    if shutil.which("uv") is None:
-        return False
-    found = subprocess.run(
-        ["uv", "python", "find", "--no-python-downloads", "3.12"],
-        capture_output=True,
-        timeout=60,
-        check=False,
-    )
-    return found.returncode == 0
-
-
 class TestCarriedTrees(TreeCase):
     """A constructed hub beside the gate and a constructed copy, so each case proves one difference."""
 
@@ -1422,6 +1409,14 @@ class TestCarriedTrees(TreeCase):
         self.run_check(files)
         self.assertEqual(len(repo_gate.NOTES), 1)
 
+    def test_only_files_a_tree_that_does_not_prune_owns_make_it_carried(self) -> None:
+        self.manifest([self.tree(include=["fleet_*.sh"], prune=False)])
+        self.write(self.hub / "lib/sh/fleet_secrets.sh", "hub\n")
+        self.run_check([self.write(self.repo / "lib/fleet/sh/own.sh", "mine\n")])
+        self.assertEqual(
+            repo_gate.NOTES, ["compared 0 carried tree(s) against the hub tree beside this gate."]
+        )
+
     def test_an_untracked_file_is_not_a_difference(self) -> None:
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
         self.write(self.repo / "lib/fleet/sh/scratch.sh", "untracked\n")
@@ -1476,7 +1471,7 @@ class TestCarriedTrees(TreeCase):
             repo_gate.NOTES[0].startswith("the hub's scripts/carry.py could not be loaded")
         )
 
-    @unittest.skipUnless(python_3_12_installed(), "no Python 3.12 is installed for uv to run")
+    @requires_python_3_12
     def test_the_hub_carry_runs_under_the_runners_python_3_12(self) -> None:
         """A CI runner's system python3 is 3.12, and hub CI otherwise loads carry.py under 3.13 alone."""
         repo = self.tmp / "scanned"

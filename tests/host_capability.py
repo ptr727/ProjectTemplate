@@ -36,6 +36,25 @@ requires_symlink = unittest.skipUnless(can_symlink(), NO_SYMLINK)
 
 
 @functools.cache
+def python_3_12_installed() -> bool:
+    """Whether uv finds a Python 3.12 already installed, so a case using it never downloads one."""
+    if shutil.which("uv") is None:
+        return False
+    found = subprocess.run(
+        ["uv", "python", "find", "--no-python-downloads", "3.12"],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    return found.returncode == 0
+
+
+requires_python_3_12 = unittest.skipUnless(
+    python_3_12_installed(), "no Python 3.12 is installed for uv to run"
+)
+
+
+@functools.cache
 def unprivileged_root_is_available() -> bool:
     """Whether `unshare -r` gives this process an EUID of 0 without any real privilege.
 
