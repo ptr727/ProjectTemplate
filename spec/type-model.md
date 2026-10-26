@@ -56,6 +56,10 @@ There is no `static-site` to `hugo` hierarchy while the type has one member. Ins
 
 A generator type declares no `profiles`. Build versus lint-only is a depth of *language* presence, so a profile on a generator type would assert nothing, and `spec/validate.py` rejects a declared profile whose type does not define one.
 
+## Runtime Libraries
+
+A **runtime library** type declares that the repo's own runtime executes a library the hub hosts, so the type's token is what selects the library's tree in [`spec/files.json`][files] and the repo carries it byte-for-byte. `host-secrets` is the one such type, for a repo whose scripts read secret and env files on a host it owns, and it carries `lib/sh` from the hub to `lib/fleet/sh`. The type is declared rather than inferred like any other, since a repo that reads one secret inline and one that runs a fleet of host services look alike to a file scan. A runtime library type declares no `profiles`, for the reason a generator type declares none.
+
 ## Changing the type set carries review weight
 
 The set of types, their profiles, and each type's checks is governed, like the section and fidelity models.
@@ -72,6 +76,7 @@ The set of types, their profiles, and each type's checks is governed, like the s
 
 [audit]: ./audit.py
 [fidelity-model]: ./fidelity-model.md
+[files]: ./files.json
 [repos]: ../registry/repos.json
 [schema]: ./project-types.schema.json
 [section-model]: ./section-model.md

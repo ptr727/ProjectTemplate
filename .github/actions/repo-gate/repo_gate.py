@@ -8,6 +8,7 @@ category's share of a 1,047-finding audit of this repo's Copilot reviews:
   eol           .editorconfig <-> .gitattributes disagreement  40 findings
   eol-coverage  Git attribute resolution differs from policy   count not recorded
   composite-actions  shellcheck and schema coverage of action.yml  count not recorded
+  carried-trees  a manifest-owned tree differing from the hub's  count not recorded
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -769,11 +771,110 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
     return hits
 
 
+def gate_hub_root() -> Path | None:
+    """The hub tree this gate file sits in, or None where it was lifted out of one.
+
+    The pinned action runs from the whole hub tree at its pin, and so does a run from a hub
+    checkout. A single-file fetch has no tree around it, and whatever happens to sit three levels
+    above the file is not the hub, so the path is trusted only where its own parents name it.
+    """
+    here = Path(__file__).resolve()
+    if [part.name for part in here.parents[:3]] != ["repo-gate", "actions", ".github"]:
+        return None
+    root = here.parents[3]
+    return root if (root / "spec" / "files.json").is_file() else None
+
+
+def workflow_command_data(text: str) -> str:
+    """`text` escaped as a workflow command's message, per the runner's own percent encoding."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def hub_tree_files(source: Path) -> dict[str, bytes]:
+    """Every file under `source`, keyed by its path relative to it, never following a link."""
+    found: dict[str, bytes] = {}
+    for current, _, filenames in os.walk(source, followlinks=False):
+        for name in filenames:
+            path = Path(current) / name
+            found[path.relative_to(source).as_posix()] = path.read_bytes()
+    return found
+
+
+def check_carried_trees(root: Path, files: list[str]) -> list[str]:
+    """Report each manifest-owned tree the scanned repository carries that differs from the hub's.
+
+    `spec/files.json` declares the trees a repository carries byte-for-byte, and a carried copy
+    goes stale silently at the next hub fix. Comparing against the hub tree this gate runs from
+    makes the answer reproducible at the action's pin, so a Dependabot bump of that pin is what
+    surfaces a refresh the audit and resync then apply.
+
+    A difference is a note rather than a finding, so it never fails the gate. Failing would break
+    every downstream pull request on each hub fix, and a byte difference cannot tell a stale copy
+    from an edited one, which the audit tells apart and disposes of. Which trees a repository owes
+    is also the audit's, read from its declared types, so a tree absent here is not compared.
+    The target side is read from the tracked files alone, so an untracked file is not a difference.
+    """
+    hub = gate_hub_root()
+    if hub is None:
+        NOTES.append(
+            "no hub tree is beside this gate, as with a single-file fetch, so no carried tree was compared."
+        )
+        return []
+    if hub == root.resolve():
+        NOTES.append(
+            "the scanned repository is the hub, whose trees are the sources rather than copies."
+        )
+        return []
+    try:
+        trees = json.loads((hub / "spec" / "files.json").read_text(encoding="utf-8"))["trees"]
+    except (OSError, ValueError, KeyError) as error:
+        return [f"spec/files.json in the hub tree could not be read: {error}"]
+    carried = 0
+    for tree in trees:
+        target = tree["target"].rstrip("/")
+        prefix = target + "/"
+        tracked_here = [path for path in files if path.startswith(prefix)]
+        if not tracked_here:
+            continue
+        carried += 1
+        if tree["include"] != ["**/*"]:
+            NOTES.append(
+                f"{target} declares include patterns this check does not read, so it was not compared."
+            )
+            continue
+        source = hub_tree_files(hub / tree["source"])
+        copy: dict[str, bytes | None] = {}
+        for path in tracked_here:
+            on_disk = root / path
+            copy[path[len(prefix) :]] = (
+                None if on_disk.is_symlink() or not on_disk.is_file() else on_disk.read_bytes()
+            )
+        missing = sorted(set(source) - set(copy))
+        extra = sorted(set(copy) - set(source))
+        changed = sorted(path for path in set(source) & set(copy) if copy[path] != source[path])
+        if missing or extra or changed:
+            # Shown on the pull request rather than only in the log, from the manifest's own paths, so nothing a scanned repository names reaches the command.
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                print(
+                    "::warning title=carried-trees::"
+                    + workflow_command_data(f"{target} differs from the hub's {tree['source']}")
+                )
+            NOTES.append(
+                f"{target} differs from the hub's {tree['source']}: {len(changed)} changed, "
+                f"{len(missing)} missing, {len(extra)} extra, first "
+                f"{(changed + missing + extra)[0]}. Refresh it from the hub, or let the audit say "
+                "whether it is a stale copy or an edited one."
+            )
+    NOTES.append(f"compared {carried} carried tree(s) against the hub tree beside this gate.")
+    return []
+
+
 CHECKS = {
     "sha-pin": check_sha_pin,
     "eol": check_eol,
     "eol-coverage": check_eol_coverage,
     "composite-actions": check_composite_actions,
+    "carried-trees": check_carried_trees,
 }
 
 

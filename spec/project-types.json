@@ -130,6 +130,12 @@
             "checks": [
                 { "id": "docs.ci.lintonly", "verdict": "intent", "assert": "CI runs linting only (markdownlint, cspell, JSON schema, actionlint); no build/test.", "intentRef": "AGENTS.md" }
             ]
+        },
+        "host-secrets": {
+            "detect": ["lib/fleet/sh/secrets.sh", "a shell script the repo runs that sources or reads a secret or env file from disk"],
+            "checks": [
+                { "id": "hostsecrets.library.reader", "verdict": "intent", "assert": "Every shell script the repo runs that reads a secret or env file sources the carried lib/fleet/sh/secrets.sh and checks the file with require_secret, secret_verdict, or secret_set_verdict before reading it, and reads one value from an env file with read_env_value rather than sourcing the file into its own shell. A repo-specific helper lives in the repo's own file that sources the library, never in an edit to the carried copy, whose byte identity the carried tree's verbatim-tree fidelity already checks.", "intentRef": "GOVERNANCE.md#hub-hosted-tooling" }
+            ]
         }
     },
     "crossCutting": {
