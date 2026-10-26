@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LIBRARY = ROOT / "lib" / "sh" / "secrets.sh"
 TIMEOUT = 30
-ROOT_ACCOUNT = os.geteuid() == 0
+ROOT_ACCOUNT = hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def run(
@@ -50,6 +51,7 @@ def write(path: Path, content: str, mode: int = 0o600) -> Path:
     return path
 
 
+@unittest.skipUnless(sys.platform == "linux", "the library runs under bash on a Linux host")
 class Tree(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()

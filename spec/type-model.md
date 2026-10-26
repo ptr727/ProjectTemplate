@@ -58,7 +58,7 @@ A generator type declares no `profiles`. Build versus lint-only is a depth of *l
 
 ## Runtime Libraries
 
-A **runtime library** type declares that the repo's own runtime executes a library the hub hosts, so the type's token is what selects the library's tree in [`spec/files.json`][files] and the repo carries it byte-for-byte. `host-secrets` is the one such type, for a repo whose scripts read secret and env files on a host it owns, and it carries `lib/sh` from the hub to `lib/fleet/sh`. The type is declared rather than inferred like any other, since a repo that reads one secret inline and one that runs a fleet of host services look alike to a file scan. A runtime library type declares no `profiles`, for the reason a generator type declares none.
+A **runtime library** type declares that the repo's own runtime executes a library the hub hosts. The type's token selects the library's tree in [`spec/files.json`][files], and the repo carries it byte-for-byte. `host-secrets` is the one such type, for a repo whose shell scripts read a secret or env file, and it carries `lib/sh` from the hub to `lib/fleet/sh`. Its `detect` entry surfaces such a script as a discovery advisory, and the declaration is what makes the type's check apply, as for any type. A runtime library type declares no `profiles`, for the reason a generator type declares none.
 
 ## Changing the type set carries review weight
 

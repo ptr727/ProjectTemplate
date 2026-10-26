@@ -1345,9 +1345,20 @@ class TestCarriedTrees(TreeCase):
         super().setUp()
         self.hub = self.tmp / "hub"
         self.repo = self.tmp / "repo"
-        self.manifest([{"source": "lib/sh", "target": "lib/fleet/sh", "include": ["**/*"]}])
+        self.manifest([self.tree()])
         self.write(self.hub / "lib/sh/secrets.sh", "hub\n")
+        (self.hub / "scripts").mkdir()
+        shutil.copy(REPO / "scripts" / "carry.py", self.hub / "scripts" / "carry.py")
         self.enterContext(mock.patch.object(repo_gate, "gate_hub_root", return_value=self.hub))
+
+    @staticmethod
+    def tree(include: list[str] | None = None, prune: bool = True) -> dict[str, object]:
+        return {
+            "source": "lib/sh",
+            "target": "lib/fleet/sh",
+            "include": include or ["**/*"],
+            "prune": prune,
+        }
 
     def manifest(self, trees: list[dict[str, object]]) -> None:
         self.write(self.hub / "spec/files.json", json.dumps({"trees": trees}))
@@ -1378,7 +1389,8 @@ class TestCarriedTrees(TreeCase):
         hits, _ = self.run_check(files)
         self.assertEqual(hits, [])
         self.assertIn(
-            "lib/fleet/sh differs from the hub's lib/sh: 1 changed, 0 missing, 0 extra, first secrets.sh.",
+            "lib/fleet/sh differs from the hub's lib/sh: 1 changed, 0 missing, 0 extra, "
+            "first secrets.sh.",
             repo_gate.NOTES[0],
         )
 
@@ -1386,6 +1398,15 @@ class TestCarriedTrees(TreeCase):
         files = [self.write(self.repo / "lib/fleet/sh/local.sh", "mine\n")]
         self.run_check(files)
         self.assertIn("0 changed, 1 missing, 1 extra, first secrets.sh.", repo_gate.NOTES[0])
+
+    def test_a_tree_that_does_not_prune_leaves_a_repository_file_alone(self) -> None:
+        self.manifest([self.tree(prune=False)])
+        files = [
+            self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n"),
+            self.write(self.repo / "lib/fleet/sh/local.sh", "mine\n"),
+        ]
+        self.run_check(files)
+        self.assertEqual(len(repo_gate.NOTES), 1)
 
     def test_an_untracked_file_is_not_a_difference(self) -> None:
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
@@ -1405,19 +1426,15 @@ class TestCarriedTrees(TreeCase):
             repo_gate.NOTES, ["compared 0 carried tree(s) against the hub tree beside this gate."]
         )
 
-    def test_a_narrowed_include_is_named_rather_than_compared(self) -> None:
-        self.manifest([{"source": "lib/sh", "target": "lib/fleet/sh", "include": ["*.sh"]}])
-        self.run_check([self.write(self.repo / "lib/fleet/sh/secrets.sh", "edited\n")])
-        self.assertEqual(
-            repo_gate.NOTES[0],
-            "lib/fleet/sh declares include patterns this check does not read, so it was not compared.",
-        )
-
-    def test_an_unreadable_manifest_is_a_finding(self) -> None:
-        self.write(self.hub / "spec/files.json", "{")
-        hits, _ = self.run_check([])
-        self.assertEqual(len(hits), 1)
-        self.assertTrue(hits[0].startswith("spec/files.json in the hub tree could not be read"))
+    def test_a_narrowed_include_compares_only_what_it_names(self) -> None:
+        self.manifest([self.tree(include=["*.sh"])])
+        self.write(self.hub / "lib/sh/README.txt", "hub only\n")
+        files = [
+            self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n"),
+            self.write(self.repo / "lib/fleet/sh/notes.txt", "repository only\n"),
+        ]
+        self.run_check(files)
+        self.assertEqual(len(repo_gate.NOTES), 1)
 
     def test_actions_shows_the_difference_on_the_pull_request(self) -> None:
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "edited\n")]
@@ -1436,11 +1453,12 @@ class TestCarriedTrees(TreeCase):
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "edited\n")]
         self.assertEqual(self.run_check(files)[1], "")
 
-    def test_the_hub_scanning_itself_compares_nothing(self) -> None:
-        self.assertEqual(repo_gate.check_carried_trees(self.hub, []), [])
+    def test_a_hub_on_another_branch_is_not_read_as_a_stale_copy(self) -> None:
+        files = ["spec/files.json", self.write(self.repo / "lib/fleet/sh/secrets.sh", "edited\n")]
+        self.assertEqual(self.run_check(files), ([], ""))
         self.assertEqual(
             repo_gate.NOTES,
-            ["the scanned repository is the hub, whose trees are the sources rather than copies."],
+            ["the scanned repository is a hub, whose trees are sources rather than copies."],
         )
 
 

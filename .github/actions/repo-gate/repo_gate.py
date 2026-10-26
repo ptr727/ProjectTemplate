@@ -36,6 +36,7 @@ actionlint, editorconfig-checker, spec/validate.py).
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -43,6 +44,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 # GOVERNANCE.md documents exactly one floating-ref exception.
 SHA_EXCEPTIONS = {"dotnet/nbgv"}
@@ -785,19 +787,16 @@ def gate_hub_root() -> Path | None:
     return root if (root / "spec" / "files.json").is_file() else None
 
 
-def workflow_command_data(text: str) -> str:
-    """`text` escaped as a workflow command's message, per the runner's own percent encoding."""
-    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+def hub_carry(hub: Path) -> ModuleType:
+    """The hub's own `scripts/carry.py`, whose tree inventory and comparison this check reuses.
 
-
-def hub_tree_files(source: Path) -> dict[str, bytes]:
-    """Every file under `source`, keyed by its path relative to it, never following a link."""
-    found: dict[str, bytes] = {}
-    for current, _, filenames in os.walk(source, followlinks=False):
-        for name in filenames:
-            path = Path(current) / name
-            found[path.relative_to(source).as_posix()] = path.read_bytes()
-    return found
+    It imports only the standard library until a section is read, so plain `python3` loads it.
+    """
+    spec = importlib.util.spec_from_file_location("carry", hub / "scripts" / "carry.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def check_carried_trees(root: Path, files: list[str]) -> list[str]:
@@ -806,58 +805,52 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     `spec/files.json` declares the trees a repository carries byte-for-byte, and a carried copy
     goes stale silently at the next hub fix. Comparing against the hub tree this gate runs from
     makes the answer reproducible at the action's pin, so a Dependabot bump of that pin is what
-    surfaces a refresh the audit and resync then apply.
+    surfaces a refresh the resync then applies.
 
     A difference is a note rather than a finding, so it never fails the gate. Failing would break
     every downstream pull request on each hub fix, and a byte difference cannot tell a stale copy
-    from an edited one, which the audit tells apart and disposes of. Which trees a repository owes
-    is also the audit's, read from its declared types, so a tree absent here is not compared.
-    The target side is read from the tracked files alone, so an untracked file is not a difference.
+    from an edited one, which the audit tells apart. Which trees a repository owes is the audit's
+    too, read from its declared types, so a tree absent here is not compared. The copy is read
+    from its tracked files alone, so an untracked file is not a difference.
     """
     hub = gate_hub_root()
     if hub is None:
         NOTES.append(
-            "no hub tree is beside this gate, as with a single-file fetch, so no carried tree was compared."
+            "no hub tree is beside this gate, as with a single-file fetch, "
+            "so no carried tree was compared."
         )
         return []
-    if hub == root.resolve():
-        NOTES.append(
-            "the scanned repository is the hub, whose trees are the sources rather than copies."
-        )
+    # A hub tracks its manifest, which no carrying repository does, so a hub worktree on another branch is not read as a stale copy.
+    if "spec/files.json" in files:
+        NOTES.append("the scanned repository is a hub, whose trees are sources rather than copies.")
         return []
-    try:
-        trees = json.loads((hub / "spec" / "files.json").read_text(encoding="utf-8"))["trees"]
-    except (OSError, ValueError, KeyError) as error:
-        return [f"spec/files.json in the hub tree could not be read: {error}"]
+    carry = hub_carry(hub)
     carried = 0
-    for tree in trees:
-        target = tree["target"].rstrip("/")
+    for tree in carry.load_json(hub / "spec" / "files.json")["trees"]:
+        target, patterns = tree["target"], tree["include"]
         prefix = target + "/"
-        tracked_here = [path for path in files if path.startswith(prefix)]
+        tracked_here = [path[len(prefix) :] for path in files if path.startswith(prefix)]
         if not tracked_here:
             continue
         carried += 1
-        if tree["include"] != ["**/*"]:
-            NOTES.append(
-                f"{target} declares include patterns this check does not read, so it was not compared."
-            )
-            continue
-        source = hub_tree_files(hub / tree["source"])
         copy: dict[str, bytes | None] = {}
-        for path in tracked_here:
-            on_disk = root / path
-            copy[path[len(prefix) :]] = (
-                None if on_disk.is_symlink() or not on_disk.is_file() else on_disk.read_bytes()
-            )
-        missing = sorted(set(source) - set(copy))
-        extra = sorted(set(copy) - set(source))
-        changed = sorted(path for path in set(source) & set(copy) if copy[path] != source[path])
-        if missing or extra or changed:
-            # Shown on the pull request rather than only in the log, from the manifest's own paths, so nothing a scanned repository names reaches the command.
+        for relative in tracked_here:
+            if carry.included(relative, patterns):
+                path = root / target / relative
+                copy[relative] = (
+                    None if path.is_symlink() or not path.is_file() else path.read_bytes()
+                )
+        result = carry.compare(
+            carry.inventory(hub / tree["source"], patterns),
+            carry.Inventory(copy, frozenset(), ""),
+        )
+        changed, missing = result["modified"], result["missing"]
+        # A tree that does not prune leaves the repository's own files under it alone, as a carry does.
+        extra = result["extra"] if tree["prune"] else []
+        if changed or missing or extra:
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 print(
-                    "::warning title=carried-trees::"
-                    + workflow_command_data(f"{target} differs from the hub's {tree['source']}")
+                    f"::warning title=carried-trees::{target} differs from the hub's {tree['source']}"
                 )
             NOTES.append(
                 f"{target} differs from the hub's {tree['source']}: {len(changed)} changed, "
