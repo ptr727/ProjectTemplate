@@ -1,7 +1,8 @@
 """The review gate's digest, rendered off one payload, for the gate in `pr_review.py`.
 
-This is a library module and has no command line. `pr_review.py` imports it as a sibling. Its
-`digest` does the reads: the payload, the normalized checks, and the run log behind a refusal.
+This is a library module and has no command line. `pr_review.py` imports it as a sibling, and
+`pr_review.digest` does the reads: the payload, the normalized checks, and the run log behind a
+refusal.
 `render` takes those results as arguments and makes no call. The header is an ordered list of
 fields, so a new one is one entry. The fixed advisory lines are an ordered table, one row each.
 """
