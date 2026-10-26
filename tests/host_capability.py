@@ -40,12 +40,15 @@ def python_3_12_installed() -> bool:
     """Whether uv finds a Python 3.12 already installed, so a case using it never downloads one."""
     if shutil.which("uv") is None:
         return False
-    found = subprocess.run(
-        ["uv", "python", "find", "--no-python-downloads", "3.12"],
-        capture_output=True,
-        timeout=60,
-        check=False,
-    )
+    try:
+        found = subprocess.run(
+            ["uv", "python", "find", "--no-python-downloads", "3.12"],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
     return found.returncode == 0
 
 

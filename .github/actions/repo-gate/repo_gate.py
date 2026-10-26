@@ -850,12 +850,17 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             # A tree that does not prune shares its target with the repository's own files, so those alone do not make it carried.
             if not owned:
                 continue
-            copy = {
-                relative: None
+            # A tracked link, or a path that is not a regular file, holds no content to compare, so it is kept out of the inventory and judged apart.
+            irregular = {
+                relative
+                for relative in owned
                 if (root / target / relative).is_symlink()
                 or not (root / target / relative).is_file()
-                else (root / target / relative).read_bytes()
+            }
+            copy = {
+                relative: (root / target / relative).read_bytes()
                 for relative in owned
+                if relative not in irregular
             }
             source = carry.inventory(hub / tree["source"], tree["include"])
             result = carry.compare_declaration(tree, source, carry.Inventory(copy, frozenset(), ""))
@@ -863,7 +868,11 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             NOTES.append(f"{target} could not be compared: {error}")
             continue
         carried += 1
-        changed, missing, extra = result["modified"], result["missing"], result["extra"]
+        changed = sorted({*result["modified"], *(irregular & source.files.keys())})
+        missing = [path for path in result["missing"] if path not in irregular]
+        extra = sorted(
+            {*result["extra"], *(irregular - source.files.keys() if tree["prune"] else ())}
+        )
         if changed or missing or extra:
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 print(

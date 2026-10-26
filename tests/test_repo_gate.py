@@ -1430,6 +1430,13 @@ class TestCarriedTrees(TreeCase):
         self.run_check(["lib/fleet/sh/secrets.sh"])
         self.assertIn("1 changed", repo_gate.NOTES[0])
 
+    @requires_symlink
+    def test_a_link_the_hub_does_not_carry_is_extra_under_a_pruned_tree(self) -> None:
+        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
+        (self.repo / "lib/fleet/sh/other.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
+        self.run_check([*files, "lib/fleet/sh/other.sh"])
+        self.assertIn("0 changed, 0 missing, 1 extra, first other.sh.", repo_gate.NOTES[0])
+
     def test_a_tree_the_repository_does_not_carry_is_not_compared(self) -> None:
         self.run_check([self.write(self.repo / "README.md", "")])
         self.assertEqual(
