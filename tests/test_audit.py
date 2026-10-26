@@ -160,7 +160,7 @@ class AuditRepoNamingCase(unittest.TestCase):
             ".codecov.yml",
             "scripts/Fetch-Report.py",
             "bin/Run_Backup",
-            ".secrets/db-root-password.example",
+            ".secrets/Db_Root_Password.example",
         }
         findings, fake = run_audit(tree, {"bin/Run_Backup": "100755"})
 
@@ -179,8 +179,8 @@ class AuditRepoNamingCase(unittest.TestCase):
                     "(an executable with no shebang)"
                 ),
                 (
-                    "runtime-secrets: 1 secret file(s) carry a stem that is not lowercase "
-                    "snake_case: .secrets/db-root-password.example"
+                    "runtime-secrets: 1 env or secret file(s) break the env and secret file rule "
+                    'of CODESTYLE.md "Script and Utility File Names": .secrets/Db_Root_Password.example'
                 ),
             ],
         )

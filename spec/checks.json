@@ -9,7 +9,7 @@
         { "id": "python.directories.coverage", "family": "python", "description": "Every tracked .py file sits inside a directory the registry declares.", "spec": "registry/repos.json", "hub": true, "scope": "repo" },
         { "id": "python.directories.root", "family": "python", "description": "A root tests/ suite has the manifest the undeclared root default needs to run it.", "spec": "registry/repos.json", "hub": true, "scope": "repo" },
         { "id": "filenaming.scripts", "family": "filenaming", "description": "Each script file name takes the stem its extension sets.", "spec": "CODESTYLE.md", "hub": true, "scope": "repo", "suppression": { "endsWithType": null } },
-        { "id": "secrets.stems", "family": "secrets", "description": "Each runtime secret file's stem is lowercase snake_case.", "spec": "GOVERNANCE.md", "hub": true, "scope": "repo" },
+        { "id": "secrets.stems", "family": "secrets", "description": "Each tracked env and secret file name takes the form the env and secret file rule sets.", "spec": "GOVERNANCE.md", "hub": true, "scope": "repo" },
         { "id": "secrets.names", "family": "secrets", "description": "The secret names each store holds against those the applicable mechanisms require and forbid.", "spec": "spec/secrets.json", "hub": true, "scope": "repo" },
         { "id": "dependabot.ecosystems", "family": "dependabot", "description": "dependabot.yml declares each ecosystem the tree implies.", "spec": "AUDIT.md", "hub": true, "scope": "repo" },
         { "id": "files.presence", "family": "files", "description": "Each baseline file, or a declared alternative, is present, with its intent staleness advisory.", "spec": "spec/files.json", "hub": true, "scope": "baseline" },
