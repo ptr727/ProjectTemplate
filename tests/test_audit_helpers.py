@@ -3318,43 +3318,65 @@ class FileNamingCase(unittest.TestCase):
 
 
 class SecretStemCase(unittest.TestCase):
-    """Holds the runtime secret file stem findings."""
+    """Holds the env and secret file name findings."""
 
     def test_secret_stem_cases(self) -> None:
         secret_stem_cases = [
             (
-                "conforming stems, examples, and the directory's own files pass",
+                "conforming names, examples, and the directory's own files pass",
                 {
                     ".secrets/README.md",
                     ".secrets/.gitignore",
                     ".secrets/db_root_password.example",
                     ".secrets/mail_relay.env.example",
+                    ".secrets/app_web-01_prod.env.example",
+                    ".secrets/app_xn--bcher-kva_prod.env",
                     "deploy/.secrets/service_account.json.example",
+                    "deploy/app_web-01_prod.env.example",
                     "docs/Mixed-Case.md",
                 },
                 set(),
             ),
             (
-                "a hyphenated, capitalized, or bare stem breaks",
+                "a capitalized, dotted, or bare name in a .secrets directory breaks",
                 {
-                    ".secrets/db-root-password.example",
                     ".secrets/Mail_Relay.env.example",
                     ".secrets/.env.example",
-                    "deploy/.secrets/api-token",
+                    ".secrets/app.web-01.prod.env",
                 },
                 {
-                    ".secrets/db-root-password.example",
                     ".secrets/Mail_Relay.env.example",
                     ".secrets/.env.example",
-                    "deploy/.secrets/api-token",
+                    ".secrets/app.web-01.prod.env",
                 },
             ),
             (
-                "a file outside a .secrets directory, or nested below one, is out of scope",
+                "a badly separated name, or a capitalized .env file elsewhere, breaks",
+                {
+                    ".secrets/app_-web.env",
+                    "deploy/.secrets/api_token_",
+                    "deploy/App_Prod.env",
+                    "deploy/app_prod.ENV.example",
+                    "deploy/app_prod.env.EXAMPLE",
+                },
+                {
+                    ".secrets/app_-web.env",
+                    "deploy/.secrets/api_token_",
+                    "deploy/App_Prod.env",
+                    "deploy/app_prod.ENV.example",
+                    "deploy/app_prod.env.EXAMPLE",
+                },
+            ),
+            (
+                "a file nested below a .secrets directory, a tool-fixed env name, or another file is out of scope",
                 {
                     "secrets/db-root-password.example",
                     "config/.secrets-notes/Odd-Name",
                     ".secrets/docs/Mixed-Case.md",
+                    ".env",
+                    "web/.env.example",
+                    "web/.env.local",
+                    "deploy/Notes.environment",
                 },
                 set(),
             ),
@@ -3365,7 +3387,7 @@ class SecretStemCase(unittest.TestCase):
                 good = (not want and got == []) or (
                     len(got) == 1
                     and got[0][0] == "DRIFT"
-                    and got[0][1].startswith(f"runtime-secrets: {len(want)} secret file(s)")
+                    and got[0][1].startswith(f"runtime-secrets: {len(want)} env or secret file(s)")
                     and all(p in got[0][1] for p in want)
                 )
                 self.assertTrue(good, f"{got}")
