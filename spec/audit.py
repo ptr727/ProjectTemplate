@@ -352,7 +352,9 @@ PYTHON_FILE_STEM = re.compile(r"[a-z0-9_]+")
 HYPHENATED_FILE_STEM = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 HYPHENATED_SCRIPT_EXTENSIONS = (".sh", ".ps1", ".cmd", ".bat")
 PESTER_SUFFIX = ".Tests.ps1"
-SECRET_FILE_STEM = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
+ENV_SECRET_FIELD = r"[a-z0-9]+(?:-+[a-z0-9]+)*"
+ENV_SECRET_NAME = re.compile(rf"{ENV_SECRET_FIELD}(?:_{ENV_SECRET_FIELD})*(?:\.[a-z0-9]+)?")
+ENV_SECRET_TEMPLATE = ".example"
 SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
 PATHS_SHOWN = 5
 
@@ -482,8 +484,9 @@ def file_naming_findings(entry, blobs, read_text):
 
 
 def secret_stem_findings(tree):
-    """DRIFT naming each secret file in a repo-scoped `.secrets/` directory whose stem is not lowercase snake_case.
+    """DRIFT naming each tracked env or secret file whose name breaks CODESTYLE.md's env and secret file rule.
 
+    Every file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere whose name opens on no dot.
     `tree` is the blob path set, or None when unread, which reports nothing.
     """
     if tree is None:
@@ -492,9 +495,14 @@ def secret_stem_findings(tree):
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        if segments[-2:-1] != [".secrets"] or name in SECRETS_DIRECTORY_EXEMPT:
+        in_secrets = segments[-2:-1] == [".secrets"]
+        if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
-        if not SECRET_FILE_STEM.fullmatch(name.split(".", 1)[0]):
+        named = name.removesuffix(ENV_SECRET_TEMPLATE)
+        folded = name.lower().removesuffix(ENV_SECRET_TEMPLATE)
+        if not in_secrets and (folded.startswith(".") or not folded.endswith(".env")):
+            continue
+        if not ENV_SECRET_NAME.fullmatch(named):
             broken.append(path)
     if not broken:
         return []
@@ -502,8 +510,10 @@ def secret_stem_findings(tree):
         (
             "DRIFT",
             (
-                f"runtime-secrets: {len(broken)} secret file(s) carry a stem that is not lowercase "
-                f"snake_case: {capped_paths(broken)}"
+                f"runtime-secrets: {len(broken)} env or secret file(s) break the env and secret file "
+                f'rule of CODESTYLE.md "Script and Utility File Names", or are a bare .env in a '
+                f'.secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out: '
+                f"{capped_paths(broken)}"
             ),
         )
     ]
@@ -2057,7 +2067,7 @@ def check_tree_readable(run):
     return [
         (
             "DRIFT",
-            f"tree: could not read the file tree for {run.slug}@{run.ground} in full, so verbatim trees, script file names, and secret-file stems are undecided",
+            f"tree: could not read the file tree for {run.slug}@{run.ground} in full, so verbatim trees, script file names, and env and secret file names are undecided",
         )
     ]
 
@@ -2278,7 +2288,7 @@ def _selftest_cases():
         ("the title and intro", title_and_intro(doc)[0], "T"),
         ("an undeclared heading", undeclared_h2_headings(doc, ["a"]), ["c"]),
         ("a version literal", version_literals_outside_verbatim("uses 1.2.3\n", []), ["1.2.3"]),
-        ("a secret-file stem", len(secret_stem_findings({".secrets/Bad.txt"})), 1),
+        ("an env or secret file name", len(secret_stem_findings({".secrets/Bad.txt"})), 1),
         ("the selftest flag", parse_args(["--selftest"]).selftest, True),
     ]
     ok = True
