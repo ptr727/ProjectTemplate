@@ -1482,6 +1482,11 @@ class TestCarriedTrees(TreeCase):
                     f"lib/fleet/sh was not compared, since {tracked} is tracked as a link or a file.",
                 )
 
+    def test_a_top_level_target_tracked_as_a_link_still_warns(self) -> None:
+        self.manifest([{**self.tree(), "target": "tools"}])
+        printed = "::warning title=carried-trees::tools sits at or below a tracked link or file, which a carry refuses\n"
+        self.assertEqual(self.run_check(["tools"], actions=True), ([], printed))
+
     def test_a_generic_top_level_path_tracked_as_a_file_is_passed_over(self) -> None:
         self.assertEqual(self.run_check(["lib"], actions=True), ([], ""))
         self.assertEqual(
