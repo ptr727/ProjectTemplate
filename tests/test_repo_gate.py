@@ -1339,6 +1339,19 @@ class TestCompositeActions(TreeCase):
         self.assertTrue(any(h.startswith("schema:") for h in hits))
 
 
+def python_3_12_installed() -> bool:
+    """Whether uv finds a 3.12 already installed, so the case below never downloads one."""
+    if shutil.which("uv") is None:
+        return False
+    found = subprocess.run(
+        ["uv", "python", "find", "--no-python-downloads", "3.12"],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    return found.returncode == 0
+
+
 class TestCarriedTrees(TreeCase):
     """A constructed hub beside the gate and a constructed copy, so each case proves one difference."""
 
@@ -1463,7 +1476,7 @@ class TestCarriedTrees(TreeCase):
             repo_gate.NOTES[0].startswith("the hub's scripts/carry.py could not be loaded")
         )
 
-    @unittest.skipUnless(shutil.which("uv"), "uv provides the 3.12 interpreter")
+    @unittest.skipUnless(python_3_12_installed(), "no Python 3.12 is installed for uv to run")
     def test_the_hub_carry_runs_under_the_runners_python_3_12(self) -> None:
         """A CI runner's system python3 is 3.12, and hub CI otherwise loads carry.py under 3.13 alone."""
         repo = self.tmp / "scanned"
@@ -1476,6 +1489,7 @@ class TestCarriedTrees(TreeCase):
                 "uv",
                 "run",
                 "--no-project",
+                "--no-python-downloads",
                 "--python",
                 "3.12",
                 "python",
