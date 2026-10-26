@@ -2067,7 +2067,7 @@ def check_tree_readable(run):
     return [
         (
             "DRIFT",
-            f"tree: could not read the file tree for {run.slug}@{run.ground} in full, so verbatim trees, script file names, and secret-file stems are undecided",
+            f"tree: could not read the file tree for {run.slug}@{run.ground} in full, so verbatim trees, script file names, and env and secret file names are undecided",
         )
     ]
 
@@ -2288,7 +2288,7 @@ def _selftest_cases():
         ("the title and intro", title_and_intro(doc)[0], "T"),
         ("an undeclared heading", undeclared_h2_headings(doc, ["a"]), ["c"]),
         ("a version literal", version_literals_outside_verbatim("uses 1.2.3\n", []), ["1.2.3"]),
-        ("a secret-file stem", len(secret_stem_findings({".secrets/Bad.txt"})), 1),
+        ("an env or secret file name", len(secret_stem_findings({".secrets/Bad.txt"})), 1),
         ("the selftest flag", parse_args(["--selftest"]).selftest, True),
     ]
     ok = True
