@@ -299,7 +299,7 @@ jobs:
       # This is the one place the fleet's uvx tools are pinned or floated, decided here.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: "3.13"
 
@@ -635,7 +635,7 @@ jobs:
       # A root the undeclared default skips still sets uv up, so an empty cache is a normal outcome rather than an error at post-job save.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true'
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}
           ignore-nothing-to-cache: true
