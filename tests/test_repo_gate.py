@@ -1469,10 +1469,14 @@ class TestCarriedTrees(TreeCase):
         self.assertIn("0 changed, 1 missing, 0 extra, first secrets.sh.", repo_gate.NOTES[0])
 
     def test_a_target_tracked_as_a_link_is_named_rather_than_skipped(self) -> None:
-        for tracked in ("lib/fleet/sh", "lib/fleet"):
+        warning = (
+            "::warning title=carried-trees::lib/fleet/sh is tracked as a link or a file, "
+            "which a carry refuses\n"
+        )
+        for tracked, printed in (("lib/fleet/sh", warning), ("lib/fleet", "")):
             with self.subTest(tracked=tracked):
                 repo_gate.NOTES.clear()
-                self.assertEqual(self.run_check([tracked]), ([], ""))
+                self.assertEqual(self.run_check([tracked], actions=True), ([], printed))
                 self.assertEqual(
                     repo_gate.NOTES[0],
                     f"lib/fleet/sh was not compared, since {tracked} is tracked as a link or a file.",
