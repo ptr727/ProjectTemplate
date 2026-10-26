@@ -1,10 +1,9 @@
 """The review gate's digest, rendered off one payload, for the gate in `pr_review.py`.
 
-This is a library module and has no command line. `pr_review.py` imports it as a sibling and keeps
-`digest`, the thin shell that does the reads: the payload, the normalized checks, and the run log
-behind a refusal. `render` takes those results as arguments and makes no call. The header is an
-ordered list of fields, so a new one is one entry, and the fixed advisory lines are an ordered
-table, so a new one is one row.
+This is a library module and has no command line. `pr_review.py` imports it as a sibling. Its
+`digest` does the reads: the payload, the normalized checks, and the run log behind a refusal.
+`render` takes those results as arguments and makes no call. The header is an ordered list of
+fields, so a new one is one entry. The fixed advisory lines are an ordered table, one row each.
 """
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ REVIEWS_TRUNCATED = (
 )
 
 
-def refusal_of(pr: dict) -> dict | None:
+def digest_refusal(pr: dict) -> dict | None:
     """The refusal the digest reports: a stopping one, else one standing in for a missing head round."""
     return stopping_refusal(pr) or (None if head_reviews(pr) else refusing_review(pr))
 
@@ -93,7 +92,7 @@ def render(
 ) -> tuple[str, int]:
     """Render the digest and return it with the unresolved count.
 
-    `quota` is the run log's rate-limit sentence for the refusal `refusal_of` names, read by the
+    `quota` is the run log's rate-limit sentence for the refusal `digest_refusal` names, read by the
     caller. Where `seen` is a set, only threads absent from it print, marked new, and are added.
     """
     head = pr["headRefOid"]
@@ -135,7 +134,7 @@ def render(
     flagged = uncounted_verdict(pr)
     advisory = uncounted_verdict(pr, "clean")
     answer = answered_outside_review(pr)
-    refusal = refusal_of(pr)
+    refusal = digest_refusal(pr)
     refusal_field = (
         "no"
         if not refusal

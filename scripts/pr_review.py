@@ -13,7 +13,8 @@ Discipline" for the rule this implements.
 
 This file is the gate: the plumbing, the verdict, the wait loop, and the writes. The head's checks
 are read by `pr_review_checks.py` and its review rounds by `pr_review_rounds.py`, both off a payload
-this file fetched, and `pr_review_digest.py` renders the digest from them. What a reviewer's body says is read by `pr_review_copilot.py`, whose vocabulary lives in
+this file fetched. `pr_review_digest.py` renders the digest from those readings. What a reviewer's
+body says is read by `pr_review_copilot.py`, whose vocabulary lives in
 `reviewers/<name>.json`, so a change in the reviewer's wording is a data edit there and never
 an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
 written outcomes acknowledge it, and on an earlier round it is a note.
@@ -199,7 +200,7 @@ from pr_review_checks import (
     held_checks_open,
     runs_open,
 )
-from pr_review_digest import refusal_of, render
+from pr_review_digest import digest_refusal, render
 from pr_review_rounds import (
     ACK_MARKER,
     CARRIED_PARTIAL,
@@ -747,7 +748,7 @@ def digest(
     pr = full_read(owner, repo, num) if pr is None else pr
     now = datetime.now(UTC) if now is None else now
     checks = check_nodes(pr) if checks is None else checks
-    refusal = refusal_of(pr)
+    refusal = digest_refusal(pr)
     quota = confirmed_quota(owner, repo, refusal) if refusal else ""
     return render(owner, repo, num, pr, checks, now, grace, stall, quota, seen, HUB, WINDOW)
 

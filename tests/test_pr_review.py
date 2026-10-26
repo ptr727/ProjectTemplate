@@ -793,8 +793,8 @@ QUIET_DIGEST = (
 class TestDigestRenderIsPinned(GqlCase):
     """The whole digest, byte for byte, as `pr_review_digest.render` lays it out.
 
-    Each expected text was captured from the digest before its rendering moved to the leaf module,
-    so a reordered header field or advisory line fails here rather than in a reader's parse.
+    Each expected text was captured before the rendering moved to the leaf module.
+    A reorder among the fields and lines these two cases print fails here rather than in a parse.
     """
 
     def test_a_crowded_digest_keeps_its_field_and_advisory_order(self) -> None:
