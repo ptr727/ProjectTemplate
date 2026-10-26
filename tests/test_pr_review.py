@@ -5346,7 +5346,7 @@ class TestReplyArguments(unittest.TestCase):
 
     def test_every_owner_in_the_table_is_a_subcommand(self) -> None:
         """A misspelled owner would refuse its flag on the one command it belongs to."""
-        commands = {"attest", "claims", "cleanup", "comment", "status", "reply", "wait"}
+        commands = set(pr_review.COMMANDS)
         # A floor, since an emptied table would pass the subset check below.
         self.assertGreaterEqual(len(pr_review.FLAG_OWNERS), 8)
         for flag, owners, _ in pr_review.FLAG_OWNERS:

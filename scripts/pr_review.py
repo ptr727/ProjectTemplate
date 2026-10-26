@@ -1724,9 +1724,10 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
     return 30
 
 
-# Each flag a subcommand owns is refused elsewhere, since an ignored flag reads as one that took effect.
+# Each flag listed is refused on a subcommand not owning it, since an ignored flag reads as one that took effect.
 # A late row is checked after the `cleanup` and `number` checks, which fixes the first error printed.
 # `cleanup` owns `--checkout` only once it has dispatched, so its row here only defers to that check.
+COMMANDS = ("attest", "claims", "cleanup", "comment", "status", "reply", "wait")
 FLAG_OWNERS = (
     ("--match", ("reply",), False),
     ("--path", ("reply",), False),
@@ -1754,9 +1755,7 @@ def main(argv: list[str] | None = None) -> int:
         return pr_cleanup.main(rest)
     utf8_console()
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "cmd", choices=["attest", "claims", "cleanup", "comment", "status", "reply", "wait"]
-    )
+    ap.add_argument("cmd", choices=COMMANDS)
     ap.add_argument("number", type=int, nargs="?")
     # No default, because a default names one repository and every run from elsewhere would read that one.
     ap.add_argument(
@@ -1880,7 +1879,7 @@ def main(argv: list[str] | None = None) -> int:
                 ap.error(
                     f"{a.cmd} requires a non-empty {flag}, since an empty answer records nothing"
                 )
-    # None takes a negative value, and a negative check threshold would report every check stuck.
+    # None of these four takes a negative value, and a negative check threshold reports every check stuck.
     for name in ("pickup_grace", "min_rounds", "check_grace", "check_stall"):
         if getattr(a, name) < 0:
             ap.error(f"--{name.replace('_', '-')} cannot be negative")
