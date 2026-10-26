@@ -114,18 +114,21 @@ Subcommands
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
-           hold the poll. On an open pull request whose head commit the payload carries, every
-           workflow run the read reaches on that head has then completed. The read reaches the
-           head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. It
-           does not prove the required checks ran.
-           A payload with no commit matching the head, named `CHECKS UNREADABLE` in the digest,
-           reads no run and no check. A required check not yet registered holds only a BLOCKED
-           merge whose base branch rules were read and whose rollup is not `CHECKS TRUNCATED`. An
-           empty rollup holds only a BLOCKED, BEHIND, or DRAFT one. Short of those holds, a merge with
-           some check posted, or a DIRTY one with none, can exit 0 with a required check unregistered.
+           hold the poll. Exit 0 on a review present does not poll the checks, so it does not prove
+           the required checks ran. On an open attested held head whose commit the payload carries,
+           every workflow run the read reaches on that head has then completed. The read reaches the
+           head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
+           CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
+           open attested held head nothing holds exits 45 where its rollup was unreadable or, under
+           DIRTY, none posted. A DIRTY or BEHIND one also exits 45 where a required check is
+           unregistered or from another app. Exit 0 can then leave a required check unregistered
+           only under unread rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request
+           not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
-           open among them. It is also a round past --min-rounds not yet landed.
+           open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
+           says an unmet required check may sit in its unread part. It is also a round past
+           --min-rounds not yet landed.
            40 = no Copilot review covers the head: the reviewer
            answered outside a formal review, the request returned success and recorded nothing on
            the pull request, or the reviewer writes under a login no query filters on. 41 = the
@@ -140,6 +143,17 @@ Subcommands
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, or failed. On
            a held head a check running long or held by its environment polls to 30 instead.
+           45 = an open attested held head that nothing holds, its merge other than CLEAN,
+           UNSTABLE, or HAS_HOOKS. Either the payload carries no commit matching the head, named
+           `CHECKS UNREADABLE` in the digest, or a DIRTY merge has no check posted. Or the merge
+           reads DIRTY or BEHIND and a check the base branch's rules require has not registered,
+           or came from another app. That last needs the rules read and a rollup not
+           `CHECKS TRUNCATED`. Where the rollup holds a type this cannot read, named
+           `CHECKS PARTIALLY UNREAD` in the digest, the status says the check may sit there.
+           `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
+           its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
+           30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
+           empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
            49 = no Copilot round covers this head and none was requested, the pull request
            merging into a branch other than the default with no attestation vouching for the
            head. 64 = the write scope could not
@@ -181,6 +195,7 @@ from pr_review_checks import (
     _unmet_note,
     check_lines,
     check_nodes,
+    checks_never_ran,
     checks_settling,
     checks_stuck,
     checks_tally,
@@ -664,9 +679,11 @@ def parsed_json(proc: subprocess.CompletedProcess) -> object:
         return None
 
 
-def required_for(pr: dict, owner: str, repo: str) -> frozenset[tuple[str, int | None]]:
-    """The required entries a BLOCKED merge can be short of, empty wherever none can matter."""
-    if pr.get("mergeStateStatus") != "BLOCKED":
+def required_for(
+    pr: dict, owner: str, repo: str, gated: frozenset[str] = frozenset({"BLOCKED"})
+) -> frozenset[tuple[str, int | None]]:
+    """The required entries a merge in `gated` can be short of, empty wherever none can matter."""
+    if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") not in gated:
         return frozenset()
     return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
@@ -707,7 +724,7 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[tuple[str, 
     ):
         print(
             f"note: the rules for {base} were unread, so which checks they require is unknown and "
-            "this wait cannot hold for one that has not registered yet."
+            "this wait cannot judge one that has not registered."
         )
         return None
     return frozenset((e[0], e[1]) for e in entries)
@@ -2013,7 +2030,7 @@ def main(argv: list[str] | None = None) -> int:
                 "had not completed, a check the base branch requires had not registered or came "
                 "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
                 "wait again, or read the checks above"
-                + _unmet_note(required_for(final, owner, repo), checks)
+                + _unmet_note(final, required_for(final, owner, repo), checks)
                 + (f" (not completed: {', '.join(runs)})" if runs else "")
             )
             return 30
@@ -2030,6 +2047,17 @@ def main(argv: list[str] | None = None) -> int:
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )
             return 44
+        if covered and (
+            unrun := checks_never_ran(
+                final, checks, required_for(final, owner, repo, frozenset({"DIRTY", "BEHIND"}))
+            )
+        ):
+            print(
+                "status=CHECKS_MISSING an attested local pass covers this head and nothing holds "
+                f"the poll, but {unrun}. The merge reads {final.get('mergeStateStatus')}, so it is "
+                "not ready to merge"
+            )
+            return 45
         return 0
     # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)
