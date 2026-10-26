@@ -137,7 +137,7 @@ def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
 
 def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     """What protects the branch, rulesets and classic protection alike, empty where nothing does."""
-    if core.UNSAFE_REF.search(branch) or core.DOT_SEGMENT.search(branch):
+    if not core.safe_ref(branch):
         raise CleanupUnread(
             f"the head branch {branch!r} holds a character that changes a REST path, so the "
             "rules applying to it cannot be read"
