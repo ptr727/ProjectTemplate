@@ -449,6 +449,20 @@ def _is_workflow_run_error(error: object) -> bool:
     return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
 
 
+def mutated(data: dict, *path: str) -> dict:
+    """The object a mutation returned at `path` under `data`, empty wherever a step is absent."""
+    for key in path:
+        data = data.get(key) or {}
+    return data
+
+
+def unconfirmed(status: str, why: str, response: dict, code: int) -> int:
+    """Print why a write is unconfirmed, then the response it returned, and return `code`."""
+    print(f"status={status} {why}")
+    print(f"  response: {json.dumps(response)[:400]}")
+    return code
+
+
 def gql(query: str, owner: str, repo: str, num: int) -> dict:
     data = gh_graphql(query, o=owner, r=repo, n=num)
     pr = data["repository"]["pullRequest"]
@@ -561,7 +575,7 @@ def request_copilot_review(
         )
     before = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
     answer = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
-    after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
+    after = mutated(answer, "requestReviews", "pullRequest")
     state = backoff(
         after,
         lambda: gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"],
@@ -670,6 +684,11 @@ def required_for(
     return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
 
+def safe_ref(ref: str) -> bool:
+    """Whether `ref` can be interpolated into a REST path without changing the path."""
+    return not UNSAFE_REF.search(ref) and not DOT_SEGMENT.search(ref)
+
+
 @functools.cache
 def required_contexts(owner: str, repo: str, base: str) -> frozenset[tuple[str, int | None]] | None:
     """Every status check the base branch's rules require, or None where it was unread.
@@ -678,7 +697,7 @@ def required_contexts(owner: str, repo: str, base: str) -> frozenset[tuple[str, 
     the rules, since the rollup lists only registered checks. None wherever the read did not
     happen, a malformed integration id, or a full page of a hundred rules. Memoized for the run.
     """
-    safe = base and not UNSAFE_REF.search(base) and not DOT_SEGMENT.search(base)
+    safe = base and safe_ref(base)
     read = (
         reread_json(
             f"repos/{owner}/{repo}/rules/branches/{urllib.parse.quote(base, safe='')}?per_page=100",
@@ -815,16 +834,15 @@ def origin_owner() -> str | None:
         and not k.startswith("GIT_CONFIG")
     }
     try:
-        url = subprocess.run(
+        url = _run(
             ["git", "-C", str(HERE), "remote", "get-url", "origin"],
-            capture_output=True,
+            5,
+            "git could not be run",
             text=True,
             encoding="utf-8",
-            timeout=5,
-            check=False,
             env=env,
         ).stdout.strip()
-    # A missing git, a timeout, or any other failure all mean the owner cannot be read.
+    # `_run` returns a missing git or a timeout as no output, and a decode error lands here.
     except Exception:  # noqa: BLE001
         return None
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
@@ -860,6 +878,20 @@ def in_scope(target_owner: str) -> tuple[bool, str]:
     return True, ""
 
 
+def not_written(status: str, why: str, code: int, *details: str) -> int:
+    """Print a refusal that wrote nothing, then each detail line, and return `code`."""
+    print(f"status={status} nothing was written: {why}")
+    for line in details:
+        print(line)
+    return code
+
+
+def scope_refusal(owner: str) -> int:
+    """64 once the refusal is printed where writing to `owner` is out of scope, else 0."""
+    ok, why = in_scope(owner)
+    return 0 if ok else not_written("OUT_OF_SCOPE", why, 64)
+
+
 def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     """Every unresolved review thread, following the cursor to the end."""
     out: list[dict] = []
@@ -870,31 +902,29 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
 
 def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     """Post one PR conversation comment and confirm the returned comment. Returns an exit code."""
-    ok, why = in_scope(owner)
-    if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
-        return 64
+    if refused := scope_refusal(owner):
+        return refused
 
     target = gql(Q_COMMENT_TARGET, owner, repo, num)
     if not target or not target.get("id") or not target.get("url"):
-        print(
-            f"status=TARGET_NOT_READ nothing was written: {owner}/{repo} #{num} did not "
-            "return a pull request id and URL, so the mutation has no verified target"
+        return not_written(
+            "TARGET_NOT_READ",
+            f"{owner}/{repo} #{num} did not return a pull request id and URL, so the mutation "
+            "has no verified target",
+            65,
         )
-        return 65
 
     body = body.replace("\r\n", "\n").replace("\r", "\n")
-    edge = (gh_graphql(M_COMMENT, subjectId=target["id"], body=body).get("addComment") or {}).get(
-        "commentEdge"
-    ) or {}
-    comment = edge.get("node") or {}
+    data = gh_graphql(M_COMMENT, subjectId=target["id"], body=body)
+    comment = mutated(data, "addComment", "commentEdge", "node")
     if not comment.get("url") or (comment.get("body") or "") != body:
-        print(
-            "status=COMMENT_NOT_CONFIRMED the response returned no URL or a different body. "
-            "Inspect the PR conversation before retrying, since the write may have landed."
+        return unconfirmed(
+            "COMMENT_NOT_CONFIRMED",
+            "the response returned no URL or a different body. Inspect the PR conversation "
+            "before retrying, since the write may have landed.",
+            comment,
+            66,
         )
-        print(f"  response: {json.dumps(comment)[:400]}")
-        return 66
     print(f"commented: {comment['url']}")
     print("status=COMMENTED")
     return 0
@@ -909,91 +939,89 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     request's own, and `local_review.py status` reports a current pass against the base. The first
     two are read again after the check returns.
     """
-    ok, why = in_scope(owner)
-    if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
-        return 64
+    if refused := scope_refusal(owner):
+        return refused
     target = gql(Q_ATTEST_TARGET, owner, repo, num) or {}
     head, base = target.get("headRefOid") or "", target.get("baseRefName") or ""
     if not head or not base:
-        print(
-            f"status=TARGET_NOT_READ nothing was written: {owner}/{repo} #{num} did not return "
-            "its head commit and base branch"
+        return not_written(
+            "TARGET_NOT_READ",
+            f"{owner}/{repo} #{num} did not return its head commit and base branch",
+            65,
         )
-        return 65
     local = _git(checkout, "rev-parse", "HEAD")
     dirty = _git(
         checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
     )
     if local.returncode != 0 or dirty.returncode != 0:
-        print(
-            f"status=CHECKOUT_NOT_READ nothing was written: {checkout} is not a readable checkout"
-        )
-        return 67
+        return not_written("CHECKOUT_NOT_READ", f"{checkout} is not a readable checkout", 67)
     registered = True
     if local.stdout.strip() != head:
         head, registered = await_registered_head(
             owner, repo, num, checkout, local.stdout.strip(), head
         )
     if local.stdout.strip() != head:
-        print(
-            f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout is at "
-            f"{local.stdout.strip()[:8]} and the pull request's head is {head[:8]}, so push or "
-            "fetch until they agree"
-            + ("" if registered else ". The push landed and GitHub had not registered it yet")
+        return not_written(
+            "CHECKOUT_NOT_THE_HEAD",
+            f"the checkout is at {local.stdout.strip()[:8]} and the pull request's head is "
+            f"{head[:8]}, so push or fetch until they agree"
+            + ("" if registered else ". The push landed and GitHub had not registered it yet"),
+            67,
         )
-        return 67
     if dirty.stdout.strip():
-        print(
-            "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout holds changes the "
-            "head commit does not, so a pass over it does not describe what was pushed"
+        return not_written(
+            "CHECKOUT_NOT_THE_HEAD",
+            "the checkout holds changes the head commit does not, so a pass over it does not "
+            "describe what was pushed",
+            67,
         )
-        return 67
-    if UNSAFE_REF.search(base) or DOT_SEGMENT.search(base):
-        print(
-            f"status=MERGE_BASE_NOT_READ nothing was written: the base branch {base!r} carries a "
-            "character that would change the compare path rather than travel along it"
+    if not safe_ref(base):
+        return not_written(
+            "MERGE_BASE_NOT_READ",
+            f"the base branch {base!r} carries a character that would change the compare path "
+            "rather than travel along it",
+            67,
         )
-        return 67
     ours = _git(checkout, "merge-base", f"refs/remotes/origin/{base}", "HEAD")
     theirs = gh_rest(
         f"repos/{owner}/{repo}/compare/{base}...{head}", ".merge_base_commit.sha // empty"
     )
     if ours.returncode != 0 or theirs.returncode != 0 or not theirs.stdout.strip():
-        print(
-            f"status=MERGE_BASE_NOT_READ nothing was written: the merge base with {base} could "
-            "not be read in the checkout or from GitHub, so the pass's scope cannot be compared "
-            "with the pull request's"
+        return not_written(
+            "MERGE_BASE_NOT_READ",
+            f"the merge base with {base} could not be read in the checkout or from GitHub, so "
+            "the pass's scope cannot be compared with the pull request's",
+            67,
+            f"  {(ours.stderr or theirs.stderr).strip()[:400]}",
         )
-        print(f"  {(ours.stderr or theirs.stderr).strip()[:400]}")
-        return 67
     if ours.stdout.strip() != theirs.stdout.strip():
-        print(
-            f"status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout's merge base with "
-            f"origin/{base} is not the pull request's own, so a pass against it measured a "
-            "different change set. Fetch, or attest from a checkout of the pull request's own "
-            "repository"
+        return not_written(
+            "CHECKOUT_NOT_THE_HEAD",
+            f"the checkout's merge base with origin/{base} is not the pull request's own, so a "
+            "pass against it measured a different change set. Fetch, or attest from a checkout "
+            "of the pull request's own repository",
+            67,
         )
-        return 67
     covered, findings, said = receipt_reading(checkout, base)
     if not covered:
-        print(
-            f"status=NO_LOCAL_PASS nothing was written: `local_review.py status --target {base}` "
-            "reports no recorded pass covering this content. Run the local strict review, "
-            "record it, and attest again"
+        return not_written(
+            "NO_LOCAL_PASS",
+            f"`local_review.py status --target {base}` reports no recorded pass covering this "
+            "content. Run the local strict review, record it, and attest again",
+            68,
+            f"  {said.strip()[:400]}",
         )
-        print(f"  {said.strip()[:400]}")
-        return 68
     after = _git(checkout, "rev-parse", "HEAD")
     still = _git(
         checkout, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"
     )
     if after.stdout.strip() != head or still.returncode != 0 or still.stdout.strip():
-        print(
-            "status=CHECKOUT_NOT_THE_HEAD nothing was written: the checkout moved or changed "
-            "while the pass was being checked, so the check no longer describes the head"
+        return not_written(
+            "CHECKOUT_NOT_THE_HEAD",
+            "the checkout moved or changed while the pass was being checked, so the check no "
+            "longer describes the head",
+            67,
         )
-        return 67
     body = (
         f"A recorded local strict-review pass covers head `{head}`, the content this pull "
         f"request carries at that commit against `{base}`, and it recorded {findings} "
@@ -1013,13 +1041,7 @@ def await_registered_head(
     """
     meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
     ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
-    if (
-        meta.get("state") != "OPEN"
-        or not ref
-        or not source
-        or UNSAFE_REF.search(ref)
-        or DOT_SEGMENT.search(ref)
-    ):
+    if meta.get("state") != "OPEN" or not ref or not source or not safe_ref(ref):
         return head, True
     tip = _git(checkout, "ls-remote", source, f"refs/heads/{ref}")
     if tip.returncode != 0 or tip.stdout.split()[:1] != [local]:
@@ -1042,18 +1064,14 @@ def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
     receipt. The findings are the covering passes' counts summed, or "unknown" where any recorded
     none, and are shown rather than gated.
     """
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(LOCAL_REVIEW), "status", "--target", base],
-            cwd=checkout,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False, "unknown", "local_review.py could not be run"
+    proc = _run(
+        [sys.executable, str(LOCAL_REVIEW), "status", "--target", base],
+        120,
+        "local_review.py could not be run",
+        cwd=checkout,
+        text=True,
+        encoding="utf-8",
+    )
     try:
         data = json.loads(proc.stdout)
     except ValueError:
@@ -1072,19 +1090,19 @@ def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
     return True, str(sum(counts.values())), proc.stdout
 
 
+def _run(argv: list[str], timeout: float, unrun: str, **options) -> subprocess.CompletedProcess:
+    """Run one command captured, returning a failure to start or finish as exit 1 with `unrun`."""
+    try:
+        return subprocess.run(argv, capture_output=True, timeout=timeout, check=False, **options)
+    except (OSError, subprocess.SubprocessError):
+        return subprocess.CompletedProcess(argv, 1, "", unrun)
+
+
 def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
     """One read-only git command in `checkout`, returned whole rather than raised."""
-    try:
-        return subprocess.run(
-            ["git", "-C", checkout, *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return subprocess.CompletedProcess([], 1, "", "git could not be run")
+    return _run(
+        ["git", "-C", checkout, *args], 30, "git could not be run", text=True, encoding="utf-8"
+    )
 
 
 POLL_DELAYS = (15, 20, 30, 45, 60, 120)
@@ -1134,25 +1152,22 @@ def reply_to_thread(
     `all_identical` covers a reviewer posting the same finding as two threads. It answers every
     candidate with the one body, only when they all sit on one file and fold identically.
     """
-    ok, why = in_scope(owner)
-    if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
-        return 64
+    if refused := scope_refusal(owner):
+        return refused
 
     threads = unresolved_threads(owner, repo, num)
     hits = matching_threads(threads, match, path)
     if not hits:
-        print(
-            f"status=NO_MATCH nothing was written: no unresolved thread on {owner}/{repo} "
-            f"#{num} carries {match!r}"
+        return not_written(
+            "NO_MATCH",
+            f"no unresolved thread on {owner}/{repo} #{num} carries {match!r}"
             + (f" at {path}" if path else "")
             + f", of {len(threads)} unresolved thread(s) total"
             + ". Widen the words or drop --path rather than reaching for an id, since the "
-            "thread may also be resolved already, which reads the same from here."
+            "thread may also be resolved already, which reads the same from here.",
+            60,
+            *(f"  unresolved: {describe(t)}" for t in threads),
         )
-        for t in threads:
-            print(f"  unresolved: {describe(t)}")
-        return 60
     paths = {t.get("path") for t in hits}
     identical = len(paths) == 1 and len({finding_text(t) for t in hits}) == 1
     if len(hits) > 1 and not (all_identical and identical):
@@ -1170,14 +1185,13 @@ def reply_to_thread(
             )
         else:
             hint = "Quote more of the finding, or add --path."
-        print(
-            f"status=AMBIGUOUS nothing was written: {len(hits)} unresolved threads carry "
-            f"{match!r}, and picking one of them is the failure this avoids rather than a "
-            f"default it can take. {hint}"
+        return not_written(
+            "AMBIGUOUS",
+            f"{len(hits)} unresolved threads carry {match!r}, and picking one of them is the "
+            f"failure this avoids rather than a default it can take. {hint}",
+            61,
+            *(f"  candidate: {describe(t)}" for t in hits),
         )
-        for t in hits:
-            print(f"  candidate: {describe(t)}")
-        return 61
 
     for done, target in enumerate(hits):
         code = answer_thread(target, body, resolve)
@@ -1204,35 +1218,34 @@ def reply_to_thread(
 def answer_thread(target: dict, body: str, resolve: bool) -> int:
     """Reply to one selected thread and resolve it where asked. Returns 0, or an exit code."""
     print(f"answering: {describe(target)}")
-    reply = (
-        gh_graphql(M_REPLY, threadId=target["id"], body=body).get("addPullRequestReviewThreadReply")
-        or {}
+    reply = mutated(
+        gh_graphql(M_REPLY, threadId=target["id"], body=body), "addPullRequestReviewThreadReply"
     )
-    comment = reply.get("comment") or {}
+    comment = mutated(reply, "comment")
     # The url says a reply carried a body, and resolving past an empty one closes the thread with nothing in it.
     if not comment.get("url") or not (comment.get("body") or "").strip():
-        print(
-            "status=REPLY_NOT_CONFIRMED the reply returned no url or an empty body, so the "
-            "thread is NOT resolved and the answer is not recorded. Read the response above "
-            "before retrying, since a write that appears to fail may have taken on the server."
+        return unconfirmed(
+            "REPLY_NOT_CONFIRMED",
+            "the reply returned no url or an empty body, so the thread is NOT resolved and the "
+            "answer is not recorded. Read the response above before retrying, since a write "
+            "that appears to fail may have taken on the server.",
+            reply,
+            62,
         )
-        print(f"  response: {json.dumps(reply)[:400]}")
-        return 62
     print(f"replied: {comment['url']}")
 
     if not resolve:
         return 0
 
-    thread = (gh_graphql(M_RESOLVE, threadId=target["id"]).get("resolveReviewThread") or {}).get(
-        "thread"
-    ) or {}
+    thread = mutated(gh_graphql(M_RESOLVE, threadId=target["id"]), "resolveReviewThread", "thread")
     if not thread.get("isResolved"):
-        print(
-            "status=RESOLVE_NOT_CONFIRMED the reply landed and the resolve did not report the "
-            "thread resolved, so it is still open and the answer is already posted."
+        return unconfirmed(
+            "RESOLVE_NOT_CONFIRMED",
+            "the reply landed and the resolve did not report the thread resolved, so it is "
+            "still open and the answer is already posted.",
+            thread,
+            63,
         )
-        print(f"  response: {json.dumps(thread)[:400]}")
-        return 63
     return 0
 
 
@@ -1258,18 +1271,14 @@ def gh_takes_escape_flag() -> bool:
 
 def _gh_run(argv: list[str], raw: bool) -> subprocess.CompletedProcess:
     """Run one `gh` read, a log decoded leniently since its bytes are the runner's own."""
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace" if raw else "strict",
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return subprocess.CompletedProcess(argv, 1, "", "gh could not be run")
+    return _run(
+        argv,
+        30,
+        "gh could not be run",
+        text=True,
+        encoding="utf-8",
+        errors="replace" if raw else "strict",
+    )
 
 
 def answered_absent(proc: subprocess.CompletedProcess) -> bool:
@@ -1318,16 +1327,11 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
     Read at the head commit, since the branch need not be fetched here. The whole tree is searched,
     since `uses:` lines also sit in catalog snippets and docs, and one archive is one request.
     """
-    # Read as bytes, so it carries its own guards and an absent `gh` or hung download reads as undecided.
-    try:
-        proc = subprocess.run(
-            ["gh", "api", f"repos/{owner}/{repo}/tarball/{head}"],
-            capture_output=True,
-            timeout=TARBALL_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    proc = _run(
+        ["gh", "api", f"repos/{owner}/{repo}/tarball/{head}"],
+        TARBALL_TIMEOUT,
+        "gh could not be run",
+    )
     if proc.returncode != 0:
         return None
     needles = {r: r.encode() for r in refs}
@@ -1412,10 +1416,8 @@ def utf8_console() -> None:
 def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
     """Request a review where one is owed, poll until it lands or the timeout, and return the code."""
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
-    ok, why = in_scope(owner)
-    if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was written: {why}")
-        return 64
+    if refused := scope_refusal(owner):
+        return refused
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
