@@ -3,7 +3,7 @@
 # Meant to be sourced, never run: `. "$REPO/lib/fleet/sh/secrets.sh"` from a script that has already found its own tree through `BASH_SOURCE`.
 # It sets no shell option, since sourcing it would change the caller's own, and every function answers through its output or its status under any of them.
 #
-# The hub hosts this file and a repository carries it byte-for-byte, per GOVERNANCE.md "Hub-Hosted Tooling", so a repository extends it in a file of its own that sources it, never by editing it.
+# The hub hosts this file and a repository carries it byte-for-byte, per GOVERNANCE.md "Hub-Hosted Tooling", so a repository extends it in a file of its own outside the carried directory that sources it, never by editing it.
 # A caller that needs these functions in an elevated shell ships them there by name with `declare -f`, since sourcing this file in the calling shell does not reach one started by `sudo`.
 # A function here that calls another is shipped with it, so `secret_verdict` needs `secret_shape_verdict`, `secret_state`, `unresolved_link_reason`, `secret_content_verdict`, `secret_content_state`, and `secret_content_refusal`.
 

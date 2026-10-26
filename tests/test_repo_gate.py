@@ -1460,6 +1460,16 @@ class TestCarriedTrees(TreeCase):
             repo_gate.NOTES[0].startswith("the hub's scripts/carry.py could not be loaded")
         )
 
+    def test_a_carry_missing_a_function_the_gate_calls_is_a_note(self) -> None:
+        carry_file = self.hub / "scripts/carry.py"
+        text = carry_file.read_text(encoding="utf-8")
+        carry_file.write_text(
+            text.replace("def compare_declaration(", "def renamed("), encoding="utf-8"
+        )
+        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
+        self.assertEqual(self.run_check(files), ([], ""))
+        self.assertTrue(repo_gate.NOTES[0].startswith("lib/fleet/sh could not be compared: "))
+
     def test_an_unreadable_manifest_is_a_note_and_never_a_finding(self) -> None:
         self.write(self.hub / "spec/files.json", "{")
         self.assertEqual(self.run_check([]), ([], ""))

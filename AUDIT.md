@@ -58,7 +58,7 @@ Otherwise read its `types[]`. If the entry is `classificationPending` (a backlog
 - `Dockerfile` + a docker build/push workflow -> `docker`, an `upstream-version.json` tracker -> `upstream-wrapper`.
 - `custom_components/*/manifest.json` + `hacs.json` -> `homeassistant`, a codegen workflow -> `codegen`, no `build-*` task -> `source-only`, governance-only -> `docs`.
 - `hugo.yaml` / `hugo.toml` / `config/_default/hugo.yaml` -> `hugo`. A repo may carry it alongside `source-only`, since a site deploy leaf is not a `build-*` task and both declarations stay true.
-- a carried `lib/fleet/sh/secrets.sh`, or a shell script the repo runs that sources or reads a credential file under `.secrets/` or `~/.secrets/` -> `host-secrets`, which selects that carried tree.
+- a carried `lib/fleet/sh/secrets.sh` -> `host-secrets`, and so does a shell script the repo runs that reads a credential file under `.secrets/` or `~/.secrets/`.
 
 ## 3. Applicability Gate
 

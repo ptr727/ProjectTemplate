@@ -3,12 +3,10 @@
 # requires-python = ">=3.13"
 # dependencies = ["markdown-it-py>=4"]
 # ///
-"""Check or apply manifest-owned trees, and the verbatim sections inside a mixed file, from the hub to a fleet worktree.
+"""Check or apply manifest-owned trees, and the verbatim sections inside a mixed file, from the hub to a fleet worktree."""
 
-The repository gate's `carried-trees` check loads this file under plain `python3`, 3.12 on a CI
-runner, and calls `load_json`, `included`, `inventory`, `Inventory`, `CarryError`,
-`target_patterns`, and `compare_declaration`. Those stay on the standard library and on 3.12.
-"""
+# The repository gate's `carried-trees` check loads this whole file under plain `python3`, 3.12 on a CI runner, and calls its tree functions.
+# The file's top level and those functions therefore stay on the standard library and on 3.12, and the gate reports a failure to load or run them as a note.
 
 import argparse
 import fnmatch
@@ -938,7 +936,9 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
         if mode == "apply" and not declaration_clean:
             for change in apply_tree(source, target_root, target, result):
                 print(change)
-            final = compare(source, inventory(target_root, target_patterns(declaration)))
+            final = compare_declaration(
+                declaration, source, inventory(target_root, target_patterns(declaration))
+            )
             print(
                 json.dumps(
                     {

@@ -825,16 +825,17 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
         NOTES.append("the scanned repository is a hub, whose trees are sources rather than copies.")
         return []
     # Each failure is a note rather than a traceback, since one here would also skip every check sorted after this one.
+    # The catches are broad because carry.py runs under whatever `python3` the host has, so a newer interpreter's API in it fails here as any exception.
     try:
         carry = hub_carry(hub)
-    except (ImportError, SyntaxError, OSError) as error:
+    except Exception as error:  # noqa: BLE001
         NOTES.append(
             f"the hub's scripts/carry.py could not be loaded, so no carried tree was compared: {error}"
         )
         return []
     try:
         trees = carry.load_json(hub / "spec" / "files.json")["trees"]
-    except carry.CarryError as error:
+    except Exception as error:  # noqa: BLE001
         NOTES.append(f"no carried tree was compared: {error}")
         return []
     carried = 0
@@ -844,8 +845,8 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
         tracked_here = [path[len(prefix) :] for path in files if path.startswith(prefix)]
         if not tracked_here:
             continue
-        owned = [path for path in tracked_here if carry.included(path, carry.target_patterns(tree))]
         try:
+            owned = [p for p in tracked_here if carry.included(p, carry.target_patterns(tree))]
             copy = {
                 relative: None
                 if (root / target / relative).is_symlink()
@@ -854,11 +855,11 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
                 for relative in owned
             }
             source = carry.inventory(hub / tree["source"], tree["include"])
-        except (carry.CarryError, OSError) as error:
+            result = carry.compare_declaration(tree, source, carry.Inventory(copy, frozenset(), ""))
+        except Exception as error:  # noqa: BLE001
             NOTES.append(f"{target} could not be compared: {error}")
             continue
         carried += 1
-        result = carry.compare_declaration(tree, source, carry.Inventory(copy, frozenset(), ""))
         changed, missing, extra = result["modified"], result["missing"], result["extra"]
         if changed or missing or extra:
             if os.environ.get("GITHUB_ACTIONS") == "true":
