@@ -1428,7 +1428,6 @@ class TestCarriedTrees(TreeCase):
         )
 
     @requires_symlink
-    @requires_symlink
     def test_a_link_the_tree_does_not_own_is_refused_as_well(self) -> None:
         self.manifest([self.tree(include=["*.sh"], prune=False)])
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
@@ -1442,6 +1441,7 @@ class TestCarriedTrees(TreeCase):
             repo_gate.NOTES[0].startswith("lib/fleet/sh could not be compared, since notes.txt")
         )
 
+    @requires_symlink
     def test_a_link_in_the_copy_is_refused_as_a_carry_refuses_it(self) -> None:
         for prune in (True, False):
             with self.subTest(prune=prune):
