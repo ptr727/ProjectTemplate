@@ -352,7 +352,7 @@ PYTHON_FILE_STEM = re.compile(r"[a-z0-9_]+")
 HYPHENATED_FILE_STEM = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 HYPHENATED_SCRIPT_EXTENSIONS = (".sh", ".ps1", ".cmd", ".bat")
 PESTER_SUFFIX = ".Tests.ps1"
-ENV_SECRET_FIELD = r"[a-z0-9]+(?:-[a-z0-9]+)*"
+ENV_SECRET_FIELD = r"[a-z0-9]+(?:-+[a-z0-9]+)*"
 ENV_SECRET_NAME = re.compile(rf"{ENV_SECRET_FIELD}(?:_{ENV_SECRET_FIELD})*(?:\.[a-z0-9]+)?")
 ENV_SECRET_TEMPLATE = ".example"
 SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
@@ -486,7 +486,7 @@ def file_naming_findings(entry, blobs, read_text):
 def secret_stem_findings(tree):
     """DRIFT naming each tracked env or secret file whose name breaks CODESTYLE.md's env and secret file rule.
 
-    Every file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere whose name no tool fixes.
+    Every file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere whose name opens on no dot.
     `tree` is the blob path set, or None when unread, which reports nothing.
     """
     if tree is None:
@@ -499,7 +499,8 @@ def secret_stem_findings(tree):
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
         named = name.removesuffix(ENV_SECRET_TEMPLATE)
-        if not in_secrets and (named.startswith(".") or not named.lower().endswith(".env")):
+        folded = name.lower().removesuffix(ENV_SECRET_TEMPLATE)
+        if not in_secrets and (folded.startswith(".") or not folded.endswith(".env")):
             continue
         if not ENV_SECRET_NAME.fullmatch(named):
             broken.append(path)
@@ -510,7 +511,9 @@ def secret_stem_findings(tree):
             "DRIFT",
             (
                 f"runtime-secrets: {len(broken)} env or secret file(s) break the env and secret file "
-                f'rule of CODESTYLE.md "Script and Utility File Names": {capped_paths(broken)}'
+                f'rule of CODESTYLE.md "Script and Utility File Names", or are a bare .env in a '
+                f'.secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out: '
+                f"{capped_paths(broken)}"
             ),
         )
     ]

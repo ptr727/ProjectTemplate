@@ -180,7 +180,9 @@ class AuditRepoNamingCase(unittest.TestCase):
                 ),
                 (
                     "runtime-secrets: 1 env or secret file(s) break the env and secret file rule "
-                    'of CODESTYLE.md "Script and Utility File Names": .secrets/Db_Root_Password.example'
+                    'of CODESTYLE.md "Script and Utility File Names", or are a bare .env in a '
+                    '.secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out: '
+                    ".secrets/Db_Root_Password.example"
                 ),
             ],
         )

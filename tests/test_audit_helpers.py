@@ -3330,6 +3330,7 @@ class SecretStemCase(unittest.TestCase):
                     ".secrets/db_root_password.example",
                     ".secrets/mail_relay.env.example",
                     ".secrets/app_web-01_prod.env.example",
+                    ".secrets/app_xn--bcher-kva_prod.env",
                     "deploy/.secrets/service_account.json.example",
                     "deploy/app_web-01_prod.env.example",
                     "docs/Mixed-Case.md",
@@ -3356,12 +3357,14 @@ class SecretStemCase(unittest.TestCase):
                     "deploy/.secrets/api_token_",
                     "deploy/App_Prod.env",
                     "deploy/app_prod.ENV.example",
+                    "deploy/app_prod.env.EXAMPLE",
                 },
                 {
                     ".secrets/app_-web.env",
                     "deploy/.secrets/api_token_",
                     "deploy/App_Prod.env",
                     "deploy/app_prod.ENV.example",
+                    "deploy/app_prod.env.EXAMPLE",
                 },
             ),
             (
