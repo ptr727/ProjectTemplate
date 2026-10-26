@@ -28,6 +28,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github/actions/repo-gate"))
 import repo_gate
+from host_capability import requires_symlink
 from runner_commands import FORGING_LINES, FORGING_NAMES, ORDINARY_LINES, forged_lines
 
 REPO = Path(__file__).resolve().parent.parent
@@ -1414,6 +1415,7 @@ class TestCarriedTrees(TreeCase):
         self.run_check(files)
         self.assertEqual(len(repo_gate.NOTES), 1)
 
+    @requires_symlink
     def test_a_link_in_the_copy_is_a_change(self) -> None:
         (self.repo / "lib/fleet/sh").mkdir(parents=True)
         (self.repo / "lib/fleet/sh/secrets.sh").symlink_to(self.hub / "lib/sh/secrets.sh")
@@ -1443,6 +1445,7 @@ class TestCarriedTrees(TreeCase):
         self.narrowed(prune=False)
         self.assertEqual(len(repo_gate.NOTES), 1)
 
+    @requires_symlink
     def test_a_tree_that_cannot_be_compared_is_a_note_and_never_a_finding(self) -> None:
         (self.hub / "lib/sh/link").symlink_to(self.hub / "lib/sh/secrets.sh")
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
@@ -1459,6 +1462,37 @@ class TestCarriedTrees(TreeCase):
         self.assertTrue(
             repo_gate.NOTES[0].startswith("the hub's scripts/carry.py could not be loaded")
         )
+
+    @unittest.skipUnless(shutil.which("uv"), "uv provides the 3.12 interpreter")
+    def test_the_hub_carry_runs_under_the_runners_python_3_12(self) -> None:
+        """A CI runner's system python3 is 3.12, and hub CI otherwise loads carry.py under 3.13 alone."""
+        repo = self.tmp / "scanned"
+        self.write(repo / "lib/fleet/sh/secrets.sh", "stale\n")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=60)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, timeout=60)
+        gate = REPO / ".github/actions/repo-gate/repo_gate.py"
+        result = subprocess.run(
+            [
+                "uv",
+                "run",
+                "--no-project",
+                "--python",
+                "3.12",
+                "python",
+                "-I",
+                str(gate),
+                "--root",
+                str(repo),
+                "--check",
+                "carried-trees",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            timeout=300,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("lib/fleet/sh differs from the hub's lib/sh: 1 changed", result.stdout)
 
     def test_a_carry_missing_a_function_the_gate_calls_is_a_note(self) -> None:
         carry_file = self.hub / "scripts/carry.py"
@@ -1483,7 +1517,8 @@ class TestCarriedTrees(TreeCase):
         )
 
     def test_the_annotation_carries_no_name_from_the_scanned_repository(self) -> None:
-        files = [self.write(self.repo / "lib/fleet/sh/x%0A::error::forged", "")]
+        # Named in the tracked list alone, since a Windows file name cannot hold `:`, and a tracked name with no file reads as changed.
+        files = ["lib/fleet/sh/x%0A::error::forged"]
         _, printed = self.run_check(files, actions=True)
         self.assertEqual(printed.count("\n"), 1)
         self.assertNotIn("forged", printed)

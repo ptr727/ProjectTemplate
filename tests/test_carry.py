@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import pathlib
 import re
 import subprocess
@@ -41,6 +44,40 @@ class CarryInventoryTests(unittest.TestCase):
         self.assertEqual(result["extra"], ["extra.txt"])
         self.assertEqual(result["missingDirectories"], ["empty"])
         self.assertEqual(result["extraDirectories"], ["extra-dir"])
+
+    def test_apply_leaves_a_repository_file_under_a_tree_that_does_not_prune(self) -> None:
+        """The post-apply comparison reads ownership as the check does, so it accepts what apply kept."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            hub = root / "hub"
+            (hub / "src").mkdir(parents=True)
+            (hub / "src" / "carried.txt").write_text("hub", encoding="utf-8")
+            (hub / "registry").mkdir()
+            (hub / "registry" / "repos.json").write_text("{}", encoding="utf-8")
+            (hub / "spec").mkdir()
+            tree = {
+                "source": "src",
+                "target": "dst",
+                "fidelity": "verbatim-tree",
+                "appliesTo": "*",
+                "include": ["**/*"],
+                "prune": False,
+            }
+            (hub / "spec" / "files.json").write_text(
+                json.dumps({"trees": [tree]}), encoding="utf-8"
+            )
+            target = root / "repo"
+            (target / "dst").mkdir(parents=True)
+            (target / "dst" / "own.txt").write_text("mine", encoding="utf-8")
+            with (
+                mock.patch.object(carry, "verify_hub", return_value="0" * 40),
+                mock.patch.object(carry, "resolve_repo", return_value={"types": ["docs"]}),
+                mock.patch.object(carry, "verify_target"),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(carry.run("apply", "Demo", target, hub), 0)
+            self.assertEqual((target / "dst" / "carried.txt").read_text(encoding="utf-8"), "hub")
+            self.assertEqual((target / "dst" / "own.txt").read_text(encoding="utf-8"), "mine")
 
     def test_a_pruned_declaration_owns_everything_under_its_target(self) -> None:
         self.assertEqual(carry.target_patterns({"prune": True, "include": ["*.txt"]}), ["**/*"])
