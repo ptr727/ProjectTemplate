@@ -42,6 +42,20 @@ class CarryInventoryTests(unittest.TestCase):
         self.assertEqual(result["missingDirectories"], ["empty"])
         self.assertEqual(result["extraDirectories"], ["extra-dir"])
 
+    def test_a_pruned_declaration_owns_everything_under_its_target(self) -> None:
+        self.assertEqual(carry.target_patterns({"prune": True, "include": ["*.txt"]}), ["**/*"])
+        self.assertEqual(carry.target_patterns({"prune": False, "include": ["*.txt"]}), ["*.txt"])
+
+    def test_only_a_pruned_declaration_reports_extras(self) -> None:
+        source = carry.Inventory({"kept.txt": b"hub"}, frozenset(), "source")
+        target = carry.Inventory(
+            {"kept.txt": b"hub", "own.txt": b"repo"}, frozenset({"own-dir"}), "target"
+        )
+        pruned = carry.compare_declaration({"prune": True}, source, target)
+        self.assertEqual((pruned["extra"], pruned["extraDirectories"]), (["own.txt"], ["own-dir"]))
+        kept = carry.compare_declaration({"prune": False}, source, target)
+        self.assertEqual((kept["extra"], kept["extraDirectories"]), ([], []))
+
     def test_empty_source_requires_target_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)

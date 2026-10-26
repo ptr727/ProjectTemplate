@@ -1448,6 +1448,22 @@ class TestCarriedTrees(TreeCase):
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
         self.assertEqual(self.run_check(files), ([], ""))
         self.assertTrue(repo_gate.NOTES[0].startswith("lib/fleet/sh could not be compared: "))
+        self.assertEqual(
+            repo_gate.NOTES[1], "compared 0 carried tree(s) against the hub tree beside this gate."
+        )
+
+    def test_a_carry_that_will_not_load_is_a_note_and_never_a_finding(self) -> None:
+        (self.hub / "scripts/carry.py").write_text("def broken(:\n", encoding="utf-8")
+        files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "hub\n")]
+        self.assertEqual(self.run_check(files), ([], ""))
+        self.assertTrue(
+            repo_gate.NOTES[0].startswith("the hub's scripts/carry.py could not be loaded")
+        )
+
+    def test_an_unreadable_manifest_is_a_note_and_never_a_finding(self) -> None:
+        self.write(self.hub / "spec/files.json", "{")
+        self.assertEqual(self.run_check([]), ([], ""))
+        self.assertTrue(repo_gate.NOTES[0].startswith("no carried tree was compared: "))
 
     def test_actions_shows_the_difference_on_the_pull_request(self) -> None:
         files = [self.write(self.repo / "lib/fleet/sh/secrets.sh", "edited\n")]

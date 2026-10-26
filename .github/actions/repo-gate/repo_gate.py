@@ -824,21 +824,27 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     if "spec/files.json" in files:
         NOTES.append("the scanned repository is a hub, whose trees are sources rather than copies.")
         return []
-    carry = hub_carry(hub)
+    # Each failure is a note rather than a traceback, since one here would also skip every check sorted after this one.
+    try:
+        carry = hub_carry(hub)
+    except (ImportError, SyntaxError, OSError) as error:
+        NOTES.append(
+            f"the hub's scripts/carry.py could not be loaded, so no carried tree was compared: {error}"
+        )
+        return []
+    try:
+        trees = carry.load_json(hub / "spec" / "files.json")["trees"]
+    except carry.CarryError as error:
+        NOTES.append(f"no carried tree was compared: {error}")
+        return []
     carried = 0
-    for tree in carry.load_json(hub / "spec" / "files.json")["trees"]:
-        target, patterns = tree["target"], tree["include"]
+    for tree in trees:
+        target = tree["target"]
         prefix = target + "/"
         tracked_here = [path[len(prefix) :] for path in files if path.startswith(prefix)]
         if not tracked_here:
             continue
-        carried += 1
-        # A pruned tree owns everything under its target, as a carry and the audit read it, so `include` narrows only one that does not prune.
-        owned = (
-            tracked_here
-            if tree["prune"]
-            else [p for p in tracked_here if carry.included(p, patterns)]
-        )
+        owned = [path for path in tracked_here if carry.included(path, carry.target_patterns(tree))]
         try:
             copy = {
                 relative: None
@@ -847,14 +853,13 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
                 else (root / target / relative).read_bytes()
                 for relative in owned
             }
-            source = carry.inventory(hub / tree["source"], patterns)
+            source = carry.inventory(hub / tree["source"], tree["include"])
         except (carry.CarryError, OSError) as error:
             NOTES.append(f"{target} could not be compared: {error}")
             continue
-        result = carry.compare(source, carry.Inventory(copy, frozenset(), ""))
-        changed, missing = result["modified"], result["missing"]
-        # A tree that does not prune leaves the repository's own files under it alone, as a carry does.
-        extra = result["extra"] if tree["prune"] else []
+        carried += 1
+        result = carry.compare_declaration(tree, source, carry.Inventory(copy, frozenset(), ""))
+        changed, missing, extra = result["modified"], result["missing"], result["extra"]
         if changed or missing or extra:
             if os.environ.get("GITHUB_ACTIONS") == "true":
                 print(

@@ -3,7 +3,12 @@
 # requires-python = ">=3.13"
 # dependencies = ["markdown-it-py>=4"]
 # ///
-"""Check or apply manifest-owned trees, and the verbatim sections inside a mixed file, from the hub to a fleet worktree."""
+"""Check or apply manifest-owned trees, and the verbatim sections inside a mixed file, from the hub to a fleet worktree.
+
+The repository gate's `carried-trees` check loads this file under plain `python3`, 3.12 on a CI
+runner, and calls `load_json`, `included`, `inventory`, `Inventory`, `CarryError`,
+`target_patterns`, and `compare_declaration`. Those stay on the standard library and on 3.12.
+"""
 
 import argparse
 import fnmatch
@@ -139,6 +144,22 @@ def compare(source: Inventory, target: Inventory | None) -> dict[str, Any]:
         "targetDigest": None if target is None else target.digest,
         "missingRoot": target is None,
     }
+
+
+def target_patterns(declaration: dict[str, Any]) -> list[str]:
+    """What a declaration owns under its target: everything where it prunes, its `include` where it does not."""
+    return ["**/*"] if declaration.get("prune") else declaration["include"]
+
+
+def compare_declaration(
+    declaration: dict[str, Any], source: Inventory, target: Inventory | None
+) -> dict[str, Any]:
+    """`compare`, with the extras cleared where the declaration does not prune, since it owns only what it carries there."""
+    result = compare(source, target)
+    if not declaration.get("prune"):
+        result["extra"] = []
+        result["extraDirectories"] = []
+    return result
 
 
 def apply_tree(
@@ -890,12 +911,10 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
         source_root = relative_root(hub, declaration["source"])
         target_root = relative_root(target, declaration["target"])
         source = inventory(source_root, declaration["include"])
-        target_patterns = ["**/*"] if declaration.get("prune") else declaration["include"]
-        target_inventory = inventory(target_root, target_patterns) if target_root.exists() else None
-        result = compare(source, target_inventory)
-        if not declaration.get("prune"):
-            result["extra"] = []
-            result["extraDirectories"] = []
+        target_inventory = (
+            inventory(target_root, target_patterns(declaration)) if target_root.exists() else None
+        )
+        result = compare_declaration(declaration, source, target_inventory)
         print(
             json.dumps(
                 {"source": declaration["source"], "target": declaration["target"], **result},
@@ -919,7 +938,7 @@ def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) ->
         if mode == "apply" and not declaration_clean:
             for change in apply_tree(source, target_root, target, result):
                 print(change)
-            final = compare(source, inventory(target_root, target_patterns))
+            final = compare(source, inventory(target_root, target_patterns(declaration)))
             print(
                 json.dumps(
                     {
