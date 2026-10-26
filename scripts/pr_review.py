@@ -575,7 +575,7 @@ def request_copilot_review(
         )
     before = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
     answer = gh_graphql(M_REQUEST_REVIEWS, pr=pr_node_id, bot=bot_id)
-    after = (answer.get("requestReviews") or {}).get("pullRequest") or {}
+    after = mutated(answer, "requestReviews", "pullRequest")
     state = backoff(
         after,
         lambda: gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"],
@@ -842,7 +842,7 @@ def origin_owner() -> str | None:
             encoding="utf-8",
             env=env,
         ).stdout.strip()
-    # A missing git, a timeout, or any other failure all mean the owner cannot be read.
+    # `_run` returns a missing git or a timeout as no output, and a decode error lands here.
     except Exception:  # noqa: BLE001
         return None
     m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
