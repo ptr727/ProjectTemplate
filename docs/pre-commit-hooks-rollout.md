@@ -57,7 +57,7 @@ later resync should mistake for unfinished work.
 Repos and their current `registry/repos.json` `types`, from the hub's own registry as of this
 doc's authorship. Archived repos are not tracked.
 
-- [x] **ProjectTemplate** (`source-only`, `docs`): the hub itself. Doc gates wired in
+- [x] **ProjectTemplate** (`source-only`, `docs`, `python`): the hub itself. Doc gates wired in
       `.husky/pre-commit` since PR #642, and the ruff/mypy half added in this PR's own commits,
       once the corpus was confirmed clean (0 ruff errors, 200 files formatted, mypy clean).
 - [ ] **Utilities** (`csharp`, `nuget`): Husky.Net + doc gates.
@@ -70,7 +70,7 @@ doc's authorship. Archived repos are not tracked.
 - [ ] **ESPHome-NonRoot** (`docker`, `upstream-wrapper`): doc-gate half only, no declared language.
 - [ ] **VSCode-Server-DotNetCore** (`docker`): doc-gate half only, no declared language.
 - [ ] **NxWitness** (`docker`, `upstream-wrapper`, `codegen`, `csharp`): Husky.Net + doc gates.
-- [ ] **HomeAutomation-Config** (`source-only`): doc-gate half only, no declared language.
+- [ ] **HomeAutomation-Config** (`source-only`, `python`): `pre-commit` framework + doc gates.
 - [ ] **KiCadLibrary** (`eda`, `python`): `pre-commit` framework + doc gates.
 - [ ] **EspDinIoT** (`eda`): doc-gate half only, no fleet-covered language.
 - [ ] **ESPHome-Config** (`source-only`, `python`, `cpp`): `pre-commit` framework + doc gates for
