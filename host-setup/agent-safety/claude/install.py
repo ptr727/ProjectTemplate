@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hooks, the write guard and the model-tier guard with its tier mapping, the
+Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tier mapping, the
 SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
 user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
 `env`. It merges the permission rules this kit owns into the same file. It renders the user
