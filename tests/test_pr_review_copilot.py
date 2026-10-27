@@ -330,6 +330,18 @@ class TestOpenFindings(unittest.TestCase):
         )
         self.assertEqual(1, found.unthreaded)
 
+    def test_each_top_level_findings_list_spelling_is_placed_and_counted(self) -> None:
+        for label in ("Review findings:", "Open findings remain:", "Unresolved findings:"):
+            with self.subTest(label=label):
+                listed = f"**{label}**\n- P1 moderate: one.\n- P2 nit: two.\n- P2 nit: three."
+                found = adapter.read(
+                    body(sections=f"{open_section()}\n\n{listed}\n\n{what_changed()}"),
+                    threads=("101", "102"),
+                )
+                self.assertEqual(1, found.unthreaded)
+                self.assertEqual((), found.notes)
+                self.assertEqual((), found.unplaced)
+
     def test_a_nested_back_reference_is_not_an_entry(self) -> None:
         nested = open_section().replace(
             "\u00b7 New\n- ", "\u00b7 New\n  - see [earlier](#discussion_r999)\n- ", 1
