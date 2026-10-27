@@ -201,7 +201,7 @@ every agent.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | Every requirement, via two `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
+| Claude Code | Every requirement, via `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 

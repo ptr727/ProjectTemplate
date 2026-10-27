@@ -706,6 +706,8 @@ def model_tier_errors(root):
         return [
             f"spec/model-tiers.json: cannot read tiers, maintainerOnly, defaultTier, and tools ({exc})"
         ]
+    if not isinstance(tiers, list) or not isinstance(tools, dict):
+        return ["spec/model-tiers.json: tiers must be a list and tools an object"]
     errors = []
     if reserved not in tiers:
         errors.append(f"spec/model-tiers.json: maintainerOnly {reserved!r} is not a declared tier")
@@ -719,7 +721,13 @@ def model_tier_errors(root):
         "| --- |" + " --- |" * len(tiers),
     ]
     for tool, entry in tools.items():
-        models = entry.get("models", {}) if isinstance(entry, dict) else {}
+        if not isinstance(entry, dict):
+            errors.append(f"spec/model-tiers.json: tool {tool!r} needs a name and a models object")
+            continue
+        models = entry.get("models")
+        if not isinstance(models, dict) or not isinstance(entry.get("name"), str):
+            errors.append(f"spec/model-tiers.json: tool {tool!r} needs a name and a models object")
+            continue
         # A row with a hole leaves a tier resolving to whatever the session runs on.
         # For the default tier, that is the leak this file exists to close.
         if set(models) != set(tiers):
