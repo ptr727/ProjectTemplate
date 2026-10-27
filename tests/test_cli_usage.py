@@ -24,8 +24,8 @@ No run reaches a stub or the listener, leaves a process running, or changes the 
 tree check covers ignored paths and a directory created or emptied anywhere in the tree.
 
 The set is discovered from the tree rather than listed, so a new script is held to the rule the
-moment it is tracked. An extensionless file opening on a shebang counts. A hook its own host runs
-is not a command-line entry point and is listed in NOT_COMMAND_LINE.
+moment it is tracked. An extensionless file opening on a shebang counts. A hook its own host runs,
+and a library a script sources, is not a command-line entry point and is listed in NOT_COMMAND_LINE.
 
 A process the run leaves behind is found by a token in the environment it inherited. That token is
 read from /proc, so the check runs only on a host that has /proc. On Windows only the PowerShell
@@ -69,6 +69,7 @@ NOT_COMMAND_LINE = {
     "host-setup/agent-safety/claude/stray-process-sweep.py": "a Claude Code hook",
     "host-setup/agent-safety/claude/tool-containment.py": "a Claude Code hook",
     "host-setup/agent-safety/claude/test_install.py": "a test module",
+    "lib/sh/secrets.sh": "a library a script sources",
 }
 
 BEFORE_FLAG = {

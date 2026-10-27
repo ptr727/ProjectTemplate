@@ -8,6 +8,7 @@ category's share of a 1,047-finding audit of this repo's Copilot reviews:
   eol           .editorconfig <-> .gitattributes disagreement  40 findings
   eol-coverage  Git attribute resolution differs from policy   count not recorded
   composite-actions  shellcheck and schema coverage of action.yml  count not recorded
+  carried-trees  a manifest-owned tree differing from the hub's  count not recorded
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining
@@ -35,12 +36,15 @@ actionlint, editorconfig-checker, spec/validate.py).
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 # GOVERNANCE.md documents exactly one floating-ref exception.
 SHA_EXCEPTIONS = {"dotnet/nbgv"}
@@ -769,11 +773,146 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
     return hits
 
 
+def gate_hub_root() -> Path | None:
+    """The hub tree this gate file sits in, or None where it was lifted out of one.
+
+    The pinned action runs from the whole hub tree at its pin, and so does a run from a hub
+    checkout. A single-file fetch has no tree around it, and whatever happens to sit three levels
+    above the file is not the hub, so the path is trusted only where its own parents name it.
+    """
+    here = Path(__file__).resolve()
+    if [part.name for part in here.parents[:3]] != ["repo-gate", "actions", ".github"]:
+        return None
+    root = here.parents[3]
+    return root if (root / "spec" / "files.json").is_file() else None
+
+
+def hub_carry(hub: Path) -> ModuleType:
+    """The hub's own `scripts/carry.py`, whose tree inventory and comparison this check reuses.
+
+    It imports only the standard library until a section is read, so plain `python3` loads it.
+    """
+    spec = importlib.util.spec_from_file_location("carry", hub / "scripts" / "carry.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def warn_carried_tree(message: str) -> None:
+    """Show `message` on the pull request under Actions, built from manifest values alone so nothing a scanned repository names reaches the command."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning title=carried-trees::{message}")
+
+
+def check_carried_trees(root: Path, files: list[str]) -> list[str]:
+    """Report each manifest-owned tree the scanned repository carries that differs from the hub's.
+
+    `spec/files.json` declares the trees a repository carries byte-for-byte, and a carried copy
+    goes stale silently at the next hub fix. Comparing against the hub tree this gate runs from
+    makes the answer reproducible at the action's pin, so a Dependabot bump of that pin is what
+    surfaces a refresh the resync then applies.
+
+    A difference is a note rather than a finding, so it never fails the gate. Failing would break
+    every downstream pull request on each hub fix, and a byte difference cannot tell a stale copy
+    from an edited one, which the audit tells apart. Which trees a repository owes is the audit's
+    too, read from its declared types, so a tree absent here is not compared. The copy is read
+    from its tracked files alone, so an untracked file is not a difference.
+    """
+    hub = gate_hub_root()
+    if hub is None:
+        NOTES.append(
+            "no hub tree is beside this gate, as with a single-file fetch, "
+            "so no carried tree was compared."
+        )
+        return []
+    # A hub tracks its manifest, which no carrying repository does, so a hub worktree on another branch is not read as a stale copy.
+    if "spec/files.json" in files:
+        NOTES.append("the scanned repository is a hub, whose trees are sources rather than copies.")
+        return []
+    # Each failure is a note rather than a traceback, since one here would also skip every check sorted after this one.
+    # The catches are broad because carry.py runs under whatever `python3` the host has, so a newer interpreter's API in it fails here as any exception.
+    try:
+        carry = hub_carry(hub)
+    except Exception as error:  # noqa: BLE001
+        NOTES.append(
+            f"the hub's scripts/carry.py could not be loaded, so no carried tree was compared: {error}"
+        )
+        return []
+    try:
+        trees = carry.load_json(hub / "spec" / "files.json")["trees"]
+    except Exception as error:  # noqa: BLE001
+        NOTES.append(f"no carried tree was compared: {error}")
+        return []
+    carried = 0
+    for tree in trees:
+        target = tree["target"]
+        prefix = target + "/"
+        # Git tracks a link to a directory as one path, so a target or an ancestor tracked that way hides every file beneath it.
+        # A top-level ancestor such as `lib` is generic, so one tracked that way says nothing about a carry and is passed over like an uncarried tree.
+        blocking = next(
+            (
+                path
+                for path in files
+                if (path == target or "/" in path) and prefix.startswith(path + "/")
+            ),
+            None,
+        )
+        if blocking is not None:
+            warn_carried_tree(
+                f"{target} sits at or below a tracked link or file, which a carry refuses"
+            )
+            NOTES.append(
+                f"{target} was not compared, since {blocking} is tracked as a link or a file."
+            )
+            continue
+        tracked_here = [path[len(prefix) :] for path in files if path.startswith(prefix)]
+        if not tracked_here:
+            continue
+        try:
+            owned = [p for p in tracked_here if carry.included(p, carry.target_patterns(tree))]
+            # A tree that does not prune shares its target with the repository's own files, so those alone do not make it carried.
+            if not owned:
+                continue
+            # A carry refuses a link anywhere under a tree's target, so the gate refuses one too rather than judging it by a rule of its own.
+            link = next((p for p in sorted(tracked_here) if (root / target / p).is_symlink()), None)
+            if link is not None:
+                warn_carried_tree(f"{target} holds a link, which a carry refuses")
+                NOTES.append(
+                    f"{target} could not be compared, since {link} is a link, which a carry refuses."
+                )
+                continue
+            # A tracked file absent from the working tree is left out, so it reads as missing.
+            copy = {
+                relative: (root / target / relative).read_bytes()
+                for relative in owned
+                if (root / target / relative).is_file()
+            }
+            source = carry.inventory(hub / tree["source"], tree["include"])
+            result = carry.compare_declaration(tree, source, carry.Inventory(copy, frozenset(), ""))
+        except Exception as error:  # noqa: BLE001
+            NOTES.append(f"{target} could not be compared: {error}")
+            continue
+        carried += 1
+        changed, missing, extra = result["modified"], result["missing"], result["extra"]
+        if changed or missing or extra:
+            warn_carried_tree(f"{target} differs from the hub's {tree['source']}")
+            NOTES.append(
+                f"{target} differs from the hub's {tree['source']}: {len(changed)} changed, "
+                f"{len(missing)} missing, {len(extra)} extra, first "
+                f"{(changed + missing + extra)[0]}. Refresh it from the hub, or let the audit say "
+                "whether it is a stale copy or an edited one."
+            )
+    NOTES.append(f"compared {carried} carried tree(s) against the hub tree beside this gate.")
+    return []
+
+
 CHECKS = {
     "sha-pin": check_sha_pin,
     "eol": check_eol,
     "eol-coverage": check_eol_coverage,
     "composite-actions": check_composite_actions,
+    "carried-trees": check_carried_trees,
 }
 
 

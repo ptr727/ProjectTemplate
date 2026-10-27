@@ -2,7 +2,8 @@
     "$schema": "./files.schema.json",
     "note": "The standardization baseline: files, sections, and fully owned trees a fleet repo is expected to carry. See spec/scope-model.md for applicability and spec/fidelity-model.md for fidelity.",
     "trees": [
-        { "source": ".github/skills", "target": ".github/skills", "fidelity": "verbatim-tree", "appliesTo": "*", "include": ["**/*"], "prune": true }
+        { "source": ".github/skills", "target": ".github/skills", "fidelity": "verbatim-tree", "appliesTo": "*", "include": ["**/*"], "prune": true },
+        { "source": "lib/sh", "target": "lib/fleet/sh", "fidelity": "verbatim-tree", "appliesTo": ["host-secrets"], "include": ["**/*"], "prune": true }
     ],
     "baseline": [
         { "path": "CLAUDE.md", "fidelity": "verbatim", "whole": true, "appliesTo": "*" },
