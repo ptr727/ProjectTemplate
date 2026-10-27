@@ -15,7 +15,8 @@ denied.
 
 It bounds a good-faith agent's mistake rather than an adversary. A workflow script is read as
 text, so a model chosen by a computed expression is not seen. A saved workflow named by `name`
-alone cannot be inspected and is allowed.
+alone cannot be inspected and is allowed. So is a child workflow a script starts by name or path,
+since only the top-level script is read.
 
 A config that is missing, unreadable, or lacks the keys cannot say which model is blocked. A call
 naming any model is then denied, so the guard never goes quiet without saying so, and a call naming
@@ -121,8 +122,9 @@ def classify(tool_name, tool_input, tiers, environ, cwd=None):
         return "allow", ""
     return "deny", (
         f'The `{blocked}` model is the maintainer-only tier (AGENTS.md "Model Tiers") and this '
-        f"session was not launched with it allowed. Re-dispatch at the {default_tier} tier's model, "
-        f"`{default}`, or a lower tier."
+        "session was not launched with it allowed. Where the maintainer asked for this tier, stop "
+        "and report the refusal rather than dispatching lower. Otherwise dispatch at the tier the "
+        f"task calls for, `{default_tier}` (`{default}`) by default."
     )
 
 

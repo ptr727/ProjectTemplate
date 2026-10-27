@@ -90,13 +90,14 @@ maintainer starts a second run on a repository only once the first has ended.
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
 invocation. Apart from the timer "A Dispatch That Fails" names, that is the one command it runs.
-From then on it holds only the scope and any `highest` the invocation named, the round count, and
+From then on it holds only the scope and any allowed `highest` the invocation named, the round count, and
 the dispatched handoff numbers. It also holds each round's one-line outcome and the waits spent on
 a dispatch being retried.
 Each round runs:
 
-1. **Dispatch the picker** at `frontier` with the brief below, or at `highest` where the
-   maintainer's invocation named that tier or its model. Its ranking, decision, and worker-tier
+1. **Dispatch the picker** at `frontier` with the brief below. Use `highest` only where the
+   invocation named that tier or its model and the session was launched with it allowed, per
+   "Model Tiers" below. A refusal there ends the run the way step 3's does. Its ranking, decision, and worker-tier
    calls are the ones `backlog-burndown` keeps in its orchestrator, and here no maintainer reviews
    them. Wait on the dispatch mechanism's own completion signal rather than polling.
 2. **Read its one line.** `NONE` or `STOP` ends the run, and so does any reply that is not a

@@ -117,8 +117,9 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
 
     This one guards the maintainer's choice of model and his quota rather than the credentials or
     the machine. It sits in the host layer all the same, because a dispatch happens inside the
-    harness, where no hook a repository carries can see it. It refuses a dispatch that names the
-    model, so a saved workflow, a computed model, or an agent definition pinning one passes.
+    harness, where no hook a repository carries can see it. It refuses only a dispatch that names
+    the model. A saved workflow, a child workflow a script starts, a computed model, and an agent
+    definition pinning one all pass.
 
 ## Decision Flow
 
