@@ -266,6 +266,18 @@ TRANSIENT_LOG = (
     "many files changed - https://docs.example.test/pulls: Failed to fetch PR metadata for o/r#7\n"
 )
 TRANSIENT_LINE = TRANSIENT_LOG.strip()
+SENT_AFTER = {
+    "reviewRequests": {"nodes": []},
+    "timelineItems": {
+        "nodes": [
+            {
+                "id": "RRE_1",
+                "createdAt": "2026-08-02T10:30:00Z",
+                "requestedReviewer": {"__typename": "Bot", "login": pr_review_rounds.REVIEWER},
+            }
+        ]
+    },
+}
 
 # Quoted from the corpus rather than invented: the body a refused review carried, byte for byte.
 QUOTA_REFUSED = (
@@ -4623,13 +4635,7 @@ class TestCli(GqlCase):
 
     def test_a_re_request_already_sent_is_not_sent_again(self) -> None:
         """The bound counts requests rather than rounds, so a request that vanished still spends it."""
-        bot = {"__typename": "Bot", "login": pr_review_rounds.REVIEWER}
-        sent = {
-            "reviewRequests": {"nodes": []},
-            "timelineItems": {
-                "nodes": [{"id": "RRE_1", "createdAt": LATE, "requestedReviewer": bot}]
-            },
-        }
+        sent = SENT_AFTER
         self.answer(self.bodyless(OLD), payload([review(oid=OLD, body=ERROR_REFUSED, at=EARLY)]))
         calls = self.wire_history([hist_review(7, ERROR_REFUSED)], (sent, sent))
         self.run_log(TRANSIENT_LOG)
@@ -4637,6 +4643,32 @@ class TestCli(GqlCase):
             self.assertEqual(41, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
         self.assertIn("one re-request was sent with no round answering it", self.out.getvalue())
+
+    def test_a_re_request_recording_nothing_is_reported_as_unrecorded(self) -> None:
+        refused = payload([review(oid=OLD, body=ERROR_REFUSED, at=EARLY)])
+        self.answer(self.bodyless(OLD), refused)
+        self.wire_history([hist_review(7, ERROR_REFUSED)], (request_state(), request_state()))
+        self.run_log(TRANSIENT_LOG)
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(40, self.cli(["wait", "7", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertIn("status=REQUEST_NOT_RECORDED", out)
+        self.assertNotIn("this is its one re-request", out)
+        self.assertNotIn("COPILOT_ERROR_TRANSIENT", out)
+
+    def test_a_wait_on_a_pending_re_request_ends_on_the_next_round(self) -> None:
+        """A second refusal is no head review, so the round count is what ends this poll early."""
+        first = review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_a")
+        live = payload([{k: v for k, v in first.items() if k != "body"}], pending=True)
+        again = payload([first, review(body=ERROR_REFUSED, at=LATE, rid="PRR_b")])
+        self.answer(live, payload([first], pending=True), again)
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)], (SENT_AFTER, SENT_AFTER))
+        self.run_log(TRANSIENT_LOG)
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(41, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertIn("but the round before it was an error refusal too", self.out.getvalue())
 
     def test_a_held_head_names_the_owed_re_request_rather_than_quota(self) -> None:
         self.answer(self.into(payload([review(oid=OLD, body=ERROR_REFUSED)])))
@@ -4661,23 +4693,22 @@ class TestCli(GqlCase):
     def test_the_digest_names_the_run_log_reading_it_took(self) -> None:
         one = [review(body=ERROR_REFUSED, at=LATE, rid="PRR_a")]
         two = [review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_z"), *one]
-        for rounds, log, wired, line in (
-            (one, TRANSIENT_LOG, True, "RUN LOG READING: transient. The run log names"),
-            (
-                two,
-                TRANSIENT_LOG,
-                True,
-                "possible quota. The run log names a fetch failure, but the round",
-            ),
-            (one, TRANSIENT_LOG, False, "but the request history was unread"),
-            (one, None, True, "RUN LOG READING: possible quota. The run log was unread"),
-            (one, RATE_LIMIT_LOG, True, None),
+        early = [review(body=ERROR_REFUSED, at=EARLY, rid="PRR_a")]
+        transient = "RUN LOG READING: transient. The run log names"
+        spent = "possible quota. The run log names a fetch failure, but the round"
+        sent = "possible quota. The one re-request it was owed was sent"
+        unread = "RUN LOG READING: possible quota. The run log was unread"
+        for rounds, log, states, line in (
+            (one, TRANSIENT_LOG, RECORDED, transient),
+            (two, TRANSIENT_LOG, RECORDED, spent),
+            (early, TRANSIENT_LOG, (SENT_AFTER, SENT_AFTER), sent),
+            (one, None, RECORDED, unread),
+            (one, RATE_LIMIT_LOG, RECORDED, None),
         ):
             with self.subTest(line=line):
                 pr_review.run_cause.cache_clear()
                 self.answer(payload(rounds))
-                if wired:
-                    self.wire_history([])
+                self.wire_history([], states)
                 self.run_log(log)
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn("refusal=QUOTA" if line is None else "refusal=ERROR", out)

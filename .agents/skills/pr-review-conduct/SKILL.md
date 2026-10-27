@@ -75,7 +75,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    earlier one, is the one nothing the loop does clears, which is the case "Which Reviewers a
    Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
    transient is the exception. `wait` re-requests it once and exits `30` while that request is
-   pending. A second error refusal in a row reads as possible quota.
+   pending. A second error refusal in a row, or a re-request made with no round answering it,
+   reads as possible quota. A held head exits `41` as `COPILOT_ERROR_TRANSIENT`, its request
+   waiting on `--request`.
    `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
    account state read from the reviewer's activity elsewhere when this head carries none of its
    own, and a refusal holding across several heads with no cause its body names reaches it the
