@@ -960,11 +960,11 @@ def registration_problems(claude_home):
     try:
         raw = read_regular_file(claude_home / "settings.json")
     except FileNotFoundError:
-        return ["settings.json is missing, so the hook is not registered"]
+        return ["settings.json is missing, so the hooks are not registered"]
     except OSError as e:
         return [f"settings.json cannot be read ({e})"]
     if raw is None:
-        return ["settings.json is not a regular file, so the hook is not registered"]
+        return ["settings.json is not a regular file, so the hooks are not registered"]
     try:
         data = json.loads(raw.decode("utf-8") or "{}")
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
@@ -1095,7 +1095,7 @@ def registration_problems(claude_home):
         groups,
         GUARD_NAME,
         ("Bash",),
-        "guard",
+        "write guard",
         "the write guard",
         "that group never fires",
         "the guard never runs",
@@ -1528,7 +1528,7 @@ def main():
     if not isinstance(data, dict):
         sys.stderr.write(
             f"{settings} is valid JSON but holds {type(data).__name__} at its root where an object "
-            "is required. Fix or remove it, then re-run. This file is unchanged, so the hook is "
+            "is required. Fix or remove it, then re-run. This file is unchanged, so the hooks are "
             "deployed but not registered.\n"
         )
         return 1
@@ -1540,7 +1540,7 @@ def main():
     def reject(where, held, want):
         sys.stderr.write(
             f"{settings} has `{where}` as {type(held).__name__} where {want.__name__} is required. "
-            "Fix or remove that key, then re-run. This file is unchanged, so the hook is deployed "
+            "Fix or remove that key, then re-run. This file is unchanged, so the hooks are deployed "
             "but not registered.\n"
         )
 
