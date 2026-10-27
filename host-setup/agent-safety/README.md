@@ -112,15 +112,17 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
     on the most capable and most expensive model nobody had asked for. Read the tier mapping from
     the hub's `spec/model-tiers.json`, deployed beside the hook. Refuse a dispatch naming the
     maintainer-only tier's model unless the session was launched with that tier allowed. An
-    agent can never grant the allowance to itself. A mapping the hook cannot read refuses every
-    dispatch naming a model, since a guard that cannot tell what to block must not go quiet.
+    agent never grants the allowance to itself. A mapping the hook cannot read refuses every
+    dispatch naming a model, since a guard that cannot tell what to block must not go quiet. A
+    session launched with the allowance blocks no model, so it needs no mapping.
 
     This one guards the maintainer's choice of model and his quota rather than the credentials or
     the machine. It sits in the host layer all the same, because a dispatch happens inside the
     harness, where no hook a repository carries can see it. It refuses only a dispatch that names
     the model. A saved workflow, a child workflow a script starts, a computed model, and an agent
     definition pinning one all pass. So do a dispatch naming no model and a fork naming another
-    model, which run at a model the hook cannot read.
+    model, which run at a model the hook cannot read. So does a nested session an agent launches
+    with the allowance set, which is circumvention rather than the mistake this guards.
 
 ## Decision Flow
 
