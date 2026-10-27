@@ -119,8 +119,8 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
     the machine. It sits in the host layer all the same, because a dispatch happens inside the
     harness, where no hook a repository carries can see it. It refuses only a dispatch that names
     the model. A saved workflow, a child workflow a script starts, a computed model, and an agent
-    definition pinning one all pass. So do a dispatch naming no model and a fork, which run at
-    a model the hook cannot read.
+    definition pinning one all pass. So do a dispatch naming no model and a fork naming another
+    model, which run at a model the hook cannot read.
 
 ## Decision Flow
 
