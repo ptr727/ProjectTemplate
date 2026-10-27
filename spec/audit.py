@@ -99,27 +99,29 @@ def hub_tracked(rev=None):
     return frozenset(paths)
 
 
+def hub_paths_below(source, include=("**/*",), rev=None):
+    """Hub-tracked paths below a declared source directory, mapped from the path relative to it, that match its include patterns."""
+    root = source.rstrip("/") + "/"
+    return {
+        path.removeprefix(root): path
+        for path in hub_tracked(rev)
+        if path.startswith(root) and tree_path_included(path.removeprefix(root), include)
+    }
+
+
 def hub_only_paths(spec, rev=None):
     """Hub-tracked paths the manifest does not declare, so a downstream copy is hub-hosted content rather than a carry.
 
     A path below a declared repo-owned tree is left out, since a downstream file there is that repo's own.
     """
-    declared = {e["path"] for e in spec["files"]["baseline"]}
-    tree_paths = set()
+    excluded = {e["path"] for e in spec["files"]["baseline"]}
     for declaration in spec["files"].get("trees", []):
-        root = declaration["source"].rstrip("/") + "/"
-        tree_paths.update(
-            path
-            for path in hub_tracked(rev)
-            if path.startswith(root)
-            and tree_path_included(path.removeprefix(root), declaration["include"])
+        excluded.update(
+            hub_paths_below(declaration["source"], declaration["include"], rev).values()
         )
-    owned_roots = tuple(
-        declaration["source"].rstrip("/") + "/"
-        for declaration in spec["files"].get("repoOwnedTrees", [])
-    )
-    owned_paths = {path for path in hub_tracked(rev) if path.startswith(owned_roots)}
-    return hub_tracked(rev) - declared - tree_paths - owned_paths
+    for declaration in spec["files"].get("repoOwnedTrees", []):
+        excluded.update(hub_paths_below(declaration["source"], rev=rev).values())
+    return hub_tracked(rev) - excluded
 
 
 def gap_dispositions(spec):
@@ -2087,14 +2089,8 @@ def check_tree_verbatim(run):
     for declaration in run.spec["files"].get("trees", []):
         if not applies(declaration.get("appliesTo", "*"), run.sel):
             continue
-        source_root = declaration["source"].rstrip("/")
         target_root = declaration["target"].rstrip("/")
-        source_files = {
-            path.removeprefix(source_root + "/"): path
-            for path in hub_tracked()
-            if path.startswith(source_root + "/")
-            and tree_path_included(path.removeprefix(source_root + "/"), declaration["include"])
-        }
+        source_files = hub_paths_below(declaration["source"], declaration["include"])
         target_files = {
             path.removeprefix(target_root + "/"): path
             for path in run.entries
