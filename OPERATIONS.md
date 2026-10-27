@@ -26,6 +26,8 @@ uvx --with-requirements tests/requirements.txt coverage@latest run --source=scri
 uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup --append spec/workflow_reuse.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/gh-write-guard.py --selftest
 uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_install.py
+uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/model-tier-guard.py --selftest
+uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_model_tier_guard.py
 uvx coverage@latest report
 uv run --no-project --script scripts/build_dist.py --check
 uv run --no-project --script scripts/canonical_review.py status > /dev/null
