@@ -1636,6 +1636,23 @@ class TestRegistration(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("under a matcher", r.stdout)
 
+    def test_a_sweep_under_a_matcher_still_counts_toward_the_duplicate(self):
+        """A narrowed matcher still fires on some exit reasons, so a second sound entry runs the sweep twice."""
+        self.install()
+        data = self._settings()
+        group = next(
+            g
+            for g in data["hooks"]["SessionEnd"]
+            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+        )
+        data["hooks"]["SessionEnd"].append(dict(json.loads(json.dumps(group)), matcher="clear"))
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertIn(
+            "the SessionEnd sweep is registered 2 times, so it runs more than once", problems
+        )
+        self.assertTrue(any("under a matcher ('clear')" in p for p in problems), problems)
+
     def test_a_sweep_matcher_covering_every_reason_is_not_a_defect(self):
         """An absent, empty, or `*` SessionEnd matcher runs on every exit reason, same as PreToolUse."""
         self.install()
