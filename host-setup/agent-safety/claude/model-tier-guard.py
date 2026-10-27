@@ -16,8 +16,8 @@ denied.
 It bounds a good-faith agent's mistake rather than an adversary. A workflow script is read as
 text, so a model chosen by a computed expression is not seen. A saved workflow named by `name`
 alone cannot be inspected and is allowed. So is a child workflow a script starts by name or path,
-since only the top-level script is read. A dispatch naming no model, and a fork naming any model but
-the blocked one, runs at a model this hook cannot read, so it is allowed.
+since only the top-level script is read. A dispatch naming no model runs at a model this hook cannot
+read, and so does a fork naming another model, so both are allowed.
 
 A config that is missing, unreadable, or lacks the keys cannot say which model is blocked. A call
 naming any model is then denied, so the guard never goes quiet without saying so, and a call naming
