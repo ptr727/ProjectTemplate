@@ -1007,11 +1007,12 @@ def registration_problems(claude_home):
             return None
         return groups
 
-    def check_pre_tool_hook(groups, name, tools, label, subject, unseen_effect, absent_effect):
-        """Report each way the PreToolUse `groups` fail to run hook `name` once on every one of `tools`.
+    def check_hook(event, groups, name, label, subject, absent_effect, judge):
+        """Report each way the `event` `groups` fail to run hook `name` exactly once.
 
-        `label` names the hook in an entry or group defect, and `subject` names it in the count
-        lines. `unseen_effect` and `absent_effect` say what a blind matcher and a missing entry cost.
+        `label` names the hook in an entry defect, and `subject` names it in the count lines, with
+        `absent_effect` saying what a missing entry costs. `judge(group, hook)` reports what `event`
+        itself requires of an entry that runs the deployed hook, and returns whether it counts as registered.
         """
         if groups is None:
             return  # the shape error is already reported, and a count from it would be meaningless
@@ -1030,24 +1031,63 @@ def registration_problems(claude_home):
                 named += 1
                 if not runs_hook(hook.get("command"), path) or hook.get("type") != "command":
                     out.append(
-                        f"a PreToolUse entry names the {label} but does not run the deployed one "
+                        f"a {event} entry names the {label} but does not run the deployed one "
                         f"({hook.get('type')!r} running {hook.get('command')!r})"
                     )
                     continue
-                # Every tool is checked, since a matcher seeing only some leaves the others' calls unguarded.
-                unseen = [t for t in tools if not matcher_sees_tool(group.get("matcher"), t)]
-                if unseen:
-                    report(
-                        f"a PreToolUse group registers the {label} under matcher "
-                        f"{group.get('matcher')!r}, which no {'/'.join(unseen)} call matches, so "
-                        f"{unseen_effect}"
-                    )
-                    continue
-                registered += 1
+                if judge(group, hook):
+                    registered += 1
         if named == 0:
             out.append(f"{subject} is not registered in settings.json, so {absent_effect}")
         elif registered > 1:
             out.append(f"{subject} is registered {registered} times, so it runs more than once")
+
+    def check_pre_tool_hook(groups, name, tools, label, subject, unseen_effect, absent_effect):
+        """Report each way the PreToolUse `groups` fail to run hook `name` once on every one of `tools`.
+
+        `label` names the hook in an entry or group defect, and `subject` names it in the count
+        lines. `unseen_effect` and `absent_effect` say what a blind matcher and a missing entry cost.
+        """
+
+        def judge(group, hook):
+            # Every tool is checked, since a matcher seeing only some leaves the others' calls unguarded.
+            unseen = [t for t in tools if not matcher_sees_tool(group.get("matcher"), t)]
+            if unseen:
+                report(
+                    f"a PreToolUse group registers the {label} under matcher "
+                    f"{group.get('matcher')!r}, which no {'/'.join(unseen)} call matches, so "
+                    f"{unseen_effect}"
+                )
+                return False
+            return True
+
+        check_hook("PreToolUse", groups, name, label, subject, absent_effect, judge)
+
+    def judge_sweep(group, hook):
+        """Report a SessionEnd sweep entry's timeout and matcher, counting it unless its timeout is too short."""
+        # A longer budget than this installer writes is not a defect, so only a shorter one is reported.
+        # The event's own default is 1.5s, which is what the sweep needs more than.
+        timeout = hook.get("timeout")
+        too_short = isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+        if not too_short:
+            too_short = timeout < SWEEP_TIMEOUT_SECONDS
+        if too_short:
+            carries = (
+                "carries no timeout" if "timeout" not in hook else f"carries timeout {timeout!r}"
+            )
+            out.append(
+                f"the SessionEnd sweep {carries} where this installer writes "
+                f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
+            )
+            return False
+        # Any matcher other than absent, empty, or `*` may filter some exit reasons out.
+        # Counting it as registered reports a machine current while the sweep may never fire on an ordinary exit.
+        if not matcher_covers_every_exit_reason(group.get("matcher")):
+            report(
+                f"the SessionEnd sweep is registered under a matcher "
+                f"({group.get('matcher')!r}) other than absent, empty, or `*`, so it may not run on every exit reason"
+            )
+        return True
 
     groups = event_groups("PreToolUse")
     check_pre_tool_hook(
@@ -1068,57 +1108,15 @@ def registration_problems(claude_home):
         "that dispatch is never checked",
         "a maintainer-only model dispatch is never refused",
     )
-    ends = event_groups("SessionEnd")
-    sweeps_named = 0
-    swept = 0
-    for group in ends or []:
-        if not isinstance(group, dict):
-            continue
-        sweep_path = claude_home / "hooks" / SWEEP_NAME
-        for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), SWEEP_NAME):
-                continue
-            sweeps_named += 1
-            if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
-                out.append(
-                    "a SessionEnd entry names the sweep but does not run the deployed one "
-                    f"({hook.get('type')!r} running {hook.get('command')!r})"
-                )
-                continue
-            # A longer budget than this installer writes is not a defect, so only a shorter one is reported.
-            # The event's own default is 1.5s, which is what the sweep needs more than.
-            timeout = hook.get("timeout")
-            too_short = isinstance(timeout, bool) or not isinstance(timeout, (int, float))
-            if not too_short:
-                too_short = timeout < SWEEP_TIMEOUT_SECONDS
-            if too_short:
-                carries = (
-                    "carries no timeout"
-                    if "timeout" not in hook
-                    else f"carries timeout {timeout!r}"
-                )
-                out.append(
-                    f"the SessionEnd sweep {carries} where this installer writes "
-                    f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
-                )
-                continue
-            swept += 1
-            # Any matcher other than absent, empty, or `*` may filter some exit reasons out.
-            # Counting it as registered reports a machine current while the sweep may never fire on an ordinary exit.
-            if not matcher_covers_every_exit_reason(group.get("matcher")):
-                report(
-                    f"the SessionEnd sweep is registered under a matcher "
-                    f"({group.get('matcher')!r}) other than absent, empty, or `*`, so it may not run on every exit reason"
-                )
-    if ends is None:
-        pass  # likewise reported as a shape error above
-    elif sweeps_named == 0:
-        out.append(
-            "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "
-            "never reported"
-        )
-    elif swept > 1:
-        out.append(f"the SessionEnd sweep is registered {swept} times, so it runs more than once")
+    check_hook(
+        "SessionEnd",
+        event_groups("SessionEnd"),
+        SWEEP_NAME,
+        "sweep",
+        "the SessionEnd sweep",
+        "a surviving shell is never reported",
+        judge_sweep,
+    )
     capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
     env = data.get("env")
     held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
