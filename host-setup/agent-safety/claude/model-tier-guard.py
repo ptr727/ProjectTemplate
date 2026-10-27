@@ -79,7 +79,9 @@ def script_text(tool_input, cwd=None):
 def names_model(text, model):
     """Whether a script text carries a `model: '<name>'` option naming `model`."""
     # A JavaScript key may be bare or quoted, so `{"model": "x"}` is the same option as `{model: "x"}`.
-    pattern = r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`](?i:" + re.escape(model) + r")['\"`]"
+    # The value may be a full model id rather than the alias, so the alias is matched as a word inside it.
+    value = r"[^'\"`]*(?<![a-z0-9])(?i:" + re.escape(model) + r")(?![a-z0-9])[^'\"`]*"
+    pattern = r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`]" + value + r"['\"`]"
     return re.search(pattern, text) is not None
 
 

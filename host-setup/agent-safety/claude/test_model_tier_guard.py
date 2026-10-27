@@ -107,6 +107,7 @@ class TestModelTierGuard(unittest.TestCase):
             "agent(`x`, { model : `fable` })",
             'agent("x", {"model": "fable"})',
             "agent('x', {'model': 'fable'})",
+            "agent('x', { model: 'claude-fable-5-1' })",
         ):
             with self.subTest(script=script):
                 self.assertDenied(self.run_hook("Workflow", {"script": script}))

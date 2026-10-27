@@ -1532,6 +1532,7 @@ class TestRegistration(StampCase):
         )
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("the installed content differs from what this checkout would write", r.stdout)
 
     def test_a_registration_is_read_however_its_path_is_quoted(self):
         """A hand-written or UI-written registration runs the deployed path bare or single-quoted."""

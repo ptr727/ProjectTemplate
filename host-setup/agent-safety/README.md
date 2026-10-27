@@ -3,7 +3,7 @@
 What any coding agent must be stopped from doing when it runs unattended on this host, stated once,
 independent of which agent implements it. Most of it guards the maintainer's `gh` credentials, which
 is where the harm started. Requirements 7 to 9 guard the machine itself, which is the other thing
-an unattended agent takes down. This file is the source
+an unattended agent takes down. Requirement 10 guards the maintainer's model choice and quota. This file is the source
 of truth: an implementation is built from the requirements below, and an implementation is audited
 by checking its decisions against them, not by reading its source as the implicit spec.
 
@@ -163,8 +163,8 @@ flowchart LR
 ```
 
 The first diagram is this spec's actual decision flow, generalized from `claude/gh-write-guard.py`'s
-`classify()`. Requirements 8 and 9 appear nowhere in it, deliberately: neither judges a command's
-text. Requirement 9 wraps every command the flow allows, and requirement 8 runs once at the end of a
+`classify()`. Requirements 8, 9, and 10 appear nowhere in it, deliberately. None judges a command's
+text, and requirement 10 judges a subagent dispatch instead. Requirement 9 wraps every command the flow allows, and requirement 8 runs once at the end of a
 session on whatever the denials and the ceilings did not prevent. The second is why a failure lands in one layer and not another. A rule that never
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and

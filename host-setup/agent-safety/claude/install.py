@@ -771,7 +771,8 @@ def payload_digest():
 
     Fixed order because a set of files has none, and a digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
-    `installed_digest` reads, so the two are directly comparable: each deployed hook, then each block.
+    `installed_digest` reads, so the two are directly comparable: each deployed hook, then each data
+    file, then each block.
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
@@ -1222,7 +1223,7 @@ def report(claude_home):
     live_installed = installed_digest(claude_home)
     if live_installed is None:
         problems.append(
-            "a deployed hook or CLAUDE.md is missing or unreadable, so the kit is not fully installed"
+            "a deployed hook, its data file, or CLAUDE.md is missing or unreadable, so the kit is not fully installed"
         )
     elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
