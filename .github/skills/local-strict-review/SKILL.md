@@ -188,7 +188,7 @@ A rule, a Skill, or a brief names a model tier, never a model. A model release i
 - **`frontier`** is the fleet's default reasoning tier, for orchestrating, rule text, design, spec logic, and adversarial review. It is not the most capable model available, which is `highest`.
 - **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's evidence-backed decline of a finding raised on its pull request stands, since that pull request's reviewers and its merge gate check it.
 - **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
-- **`highest`** is the most capable model available. Only the maintainer selects it, for the session itself or for its subagents when the session starts. A host running the hub's agent-safety kit refuses any other dispatch at it. A maintainer naming it partway through a session restarts the session with it allowed. A session never reaches for it because a task looks hard.
+- **`highest`** is the most capable model available. Only the maintainer selects it, for the session itself or for its subagents when the session starts. A host running the hub's agent-safety kit refuses any other dispatch that names it. A maintainer naming it partway through a session restarts the session with it allowed. A session never reaches for it because a task looks hard.
 
 | Tool | `highest` | `frontier` | `standard` | `bulk` |
 | --- | --- | --- | --- | --- |

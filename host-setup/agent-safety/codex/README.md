@@ -32,7 +32,7 @@ offers none of these extension points, that finding belongs on
 
 Once a Codex-side implementation exists, audit it the way [`../README.md`][spec] "Auditing an
 Implementation Against This Spec" describes. Run its own self-test and check every case against the
-ten requirements, not against `gh-write-guard.py`'s source.
+requirements, not against `gh-write-guard.py`'s source.
 
 <!-- Repo -->
 [spec]: ../README.md

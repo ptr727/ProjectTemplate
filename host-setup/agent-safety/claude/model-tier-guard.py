@@ -35,45 +35,52 @@ TOOL = "claude-code"
 
 
 def load_tiers(path):
-    """The (blocked model, default model) pair from the config, or None where it cannot be read."""
+    """The (blocked model, default tier, default model) triple from the config, or None where it cannot be read."""
     try:
         with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
         models = cfg["tools"][TOOL]["models"]
         blocked = models[cfg["maintainerOnly"]]
-        default = models[cfg["defaultTier"]]
+        default_tier = cfg["defaultTier"]
+        default = models[default_tier]
     except (OSError, ValueError, KeyError, TypeError):
         return None
     if not isinstance(blocked, str) or not isinstance(default, str) or not blocked:
         return None
-    return blocked, default
+    return blocked, default_tier, default
 
 
-def script_text(tool_input):
-    """The script the Workflow tool will run: the file at `scriptPath`, which takes precedence there, else the inline `script`.
+def script_text(tool_input, cwd=None):
+    """`(text, unreadable)` for the script the Workflow tool will run, the file at `scriptPath` and the inline `script`.
 
     Both are read and joined, since a call passing both runs the file. Reading only the inline
-    text would let a model named in the file pass unseen.
+    text would let a model named in the file pass unseen. A relative path resolves against the
+    session's `cwd` rather than this hook's own directory. A file that cannot be read is reported,
+    so the caller refuses rather than passing a script it never saw.
     """
     parts = []
+    unreadable = False
     path = tool_input.get("scriptPath")
     if isinstance(path, str) and path:
+        path = os.path.expanduser(path)
+        if not os.path.isabs(path) and isinstance(cwd, str) and cwd:
+            path = os.path.join(cwd, path)
         try:
             with open(path, encoding="utf-8") as f:
                 parts.append(f.read())
         except (OSError, ValueError):
-            pass
+            unreadable = True
     inline = tool_input.get("script")
     if isinstance(inline, str):
         parts.append(inline)
-    return "\n".join(parts)
+    return "\n".join(parts), unreadable
 
 
 def names_model(text, model):
     """Whether a script text carries a `model: '<name>'` option naming `model`."""
     # A JavaScript key may be bare or quoted, so `{"model": "x"}` is the same option as `{model: "x"}`.
-    pattern = r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`]" + re.escape(model) + r"['\"`]"
-    return re.search(pattern, text, re.IGNORECASE) is not None
+    pattern = r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`](?i:" + re.escape(model) + r")['\"`]"
+    return re.search(pattern, text) is not None
 
 
 def any_model(text):
@@ -81,7 +88,7 @@ def any_model(text):
     return re.search(r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`]", text) is not None
 
 
-def classify(tool_name, tool_input, tiers, environ):
+def classify(tool_name, tool_input, tiers, environ, cwd=None):
     """Return ("deny", reason) or ("allow", "") for one tool call."""
     if tool_name not in ("Agent", "Workflow") or not isinstance(tool_input, dict):
         return "allow", ""
@@ -92,7 +99,12 @@ def classify(tool_name, tool_input, tiers, environ):
         model = model if isinstance(model, str) else ""
     else:
         model = ""
-    text = script_text(tool_input) if tool_name == "Workflow" else ""
+    text, unreadable = script_text(tool_input, cwd) if tool_name == "Workflow" else ("", False)
+    if unreadable:
+        return "deny", (
+            "The workflow's scriptPath could not be read, so a model it names cannot be ruled out. "
+            "Pass an absolute path to a readable file, or the script inline."
+        )
     if tiers is None:
         if model or any_model(text):
             return "deny", (
@@ -101,19 +113,19 @@ def classify(tool_name, tool_input, tiers, environ):
                 "agent-safety installer to restore it."
             )
         return "allow", ""
-    blocked, default = tiers
+    blocked, default_tier, default = tiers
     hit = model.lower() == blocked.lower() if model else names_model(text, blocked)
     if not hit:
         return "allow", ""
     return "deny", (
         f'The `{blocked}` model is the maintainer-only tier (AGENTS.md "Model Tiers") and this '
-        f"session was not launched with it allowed. Re-dispatch at the frontier tier's model, "
+        f"session was not launched with it allowed. Re-dispatch at the {default_tier} tier's model, "
         f"`{default}`, or a lower tier."
     )
 
 
 def _selftest():
-    tiers = ("fable", "opus")
+    tiers = ("fable", "frontier", "opus")
     cases = [
         ("Agent", {"model": "fable"}, tiers, {}, "deny"),
         ("Agent", {"model": "Fable"}, tiers, {}, "deny"),
@@ -146,7 +158,9 @@ def _main():
     if not isinstance(data, dict):
         sys.exit(0)
     tiers = load_tiers(os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_NAME))
-    decision, reason = classify(data.get("tool_name"), data.get("tool_input"), tiers, os.environ)
+    decision, reason = classify(
+        data.get("tool_name"), data.get("tool_input"), tiers, os.environ, data.get("cwd")
+    )
     if decision == "deny":
         print(
             json.dumps(

@@ -38,13 +38,13 @@ class TestModelTierGuard(unittest.TestCase):
     def write_config(self, cfg):
         (self.dir / "model-tiers.json").write_text(json.dumps(cfg), encoding="utf-8")
 
-    def run_hook(self, tool, tool_input, allow=None):
+    def run_hook(self, tool, tool_input, allow=None, cwd=None):
         env = {k: v for k, v in os.environ.items() if k != "FLEET_ALLOW_HIGHEST"}
         if allow is not None:
             env["FLEET_ALLOW_HIGHEST"] = allow
         done = subprocess.run(
             [sys.executable, str(self.dir / "model-tier-guard.py")],
-            input=json.dumps({"tool_name": tool, "tool_input": tool_input}),
+            input=json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": cwd}),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -115,6 +115,14 @@ class TestModelTierGuard(unittest.TestCase):
         path = self.dir / "flow.js"
         path.write_text("agent('x', { model: 'fable' })", encoding="utf-8")
         self.assertDenied(self.run_hook("Workflow", {"scriptPath": str(path)}))
+
+    def test_a_relative_script_path_resolves_against_the_session_cwd(self):
+        (self.dir / "flow.js").write_text("agent('x', { model: 'fable' })", encoding="utf-8")
+        self.assertDenied(self.run_hook("Workflow", {"scriptPath": "flow.js"}, cwd=str(self.dir)))
+
+    def test_an_unreadable_script_path_is_denied(self):
+        missing = str(self.dir / "absent.js")
+        self.assertDenied(self.run_hook("Workflow", {"scriptPath": missing}))
 
     def test_a_script_file_is_read_even_beside_an_inline_script(self):
         path = self.dir / "flow.js"

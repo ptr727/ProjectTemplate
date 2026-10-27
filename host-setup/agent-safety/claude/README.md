@@ -53,6 +53,7 @@ The deployed copy on each machine is a snapshot, so when the guard changes upstr
 python3 ~/.claude/hooks/gh-write-guard.py --selftest        # decision matrix: all cases pass
 python3 ~/.claude/hooks/stray-process-sweep.py --selftest  # reporting matrix: all cases pass
 python3 ~/.claude/hooks/tool-containment.py --selftest     # containment matrix: all cases pass
+python3 ~/.claude/hooks/model-tier-guard.py --selftest     # tier matrix: all cases pass
 python3 ~/.claude/hooks/stray-process-sweep.py --orphans   # exit 0: no command scope outlived its session
 grep -c CLAUDE_CODE_SHELL_PREFIX ~/.claude/settings.json      # expect 1 where the installer reported the prefix set
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
@@ -67,6 +68,7 @@ On Windows PowerShell:
 py -3 "$env:USERPROFILE\.claude\hooks\gh-write-guard.py" --selftest        # all cases pass
 py -3 "$env:USERPROFILE\.claude\hooks\stray-process-sweep.py" --selftest  # all cases pass
 py -3 "$env:USERPROFILE\.claude\hooks\tool-containment.py" --selftest     # all cases pass
+py -3 "$env:USERPROFILE\.claude\hooks\model-tier-guard.py" --selftest     # all cases pass
 (Select-String 'agent-safety v' "$env:USERPROFILE\.claude\CLAUDE.md").Count      # expect 2
 (Select-String 'fleet-bootstrap v' "$env:USERPROFILE\.claude\CLAUDE.md").Count   # expect 2
 (Select-String -SimpleMatch 'Bash(python3 scripts/pr_review.py:*)' "$env:USERPROFILE\.claude\settings.json").Count   # expect 1

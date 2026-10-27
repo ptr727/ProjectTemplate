@@ -115,6 +115,11 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
     agent can never grant the allowance to itself. A mapping the hook cannot read refuses every
     dispatch naming a model, since a guard that cannot tell what to block must not go quiet.
 
+    This one guards the maintainer's choice of model and his quota rather than the credentials or
+    the machine. It sits in the host layer all the same, because a dispatch happens inside the
+    harness, where no hook a repository carries can see it. It refuses a dispatch that names the
+    model, so a saved workflow, a computed model, or an agent definition pinning one passes.
+
 ## Decision Flow
 
 ```mermaid
@@ -194,7 +199,7 @@ every agent.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | All 10 requirements, via two `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
+| Claude Code | Every requirement, via two `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 
