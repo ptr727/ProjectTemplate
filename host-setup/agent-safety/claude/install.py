@@ -200,6 +200,24 @@ def matcher_covers_every_exit_reason(matcher):
     return matcher is None or matcher in ("", "*")
 
 
+def register_hook(groups, name, entry, selects, matcher=None):
+    """Leave `entry` as the only registration of hook `name` across an event's matcher `groups`.
+
+    Every entry naming the hook is stripped first, so a re-run leaves no duplicate behind even
+    where more than one group would select it. `entry` then goes into the first group `selects`
+    accepts, or into a new group carrying `matcher`, which an absent `matcher` leaves unfiltered.
+    """
+    for g in groups:
+        hooks_list = g.get("hooks")
+        if isinstance(hooks_list, list):
+            hooks_list[:] = [h for h in hooks_list if not names_hook(h.get("command", ""), name)]
+    group = next((g for g in groups if selects(g)), None)
+    if group is None:
+        group = {"hooks": []} if matcher is None else {"matcher": matcher, "hooks": []}
+        groups.append(group)
+    group.setdefault("hooks", []).append(entry)
+
+
 def owns(entry, prefix):
     """Whether an allow rule names the script the prefix identifies, rather than a longer path.
 
@@ -989,83 +1007,67 @@ def registration_problems(claude_home):
             return None
         return groups
 
+    def check_pre_tool_hook(groups, name, tools, label, subject, unseen_effect, absent_effect):
+        """Report each way the PreToolUse `groups` fail to run hook `name` once on every one of `tools`.
+
+        `label` names the hook in an entry or group defect, and `subject` names it in the count
+        lines. `unseen_effect` and `absent_effect` say what a blind matcher and a missing entry cost.
+        """
+        if groups is None:
+            return  # the shape error is already reported, and a count from it would be meaningless
+        # Counted apart from the registrations, since an entry with a problem is still an entry.
+        # Counting only the sound ones added a "not registered" line under every problem reported here.
+        # That line is false, and it sends a reader to the wrong fix.
+        named = 0
+        registered = 0
+        path = claude_home / "hooks" / name
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for hook in group.get("hooks") or []:
+                if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), name):
+                    continue
+                named += 1
+                if not runs_hook(hook.get("command"), path) or hook.get("type") != "command":
+                    out.append(
+                        f"a PreToolUse entry names the {label} but does not run the deployed one "
+                        f"({hook.get('type')!r} running {hook.get('command')!r})"
+                    )
+                    continue
+                # Every tool is checked, since a matcher seeing only some leaves the others' calls unguarded.
+                unseen = [t for t in tools if not matcher_sees_tool(group.get("matcher"), t)]
+                if unseen:
+                    report(
+                        f"a PreToolUse group registers the {label} under matcher "
+                        f"{group.get('matcher')!r}, which no {'/'.join(unseen)} call matches, so "
+                        f"{unseen_effect}"
+                    )
+                    continue
+                registered += 1
+        if named == 0:
+            out.append(f"{subject} is not registered in settings.json, so {absent_effect}")
+        elif registered > 1:
+            out.append(f"{subject} is registered {registered} times, so it runs more than once")
+
     groups = event_groups("PreToolUse")
-    # Counted apart from the registrations, since an entry with a problem is still an entry.
-    # Counting only the sound ones added "the guard never runs" under every problem reported here.
-    # That line is false, and it sends a reader to the wrong fix.
-    named = 0
-    registered = 0
-    guard_path = claude_home / "hooks" / GUARD_NAME
-    for group in groups or []:
-        if not isinstance(group, dict):
-            continue
-        for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), GUARD_NAME):
-                continue
-            named += 1
-            if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
-                out.append(
-                    "a PreToolUse entry names the guard but does not run the deployed one "
-                    f"({hook.get('type')!r} running {hook.get('command')!r})"
-                )
-                continue
-            if not matcher_sees_tool(group.get("matcher"), "Bash"):
-                report(
-                    f"a PreToolUse group registers the guard under matcher "
-                    f"{group.get('matcher')!r}, which no Bash call matches, so that group never "
-                    "fires"
-                )
-                continue
-            registered += 1
-    if groups is None:
-        pass  # the shape error is already reported, and a count from it would be meaningless
-    elif named == 0:
-        out.append(
-            "the PreToolUse hook is not registered in settings.json, so the guard never runs"
-        )
-    elif registered > 1:
-        out.append(
-            f"the PreToolUse hook is registered {registered} times, so it runs more than once"
-        )
-    tier_named = 0
-    tier_registered = 0
-    tier_path = claude_home / "hooks" / TIER_NAME
-    for group in groups or []:
-        if not isinstance(group, dict):
-            continue
-        for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), TIER_NAME):
-                continue
-            tier_named += 1
-            if not runs_hook(hook.get("command"), tier_path) or hook.get("type") != "command":
-                out.append(
-                    "a PreToolUse entry names the model tier guard but does not run the deployed one "
-                    f"({hook.get('type')!r} running {hook.get('command')!r})"
-                )
-                continue
-            # Both tools are checked, since a matcher seeing only one leaves the other dispatch path open.
-            unseen = [
-                t for t in ("Agent", "Workflow") if not matcher_sees_tool(group.get("matcher"), t)
-            ]
-            if unseen:
-                report(
-                    f"a PreToolUse group registers the model tier guard under matcher "
-                    f"{group.get('matcher')!r}, which no {'/'.join(unseen)} call matches, so that "
-                    "dispatch is never checked"
-                )
-                continue
-            tier_registered += 1
-    if groups is None:
-        pass  # the shape error is already reported
-    elif tier_named == 0:
-        out.append(
-            "the model tier guard is not registered in settings.json, so a maintainer-only "
-            "model dispatch is never refused"
-        )
-    elif tier_registered > 1:
-        out.append(
-            f"the model tier guard is registered {tier_registered} times, so it runs more than once"
-        )
+    check_pre_tool_hook(
+        groups,
+        GUARD_NAME,
+        ("Bash",),
+        "guard",
+        "the PreToolUse hook",
+        "that group never fires",
+        "the guard never runs",
+    )
+    check_pre_tool_hook(
+        groups,
+        TIER_NAME,
+        ("Agent", "Workflow"),
+        "model tier guard",
+        "the model tier guard",
+        "that dispatch is never checked",
+        "a maintainer-only model dispatch is never refused",
+    )
     ends = event_groups("SessionEnd")
     sweeps_named = 0
     swept = 0
@@ -1577,57 +1579,37 @@ def main():
                     return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
-    # Strip the hook from every existing group first, so a re-run leaves no duplicate behind.
-    # That matters when settings.json already carries more than one Bash group.
-    # Then register it in a single Bash group.
-    for g in pre:
-        hooks_list = g.get("hooks")
-        if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if not names_hook(h.get("command", ""), GUARD_NAME)
-            ]
-    group = next((g for g in pre if g.get("matcher") == "Bash"), None)
-    if group is None:
-        group = {"matcher": "Bash", "hooks": []}
-        pre.append(group)
-    group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
+    register_hook(
+        pre,
+        GUARD_NAME,
+        {"type": "command", "command": hook_cmd},
+        lambda g: g.get("matcher") == "Bash",
+        "Bash",
+    )
     done = ["PreToolUse/Bash hook registered"]
 
     # The tier guard gets its own Agent|Workflow group, stripped and re-added the same way so a re-run leaves one.
-    for g in pre:
-        hooks_list = g.get("hooks")
-        if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if not names_hook(h.get("command", ""), TIER_NAME)
-            ]
-    tier_group = next((g for g in pre if g.get("matcher") == TIER_MATCHER), None)
-    if tier_group is None:
-        tier_group = {"matcher": TIER_MATCHER, "hooks": []}
-        pre.append(tier_group)
-    tier_group.setdefault("hooks", []).append(
-        {"type": "command", "command": hook_command(launcher, tier_dst)}
+    register_hook(
+        pre,
+        TIER_NAME,
+        {"type": "command", "command": hook_command(launcher, tier_dst)},
+        lambda g: g.get("matcher") == TIER_MATCHER,
+        TIER_MATCHER,
     )
     done.append(f"PreToolUse/{TIER_MATCHER} model tier guard registered")
 
     # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
     # The chosen or newly created group covers every exit reason, so the sweep fires on all of them.
     ends = data.setdefault("hooks", {}).setdefault("SessionEnd", [])
-    for g in ends:
-        hooks_list = g.get("hooks")
-        if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if not names_hook(h.get("command", ""), SWEEP_NAME)
-            ]
-    end_group = next((g for g in ends if matcher_covers_every_exit_reason(g.get("matcher"))), None)
-    if end_group is None:
-        end_group = {"hooks": []}
-        ends.append(end_group)
-    end_group.setdefault("hooks", []).append(
+    register_hook(
+        ends,
+        SWEEP_NAME,
         {
             "type": "command",
             "command": hook_command(launcher, sweep_dst),
             "timeout": SWEEP_TIMEOUT_SECONDS,
-        }
+        },
+        lambda g: matcher_covers_every_exit_reason(g.get("matcher")),
     )
     done.append("SessionEnd sweep registered")
 
