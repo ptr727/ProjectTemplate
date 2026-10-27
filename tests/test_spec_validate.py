@@ -397,6 +397,16 @@ class ModelTierCase(unittest.TestCase):
 
                 self.assertTrue(any("non-empty model name" in e for e in self.errors()))
 
+    def test_rejects_a_tier_sharing_the_maintainer_only_model(self) -> None:
+        self.models["frontier"] = "Fable"
+
+        self.assertTrue(any("no other tier shares" in e for e in self.errors()))
+
+    def test_reports_a_maintainer_only_value_that_is_not_a_string(self) -> None:
+        self.config["maintainerOnly"] = []
+
+        self.assertTrue(any("maintainerOnly" in e for e in self.errors()))
+
     def test_rejects_a_tools_list_instead_of_an_object(self) -> None:
         self.config["tools"] = []
 
