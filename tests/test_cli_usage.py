@@ -68,7 +68,9 @@ NOT_COMMAND_LINE = {
     "host-setup/agent-safety/claude/gh-write-guard.py": "a Claude Code hook",
     "host-setup/agent-safety/claude/stray-process-sweep.py": "a Claude Code hook",
     "host-setup/agent-safety/claude/tool-containment.py": "a Claude Code hook",
+    "host-setup/agent-safety/claude/model-tier-guard.py": "a Claude Code hook",
     "host-setup/agent-safety/claude/test_install.py": "a test module",
+    "host-setup/agent-safety/claude/test_model_tier_guard.py": "a test module",
     "lib/sh/secrets.sh": "a library a script sources",
 }
 

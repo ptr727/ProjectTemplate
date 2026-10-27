@@ -3,7 +3,7 @@
 What any coding agent must be stopped from doing when it runs unattended on this host, stated once,
 independent of which agent implements it. Most of it guards the maintainer's `gh` credentials, which
 is where the harm started. Requirements 7 to 9 guard the machine itself, which is the other thing
-an unattended agent takes down. This file is the source
+an unattended agent takes down. Requirement 10 guards the maintainer's model choice and quota. This file is the source
 of truth: an implementation is built from the requirements below, and an implementation is audited
 by checking its decisions against them, not by reading its source as the implicit spec.
 
@@ -106,6 +106,22 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
    them. They bound an accident rather than an adversary, since a command can still raise its own
    group's limits or start a group outside it, and the incident this answers was a mistake.
 
+10. **A subagent dispatch at the maintainer-only model tier is denied, unless the maintainer
+    allowed it when the session started.** A skill named the `frontier` tier in a repository whose
+    instruction set carried no tier table. It was taken as "the frontier model", and the work ran
+    on the most capable and most expensive model nobody had asked for. Read the tier mapping from
+    the hub's `spec/model-tiers.json`, deployed beside the hook. Refuse a dispatch naming the
+    maintainer-only tier's model unless the session was launched with that tier allowed. An
+    agent can never grant the allowance to itself. A mapping the hook cannot read refuses every
+    dispatch naming a model, since a guard that cannot tell what to block must not go quiet.
+
+    This one guards the maintainer's choice of model and his quota rather than the credentials or
+    the machine. It sits in the host layer all the same, because a dispatch happens inside the
+    harness, where no hook a repository carries can see it. It refuses only a dispatch that names
+    the model. A saved workflow, a child workflow a script starts, a computed model, and an agent
+    definition pinning one all pass. So do a dispatch naming no model and a fork naming another
+    model, which run at a model the hook cannot read.
+
 ## Decision Flow
 
 ```mermaid
@@ -149,8 +165,8 @@ flowchart LR
 ```
 
 The first diagram is this spec's actual decision flow, generalized from `claude/gh-write-guard.py`'s
-`classify()`. Requirements 8 and 9 appear nowhere in it, deliberately: neither judges a command's
-text. Requirement 9 wraps every command the flow allows, and requirement 8 runs once at the end of a
+`classify()`. Requirements 8, 9, and 10 appear nowhere in it, deliberately. None judges a command's
+text, and requirement 10 judges a subagent dispatch instead. Requirement 9 wraps every command the flow allows, and requirement 8 runs once at the end of a
 session on whatever the denials and the ceilings did not prevent. The second is why a failure lands in one layer and not another. A rule that never
 reached the session at all is a loading bug, fixed the way PR #1081 fixed `local-strict-review`'s
 missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and
@@ -185,7 +201,7 @@ every agent.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | All 9 requirements, via a `PreToolUse` hook, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
+| Claude Code | Every requirement, via `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 
@@ -196,8 +212,8 @@ local host-safety hazard for this kit to cover.
 ## Auditing an Implementation Against This Spec
 
 Run each of the implementation's own self-tests (`claude/gh-write-guard.py --selftest`,
-`claude/stray-process-sweep.py --selftest`, and `claude/tool-containment.py --selftest` for Claude
-Code) and compare every case against the
+`claude/stray-process-sweep.py --selftest`, `claude/tool-containment.py --selftest`, and
+`claude/model-tier-guard.py --selftest` for Claude Code) and compare every case against the
 requirements list above, one by one, rather than reading the implementation's source as though it
 were the spec. A case the self-test doesn't cover is a gap in
 the audit, not evidence the requirement is satisfied. This is the concrete shape of "ask Claude to
