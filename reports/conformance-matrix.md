@@ -20,7 +20,7 @@ The primary shapes are stood up as whole repos. The **composable targets** (`nug
 | `upstream-wrapper` | - | not-tested | - | Tag from a committed state file, not SemVer2. |
 | `codegen` | - | not-tested | - | Deterministic matrix over both branches. |
 | `docs` | ProjectTemplate | not-tested | - | Governance hub, and CI is lint-only. |
-| `host-secrets` overlay | - | not-tested | - | Layered onto a base shape, and carries the hub's `lib/sh` secret and env readers at `lib/fleet/sh` byte-for-byte. Blog is the first repository to declare it, carrying the readers per ptr727/Blog#553, and HomeAutomation-Config adopts it by its own adoption issue. |
+| `host-secrets` overlay | - | not-tested | - | Layered onto a base shape, and carries the hub's `lib/sh` secret and env readers at `lib/fleet/sh` byte-for-byte. Blog is the first repository to declare it, with its carry of the readers tracked in ptr727/Blog#553, and HomeAutomation-Config adopts it by its own adoption issue. |
 | `operational` config | - | not-tested | - | `workflowModel: operational`, direct signed commits to `develop`, promotion-PR gate. HomeAutomation-Config was the reference until its 2026-09-24 reclassification to `release`, and no remaining operational repository (ESPHome-Config, HomeAssistant-Config, Vantage-Config) has taken its place yet. |
 
 ## Composable Targets
