@@ -42,8 +42,14 @@
     ]
   },
   "closed_badges": [],
-  "labels": ["changes:", "review findings:", "findings:", "open findings remain:"],
-  "finding_lists": ["review findings:", "open findings remain:"],
+  "labels": [
+    "changes:",
+    "review findings:",
+    "findings:",
+    "open findings remain:",
+    "unresolved findings:"
+  ],
+  "finding_lists": ["review findings:", "open findings remain:", "unresolved findings:"],
   "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
   "table_header": "file",
   "discussion_link": "#discussion_r(?P<id>\\d+)$"
