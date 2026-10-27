@@ -351,21 +351,17 @@ class ModelTierCase(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.root / "spec").mkdir()
+        self.models: dict[str, object] = {
+            "highest": "fable",
+            "frontier": "opus",
+            "standard": "sonnet",
+            "bulk": "haiku",
+        }
         self.config: dict[str, object] = {
             "tiers": ["highest", "frontier", "standard", "bulk"],
             "maintainerOnly": "highest",
             "defaultTier": "frontier",
-            "tools": {
-                "claude-code": {
-                    "name": "Claude Code",
-                    "models": {
-                        "highest": "fable",
-                        "frontier": "opus",
-                        "standard": "sonnet",
-                        "bulk": "haiku",
-                    },
-                }
-            },
+            "tools": {"claude-code": {"name": "Claude Code", "models": self.models}},
         }
 
     def errors(self, table: str = TABLE) -> list[str]:
@@ -390,10 +386,16 @@ class ModelTierCase(unittest.TestCase):
         self.assertTrue(any("defaultTier" in e for e in self.errors()))
 
     def test_rejects_a_tool_missing_a_tier(self) -> None:
-        tool = self.config["tools"]["claude-code"]  # type: ignore[index]
-        del tool["models"]["bulk"]
+        del self.models["bulk"]
 
         self.assertTrue(any("exactly the declared tiers" in e for e in self.errors()))
+
+    def test_rejects_a_model_that_is_not_a_non_empty_string(self) -> None:
+        for value in (None, 7, ""):
+            with self.subTest(value=value):
+                self.models["highest"] = value
+
+                self.assertTrue(any("non-empty model name" in e for e in self.errors()))
 
     def test_rejects_a_tools_list_instead_of_an_object(self) -> None:
         self.config["tools"] = []

@@ -735,6 +735,11 @@ def model_tier_errors(root):
                 f"spec/model-tiers.json: tool {tool!r} must map exactly the declared tiers"
             )
             continue
+        if not all(isinstance(m, str) and m for m in models.values()):
+            errors.append(
+                f"spec/model-tiers.json: tool {tool!r} must map each tier to a non-empty model name"
+            )
+            continue
         rows.append(f"| {entry['name']} | " + " | ".join(f"`{models[t]}`" for t in tiers) + " |")
     agents_path = root / "AGENTS.md"
     if not agents_path.is_file():
