@@ -103,7 +103,7 @@ Each round runs:
    picker line below. A handoff number already dispatched in this run ends it too, since a handoff
    a worker neither closed nor parked means the worker failed in a way this seat must not
    investigate.
-3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" names
+3. **Dispatch the worker** on that handoff and track, at the model "Model Tiers" below names
    for the tier in the picker's line. Wait the same way. Dispatch at `highest` instead only where
    the maintainer's invocation named that tier or its model.
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
@@ -179,6 +179,32 @@ A promotion carries whatever develop holds, since that is what a develop -> main
 Under `main` or `release` every unblocked round promotes, so each promotion ordinarily carries one
 fix. A change another session merged to develop meanwhile rides along with it. Naming the scope
 accepts that.
+
+## Model Tiers
+
+`AGENTS.md` "Model Tiers" keeps the tier rule, carried here whole as a generated include, so a tier
+this skill names resolves to its model even in a repository whose carried `AGENTS.md` predates the
+table.
+
+<!-- include: AGENTS.md > Model Tiers -->
+
+A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below alone, and to the hub's `spec/model-tiers.json`, which states the same mapping as data and which the hub's spec gate holds equal to this table. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
+
+- **`frontier`** is the fleet's default reasoning tier, for orchestrating, rule text, design, spec logic, and adversarial review. It is not the most capable model available, which is `highest`.
+- **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's evidence-backed decline of a finding raised on its pull request stands, since that pull request's reviewers and its merge gate check it.
+- **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
+- **`highest`** is the most capable model available. Only the maintainer selects it, naming the tier or the model in the session or the invocation. A session never reaches for it because a task looks hard, and a host running the hub's agent-safety kit refuses a dispatch at it that the maintainer did not allow when the session started.
+
+| Tool | `highest` | `frontier` | `standard` | `bulk` |
+| --- | --- | --- | --- | --- |
+| Claude Code | Fable | Opus | Sonnet | Haiku |
+
+A tool with no row here, or one that cannot name a model per subagent, runs every tier at the session's own model.
+
+- **A tier resolves only through this table.** A word such as "frontier", "strongest", or "most capable" never resolves to `highest`, since the industry's sense of "frontier model" is the opposite of what this tier means here. A session that cannot see this table names no model and runs the subagent at the session's own model, rather than guessing one.
+- **An orchestrating seat runs at `frontier` and names a tier on every dispatch.** It defaults a subagent to `frontier` and picks `standard` or `bulk` deliberately where the work is execution or mechanical. A dispatch that names no model inherits whatever the session runs on, which is a choice nobody made.
+
+<!-- /include -->
 
 ## Auto-Resolvable
 

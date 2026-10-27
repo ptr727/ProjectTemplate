@@ -688,6 +688,68 @@ def version_literal_errors(root):
     return errors
 
 
+def model_tier_errors(root):
+    """Hold spec/model-tiers.json to its own invariants and AGENTS.md's tier table to it.
+
+    The table is prose a session reads and the JSON is data the model-tier-guard hook reads, so a
+    model release that edits one and not the other would leave the hook refusing a model the rule
+    no longer names, or allowing the one it now names. AGENTS.md is carried, so the table cannot be
+    a generated include region, and an equality check is what keeps the two in step instead.
+    """
+    try:
+        config = json.loads((root / "spec/model-tiers.json").read_text(encoding="utf-8"))
+        tiers = config["tiers"]
+        reserved = config["maintainerOnly"]
+        default = config["defaultTier"]
+        tools = config["tools"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [
+            f"spec/model-tiers.json: cannot read tiers, maintainerOnly, defaultTier, and tools ({exc})"
+        ]
+    errors = []
+    if reserved not in tiers:
+        errors.append(f"spec/model-tiers.json: maintainerOnly {reserved!r} is not a declared tier")
+    # The default is what an orchestrator dispatches at without being told otherwise, so it can never be the tier only the maintainer selects.
+    if default not in tiers or default == reserved:
+        errors.append(
+            f"spec/model-tiers.json: defaultTier {default!r} must be a declared tier other than maintainerOnly"
+        )
+    rows = [
+        "| Tool | " + " | ".join(f"`{t}`" for t in tiers) + " |",
+        "| --- |" + " --- |" * len(tiers),
+    ]
+    for tool, entry in tools.items():
+        models = entry.get("models", {}) if isinstance(entry, dict) else {}
+        # A row with a hole would leave one tier resolving to whatever the session runs on, which for the default tier is the leak this file exists to close.
+        if set(models) != set(tiers):
+            errors.append(
+                f"spec/model-tiers.json: tool {tool!r} must map exactly the declared tiers"
+            )
+            continue
+        rows.append(
+            f"| {entry['name']} | " + " | ".join(models[t].capitalize() for t in tiers) + " |"
+        )
+    agents_path = root / "AGENTS.md"
+    if not agents_path.is_file():
+        return errors
+    agents = agents_path.read_text(encoding="utf-8").splitlines()
+    try:
+        start = agents.index(rows[0])
+    except ValueError:
+        return [*errors, f"AGENTS.md: no tier table whose header is {rows[0]!r}"]
+    table = []
+    for line in agents[start:]:
+        if not line.startswith("|"):
+            break
+        table.append(line)
+    if table != rows:
+        errors.append(
+            "AGENTS.md: the Model Tiers table does not match spec/model-tiers.json, expected "
+            + " / ".join(rows[2:])
+        )
+    return errors
+
+
 def utf8_console() -> None:
     """Write the console streams as UTF-8, whatever the host code page is.
 
@@ -1541,6 +1603,7 @@ def main(argv=()):
 
     errors.extend(carried_link_errors(ROOT, baseline))
     errors.extend(version_literal_errors(ROOT))
+    errors.extend(model_tier_errors(ROOT))
 
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")

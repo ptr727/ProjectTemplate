@@ -45,13 +45,20 @@ GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
 SWEEP_STEM = "stray-process-sweep"
 CONTAIN_NAME = "tool-containment.py"
+TIER_NAME = "model-tier-guard.py"
+TIER_CONFIG_NAME = "model-tiers.json"
+# The tier guard fires on the tools that dispatch a subagent, so it is its own group and not the Bash one.
+TIER_MATCHER = "Agent|Workflow"
 
 PREFIX_VAR = "CLAUDE_CODE_SHELL_PREFIX"
 
 # The hook files this kit copies into ~/.claude/hooks, in deploy order.
 # Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
 # That silence reads as a pass.
-DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME)
+DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME, TIER_NAME)
+
+# The tier mapping lives in the hub's spec/ so a gate and the hook read one file, and is copied here, never edited here.
+DEPLOYED_DATA = {TIER_CONFIG_NAME: HERE.parent.parent.parent / "spec" / TIER_CONFIG_NAME}
 
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
 # The sweep's own calls are each bounded, two `ps` reads at 5s and four `systemctl` calls at 5s, all inside this.
@@ -81,11 +88,18 @@ LOCAL_MARKER = "host-local"
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-PAYLOAD_FILES = DEPLOYED_HOOKS + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
+PAYLOAD_FILES = (
+    DEPLOYED_HOOKS + tuple(DEPLOYED_DATA) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
+)
 
 # Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
 # The two need different answers, since a gap is filled and a null is a settings error.
 MISSING = object()
+
+
+def payload_source(name):
+    """Where a payload file is read from, the kit directory unless it is a data file kept in spec/."""
+    return DEPLOYED_DATA.get(name, HERE / name)
 
 
 def hook_command(launcher, path):
@@ -170,6 +184,18 @@ def matcher_sees_bash(matcher):
         return False
     try:
         return re.fullmatch(matcher, "Bash") is not None
+    except re.error:
+        return False
+
+
+def matcher_sees_tool(matcher, tool):
+    """Whether a PreToolUse matcher group receives a call to `tool`, by the same rules as `matcher_sees_bash`."""
+    if matcher is None or matcher in ("", "*"):
+        return True
+    if not isinstance(matcher, str):
+        return False
+    try:
+        return re.fullmatch(matcher, tool) is not None
     except re.error:
         return False
 
@@ -401,7 +427,9 @@ def source_ref():
             file=sys.stderr,
         )
     else:
-        status = git("status", "--porcelain", "--", *PAYLOAD_FILES)
+        status = git(
+            "status", "--porcelain", "--", *(str(payload_source(n)) for n in PAYLOAD_FILES)
+        )
         ref["dirty"] = bool(status)
     return ref
 
@@ -759,7 +787,7 @@ def payload_digest():
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
-        raw = normalized((HERE / name).read_bytes())
+        raw = normalized(payload_source(name).read_bytes())
         # A snippet is embedded stripped, so trailing whitespace is not installed content.
         # The hook is copied byte for byte, so nothing about it is stripped.
         if name.endswith(".md"):
@@ -832,7 +860,7 @@ def installed_digest(claude_home):
     """
     # Read from `DEPLOYED_HOOKS` rather than by name, since naming them here is the drift that constant closes.
     # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
-    deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
+    deployed = [claude_home / "hooks" / name for name in (*DEPLOYED_HOOKS, *DEPLOYED_DATA)]
     claude_md = claude_home / "CLAUDE.md"
     claude_text = read_claude_md(claude_md)
     try:
@@ -1009,6 +1037,45 @@ def registration_problems(claude_home):
     elif registered > 1:
         out.append(
             f"the PreToolUse hook is registered {registered} times, so it runs more than once"
+        )
+    tier_named = 0
+    tier_registered = 0
+    tier_path = claude_home / "hooks" / TIER_NAME
+    for group in groups or []:
+        if not isinstance(group, dict):
+            continue
+        for hook in group.get("hooks") or []:
+            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), TIER_NAME):
+                continue
+            tier_named += 1
+            if not runs_hook(hook.get("command"), tier_path) or hook.get("type") != "command":
+                out.append(
+                    "a PreToolUse entry names the model tier guard but does not run the deployed one "
+                    f"({hook.get('type')!r} running {hook.get('command')!r})"
+                )
+                continue
+            # Both tools are checked, since a matcher seeing only one leaves the other dispatch path open.
+            unseen = [
+                t for t in ("Agent", "Workflow") if not matcher_sees_tool(group.get("matcher"), t)
+            ]
+            if unseen:
+                report(
+                    f"a PreToolUse group registers the model tier guard under matcher "
+                    f"{group.get('matcher')!r}, which no {'/'.join(unseen)} call matches, so that "
+                    "dispatch is never checked"
+                )
+                continue
+            tier_registered += 1
+    if groups is None:
+        pass  # the shape error is already reported
+    elif tier_named == 0:
+        out.append(
+            "the model tier guard is not registered in settings.json, so a maintainer-only "
+            "model dispatch is never refused"
+        )
+    elif tier_registered > 1:
+        out.append(
+            f"the model tier guard is registered {tier_registered} times, so it runs more than once"
         )
     ends = event_groups("SessionEnd")
     sweeps_named = 0
@@ -1283,6 +1350,7 @@ def main():
     hook_dst = hooks_dir / GUARD_NAME
     sweep_dst = hooks_dir / SWEEP_NAME
     contain_dst = hooks_dir / CONTAIN_NAME
+    tier_dst = hooks_dir / TIER_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
 
@@ -1408,6 +1476,20 @@ def main():
             )
             return 1
         print(f"  {src_name} self-test: PASS")
+    # The data the hooks read goes in after every self-test passed and before any hook is replaced.
+    # A new hook then never runs beside a config it cannot find.
+    for data_name, data_src in DEPLOYED_DATA.items():
+        data_tmp = hooks_dir / f"{data_name}.{os.getpid()}.staged"
+        try:
+            shutil.copyfile(data_src, data_tmp)
+            os.replace(data_tmp, hooks_dir / data_name)
+        except OSError as e:
+            data_tmp.unlink(missing_ok=True)
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(f"copying {data_name} failed ({e}); no hook was replaced.\n")
+            return 1
+        print(f"  data -> {hooks_dir / data_name}")
     for done_count, (src_name, tmp) in enumerate(staged):
         dst = hooks_dir / src_name
         # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
@@ -1521,6 +1603,22 @@ def main():
         pre.append(group)
     group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
     done = ["PreToolUse/Bash hook registered"]
+
+    # The tier guard gets its own Agent|Workflow group, stripped and re-added the same way so a re-run leaves one.
+    for g in pre:
+        hooks_list = g.get("hooks")
+        if isinstance(hooks_list, list):
+            hooks_list[:] = [
+                h for h in hooks_list if not names_hook(h.get("command", ""), TIER_NAME)
+            ]
+    tier_group = next((g for g in pre if g.get("matcher") == TIER_MATCHER), None)
+    if tier_group is None:
+        tier_group = {"matcher": TIER_MATCHER, "hooks": []}
+        pre.append(tier_group)
+    tier_group.setdefault("hooks", []).append(
+        {"type": "command", "command": hook_command(launcher, tier_dst)}
+    )
+    done.append(f"PreToolUse/{TIER_MATCHER} model tier guard registered")
 
     # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
     # The chosen or newly created group covers every exit reason, so the sweep fires on all of them.
