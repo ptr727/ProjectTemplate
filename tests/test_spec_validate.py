@@ -400,6 +400,11 @@ class ModelTierCase(unittest.TestCase):
 
         self.assertTrue(any("tools an object" in e for e in self.errors()))
 
+    def test_rejects_a_tier_that_is_not_a_string(self) -> None:
+        self.config["tiers"] = [["highest"]]
+
+        self.assertTrue(any("a list of strings" in e for e in self.errors()))
+
     def test_rejects_a_tool_entry_that_is_not_an_object(self) -> None:
         self.config["tools"] = {"claude-code": "opus"}
 

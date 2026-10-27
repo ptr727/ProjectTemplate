@@ -706,8 +706,8 @@ def model_tier_errors(root):
         return [
             f"spec/model-tiers.json: cannot read tiers, maintainerOnly, defaultTier, and tools ({exc})"
         ]
-    if not isinstance(tiers, list) or not isinstance(tools, dict):
-        return ["spec/model-tiers.json: tiers must be a list and tools an object"]
+    if not is_str_list(tiers) or not isinstance(tools, dict):
+        return ["spec/model-tiers.json: tiers must be a list of strings and tools an object"]
     errors = []
     if reserved not in tiers:
         errors.append(f"spec/model-tiers.json: maintainerOnly {reserved!r} is not a declared tier")
