@@ -740,8 +740,12 @@ def model_tier_errors(root):
                 f"spec/model-tiers.json: tool {tool!r} must map each tier to a non-empty model name"
             )
             continue
-        if reserved in models and any(
-            t != reserved and m.lower() == models[reserved].lower() for t, m in models.items()
+        if (
+            isinstance(reserved, str)
+            and reserved in models
+            and any(
+                t != reserved and m.lower() == models[reserved].lower() for t, m in models.items()
+            )
         ):
             errors.append(
                 f"spec/model-tiers.json: tool {tool!r} must give maintainerOnly a model no other tier shares"
