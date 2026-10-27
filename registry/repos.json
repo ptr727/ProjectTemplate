@@ -156,15 +156,16 @@
             "name": "HomeAutomation-Config",
             "url": "https://github.com/ptr727/HomeAutomation-Config",
             "status": "cataloged",
-            "types": ["source-only"],
+            "types": ["source-only", "python"],
             "groundTruthBranch": "main",
             "workflowModel": "release",
             "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
+            "pythonDirectories": ["CloudInit", "Cloudflare", "MutationSweep", "Notify", "Trackers", "USBDev", "VPS", "scripts"],
             "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model. It is Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425). The -Config suffix in its name predates the reclassification.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Vantage-Config repo (lf default, only `.dc` pinned CRLF), not carried here, and the legacy Vantage/ subtree is stripped."]
         },
         {
