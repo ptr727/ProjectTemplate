@@ -108,6 +108,7 @@ class TestModelTierGuard(unittest.TestCase):
             'agent("x", {"model": "fable"})',
             "agent('x', {'model': 'fable'})",
             "agent('x', { model: 'claude-fable-5-1' })",
+            "agent('x', { model: 'claude-Fable-5-1' })",
         ):
             with self.subTest(script=script):
                 self.assertDenied(self.run_hook("Workflow", {"script": script}))
@@ -135,7 +136,7 @@ class TestModelTierGuard(unittest.TestCase):
         for script in (
             "agent('x', { model: 'fableX' })",
             "agent('x', { model: 'Xfable' })",
-            "agent('x', { model: 'FABLE2' })",
+            "agent('x', { model: 'FABLEX' })",
         ):
             with self.subTest(script=script):
                 self.assertIsNone(self.run_hook("Workflow", {"script": script}))
