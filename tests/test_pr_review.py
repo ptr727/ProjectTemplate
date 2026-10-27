@@ -261,6 +261,12 @@ RATE_LIMIT_LOG = (
     "2026-08-02T10:59:00.0000000Z   errorType: 'rate_limit',\n"
 )
 
+TRANSIENT_LOG = (
+    "2026-08-02T10:59:00.0000000Z HttpError: The request could not be processed because too "
+    "many files changed - https://docs.example.test/pulls: Failed to fetch PR metadata for o/r#7\n"
+)
+TRANSIENT_LINE = TRANSIENT_LOG.strip()
+
 # Quoted from the corpus rather than invented: the body a refused review carried, byte for byte.
 QUOTA_REFUSED = (
     "Copilot was unable to review this pull request because the user who requested the "
@@ -4535,6 +4541,108 @@ class TestCli(GqlCase):
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn(field, out)
                 self.assertEqual(line, "RATE LIMIT FROM THE REVIEWER'S RUN LOG" in out)
+
+    def test_a_transient_fetch_failure_in_the_run_log_is_its_own_cause(self) -> None:
+        for log, want in (
+            (TRANSIENT_LOG, ("", "", TRANSIENT_LINE)),
+            ("x errorType: 'internal',\n" + TRANSIENT_LOG, ("internal", "", TRANSIENT_LINE)),
+            ("x errorType: 'internal',\n", ("internal", "", "")),
+            ("nothing the reader names\n", None),
+        ):
+            with self.subTest(want=want):
+                pr_review.run_cause.cache_clear()
+                self.run_log(log)
+                self.assertEqual(want, pr_review.run_cause("o", "r", HEAD, LATE))
+
+    def test_a_logged_rate_limit_outranks_a_transient_line(self) -> None:
+        self.run_log(TRANSIENT_LOG + RATE_LIMIT_LOG)
+        node = review(body=ERROR_REFUSED, at=LATE)
+        self.assertEqual("", pr_review.transient_error("o", "r", node))
+        self.assertIn("reset on August 9", pr_review.confirmed_quota("o", "r", node))
+
+    def test_a_transient_error_round_is_re_requested_once_and_reviewed(self) -> None:
+        refused = review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_a")
+        answered = payload([refused, review(at=LATE, rid="PRR_b")])
+        self.answer(self.bodyless(OLD), payload([refused]), answered)
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(TRANSIENT_LOG)
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("spends the one re-request that allows: " + TRANSIENT_LINE, out)
+        self.assertNotIn("COPILOT_ERROR_POSSIBLE_QUOTA", out)
+
+    def test_a_second_error_round_after_the_re_request_ends_the_poll_as_quota(self) -> None:
+        """The second refusal is no head review, so only the round count ends the poll early."""
+        first = review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_a")
+        again = payload([first, review(body=ERROR_REFUSED, at=LATE, rid="PRR_b")])
+        self.answer(self.bodyless(OLD), payload([first]), again)
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(TRANSIENT_LOG)
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(41, self.cli(["wait", "7"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("status=COPILOT_ERROR_POSSIBLE_QUOTA", out)
+        self.assertIn("one re-request that allows is spent", out)
+
+    def test_two_error_rounds_in_a_row_request_nothing_whatever_the_log_says(self) -> None:
+        rounds = [
+            review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_a"),
+            review(oid=OLD, body=ERROR_REFUSED, at=LATE, rid="PRR_b"),
+        ]
+        self.answer(self.bodyless(OLD), payload(rounds))
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(TRANSIENT_LOG)
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(41, self.cli(["wait", "7", "--timeout", "0"]))
+        slept.assert_not_called()
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertIn("one re-request that allows is spent", self.out.getvalue())
+
+    def test_an_unanswered_re_request_is_pending_rather_than_a_refusal(self) -> None:
+        refused = payload([review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_a")])
+        self.answer(self.bodyless(OLD), refused)
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(TRANSIENT_LOG)
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        out = self.out.getvalue()
+        self.assertIn("status=PENDING the newest Copilot review is an error refusal", out)
+        self.assertNotIn("COPILOT_ERROR_POSSIBLE_QUOTA", out)
+
+    def test_an_unread_run_log_keeps_the_quota_reading_and_says_so(self) -> None:
+        self.answer(self.bodyless(OLD), payload([review(oid=OLD, body=ERROR_REFUSED)]))
+        calls = self.wire_history([hist_review(7, ERROR_REFUSED)])
+        self.run_log(None)
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(41, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertIn("its run log was unread or names neither", self.out.getvalue())
+
+    def test_the_digest_names_the_run_log_reading_it_took(self) -> None:
+        one = [review(body=ERROR_REFUSED, at=LATE, rid="PRR_a")]
+        two = [review(oid=OLD, body=ERROR_REFUSED, at=EARLY, rid="PRR_z"), *one]
+        for rounds, log, line in (
+            (one, TRANSIENT_LOG, "RUN LOG READING: transient."),
+            (two, TRANSIENT_LOG, "RUN LOG READING: possible quota. The run log names a transient"),
+            (one, None, "RUN LOG READING: possible quota. The reviewer's run log was unread"),
+            (one, RATE_LIMIT_LOG, None),
+        ):
+            with self.subTest(line=line):
+                pr_review.run_cause.cache_clear()
+                self.answer(payload(rounds))
+                self.run_log(log)
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn("refusal=QUOTA" if line is None else "refusal=ERROR", out)
+                if line is None:
+                    self.assertNotIn("RUN LOG READING", out)
+                else:
+                    self.assertIn(line, out)
 
 
 class TestCopilotHistoryReadings(GqlCase):

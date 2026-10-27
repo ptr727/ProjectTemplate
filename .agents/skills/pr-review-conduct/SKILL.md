@@ -73,7 +73,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `refusal=QUOTA` or `refusal=ERROR`, the pull request's newest Copilot review being an
    account-quota refusal or an error refusal read as a possible quota hit, on this head or an
    earlier one, is the one nothing the loop does clears, which is the case "Which Reviewers a
-   Repository Actually Has" below states. `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
+   Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
+   transient is the exception. `wait` re-requests it once, and a second error refusal in a row
+   reads as possible quota. `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
    account state read from the reviewer's activity elsewhere when this head carries none of its
    own, and a refusal holding across several heads with no cause its body names reaches it the
    slower way. That exit is `wait`'s alone: `status` exits 0 over a refusal, carrying it as
@@ -229,8 +231,9 @@ must have done.
   encountered an error, which is what the
   weekly rate limit posts. Each covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
-  reviewer's run log names a reset time `pr_review.py` reports it. Each refusal goes to the
-  maintainer, rather than into a wait.
+  reviewer's run log names a reset time `pr_review.py` reports it. Where it names a transient
+  fetch failure instead, `pr_review.py wait` re-requests once. Every other refusal, a repeat of
+  that one included, goes to the maintainer rather than into a wait.
 
 Where a reviewer's behavior still surprises you after reading what it posted, the hub's
 `docs/pr-reviewer-reference.md` records what each one does, what shapes it, and which repositories
