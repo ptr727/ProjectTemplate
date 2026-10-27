@@ -1096,7 +1096,7 @@ def registration_problems(claude_home):
         GUARD_NAME,
         ("Bash",),
         "guard",
-        "the PreToolUse hook",
+        "the write guard",
         "that group never fires",
         "the guard never runs",
     )
