@@ -58,7 +58,7 @@ Repos and their current `registry/repos.json` `types`, from the hub's own regist
 doc's authorship. Archived repos are not tracked.
 
 - [x] **ProjectTemplate** (`source-only`, `docs`, `python`): the hub itself. Doc gates wired in
-      `.husky/pre-commit` since PR #642. The ruff/mypy half was added in this PR's own commits,
+      `.husky/pre-commit` since PR #642. The ruff/mypy half was added in PR #962,
       once the corpus was confirmed clean (0 ruff errors, 200 files formatted, mypy clean).
 - [ ] **Utilities** (`csharp`, `nuget`): Husky.Net + doc gates.
 - [ ] **LanguageTags** (`csharp`, `nuget`, `codegen`): Husky.Net + doc gates.
