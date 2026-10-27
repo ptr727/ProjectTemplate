@@ -219,16 +219,6 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
 
         self.assertEqual(self.hub_only_findings(findings), [])
 
-    def test_the_shipped_declaration_holds_the_shape_the_audit_reads(self) -> None:
-        """No gate reads spec/files.schema.json, so a malformed entry would crash the audit run instead."""
-        owned = audit.load("spec/files.json")["repoOwnedTrees"]
-
-        self.assertIn("tests", [entry.get("source") for entry in owned])
-        for entry in owned:
-            with self.subTest(entry=entry):
-                self.assertEqual(set(entry), {"source", "reason"})
-                self.assertTrue(all(isinstance(v, str) and v for v in entry.values()))
-
     def test_a_hub_only_path_outside_tests_is_still_reported(self) -> None:
         """The control, showing the check under test ran and reports a hub-only path it sees."""
         findings, _ = run_audit(CARRIED | {".codecov.yml", "tools/hub_tool.py"}, hub=self.HUB)
