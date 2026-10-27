@@ -6,7 +6,8 @@ tool-input JSON on stdin. It prints a deny decision when the call names the mode
 `model-tiers.json` marks maintainer-only, today `highest`, so `fable`. Everything else passes.
 
 The mapping is read from `model-tiers.json` beside this file, which the installer copies from the
-hub's spec/model-tiers.json. A model release is then an edit to that file alone.
+hub's spec/model-tiers.json. A model release is then an edit to that file and to the hub's AGENTS.md
+tier table its spec gate holds equal to it, never to this hook.
 
 The maintainer allows the tier for a session by launching it with FLEET_ALLOW_HIGHEST=1 in the
 environment. A hook runs as its own process, so an agent cannot set it for itself, and the deny
