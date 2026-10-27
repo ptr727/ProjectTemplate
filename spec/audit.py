@@ -100,7 +100,10 @@ def hub_tracked(rev=None):
 
 
 def hub_only_paths(spec, rev=None):
-    """Hub-tracked paths the manifest does not declare, so a downstream copy is hub-hosted content rather than a carry."""
+    """Hub-tracked paths the manifest does not declare, so a downstream copy is hub-hosted content rather than a carry.
+
+    A path below a declared repo-owned tree is left out, since a downstream file there is that repo's own.
+    """
     declared = {e["path"] for e in spec["files"]["baseline"]}
     tree_paths = set()
     for declaration in spec["files"].get("trees", []):
@@ -111,7 +114,12 @@ def hub_only_paths(spec, rev=None):
             if path.startswith(root)
             and tree_path_included(path.removeprefix(root), declaration["include"])
         )
-    return hub_tracked(rev) - declared - tree_paths
+    owned_roots = tuple(
+        declaration["source"].rstrip("/") + "/"
+        for declaration in spec["files"].get("repoOwnedTrees", [])
+    )
+    owned_paths = {path for path in hub_tracked(rev) if path.startswith(owned_roots)}
+    return hub_tracked(rev) - declared - tree_paths - owned_paths
 
 
 def gap_dispositions(spec):

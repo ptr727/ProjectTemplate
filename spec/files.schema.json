@@ -24,6 +24,19 @@
                 }
             }
         },
+        "repoOwnedTrees": {
+            "description": "Hub directories no repo carries, where a downstream file is that repo's own content. The hub-only check in spec/audit.py skips every hub path below one.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["source", "reason"],
+                "additionalProperties": false,
+                "properties": {
+                    "source": { "type": "string", "minLength": 1, "not": { "const": "." } },
+                    "reason": { "type": "string", "minLength": 1 }
+                }
+            }
+        },
         "baseline": {
             "type": "array",
             "items": {
