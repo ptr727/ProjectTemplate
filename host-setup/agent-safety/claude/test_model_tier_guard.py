@@ -108,6 +108,7 @@ class TestModelTierGuard(unittest.TestCase):
             'agent("x", {"model": "fable"})',
             "agent('x', {'model': 'fable'})",
             "agent('x', { model: 'claude-fable-5-1' })",
+            "agent('x', { model: 'claude-Fable-5-1' })",
         ):
             with self.subTest(script=script):
                 self.assertDenied(self.run_hook("Workflow", {"script": script}))
@@ -130,6 +131,15 @@ class TestModelTierGuard(unittest.TestCase):
         path.write_text("agent('x', { model: 'fable' })", encoding="utf-8")
         tool_input = {"script": "agent('x', { model: 'opus' })", "scriptPath": str(path)}
         self.assertDenied(self.run_hook("Workflow", tool_input))
+
+    def test_a_workflow_model_merely_containing_the_blocked_alias_is_allowed(self):
+        for script in (
+            "agent('x', { model: 'fableX' })",
+            "agent('x', { model: 'Xfable' })",
+            "agent('x', { model: 'FABLEX' })",
+        ):
+            with self.subTest(script=script):
+                self.assertIsNone(self.run_hook("Workflow", {"script": script}))
 
     def test_a_workflow_at_another_model_or_saved_by_name_is_allowed(self):
         self.assertIsNone(self.run_hook("Workflow", {"script": "agent('x', { model: 'opus' })"}))
