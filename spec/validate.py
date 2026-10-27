@@ -1457,6 +1457,28 @@ def main(argv=()):
                     f"files.json: tree targets {left_target} and {right_target} have overlapping ownership"
                 )
 
+    owned_trees = files.get("repoOwnedTrees", [])
+    if not isinstance(owned_trees, list):
+        errors.append("files.json: 'repoOwnedTrees' must be an array")
+        owned_trees = []
+    for owned in owned_trees:
+        if not isinstance(owned, dict):
+            errors.append(f"files.json: repo-owned tree {owned!r} is not an object")
+            continue
+        source = owned.get("source")
+        if not isinstance(source, str) or not source:
+            errors.append(f"files.json: repo-owned tree has an invalid source: {owned!r}")
+            continue
+        reason = owned.get("reason")
+        if not isinstance(reason, str) or not reason:
+            errors.append(f"files.json: repo-owned tree {source} reason must be a non-empty string")
+        if reduces_to_repo_root(source) or escapes_repo_root(source):
+            errors.append(
+                f"files.json: repo-owned tree {source} source must be a path below the repository root"
+            )
+        elif not (ROOT / source).is_dir():
+            errors.append(f"files.json: repo-owned tree {source} is missing or not a directory")
+
     copilot_path = ROOT / ".github/copilot-instructions.md"
     try:
         copilot_instructions = copilot_path.read_text(encoding="utf-8")

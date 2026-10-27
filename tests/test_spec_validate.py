@@ -671,6 +671,59 @@ class TreePathGateCase(unittest.TestCase):
                     self.assertIsNone(validate.symlinked_component(validate.ROOT, value))
 
 
+class RepoOwnedTreeGateCase(unittest.TestCase):
+    """A repo-owned tree declaration the audit cannot use is refused, run as the real script against a scratch tree.
+
+    Every run adds a marker entry with no reason, which the loop always reports, so each absence assertion proves the loop ran.
+    """
+
+    def run_against(self, owned: list[object]) -> str:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            shutil.copytree(validate.ROOT / "registry", root / "registry")
+            (root / "real" / "sub").mkdir(parents=True)
+            files_path = root / "spec" / "files.json"
+            files = json.loads(files_path.read_text(encoding="utf-8"))
+            files["repoOwnedTrees"] = [*owned, {"source": "real"}]
+            files_path.write_text(json.dumps(files), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=False,
+            )
+            output = result.stdout + result.stderr
+            self.assertIn(
+                "files.json: repo-owned tree real reason must be a non-empty string",
+                output,
+                "the repo-owned tree loop was never reached, so an absence assertion would be vacuous",
+            )
+            return output
+
+    def test_a_misspelled_source_is_refused(self) -> None:
+        output = self.run_against([{"source": "rael", "reason": "r"}])
+        self.assertIn("files.json: repo-owned tree rael is missing or not a directory", output)
+
+    def test_a_root_or_escaping_source_is_refused(self) -> None:
+        for source in (".", "..", "../real"):
+            with self.subTest(source=source):
+                self.assertIn(
+                    f"files.json: repo-owned tree {source} source must be a path below the repository root",
+                    self.run_against([{"source": source, "reason": "r"}]),
+                )
+
+    def test_an_entry_without_a_source_is_refused(self) -> None:
+        output = self.run_against([{"path": "real", "reason": "r"}])
+        self.assertIn("files.json: repo-owned tree has an invalid source:", output)
+
+    def test_a_plain_entry_draws_no_error(self) -> None:
+        output = self.run_against([{"source": "real/sub", "reason": "r"}])
+        self.assertNotIn("repo-owned tree real/sub", output)
+
+
 class RegistryNameUniquenessCase(unittest.TestCase):
     """A registry name is the key both configure.sh and audit.py resolve an entry by.
 
