@@ -407,6 +407,11 @@ class ModelTierCase(unittest.TestCase):
 
         self.assertTrue(any("maintainerOnly" in e for e in self.errors()))
 
+    def test_rejects_a_repeated_tier_name(self) -> None:
+        self.config["tiers"] = ["highest", "frontier", "standard", "bulk", "bulk"]
+
+        self.assertTrue(any("must not repeat a name" in e for e in self.errors()))
+
     def test_rejects_a_tools_list_instead_of_an_object(self) -> None:
         self.config["tools"] = []
 

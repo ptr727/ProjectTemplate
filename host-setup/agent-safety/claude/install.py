@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook, the SessionEnd stray-process sweep, and the tool-containment shell prefix,
-registers the two hooks in the user settings.json and, on a host with a systemd user manager, the prefix
-in its `env`, merges the permission rules this kit owns into the same file, renders the user
-CLAUDE.md whole from the kit's blocks and the host-local instruction file, and self-tests each hook
-before registering it.
+Deploys the two PreToolUse hooks, the write guard and the model-tier guard with its tier mapping,
+the SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the three
+hooks in the user settings.json. On a host with a systemd user manager it also sets the prefix in
+that file's `env`. It merges the permission rules this kit owns into the same file. It renders the
+user CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is
+self-tested before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was

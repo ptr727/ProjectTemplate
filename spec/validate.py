@@ -709,6 +709,8 @@ def model_tier_errors(root):
     if not is_str_list(tiers) or not isinstance(tools, dict):
         return ["spec/model-tiers.json: tiers must be a list of strings and tools an object"]
     errors = []
+    if len(set(tiers)) != len(tiers):
+        errors.append("spec/model-tiers.json: tiers must not repeat a name")
     if reserved not in tiers:
         errors.append(f"spec/model-tiers.json: maintainerOnly {reserved!r} is not a declared tier")
     # The default is what an orchestrator dispatches at without being told otherwise, so it can never be the tier only the maintainer selects.
