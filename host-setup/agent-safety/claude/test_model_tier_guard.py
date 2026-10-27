@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Self-test for model-tier-guard.py, running the hook as Claude Code does, over stdin.
 
-Each case copies the hook beside a synthetic model-tiers.json in a throwaway directory, so the
-hub's real mapping is never read and a model release does not break the suite.
+Each case copies the hook beside a synthetic model-tiers.json in a throwaway directory. The hub's
+real mapping is never read, so a model release does not break the suite.
 """
 
 import json
@@ -105,6 +105,8 @@ class TestModelTierGuard(unittest.TestCase):
             "agent('x', { model: 'fable' })",
             'agent("x", {model:"fable"})',
             "agent(`x`, { model : `fable` })",
+            'agent("x", {"model": "fable"})',
+            "agent('x', {'model': 'fable'})",
         ):
             with self.subTest(script=script):
                 self.assertDenied(self.run_hook("Workflow", {"script": script}))

@@ -56,21 +56,21 @@ An agent session is billed on the context it carries, not the work it does. Ever
 
 ### Model Tiers
 
-A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below alone, and to the hub's `spec/model-tiers.json`, which states the same mapping as data and which the hub's spec gate holds equal to this table. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
+A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below and to the hub's `spec/model-tiers.json`. That file states the same mapping as data, and the hub's spec gate holds the two equal. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
 
 - **`frontier`** is the fleet's default reasoning tier, for orchestrating, rule text, design, spec logic, and adversarial review. It is not the most capable model available, which is `highest`.
 - **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's evidence-backed decline of a finding raised on its pull request stands, since that pull request's reviewers and its merge gate check it.
 - **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
-- **`highest`** is the most capable model available. Only the maintainer selects it, naming the tier or the model in the session or the invocation. A session never reaches for it because a task looks hard, and a host running the hub's agent-safety kit refuses a dispatch at it that the maintainer did not allow when the session started.
+- **`highest`** is the most capable model available. Only the maintainer selects it, for the session itself or for its subagents when the session starts. A host running the hub's agent-safety kit refuses any other dispatch at it. A maintainer naming it partway through a session restarts the session with it allowed. A session never reaches for it because a task looks hard.
 
 | Tool | `highest` | `frontier` | `standard` | `bulk` |
 | --- | --- | --- | --- | --- |
-| Claude Code | Fable | Opus | Sonnet | Haiku |
+| Claude Code | `fable` | `opus` | `sonnet` | `haiku` |
 
-A tool with no row here, or one that cannot name a model per subagent, runs every tier at the session's own model.
+Each cell is the name that tool's subagent dispatch takes, which follows the latest model of its family. A tool with no row here, or one that cannot name a model per subagent, runs every tier at the session's own model.
 
-- **A tier resolves only through this table.** A word such as "frontier", "strongest", or "most capable" never resolves to `highest`, since the industry's sense of "frontier model" is the opposite of what this tier means here. A session that cannot see this table names no model and runs the subagent at the session's own model, rather than guessing one.
-- **An orchestrating seat runs at `frontier` and names a tier on every dispatch.** It defaults a subagent to `frontier` and picks `standard` or `bulk` deliberately where the work is execution or mechanical. A dispatch that names no model inherits whatever the session runs on, which is a choice nobody made.
+- **A tier resolves only through this table.** A word such as "frontier", "strongest", or "most capable" never resolves to `highest`. The industry's "frontier model" is the opposite of what this tier means here. A session that cannot see this table names no model rather than guessing one, so the subagent runs at the session's own model.
+- **An orchestrating seat runs at `frontier` and names a tier on every dispatch.** It defaults a subagent to `frontier`, and picks `standard` or `bulk` deliberately for execution or mechanical work. A dispatch that names no model inherits whatever the session runs on, which is a choice nobody made.
 
 ### Delegation
 

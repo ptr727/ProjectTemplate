@@ -106,6 +106,15 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
    them. They bound an accident rather than an adversary, since a command can still raise its own
    group's limits or start a group outside it, and the incident this answers was a mistake.
 
+10. **A subagent dispatch at the maintainer-only model tier is denied, unless the maintainer
+    allowed it when the session started.** A skill named the `frontier` tier in a repository whose
+    instruction set carried no tier table. It was taken as "the frontier model", and the work ran
+    on the most capable and most expensive model nobody had asked for. Read the tier mapping from
+    the hub's `spec/model-tiers.json`, deployed beside the hook. Refuse a dispatch naming the
+    maintainer-only tier's model unless the session was launched with that tier allowed. An
+    agent can never grant the allowance to itself. A mapping the hook cannot read refuses every
+    dispatch naming a model, since a guard that cannot tell what to block must not go quiet.
+
 ## Decision Flow
 
 ```mermaid
@@ -185,7 +194,7 @@ every agent.
 
 | Agent | Status | Implementation |
 | --- | --- | --- |
-| Claude Code | All 9 requirements, via a `PreToolUse` hook, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
+| Claude Code | All 10 requirements, via two `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
 | Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
 | opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
 
@@ -196,8 +205,8 @@ local host-safety hazard for this kit to cover.
 ## Auditing an Implementation Against This Spec
 
 Run each of the implementation's own self-tests (`claude/gh-write-guard.py --selftest`,
-`claude/stray-process-sweep.py --selftest`, and `claude/tool-containment.py --selftest` for Claude
-Code) and compare every case against the
+`claude/stray-process-sweep.py --selftest`, `claude/tool-containment.py --selftest`, and
+`claude/model-tier-guard.py --selftest` for Claude Code) and compare every case against the
 requirements list above, one by one, rather than reading the implementation's source as though it
 were the spec. A case the self-test doesn't cover is a gap in
 the audit, not evidence the requirement is satisfied. This is the concrete shape of "ask Claude to

@@ -691,9 +691,9 @@ def version_literal_errors(root):
 def model_tier_errors(root):
     """Hold spec/model-tiers.json to its own invariants and AGENTS.md's tier table to it.
 
-    The table is prose a session reads and the JSON is data the model-tier-guard hook reads, so a
-    model release that edits one and not the other would leave the hook refusing a model the rule
-    no longer names, or allowing the one it now names. AGENTS.md is carried, so the table cannot be
+    The table is prose a session reads, and the JSON is data the model-tier-guard hook reads. A
+    model release editing only one would leave the hook refusing a model the rule no longer names,
+    or allowing the one it now names. AGENTS.md is carried, so the table cannot be
     a generated include region, and an equality check is what keeps the two in step instead.
     """
     try:
@@ -720,15 +720,14 @@ def model_tier_errors(root):
     ]
     for tool, entry in tools.items():
         models = entry.get("models", {}) if isinstance(entry, dict) else {}
-        # A row with a hole would leave one tier resolving to whatever the session runs on, which for the default tier is the leak this file exists to close.
+        # A row with a hole leaves a tier resolving to whatever the session runs on.
+        # For the default tier, that is the leak this file exists to close.
         if set(models) != set(tiers):
             errors.append(
                 f"spec/model-tiers.json: tool {tool!r} must map exactly the declared tiers"
             )
             continue
-        rows.append(
-            f"| {entry['name']} | " + " | ".join(models[t].capitalize() for t in tiers) + " |"
-        )
+        rows.append(f"| {entry['name']} | " + " | ".join(f"`{models[t]}`" for t in tiers) + " |")
     agents_path = root / "AGENTS.md"
     if not agents_path.is_file():
         return errors

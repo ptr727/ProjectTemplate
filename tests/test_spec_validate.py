@@ -345,7 +345,7 @@ class ModelTierCase(unittest.TestCase):
     TABLE = (
         "| Tool | `highest` | `frontier` | `standard` | `bulk` |\n"
         "| --- | --- | --- | --- | --- |\n"
-        "| Claude Code | Fable | Opus | Sonnet | Haiku |\n"
+        "| Claude Code | `fable` | `opus` | `sonnet` | `haiku` |\n"
     )
 
     def setUp(self) -> None:
@@ -379,7 +379,7 @@ class ModelTierCase(unittest.TestCase):
         self.assertEqual(self.errors(), [])
 
     def test_rejects_a_table_naming_another_model(self) -> None:
-        errors = self.errors(self.TABLE.replace("| Opus |", "| Fable |"))
+        errors = self.errors(self.TABLE.replace("| `opus` |", "| `fable` |"))
 
         self.assertEqual(1, len(errors))
         self.assertIn("does not match", errors[0])

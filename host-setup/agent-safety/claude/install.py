@@ -171,25 +171,13 @@ def names_hook(command, name):
     return re.search(quoted, text) is not None or re.search(bare, text) is not None
 
 
-def matcher_sees_bash(matcher):
-    """Whether a PreToolUse matcher group receives a Bash call.
+def matcher_sees_tool(matcher, tool):
+    """Whether a PreToolUse matcher group receives a call to `tool`.
 
     An absent or empty matcher runs on every tool and `*` is the all-tools spelling, so neither is
     a defect. A matcher is otherwise a regular expression, which makes `Bash|Task` as good as
     `Bash`. Requiring the exact string reported all three of those working shapes as broken.
     """
-    if matcher is None or matcher in ("", "*"):
-        return True
-    if not isinstance(matcher, str):
-        return False
-    try:
-        return re.fullmatch(matcher, "Bash") is not None
-    except re.error:
-        return False
-
-
-def matcher_sees_tool(matcher, tool):
-    """Whether a PreToolUse matcher group receives a call to `tool`, by the same rules as `matcher_sees_bash`."""
     if matcher is None or matcher in ("", "*"):
         return True
     if not isinstance(matcher, str):
@@ -205,7 +193,7 @@ def matcher_covers_every_exit_reason(matcher):
 
     A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool: an
     absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
-    the three is a defect. Unlike `matcher_sees_bash`, there is no single reason to test regex
+    the three is a defect. Unlike `matcher_sees_tool`, there is no single reason to test regex
     membership against, since the sweep must fire on every exit reason rather than one particular
     one, so this classifies the shape rather than evaluating a pattern.
     """
@@ -1020,7 +1008,7 @@ def registration_problems(claude_home):
                     f"({hook.get('type')!r} running {hook.get('command')!r})"
                 )
                 continue
-            if not matcher_sees_bash(group.get("matcher")):
+            if not matcher_sees_tool(group.get("matcher"), "Bash"):
                 report(
                     f"a PreToolUse group registers the guard under matcher "
                     f"{group.get('matcher')!r}, which no Bash call matches, so that group never "

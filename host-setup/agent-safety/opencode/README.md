@@ -31,8 +31,8 @@ on [issue #781][issue-781], not silently worked around.
 ## Auditing
 
 Once an opencode-side implementation exists, audit it the way [`../README.md`][spec] "Auditing an
-Implementation Against This Spec" describes: run its own self-test and check every case against the
-nine requirements, not against `gh-write-guard.py`'s source.
+Implementation Against This Spec" describes. Run its own self-test and check every case against the
+ten requirements, not against `gh-write-guard.py`'s source.
 
 <!-- Repo -->
 [spec]: ../README.md

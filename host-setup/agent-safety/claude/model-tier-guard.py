@@ -2,8 +2,8 @@
 """PreToolUse guard: deny a subagent dispatch at the maintainer-only model tier.
 
 Registered as a Claude Code PreToolUse hook on the Agent and Workflow tools. It reads the
-tool-input JSON on stdin and prints a deny decision when the call names the model of the tier
-`model-tiers.json` marks maintainer-only (today `highest`, so `fable`). Everything else passes.
+tool-input JSON on stdin. It prints a deny decision when the call names the model of the tier
+`model-tiers.json` marks maintainer-only, today `highest`, so `fable`. Everything else passes.
 
 The mapping is read from `model-tiers.json` beside this file, which the installer copies from the
 hub's spec/model-tiers.json. A model release is then an edit to that file alone.
@@ -52,7 +52,7 @@ def load_tiers(path):
 def script_text(tool_input):
     """The script the Workflow tool will run: the file at `scriptPath`, which takes precedence there, else the inline `script`.
 
-    Both are read and joined, since a call passing both runs the file, and reading only the inline
+    Both are read and joined, since a call passing both runs the file. Reading only the inline
     text would let a model named in the file pass unseen.
     """
     parts = []
@@ -71,13 +71,14 @@ def script_text(tool_input):
 
 def names_model(text, model):
     """Whether a script text carries a `model: '<name>'` option naming `model`."""
-    pattern = r"\bmodel\s*:\s*['\"`]" + re.escape(model) + r"['\"`]"
+    # A JavaScript key may be bare or quoted, so `{"model": "x"}` is the same option as `{model: "x"}`.
+    pattern = r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`]" + re.escape(model) + r"['\"`]"
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 
 def any_model(text):
     """Whether a script text names any model option at all, for the unreadable-config case."""
-    return re.search(r"\bmodel\s*:\s*['\"`]", text) is not None
+    return re.search(r"(?<![\w$])['\"]?model['\"]?\s*:\s*['\"`]", text) is not None
 
 
 def classify(tool_name, tool_input, tiers, environ):
