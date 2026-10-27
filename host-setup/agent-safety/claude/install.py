@@ -1016,7 +1016,7 @@ def registration_problems(claude_home):
         if groups is None:
             return  # the shape error is already reported, and a count from it would be meaningless
         # Counted apart from the registrations, since an entry with a problem is still an entry.
-        # Counting only the sound ones added "the guard never runs" under every problem reported here.
+        # Counting only the sound ones added a "not registered" line under every problem reported here.
         # That line is false, and it sends a reader to the wrong fix.
         named = 0
         registered = 0
