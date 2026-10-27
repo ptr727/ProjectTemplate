@@ -72,7 +72,7 @@ Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of 
 
 Before dispatching, grep the tree for other statements of each rule the diff adds or changes, and add each file holding one to the `Paths:` floor, so a statement the diff has put in disagreement is read rather than missed.
 
-**Model tier:** `frontier`, the tier `AGENTS.md` "Delegation" names for adversarial review, which this pass is. Where `frontier` is not reachable, run the pass on the strongest tier below it that is, even the one that authored the change. A second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
+**Model tier:** `frontier`, the tier "Model Tiers" below names for adversarial review, which this pass is. Where `frontier` is not reachable, run the pass on the strongest tier below it that is, even the one that authored the change. A second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
 Reachable means the tier this session can name when it dispatches the reviewer, rather than the tier this session is itself running on. A session deliberately tiered down for execution work, a worker dispatched by an orchestrator being the ordinary case, names `frontier` for the reviewer where its harness lets it, since tiering down the author is the reason the reviewer must not follow it down. What a given harness and account actually permit varies, so treat this as the tier to ask for rather than one to assume. Where a dispatch exposes no way to name a tier, take what it gives and run the pass, for the reason the fallback above states. A seat that cannot dispatch a subagent hands the pass to whoever dispatched it. The seat commits, runs `python3 <hub-checkout>/scripts/local_review.py status --target <target>` in its worktree, and hands back its worktree path, target, and `contentDigest`. The dispatcher fills the brief's `<worktree>` slot and runs the reviewer. It then runs the record command from "Recording the Pass" in that worktree, with `--reviewer agent-skill --target <target> --expect-digest <digest>`. It returns the findings. Each fix commit repeats this cycle, and the seat pushes only when a record matches its content. The brief dispatching the seat states whether the dispatcher can continue that seat. Where the dispatcher cannot, or under `unattended-handoff`, the seat stops, reports, and does not push. Where nobody dispatched the seat, it reports to the maintainer that it could not run the pass, and does not push. Either way the push waits rather than the pass being quietly skipped. The headless `run --backend` route under "Recording the Pass" is not the substitute: it runs a vendor CLI against its own review, which never carries the brief above, so it satisfies the rule this section states only where that separate route is what a capture point asked for.
 
@@ -175,6 +175,31 @@ In the hub, `.husky/pre-push` checks the receipt at the push itself, so the mome
 | The recorded pass was run against X and this check measured Y, printed under the missing-pass headline | The hook reads `develop` and nothing else, so a branch based elsewhere is measured against `develop` whatever the pass targeted, and the engine deliberately prints no record command, since the one it would print records a pass over a diff nobody read | One more pass against the branch this work actually targets, where it does target the measured one. Where it does not, the gate cannot judge the branch at all and the bypass is its answer |
 
 This table is the fleet's one enumeration of these, and every other surface states the principle and routes here rather than listing the shapes. That is deliberate: every review round that added a shape also left a restatement of it somewhere else, and keeping one table is what stops the next round doing the same.
+
+## Model Tiers
+
+`AGENTS.md` "Model Tiers" keeps the tier rule, carried here whole as a generated include. A tier
+this skill names then resolves to its model even where a carried `AGENTS.md` predates the table.
+
+<!-- include: AGENTS.md > Model Tiers -->
+
+A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below and to the hub's `spec/model-tiers.json`. That file states the same mapping as data, and the hub's spec gate holds the two equal. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
+
+- **`frontier`** is the fleet's default reasoning tier, for orchestrating, rule text, design, spec logic, and adversarial review. It is not the most capable model available, which is `highest`.
+- **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's evidence-backed decline of a finding raised on its pull request stands, since that pull request's reviewers and its merge gate check it.
+- **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
+- **`highest`** is the most capable model available, and only the maintainer selects it. The maintainer chooses it for the session itself, or allows it for the session's subagents at launch. The host's agent-safety kit reads that launch setting, `FLEET_ALLOW_HIGHEST=1` on Claude Code. Naming the tier in a prompt does not set it. A maintainer naming it partway through a session restarts the session with it allowed, and an agent never sets it. Without that setting, the kit refuses a dispatch that names it. A dispatch naming no model runs at its agent definition's model where one is set, and otherwise at the session's own. A fork always runs at the session's model, whatever it names. So a session launched on `highest` names a tier on every dispatch meant to run below it, and uses no fork for such work. A session never reaches for it because a task looks hard.
+
+| Tool | `highest` | `frontier` | `standard` | `bulk` |
+| --- | --- | --- | --- | --- |
+| Claude Code | `fable` | `opus` | `sonnet` | `haiku` |
+
+Each cell is the name that tool's subagent dispatch takes, which follows the latest model of its family. A tool with no row here, or one that cannot name a model per subagent, runs every tier at the session's own model.
+
+- **A tier resolves only through this table.** A word such as "frontier", "strongest", or "most capable" never resolves to `highest`. The industry's "frontier model" is the opposite of what this tier means here. A session that cannot see this table names no model rather than guessing one, so the subagent runs at the session's own model.
+- **An orchestrating seat runs at `frontier` and names a tier on every dispatch.** It defaults a subagent to `frontier`, and picks `standard` or `bulk` deliberately for execution or mechanical work. A dispatch that names no model inherits whatever the session runs on, which is a choice nobody made.
+
+<!-- /include -->
 
 ## Mechanics Live Elsewhere
 

@@ -31,8 +31,8 @@ offers none of these extension points, that finding belongs on
 ## Auditing
 
 Once a Codex-side implementation exists, audit it the way [`../README.md`][spec] "Auditing an
-Implementation Against This Spec" describes: run its own self-test and check every case against the
-nine requirements, not against `gh-write-guard.py`'s source.
+Implementation Against This Spec" describes. Run its own self-test and check every case against the
+requirements, not against `gh-write-guard.py`'s source.
 
 <!-- Repo -->
 [spec]: ../README.md

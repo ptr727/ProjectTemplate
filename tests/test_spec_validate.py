@@ -339,6 +339,98 @@ class VersionLiteralCase(unittest.TestCase):
         self.assertEqual(validate.version_literal_errors(root), [])
 
 
+class ModelTierCase(unittest.TestCase):
+    """spec/model-tiers.json keeps its invariants, and AGENTS.md's tier table renders it exactly."""
+
+    TABLE = (
+        "| Tool | `highest` | `frontier` | `standard` | `bulk` |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| Claude Code | `fable` | `opus` | `sonnet` | `haiku` |\n"
+    )
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.root / "spec").mkdir()
+        self.models: dict[str, object] = {
+            "highest": "fable",
+            "frontier": "opus",
+            "standard": "sonnet",
+            "bulk": "haiku",
+        }
+        self.config: dict[str, object] = {
+            "tiers": ["highest", "frontier", "standard", "bulk"],
+            "maintainerOnly": "highest",
+            "defaultTier": "frontier",
+            "tools": {"claude-code": {"name": "Claude Code", "models": self.models}},
+        }
+
+    def errors(self, table: str = TABLE) -> list[str]:
+        (self.root / "spec/model-tiers.json").write_text(json.dumps(self.config), encoding="utf-8")
+        (self.root / "AGENTS.md").write_text(
+            f"# Agents\n\n### Model Tiers\n\n{table}\nAfter.\n", encoding="utf-8"
+        )
+        return validate.model_tier_errors(self.root)
+
+    def test_accepts_a_table_that_renders_the_config(self) -> None:
+        self.assertEqual(self.errors(), [])
+
+    def test_rejects_a_table_naming_another_model(self) -> None:
+        errors = self.errors(self.TABLE.replace("| `opus` |", "| `fable` |"))
+
+        self.assertEqual(1, len(errors))
+        self.assertIn("does not match", errors[0])
+
+    def test_rejects_the_maintainer_only_tier_as_the_default(self) -> None:
+        self.config["defaultTier"] = "highest"
+
+        self.assertTrue(any("defaultTier" in e for e in self.errors()))
+
+    def test_rejects_a_tool_missing_a_tier(self) -> None:
+        del self.models["bulk"]
+
+        self.assertTrue(any("exactly the declared tiers" in e for e in self.errors()))
+
+    def test_rejects_a_model_that_is_not_a_non_empty_string(self) -> None:
+        for value in (None, 7, ""):
+            with self.subTest(value=value):
+                self.models["highest"] = value
+
+                self.assertTrue(any("non-empty model name" in e for e in self.errors()))
+
+    def test_rejects_a_tier_sharing_the_maintainer_only_model(self) -> None:
+        self.models["frontier"] = "Fable"
+
+        self.assertTrue(any("no other tier shares" in e for e in self.errors()))
+
+    def test_reports_a_maintainer_only_value_that_is_not_a_string(self) -> None:
+        self.config["maintainerOnly"] = []
+
+        self.assertTrue(any("maintainerOnly" in e for e in self.errors()))
+
+    def test_rejects_a_repeated_tier_name(self) -> None:
+        self.config["tiers"] = ["highest", "frontier", "standard", "bulk", "bulk"]
+
+        self.assertTrue(any("must not repeat a name" in e for e in self.errors()))
+
+    def test_rejects_a_tools_list_instead_of_an_object(self) -> None:
+        self.config["tools"] = []
+
+        self.assertTrue(any("tools an object" in e for e in self.errors()))
+
+    def test_rejects_a_tier_that_is_not_a_string(self) -> None:
+        self.config["tiers"] = [["highest"]]
+
+        self.assertTrue(any("a list of strings" in e for e in self.errors()))
+
+    def test_rejects_a_tool_entry_that_is_not_an_object(self) -> None:
+        self.config["tools"] = {"claude-code": "opus"}
+
+        self.assertTrue(any("needs a name and a models object" in e for e in self.errors()))
+
+    def test_the_hub_table_matches_the_hub_config(self) -> None:
+        self.assertEqual(validate.model_tier_errors(Path(__file__).resolve().parents[1]), [])
+
+
 class DescriptionErrorsCase(unittest.TestCase):
     """registry/repos.json's optional `description` (GOVERNANCE.md "Repository Details")."""
 

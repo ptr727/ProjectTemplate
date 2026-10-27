@@ -90,22 +90,25 @@ maintainer starts a second run on a repository only once the first has ended.
 
 The orchestrator first resolves `<owner>/<repo>` from the checkout's `origin`, or takes it from the
 invocation. Apart from the timer "A Dispatch That Fails" names, that is the one command it runs.
-From then on it holds only the scope and any `highest` the invocation named, the round count, and
+From then on it holds only the scope and any allowed `highest` the invocation named, the round count, and
 the dispatched handoff numbers. It also holds each round's one-line outcome and the waits spent on
 a dispatch being retried.
 Each round runs:
 
-1. **Dispatch the picker** at `frontier` with the brief below, or at `highest` where the
-   maintainer's invocation named that tier or its model. Its ranking, decision, and worker-tier
+1. **Dispatch the picker** at `frontier` with the brief below. Use `highest` only where the
+   invocation named that tier or its model and the session was launched with it allowed, per
+   "Model Tiers" below. A refusal there ends the run the way step 3's does. Its ranking, decision, and worker-tier
    calls are the ones `backlog-burndown` keeps in its orchestrator, and here no maintainer reviews
    them. Wait on the dispatch mechanism's own completion signal rather than polling.
 2. **Read its one line.** `NONE` or `STOP` ends the run, and so does any reply that is not a
    picker line below. A handoff number already dispatched in this run ends it too, since a handoff
    a worker neither closed nor parked means the worker failed in a way this seat must not
    investigate.
-3. **Dispatch the worker** on that handoff and track, at the model `AGENTS.md` "Delegation" names
+3. **Dispatch the worker** on that handoff and track, at the model "Model Tiers" below names
    for the tier in the picker's line. Wait the same way. Dispatch at `highest` instead only where
-   the maintainer's invocation named that tier or its model.
+   the invocation named that tier or its model and the session was launched with it allowed, per
+   "Model Tiers" below. Without that allowance every such dispatch is refused. The run then ends
+   and reports the refusal rather than continuing at a tier nobody chose.
 4. **Record its one line** and start the next round. `STOP` ends the run, and so does a reply that
    is not one of the lines below, rather than being read further.
 
@@ -179,6 +182,31 @@ A promotion carries whatever develop holds, since that is what a develop -> main
 Under `main` or `release` every unblocked round promotes, so each promotion ordinarily carries one
 fix. A change another session merged to develop meanwhile rides along with it. Naming the scope
 accepts that.
+
+## Model Tiers
+
+`AGENTS.md` "Model Tiers" keeps the tier rule, carried here whole as a generated include. A tier
+this skill names then resolves to its model even where a carried `AGENTS.md` predates the table.
+
+<!-- include: AGENTS.md > Model Tiers -->
+
+A rule, a Skill, or a brief names a model tier, never a model. A model release is then an edit to the table below and to the hub's `spec/model-tiers.json`. That file states the same mapping as data, and the hub's spec gate holds the two equal. Reasoning effort is a separate axis stated beside the tier, such as `bulk` at low effort.
+
+- **`frontier`** is the fleet's default reasoning tier, for orchestrating, rule text, design, spec logic, and adversarial review. It is not the most capable model available, which is `highest`.
+- **`standard`** is ordinary implementation and driving a pull request. Judging a review finding is never mechanical, however often it repeats, so it runs at `standard` or above. A `standard` driver's evidence-backed decline of a finding raised on its pull request stands, since that pull request's reviewers and its merge gate check it.
+- **`bulk`** is the cheapest model that does the work correctly. It is for high fan-out mechanical work, such as an extraction or a status check.
+- **`highest`** is the most capable model available, and only the maintainer selects it. The maintainer chooses it for the session itself, or allows it for the session's subagents at launch. The host's agent-safety kit reads that launch setting, `FLEET_ALLOW_HIGHEST=1` on Claude Code. Naming the tier in a prompt does not set it. A maintainer naming it partway through a session restarts the session with it allowed, and an agent never sets it. Without that setting, the kit refuses a dispatch that names it. A dispatch naming no model runs at its agent definition's model where one is set, and otherwise at the session's own. A fork always runs at the session's model, whatever it names. So a session launched on `highest` names a tier on every dispatch meant to run below it, and uses no fork for such work. A session never reaches for it because a task looks hard.
+
+| Tool | `highest` | `frontier` | `standard` | `bulk` |
+| --- | --- | --- | --- | --- |
+| Claude Code | `fable` | `opus` | `sonnet` | `haiku` |
+
+Each cell is the name that tool's subagent dispatch takes, which follows the latest model of its family. A tool with no row here, or one that cannot name a model per subagent, runs every tier at the session's own model.
+
+- **A tier resolves only through this table.** A word such as "frontier", "strongest", or "most capable" never resolves to `highest`. The industry's "frontier model" is the opposite of what this tier means here. A session that cannot see this table names no model rather than guessing one, so the subagent runs at the session's own model.
+- **An orchestrating seat runs at `frontier` and names a tier on every dispatch.** It defaults a subagent to `frontier`, and picks `standard` or `bulk` deliberately for execution or mechanical work. A dispatch that names no model inherits whatever the session runs on, which is a choice nobody made.
+
+<!-- /include -->
 
 ## Auto-Resolvable
 

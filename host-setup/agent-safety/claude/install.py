@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook, the SessionEnd stray-process sweep, and the tool-containment shell prefix,
-registers the two hooks in the user settings.json and, on a host with a systemd user manager, the prefix
-in its `env`, merges the permission rules this kit owns into the same file, renders the user
-CLAUDE.md whole from the kit's blocks and the host-local instruction file, and self-tests each hook
-before registering it.
+Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tier mapping, the
+SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
+user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
+`env`. It merges the permission rules this kit owns into the same file. It renders the user
+CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
+before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
@@ -45,13 +46,20 @@ GUARD_STEM = "gh-write-guard"
 SWEEP_NAME = "stray-process-sweep.py"
 SWEEP_STEM = "stray-process-sweep"
 CONTAIN_NAME = "tool-containment.py"
+TIER_NAME = "model-tier-guard.py"
+TIER_CONFIG_NAME = "model-tiers.json"
+# The tier guard fires on the tools that dispatch a subagent, so it is its own group and not the Bash one.
+TIER_MATCHER = "Agent|Workflow"
 
 PREFIX_VAR = "CLAUDE_CODE_SHELL_PREFIX"
 
 # The hook files this kit copies into ~/.claude/hooks, in deploy order.
 # Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
 # That silence reads as a pass.
-DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME)
+DEPLOYED_HOOKS = (GUARD_NAME, SWEEP_NAME, CONTAIN_NAME, TIER_NAME)
+
+# The tier mapping lives in the hub's spec/ so a gate and the hook read one file, and is copied here, never edited here.
+DEPLOYED_DATA = {TIER_CONFIG_NAME: HERE.parent.parent.parent / "spec" / TIER_CONFIG_NAME}
 
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
 # The sweep's own calls are each bounded, two `ps` reads at 5s and four `systemctl` calls at 5s, all inside this.
@@ -81,11 +89,18 @@ LOCAL_MARKER = "host-local"
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-PAYLOAD_FILES = DEPLOYED_HOOKS + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
+PAYLOAD_FILES = (
+    DEPLOYED_HOOKS + tuple(DEPLOYED_DATA) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
+)
 
 # Distinguishes an absent key from one holding an explicit null, which `dict.get` reports alike.
 # The two need different answers, since a gap is filled and a null is a settings error.
 MISSING = object()
+
+
+def payload_source(name):
+    """Where a payload file is read from, the kit directory unless it is a data file kept in spec/."""
+    return DEPLOYED_DATA.get(name, HERE / name)
 
 
 def hook_command(launcher, path):
@@ -157,8 +172,8 @@ def names_hook(command, name):
     return re.search(quoted, text) is not None or re.search(bare, text) is not None
 
 
-def matcher_sees_bash(matcher):
-    """Whether a PreToolUse matcher group receives a Bash call.
+def matcher_sees_tool(matcher, tool):
+    """Whether a PreToolUse matcher group receives a call to `tool`.
 
     An absent or empty matcher runs on every tool and `*` is the all-tools spelling, so neither is
     a defect. A matcher is otherwise a regular expression, which makes `Bash|Task` as good as
@@ -169,7 +184,7 @@ def matcher_sees_bash(matcher):
     if not isinstance(matcher, str):
         return False
     try:
-        return re.fullmatch(matcher, "Bash") is not None
+        return re.fullmatch(matcher, tool) is not None
     except re.error:
         return False
 
@@ -179,11 +194,29 @@ def matcher_covers_every_exit_reason(matcher):
 
     A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool: an
     absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
-    the three is a defect. Unlike `matcher_sees_bash`, there is no single reason to test regex
+    the three is a defect. Unlike `matcher_sees_tool`, there is no single reason to test regex
     membership against, since the sweep must fire on every exit reason rather than one particular
     one, so this classifies the shape rather than evaluating a pattern.
     """
     return matcher is None or matcher in ("", "*")
+
+
+def register_hook(groups, name, entry, selects, matcher=None):
+    """Leave `entry` as the only registration of hook `name` across an event's matcher `groups`.
+
+    Every entry naming the hook is stripped first, so a re-run leaves no duplicate behind even
+    where more than one group would select it. `entry` then goes into the first group `selects`
+    accepts, or into a new group carrying `matcher`, which an absent `matcher` leaves unfiltered.
+    """
+    for g in groups:
+        hooks_list = g.get("hooks")
+        if isinstance(hooks_list, list):
+            hooks_list[:] = [h for h in hooks_list if not names_hook(h.get("command", ""), name)]
+    group = next((g for g in groups if selects(g)), None)
+    if group is None:
+        group = {"hooks": []} if matcher is None else {"matcher": matcher, "hooks": []}
+        groups.append(group)
+    group.setdefault("hooks", []).append(entry)
 
 
 def owns(entry, prefix):
@@ -401,7 +434,9 @@ def source_ref():
             file=sys.stderr,
         )
     else:
-        status = git("status", "--porcelain", "--", *PAYLOAD_FILES)
+        status = git(
+            "status", "--porcelain", "--", *(str(payload_source(n)) for n in PAYLOAD_FILES)
+        )
         ref["dirty"] = bool(status)
     return ref
 
@@ -755,11 +790,12 @@ def payload_digest():
 
     Fixed order because a set of files has none, and a digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
-    `installed_digest` reads, so the two are directly comparable: each deployed hook, then each block.
+    `installed_digest` reads, so the two are directly comparable: each deployed hook, then each data
+    file, then each block.
     """
     h = hashlib.sha256()
     for name in PAYLOAD_FILES:
-        raw = normalized((HERE / name).read_bytes())
+        raw = normalized(payload_source(name).read_bytes())
         # A snippet is embedded stripped, so trailing whitespace is not installed content.
         # The hook is copied byte for byte, so nothing about it is stripped.
         if name.endswith(".md"):
@@ -832,7 +868,7 @@ def installed_digest(claude_home):
     """
     # Read from `DEPLOYED_HOOKS` rather than by name, since naming them here is the drift that constant closes.
     # A hook added to the deploy list and not to this one installs and is never covered by the currentness digest.
-    deployed = [claude_home / "hooks" / name for name in DEPLOYED_HOOKS]
+    deployed = [claude_home / "hooks" / name for name in (*DEPLOYED_HOOKS, *DEPLOYED_DATA)]
     claude_md = claude_home / "CLAUDE.md"
     claude_text = read_claude_md(claude_md)
     try:
@@ -924,11 +960,11 @@ def registration_problems(claude_home):
     try:
         raw = read_regular_file(claude_home / "settings.json")
     except FileNotFoundError:
-        return ["settings.json is missing, so the hook is not registered"]
+        return ["settings.json is missing, so the hooks are not registered"]
     except OSError as e:
         return [f"settings.json cannot be read ({e})"]
     if raw is None:
-        return ["settings.json is not a regular file, so the hook is not registered"]
+        return ["settings.json is not a regular file, so the hooks are not registered"]
     try:
         data = json.loads(raw.decode("utf-8") or "{}")
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
@@ -972,95 +1008,116 @@ def registration_problems(claude_home):
             return None
         return groups
 
+    def check_hook(event, groups, name, label, subject, absent_effect, judge):
+        """Report each way the `event` `groups` fail to run hook `name` exactly once.
+
+        `label` names the hook in an entry defect, and `subject` names it in the count lines, with
+        `absent_effect` saying what a missing entry costs. `judge(group, hook)` reports what `event`
+        itself requires of an entry that runs the deployed hook, and returns whether it counts as registered.
+        """
+        if groups is None:
+            return  # the shape error is already reported, and a count from it would be meaningless
+        # Counted apart from the registrations, since an entry with a problem is still an entry.
+        # Counting only the sound ones added a "not registered" line under every problem reported here.
+        # That line is false, and it sends a reader to the wrong fix.
+        named = 0
+        registered = 0
+        path = claude_home / "hooks" / name
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for hook in group.get("hooks") or []:
+                if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), name):
+                    continue
+                named += 1
+                if not runs_hook(hook.get("command"), path) or hook.get("type") != "command":
+                    out.append(
+                        f"a {event} entry names the {label} but does not run the deployed one "
+                        f"({hook.get('type')!r} running {hook.get('command')!r})"
+                    )
+                    continue
+                if judge(group, hook):
+                    registered += 1
+        if named == 0:
+            out.append(f"{subject} is not registered in settings.json, so {absent_effect}")
+        elif registered > 1:
+            out.append(f"{subject} is registered {registered} times, so it runs more than once")
+
+    def check_pre_tool_hook(groups, name, tools, label, subject, unseen_effect, absent_effect):
+        """Report each way the PreToolUse `groups` fail to run hook `name` once on every one of `tools`.
+
+        `label` names the hook in an entry or group defect, and `subject` names it in the count
+        lines. `unseen_effect` and `absent_effect` say what a blind matcher and a missing entry cost.
+        """
+
+        def judge(group, hook):
+            # Every tool is checked, since a matcher seeing only some leaves the others' calls unguarded.
+            unseen = [t for t in tools if not matcher_sees_tool(group.get("matcher"), t)]
+            if unseen:
+                report(
+                    f"a PreToolUse group registers the {label} under matcher "
+                    f"{group.get('matcher')!r}, which no {'/'.join(unseen)} call matches, so "
+                    f"{unseen_effect}"
+                )
+                return False
+            return True
+
+        check_hook("PreToolUse", groups, name, label, subject, absent_effect, judge)
+
+    def judge_sweep(group, hook):
+        """Report a SessionEnd sweep entry's timeout and matcher, counting it unless its timeout is too short."""
+        # A longer budget than this installer writes is not a defect, so only a shorter one is reported.
+        # The event's own default is 1.5s, which is what the sweep needs more than.
+        timeout = hook.get("timeout")
+        too_short = isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+        if not too_short:
+            too_short = timeout < SWEEP_TIMEOUT_SECONDS
+        if too_short:
+            carries = (
+                "carries no timeout" if "timeout" not in hook else f"carries timeout {timeout!r}"
+            )
+            out.append(
+                f"the SessionEnd sweep {carries} where this installer writes "
+                f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
+            )
+            return False
+        # Any matcher other than absent, empty, or `*` may filter some exit reasons out.
+        # Counting it as registered reports a machine current while the sweep may never fire on an ordinary exit.
+        if not matcher_covers_every_exit_reason(group.get("matcher")):
+            report(
+                f"the SessionEnd sweep is registered under a matcher "
+                f"({group.get('matcher')!r}) other than absent, empty, or `*`, so it may not run on every exit reason"
+            )
+        return True
+
     groups = event_groups("PreToolUse")
-    # Counted apart from the registrations, since an entry with a problem is still an entry.
-    # Counting only the sound ones added "the guard never runs" under every problem reported here.
-    # That line is false, and it sends a reader to the wrong fix.
-    named = 0
-    registered = 0
-    guard_path = claude_home / "hooks" / GUARD_NAME
-    for group in groups or []:
-        if not isinstance(group, dict):
-            continue
-        for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), GUARD_NAME):
-                continue
-            named += 1
-            if not runs_hook(hook.get("command"), guard_path) or hook.get("type") != "command":
-                out.append(
-                    "a PreToolUse entry names the guard but does not run the deployed one "
-                    f"({hook.get('type')!r} running {hook.get('command')!r})"
-                )
-                continue
-            if not matcher_sees_bash(group.get("matcher")):
-                report(
-                    f"a PreToolUse group registers the guard under matcher "
-                    f"{group.get('matcher')!r}, which no Bash call matches, so that group never "
-                    "fires"
-                )
-                continue
-            registered += 1
-    if groups is None:
-        pass  # the shape error is already reported, and a count from it would be meaningless
-    elif named == 0:
-        out.append(
-            "the PreToolUse hook is not registered in settings.json, so the guard never runs"
-        )
-    elif registered > 1:
-        out.append(
-            f"the PreToolUse hook is registered {registered} times, so it runs more than once"
-        )
-    ends = event_groups("SessionEnd")
-    sweeps_named = 0
-    swept = 0
-    for group in ends or []:
-        if not isinstance(group, dict):
-            continue
-        sweep_path = claude_home / "hooks" / SWEEP_NAME
-        for hook in group.get("hooks") or []:
-            if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), SWEEP_NAME):
-                continue
-            sweeps_named += 1
-            if not runs_hook(hook.get("command"), sweep_path) or hook.get("type") != "command":
-                out.append(
-                    "a SessionEnd entry names the sweep but does not run the deployed one "
-                    f"({hook.get('type')!r} running {hook.get('command')!r})"
-                )
-                continue
-            # A longer budget than this installer writes is not a defect, so only a shorter one is reported.
-            # The event's own default is 1.5s, which is what the sweep needs more than.
-            timeout = hook.get("timeout")
-            too_short = isinstance(timeout, bool) or not isinstance(timeout, (int, float))
-            if not too_short:
-                too_short = timeout < SWEEP_TIMEOUT_SECONDS
-            if too_short:
-                carries = (
-                    "carries no timeout"
-                    if "timeout" not in hook
-                    else f"carries timeout {timeout!r}"
-                )
-                out.append(
-                    f"the SessionEnd sweep {carries} where this installer writes "
-                    f"{SWEEP_TIMEOUT_SECONDS}, too little for a `ps` on a loaded machine"
-                )
-                continue
-            swept += 1
-            # Any matcher other than absent, empty, or `*` may filter some exit reasons out.
-            # Counting it as registered reports a machine current while the sweep may never fire on an ordinary exit.
-            if not matcher_covers_every_exit_reason(group.get("matcher")):
-                report(
-                    f"the SessionEnd sweep is registered under a matcher "
-                    f"({group.get('matcher')!r}) other than absent, empty, or `*`, so it may not run on every exit reason"
-                )
-    if ends is None:
-        pass  # likewise reported as a shape error above
-    elif sweeps_named == 0:
-        out.append(
-            "the SessionEnd sweep is not registered in settings.json, so a surviving shell is "
-            "never reported"
-        )
-    elif swept > 1:
-        out.append(f"the SessionEnd sweep is registered {swept} times, so it runs more than once")
+    check_pre_tool_hook(
+        groups,
+        GUARD_NAME,
+        ("Bash",),
+        "write guard",
+        "the write guard",
+        "that group never fires",
+        "the guard never runs",
+    )
+    check_pre_tool_hook(
+        groups,
+        TIER_NAME,
+        ("Agent", "Workflow"),
+        "model tier guard",
+        "the model tier guard",
+        "that dispatch is never checked",
+        "a maintainer-only model dispatch is never refused",
+    )
+    check_hook(
+        "SessionEnd",
+        event_groups("SessionEnd"),
+        SWEEP_NAME,
+        "sweep",
+        "the SessionEnd sweep",
+        "a surviving shell is never reported",
+        judge_sweep,
+    )
     capable, reason = containment_capable(claude_home / "hooks" / CONTAIN_NAME)
     env = data.get("env")
     held = env.get(PREFIX_VAR) if isinstance(env, dict) else None
@@ -1167,7 +1224,7 @@ def report(claude_home):
     live_installed = installed_digest(claude_home)
     if live_installed is None:
         problems.append(
-            "a deployed hook or CLAUDE.md is missing or unreadable, so the kit is not fully installed"
+            "a deployed hook, its data file, or CLAUDE.md is missing or unreadable, so the kit is not fully installed"
         )
     elif live_installed != current:
         problems.append("the installed content differs from what this checkout would write")
@@ -1283,6 +1340,7 @@ def main():
     hook_dst = hooks_dir / GUARD_NAME
     sweep_dst = hooks_dir / SWEEP_NAME
     contain_dst = hooks_dir / CONTAIN_NAME
+    tier_dst = hooks_dir / TIER_NAME
     settings = claude_home / "settings.json"
     claude_md = claude_home / "CLAUDE.md"
 
@@ -1408,6 +1466,20 @@ def main():
             )
             return 1
         print(f"  {src_name} self-test: PASS")
+    # The data the hooks read goes in after every self-test passed and before any hook is replaced.
+    # A new hook then never runs beside a config it cannot find.
+    for data_name, data_src in DEPLOYED_DATA.items():
+        data_tmp = hooks_dir / f"{data_name}.{os.getpid()}.staged"
+        try:
+            shutil.copyfile(data_src, data_tmp)
+            os.replace(data_tmp, hooks_dir / data_name)
+        except OSError as e:
+            data_tmp.unlink(missing_ok=True)
+            for _n, f in staged:
+                f.unlink(missing_ok=True)
+            sys.stderr.write(f"copying {data_name} failed ({e}); no hook was replaced.\n")
+            return 1
+        print(f"  data -> {hooks_dir / data_name}")
     for done_count, (src_name, tmp) in enumerate(staged):
         dst = hooks_dir / src_name
         # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
@@ -1456,7 +1528,7 @@ def main():
     if not isinstance(data, dict):
         sys.stderr.write(
             f"{settings} is valid JSON but holds {type(data).__name__} at its root where an object "
-            "is required. Fix or remove it, then re-run. This file is unchanged, so the hook is "
+            "is required. Fix or remove it, then re-run. This file is unchanged, so the hooks are "
             "deployed but not registered.\n"
         )
         return 1
@@ -1468,7 +1540,7 @@ def main():
     def reject(where, held, want):
         sys.stderr.write(
             f"{settings} has `{where}` as {type(held).__name__} where {want.__name__} is required. "
-            "Fix or remove that key, then re-run. This file is unchanged, so the hook is deployed "
+            "Fix or remove that key, then re-run. This file is unchanged, so the hooks are deployed "
             "but not registered.\n"
         )
 
@@ -1506,41 +1578,37 @@ def main():
                     return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
-    # Strip the hook from every existing group first, so a re-run leaves no duplicate behind.
-    # That matters when settings.json already carries more than one Bash group.
-    # Then register it in a single Bash group.
-    for g in pre:
-        hooks_list = g.get("hooks")
-        if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if not names_hook(h.get("command", ""), GUARD_NAME)
-            ]
-    group = next((g for g in pre if g.get("matcher") == "Bash"), None)
-    if group is None:
-        group = {"matcher": "Bash", "hooks": []}
-        pre.append(group)
-    group.setdefault("hooks", []).append({"type": "command", "command": hook_cmd})
+    register_hook(
+        pre,
+        GUARD_NAME,
+        {"type": "command", "command": hook_cmd},
+        lambda g: g.get("matcher") == "Bash",
+        "Bash",
+    )
     done = ["PreToolUse/Bash hook registered"]
+
+    # The tier guard gets its own Agent|Workflow group, stripped and re-added the same way so a re-run leaves one.
+    register_hook(
+        pre,
+        TIER_NAME,
+        {"type": "command", "command": hook_command(launcher, tier_dst)},
+        lambda g: g.get("matcher") == TIER_MATCHER,
+        TIER_MATCHER,
+    )
+    done.append(f"PreToolUse/{TIER_MATCHER} model tier guard registered")
 
     # Step 2b registers the SessionEnd sweep the same strip-then-register way as the guard above.
     # The chosen or newly created group covers every exit reason, so the sweep fires on all of them.
     ends = data.setdefault("hooks", {}).setdefault("SessionEnd", [])
-    for g in ends:
-        hooks_list = g.get("hooks")
-        if isinstance(hooks_list, list):
-            hooks_list[:] = [
-                h for h in hooks_list if not names_hook(h.get("command", ""), SWEEP_NAME)
-            ]
-    end_group = next((g for g in ends if matcher_covers_every_exit_reason(g.get("matcher"))), None)
-    if end_group is None:
-        end_group = {"hooks": []}
-        ends.append(end_group)
-    end_group.setdefault("hooks", []).append(
+    register_hook(
+        ends,
+        SWEEP_NAME,
         {
             "type": "command",
             "command": hook_command(launcher, sweep_dst),
             "timeout": SWEEP_TIMEOUT_SECONDS,
-        }
+        },
+        lambda g: matcher_covers_every_exit_reason(g.get("matcher")),
     )
     done.append("SessionEnd sweep registered")
 

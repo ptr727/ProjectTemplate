@@ -1467,6 +1467,73 @@ class TestRegistration(StampCase):
             any("so that group never fires" in p for p in install.registration_problems(self.home))
         )
 
+    def _tier_group(self):
+        data = self._settings()
+        groups = [
+            g
+            for g in data["hooks"]["PreToolUse"]
+            if any(install.TIER_NAME in h.get("command", "") for h in g.get("hooks", []))
+        ]
+        return data, groups
+
+    def test_the_tier_guard_is_deployed_with_its_config(self):
+        self.install()
+        for name in (install.TIER_NAME, install.TIER_CONFIG_NAME):
+            self.assertTrue((self.home / "hooks" / name).is_file(), name)
+        self.assertEqual(
+            (self.home / "hooks" / install.TIER_CONFIG_NAME).read_bytes(),
+            install.DEPLOYED_DATA[install.TIER_CONFIG_NAME].read_bytes(),
+        )
+
+    def test_the_tier_guard_registers_once_in_its_own_group(self):
+        self.install()
+        self.install()
+        data, groups = self._tier_group()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["matcher"], install.TIER_MATCHER)
+        self.assertEqual(len(groups[0]["hooks"]), 1)
+        bash = [g for g in data["hooks"]["PreToolUse"] if g.get("matcher") == "Bash"]
+        self.assertFalse(
+            any(install.TIER_NAME in h.get("command", "") for g in bash for h in g["hooks"])
+        )
+        self.assertEqual(install.registration_problems(self.home), [])
+
+    def test_a_tier_guard_matcher_that_misses_agent_is_a_defect(self):
+        self.install()
+        for matcher in ("Workflow", "Bash", "Edit"):
+            with self.subTest(matcher=matcher):
+                data, groups = self._tier_group()
+                groups[0]["matcher"] = matcher
+                self._write(data)
+                self.assertTrue(
+                    any(
+                        "model tier guard" in p and "never checked" in p
+                        for p in install.registration_problems(self.home)
+                    )
+                )
+
+    def test_a_missing_tier_guard_registration_is_reported(self):
+        self.install()
+        data, groups = self._tier_group()
+        data["hooks"]["PreToolUse"].remove(groups[0])
+        self._write(data)
+        self.assertTrue(
+            any(
+                "model tier guard is not registered" in p
+                for p in install.registration_problems(self.home)
+            )
+        )
+
+    def test_a_modified_tier_config_reports_stale(self):
+        self.install()
+        config = self.home / "hooks" / install.TIER_CONFIG_NAME
+        config.write_text(
+            config.read_text(encoding="utf-8").replace("fable", "other"), encoding="utf-8"
+        )
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("the installed content differs from what this checkout would write", r.stdout)
+
     def test_a_registration_is_read_however_its_path_is_quoted(self):
         """A hand-written or UI-written registration runs the deployed path bare or single-quoted."""
         self.install()
@@ -1553,7 +1620,7 @@ class TestRegistration(StampCase):
         self.assertEqual(live.read_bytes(), before, "the live hook was replaced by a failing one")
         self.assertEqual(
             sorted(f.name for f in (self.home / "hooks").iterdir()),
-            sorted(install.DEPLOYED_HOOKS),
+            sorted((*install.DEPLOYED_HOOKS, *install.DEPLOYED_DATA)),
             "a staged file was left behind",
         )
 
@@ -1568,6 +1635,23 @@ class TestRegistration(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("under a matcher", r.stdout)
+
+    def test_a_sweep_under_a_matcher_still_counts_toward_the_duplicate(self):
+        """A narrowed matcher still fires on some exit reasons, so a second sound entry runs the sweep twice."""
+        self.install()
+        data = self._settings()
+        group = next(
+            g
+            for g in data["hooks"]["SessionEnd"]
+            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+        )
+        data["hooks"]["SessionEnd"].append(dict(json.loads(json.dumps(group)), matcher="clear"))
+        self._write(data)
+        problems = install.registration_problems(self.home)
+        self.assertIn(
+            "the SessionEnd sweep is registered 2 times, so it runs more than once", problems
+        )
+        self.assertTrue(any("under a matcher ('clear')" in p for p in problems), problems)
 
     def test_a_sweep_matcher_covering_every_reason_is_not_a_defect(self):
         """An absent, empty, or `*` SessionEnd matcher runs on every exit reason, same as PreToolUse."""
@@ -1957,7 +2041,7 @@ class TestStampContent(StampCase):
         """
         baseline = install.payload_digest()
         for name in install.PAYLOAD_FILES:
-            target = HERE / name
+            target = install.payload_source(name)
             original = target.read_bytes()
             try:
                 target.write_bytes(original + b"\n# sentinel\n")
@@ -2068,7 +2152,9 @@ class TestStampContent(StampCase):
         """Written out by hand, the two drifted and the digest stopped covering a deployed file."""
         self.assertEqual(
             install.PAYLOAD_FILES,
-            install.DEPLOYED_HOOKS + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
+            install.DEPLOYED_HOOKS
+            + tuple(install.DEPLOYED_DATA)
+            + tuple(f for _, f in install.CLAUDE_MD_BLOCKS),
         )
         # The hooks the installer actually copies, read from `main`, are exactly that declared list.
         source = INSTALL.read_text(encoding="utf-8")

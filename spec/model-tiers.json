@@ -1,0 +1,17 @@
+{
+    "note": "The model-tier mapping AGENTS.md \"Model Tiers\" states, as data a gate and a hook can read. A rule, a Skill, or a brief names a tier, never a model, so a model release is an edit to a `models` value here and to the AGENTS.md table, which spec/validate.py holds equal. Each value is the alias that tool's own subagent dispatch accepts, an alias that already tracks the latest model of its family. A tool with no entry, or with no way to name a model per subagent, runs every tier at the session's own model. The model-tier-guard hook in host-setup/agent-safety/claude/ refuses a dispatch at the maintainerOnly tier's model unless the maintainer allowed it at launch.",
+    "tiers": ["highest", "frontier", "standard", "bulk"],
+    "maintainerOnly": "highest",
+    "defaultTier": "frontier",
+    "tools": {
+        "claude-code": {
+            "name": "Claude Code",
+            "models": {
+                "highest": "fable",
+                "frontier": "opus",
+                "standard": "sonnet",
+                "bulk": "haiku"
+            }
+        }
+    }
+}
