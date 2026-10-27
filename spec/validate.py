@@ -1480,6 +1480,10 @@ def main(argv=()):
             errors.append(
                 f"files.json: repo-owned tree {source} source must be a normalized path below the repository root"
             )
+        elif (link := symlinked_component(ROOT, source)) is not None:
+            errors.append(
+                f"files.json: repo-owned tree {source} has a symlinked component {link}, below which git tracks no file"
+            )
         elif not (ROOT / source).is_dir():
             errors.append(f"files.json: repo-owned tree {source} is missing or not a directory")
 

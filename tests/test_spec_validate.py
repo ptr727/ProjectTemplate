@@ -685,8 +685,8 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
     Every run adds a marker entry with no reason, which the loop always reports, so each absence assertion proves the loop ran.
     """
 
-    def run_against(self, owned: list[object]) -> str:
-        output = run_gate_on_files({"repoOwnedTrees": [*owned, {"source": "real"}]})
+    def run_against(self, owned: list[object], make_tree=None) -> str:
+        output = run_gate_on_files({"repoOwnedTrees": [*owned, {"source": "real"}]}, make_tree)
         self.assertIn(
             "files.json: repo-owned tree real reason must be a non-empty string",
             output,
@@ -704,6 +704,16 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
                 self.assertIn(
                     f"files.json: repo-owned tree {source} source must be a normalized path below the repository root",
                     self.run_against([{"source": source, "reason": "r"}]),
+                )
+
+    def test_a_symlinked_source_component_is_refused(self) -> None:
+        for source in ("alias", "alias/sub"):
+            with self.subTest(source=source):
+                self.assertIn(
+                    f"files.json: repo-owned tree {source} has a symlinked component alias, below which git tracks no file",
+                    self.run_against(
+                        [{"source": source, "reason": "r"}], TreePathGateCase.link_alias
+                    ),
                 )
 
     def test_an_entry_without_a_source_is_refused(self) -> None:
