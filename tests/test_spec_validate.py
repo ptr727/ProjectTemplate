@@ -571,13 +571,14 @@ class TreeSourceRootCase(unittest.TestCase):
 def run_gate_on_files(overrides: dict[str, object], make_tree=None) -> str:
     """Run the real spec gate against a scratch tree whose files.json carries `overrides`, returning its output.
 
-    The scratch tree holds spec/, registry/, and an empty real/sub directory for a declared source to name.
+    The scratch tree holds spec/, registry/, an empty real/sub directory for a declared source to name, and the shipped repo-owned tests directory.
     """
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         shutil.copytree(validate.ROOT / "spec", root / "spec")
         shutil.copytree(validate.ROOT / "registry", root / "registry")
         (root / "real" / "sub").mkdir(parents=True)
+        (root / "tests").mkdir()
         if make_tree is not None:
             make_tree(root)
         files_path = root / "spec" / "files.json"
@@ -723,6 +724,13 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
     def test_a_plain_entry_draws_no_error(self) -> None:
         output = self.run_against([{"source": "real/sub", "reason": "r"}])
         self.assertNotIn("repo-owned tree real/sub", output)
+
+    def test_the_shipped_declaration_draws_no_error(self) -> None:
+        shipped = json.loads((validate.ROOT / "spec" / "files.json").read_text(encoding="utf-8"))
+        output = self.run_against(shipped["repoOwnedTrees"])
+        for owned in shipped["repoOwnedTrees"]:
+            with self.subTest(source=owned["source"]):
+                self.assertNotIn(f"repo-owned tree {owned['source']} ", output)
 
 
 class RegistryNameUniquenessCase(unittest.TestCase):
