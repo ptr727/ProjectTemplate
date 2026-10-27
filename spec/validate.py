@@ -1472,9 +1472,13 @@ def main(argv=()):
         reason = owned.get("reason")
         if not isinstance(reason, str) or not reason:
             errors.append(f"files.json: repo-owned tree {source} reason must be a non-empty string")
-        if reduces_to_repo_root(source) or escapes_repo_root(source):
+        if (
+            reduces_to_repo_root(source)
+            or escapes_repo_root(source)
+            or pathlib.PurePosixPath(source).as_posix() != source
+        ):
             errors.append(
-                f"files.json: repo-owned tree {source} source must be a path below the repository root"
+                f"files.json: repo-owned tree {source} source must be a normalized path below the repository root"
             )
         elif not (ROOT / source).is_dir():
             errors.append(f"files.json: repo-owned tree {source} is missing or not a directory")

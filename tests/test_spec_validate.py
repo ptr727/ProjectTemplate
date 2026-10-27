@@ -568,6 +568,33 @@ class TreeSourceRootCase(unittest.TestCase):
                 self.assertFalse(validate.reduces_to_repo_root(value))
 
 
+def run_gate_on_files(overrides: dict[str, object], make_tree=None) -> str:
+    """Run the real spec gate against a scratch tree whose files.json carries `overrides`, returning its output.
+
+    The scratch tree holds spec/, registry/, and an empty real/sub directory for a declared source to name.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        shutil.copytree(validate.ROOT / "spec", root / "spec")
+        shutil.copytree(validate.ROOT / "registry", root / "registry")
+        (root / "real" / "sub").mkdir(parents=True)
+        if make_tree is not None:
+            make_tree(root)
+        files_path = root / "spec" / "files.json"
+        files = json.loads(files_path.read_text(encoding="utf-8"))
+        files.update(overrides)
+        files_path.write_text(json.dumps(files), encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(root / "spec" / "validate.py")],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        return result.stdout + result.stderr
+
+
 class TreePathGateCase(unittest.TestCase):
     """A tree path `scripts/carry.py` refuses is refused here too, run as the real script against a scratch tree.
 
@@ -576,33 +603,14 @@ class TreePathGateCase(unittest.TestCase):
     """
 
     def run_against(self, trees: list[dict], make_tree=None) -> str:
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            shutil.copytree(validate.ROOT / "spec", root / "spec")
-            shutil.copytree(validate.ROOT / "registry", root / "registry")
-            (root / "real" / "sub").mkdir(parents=True)
-            if make_tree is not None:
-                make_tree(root)
-            files_path = root / "spec" / "files.json"
-            files = json.loads(files_path.read_text(encoding="utf-8"))
-            marker = self.tree("real", "marker-target", fidelity="verbatim")
-            files["trees"] = trees + [marker]
-            files_path.write_text(json.dumps(files), encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(root / "spec" / "validate.py")],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                check=False,
-            )
-            output = result.stdout + result.stderr
-            self.assertIn(
-                "files.json: tree real fidelity must be 'verbatim-tree'",
-                output,
-                "the tree loop was never reached, so an absence assertion would be vacuous",
-            )
-            return output
+        marker = self.tree("real", "marker-target", fidelity="verbatim")
+        output = run_gate_on_files({"trees": trees + [marker]}, make_tree)
+        self.assertIn(
+            "files.json: tree real fidelity must be 'verbatim-tree'",
+            output,
+            "the tree loop was never reached, so an absence assertion would be vacuous",
+        )
+        return output
 
     @staticmethod
     def tree(source: str, target: str, fidelity: str = "verbatim-tree") -> dict:
@@ -678,40 +686,23 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
     """
 
     def run_against(self, owned: list[object]) -> str:
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            shutil.copytree(validate.ROOT / "spec", root / "spec")
-            shutil.copytree(validate.ROOT / "registry", root / "registry")
-            (root / "real" / "sub").mkdir(parents=True)
-            files_path = root / "spec" / "files.json"
-            files = json.loads(files_path.read_text(encoding="utf-8"))
-            files["repoOwnedTrees"] = [*owned, {"source": "real"}]
-            files_path.write_text(json.dumps(files), encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(root / "spec" / "validate.py")],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                check=False,
-            )
-            output = result.stdout + result.stderr
-            self.assertIn(
-                "files.json: repo-owned tree real reason must be a non-empty string",
-                output,
-                "the repo-owned tree loop was never reached, so an absence assertion would be vacuous",
-            )
-            return output
+        output = run_gate_on_files({"repoOwnedTrees": [*owned, {"source": "real"}]})
+        self.assertIn(
+            "files.json: repo-owned tree real reason must be a non-empty string",
+            output,
+            "the repo-owned tree loop was never reached, so an absence assertion would be vacuous",
+        )
+        return output
 
     def test_a_misspelled_source_is_refused(self) -> None:
         output = self.run_against([{"source": "rael", "reason": "r"}])
         self.assertIn("files.json: repo-owned tree rael is missing or not a directory", output)
 
-    def test_a_root_or_escaping_source_is_refused(self) -> None:
-        for source in (".", "..", "../real"):
+    def test_a_root_escaping_or_unnormalized_source_is_refused(self) -> None:
+        for source in (".", "..", "../real", "./real", "real/.", "real//", "real/"):
             with self.subTest(source=source):
                 self.assertIn(
-                    f"files.json: repo-owned tree {source} source must be a path below the repository root",
+                    f"files.json: repo-owned tree {source} source must be a normalized path below the repository root",
                     self.run_against([{"source": source, "reason": "r"}]),
                 )
 
