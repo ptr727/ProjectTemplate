@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Install the agent host-safety kit for the current user account. Cross-platform, idempotent.
 
-Deploys the PreToolUse hook, the SessionEnd stray-process sweep, and the tool-containment shell prefix,
-registers the two hooks in the user settings.json and, on a host with a systemd user manager, the prefix
-in its `env`, merges the permission rules this kit owns into the same file, renders the user
-CLAUDE.md whole from the kit's blocks and the host-local instruction file, and self-tests each hook
-before registering it.
+Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tier mapping, the
+SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
+user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
+`env`. It merges the permission rules this kit owns into the same file. It renders the user
+CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
+before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
@@ -959,11 +960,11 @@ def registration_problems(claude_home):
     try:
         raw = read_regular_file(claude_home / "settings.json")
     except FileNotFoundError:
-        return ["settings.json is missing, so the hook is not registered"]
+        return ["settings.json is missing, so the hooks are not registered"]
     except OSError as e:
         return [f"settings.json cannot be read ({e})"]
     if raw is None:
-        return ["settings.json is not a regular file, so the hook is not registered"]
+        return ["settings.json is not a regular file, so the hooks are not registered"]
     try:
         data = json.loads(raw.decode("utf-8") or "{}")
     # ValueError rather than JSONDecodeError, since it also covers UnicodeDecodeError.
@@ -1094,8 +1095,8 @@ def registration_problems(claude_home):
         groups,
         GUARD_NAME,
         ("Bash",),
-        "guard",
-        "the PreToolUse hook",
+        "write guard",
+        "the write guard",
         "that group never fires",
         "the guard never runs",
     )
@@ -1527,7 +1528,7 @@ def main():
     if not isinstance(data, dict):
         sys.stderr.write(
             f"{settings} is valid JSON but holds {type(data).__name__} at its root where an object "
-            "is required. Fix or remove it, then re-run. This file is unchanged, so the hook is "
+            "is required. Fix or remove it, then re-run. This file is unchanged, so the hooks are "
             "deployed but not registered.\n"
         )
         return 1
@@ -1539,7 +1540,7 @@ def main():
     def reject(where, held, want):
         sys.stderr.write(
             f"{settings} has `{where}` as {type(held).__name__} where {want.__name__} is required. "
-            "Fix or remove that key, then re-run. This file is unchanged, so the hook is deployed "
+            "Fix or remove that key, then re-run. This file is unchanged, so the hooks are deployed "
             "but not registered.\n"
         )
 
