@@ -10,15 +10,17 @@ hub's spec/model-tiers.json. A model release is then an edit to the hub's spec/m
 to its AGENTS.md tier table, never to this hook. The hub's spec gate holds the two equal.
 
 The maintainer allows the tier for a session by launching it with FLEET_ALLOW_HIGHEST=1 in the
-environment. A hook runs as its own process, so an agent cannot set it for itself, and the deny
-text never suggests that it try. The value must be exactly `1`, so a loose truthy spelling stays
-denied.
+environment. A hook inherits the environment its session was launched with. A tool call inside that
+session cannot change it, and the deny text never suggests that it try. The value must be exactly
+`1`, so a loose truthy spelling stays denied. A session launched with it blocks no model, so it
+needs no mapping either.
 
-It bounds a good-faith agent's mistake rather than an adversary. A workflow script is read as
-text, so a model chosen by a computed expression is not seen. A saved workflow named by `name`
-alone cannot be inspected and is allowed. So is a child workflow a script starts by name or path,
-since only the top-level script is read. A dispatch naming no model runs at a model this hook cannot
-read, and so does a fork naming another model, so both are allowed.
+It bounds a good-faith agent's mistake rather than an adversary. A nested `claude` an agent launches
+with the variable set is not told apart, since that is circumvention rather than a mistake. A
+workflow script is read as text, so a model chosen by a computed expression is not seen. A saved
+workflow named by `name` alone cannot be inspected and is allowed. So is a child workflow a script
+starts by name or path, since only the top-level script is read. A dispatch naming no model runs at
+a model this hook cannot read, and so does a fork naming another model, so both are allowed.
 
 A config that is missing, unreadable, or lacks the keys cannot say which model is blocked. A call
 naming any model is then denied, so the guard never goes quiet without saying so, and a call naming
