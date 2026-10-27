@@ -253,6 +253,7 @@ RUN_RATE_LIMIT = re.compile(
 )
 RUN_TRANSIENT = re.compile(r"^.*too many files changed.*$", re.MULTILINE)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+REQUESTS_KEY = "requestState"
 ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
@@ -662,6 +663,7 @@ def transient_state(owner: str, repo: str, num: int, pr: dict, node: dict) -> tu
     The state is `owed` until a request postdates the refusal, then `pending` while one is
     requested, else `sent`. It is `spent` where the round before was an error refusal too. Both
     parts are empty where the refusal is no error refusal or its log names no transient failure.
+    The request read is kept on `pr`, so the digest and the exit read one answer.
     """
     line = transient_error(owner, repo, node) if possible_quota(node) else ""
     if not line:
@@ -671,7 +673,11 @@ def transient_state(owner: str, repo: str, num: int, pr: dict, node: dict) -> tu
     before = newest_of(revs[:at])
     if before is not None and possible_quota(before):
         return "spent", line
-    state = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"]["pullRequest"]
+    if REQUESTS_KEY not in pr:
+        pr[REQUESTS_KEY] = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"][
+            "pullRequest"
+        ]
+    state = pr[REQUESTS_KEY]
     newest = newest_request_event(state)
     made = next(
         (

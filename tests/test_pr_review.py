@@ -4629,6 +4629,8 @@ class TestCli(GqlCase):
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
+        reads = [q for q, _ in calls if "REVIEW_REQUESTED_EVENT" in q and "requestReviews" not in q]
+        self.assertEqual(3, len(reads), "the first payload, the request, then one the last shares")
         out = self.out.getvalue()
         self.assertIn("status=PENDING the newest Copilot review is an error refusal", out)
         self.assertNotIn("COPILOT_ERROR_POSSIBLE_QUOTA", out)
