@@ -74,8 +74,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    account-quota refusal or an error refusal read as a possible quota hit, on this head or an
    earlier one, is the one nothing the loop does clears, which is the case "Which Reviewers a
    Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
-   transient is the exception. `wait` re-requests it once, and a second error refusal in a row
-   reads as possible quota. `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
+   transient is the exception. `wait` re-requests it once and exits `30` while that request is
+   pending. A second error refusal in a row reads as possible quota.
+   `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
    account state read from the reviewer's activity elsewhere when this head carries none of its
    own, and a refusal holding across several heads with no cause its body names reaches it the
    slower way. That exit is `wait`'s alone: `status` exits 0 over a refusal, carrying it as
