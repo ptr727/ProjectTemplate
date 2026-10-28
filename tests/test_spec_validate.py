@@ -15,6 +15,7 @@ import time
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 import audit
@@ -686,8 +687,12 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
     Every run adds a marker entry with no reason, which the loop always reports, so each absence assertion proves the loop ran.
     """
 
-    def run_against(self, owned: list[object], make_tree=None) -> str:
-        output = run_gate_on_files({"repoOwnedTrees": [*owned, {"source": "real"}]}, make_tree)
+    def run_against(
+        self, owned: list[object], make_tree=None, overrides: dict[str, object] | None = None
+    ) -> str:
+        output = run_gate_on_files(
+            {**(overrides or {}), "repoOwnedTrees": [*owned, {"source": "real"}]}, make_tree
+        )
         self.assertIn(
             "files.json: repo-owned tree real reason must be a non-empty string",
             output,
@@ -724,6 +729,54 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
     def test_a_plain_entry_draws_no_error(self) -> None:
         output = self.run_against([{"source": "real/sub", "reason": "r"}])
         self.assertNotIn("repo-owned tree real/sub", output)
+
+    CARRIED: ClassVar[dict[str, object]] = {
+        "trees": [
+            {
+                "source": "carried/kit",
+                "target": "carried/kit",
+                "fidelity": "verbatim-tree",
+                "appliesTo": "*",
+                "include": ["**/*"],
+                "prune": True,
+            }
+        ],
+        "baseline": [
+            {"path": "shared/doc.md", "fidelity": "verbatim", "whole": True, "appliesTo": "*"}
+        ],
+    }
+
+    @staticmethod
+    def make_carried(root: Path) -> None:
+        (root / "carried" / "kit" / "inner").mkdir(parents=True)
+        (root / "shared").mkdir()
+        (root / "shared" / "doc.md").write_text("doc\n", encoding="utf-8")
+
+    def run_carried(self, source: str) -> str:
+        return self.run_against(
+            [{"source": source, "reason": "r"}], self.make_carried, self.CARRIED
+        )
+
+    def test_a_source_overlapping_a_tree_source_is_refused(self) -> None:
+        for source in ("carried/kit", "carried", "carried/kit/inner"):
+            with self.subTest(source=source):
+                self.assertIn(
+                    f"files.json: repo-owned tree {source} and tree source carried/kit have overlapping ownership",
+                    self.run_carried(source),
+                )
+
+    def test_a_source_holding_a_baseline_path_is_refused(self) -> None:
+        for source in ("shared", "shared/doc.md"):
+            with self.subTest(source=source):
+                self.assertIn(
+                    f"files.json: repo-owned tree {source} and baseline path shared/doc.md have overlapping ownership",
+                    self.run_carried(source),
+                )
+
+    def test_a_source_beside_carried_content_draws_no_error(self) -> None:
+        output = self.run_carried("real/sub")
+        self.assertNotIn("repo-owned tree real/sub", output)
+        self.assertNotIn("overlapping ownership", output)
 
     def test_the_shipped_declaration_draws_no_error(self) -> None:
         shipped = json.loads((validate.ROOT / "spec" / "files.json").read_text(encoding="utf-8"))

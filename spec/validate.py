@@ -1480,12 +1480,32 @@ def main(argv=()):
             errors.append(
                 f"files.json: repo-owned tree {source} source must be a normalized path below the repository root"
             )
-        elif (link := symlinked_component(ROOT, source)) is not None:
+            continue
+        if (link := symlinked_component(ROOT, source)) is not None:
             errors.append(
                 f"files.json: repo-owned tree {source} has a symlinked component {link}, below which git tracks no file"
             )
         elif not (ROOT / source).is_dir():
             errors.append(f"files.json: repo-owned tree {source} is missing or not a directory")
+        owned_path = pathlib.PurePosixPath(source)
+        for tree in validated_trees:
+            tree_source = pathlib.PurePosixPath(tree["source"])
+            if (
+                owned_path == tree_source
+                or owned_path in tree_source.parents
+                or tree_source in owned_path.parents
+            ):
+                errors.append(
+                    f"files.json: repo-owned tree {source} and tree source {tree_source} have overlapping ownership"
+                )
+        for item in baseline:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                continue
+            item_path = pathlib.PurePosixPath(item["path"])
+            if item_path == owned_path or owned_path in item_path.parents:
+                errors.append(
+                    f"files.json: repo-owned tree {source} and baseline path {item_path} have overlapping ownership"
+                )
 
     copilot_path = ROOT / ".github/copilot-instructions.md"
     try:
