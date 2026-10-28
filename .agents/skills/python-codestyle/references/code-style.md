@@ -48,7 +48,7 @@
 - **Don't hedge that syntax for an older interpreter.** `pyproject.toml` pins `target-version` /
   `python_version` to 3.13 for every Python profile in this repo. `spec/host-tools.json`
   carries that as the host floor `scripts/host_gate.py` enforces. As a result of both, 3.10+-only syntax
-  (`X | None`, `match`, etc.) needs no quoting and no `typing.Union` fallback. It also needs no
+  (`X | None`, `match`, etc.) needs no quoting and no `typing.Union` fallback on that account alone. It also needs no
   `from __future__ import annotations` guard on that account alone. Add that import only when a real forward reference
   needs it, per the bullet above. Named exceptions carry a lower floor on purpose and say so
   themselves. They are `scripts/skills_install.sh`, the `install-skills.*` bootstrap scripts, and

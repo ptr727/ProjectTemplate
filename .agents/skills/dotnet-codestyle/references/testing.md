@@ -26,7 +26,7 @@
 
 ## Microsoft.Testing.Platform and coverage
 
-A test project on `xunit.v3` 4.0.0 or later is MTP-based. The .NET 10 SDK and later refuse to run an MTP-based project through the VSTest target, so such a project also carries:
+A test project on `xunit.v3` 4.0.0 or later is MTP-based. The .NET 10 SDK and later refuse to run such a test project through the VSTest target, so it also carries:
 
 - a root **`global.json`** declaring `{"test": {"runner": "Microsoft.Testing.Platform"}}`, which is what selects the driver `dotnet test` runs the project through,
 - **`Microsoft.Testing.Extensions.CodeCoverage`** at **18.9.0 or later**, in place of `coverlet.collector`, whose VSTest data collector MTP ignores without failing,
