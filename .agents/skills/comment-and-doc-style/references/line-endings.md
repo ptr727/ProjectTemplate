@@ -2,8 +2,8 @@
 
 Full detail for the "Line endings" rule in `SKILL.md`. Load this when choosing an ending for a
 new file type or working in an operational (config) repo. Also load it when pinning an
-extensionless executable or auditing a repo's endings. Load this not for an ordinary content edit
-to an existing file. The SKILL.md summary, preserve the existing ending and verify with a byte
+extensionless executable or auditing a repo's endings. An ordinary content edit
+to an existing file is not a reason to load this. The SKILL.md summary, preserve the existing ending and verify with a byte
 scan, covers that case.
 
 ## The defaults
@@ -73,7 +73,7 @@ files only for scripts it executes on POSIX.
 
 For a type that genuinely needs an ending the `[*]` default no longer supplies, still pair a
 `.gitattributes` pin with a matching `.editorconfig` override. That is because the git pin alone is not enough for such a type. `.gitattributes`
-governs git while the editor follows `.editorconfig`. Examples of such a type are a Windows-native
+governs git while the editor follows `.editorconfig`. That type is a Windows-native
 tool-owned format outside `.bat`/`.cmd`, or a byte-preserve data directory whose exact bytes the
 consumer may depend on. For a byte-preserve directory, disable all
 editor normalization, not just EOL: `[<dir>/**]` with `charset = unset`, `end_of_line = unset`,

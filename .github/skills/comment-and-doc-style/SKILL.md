@@ -45,7 +45,7 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
   `.markdownlint-cli2.jsonc` at the repo root is fleet-fixed, and its `ignores` list covers only
   what every repo has, third-party Markdown under `node_modules`. A repo excluding a subtree of
   its own that it does not treat as authored prose puts a `.markdownlint-cli2.jsonc` beside that
-  content. That config carries its own `ignores`. Such a subtree is, for example, a committed data archive, a
+  content. That config carries its own `ignores`. That subtree is a committed data archive, a
   vendored theme, or a hand-maintained record. A config inside a
   tree that is re-imported or re-vendored wholesale is deleted by the next refresh, so it is
   re-added with the import. Excluding through the CI workflow's negated glob input instead is a
