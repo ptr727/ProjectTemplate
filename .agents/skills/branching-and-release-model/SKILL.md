@@ -115,7 +115,7 @@ rather than guessing from the repo's contents.
   `references/release-publish-mechanics.md`.
 - **Adding, dropping, or wiring a release target**, and tracking an upstream release from a
   wrapper repo: `references/release-publish-mechanics.md`. The questions are which leaf task,
-  which artifact-naming contract, and which seam a given output belongs to. Seams include a GitHub
+  which artifact-naming contract, and which seam a given output belongs to. Seams are a GitHub
   Release asset, a package-registry push, an image-registry push, a filesystem deploy, or a
   source-only repo with no build layer at all.
   See also `WORKFLOW.md` for the full CI/CD contract this section's rules are load-bearing
@@ -146,8 +146,8 @@ stays the same:
   That would withdraw the allowance the model exists to give.
 - **The `main` promotion gate is unchanged.** The shared `main` ruleset still **enforces** the
   required `Check pull request workflow status job` on the `develop -> main` PR. For an operational
-  repo that check is lint/validation only (editorconfig/EOL plus a domain linter such as a Home
-  Assistant or ESPHome config validation). It never runs unit tests. So `develop` stays the live surface
+  repo that check is lint/validation only, never unit tests (editorconfig/EOL plus a domain linter
+  such as Home Assistant or ESPHome config validation). So `develop` stays the live surface
   and a broken config can never reach `main`.
 - **Release only by manual dispatch.** Operational repos carry `releaseTrigger: dispatch-only` and
   run no codegen or auto-publish bots. They publish **only** on a manual `workflow_dispatch` (the

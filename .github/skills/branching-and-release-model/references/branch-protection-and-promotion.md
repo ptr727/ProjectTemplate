@@ -77,14 +77,14 @@ major that breaks the build fails its checks and never merges.
 Push-distribution channels consume `main` directly.
 Examples include HACS for Home Assistant integrations, Linux distros that vendor from `main`, and others. A develop-only model would leave `main` running stale code
 during long-running develop features. Codegen content can also be production-critical
-rather than just sample/demo content (live API-derived data, language lists, build catalogs).
+(live API-derived data, language lists, build catalogs) rather than just sample/demo content.
 So both branches need fresh codegen on their own cadence.
 
 **Maintainer-pushed commits on a bot PR auto-disable auto-merge.** The merge-bot's
 `merge-dependabot` and `merge-codegen` jobs only fire on `opened`/`reopened` events (auto-merge is
-enabled exactly once per PR). When a maintainer pushes commits to a bot's branch, that is a `synchronize`
-event with an actor that isn't the same bot. The merge-bot's
-`disable-auto-merge-on-maintainer-push` job then fires and calls `gh pr merge --disable-auto`. The
+enabled exactly once per PR). A maintainer may push commits to a bot's branch, which is a `synchronize`
+event with an actor that isn't the same bot. When that happens, the merge-bot's
+`disable-auto-merge-on-maintainer-push` job fires and calls `gh pr merge --disable-auto`. The
 maintainer's commits stay in the PR but won't auto-merge with the bot's content. Re-enable
 auto-merge manually (`gh pr merge --auto <PR>` or the GitHub UI) when ready.
 

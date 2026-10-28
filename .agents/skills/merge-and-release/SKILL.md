@@ -22,7 +22,7 @@ description: >-
 ## Why This Exists
 
 Once drive-pr (or a maintainer by hand) leaves a promotion PR ready, the same steps follow every
-time. They are to merge it, and usually dispatch the release it unblocks. In this hub a promotion can
+time. Merge it, and usually dispatch the release it unblocks. In this hub a promotion can
 also change `.agents/skills` content this very session depends on. So the release step always
 carries a Skills refresh with it there, never a separate branch to ask about. This is because an
 ambiguous "merge and release" on the hub must not leave the maintainer unsure whether Skills got refreshed. One
@@ -120,7 +120,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`. On a host without
    it (macOS without coreutils, native Windows), use the equivalent bounded-wait mechanism
    enforcing the same bound. Never pipe `gh run watch` into another command unless the shell running it sets
-   `pipefail`. Without it a pipeline reports its last stage's exit status and
+   `pipefail`. That is because without it a pipeline reports its last stage's exit status and
    `gh run watch ... | tail` reports whether `tail` succeeded rather than whether the run
    did. Read the watch's own exit status, or read the conclusion back with
    `gh run view <run-id> --repo owner/repo --json status,conclusion`.
@@ -160,7 +160,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    - The promotion PR's own worktree: fetch and prune, remove the worktree, then bring the base
      clone to current `develop`. Check `develop` out first only where it sits on another
      branch, and fast-forward it with `git merge --ff-only origin/develop`. Where that checkout
-     is needed, removing first, not after, matters. The base clone cannot check out `develop`
+     is needed, removing first, not after, matters. The reason is that the base clone cannot check out `develop`
      while the promotion worktree still has it checked out. That is because one branch checked out
      in two worktrees at once is refused outright. Never delete `develop`: it is the promotion PR's
      own head. The repo's auto-delete-head-branches setting is kept off fleet-wide for exactly

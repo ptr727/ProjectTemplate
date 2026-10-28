@@ -21,11 +21,11 @@ publisher passes `branch: ${{ github.ref_name }}`, which the tasks forward and r
 ## Per-target subsetting
 
 `build-release-task.yml` is a hub-hosted task with per-target `enable_*` inputs. So a repo drops a
-target by setting its `enable_<target>: false` at the caller stub rather than deleting a job. The
-hub task carries the full job graph for every repo, and the caller stub's `with:` block is where
+target by setting its `enable_<target>: false` at the caller stub rather than deleting a job. That is because the
+hub task carries the full job graph for every repo. The caller stub's `with:` block is where
 the target list is expressed. A repo still curates, in `test-pull-request.yml`, its
 path-filter entry, that filter's output, and the `smoke-build` enable-forward, together
-per D6.4. That is because an entry nothing consumes never smoke-builds the target. And, for a package
+per D6.4. That is because an entry nothing consumes never smoke-builds the target. It also curates, for a package
 target, the `publish-nuget` or `publish-pypi` job in its own `publish-release.yml`, since
 `id-token: write` belongs at that one entry point. CodeGen, versioning, merge-bot, and Dependabot
 are target-agnostic.
