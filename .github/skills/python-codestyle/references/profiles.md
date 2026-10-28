@@ -77,8 +77,8 @@ and tool configuration alone marks the lint-only one:
   declared directory with no `tests/` fails that job.
 
 A profile belongs to a declared directory, not to the repository. A repository declaring none gates
-its root instead, where a root `pyproject.toml` is tracked. Each deliverable takes its own
-build-profile directory, with its own `uv.lock` or `requirements*.txt`. A uv workspace is the
+its root instead, where a root `pyproject.toml` is tracked. Each deliverable takes one build-profile
+directory of its own, with its own `uv.lock` or `requirements*.txt`. A uv workspace is the
 exception: its root is the one build-profile directory, declared once, and its members share the
 root's lock. Lint-only Python may sit beside the component it serves. Only a split by purpose alone,
 within one place, is forbidden. One place means directories serving the same component, or serving
