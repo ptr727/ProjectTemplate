@@ -23,7 +23,7 @@ description: >-
 
 ## Why This Exists
 
-The fleet's conduct rules (verification before claiming done, asking instead of assuming, recording lessons, accounting at handoff for what was parked rather than asked, recording a blocker that lives in another repository) lived only in doc sections nothing surfaced at the moment of violation, so they were honored by whoever happened to have read them recently. This skill is the decision-moment surface. The full rules stay in `GOVERNANCE.md` ("Verification Discipline", "Communicating with the User", "Durable Knowledge and Self-Improvement"), which keeps authority, and each of those sections is carried here whole, as a generated include that `scripts/build_dist.py` fills from the section and holds to it, so the text that surfaces at the moment is the rule's own rather than a shorter list of it. The carried `AGENTS.md` "Context and Delegation Discipline" section is the always-on layer and is not carried here. A defect in included text is fixed in `GOVERNANCE.md` and regenerated, never edited in this file, per the `skill-lifecycle` Skill.
+The fleet's conduct rules lived only in doc sections nothing surfaced at the moment of violation. Those rules include verification before claiming done, asking instead of assuming, and recording lessons. They also include accounting at handoff for what was parked rather than asked, and recording a blocker that lives in another repository. So the rules were honored by whoever happened to have read them recently. This skill is the decision-moment surface. The full rules stay in `GOVERNANCE.md` ("Verification Discipline", "Communicating with the User", "Durable Knowledge and Self-Improvement"), which keeps authority. Each of those sections is carried here whole, as a generated include that `scripts/build_dist.py` fills from the section and holds to it. So the text that surfaces at the moment is the rule's own rather than a shorter list of it. The carried `AGENTS.md` "Context and Delegation Discipline" section is the always-on layer and is not carried here. A defect in included text is fixed in `GOVERNANCE.md` and regenerated, never edited in this file, per the `skill-lifecycle` Skill.
 
 ## Before Designing a Change
 
@@ -65,14 +65,14 @@ The checks that separate work actually done from work that merely reports succes
 
 <!-- /include -->
 
-Claims about a pull request being reviewed, clean, or mergeable are owned by the `pr-review-conduct` skill, and claims that a commit landed by `git-commit-conventions`. The review passes the section above requires, one over a push's diff and one over each canonical unit a sweep names, their delegation shape, and how each is recorded are the `local-strict-review` skill's.
+Claims about a pull request being reviewed, clean, or mergeable are owned by the `pr-review-conduct` skill, and claims that a commit landed by `git-commit-conventions`. The `local-strict-review` skill owns the review passes the section above requires, one over a push's diff and one over each canonical unit a sweep names. It also owns their delegation shape and how each is recorded.
 
 ## Before Assuming
 
-- **Ask when the user can cheaply confirm.** An assumption that saves one question and is wrong costs the rework plus the trust, so a genuine ambiguity in intent, scope, or authorization is raised, not resolved by picking the likelier reading. Rules that already answer the question (the committed instruction set) are not ambiguity, so read them first rather than asking what they state.
-- **The irreversible step (merging, publishing, releasing, force-pushing, deleting, changing branch protection) stays the maintainer's, and a grant given in a past session or for a different task authorizes nothing now.** Whether a credential's reach or a tool that happens to work authorizes anything is answered by `GOVERNANCE.md` "Repository Boundaries and Write Safety" rather than here.
+- **Ask when the user can cheaply confirm.** An assumption that saves one question and is wrong costs the rework plus the trust. So a genuine ambiguity in intent, scope, or authorization is raised, not resolved by picking the likelier reading. Rules that already answer the question (the committed instruction set) are not ambiguity, so read them first rather than asking what they state.
+- **The irreversible step (merging, publishing, releasing, force-pushing, deleting, changing branch protection) stays the maintainer's.** **A grant given in a past session or for a different task authorizes nothing now.** Whether a credential's reach or a tool that happens to work authorizes anything is answered by `GOVERNANCE.md` "Repository Boundaries and Write Safety" rather than here.
 
-`GOVERNANCE.md` "Communicating with the User", carried whole below, covers how to ask, how to reference an issue, a pull request, or a commit wherever it is mentioned, how to raise work that is blocked on the answer, and what a session owes for the questions it parked rather than asked.
+`GOVERNANCE.md` "Communicating with the User", carried whole below, covers how to ask. It also covers how to reference an issue, a pull request, or a commit wherever it is mentioned. It also covers how to raise work that is blocked on the answer. And it covers what a session owes for the questions it parked rather than asked.
 
 <!-- include: GOVERNANCE.md > Communicating with the User -->
 
@@ -90,7 +90,7 @@ Claims about a pull request being reviewed, clean, or mergeable are owned by the
 
 ## Before Writing a Handoff
 
-Three sources govern this moment, and the first two are rules in the `GOVERNANCE.md` "Communicating with the User" include under "Before Assuming": the one opening "A question filed as an issue is parked rather than asked" and the one opening "The session that writes a handoff presents the parked queue in the same act". They state the obligation, how the queue is enumerated, how it is ranked, and what to do where no prompt or no user is available. The third is `AGENTS.md` "Session Scope", which the second of those bullets names and which keeps the handoff's own size rule and names what its sections carry, while the `session-handoff` Skill fixes their headings and their order and is what writes one and resumes from one. Read all three there, since a restatement here would be a second copy, and nothing would hold it to the first.
+Three sources govern this moment. The first two are rules in the `GOVERNANCE.md` "Communicating with the User" include under "Before Assuming": the one opening "A question filed as an issue is parked rather than asked" and the one opening "The session that writes a handoff presents the parked queue in the same act". They state the obligation, how the queue is enumerated, how it is ranked, and what to do where no prompt or no user is available. The third is `AGENTS.md` "Session Scope", which the second of those bullets names. It keeps the handoff's own size rule and names what its sections carry. The `session-handoff` Skill fixes their headings and their order, and is what writes a handoff and resumes from one. Read all three there, since a restatement here would be a second copy, and nothing would hold it to the first.
 
 ## When a Failure Surfaces a Lesson
 
@@ -109,12 +109,12 @@ Where a lesson lands, when it earns a mechanical hook, and where work blocked on
 
 <!-- /include -->
 
-Some rules that bind at this moment have their homes elsewhere. A review flags an instance, so a fix covers the class, bounded to what the change touched or broke, stated under "Before Claiming Done" above. And a rule that keeps needing to be restated is a stale or missing skills install before it is a missing rule, per `AGENTS.md` "Where the Rules Live", with the `check-this-repo` Skill as the check.
+Some rules that bind at this moment have their homes elsewhere. A review flags an instance, so a fix covers the class, bounded to what the change touched or broke. That rule is stated under "Before Claiming Done" above. And a rule that keeps needing to be restated is a stale or missing skills install before it is a missing rule. That is per `AGENTS.md` "Where the Rules Live", with the `check-this-repo` Skill as the check.
 
 ## When Work Stops on Another Repository
 
-The rules for this moment are bullets in the `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" include under "When a Failure Surfaces a Lesson" above. The first, opening "A blocker filed in another repository is recorded in the repository whose work it blocks", states what the two issues are, what the local one says, the `blocked` label it carries, and the backlink the upstream issue takes in return. The second, opening "The blocker record is written under the ordinary write rules", states which write rules bind those writes, what a repository not carrying the `blocked` label owes before it can host the record, and when the label comes off. Read both there, since a restatement here would be a second copy and nothing would hold it to the first.
+The rules for this moment are bullets in the `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" include under "When a Failure Surfaces a Lesson" above. The first, opening "A blocker filed in another repository is recorded in the repository whose work it blocks", states what the two issues are and what the local one says. It also states the `blocked` label the local one carries, and the backlink the upstream issue takes in return. The second, opening "The blocker record is written under the ordinary write rules", states which write rules bind those writes. It also states what a repository not carrying the `blocked` label owes before it can host the record, and when the label comes off. Read both there, since a restatement here would be a second copy and nothing would hold it to the first.
 
 ## Delegation, in One Paragraph
 
-The always-on rules live in `AGENTS.md` "Context and Delegation Discipline", loaded in every session, and are not restated here. Those that bind at a conduct moment are its rule on briefing a subagent and its rule on never tiering down the seat holding the judgment.
+The always-on rules live in `AGENTS.md` "Context and Delegation Discipline", loaded in every session. They are not restated here. Those that bind at a conduct moment are its rules on briefing a subagent and on never tiering down the seat holding the judgment.
