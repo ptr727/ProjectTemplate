@@ -84,9 +84,9 @@ maintainer can supply what section 0A lists.
    repository agree before running anything else here. Then run
    `repo-config/configure.sh check owner/repo release` (substitute `operational` for an
    operational repo) from the hub at `main`. A non-zero exit there means drift was found, not a
-   command failure. Review what it reports. Then run the same command's `apply` subcommand. It
+   command failure. Review what it reports. Then run the same command's `apply` subcommand, never from a hand-built or carried copy. It
    idempotently reconciles the repo to the full committed configuration regardless of what `check`
-   reported, never from a hand-built or carried copy.
+   reported.
 
 9. **Verify with the audit.** STANDUP.md section 5: run `AUDIT.md` end to end. The repo is stood
    up only when it passes for its type, or a hub-committed `reports/<repo>/audit.md`
