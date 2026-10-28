@@ -64,7 +64,7 @@ A command-line script is one a person or an agent runs by name. A hook its host 
 - **A variable name converts separately.** An env variable or CI secret name allows only `A-Z`, `0-9`, and `_`. Where a field becomes one, the hyphen becomes `_` there, as in `APP_WEB_01_PROD_TOKEN`, and never in the file name.
 - **Some consumers set limits of their own.** A name used as a Docker secret stays within the 64 characters Docker allows. A name that maps to an env variable or CI secret does not start with a digit, which POSIX and GitHub both forbid.
 - **Externally fixed names are exempt.** That covers Git hook names, `__init__.py`, `conftest.py`, and Pester's `.Tests.ps1` suffix, whose stem mirrors the script under test. It covers a PowerShell data file (`.psd1`) whose name a tool fixes, such as a module manifest named for its module. `PSScriptAnalyzerSettings.psd1` is another, since PSScriptAnalyzer finds it by that name. So is an env file a tool reads by a fixed name, such as `.env`, `.env.local`, or `.env.production`. An env or secret file in a `.secrets/` directory is never one, since it is read by a path the repository configures. The exemption also covers any name a platform defines.
-- **Directories are out of scope.** How a repository splits its Python across directories is a profile rule, stated in the "Python" section below.
+- **Directories are out of scope.** That means directory names. How a repository splits its Python across directories is a profile rule, stated in the "Python" section below.
 
 Departures, stated on purpose so a reader does not "fix" them back:
 

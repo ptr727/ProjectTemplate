@@ -27,13 +27,13 @@ A directory's Python is one of two shapes, declared as the `build` or `lint-only
 validated against that directory's structural shape. Most of the `SKILL.md` rules (src layout,
 pytest coverage) describe the Project shape (the `build` profile). Its uv project, `uv.lock`, and
 `uv run` rules describe that shape's uv form. The two differ by trait, whether the Python has
-third-party runtime dependencies or is the repo's deliverable. The fleet's audit reads the shape
+third-party runtime dependencies or is a deliverable. The fleet's audit reads the shape
 that trait leaves rather than inspecting imports. A `[project]` or `[build-system]` table in
 `pyproject.toml`, a committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile,
 and tool configuration alone marks the lint-only one:
 
-- **Project** (the `build` profile): the Python has third-party runtime dependencies, or is the
-  repo's deliverable. It takes one of these forms. The uv form is a PEP 621 project: `[project]`
+- **Project** (the `build` profile): the Python has third-party runtime dependencies, or is a
+  deliverable. It takes one of these forms. The uv form is a PEP 621 project: `[project]`
   with `dependencies` (dev tools in `[dependency-groups]`, per the dependency-declaration axis
   above), a `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line
   Endings" section). CI runs `uv sync --all-groups --frozen` + `uv run <tool>`, so the lockfile pins
@@ -78,15 +78,14 @@ and tool configuration alone marks the lint-only one:
 
 A profile belongs to a declared directory, not to the repository. Each deliverable takes its own
 build-profile directory, with its own `uv.lock` or `requirements*.txt`. Lint-only Python may sit in
-a directory beside the component it serves. Declared directories split by profile trait,
-deliverable, or component. Only a split by purpose alone, within one place, is forbidden. Within one
-directory the file name carries the purpose, such as the `_gate` or `_lint` suffix. A stdlib-only
-`tools/` beside a `render/` that imports a third-party imaging library is a legitimate split by
-profile trait. Merging them would put every stdlib gate behind that library's install. Two
-deliverables, `render/` and `publish/`, each keep a build-profile directory of their own. A
-component directory such as `infra/` may hold its own lint-only Python, declared apart from
-`tools/`. Two stdlib-only directories side by side at the root, `tools/` and `audits/`, differ only
-by purpose, so they merge.
+a directory beside the component it serves. Only a split by purpose alone, within one place, is
+forbidden. Within one directory the file name carries the purpose, its stem naming the job and a
+`_gate` or `_lint` suffix marking a gate. A stdlib-only `tools/` beside a `render/` that imports a
+third-party imaging library is a legitimate split by profile trait. Merging them would put every
+stdlib gate behind that library's install. Two deliverables, `render/` and `publish/`, each keep a
+build-profile directory of their own. A component directory such as `infra/` may hold its own
+lint-only Python, declared apart from `tools/`. Two stdlib-only root directories, `tools/` and
+`audits/`, serve no component of their own and differ only by purpose, so they merge.
 
 ## Versioning
 
