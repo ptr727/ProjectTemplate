@@ -66,7 +66,7 @@ and tool configuration alone marks the lint-only one:
   (`<scripts-dir>/tests/`), where the validator looks for it. That directory stays apart so a
   test never reads as a tool. Within the scripts directory the name carries the kind: a gate
   that checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix, and a utility
-  that does work takes none. Any repo carrying Python
+  that does work takes none. Each Python directory
   owes the same gates whatever its profile: lint, format, a type check, a test suite, and a
   coverage report to Codecov. The hub validator runs them in each directory the caller declares
   in its `python-directories` input, which the registry's `pythonDirectories` mirrors. From inside
@@ -77,7 +77,8 @@ and tool configuration alone marks the lint-only one:
   declared directory with no `tests/` fails that job.
 
 A profile belongs to a declared directory, not to the repository. Each deliverable takes its own
-build-profile directory, with its own `uv.lock` or `requirements*.txt`. Lint-only Python may sit
+build-profile directory, with its own `uv.lock` or `requirements*.txt`. A uv workspace is declared
+once, by its root, which holds the lock its member deliverables share. Lint-only Python may sit
 beside the component it serves. Only a split by purpose alone, within one place, is forbidden. One
 place means directories serving the same component, or serving none. Within one directory the file
 name carries the purpose instead, per the suffix rule in the Scripts bullet above. A stdlib-only
