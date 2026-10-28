@@ -23,7 +23,7 @@ description: >-
 This is the Python-specific half of the fleet's code style guide, kept in one place instead of
 re-derived per repo or per session. CODESTYLE.md's General section still owns the rules every
 language shares (clean-compile verification as a concept, the suppression-scope order, tooling
-casing in prose), this Skill is everything specific to a Python project on top of that: the two
+casing in prose). This Skill is everything specific to a Python project on top of that: the two
 profiles, the toolchain, layout, and the language-level conventions.
 
 ## Two profiles
@@ -65,26 +65,27 @@ declaration, and versioning.
 | [pytest][docs-link] | test runner (build profile only, lint-only uses `unittest`) | `pyproject.toml` `[tool.pytest.ini_options]` |
 
 **Type checking targets strongly typed, deterministic code.** pyright in strict mode is the
-default baseline on first-party code (a repo may instead run mypy with its strict flags in CI
-and keep pyright editor-only via Pylance, per the next paragraph): `[tool.pyright]`
-`strict = ["src"]`, or the integration package for a Home Assistant repo, with tests run in
-standard mode. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
+default baseline on first-party code. That baseline is `[tool.pyright]` `strict = ["src"]`, or the
+integration package for a Home Assistant repo, with tests run in standard mode. A repo may instead
+run mypy with its strict flags in CI and keep pyright editor-only via Pylance, per the next
+paragraph. pyright is the anchor because Pylance embeds it, so where CI runs pyright, the
 editor and the CLI/CI run the same engine. A pyright the requirements pin can lag the one Pylance
 bundles, though. The CLI/CI form is `uv run pyright` in the uv form. In the pip form a declared
 directory runs the environment's own pyright, or `uvx pyright@latest` pointed at the environment
 where it installs none.
 The standalone `ms-pyright.pyright` extension stays in
 `unwantedRecommendations` because Pylance covers it. Relax strictness on third-party code only
-when a dependency has no usable types and no alternative (e.g. `pandas`): a targeted, commented
-`# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket relaxation.
+when a dependency has no usable types and no alternative (e.g. `pandas`). The relaxation is a
+targeted, commented `# pyright: ignore[...]` or a scoped `[tool.pyright]` override, never a blanket
+one.
 
 **mypy is allowed, and required where the ecosystem demands it, it is not banned.** Running more
 than one checker is normal when each serves a purpose (the .NET side pairs CSharpier and
-`dotnet format` the same way), and pyright's inference and mypy's plugin ecosystem (e.g.
+`dotnet format` the same way). pyright's inference and mypy's plugin ecosystem (e.g.
 `pydantic.mypy`) catch different classes of error. A Home Assistant integration runs
 `mypy --strict` because the platinum `strict-typing` quality-scale tier requires it, and a
 pydantic-heavy library may opt in for the plugin. When a repo uses mypy it runs in CI and the
-editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent, and its mypy
+editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent. That repo's mypy
 command joins the clean-compile. The hub validator runs at most one checker in each Python
 directory, mypy where both are configured. A repo enforcing pyright beside mypy runs pyright from
 its own `.github/actions/validate/action.yml` hook. That hook starts from a bare checkout, so it
@@ -97,9 +98,9 @@ engine.
 
 From inside a **build**-profile Python project directory in its uv form. A pip-form directory runs
 neither `uv sync` nor `uv run`, since either writes a `uv.lock` that, once committed, makes the
-directory the uv form, and builds its environment as the pip-form block below shows. A
-**lint-only** Scripts profile has no `uv.lock` to sync and no pytest to run, substitute `uvx` per
-tool and `unittest` per the Two Profiles section above:
+directory the uv form. It builds its environment as the pip-form block below shows. A
+**lint-only** Scripts profile has no `uv.lock` to sync and no pytest to run. For it, substitute
+`uvx` per tool and `unittest` per the Two Profiles section above:
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
@@ -124,7 +125,7 @@ the same way. Run the clean-compile, plus `uv run pytest`, before committing.
 A **build**-profile directory in its pip form builds its environment the way CI does, through uv's
 pip interface, which writes no `uv.lock`. It installs every `requirements*.txt` in one command, since
 separate installs let one file's pins downgrade what another resolved. Where its `pyproject.toml`
-carries a `[project]` table it then installs the directory itself as editable, without which a
+carries a `[project]` table it then installs the directory itself as editable. Without that, a
 `src`-layout package is not importable and pytest fails locally where CI passes:
 
 ```sh
@@ -156,9 +157,8 @@ clean-compile, run with pytest before committing.
 
 A **lint-only** profile's clean-compile substitutes its `uvx` and `unittest` equivalents, per Two
 Profiles above, and has no such command to run before committing beyond those. These are documented
-commands, and the hub's `vscode-tasks-python.json` snippet carries the VS Code tasks mirror of the
-uv form that the fleet baseline expects, with its header naming the pip-form and lint-only
-adaptations. Every command-executing task in it is `type: process`, and every aggregator is
+commands. The hub's `vscode-tasks-python.json` snippet carries the VS Code tasks mirror of the uv
+form that the fleet baseline expects. Its header names the pip-form and lint-only adaptations. Every command-executing task in it is `type: process`, and every aggregator is
 `dependsOn`-only. Neither chains with `&&`, so the mirror runs the same on any task shell.
 
 CI runs these same commands as the authoritative backstop in every directory the hub validator's
@@ -167,15 +167,15 @@ a root `pyproject.toml`, per `WORKFLOW.md` D1.2. That undeclared root is gated m
 reads its type-checker configuration only from the `[tool.mypy]` or `[tool.pyright]` section of its
 `pyproject.toml`. It skips the type check where neither is there,
 whatever the form. In its pip form CI installs nothing for that check and runs a bare
-`uvx <checker>@latest`, so the local check against the environment is the stricter one. And CI runs
+`uvx <checker>@latest`. So the local check against the environment is the stricter one. And CI runs
 its tests only where a pytest suite in `tests/` sits beside a `uv.lock` or `requirements*.txt`.
 
-A repo that keeps no .NET tool manifest declaring Husky.Net, or one that prefers the
-`pre-commit` framework, wires its local hook from the canonical `catalog/snippets/pre-commit/`
-directory, hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent
+A repo that keeps no .NET tool manifest declaring Husky.Net wires its local hook from the canonical
+`catalog/snippets/pre-commit/` directory. So does one that prefers the `pre-commit` framework. That
+directory is hub-local and not carried into every fleet repo. Any repo may instead wire an equivalent
 hook of its own at `.husky/pre-commit`, enabled with `core.hooksPath` and sourcing nothing. That
 path and `.pre-commit-config.yaml` are the ones the audit reads. The runner is bounded by the
-toolchain the repo already keeps rather than by the languages the hook checks, so a repo keeping a
+toolchain the repo already keeps rather than by the languages the hook checks. So a repo keeping a
 Husky.Net manifest may run these same Python checks from the `catalog/snippets/husky/` shape
 instead. Each shape carries whichever language checks its own repo keeps. The `pre-commit`
 directory's own README names the second file to copy alongside the config. GOVERNANCE.md's hub-only
@@ -231,7 +231,7 @@ For comments, docstrings, full type-hint rules, naming, imports, and all pattern
 ## Tests
 
 `uv run pytest` for a build profile (`.venv/bin/python -m pytest` in its pip form, from the
-environment the Local development loop builds), `unittest` for a lint-only Scripts profile (see Two
+environment the Local development loop builds). `unittest` for a lint-only Scripts profile (see Two
 Profiles above). One test file per module (`test_<module>.py`). A build profile prefers fixtures
 over `unittest`'s `setUp`/`tearDown` lifecycle hooks. A lint-only profile uses those hooks directly,
 since `unittest` has no fixture-injection mechanism of its own. Fakes over mocks either way. Test
@@ -263,9 +263,9 @@ Before pushing or opening a PR:
 - The **build**-profile CI gate, in its uv form, runs the local loop's commands above, each from
   where that loop runs it. Those are `uv run ruff check`, `uv run ruff format --check`, the repo's
   type checker, and `uv run pytest`. CI invokes them as separate steps, not `&&`-chained, so the
-  runner shell is irrelevant. The pip form's
-  CI gate is its commands in the local loop above, and a **lint-only** profile's is its `uvx`
-  equivalents plus its `unittest` suite, each per `references/profiles.md`. The local loop names
+  runner shell is irrelevant. Per `references/profiles.md`, the pip form's CI gate is its commands
+  in the local loop above. Per the same file, a **lint-only** profile's is its `uvx` equivalents
+  plus its `unittest` suite. The local loop names
   what CI relaxes for an undeclared root.
 - Markdown in this directory follows CODESTYLE.md's repo-wide Markdown and Spelling rules,
   packaged as the `comment-and-doc-style` Skill.
