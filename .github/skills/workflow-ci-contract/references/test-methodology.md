@@ -52,7 +52,7 @@ Record the workflow **operational** when every *applicable* 5A item passes and e
 
 1. **Audit** with 5A, recording each item's verdict and its evidence in the form 5A sets out.
 2. **Trace** the applicable S-scenarios with 5B. Diff predicted vs expected.
-3. **Probe** with 5C where a live signal exists that the static trace cannot produce. Run the probes that only read, and prepare the writing ones for the maintainer. The probes cover live version classification, registry state, the artifact lifecycle of a real run, and the deploy ref gate.
+3. **Probe** with 5C where a live signal exists that the static trace cannot produce. Where such a signal exists, run the probes that only read, and prepare the writing ones for the maintainer. The probes cover live version classification, registry state, the artifact lifecycle of a real run, and the deploy ref gate.
 4. **Verdict:** operational / not operational, with the failing guarantee(s) and the triggering input for each. It also lists the items recorded N/A, and the 5C probes prepared but not run.
 
 `WORKFLOW.md` section 5 keeps the test methodology. The `workflow-ci-contract` Skill carries this section whole as a generated include, at `.agents/skills/workflow-ci-contract/references/test-methodology.md` in the hub. That path is not a repo-relative link, since it is hub-local and not carried into every fleet repo.
