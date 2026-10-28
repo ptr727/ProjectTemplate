@@ -34,11 +34,11 @@ A language type is present at one of two **depths**, declared as its `profile`:
 - **build** - the language is compiled, tested, and/or packaged in this repo. Its full check set applies (style, type-check, tests, coverage, packaging).
 - **lint-only** - the language is present and style-checked here, but not built or packaged in this repo. Its lint/style/type-check checks apply, and build and packaging checks are N/A. Test and coverage checks are N/A too, except for Python, whose lint-only directories still owe a suite run under coverage.
 
-Python's profile belongs to each declared Python directory rather than to the repository, per [CODESTYLE.md][codestyle] "Python", so one repository may hold both depths.
+Python's profile belongs to each declared Python directory rather than to the repository, per [CODESTYLE.md][codestyle] "Python", so one repository may hold both depths. The registry therefore declares no `python` profile. The registry's `pythonDirectories` lists the directories, and each one's `pyproject.toml` shape states its profile. A lock or requirements file means build.
 
 Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile, and a check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build and package checks set `build`, and so does a coverage check for a language other than Python. The coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file, or its .codecov.yml alternative) is N/A for a lint-only language other than Python, and otherwise follows tests: the audit reads the repo's tree for tests and holds the requirement N/A where it finds none.
 
-The profile is **declared and validated**, not merely detected. `python` already reads its shape structurally from `pyproject.toml` (a uv PROJECT with tests and a lockfile, versus stdlib SCRIPTS tooling). That structural read becomes the profile **validator**. A declared `python` profile that contradicts the pyproject shape is a false declaration. One concept (the declared profile), checked by detection, rather than two ways to classify.
+A registry profile is **declared and validated**, not merely detected. Python is the exception, because its structural read of each directory's `pyproject.toml` already is the profile. A repository-wide value could not describe a repository holding both depths. It would also be a second classification of a shape that already states one. So [validate.py][validate] refuses a `python` entry in `profiles`.
 
 ### Consequence for cross-cutting checks
 
