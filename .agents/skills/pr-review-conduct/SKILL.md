@@ -273,13 +273,15 @@ Run `local-strict-review` against the branch's current diff before every push th
    deserves a Copilot round anyway. `wait` also skips the request where
    a review already covers the head, where the answer came outside a formal review, where it detects
    drift, under a quota or error refusal, and where something is already in the request set, which
-   is the condition the recovery below clears. Requesting in the pull request UI is the maintainer's
-   route rather than this loop's.
+   is the condition the recovery below clears. An error refusal whose run log reads transient is
+   the exception, owed one re-request per Merge Gate item 2. Requesting in the pull request UI is
+   the maintainer's route rather than this loop's.
 4. Run a bounded `uv run --no-project --script scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
    A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
    or read silence as a missing review. A review whose body says it declined to review is the one
    exception, and it is terminal the other way. Nothing follows it, and re-requesting the same
-   head only repeats the decline.
+   head only repeats the decline. A transient error refusal under Merge Gate item 2 is owed its one
+   re-request first.
 5. Triage findings (see below).
 6. Apply fixes or write a rationale for declines.
 7. Reply to each thread, and resolve what was addressed and what was declined on evidence the
