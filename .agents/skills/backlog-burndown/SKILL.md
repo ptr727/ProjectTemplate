@@ -251,8 +251,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   so brief the group and the bounds rather than restating the loop.
 - **The worker creates its own worktree**, always, as `drive-pr`'s worktree isolation and
   `repo-worktree`'s task-start mandate already require of the task itself. No worker inherits
-  another's worktree. That is why "Bounding the Wait on a Worker" removes a dead worker's tree and
-  branch or leaves the tree untouched for the maintainer. That section never passes the tree on.
+  another's worktree. That is why "Bounding the Wait on a Worker" never passes a dead worker's tree
+  on. It either removes the tree and its branch or leaves the tree untouched for the maintainer.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself. What
@@ -509,7 +509,7 @@ the opposite error destroys work.
 Deriving the set from the range rather than from what this round dispatched is what covers a group
 that deferred or parked, contributing none. It also covers an earlier round's work that no
 promotion has yet carried. A fix landing during the freeze adds its issue to a body already
-written. So amend the body when it lands, rather than leaving the issue to be closed by hand. Each amendment replaces
+written. So amend the body when the fix lands, rather than leaving the issue to be closed by hand. Each amendment replaces
 the whole body, and another session may amend it between a read and a write. So build each one
 from a read of the body made immediately before the write, keeping every line that read holds.
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched

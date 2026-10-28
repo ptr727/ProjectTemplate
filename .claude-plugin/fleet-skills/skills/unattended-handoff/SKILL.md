@@ -216,8 +216,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 - **The right outcome is determined** by the issue together with the committed rules, and the issue
   leaves no choice open between alternatives it names.
 - **Nothing on it waits on the maintainer.** It carries none of `decision`, `blocked`, `handoff`, or
-  `canonical-sweep`. An issue carrying the last is one a workflow owns rather than one a pull
-  request closes. And no comment asks the maintainer something still unanswered.
+  `canonical-sweep`, and no comment asks the maintainer something still unanswered. An issue
+  carrying `canonical-sweep` is one a workflow owns rather than one a pull request closes.
 - **The fix stays inside this repository's tree.** It changes no repository setting, ruleset,
   visibility, secret, or release condition, and needs no credential, account, or host the session
   lacks. The issue needs no platform, in whole or in part, by the test `session-handoff` "The
@@ -240,8 +240,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
   way, does not exclude the issue. The set is wider than the `Closes on promotion:` line a
   promotion closes from. Excluding an issue not yet fixed only delays it until the pull request
   naming it is promoted or closed. But taking a fixed one redoes finished work. No open handoff on
-  any track names it in its next steps. No comment on it claims it for a `backlog-burndown` group
-  either. That is because each marks work that has no pull request yet.
+  any track names it in its next steps, and no comment on it claims it for a `backlog-burndown`
+  group. That is because each marks work that has no pull request yet.
 
 ## The Picker
 
@@ -250,9 +250,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    reads the repository's issue connection rather than the search index, so a handoff a worker's
    `new` just opened or rewrote is already read correctly. A nonzero exit, including the refusal
    over a read window that filled, is a read that cannot run. So the picker returns `STOP` rather
-   than ranking a partial list. **The full-page check** is one picker step 3 and the worker's
-   `decision` read apply to their own `gh issue list` reads. It says a read returning as many rows
-   as its limit may be truncated, so raise the limit and read again until it returns fewer.
+   than ranking a partial list. Picker step 3 and the worker's `decision` read each apply **the
+   full-page check** to their own `gh issue list` reads. A read returning as many rows as its limit
+   may be truncated, so raise the limit and read again until it returns fewer.
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died. A live link
    is work already framed. Handoffs on any other track belong to the maintainer's attended lanes and
@@ -290,7 +290,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    only notice names the `--limit` cap. Read the comments of each issue it names the same way, since
    `chain` prints one summary line per round. Any other notice says the walk missed part of the
    lane, so it returns `STOP`, as a nonzero exit from `chain` does. Where a parking comment names a
-   decision issue the lane waits on, read the answer recorded there. Follow it, since it is what
+   decision issue the lane waits on, read the answer recorded there and follow it, since it
    unblocked the lane. A lesson issue the comment also names, per step 6, is its own work rather
    than this lane's. So the worker neither follows it nor parks on it. Re-derive live state rather
    than trusting any of them, per `session-handoff` "Resuming".
@@ -317,11 +317,11 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    That holds whatever that issue's state. The worker then merges, opens, and releases no promotion
    while the round is narrowed. It instead brings that promotion's body up to a `Fixes` line for
    every issue develop fixes, `#<issue>` included. It does so per `backlog-burndown` "Assembling the Promotion Body",
-   so each closes when the promotion merges. It then closes the lane out, naming the decision issue
+   so each issue closes when the promotion merges. It then closes the lane out, naming the decision issue
    in the close-out comment. Where the round is not narrowed, continue to the promotion pull
    request, its body carrying a `Fixes` line for every issue develop fixes. That body is assembled
-   per that same section. Then hand the pull request to `merge-and-release`, merging only under
-   `main` and merging and releasing under `release`. **A read this step names that cannot run returns `STOP`** rather than
+   per that same section. Then, where the round is not narrowed, hand the pull request to
+   `merge-and-release`, merging only under `main` and merging and releasing under `release`. **A read this step names that cannot run returns `STOP`** rather than
    continuing. That is because a read that did not run shows nothing about whether the promotion
    is blocked. **Repeat the blocked-promotion reads immediately before each
    head of the promotion merges**, a head `merge-and-release` re-gates included. Run the `decision`
@@ -381,11 +381,11 @@ interruption part way leaves the work findable rather than lost.
    stands and name it in the comment below.
 2. **File the question** as an issue carrying `decision`, per `GOVERNANCE.md` "Communicating with
    the User". It states the question, and the choices as its options in the form that section sets
-   for any choice put to the maintainer. It states what each choice would do to the parked work, and
-   the handoff it belongs to. It also states every pull request the decision blocks, the open
+   for any choice put to the maintainer. It states what each choice would do to the parked work. It
+   also states the handoff it belongs to, and every pull request the decision blocks, the open
    promotion included where it blocks that. Naming the promotion there is what lets a later worker
    find a promotion already waiting on one. Where an open `decision` issue already asks the same
-   question about the same pull request, name that one instead of filing another. Comment onto it
+   question about the same pull request, name that one instead of filing another. In that case, comment onto it
    this handoff, the effect on its work, and every pull request the decision now blocks. It holds
    nothing but the question, so it closes once answered.
 3. **Comment the state on the handoff**, filing any lesson first per worker step 6 so the comment
