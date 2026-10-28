@@ -4719,6 +4719,40 @@ class TestCli(GqlCase):
                 else:
                     self.assertIn(line, out)
 
+    def test_the_run_log_line_sits_inside_the_refusal_block_for_either_reading(self) -> None:
+        """A line printed after the block reads as advice of its own, apart from the refusal.
+
+        An open thread prints after the block, so a line appended to the digest's end lands past it.
+        Only the refusal's own body, indented under the marker, may sit between the two.
+        """
+        open_thread = [thread("PRRT_after", login="someone", body="A finding after the block.")]
+        for body, log, field, want in (
+            (ERROR_REFUSED, TRANSIENT_LOG, "refusal=ERROR", "  RUN LOG READING: transient."),
+            (ERROR_REFUSED, None, "refusal=ERROR", "  RUN LOG READING: possible quota."),
+            (ERROR_REFUSED, RATE_LIMIT_LOG, "refusal=QUOTA", "  RATE LIMIT FROM THE REVIEWER'S"),
+            (QUOTA_REFUSED, None, "refusal=QUOTA", None),
+            (REFUSED, None, "refusal=YES", None),
+        ):
+            with self.subTest(field=field, want=want):
+                pr_review.run_cause.cache_clear()
+                self.answer(payload([review(body=body, at=LATE)], threads=open_thread))
+                self.wire_history([], RECORDED)
+                self.run_log(log)
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn(field, out)
+                self.assertNotIn("re-requesting repeats it", out)
+                self.assertIn("The body below says which remedy applies", out)
+                lines = out.splitlines()
+                start = next(i for i, ln in enumerate(lines) if "COPILOT REFUSED" in ln)
+                after = next(i for i, ln in enumerate(lines) if "PRRT_after" in ln)
+                if want is None:
+                    self.assertNotIn("RUN LOG READING", out)
+                    self.assertNotIn("RATE LIMIT FROM THE REVIEWER'S RUN LOG", out)
+                    continue
+                at = next(i for i, ln in enumerate(lines) if ln.startswith(want))
+                self.assertTrue(all(ln.startswith("    ") for ln in lines[start + 1 : at]))
+                self.assertLess(at, after)
+
 
 class TestCopilotHistoryReadings(GqlCase):
     """The readings built from the reviewer's own review history across the repository."""
