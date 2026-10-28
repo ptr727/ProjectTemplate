@@ -28,9 +28,9 @@ validated against that directory's structural shape. Most of the `SKILL.md` rule
 pytest coverage) describe the Project shape (the `build` profile). Its uv project, `uv.lock`, and
 `uv run` rules describe that shape's uv form. The two differ by trait, whether the Python has
 third-party runtime dependencies or is the repo's deliverable. The fleet's audit reads the shape
-that trait leaves rather than inspecting imports. A `[project]` or `[build-system]` table in `pyproject.toml`, a
-committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile, and tool
-configuration alone marks the lint-only one:
+that trait leaves rather than inspecting imports. A `[project]` or `[build-system]` table in
+`pyproject.toml`, a committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile,
+and tool configuration alone marks the lint-only one:
 
 - **Project** (the `build` profile): the Python has third-party runtime dependencies, or is the
   repo's deliverable. It takes one of these forms. The uv form is a PEP 621 project: `[project]`
