@@ -46,7 +46,7 @@ All builds must complete without warnings, enforced as follows:
 - **Analyzer configuration.** `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with
   `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (the full
   analyzer set), plus `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`. With that, any diagnostic
-  surfaced as a warning fails the build. It must be fixed or deliberately suppressed at the
+  surfaced as a warning fails the build. Such a diagnostic must be fixed or deliberately suppressed at the
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
@@ -65,7 +65,7 @@ All builds must complete without warnings, enforced as follows:
 **A new port is not a license to silence diagnostics.** Brownfield or just-ported status never
 justifies relaxing analyzer severities or muting newly surfaced warnings. Fix them. (The only
 brownfield allowance in the fleet is the one-time git-signing / line-ending migration described in
-GOVERNANCE.md and README.md. It has nothing to do with code analysis.)
+GOVERNANCE.md and README.md. That migration has nothing to do with code analysis.)
 
 ### Central build and package configuration
 
@@ -126,7 +126,7 @@ For language features, naming, code structure, and XML documentation examples, s
 ## Analyzer suppressions (.NET)
 
 CODESTYLE.md's General section sets the suppression-scope order fleet-wide: narrowest scope first,
-symbol-scoped before project-scoped before repo-wide. Suppress only for a genuine false-positive or a
+symbol-scoped before project-scoped before repo-wide. That section allows suppression only for a genuine false-positive or a
 deliberate, documented exception, never a blanket relaxation to get a brownfield port to build.
 The .NET mechanics, narrowest first:
 

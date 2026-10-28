@@ -81,7 +81,7 @@ deleting it.
    against the hub. Judge its **entries** only against what that repo itself carries (see
    above), never against the hub's own entries.
 4. Report what is actually stale (a runbook mechanic that changed, a rule that moved, a new
-   section). Keep that apart from what only looks different because it is correctly repo-specific.
+   section). Report it separately from what only looks different because it is correctly repo-specific.
 
 ## Carrying it fresh, new repo or full resync
 

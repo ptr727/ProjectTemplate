@@ -30,7 +30,7 @@
   Implementation-local rationale belongs in inline `#` comments, not docstrings.
 - A short one-liner is fine for trivial functions and tests with self-documenting names.
 - For non-trivial behavior, write a one-line summary, blank line, then a details paragraph.
-  Examples are non-obvious test scenarios, contracts a test pins, edge
+  These are non-obvious test scenarios, contracts a test pins, edge
   cases callers must know about, and design trade-offs that are load-bearing for future
   maintainers. Multi-paragraph docstrings are fine when
   the contract earns it.
@@ -47,7 +47,7 @@
   references.
 - **Don't hedge that syntax for an older interpreter.** `pyproject.toml` pins `target-version` /
   `python_version` to 3.13 for every Python profile in this repo. `spec/host-tools.json`
-  carries that as the host floor `scripts/host_gate.py` enforces. As a result, 3.10+-only syntax
+  carries that as the host floor `scripts/host_gate.py` enforces. As a result of both, 3.10+-only syntax
   (`X | None`, `match`, etc.) needs no quoting and no `typing.Union` fallback. It also needs no
   `from __future__ import annotations` guard on that account alone. Add that import only when a real forward reference
   needs it, per the bullet above. Named exceptions carry a lower floor on purpose and say so
@@ -58,7 +58,7 @@
   `spec/resolve_description.py` down to 3.7 for the same reason. `spec/resolve_description.py`
   also carries `from __future__ import annotations` for exactly that purpose rather than out of
   habit. No other `spec/` code has a reason to hedge. Therefore that import or a quoted annotation
-  appearing anywhere else in `spec/` signals this one exception got copied rather than a pattern
+  appearing anywhere else in `spec/` is a sign this one exception got copied. It is not a pattern
   to follow.
 - **Don't add `# type: ignore` to silence pyright errors without a comment** explaining the
   constraint. If a recurring false positive needs suppression, configure it project-wide in
