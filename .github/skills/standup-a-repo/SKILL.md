@@ -74,7 +74,7 @@ maintainer can supply what section 0A lists.
    `AGENTS.md`'s skill-dependency pointer paragraph in this same step, as one more verbatim unit
    and not a separate pass. The paragraph names `scripts/skills_install.py` and where
    the fleet's Skills live. `RESYNC.md` places the
-   identical requirement on a repo already stood up.
+   same carry requirement on a repo already stood up.
 
 7. **The workflows.** STANDUP.md section 3: implement the Actions `WORKFLOW.md` requires for the
    repo's type, reusing `catalog/snippets/workflows/` as the reference implementation rather than
