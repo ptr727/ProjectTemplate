@@ -357,11 +357,11 @@ a refusal rather than a degraded empty answer. The refusal names the command tha
 label set, except where the label read filled its window. That is the one case where the label's
 absence is unproven rather than established.
 
-A fork under the registry's owner that the registry does not list can host a chain. One example is
-a fork kept for an upstream contribution per `upstream-contribution-workflow`. On any such fork, the
-chain keeps a session's state without the fork taking on any fleet configuration. Missing the label
-there, a read prints a warning and answers as an empty chain does. Missing the label, `new` refuses
-until it is given `--create-label`. With that flag, `new` creates the one `handoff` label, confirms
+A fork under the registry's owner that the registry does not list can host a chain. One kept for an
+upstream contribution per `upstream-contribution-workflow` is an example. The chain keeps a session's
+state on an unlisted fork under the owner without the fork taking on any fleet configuration.
+Missing the label there, a read prints a warning and answers as an empty chain does, and `new`
+refuses until it is given `--create-label`. With that flag, `new` creates the one `handoff` label, confirms
 it, and then files the track's issue. Issues turned off stop it before any write, naming the command that turns them on.
 Never apply the fleet label set to such a fork. A repository under another owner, or an
 unregistered one of the owner's that is not a fork, refuses before any write. `new` and `close`

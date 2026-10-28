@@ -251,8 +251,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   so brief the group and the bounds rather than restating the loop.
 - **The worker creates its own worktree**, always, as `drive-pr`'s worktree isolation and
   `repo-worktree`'s task-start mandate already require of the task itself. No worker inherits
-  another's worktree. That is why "Bounding the Wait on a Worker" never passes a dead worker's tree
-  on. It either removes the tree and its branch or leaves the tree untouched for the maintainer.
+  another's worktree. That is why "Bounding the Wait on a Worker" either removes a dead worker's
+  tree and its branch or leaves that tree untouched for the maintainer. It never passes the tree on,
+  for the same reason.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself. What
