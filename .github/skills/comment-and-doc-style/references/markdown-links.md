@@ -9,8 +9,8 @@ in-place prose edit.
 Every Markdown file in the repo uses reference-style links only, except the files
 read one section at a time rather than end to end. These are `AGENTS.md`, `GOVERNANCE.md`,
 `OPERATIONS.md`, and `.github/copilot-instructions.md`. Those keep inline `[text](uri)` links,
-since a reader jumping straight to one section needs the target to resolve where it is. That
-reader never reaches a definition parked at the bottom of the file. The exception is that closed list of files, never
+since a reader jumping straight to one section needs the target to resolve where it is. A
+further reason is that a definition parked at the bottom of the file is never reached. The exception is that closed list of files, never
 a category to argue from case by case. Every other Markdown file follows the rule regardless of
 its audience.
 

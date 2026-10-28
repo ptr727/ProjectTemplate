@@ -196,7 +196,7 @@ scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
 earn. Where a comment is genuinely owed, and a rule requiring one is the clearest case of that, the
-pull request carries the `comments` label. In that case the gate stands down for that change.
+pull request carries the `comments` label. With that label the gate stands down for that change.
 Locally a `PROSE_ALLOW_COMMENTS` does the same, for as long as it is set to anything but a false
 spelling. And `--allow-comments` does it for one run by hand. The label and the variable are separate deliberately, so a variable
 left exported reaches the commit and never the merge gate.
@@ -236,7 +236,7 @@ moved is deleted rather than edited to look current. The revision there is the r
 citation beside a claim, which is the distinction this rule turns on.
 
 Separately, `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md` carry no three-part
-version and no commit SHA, full or abbreviated. That holds whether it is a pin's value, an example,
+version and no commit SHA, full or abbreviated. That holds whether the version or SHA is a pin's value, an example,
 a minimum version, or a fixed constant. The reason is that a pin's copy goes stale at the next
 Dependabot bump, and every other kind reads exactly like one. No carve-out above lifts this ban. Item 3 of this skill's
 carried-doc-references reference says what to write instead of each and carries the audit that flags
@@ -292,7 +292,7 @@ version-literal scan reads it
 in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md`, bare or inside a URL.
 Elsewhere the text above is the whole of what covers a commit. A reference in a
 string literal is not read either. The reason is that a test builds the numbers it asserts against.
-Reading those would report a fixture rather than a claim about this repository.
+It is also because reading those would report a fixture rather than a claim about this repository.
 
 ## Character set
 
