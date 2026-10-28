@@ -89,7 +89,7 @@ This is packaged as the `dotnet-codestyle` Skill at `.agents/skills/dotnet-codes
 
 The style guide for any Python project(s) in this repo: the build-versus-lint-only profile split, the uv/ruff/pyright/mypy/pytest toolchain, `src` layout, formatting and linting, comment and docstring conventions, type hints, naming, imports, patterns to avoid, test conventions including the `pytest-cov` dependency and coverage selector a Python directory running pytest owes under `WORKFLOW.md` D1.6, and versioning.
 
-A profile belongs to a declared directory, not to the repository, and a repository declaring none has its root as that directory. Each deliverable takes its own build-profile directory, and lint-only Python may sit beside the component it serves. Only a split by purpose alone, within one place, is forbidden, since the file name carries the purpose.
+A profile belongs to a declared directory, not to the repository. Each deliverable takes its own build-profile directory, a uv workspace counting as one, and lint-only Python may sit beside the component it serves. Only a split by purpose alone, within one place, is forbidden, since the file name carries the purpose.
 
 This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codestyle/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. The summary above sketches the scope. Read the skill for the full rules and the profile-adaptation guidance.
 

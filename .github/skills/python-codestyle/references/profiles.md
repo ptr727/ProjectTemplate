@@ -76,19 +76,19 @@ and tool configuration alone marks the lint-only one:
   `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold adopted. A
   declared directory with no `tests/` fails that job.
 
-A profile belongs to a declared directory, not to the repository. A repository declaring none has
-one such directory, its root. Each deliverable takes its own build-profile directory, with its own
-`uv.lock` or `requirements*.txt`. A uv workspace is the exception: its root is the one build-profile
-directory, declared once, and its members share the root's lock. Lint-only Python may sit beside the
-component it serves, in that component's directory or next to it. Only a split by purpose alone,
+A profile belongs to a declared directory, not to the repository. A repository declaring none gates
+its root instead, where a root `pyproject.toml` is tracked. Each deliverable takes its own
+build-profile directory, with its own `uv.lock` or `requirements*.txt`. A uv workspace is the
+exception: its root is the one build-profile directory, declared once, and its members share the
+root's lock. Lint-only Python may sit beside the component it serves. Only a split by purpose alone,
 within one place, is forbidden. One place means directories serving the same component, or serving
 none. Within one directory the file name carries the purpose instead, as the Scripts bullet's
 `_gate` and `_lint` suffixes do. A stdlib-only `tools/` beside a `render/` that imports a
 third-party imaging library is a legitimate split by profile trait. Merging them would put every
 stdlib gate behind that library's install. Two deliverables, `render/` and `publish/`, each keep a
-build-profile directory of their own. An `infra/` component may hold its own lint-only Python beside
-its configuration, declared apart from `tools/`. Two stdlib-only root directories, `tools/` and
-`audits/`, serve no component of their own and differ only by purpose, so they merge.
+build-profile directory of their own. Lint-only Python serving an `infra/` component may sit in an
+`infra-checks/` directory beside it, declared apart from `tools/`. Two stdlib-only root directories,
+`tools/` and `audits/`, serve no component of their own and differ only by purpose, so they merge.
 
 ## Versioning
 
