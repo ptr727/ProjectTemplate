@@ -145,7 +145,7 @@ jobs:
       # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
       # An empty markdown-exclude-globs leaves a blank line here, which the action ignores, so the default caller passes nothing extra.
       - name: Lint Markdown step
-        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
         with:
           globs: |
             **/*.md
