@@ -37,7 +37,7 @@ The following are banned in the files above:
    Y"). Write a minimum version by naming the manifest or skill that holds it. Write a fixed
    constant by what it is ("the all-zero placeholder version"). A two-part language or runtime version, such as a minimum Python minor, stays. In
    those files the audit flags a three-part version, a full SHA, or an abbreviated one. Downstream
-   it flags them outside the verbatim sections. In the hub it flags them across the whole file.
+   it flags them outside those files' verbatim sections. In the hub it flags them across the whole file.
    `.github/copilot-instructions.md` is outside that check, since its disproved-claims records name a
    revision by design, which the revision carve-out in `GOVERNANCE.md` "References" permits.
 

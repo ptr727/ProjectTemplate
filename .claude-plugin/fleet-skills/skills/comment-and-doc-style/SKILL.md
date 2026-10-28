@@ -291,7 +291,7 @@ carries the same shape as a blob id, a version fragment, and a fixture hash. The
 version-literal scan reads it
 in `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, and `WORKFLOW.md`, bare or inside a URL.
 Elsewhere the text above is the whole of what covers a commit. A reference in a
-string literal is not read either. The reason is that a test builds the numbers it asserts against.
+string literal is not read either. That is because a test builds the numbers it asserts against.
 It is also because reading those would report a fixture rather than a claim about this repository.
 
 ## Character set
