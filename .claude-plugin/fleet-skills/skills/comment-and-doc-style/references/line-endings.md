@@ -3,8 +3,8 @@
 Full detail for the "Line endings" rule in `SKILL.md`. Load this when choosing an ending for a
 new file type or working in an operational (config) repo. Also load it when pinning an
 extensionless executable or auditing a repo's endings. An ordinary content edit
-to an existing file is not a reason to load this. The SKILL.md summary, preserve the existing ending and verify with a byte
-scan, covers that case.
+to an existing file is not a reason to load this. The SKILL.md summary covers that case: preserve the existing ending and
+verify with a byte scan.
 
 ## The defaults
 
