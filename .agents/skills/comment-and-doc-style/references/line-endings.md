@@ -59,8 +59,8 @@ repo.** When a config repo would be consumed on two platforms (a Linux app plus 
 subtree), the clean answer is a repo per consumer. Each is single-platform with its own
 `lineEndings`. For example a controller config edited by a Windows-native editor lives in its own
 CRLF repo. It does not live as a subtree inside a Linux `lf` config repo. Fallback only if a
-subtree genuinely cannot be split out. Keep the global default at the primary consumer. Pin the odd
-subtree with an `.editorconfig` path override (for example `[<subtree>/**] end_of_line = crlf`) matching its
+subtree genuinely cannot be split out. In that case keep the global default at the primary consumer. In
+that case also pin the odd subtree with an `.editorconfig` path override (for example `[<subtree>/**] end_of_line = crlf`) matching its
 consumer. Pair the same path override in `.gitattributes`, since both layers must resolve the
 path to the same ending.
 
@@ -78,7 +78,7 @@ consumer may depend on. The reason is that the git pin alone is not enough there
 governs git while the editor follows `.editorconfig`. For a byte-preserve directory, disable all
 editor normalization, not just EOL: `[<dir>/**]` with `charset = unset`, `end_of_line = unset`,
 `insert_final_newline =
-unset`, `trim_trailing_whitespace = false`. In that block `unset` is EditorConfig's spec-defined
+unset`, `trim_trailing_whitespace = false`. `unset` is EditorConfig's spec-defined
 special value that removes an inherited property. Also in that block `**` is needed rather than
 `*` so a nested file under the directory is covered too. That is because `*` excludes `/` and only
 matches one path component.
@@ -96,7 +96,7 @@ matches one path component.
 - **Fixing a non-compliant file**: bring it to its `.editorconfig` ending as a deliberate change.
   Prefer to isolate it in its own EOL-only commit so the churn is reviewable. When a broader
   maintenance change has to normalize endings alongside content edits, call it out explicitly in
-  the commit or PR description. Also verify the content separately with
+  the commit or PR description. In that case also verify the content separately with
   `git diff --ignore-cr-at-eol`.
 
 ## Auditing

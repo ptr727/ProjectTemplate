@@ -31,13 +31,13 @@ The following are banned in the files above:
    the next Dependabot bump. The reason is that the pin lives in the workflow or manifest that uses
    it. That value also sends the next agent to edit governance for a change that needed none. An
    illustrative example, a minimum version, and a fixed constant read exactly like a copied pin, so
-   no check can tell them apart. The rule covers them too. Write each as its mechanism instead.
+   no check can tell them apart. And the rule covers them too. Write each as its mechanism instead.
    Write a pin as "SHA-pinned to a hub release, with the release in a trailing comment". Write an
    example with a placeholder (`1.0.N` publishing as `1.0.(N+1)`, or a dependency bump "from X to
    Y"). Write a minimum version by naming the manifest or skill that holds it. Write a fixed
-   constant by what it is ("the all-zero placeholder version"). A two-part language or runtime version, such as a minimum Python minor, stays. The
-   audit flags a three-part version, a full SHA, or an abbreviated one in those files. It flags
-   them outside their verbatim sections downstream and across the whole file in the hub.
+   constant by what it is ("the all-zero placeholder version"). A two-part language or runtime version, such as a minimum Python minor, stays. In
+   those files the audit flags a three-part version, a full SHA, or an abbreviated one. Downstream
+   it flags them outside the verbatim sections. In the hub it flags them across the whole file.
    `.github/copilot-instructions.md` is outside it, since its disproved-claims records name a
    revision by design, which the revision carve-out in `GOVERNANCE.md` "References" permits.
 
@@ -47,7 +47,7 @@ The following are banned in the files above:
 That section's whole function is to name where the canonical rules live. It does so for an agent
 in a repository whose carried copies are stale, partial, or absent. That is exactly when no other
 file present can say it. Its bytes are fixed fleet-wide, so a repository cannot edit the reference
-out without failing the verbatim check instead. A rule banning it would be unsatisfiable rather
+out without failing the verbatim check instead. And a rule banning it would be unsatisfiable rather
 than merely strict. The exception is scoped to the verbatim region and never leaks past it: the
 same document's own prose, outside that region, is governed normally. A reference that reaches a
 verbatim section is a defect in the canonical. It is fixed once at the source rather than reported
