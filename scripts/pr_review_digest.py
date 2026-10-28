@@ -215,8 +215,8 @@ def render(
     if refusal:
         lines.append(
             "  COPILOT REFUSED THIS ROUND: the newest Copilot review on this pull request says "
-            "it did not review, so it covers nothing. The body below, and any run log line under "
-            "it, say whether a re-request is owed or repeats the refusal"
+            "it did not review, so it covers nothing. The body below says which remedy applies, "
+            "and any run log line under it says whether a re-request is owed"
         )
         lines += [
             f"    {ln.rstrip()}" for ln in (refusal.get("body") or "").splitlines() if ln.strip()

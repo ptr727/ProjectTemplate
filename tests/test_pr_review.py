@@ -4731,6 +4731,7 @@ class TestCli(GqlCase):
             (ERROR_REFUSED, None, "refusal=ERROR", "  RUN LOG READING: possible quota."),
             (ERROR_REFUSED, RATE_LIMIT_LOG, "refusal=QUOTA", "  RATE LIMIT FROM THE REVIEWER'S"),
             (QUOTA_REFUSED, None, "refusal=QUOTA", None),
+            (REFUSED, None, "refusal=YES", None),
         ):
             with self.subTest(field=field, want=want):
                 pr_review.run_cause.cache_clear()
@@ -4740,7 +4741,7 @@ class TestCli(GqlCase):
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn(field, out)
                 self.assertNotIn("re-requesting repeats it", out)
-                self.assertIn("say whether a re-request is owed or repeats the refusal", out)
+                self.assertIn("The body below says which remedy applies", out)
                 lines = out.splitlines()
                 start = next(i for i, ln in enumerate(lines) if "COPILOT REFUSED" in ln)
                 after = next(i for i, ln in enumerate(lines) if "PRRT_after" in ln)
