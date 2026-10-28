@@ -47,8 +47,8 @@ and tool configuration alone marks the lint-only one:
   installs them. It otherwise runs them through `uvx`, with the checker pointed at that
   environment. The undeclared default root runs `uvx ruff@latest` and a bare
   `uvx <checker>@latest`, with nothing installed.
-- **Scripts** (the `lint-only` profile): stdlib-only utility scripts embedded in a non-Python repo
-  (e.g. a Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
+- **Scripts** (the `lint-only` profile): stdlib-only utility scripts (e.g. a
+  Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
   an optional `[tool.pyright]` editor block), with no `[project]`, no `[build-system]`, and no
   `uv.lock` (that metadata would misrepresent it as a shippable package). mypy is the type-check
@@ -77,15 +77,16 @@ and tool configuration alone marks the lint-only one:
   declared directory with no `tests/` fails that job.
 
 A profile belongs to a declared directory, not to the repository. Each deliverable takes its own
-build-profile directory, with its own `uv.lock` or `requirements*.txt`. Lint-only Python may sit in
-a directory beside the component it serves. Only a split by purpose alone, within one place, is
-forbidden. Within one directory the file name carries the purpose, its stem naming the job and a
-`_gate` or `_lint` suffix marking a gate. A stdlib-only `tools/` beside a `render/` that imports a
-third-party imaging library is a legitimate split by profile trait. Merging them would put every
-stdlib gate behind that library's install. Two deliverables, `render/` and `publish/`, each keep a
-build-profile directory of their own. A component directory such as `infra/` may hold its own
-lint-only Python, declared apart from `tools/`. Two stdlib-only root directories, `tools/` and
-`audits/`, serve no component of their own and differ only by purpose, so they merge.
+build-profile directory, with its own `uv.lock` or `requirements*.txt`. Lint-only Python may sit
+beside the component it serves. Only a split by purpose alone, within one place, is forbidden. One
+place means directories serving the same component, or serving none. Within one directory the file
+name carries the purpose instead, per the suffix rule in the Scripts bullet above. A stdlib-only
+`tools/` beside a `render/` that imports a third-party imaging library is a legitimate split by
+profile trait. Merging them would put every stdlib gate behind that library's install. Two
+deliverables, `render/` and `publish/`, each keep a build-profile directory of their own. An
+`infra/` component may hold its own lint-only Python beside its configuration, declared apart from
+`tools/`. Two stdlib-only root directories, `tools/` and `audits/`, serve no component of their own
+and differ only by purpose, so they merge.
 
 ## Versioning
 
