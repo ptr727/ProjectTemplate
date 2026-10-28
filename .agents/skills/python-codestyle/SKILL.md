@@ -46,7 +46,8 @@ A profile belongs to a declared directory, not to the repository. Each deliverab
 build-profile directory of its own. The profile decides only how the tools are installed, never
 what is owed. Every Python directory owes lint, format, a type check, a `tests/` suite, and
 coverage. A repo declares each in the hub validator's `python-directories` input, except that a uv
-workspace is declared once, by its root.
+workspace is declared once, by its root. A repo declaring none has its root gated only where it
+tracks a root `pyproject.toml`, as `WORKFLOW.md` D1.2 states.
 
 `references/profiles.md` holds the full profile specification and the rule for splitting Python
 across directories. It also holds the toolchain axes a directory adapts: type checker, dependency
