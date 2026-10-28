@@ -77,8 +77,9 @@ Subcommands
            `other_rate_limited` names one whose newest comment or review is its own rate-limit
            notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
            the account quota or an error whose run log names a rate limit, `ERROR` for any other
-           error refusal, `YES` for any other refusal. `status` exits 0 over a refusal, and `wait`
-           gives it 41.
+           error refusal, `YES` for any other refusal. Under `ERROR`, a `RUN LOG READING` line
+           names the reading taken: transient where the run log names a fetch failure, else
+           possible quota. `status` exits 0 over a refusal, and `wait` gives it 41.
            `unresolved` counts every open thread whoever opened it, its breakdown attributing the
            known logins. Both `threads=` and `unresolved=` read one 100-thread page, a trailing
            `+` and a `THREADS TRUNCATED` block naming a cut page. `suppressed=`,
@@ -106,7 +107,10 @@ Subcommands
            current head, then print the digest. The auto-request is skipped once a review past
            --min-rounds covers the head, once Copilot has answered outside a formal review, once
            one is pending, and under a refusal or quota reading below, since a request into a
-           reached limit spends quota and returns the same refusal. It is skipped on a pull
+           reached limit spends quota and returns the same refusal. An error refusal whose run log
+           names a transient fetch failure is owed one re-request, unless the round before it was
+           an error refusal too. A re-request already made after the refusal is never sent again.
+           A held head names it under COPILOT_ERROR_TRANSIENT instead. It is skipped on a pull
            request into a branch other than the default too, whose every head an attested local
            pass covers: an attested head has its checks polled instead while they can still move
            its merge, and one with no attestation exits 49. --request asks for a round anyway.
@@ -139,7 +143,7 @@ Subcommands
            reviewer's newest activity elsewhere in the repository being a quota refusal nothing
            answered since while this head carries none of its own. Proceed on the other reviewers'
            coverage rather than retrying, and pass --ignore-quota-signal once the quota is believed
-           to have reset. 42 and 50 = the review landed and `status`'s readings
+           to have reset. A transient error refusal whose one re-request is pending exits 30 instead. 42 and 50 = the review landed and `status`'s readings
            apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, or failed. On
@@ -220,6 +224,8 @@ from pr_review_rounds import (
     local_cover,
     matching_threads,
     newest_first,
+    newest_of,
+    newest_request_event,
     open_threads,
     possible_quota,
     quota_refusal,
@@ -245,7 +251,9 @@ RUN_ERROR_TYPE = re.compile(r"errorType: '([a-z_]+)'")
 RUN_RATE_LIMIT = re.compile(
     r"(You.ve reached your [^\n]*?rate limit\.[^\n]*?)(?= or switch| Learn More|$)", re.MULTILINE
 )
+RUN_TRANSIENT = re.compile(r"^.*too many files changed.*$", re.MULTILINE)
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+REQUESTS_KEY = "requestState"
 ISO_STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
@@ -306,7 +314,7 @@ query($o:String!,$r:String!,$prs:Int!,$reviews:Int!,$comments:Int!){
 REQUEST_STATE = """
     reviewRequests(first:100){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     timelineItems(last:100, itemTypes:[REVIEW_REQUESTED_EVENT]){ nodes{
-      ... on ReviewRequestedEvent{ id requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } } }
+      ... on ReviewRequestedEvent{ id createdAt requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } } }
 """
 Q_REQUEST_STATE = """
 query($o:String!,$r:String!,$n:Int!){
@@ -588,11 +596,12 @@ def request_copilot_review(
 
 
 @functools.cache
-def run_cause(owner: str, repo: str, oid: str, before: str) -> tuple[str, str] | None:
-    """The error type and rate-limit sentence the reviewer's own failed run logged, or None.
+def run_cause(owner: str, repo: str, oid: str, before: str) -> tuple[str, str, str] | None:
+    """The error type, rate-limit sentence, and transient-failure line the reviewer's failed run logged.
 
-    The run read is the newest failed one on that commit created no later than the review. None
-    wherever any read fails or finds nothing. Memoized for the run.
+    The run read is the newest failed one on that commit created no later than the review. Each
+    part is empty where the log holds none of it. None wherever any read fails or finds nothing.
+    Memoized for the run.
     """
     if not oid or not ISO_STAMP.fullmatch(before):
         return None
@@ -613,22 +622,87 @@ def run_cause(owner: str, repo: str, oid: str, before: str) -> tuple[str, str] |
         return None
     log = ANSI.sub("", proc.stdout)
     kinds, said = RUN_ERROR_TYPE.findall(log), RUN_RATE_LIMIT.search(log)
-    if not kinds:
+    fetch = RUN_TRANSIENT.findall(log)
+    if not kinds and not fetch:
         return None
-    kind = "rate_limit" if "rate_limit" in kinds else kinds[-1]
-    return kind, said.group(1).strip() if said else ""
+    kind = "rate_limit" if "rate_limit" in kinds else kinds[-1] if kinds else ""
+    return kind, said.group(1).strip() if said else "", fetch[-1].strip() if fetch else ""
+
+
+def node_cause(owner: str, repo: str, node: dict) -> tuple[str, str, str] | None:
+    """`run_cause` for an error refusal's own commit and submission time, else None."""
+    if not possible_quota(node):
+        return None
+    return run_cause(
+        owner, repo, (node.get("commit") or {}).get("oid") or "", node.get("submittedAt") or ""
+    )
 
 
 def confirmed_quota(owner: str, repo: str, node: dict) -> str:
     """The run log's rate-limit sentence where an error refusal's run logged a rate limit, else ""."""
-    if not possible_quota(node):
-        return ""
-    cause = run_cause(
-        owner, repo, (node.get("commit") or {}).get("oid") or "", node.get("submittedAt") or ""
-    )
+    cause = node_cause(owner, repo, node)
     if cause is None or cause[0] != "rate_limit":
         return ""
     return cause[1] or "the run logged a rate limit and stated no reset time"
+
+
+def transient_error(owner: str, repo: str, node: dict) -> str:
+    """The run log's transient-failure line where an error refusal's run logged no rate limit, else "".
+
+    A logged rate limit wins, since a re-request into a reached limit spends quota.
+    """
+    cause = node_cause(owner, repo, node)
+    if cause is None or cause[0] == "rate_limit":
+        return ""
+    return cause[2]
+
+
+def transient_state(owner: str, repo: str, num: int, pr: dict, node: dict) -> tuple[str, str]:
+    """Where an error refusal stands on its one re-request, and its run log's transient line.
+
+    The state is `owed` until a request postdates the refusal, then `pending` while one is
+    requested, else `sent`. It is `spent` where the round before was an error refusal too. Both
+    parts are empty where the refusal is no error refusal or its log names no transient failure.
+    The request read is kept on `pr`, so the digest and the exit read one answer.
+    """
+    line = transient_error(owner, repo, node) if possible_quota(node) else ""
+    if not line:
+        return "", ""
+    revs = reviewer_nodes(pr, "reviews")
+    at = next((i for i, n in enumerate(revs) if n is node), 0)
+    before = newest_of(revs[:at])
+    if before is not None and possible_quota(before):
+        return "spent", line
+    if REQUESTS_KEY not in pr:
+        pr[REQUESTS_KEY] = gh_graphql(Q_REQUEST_STATE, o=owner, r=repo, n=num)["repository"][
+            "pullRequest"
+        ]
+    state = pr[REQUESTS_KEY]
+    newest = newest_request_event(state)
+    made = next(
+        (
+            n.get("createdAt") or ""
+            for n in state["timelineItems"]["nodes"]
+            if n.get("id") == newest
+        ),
+        "",
+    )
+    if made <= (node.get("submittedAt") or ""):
+        return "owed", line
+    return ("pending" if reviewer_requested(pr) else "sent"), line
+
+
+def run_log_reading(state: str, line: str) -> str:
+    """The digest line naming the reading `transient_state` gave, empty where it gave none."""
+    readings = {
+        "owed": "transient. The run log names a fetch failure, not a rate limit, so one "
+        "re-request is owed",
+        "pending": "transient. The one re-request it is owed is pending",
+        "sent": "possible quota. The one re-request it was owed was sent and nothing answered it",
+        "spent": "possible quota. The run log names a fetch failure, but the round before was "
+        "an error refusal too",
+    }
+    return f"  RUN LOG READING: {readings[state]}: {line}" if state else ""
 
 
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
@@ -769,7 +843,16 @@ def digest(
     checks = check_nodes(pr) if checks is None else checks
     refusal = digest_refusal(pr)
     quota = confirmed_quota(owner, repo, refusal) if refusal else ""
-    return render(owner, repo, num, pr, checks, now, grace, stall, quota, seen, HUB, WINDOW)
+    out, unresolved = render(
+        owner, repo, num, pr, checks, now, grace, stall, quota, seen, HUB, WINDOW
+    )
+    reading = ""
+    if refusal and possible_quota(refusal) and not quota:
+        reading = run_log_reading(*transient_state(owner, repo, num, pr, refusal)) or (
+            "  RUN LOG READING: possible quota. The run log was unread or names neither a rate "
+            "limit nor a transient fetch failure"
+        )
+    return (f"{out}\n{reading}" if reading else out), unresolved
 
 
 def report_verdict(pr: dict) -> int:
@@ -1448,6 +1531,12 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
         and holds(snapshot)
         and (not answer or attested(snapshot))
     )
+    retry, watch = "", False
+    if snapshot and stopped and not held:
+        state, line = transient_state(owner, repo, a.number, snapshot, stopped)
+        retry, watch = (line if state == "owed" else ""), state in {"owed", "pending"}
+    if retry:
+        stopped = None
     # Request before the first poll, so `wait` makes a review happen rather than only watching for one.
     # Skipped once a round past --min-rounds covers the head, Copilot answered outside a review, or a request is pending.
     recorded: bool | None = None
@@ -1471,6 +1560,11 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             else:
                 line += ", and the request recorded nothing on the pull request"
         print(f"auto-request: {line}")
+        if retry and recorded is not False:
+            print(
+                "note: the newest Copilot review is an error refusal whose run log names a "
+                f"transient fetch failure, so this is its one re-request: {retry}"
+            )
     if recorded is False:
         print(
             "note: the review request returned success and recorded nothing on this pull "
@@ -1541,6 +1635,14 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             "rather than polling --timeout out against the same account state. Pass "
             "--ignore-quota-signal to poll anyway, once the quota is believed to have reset."
         )
+    elif watch:
+
+        def read_live() -> tuple[bool, dict | None, list[str], bool]:
+            live = gql(Q_LIVE, owner, repo, a.number)
+            fresh = len(reviewer_nodes(live, "reviews")) > rounds_before
+            return (*liveness(live, a.min_rounds), fresh)
+
+        backoff((done, answer, drift, False), read_live, lambda s: not any(s), start, a.timeout)
     else:
         backoff(
             (done, answer, drift),
@@ -1632,6 +1734,23 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
     refusal = refusing_review(final)
     if refusal is None and not a.ignore_quota_signal:
         refusal = stopping_refusal(final)
+    state, line = transient_state(owner, repo, a.number, final, refusal) if refusal else ("", "")
+    if state == "pending" or (state == "owed" and reviewer_requested(final)):
+        print(
+            "status=PENDING the newest Copilot review is an error refusal whose run log names a "
+            "transient fetch failure. Its one re-request is pending with no round by the timeout, "
+            f"so run wait again: {line}"
+        )
+        return 30
+    if state == "owed" and held:
+        print(
+            "status=COPILOT_ERROR_TRANSIENT the newest Copilot review is an error refusal whose "
+            "run log names a transient fetch failure, which one re-request clears. This wait "
+            f"sent none, so pass --request to send it: {line}"
+        )
+        return 41
+    if state == "owed":
+        refusal = None
     if refusal and quota_refusal(refusal):
         print(
             "status=COPILOT_QUOTA_EXHAUSTED the newest Copilot review declined because the "
@@ -1651,10 +1770,19 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
         )
         return 41
     if refusal and possible_quota(refusal):
+        why = {
+            "sent": "Its run log names a transient fetch failure, and its one re-request was "
+            "sent with no round answering it.",
+            "spent": "Its run log names a transient fetch failure, but the round before it was an "
+            "error refusal too.",
+        }.get(
+            state, "Its run log was unread or names neither a rate limit nor a transient failure."
+        )
         print(
             "status=COPILOT_ERROR_POSSIBLE_QUOTA the newest Copilot review on this pull request "
             "says it encountered an error and did not review, printed above under COPILOT "
-            "REFUSED THIS ROUND, which is the body the weekly rate limit posts. Read it as a "
+            "REFUSED THIS ROUND, which is the body the weekly rate limit posts. "
+            f"{why} Read it as a "
             "possible quota hit: do not re-request, proceed on the coverage the other reviewers "
             "already gave, and hand the state to the maintainer, who can pass "
             "--ignore-quota-signal once the limit is believed to have reset"
