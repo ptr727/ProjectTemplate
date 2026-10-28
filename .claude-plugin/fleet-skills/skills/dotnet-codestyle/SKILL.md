@@ -105,7 +105,7 @@ updates, dependency upgrades, benchmarks) on top:
 - **`dotnet-outdated-tool`** checks for dependency updates, and Nerdbank.GitVersioning owns
   version management.
 - CI is the authoritative lint backstop. A repo already keeping a .NET tool manifest declaring
-  Husky.Net wires its local pre-commit hook from `catalog/snippets/husky/` in the hub. That config is hub-local
+  Husky.Net wires its local pre-commit hook from `catalog/snippets/husky/` in the hub. That snippet is hub-local
   and not carried into every fleet repo. A repo keeping none, or one preferring the `pre-commit`
   framework, takes `catalog/snippets/pre-commit/` instead. Either shape covers the shared doc
   gates alongside the language checks. Each snippet's own README names the per-clone steps and
