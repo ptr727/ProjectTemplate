@@ -29,9 +29,10 @@ profiles, the toolchain, layout, and the language-level conventions.
 ## Two profiles
 
 Read the repo's `OPERATIONS.md` local-verification commands before substituting a generic command.
-Then read the `pyproject.toml` shape and pick the profile before running Python tooling or tests:
+Then read each Python directory's `pyproject.toml` shape and pick its profile before running Python
+tooling or tests:
 
-- **build** (Project): third-party runtime dependencies, or the repo's deliverable. Either a uv
+- **build** (Project): third-party runtime dependencies, or a deliverable. Either a uv
   project (`[project]` + `[build-system]` + committed `uv.lock`, run with `uv run`) or a
   `pyproject.toml` beside a `requirements*.txt` and no `uv.lock`, installed with pip. Uses pytest,
   and pyright strict or mypy with its strict flags as the CI type checker. A repo enforcing
@@ -41,12 +42,16 @@ Then read the `pyproject.toml` shape and pick the profile before running Python 
   for tests, and mypy as the CI gate. Do not run pytest or diagnose its absence as an environment
   defect. Use the repository's exact coverage command and unittest scope from `OPERATIONS.md`.
 
-The profile decides only how the tools are installed, never what is owed. Every Python directory
-owes lint, format, a type check, a `tests/` suite, and coverage, and a repo declares each such
-directory in the hub validator's `python-directories` input.
+A profile belongs to a declared directory, not to the repository. Each deliverable takes a
+build-profile directory of its own. The profile decides only how the tools are installed, never
+what is owed. Every Python directory owes lint, format, a type check, a `tests/` suite, and
+coverage. A repo declares each in the hub validator's `python-directories` input, except that a uv
+workspace is declared once, by its root. A repo declaring none has its root gated only where it
+tracks a root `pyproject.toml`, as `WORKFLOW.md` D1.2 states.
 
-For the full profile specification and per-repo adaptation axes (type checker, dependency
-declaration, versioning), see `references/profiles.md`.
+`references/profiles.md` holds the full profile specification and the rule for splitting Python
+across directories. It also holds the toolchain axes a directory adapts: type checker, dependency
+declaration, and versioning.
 
 ## Toolchain
 
@@ -83,8 +88,8 @@ editor (the `ms-python.mypy-type-checker` extension) so the two stay consistent,
 command joins the clean-compile. The hub validator runs at most one checker in each Python
 directory, mypy where both are configured. A repo enforcing pyright beside mypy runs pyright from
 its own `.github/actions/validate/action.yml` hook. That hook starts from a bare checkout, so it
-sets up its own Python environment. mypy may also be a build repo's only CI checker, run with its
-strict flags, and Pylance's pyright diagnostics are then advisory, since CI never runs them. A
+sets up its own Python environment. mypy may also be a build directory's only CI checker, run with
+its strict flags. Pylance's pyright diagnostics are then advisory, since CI never runs them. A
 pyright-only repo is the lightest and is inherently consistent, since the editor and CI run one
 engine.
 
@@ -157,9 +162,10 @@ adaptations. Every command-executing task in it is `type: process`, and every ag
 `dependsOn`-only. Neither chains with `&&`, so the mirror runs the same on any task shell.
 
 CI runs these same commands as the authoritative backstop in every directory the hub validator's
-`python-directories` input declares. The undeclared root, the default for a repo declaring none, is
-gated more loosely. CI reads its type-checker configuration only from the `[tool.mypy]` or
-`[tool.pyright]` section of its `pyproject.toml`, and skips the type check where neither is there,
+`python-directories` input declares. A repo declaring none has its root gated only where it tracks
+a root `pyproject.toml`, per `WORKFLOW.md` D1.2. That undeclared root is gated more loosely. CI
+reads its type-checker configuration only from the `[tool.mypy]` or `[tool.pyright]` section of its
+`pyproject.toml`. It skips the type check where neither is there,
 whatever the form. In its pip form CI installs nothing for that check and runs a bare
 `uvx <checker>@latest`, so the local check against the environment is the stricter one. And CI runs
 its tests only where a pytest suite in `tests/` sits beside a `uv.lock` or `requirements*.txt`.

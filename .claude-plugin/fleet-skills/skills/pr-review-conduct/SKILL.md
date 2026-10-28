@@ -54,7 +54,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    reading a Copilot round at Balanced review effort gives. Where no round covering the head carries a table of its own, the newest round
    that does, its table naming exactly the changed files, stands in as `coverage=carried:table`.
    A table stands in only where no Copilot round on the pull request, on any commit, states
-   partial coverage, so a pull request that ever had a partial round goes to the maintainer.
+   partial coverage. So a pull request that ever had a partial round goes to the maintainer.
    `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
    so read the field rather than the exit.
    The coverage this item requires is Copilot's, or the attested local pass above, and CodeRabbit
