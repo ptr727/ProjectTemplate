@@ -39,8 +39,8 @@ anything else. The finding kind names the procedure the repo is owed.
 ## Reach the hub and measure before changing anything
 
 Fetch a hub checkout of your own immediately before reading it, since a stale clone
-answers confidently instead of failing. This follows the hub-only `RESYNC.md`
-section 1, a file fetched with the hub rather than present in a carrier. Never do the resync's own work in a checkout another task
+answers confidently instead of failing. This follows section 1 of the hub-only `RESYNC.md`.
+That file is fetched with the hub rather than present in a carrier. Never do the resync's own work in a checkout another task
 may be using, the maintainer's own primary checkout included, even one that looks current. For the
 hub and for the target repo alike, create a worktree of your own off that base clone and work
 there, per `repo-worktree`. Remove each one when the run ends, per that skill's "Listing and
