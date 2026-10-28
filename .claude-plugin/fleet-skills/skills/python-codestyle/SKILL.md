@@ -29,8 +29,8 @@ profiles, the toolchain, layout, and the language-level conventions.
 ## Two profiles
 
 Read the repo's `OPERATIONS.md` local-verification commands before substituting a generic command.
-Then read the directory's `pyproject.toml` shape and pick its profile before running Python tooling
-or tests:
+Then read each Python directory's `pyproject.toml` shape and pick its profile before running Python
+tooling or tests:
 
 - **build** (Project): third-party runtime dependencies, or a deliverable. Either a uv
   project (`[project]` + `[build-system]` + committed `uv.lock`, run with `uv run`) or a
