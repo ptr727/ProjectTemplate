@@ -30,7 +30,7 @@
   Implementation-local rationale belongs in inline `#` comments, not docstrings.
 - A short one-liner is fine for trivial functions and tests with self-documenting names.
 - For non-trivial behavior, write a one-line summary, blank line, then a details paragraph.
-  These are non-obvious test scenarios, contracts a test pins, edge
+  Non-trivial behavior covers non-obvious test scenarios, contracts a test pins, edge
   cases callers must know about, and design trade-offs that are load-bearing for future
   maintainers. Multi-paragraph docstrings are fine when
   the contract earns it.

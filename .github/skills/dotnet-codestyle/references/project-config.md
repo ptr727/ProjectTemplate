@@ -4,7 +4,7 @@
 2. **AOT compatibility**: `<IsAotCompatible>true</IsAotCompatible>` unconditionally, and
    `<VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>` only in a
    `<PropertyGroup Condition="'$(PublishAot)' == 'true'">`. That group is placed in the `.csproj` after
-   it sets `PublishAot` or in `Directory.Build.targets`, never in `Directory.Build.props`.
+   the `.csproj` sets `PublishAot` or in `Directory.Build.targets`, never in `Directory.Build.props`.
    `Directory.Build.props` is imported before the project body and so never sees a `PublishAot` the
    `.csproj` sets. Reference
    verification reports `IL3058` for every referenced assembly that lacks `IsAotCompatible` metadata

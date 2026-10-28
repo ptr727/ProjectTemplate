@@ -14,10 +14,10 @@ project.
 2. **Nullable reference types**: enabled (`<Nullable>enable</Nullable>`), use nullable annotations
    appropriately, use `required` for mandatory properties.
 3. **Modern C# features**: prefer modern language constructs. Prefer primary constructors when
-   appropriate, top-level statements for console apps, and pattern matching over traditional checks.
+   appropriate, top-level statements for console apps, pattern matching over traditional checks.
    Prefer collection expressions when types loosely match. Prefer extension methods (the classic
    `this`-parameter form or an `extension(<receiver>) { ... }` block on C# 14+). Prefer implicit
-   object creation when the type is apparent, and range and index operators.
+   object creation when the type is apparent. Prefer range and index operators.
 4. **Expression-bodied members**: use for applicable methods, properties, accessors, operators,
    lambdas, local functions.
 5. **`var` keyword**: do NOT use `var`, always use explicit types:

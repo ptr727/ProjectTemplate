@@ -48,7 +48,7 @@ repo's copy is wrong in both directions:
 - Copying the hub's own "Disproved Claims" entries (about `ProjectTemplate` itself) into a
   downstream repo attaches proofs about code that repo does not carry.
 - Overwriting a downstream repo's copy wholesale deletes any entries that repo itself has earned.
-  That is a live disproof, run against that repo's own tree, thrown away with no record.
+  Each is a live disproof, run against that repo's own tree, thrown away with no record.
 
 **Before touching this file in any repo other than the hub itself:**
 
