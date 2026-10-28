@@ -49,7 +49,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
 
 - **Every commit must be cryptographically signed (SSH or GPG).** Branch protection enforces this
   on every fleet branch, and an unsigned commit is rejected on push. Signing depends on
-  environment configuration (`commit.gpgsign`, `user.signingkey`, `gpg.format`), but none of those values prove signing actually works. `gpg.format=ssh` can sign straight from a key file with no `ssh-agent` running at all (the common case on Git for Windows). GPG can likewise sign
+  environment configuration (`commit.gpgsign`, `user.signingkey`, `gpg.format`), but none of those values prove signing actually works. For example, `gpg.format=ssh` can sign straight from a key file with no `ssh-agent` running at all (the common case on Git for Windows). GPG can likewise sign
   agent-backed or straight from a keyring. **Probing agent liveness (`ssh-add -L`, a `gpg-agent`
   check) is not a valid test and must not be used.** It tests one specific delivery path, not
   whether a commit actually ends up signed. A host that signs straight from a key file fails
@@ -91,11 +91,11 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   `sig` must read `G` (good signature) or `U` (good signature, unrecognized signer). For GPG, `U`
   is a valid signature from a key whose trust level is merely undefined, common right after
   generating a new key. For SSH, it's a valid signature from a key not found in the local
-  `allowed_signers` file. That doesn't affect whether GitHub itself verifies the commit, only
+  `allowed_signers` file. That status doesn't affect whether GitHub itself verifies the commit, only
   local `git verify-commit` output. `sig` is git's own verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
   outright, means **do not commit**: surface the actual error to the developer and stop at
-  `git add`. Not even an unreachable agent, a config value, or a signature type you can't otherwise explain in past history (see below) is contrary evidence.
+  `git add`. Nothing else is contrary evidence, whether an unreachable agent, a config value, or a signature type you can't otherwise explain in past history (see below).
 - **A mix of SSH- and GPG-signed commits in history is structural, not a host to track down.**
   `git log --pretty='%G? %GK'` shows distinct shapes, not health states. A commit committed by the PR's own author carries that host's own signature type. By contrast, a commit committed by `GitHub <noreply@github.com>` is a squash-merge. GitHub creates and signs that commit itself,
   server-side, with GitHub's own GPG key, regardless of what the PR author signed with locally.
@@ -140,4 +140,4 @@ any rewrite. See `references/history-rewrite.md` for the full rule.
 
 ## Never run destructive git commands without being asked
 
-`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`, and other commands that discard work require explicit developer instruction. Never use them as a convenience inside a larger task. One narrow cleanup exception applies to `git branch -D <exact-task-branch>` after a squash merge. It requires live proof that the pull request for that exact branch merged, per `repo-worktree`. That proof also includes a clean worktree with the branch at the verified head SHA or behind it. The exception never applies to `develop`, an unmerged branch, an unresolved pull request, or a branch with uncommitted work.
+`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`, and other commands that discard work require explicit developer instruction. Never use them as a convenience inside a larger task. One narrow cleanup exception applies to `git branch -D <exact-task-branch>` after a squash merge. It requires live proof, per `repo-worktree`, that the pull request for that exact branch merged. The same proof must show that the worktree is clean and the branch is at the verified head SHA or behind it. The exception never applies to `develop`, an unmerged branch, an unresolved pull request, or a branch with uncommitted work.

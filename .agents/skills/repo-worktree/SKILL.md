@@ -26,7 +26,7 @@ description: >-
 
 Two agent sessions once ran concurrently in the same primary checkout, on the same feature
 branch, neither knowing the other was in the tree. One session's commits swept in the other session's uncommitted files. So two commits landed carrying work their subjects never mention,
-committed by a task that never saw it. No rule fired at the moment it was violated, which is the first file edit. No rule fired because the commit-time and review-time skills all run after a sweep has already
+committed by a task that never saw it. No rule fired at the moment it was violated, which is the first file edit. The reason is that the commit-time and review-time skills all run after a sweep has already
 happened. This skill is that missing task-start surface. `GOVERNANCE.md` "Repository Boundaries
 and Write Safety" keeps the isolation law and wins on any disagreement, and the mechanics below
 are this skill's own content.
@@ -82,15 +82,15 @@ place:
 The top level carries no owner segment because everything in it is the fleet owner's own, an
 original repo and a fork alike. A fork is named `<upstream-owner>-<upstream-repo>` at fork time, so a fork of `acme/core` is `acme-core`. Its name identifies the upstream project and stays
 unique in the flat namespace without an owner segment of its own. A repository adopted as the
-owner's own work rather than kept as a fork is detached from its parent. It keeps a plain name, `widget` rather than `initech-widget`, since it no longer tracks anything upstream.
+owner's own work rather than kept as a fork is detached from its parent. That repository keeps a plain name, `widget` rather than `initech-widget`, since it no longer tracks anything upstream.
 
 A clone of a repository under another owner is neither of those. Flattening one collides rather than merely reading oddly. That is because `acme/core` joined the way a fork is joined **is** the fork's name, `acme-core`. That is also because, reduced to a bare `core`, `acme/core` names no project and collides with the next
 `core` cloned from any other owner. Those clones live one level down under `upstream/`, named by
 that same join, so `upstream/acme-core` sits beside the fork it would otherwise land on. The
 segment states the relationship rather than the owner, so a reference checkout is told from a
-working repo without a `git remote` call. And so the names under it never compete with the flat
+working repo without a `git remote` call. Also, the names under `upstream/` never compete with the flat
 namespace above. The join is ambiguous in the abstract, since a hyphen in either half means
-`acme-labs/core` and `acme/labs-core` produce one name. The join is kept anyway because it is the fork convention's own join. It follows that the ambiguity is inherited from the flat namespace above rather than introduced here. That ambiguity surfaces at clone time as a directory that already exists, where the
+`acme-labs/core` and `acme/labs-core` produce one name. The join is kept anyway because it is the fork convention's own join. The ambiguity is inherited from the flat namespace above rather than introduced here. The ambiguity surfaces at clone time as a directory that already exists, where the
 second clone takes a hand-picked name. A worktree off one of them keeps the flat worktrees path
 under the same name, `~/repos/worktrees/<owner>-<repo>-<task-slug>`. Contributing a change from
 such a clone is never a push out of it. Fork the upstream first, per the `upstream-contribution-workflow` skill. That fork's own clone then belongs in the flat
@@ -126,11 +126,11 @@ administrative directory under the same writable root. It therefore supports edi
 staging, commits, and branch updates without sharing the base clone's index.
 
 On Claude Code, a standalone clone is structurally a primary checkout to `gh-write-guard.py`'s own
-rule 6 test. Like a primary checkout, it has `--git-dir` equal to `--git-common-dir`, since it is not a linked worktree of anything. So the hook denies the git commands this fallback exists to run. Its rules classify git
+rule 6 test. Like a primary checkout, the clone has `--git-dir` equal to `--git-common-dir`, since it is not a linked worktree of anything. So the hook denies the git commands this fallback exists to run. Its rules classify git
 and gh commands only, so a plain file edit is never denied there and only the git steps need the grant. A compound command is judged whole, though, so an edit chained to a denied git write does
 not run either. That grant is `GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT`, the same escape hatch
 `host-setup/agent-safety/README.md` in the hub already documents as its requirement 6. That path is not a repo-relative link, since it is hub-local and not carried into every fleet repo. The
-maintainer sets it before the session starts, and an agent cannot set it for itself. The guard reads it from the environment the session was launched with. It never reads it from an inline `VAR=x` prefix or an `export` the agent runs. So ask for it rather than trying to set it mid-session. This
+maintainer sets it before the session starts, and an agent cannot set it for itself. That is because the guard reads it from the environment the session was launched with. The guard never reads it from an inline `VAR=x` prefix or an `export` the agent runs. So ask for it rather than trying to set it mid-session. This
 fallback is exactly the narrow, already-approval-gated case that grant exists for.
 
 A temporary standalone clone is a degraded handoff, not an equivalent location. The base clone
@@ -250,7 +250,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   removes every worktree holding the branch without force, deletes the local branch, and
   fast-forwards the base clone's `develop`. Its local refusals are decided before the remote delete. So a dirty worktree, an operation in progress, or a local tip the merge did not carry
   leaves everything in place. A re-check after the delete can still refuse where a concurrent
-  session changed a tree in between. Its output then names what was already deleted. Any exit
+  session changed a tree in between. The refusal's output then names what was already deleted. Any exit
   other than `0` stops and is reported as it stands rather than finished by hand. The raw
   `git worktree remove`, `git branch -D`, and remote delete it replaces are not on the host-safety
   permission allowlist, and the command is. It forwards to `scripts/pr_cleanup.py`, and

@@ -36,7 +36,7 @@ fleet's internal model so the two are never conflated.
 2. **Do the actual work on a dirty work branch**, on the maintainer's own fork. This branch is
    allowed to be messy: false starts, fixup commits, back-and-forth in response to review, whatever
    the real work looks like while it's happening. Open a PR from this branch into the mirror
-   branch on the maintainer's **own fork** (not upstream). So all the iteration happens there,
+   branch on the maintainer's **own fork** (not upstream). So all the iteration happens on that fork,
    visible and reviewable by bots and the maintainer, without touching the upstream repo at all.
    **That fork-internal PR is the iteration record, never a merge candidate.** It stays open for
    the life of the contribution, however green it gets, and is never merged, per "The iteration PR
@@ -54,7 +54,7 @@ fleet's internal model so the two are never conflated.
    finishes. Open it ready immediately when no preparation remains.
 5. **If upstream reviewers ask for changes, apply them to the dirty branch first**, and iterate there the same way as step 2. After that iteration, re-squash the updated dirty branch into the clean branch that
    actually reaches upstream. Updating the same upstream PR rather than opening a new one each
-   round rewrites the clean branch's history. Pushing a rewritten branch that is already published requires `git push --force-with-lease`. Prefer `--force-with-lease` over a bare `--force`, since it refuses the push if the remote moved since the last fetch. **`git-commit-conventions`'s never-force-push
+   round rewrites the clean branch's history. Pushing a rewritten branch that is already published requires `git push --force-with-lease`. Prefer `--force-with-lease` over a bare `--force`, since `--force-with-lease` refuses the push if the remote moved since the last fetch. **`git-commit-conventions`'s never-force-push
    rule governs this fleet's own repos, where a branch is shared with bots, other branches, and
    required-check history a rewrite would orphan. That rule stays absolute there, with no exception.
    It has no jurisdiction here**. That is because this clean presentation branch lives on the maintainer's own
