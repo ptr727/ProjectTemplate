@@ -78,8 +78,12 @@ Subcommands
            notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
            the account quota or an error whose run log names a rate limit, `ERROR` for any other
            error refusal, `YES` for any other refusal. Under `ERROR`, a `RUN LOG READING` line
-           names the reading taken: transient where the run log names a fetch failure, else
-           possible quota. `status` exits 0 over a refusal, and `wait` gives it 41.
+           names the reading taken. It is transient where the run log names a fetch failure while
+           the refusal's one re-request is still `owed` or `pending`. It is possible quota once
+           that re-request is `sent` with no round answering it. A second error refusal in a row,
+           `spent`, reads possible quota too. Both hold although the log still names a fetch
+           failure. Else it is possible quota.
+           `status` exits 0 over a refusal, and `wait` gives it 41.
            `unresolved` counts every open thread whoever opened it, its breakdown attributing the
            known logins. Both `threads=` and `unresolved=` read one 100-thread page, a trailing
            `+` and a `THREADS TRUNCATED` block naming a cut page. `suppressed=`,

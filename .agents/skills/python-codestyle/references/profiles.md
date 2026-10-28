@@ -12,14 +12,16 @@ review. The axes that commonly vary:
   pyright kept editor-only through Pylance), or both. A repo running both runs pyright itself,
   per `SKILL.md` "Toolchain". The clean-compile runs every checker CI runs.
 - **Dependency declaration**: the uv form declares the dev tools CI runs in the `dev` group of
-  `[dependency-groups]`, the one group a plain local `uv sync` or `uv run` installs, and which CI's
-  `uv sync --all-groups --frozen` installs too, since it takes every group and no extra. PEP 621
+  `[dependency-groups]`. The `dev` group is the one group a plain local `uv sync` or `uv run`
+  installs. CI's
+  `uv sync --all-groups --frozen` installs that group too, since the command takes every group and
+  no extra. PEP 621
   `[project.optional-dependencies]` (installed with `uv sync --extra <group>`) suits only a tool CI
   does not run. The pip form declares its dependencies in `requirements*.txt` files, installed
   together in one resolve, per `SKILL.md` "Local development loop".
-- **Versioning / publishing**: a published package (`_version.py` plus a version source,
-  `uv build`, and a PyPI publish step), or a source-only repo with a static `version` and no
-  publish step (see Versioning below).
+- **Versioning / publishing**: a published package or a source-only repo (see Versioning below).
+  A published package has `_version.py` plus a version source, `uv build`, and a PyPI publish step.
+  A source-only repo has a static `version` and no publish step.
 
 ## Two profiles: full specification
 
@@ -29,15 +31,15 @@ pytest coverage) describe the Project shape (the `build` profile). Its uv projec
 `uv run` rules describe that shape's uv form. The two differ by trait, whether the Python has
 third-party runtime dependencies or is a deliverable. The fleet's audit reads the shape
 that trait leaves rather than inspecting imports. A `[project]` or `[build-system]` table in
-`pyproject.toml`, a committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile,
-and tool configuration alone marks the lint-only one:
+`pyproject.toml`, a committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile.
+Tool configuration alone marks the lint-only one:
 
 - **Project** (the `build` profile): the Python has third-party runtime dependencies, or is a
   deliverable. It takes one of these forms. The uv form is a PEP 621 project: `[project]`
-  with `dependencies` (dev tools in `[dependency-groups]`, per the dependency-declaration axis
-  above), a `[build-system]`, and a committed `uv.lock` (pinned LF, per GOVERNANCE.md's "Line
-  Endings" section). CI runs `uv sync --all-groups --frozen` + `uv run <tool>`, so the lockfile pins
-  tool versions. That sync installs every `[dependency-groups]` group and no
+  with `dependencies`, a `[build-system]`, and a committed `uv.lock`. Its dev tools sit in
+  `[dependency-groups]`, per the dependency-declaration axis above. The `uv.lock` is pinned LF, per
+  GOVERNANCE.md's "Line Endings" section. CI runs `uv sync --all-groups --frozen` +
+  `uv run <tool>`, so the lockfile pins tool versions. That sync installs every `[dependency-groups]` group and no
   `[project.optional-dependencies]` extra. The pip form is a `pyproject.toml` beside a
   `requirements*.txt`, installed with pip, whether or not it carries a `[project]` table. A
   committed `uv.lock` makes a directory the uv form even where a `requirements*.txt` sits beside it.
@@ -49,15 +51,15 @@ and tool configuration alone marks the lint-only one:
   `uvx <checker>@latest`, with nothing installed.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts (e.g. a
   Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
-  no lockfile): the `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
-  an optional `[tool.pyright]` editor block), with no `[project]`, no `[build-system]`, and no
+  no lockfile). The `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
+  an optional `[tool.pyright]` editor block). There is no `[project]`, no `[build-system]`, and no
   `uv.lock` (that metadata would misrepresent it as a shippable package). mypy is the type-check
-  gate (there is no first-party package for pyright strict to anchor on), and a `[tool.pyright]`
+  gate (there is no first-party package for pyright strict to anchor on). A `[tool.pyright]`
   block in standard mode keeps Pylance quiet in the editor, the same mypy-gate/pyright-editor
   split the build profile uses. There is no lockfile, and a `uvx <tool>@<ver>` pin in a `run:`
-  step is not something Dependabot tracks, so CI runs `uvx ruff@latest` / `uvx mypy@latest` rather
+  step is not something Dependabot tracks. So CI runs `uvx ruff@latest` / `uvx mypy@latest` rather
   than a manual pin that would silently go stale. The fleet rule is to pin only what Dependabot
-  auto-updates (SHA-pinned actions, package deps) and otherwise run latest, so the VS Code tasks,
+  auto-updates (SHA-pinned actions, package deps) and otherwise run latest. So the VS Code tasks,
   README, and CI all run the unpinned latest here. `.py` files follow the repo's LF line-ending
   default (per GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is
   the runner instead. The directory still owes tests, written with the standard
@@ -65,15 +67,16 @@ and tool configuration alone marks the lint-only one:
   under a `tests/` directory beside the scripts it exercises and their `pyproject.toml`
   (`<scripts-dir>/tests/`), where the validator looks for it. That directory stays apart so a
   test never reads as a tool. Within the scripts directory the name carries the kind: a gate
-  that checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix, and a utility
+  that checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix. A utility there
   that does work takes none. Every declared directory
   owes the same gates whatever its profile: lint, format, a type check, a test suite, and a
   coverage report to Codecov. The hub validator runs them in each directory the caller declares
   in its `python-directories` input, which the registry's `pythonDirectories` mirrors. From inside
   a lint-only directory it runs `uvx ruff@latest check`, `uvx ruff@latest format --check`,
-  `uvx mypy@latest`, and `uvx coverage@latest run -m unittest discover -s tests`, adding
-  `--with-requirements tests/requirements.txt` to that last where the directory carries one, then writes
-  `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold adopted. A
+  `uvx mypy@latest`, and `uvx coverage@latest run -m unittest discover -s tests`. It adds
+  `--with-requirements tests/requirements.txt` to that last where the directory carries one. It then
+  writes `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold
+  adopted. A
   declared directory with no `tests/` fails that job.
 
 A profile belongs to a declared directory, not to the repository. A repository declaring none has
@@ -95,10 +98,10 @@ their own and differ only by purpose, so they merge.
 
 **Published packages.** `_version.py` ships with `__version__ = "0.0.0"` as a placeholder. Until
 you wire `_version.py` to something that increments (the usual options are `hatch-vcs`, a
-version.json bridge, or manual bumps), no new PyPI versions will land, and publishing with
+version.json bridge, or manual bumps), no new PyPI versions land. Publishing with
 `skip-existing: true` keeps a stuck placeholder version from failing the run.
 
 **Source-only repos** (no PyPI publish, with a source-release on dispatch or no release at all) do
-not need `_version.py`: keep a static `version` in `pyproject.toml` `[project]`, or let the
+not need `_version.py`. Keep a static `version` in `pyproject.toml` `[project]`, or let the
 release pipeline's version source (e.g. NBGV plus `version.json`) own the tag. There is no publish
 step to guard, so `skip-existing` does not apply.
