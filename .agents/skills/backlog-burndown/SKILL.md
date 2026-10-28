@@ -347,8 +347,8 @@ below `frontier`:
   it, since a wrong rule propagates to every carrier.
 - One touching **anything `AGENTS.md` "Delegation" calls a design change**, however small the diff
   looks.
-- One whose issues are **complex or entangled**. Its fix depends on reasoning across several files,
-  or on a contract not stated in the file being edited.
+- One whose issues are **complex or entangled**, where the fix depends on cross-file reasoning or
+  on a contract not stated in the edited file.
 
 State the chosen tier and its reason in the round's report.
 

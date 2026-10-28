@@ -319,9 +319,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    every issue develop fixes, `#<issue>` included. It does so per `backlog-burndown` "Assembling the Promotion Body",
    so each closes when the promotion merges. It then closes the lane out, naming the decision issue
    in the close-out comment. Where the round is not narrowed, continue to the promotion pull
-   request and hand it to `merge-and-release`. The promotion's body carries a `Fixes` line for every
-   issue develop fixes, assembled per that same section. The hand-off merges only under `main`, and
-   merges and releases under `release`. **A read this step names that cannot run returns `STOP`** rather than
+   request, its body carrying a `Fixes` line for every issue develop fixes. That body is assembled
+   per that same section. Then hand the pull request to `merge-and-release`, merging only under
+   `main` and merging and releasing under `release`. **A read this step names that cannot run returns `STOP`** rather than
    continuing. That is because a read that did not run shows nothing about whether the promotion
    is blocked. **Repeat the blocked-promotion reads immediately before each
    head of the promotion merges**, a head `merge-and-release` re-gates included. Run the `decision`
