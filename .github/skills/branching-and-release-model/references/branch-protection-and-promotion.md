@@ -82,8 +82,8 @@ So both branches need fresh codegen on their own cadence.
 
 **Maintainer-pushed commits on a bot PR auto-disable auto-merge.** The merge-bot's
 `merge-dependabot` and `merge-codegen` jobs only fire on `opened`/`reopened` events (auto-merge is
-enabled exactly once per PR). A maintainer may push commits to a bot's branch, which is a `synchronize`
-event with an actor that isn't the same bot. When that happens, the merge-bot's
+enabled exactly once per PR). A maintainer may push commits to a bot's branch. Such a push is a `synchronize`
+event with an actor that isn't the same bot. When it happens, the merge-bot's
 `disable-auto-merge-on-maintainer-push` job fires and calls `gh pr merge --disable-auto`. The
 maintainer's commits stay in the PR but won't auto-merge with the bot's content. Re-enable
 auto-merge manually (`gh pr merge --auto <PR>` or the GitHub UI) when ready.

@@ -158,7 +158,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    failure, an ambiguous run match, a timeout, a failed run, or a hub Skills refresh all still
    reach this step. The merge in step 3 already landed by then. Every part below is required:
    - The promotion PR's own worktree: fetch and prune, remove the worktree, then bring the base
-     clone to current `develop`. Check `develop` out first only where it sits on another
+     clone to current `develop`. To do so, check `develop` out first only where it sits on another
      branch, and fast-forward it with `git merge --ff-only origin/develop`. Where that checkout
      is needed, removing first, not after, matters. The reason is that the base clone cannot check out `develop`
      while the promotion worktree still has it checked out. That is because one branch checked out
@@ -184,8 +184,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      among them, are decided before the remote delete. `repo-worktree` "Listing and Cleanup"
      says what a refusal after it and a `base=kept` line each leave to do. Exit `0` is done, and
      any other exit stops and reports. `1` is a refusal, and `2` is an unanswered read or an unconfirmed
-     delete. `64` is a target under an owner other than the hub checkout's own `origin`, or that
-     `origin` unreadable. A registry refusal is a `1`. It runs under the host-safety
+     delete. `64` is a target under an owner other than the hub checkout's own `origin`, or an
+     unreadable `origin`. A registry refusal is a `1`. It runs under the host-safety
      installer's `Bash(uv run --no-project --script scripts/pr_review.py:*)` allow rule, which is what lets auto mode
      complete it.
      It also refuses while another open pull request in the repository has the branch as its head or base, naming each.

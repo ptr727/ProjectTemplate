@@ -63,7 +63,7 @@ rather than guessing from the repo's contents.
   into the **default branch** (`main`), so a feature -> `develop` PR merge never fires it.
   Reference the issue in the `develop` PR body if useful, but the actual closing keyword belongs on
   the promotion PR. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
-  promotion that already merged without it, or completed work with no promotion imminent. It is
+  promotion that already merged without it, or completed work with no promotion imminent. Closing by hand is
   not a repair for a botched promotion. Cite the squash SHA and re-read that commit before closing.
 - **Neither ruleset requires branches to be up to date before merging.** The reasons differ on
   each branch (a graph-based check that would fail every release on `main`, a check that stalls

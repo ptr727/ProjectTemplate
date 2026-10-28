@@ -93,7 +93,7 @@ Pick by where each artifact *goes*, not by language:
   The reusable task runs NBGV and creates the release with the tag, automatic source archive, README, and LICENSE.
 
 `get-version-task.yml` installs the .NET SDK only because NBGV needs the runtime to compute the
-version/tag. That is heavyweight but expected even for a non-.NET repo, and acceptable as-is.
+version/tag. That runtime is heavyweight but expected even for a non-.NET repo, and acceptable as-is.
 
 ## No-op republish guarantee
 
