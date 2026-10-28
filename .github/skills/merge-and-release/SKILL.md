@@ -22,7 +22,7 @@ description: >-
 ## Why This Exists
 
 Once drive-pr (or a maintainer by hand) leaves a promotion PR ready, the same steps follow every
-time. Merge it, and usually dispatch the release it unblocks. In this hub a promotion can
+time. The steps are to merge it, and usually dispatch the release it unblocks. In this hub a promotion can
 also change `.agents/skills` content this very session depends on. So the release step always
 carries a Skills refresh with it there, never a separate branch to ask about. This is because an
 ambiguous "merge and release" on the hub must not leave the maintainer unsure whether Skills got refreshed. One
@@ -117,7 +117,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    id to completion in one further bounded background wait with an explicit, finite timeout.
    The timeout is 2700 seconds (45 minutes, matching `scripts/pr_review.py`'s own default) unless
    the maintainer states a different bound for this specific release. Use `timeout 2700 gh run
-   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`. On a host without
+   watch <run-id> --repo owner/repo --exit-status` on a host with GNU `timeout`, with the maintainer's bound in place of 2700 where they state
+   one. On a host without
    it (macOS without coreutils, native Windows), use the equivalent bounded-wait mechanism
    enforcing the same bound. Never pipe `gh run watch` into another command unless the shell running it sets
    `pipefail`. That is because without it a pipeline reports its last stage's exit status and

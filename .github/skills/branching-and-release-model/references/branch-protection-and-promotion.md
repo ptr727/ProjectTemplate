@@ -28,7 +28,7 @@ These traps were learned the hard way:
   `gh api -X POST "repos/<owner>/<repo>/git/refs" -f ref=refs/heads/develop -f sha="$(gh pr view <n> --json headRefOid --jq .headRefOid)"`.
 - **Spurious EOL-only conflicts resolve by taking `develop`.** When `develop`'s `.editorconfig`
   line-ending default has changed while `main` hasn't caught up yet, `develop -> main` conflicts
-  *whole-file* on every renormalized path. An example is the fleet-wide CRLF-to-LF flip.
+  *whole-file* on every renormalized path. An example of that default changing is the fleet-wide CRLF-to-LF flip.
   `develop`'s `required_linear_history` plus PR rulesets forbid resolving on `develop` (no merge
   commit, no force-push). So resolve on a throwaway branch off `main`:
   `git checkout -b promote/develop-to-main origin/main && git merge origin/develop`. Take
