@@ -11,9 +11,8 @@
 # A function here that calls another is shipped with it, so `secret_verdict` needs `secret_shape_verdict`, `secret_state`, `unresolved_link_reason`, `secret_content_verdict`, `secret_content_state`, and `secret_content_refusal`.
 
 # `unresolved_link_reason`
-# Echoes the clause that says why a symlink answering `-L` true and `-e` false does not resolve.
-# The clause is worded for the account running it.
-# Every site that reports such a link thereby composes one sentence instead of spelling its own.
+# Echoes the clause that says why a symlink answering `-L` true and `-e` false does not resolve, worded for the account running it.
+# Echoing it lets every site that reports such a link compose one sentence instead of spelling its own.
 # Root with its DAC override enters every directory.
 # A link it cannot resolve therefore has a target that is missing or loops back on itself, and the clause says only that.
 # A uid 0 without the override, such as one in a user namespace facing an unmapped owner, is read as root all the same.
@@ -75,7 +74,7 @@ secret_state() {
         # Reported as unresolved rather than as a missing target.
         # The reason is that `-e` cannot separate a target that is gone from one that loops back on itself.
         # For a non-root account, it cannot separate a target that is gone from one sitting behind a directory this account cannot enter.
-        # The same reason covers asserting any one of those targets, which would claim more than the test established.
+        # Asserting any one of them would also claim more than the test established.
         if [[ -L $walked && ! -e $walked ]]; then
             echo "damaged $walked is a symlink that does not resolve, so $(unresolved_link_reason)"
             return 0
