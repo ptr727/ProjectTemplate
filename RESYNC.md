@@ -89,11 +89,11 @@ The order is load-bearing. Each step below either changes the rules the later st
 
 Every other finding in this procedure is satisfied by adding or replacing content. This one is satisfied by removing it, which makes it the only class where acting on a wrong finding loses something.
 
-The detector is derived rather than listed: the hub's git-tracked paths minus the [`spec/files.json`][files] baseline is what the hub hosts and no repository carries. Every hub path below a `repoOwnedTrees` entry in that file, such as `tests`, is left out. That means a file dropped from the manifest starts being reported on the next run with no retirement list to maintain, and it also means **the match is on path alone**, so a hit is a candidate and not a verdict.
+The detector is derived rather than listed. It is the hub's git-tracked paths minus the [`spec/files.json`][files] baseline and every hub path a carried `trees` entry covers. A `trees` entry covers only the hub paths below its `source` that its `include` patterns match. Every hub path below a `repoOwnedTrees` entry in that file, such as `tests`, is left out. What remains is what the hub hosts and no repository carries. That means a file dropped from the manifest starts being reported on the next run with no retirement list to maintain, and it also means **the match is on path alone**, so a hit is a candidate and not a verdict.
 
 ```mermaid
 flowchart LR
-  candidate["hub git-tracked path, not in spec/files.json or a repo-owned tree"] --> disp["check spec/divergences.json disposition"]
+  candidate["hub git-tracked path, not in the baseline, a carried tree, or a repo-owned tree"] --> disp["check spec/divergences.json disposition"]
   disp -->|"retire"| delete["delete the file"]
   disp -->|"accepted"| keep["keep, closed permanently"]
   disp -->|"untriaged"| read["read before touching"]
