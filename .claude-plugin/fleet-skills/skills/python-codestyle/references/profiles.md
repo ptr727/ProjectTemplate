@@ -27,8 +27,8 @@ A directory's Python is one of two shapes, declared as the `build` or `lint-only
 validated against that directory's structural shape. Most of the `SKILL.md` rules (src layout,
 pytest coverage) describe the Project shape (the `build` profile). Its uv project, `uv.lock`, and
 `uv run` rules describe that shape's uv form. The two differ by trait, whether the Python has
-third-party runtime dependencies or is the repo's deliverable. The fleet's audit reads the shape that trait leaves
-rather than inspecting imports. A `[project]` or `[build-system]` table in `pyproject.toml`, a
+third-party runtime dependencies or is the repo's deliverable. The fleet's audit reads the shape
+that trait leaves rather than inspecting imports. A `[project]` or `[build-system]` table in `pyproject.toml`, a
 committed `uv.lock`, or a `requirements*.txt` beside it marks the build profile, and tool
 configuration alone marks the lint-only one:
 
@@ -76,14 +76,17 @@ configuration alone marks the lint-only one:
   `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold adopted. A
   declared directory with no `tests/` fails that job.
 
-A profile belongs to a declared directory, not to the repository. A repository declares one
-directory per profile its Python needs. Declared directories split by profile trait, meaning
-third-party runtime dependencies or being the deliverable, not by purpose. Within one directory the
-file name carries the purpose, such as the `_gate` or `_lint` suffix. A stdlib-only `tools/` beside
-a `render/` that imports a third-party imaging library is a legitimate split, one directory per
-profile. Merging them would put every stdlib gate behind that library's install. Two stdlib-only
-directories, `tools/` and `audits/`, differ only by purpose, so they merge into one lint-only
-directory.
+A profile belongs to a declared directory, not to the repository. Each deliverable takes its own
+build-profile directory, with its own `uv.lock` or `requirements*.txt`. Lint-only Python may sit in
+a directory beside the component it serves. Declared directories split by profile trait,
+deliverable, or component. Only a split by purpose alone, within one place, is forbidden. Within one
+directory the file name carries the purpose, such as the `_gate` or `_lint` suffix. A stdlib-only
+`tools/` beside a `render/` that imports a third-party imaging library is a legitimate split by
+profile trait. Merging them would put every stdlib gate behind that library's install. Two
+deliverables, `render/` and `publish/`, each keep a build-profile directory of their own. A
+component directory such as `infra/` may hold its own lint-only Python, declared apart from
+`tools/`. Two stdlib-only directories side by side at the root, `tools/` and `audits/`, differ only
+by purpose, so they merge.
 
 ## Versioning
 
