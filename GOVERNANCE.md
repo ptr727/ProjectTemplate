@@ -174,7 +174,7 @@ No comment, no docstring, and no instruction document names an issue, a pull req
 
 ### Character Set
 
-The full character-set tier system is in the `comment-and-doc-style` Skill referenced above. It covers never legitimate, legitimate next to a number, always legitimate, a fixed set of emoji callout markers, and developer-typed Unicode. The Skill also holds the rule that the letters of a recorded name keep their actual spelling, and the semicolon and spaced-hyphen rules.
+The full character-set tier system is in the `comment-and-doc-style` Skill referenced above. That tier system covers what is never legitimate, legitimate next to a number, or always legitimate. It also covers a fixed set of emoji callout markers and developer-typed Unicode. The Skill also holds the rule that the letters of a recorded name keep their actual spelling, and the semicolon and spaced-hyphen rules.
 
 ### Line Endings
 
@@ -334,7 +334,7 @@ cd /path/to/target-worktree
 PROSE_GATE_PROVENANCE="reproducing ptr727/ProjectTemplate@<hub-sha>" uv run --no-project --script "$scratch/prose_lint.py" --diff "<base>" -- .
 ```
 
-Where the reporting repository carries `.github/prose-gate-excludes`, pass each of its non-empty, non-comment lines as a `--exclude <path>` argument. Trim the surrounding whitespace from each, the way the composite action trims it. An untrimmed value is a substring that matches no key, so it excludes nothing and says nothing about having failed. Omitting them widens the run past what CI read. A finding on an excluded file is then a local artifact rather than the one being chased. Skip the blank lines rather than passing them, since an empty exclusion would match every path. It is also because the gate refuses one rather than reporting the empty scan that follows as clean.
+Where the reporting repository carries `.github/prose-gate-excludes`, pass each of its non-empty, non-comment lines as a `--exclude <path>` argument. Trim the surrounding whitespace from each, the way the composite action trims it. An untrimmed value is a substring that matches no key, so it excludes nothing and says nothing about having failed. Omitting them widens the run past what CI read. A finding on an excluded file is then a local artifact rather than the one being chased. Skip the blank lines rather than passing them, since an empty exclusion would match every path. Skipping them also matters because the gate refuses one rather than reporting the empty scan that follows as clean.
 
 A finding the pinned copy raises and the current copy does not is a stale pin rather than a defect in either copy. So the fix is to move the pin rather than to edit the content it flags. The `dead-path` rule reaches this state most often. That is because it keys on deletion history, and so speaks only about a path a repository tracked and removed. The hub deletes paths of its own and the rule fires there too. What does not fire here is a mention of a path the fleet hosts centrally, such as one under `repo-config/`. Those carry a standing exemption, and that, rather than what any one tree happens to hold, is why they do not fire. The exemption is what a downstream repository is missing when its pin predates an addition to that list. The hub cannot see the difference from its own runs.
 
