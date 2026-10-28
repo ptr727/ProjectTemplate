@@ -35,8 +35,8 @@ reason is that Windows GUI editors (VS Code, Visual Studio, Notepad, WordPad) al
 cleanly. Pin
 CRLF only for a type Windows itself requires it for: `*.bat` and `*.cmd`. Everything else
 takes the `[*]` default with no override. That includes YAML, `.gitignore`, `.dockerignore`, and a
-tool-owned format with a native LF ending (KiCad). Workflow and non-workflow YAML alike need no
-distinction, now that both are LF.
+tool-owned format with a native LF ending (KiCad). No distinction is needed between workflow and
+non-workflow YAML, now that both are LF.
 
 ## Operational (config) repos
 
@@ -79,7 +79,7 @@ governs git while the editor follows `.editorconfig`. For a byte-preserve direct
 editor normalization, not just EOL: `[<dir>/**]` with `charset = unset`, `end_of_line = unset`,
 `insert_final_newline =
 unset`, `trim_trailing_whitespace = false`. `unset` is EditorConfig's spec-defined
-special value that removes an inherited property. Also in that block `**` is needed rather than
+special value that removes an inherited property. The glob needs `**` rather than
 `*` so a nested file under the directory is covered too. That is because `*` excludes `/` and only
 matches one path component.
 

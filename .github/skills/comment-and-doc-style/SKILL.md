@@ -281,9 +281,9 @@ reads a URL naming an issue or a pull request as well. It reads that URL written
 destination, as a reference definition, or bare in the prose. It reads one forge's URL paths, so a URL naming a tracker it does
 not know is banned there and goes unreported. Whatever a gate does not reach is unlicensed all the
 same, since the rule binds a reader rather than a scan. Reading the URL in instruction text is what
-stops the gate reporting the bare spelling and passing the URL. Instruction text is the one surface
-where the gate reads both. The reason is that an author met by the bare form's finding is otherwise
-pointed at respelling the reference rather than at removing it. On every other surface the gate reads the bare form alone, so a banned
+stops the gate reporting the bare spelling and passing the URL. The reason is that an author met by
+the bare form's finding is otherwise pointed at respelling the reference rather than at removing
+it. Instruction text is the one surface where the gate reads both. On every other surface the gate reads the bare form alone, so a banned
 URL is banned there and goes unreported.
 
 A bare commit reference is not a shape the prose gate can read. The reason is that a short SHA
