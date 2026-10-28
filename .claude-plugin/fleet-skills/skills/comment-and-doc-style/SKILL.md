@@ -223,7 +223,7 @@ are the repository's own narrative and keep their references. So do a commit mes
 request body, which are the surfaces a reference belongs on.
 
 The carve-outs below are each stated as a single case. Whatever none of them affirmatively permits is
-banned by the paragraph above. That paragraph is the whole of the test and is why no list of banned
+banned by the paragraph above. That ban is the whole of the test and is why no list of banned
 cases follows. The first concerns a code or workflow comment. **A URL there naming an issue or a
 pull request on a public repository other than this one is a permitted source citation.** It does
 the same job as the datasheet link, vendor wiki link, and SDK doc link the rule already leaves alone
