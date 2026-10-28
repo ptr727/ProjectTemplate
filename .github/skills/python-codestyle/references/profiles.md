@@ -66,7 +66,7 @@ and tool configuration alone marks the lint-only one:
   (`<scripts-dir>/tests/`), where the validator looks for it. That directory stays apart so a
   test never reads as a tool. Within the scripts directory the name carries the kind: a gate
   that checks and exits non-zero on a finding takes a `_lint` or `_gate` suffix, and a utility
-  that does work takes none. Each Python directory
+  that does work takes none. Every declared directory
   owes the same gates whatever its profile: lint, format, a type check, a test suite, and a
   coverage report to Codecov. The hub validator runs them in each directory the caller declares
   in its `python-directories` input, which the registry's `pythonDirectories` mirrors. From inside
@@ -78,17 +78,17 @@ and tool configuration alone marks the lint-only one:
 
 A profile belongs to a declared directory, not to the repository. A repository declaring none has
 its root gated as `WORKFLOW.md` D1.2 states. Each deliverable takes one build-profile directory of
-its own, with its own `uv.lock` or `requirements*.txt`. A uv workspace is the exception: its root is
-the one build-profile directory, declared once, and its members share the root's lock. Lint-only
-Python may sit beside the component it serves. Only a split by purpose alone, within one place, is
-forbidden. One place means directories serving the same component, or serving none. Within one
-directory the file name carries the purpose instead, as the Scripts bullet's `_gate` and `_lint`
-suffixes do. A stdlib-only `tools/` beside a `render/` that imports a third-party imaging library is
-a legitimate split by profile trait. Merging them would put every stdlib gate behind that library's
-install. Two deliverables, `render/` and `publish/`, each keep a build-profile directory of their
-own. Lint-only Python serving an `infra/` component may sit in an `infra-checks/` directory beside
-it, declared apart from `tools/`. Two stdlib-only root directories, `tools/` and `audits/`, serve no
-component of their own and differ only by purpose, so they merge.
+its own, with its own `uv.lock` or `requirements*.txt`. A uv workspace is the exception: it is
+declared once, by its root, and its members share the root's lock. Lint-only Python may sit beside
+the component it serves. Only a split by purpose alone, within one place, is forbidden. One place
+means directories serving the same component, or serving none. Within one directory the file name
+carries the purpose instead, as the Scripts bullet's `_gate` and `_lint` suffixes do. A stdlib-only
+`tools/` beside a `render/` that imports a third-party imaging library is a legitimate split by
+profile trait. Merging them would put every stdlib gate behind that library's install. Two
+deliverables, `render/` and `publish/`, each keep a build-profile directory of their own. Lint-only
+Python serving an `infra/` component may sit in an `infra-checks/` directory beside it, declared
+apart from `tools/`. Two stdlib-only root directories, `tools/` and `audits/`, serve no component of
+their own and differ only by purpose, so they merge.
 
 ## Versioning
 
