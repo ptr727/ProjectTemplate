@@ -15,8 +15,8 @@ description: >-
   canonical sweep is worked. That sweep names the carried units whose text has moved past the pass
   that read them. It also names a bounded slice of those nothing has read at all. This skill
   triggers there because the content a sweep names reaches a reviewer whole only when a repository carries it
-  for the first time. It also triggers there for one more reason. A pass reading each named unit's whole text
-  is what moves that read into the repository that can act on what it finds. Editing such content owes no pass of its
+  for the first time. It also triggers there because reading each named unit's whole text
+  moves that first-carry read into the repository that can act on its findings. Editing such content owes no pass of its
   own, so a change that moves a unit pushes and merges like any other.
 ---
 
