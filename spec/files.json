@@ -5,6 +5,9 @@
         { "source": ".github/skills", "target": ".github/skills", "fidelity": "verbatim-tree", "appliesTo": "*", "include": ["**/*"], "prune": true },
         { "source": "lib/sh", "target": "lib/fleet/sh", "fidelity": "verbatim-tree", "appliesTo": ["host-secrets"], "include": ["**/*"], "prune": true }
     ],
+    "repoOwnedTrees": [
+        { "source": "tests", "reason": "The hub's own test suite is never carried. Every repo with code keeps its own tests here, so a shared file name is a path collision rather than a carry." }
+    ],
     "baseline": [
         { "path": "CLAUDE.md", "fidelity": "verbatim", "whole": true, "appliesTo": "*" },
         { "path": "AGENTS.md", "fidelity": "intent", "sections": [{ "name": "Fleet Bootstrap", "fidelity": "verbatim" },

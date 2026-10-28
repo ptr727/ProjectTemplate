@@ -73,7 +73,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `refusal=QUOTA` or `refusal=ERROR`, the pull request's newest Copilot review being an
    account-quota refusal or an error refusal read as a possible quota hit, on this head or an
    earlier one, is the one nothing the loop does clears, which is the case "Which Reviewers a
-   Repository Actually Has" below states. `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
+   Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
+   transient is the exception. `wait` re-requests it once and exits `30` while that request is
+   pending. A second error refusal in a row, or a re-request made with no round answering it,
+   reads as possible quota. A held head exits `41` as `COPILOT_ERROR_TRANSIENT`, its request
+   waiting on `--request`.
+   `status=COPILOT_QUOTA_EXHAUSTED_REPO_WIDE` is that same
    account state read from the reviewer's activity elsewhere when this head carries none of its
    own, and a refusal holding across several heads with no cause its body names reaches it the
    slower way. That exit is `wait`'s alone: `status` exits 0 over a refusal, carrying it as
@@ -229,8 +234,9 @@ must have done.
   encountered an error, which is what the
   weekly rate limit posts. Each covers no head, so the gate stays unsatisfied, and nothing the
   loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
-  reviewer's run log names a reset time `pr_review.py` reports it. Each refusal goes to the
-  maintainer, rather than into a wait.
+  reviewer's run log names a reset time `pr_review.py` reports it. Where it names a transient
+  fetch failure instead, `pr_review.py wait` re-requests once. Every other refusal, a repeat of
+  that one included, goes to the maintainer rather than into a wait.
 
 Where a reviewer's behavior still surprises you after reading what it posted, the hub's
 `docs/pr-reviewer-reference.md` records what each one does, what shapes it, and which repositories
@@ -267,13 +273,15 @@ Run `local-strict-review` against the branch's current diff before every push th
    deserves a Copilot round anyway. `wait` also skips the request where
    a review already covers the head, where the answer came outside a formal review, where it detects
    drift, under a quota or error refusal, and where something is already in the request set, which
-   is the condition the recovery below clears. Requesting in the pull request UI is the maintainer's
-   route rather than this loop's.
+   is the condition the recovery below clears. An error refusal whose run log reads transient is
+   the exception, owed one re-request per Merge Gate item 2. Requesting in the pull request UI is
+   the maintainer's route rather than this loop's.
 4. Run a bounded `uv run --no-project --script scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
    A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
    or read silence as a missing review. A review whose body says it declined to review is the one
    exception, and it is terminal the other way. Nothing follows it, and re-requesting the same
-   head only repeats the decline.
+   head only repeats the decline. A transient error refusal under Merge Gate item 2 is owed its one
+   re-request first.
 5. Triage findings (see below).
 6. Apply fixes or write a rationale for declines.
 7. Reply to each thread, and resolve what was addressed and what was declined on evidence the

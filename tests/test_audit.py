@@ -79,23 +79,30 @@ class FakeGh:
 
 
 def run_audit(
-    tree: set[str], modes: dict[str, str] | None = None, unread: frozenset[str] = frozenset()
+    tree: set[str],
+    modes: dict[str, str] | None = None,
+    unread: frozenset[str] = frozenset(),
+    hub: frozenset[str] = frozenset(),
 ) -> tuple[list[tuple[str, str]], FakeGh]:
     """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
 
-    The hub's tracked paths come from a fetch of its origin. Answering them as empty keeps the
-    run offline and leaves the checkout the suite runs in untouched.
+    The hub's tracked paths come from a fetch of its origin. Answering them with `hub` keeps the
+    run offline and leaves the checkout the suite runs in untouched. The repo-owned trees are the
+    shipped declaration, so a test reads the exclusion the real audit applies.
     """
     spec = {
         "registry": {"repos": [ENTRY], "defaults": {}},
         "settings": audit.load("repo-config/settings.json"),
         "secrets": audit.load("spec/secrets.json"),
-        "files": {"baseline": [CODECOV]},
+        "files": {
+            "baseline": [CODECOV],
+            "repoOwnedTrees": audit.load("spec/files.json")["repoOwnedTrees"],
+        },
     }
     fake = FakeGh(tree, modes, unread)
     with (
         mock.patch.object(audit, "gh", fake),
-        mock.patch.object(audit, "hub_tracked", lambda rev=None: frozenset()),
+        mock.patch.object(audit, "hub_tracked", lambda rev=None: hub),
     ):
         findings, _ = audit.audit_repo(ENTRY, spec)
     return findings, fake
@@ -193,6 +200,33 @@ class AuditRepoNamingCase(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
+
+
+class AuditRepoHubOnlyCase(unittest.TestCase):
+    """audit_repo leaves a carrier's own test module out of the hub-only check.
+
+    The hub's tests are never carried, so a carrier's file at a hub test path is a collision.
+    Reporting it would ask for the deletion of that repo's own suite.
+    """
+
+    HUB = frozenset({"tests/test_a.py", "tools/hub_tool.py"})
+
+    def hub_only_findings(self, findings: list[tuple[str, str]]) -> list[str]:
+        return [text for _, text in findings if text.startswith("hub-only:")]
+
+    def test_a_test_module_sharing_a_hub_test_name_is_not_reported(self) -> None:
+        findings, _ = run_audit(CARRIED | {".codecov.yml"}, hub=self.HUB)
+
+        self.assertEqual(self.hub_only_findings(findings), [])
+
+    def test_a_hub_only_path_outside_tests_is_still_reported(self) -> None:
+        """The control, showing the check under test ran and reports a hub-only path it sees."""
+        findings, _ = run_audit(CARRIED | {".codecov.yml", "tools/hub_tool.py"}, hub=self.HUB)
+
+        hub_only = self.hub_only_findings(findings)
+        self.assertTrue(
+            any(text.startswith("hub-only: tools/hub_tool.py ") for text in hub_only), hub_only
+        )
 
 
 if __name__ == "__main__":
