@@ -315,7 +315,7 @@
             "name": "Blog",
             "url": "https://github.com/ptr727/Blog",
             "status": "cataloged",
-            "types": ["hugo", "source-only", "python"],
+            "types": ["hugo", "source-only", "python", "host-secrets"],
             "groundTruthBranch": "main",
             "workflowModel": "release",
             "lineEndings": "lf",
