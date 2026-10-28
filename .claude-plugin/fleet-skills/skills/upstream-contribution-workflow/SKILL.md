@@ -54,7 +54,7 @@ fleet's internal model so the two are never conflated.
    finishes. Open it ready immediately when no preparation remains.
 5. **If upstream reviewers ask for changes, apply them to the dirty branch first**, and iterate there the same way as step 2. After that iteration, re-squash the updated dirty branch into the clean branch that
    actually reaches upstream. Updating the same upstream PR rather than opening a new one each
-   round rewrites the clean branch's history. Pushing a rewritten branch that is already published requires `git push --force-with-lease`. Prefer it over a bare `--force`, since it refuses the push if the remote moved since the last fetch. **`git-commit-conventions`'s never-force-push
+   round rewrites the clean branch's history. Pushing a rewritten branch that is already published requires `git push --force-with-lease`. Prefer `--force-with-lease` over a bare `--force`, since it refuses the push if the remote moved since the last fetch. **`git-commit-conventions`'s never-force-push
    rule governs this fleet's own repos, where a branch is shared with bots, other branches, and
    required-check history a rewrite would orphan. That rule stays absolute there, with no exception.
    It has no jurisdiction here**. That is because this clean presentation branch lives on the maintainer's own
@@ -78,7 +78,7 @@ iteration PR is the place where upstream drift is absorbed and its fallout fixed
 upstream PR has to absorb that drift. So merging or closing the iteration PR removes that place.
 
 When the upstream base moves, sync the mirror branch from upstream and merge the mirror branch into
-the dirty branch. In that case, also fix whatever breaks in the iteration PR. That is a merge rather than a rebase,
+the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase,
 since the dirty branch is append-only and is never force-pushed. Then re-squash onto the new mirror
 tip whenever the clean branch needs to follow, per step 5.
 

@@ -84,13 +84,13 @@ original repo and a fork alike. A fork is named `<upstream-owner>-<upstream-repo
 unique in the flat namespace without an owner segment of its own. A repository adopted as the
 owner's own work rather than kept as a fork is detached from its parent. It keeps a plain name, `widget` rather than `initech-widget`, since it no longer tracks anything upstream.
 
-A clone of a repository under another owner is neither of those. Flattening one collides rather than merely reading oddly. That is because `acme/core` joined the way a fork is joined **is** the fork's name, `acme-core`. Reduced to a bare `core` instead, it names no project and collides with the next
+A clone of a repository under another owner is neither of those. Flattening one collides rather than merely reading oddly. That is because `acme/core` joined the way a fork is joined **is** the fork's name, `acme-core`. That is also because, reduced to a bare `core`, `acme/core` names no project and collides with the next
 `core` cloned from any other owner. Those clones live one level down under `upstream/`, named by
 that same join, so `upstream/acme-core` sits beside the fork it would otherwise land on. The
 segment states the relationship rather than the owner, so a reference checkout is told from a
 working repo without a `git remote` call. And so the names under it never compete with the flat
 namespace above. The join is ambiguous in the abstract, since a hyphen in either half means
-`acme-labs/core` and `acme/labs-core` produce one name. The join is kept anyway because it is the fork convention's own join. The ambiguity is inherited from the flat namespace above rather than introduced here. The ambiguity surfaces at clone time as a directory that already exists, where the
+`acme-labs/core` and `acme/labs-core` produce one name. The join is kept anyway because it is the fork convention's own join. It follows that the ambiguity is inherited from the flat namespace above rather than introduced here. That ambiguity surfaces at clone time as a directory that already exists, where the
 second clone takes a hand-picked name. A worktree off one of them keeps the flat worktrees path
 under the same name, `~/repos/worktrees/<owner>-<repo>-<task-slug>`. Contributing a change from
 such a clone is never a push out of it. Fork the upstream first, per the `upstream-contribution-workflow` skill. That fork's own clone then belongs in the flat
@@ -240,7 +240,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   in flight across the whole fleet.
 - **Cleanup after merge is the default terminal step.** Run it after a squash merge into `develop`. Run it again after a merge-commit promotion into `main`, unless the user explicitly says to retain a checkout or branch. A merge or release handoff is incomplete while finished task, conflict-resolution, installer, or release worktrees remain registered.
 - **Verify before removing.** A worktree or branch is removed only once live state proves it
-  finished. For a pull request, that proof is its merged state and head SHA read from GitHub. That proof also requires the worktree to be clean and the local branch to be at that head or behind it. `cleanup` below checks all of that in code. A dirty worktree stops cleanup because force-removing it would discard work. A detached
+  finished. For a pull request, that proof is its merged state and head SHA read from GitHub. That proof also requires the worktree to be clean and the local branch to be at that head or behind it. `cleanup` below checks that in code. A dirty worktree stops cleanup because force-removing it would discard work. A detached
   helper worktree needs no pull request, but its commit must be contained in the branch whose
   completed operation created it.
 - **A pull request merged into `develop` is cleaned up by one command.** Run

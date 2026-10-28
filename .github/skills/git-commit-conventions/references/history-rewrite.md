@@ -2,7 +2,7 @@
 
 **A history rewrite includes only the commits that must change, and re-identifies any commit it
 rewrites that is not the agent's own.** Filtering history (`git filter-repo` or an equivalent, for
-example to strip PII) re-signs every commit it touches with the rewriter's own key. Meanwhile, the tooling preserves each commit's original `author`/`committer` unless told otherwise. GitHub verifies a signature against the commit's `committer` identity. So a rewriter's-key signature over a commit still committed by a bot (`dependabot[bot]`, `github-actions[bot]`) or GitHub's own web-flow does not match its committer. It lands `unknown_key`/unverified, which a
+example to strip PII) re-signs every commit it touches with the rewriter's own key. Meanwhile, the tooling preserves each commit's original `author`/`committer` unless told otherwise. GitHub verifies a signature against the commit's `committer` identity. So a rewriter's signature over a commit still committed by a bot (`dependabot[bot]`, `github-actions[bot]`) or GitHub's own web-flow does not match its committer. It lands `unknown_key`/unverified, which a
 require-signed-commits rule then rejects.
 
 These gates keep committer and signature aligned:

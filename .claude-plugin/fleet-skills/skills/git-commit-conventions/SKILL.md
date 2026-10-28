@@ -36,7 +36,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   and let anything else stay unstaged.
 - **"Commit" means commit and push.** An authorization to commit carries the push to the feature
   branch the work belongs on, because nothing reviews a local commit. The Copilot review loop, the
-  required status checks, and the maintainer all read the remote. So stopping at `git commit` leaves the review unstarted and the branch's state private to one machine. That reads as progress while none of the gates have run. Push to the feature branch, never to a protected
+  required status checks, and the maintainer all read the remote. So stopping at `git commit` leaves the review unstarted and the branch's state private to one machine. Stopping there reads as progress while none of the gates have run. Push to the feature branch, never to a protected
   branch, and never with `--force`. Holding a commit locally is the narrower case: it happens when
   the developer asks for it, not by default.
 - **Check `git status` before committing, and treat any change this session did not make as a
@@ -58,7 +58,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   single probe is tech-agnostic (SSH agent-backed, SSH key-file, GPG agent-backed, and GPG keyring
   all exercise the same code path). It also doubles as the identity check below. Run it once before the
   first agent-authored commit of a session. Don't assume a prior session left config correct. The
-  commit below is plain, deliberately no `-S`. Forcing it would still succeed on a host where `commit.gpgsign` is unset or false, which is the exact default-config gap this probe exists to catch. That gap matters, since every real commit an agent makes is plain too:
+  commit below is plain, deliberately no `-S`. Forcing it would still succeed on a host where `commit.gpgsign` is unset or false, which is the exact default-config gap this probe exists to catch. The probe stays plain because every real commit an agent makes is plain too:
 
   The probe is one physical line, not backslash-joined ones, so it copy-pastes cleanly into a
   shell:
@@ -95,7 +95,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   local `git verify-commit` output. `sig` is git's own verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
   outright, means **do not commit**: surface the actual error to the developer and stop at
-  `git add`. Nothing else is contrary evidence. That includes an unreachable agent, a config value, and a signature type you can't otherwise explain in past history (see below).
+  `git add`. Not even an unreachable agent, a config value, or a signature type you can't otherwise explain in past history (see below) is contrary evidence.
 - **A mix of SSH- and GPG-signed commits in history is structural, not a host to track down.**
   `git log --pretty='%G? %GK'` shows distinct shapes, not health states. A commit committed by the PR's own author carries that host's own signature type. By contrast, a commit committed by `GitHub <noreply@github.com>` is a squash-merge. GitHub creates and signs that commit itself,
   server-side, with GitHub's own GPG key, regardless of what the PR author signed with locally.
