@@ -30,8 +30,8 @@ The following are banned in the files above:
    pin's value ("SHA-pinned at hub release 2.0.x", with a real number in place of the x) is stale at
    the next Dependabot bump. The reason is that the pin lives in the workflow or manifest that uses
    it. That value also sends the next agent to edit governance for a change that needed none. An
-   illustrative example, a minimum version, and a fixed constant read exactly like a copied pin, so
-   no check can tell them apart. And the rule covers them too. Write each as its mechanism instead.
+   illustrative example, a minimum version, and a fixed constant read exactly like a copied pin.
+   So no check can tell them apart, and the rule covers them too. Write each as its mechanism instead.
    Write a pin as "SHA-pinned to a hub release, with the release in a trailing comment". Write an
    example with a placeholder (`1.0.N` publishing as `1.0.(N+1)`, or a dependency bump "from X to
    Y"). Write a minimum version by naming the manifest or skill that holds it. Write a fixed
@@ -47,7 +47,7 @@ The following are banned in the files above:
 That section's whole function is to name where the canonical rules live. It does so for an agent
 in a repository whose carried copies are stale, partial, or absent. That is exactly when no other
 file present can say it. Its bytes are fixed fleet-wide, so a repository cannot edit the reference
-out without failing the verbatim check instead. And a rule banning it would be unsatisfiable rather
+out without failing the verbatim check instead. For the same reason a rule banning it would be unsatisfiable rather
 than merely strict. The exception is scoped to the verbatim region and never leaks past it: the
 same document's own prose, outside that region, is governed normally. A reference that reaches a
 verbatim section is a defect in the canonical. It is fixed once at the source rather than reported

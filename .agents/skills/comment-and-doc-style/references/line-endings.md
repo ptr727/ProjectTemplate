@@ -2,7 +2,7 @@
 
 Full detail for the "Line endings" rule in `SKILL.md`. Load this when choosing an ending for a
 new file type or working in an operational (config) repo. Also load it when pinning an
-extensionless executable or auditing a repo's endings. Do not load it for an ordinary content edit
+extensionless executable or auditing a repo's endings. This file is not for an ordinary content edit
 to an existing file. The SKILL.md summary, preserve the existing ending and verify with a byte
 scan, covers that case.
 

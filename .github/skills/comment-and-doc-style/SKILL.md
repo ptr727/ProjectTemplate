@@ -208,7 +208,7 @@ repository, or where the log lacks that line, the event's snapshot decides. It m
 applied after the event, `gh pr create --label` included, so
 there the label applies to the next push. The label reaches a repository only when the fleet label
 set is applied to it. So a repository that has not had that applied since the label was declared
-cannot carry it. There the finding names a remedy that is not yet available. And the local
+cannot carry it. In such a repository the finding names a remedy that is not yet available. And the local
 escape reaches a commit before any of that. A commit is where a repository meets this rule first,
 since a hook runs on every commit while the label decides a pull request.
 
@@ -257,7 +257,7 @@ taxonomy. Another repository's status is not a fact this file can hold. It chang
 touching this file. The constraint the citation stands in for is therefore unwritable. The
 lookup is not impossible, that repository being public. Nor is a URL line pollution on a surface
 where the datasheet, the forum thread, and the component docs already sit on the adjacent lines.
-The hostname is the only thing that separates them. A workaround whose justification is an open
+On such a surface the hostname is the only thing that separates a URL line from them. A workaround whose justification is an open
 report on the project it works around is the routine case. A reader revisiting such a workaround
 needs to know whether the cause still stands.
 
