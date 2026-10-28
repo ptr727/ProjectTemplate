@@ -23,8 +23,8 @@ in review). The axes that commonly vary per repo:
 
 ## Two profiles: full specification
 
-A repo's Python is one of two shapes, declared as the `build` or `lint-only` profile and validated
-against the directory's structural shape. Most of the `SKILL.md` rules (src layout, pytest coverage)
+A directory's Python is one of two shapes, declared as the `build` or `lint-only` profile and
+validated against that directory's structural shape. Most of the `SKILL.md` rules (src layout, pytest coverage)
 describe the Project shape (the `build` profile), and its uv project, `uv.lock`, and `uv run` rules
 describe that shape's uv form. The two differ by trait, whether the Python has third-party runtime
 dependencies or is the repo's deliverable. The fleet's audit reads the shape that trait leaves
@@ -75,6 +75,15 @@ configuration alone marks the lint-only one:
   `--with-requirements tests/requirements.txt` to that last where the directory carries one, then writes
   `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold adopted. A
   declared directory with no `tests/` fails that job.
+
+A profile belongs to a declared directory, not to the repository. A repository declares one
+directory per profile its Python needs. Directories split by profile trait, meaning third-party
+runtime dependencies or being the deliverable, not by purpose. Within one directory the file name
+carries the purpose, such as the `_gate` or `_lint` suffix. A stdlib-only `tools/` beside a
+`render/` that imports a third-party imaging library is a legitimate split, one directory per
+profile. Merging them would put every stdlib gate behind that library's install. Two stdlib-only
+directories, `tools/` and `audits/`, differ only by purpose, so they merge into one lint-only
+directory.
 
 ## Versioning
 
