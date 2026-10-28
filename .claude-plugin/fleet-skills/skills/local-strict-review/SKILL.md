@@ -15,8 +15,8 @@ description: >-
   canonical sweep is worked. That sweep names the carried units whose text has moved past the pass
   that read them. It also names a bounded slice of those nothing has read at all. This skill
   triggers there because that content reaches a reviewer whole only when a repository carries it
-  for the first time. It also triggers there because a pass reading each named unit's whole text
-  moves that read into the repository that can act on what it finds. Editing such content owes no pass of its
+  for the first time. It also triggers there for one more reason. A pass reading each named unit's whole text
+  is what moves that read into the repository that can act on what it finds. Editing such content owes no pass of its
   own, so a change that moves a unit pushes and merges like any other.
 ---
 
@@ -24,7 +24,7 @@ description: >-
 
 ## Why This Exists
 
-A coding agent that finishes a unit of work, judges it ready, and opens the pull request is judging its own diff. It does so with the model, and often the blind spots, that wrote it. CodeRabbit, Qodo, and Copilot routinely find real defects that a local pass missed. Each round costs review latency and, for a rate-limited reviewer, shared account-wide quota. A local, full-file-context adversarial pass before the pull request exists catches the same class of defect for a fixed, smaller cost. It is the same reasoning that already runs local lint before a push instead of waiting for CI.
+A coding agent that finishes a unit of work, judges it ready, and opens the pull request is judging its own diff. It does so with the model, and often the blind spots, that wrote it. CodeRabbit, Qodo, and Copilot routinely find real defects that a local pass missed. Each round costs review latency and, for a rate-limited reviewer, shared account-wide quota. A local, full-file-context adversarial pass before the pull request exists catches the same class of defect for a fixed, smaller cost. That is the same reasoning that already runs local lint before a push instead of waiting for CI.
 
 ## What It Does
 

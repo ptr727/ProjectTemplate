@@ -65,8 +65,8 @@ reach this particular repo.
   needs a review.
 
 Nothing else. This skill never re-vendors a carried file, never deletes one, and never applies a
-setting or ruleset. Converging that drift is a resync, a separate change on its own branch. It runs
-per the hub's `RESYNC.md`, by this repo's own session or by `resync-a-repo` from a hub checkout.
+setting or ruleset. Converging that drift is a resync, a separate change on its own branch. It is run
+per the hub's `RESYNC.md` by this repo's own session or by `resync-a-repo` from a hub checkout.
 
 ## Refresh cadence
 
