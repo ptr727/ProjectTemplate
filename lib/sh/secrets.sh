@@ -12,7 +12,7 @@
 
 # `unresolved_link_reason`
 # Echoes the clause that says why a symlink answering `-L` true and `-e` false does not resolve, worded for the account running it.
-# Echoing it lets every site that reports such a link compose one sentence instead of spelling its own.
+# Every site that reports such a link therefore composes one sentence instead of spelling its own.
 # Root with its DAC override enters every directory.
 # A link it cannot resolve therefore has a target that is missing or loops back on itself, and the clause says only that.
 # A uid 0 without the override, such as one in a user namespace facing an unmapped owner, is read as root all the same.
@@ -34,7 +34,7 @@ unresolved_link_reason() {
 # `damaged <sentence>` where the path or a directory leading to it is a symlink that does not resolve.
 # `damaged <sentence>` also where the path or a directory leading to it is present in a shape a secret cannot be read from.
 # `unknown <sentence>` where a directory leading to it cannot be entered, or the path is not absolute.
-# In those cases the path's absence was never established rather than observed.
+# In those cases the path's absence was therefore never established rather than observed.
 # `present` where a regular file is there.
 # The walk starts at the root, not the immediate parent, since a single unenterable ancestor makes every component below it answer false to `-e`.
 # That answer would otherwise read as a proven absence.
@@ -73,8 +73,8 @@ secret_state() {
         # That is exactly the state a bare existence test reads as an absence.
         # Reported as unresolved rather than as a missing target.
         # The reason is that `-e` cannot separate a target that is gone from one that loops back on itself.
-        # For a non-root account, it cannot separate a target that is gone from one sitting behind a directory this account cannot enter.
-        # Asserting any one of them would also claim more than the test established.
+        # For a non-root account, `-e` also cannot separate a target that is gone from one sitting behind a directory this account cannot enter.
+        # A second reason is that asserting any one of those possibilities would claim more than the test established.
         if [[ -L $walked && ! -e $walked ]]; then
             echo "damaged $walked is a symlink that does not resolve, so $(unresolved_link_reason)"
             return 0
@@ -256,7 +256,7 @@ require_secret() {
 # Prints <name> as the env file named by <env-file> sets it, and fails where any line of that file fails.
 # A bash of its own rather than a subshell.
 # That is because a caller reading this inside an `if` condition has errexit off in every subshell as well.
-# For such a caller, a subshell would count only the last line of the file.
+# For such a caller, a subshell would therefore count only the last line of the file.
 # The child also keeps `set -a` from exporting that file's credentials into anything this script spawns.
 # Likewise `unset` keeps an operator's already-sourced shell from standing in for the file.
 # The name is held in a variable of the child's own rather than read from `$2` at the end.
