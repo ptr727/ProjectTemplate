@@ -238,10 +238,9 @@ the whole procedure below. Run every step without being reminded of any of them.
    already states that target, so `drive-pr` does not ask how far. Merging that promotion pull
    request and dispatching a release stay `merge-and-release`. Each needs an explicit go-ahead,
    asked for as a prompt whose option names the action.
-5. **Ask every question as a dialog.** Where the interface has a prompt mechanism, per "The Parked
-   Decision Queue" below, each decision is its own question with its answers as the options. The
-   recommended one comes first and is marked as the recommendation, and every one carries its
-   reason. The numbered list is the fallback where no prompt exists.
+5. **Ask every question as a dialog.** Where the interface has a prompt mechanism, each decision is its own
+   question with its answers as the options. There the recommended one comes first and is marked as
+   the recommendation, and every one carries its reason, per "The Parked Decision Queue" below. The numbered list is the fallback where no prompt exists.
 6. **Close the session** per "Closing a Session" below, which records lessons, writes the next round
    with `new`, presents the parked decision queue, and saves memories last. Where the issue carries
    the `blocked` label left on in step 3, take it off once the next round is written. Remove it with
@@ -270,8 +269,8 @@ it.
    written, comment those answers onto its issue, with the queue's count and list after them. That
    is because the body keeps the count it was written with, and a resume reads the issue's comments.
 4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
-   environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory. A quirk of
-   this machine or this account is one such nuance. It is saved as the session's final act. Never
+   environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory, saved as the
+   session's final act. A quirk of this machine or this account is one such nuance. Never
    the round's state, which the issue holds, and never a lesson, which step 1 already recorded.
 
 ## The Parked Decision Queue
@@ -360,7 +359,7 @@ absence is unproven rather than established.
 A fork under the registry's owner that the registry does not list can host a chain. The chain keeps
 a session's state there without the fork taking on any fleet configuration. One example is a fork
 kept for an upstream contribution per `upstream-contribution-workflow`. Missing the label there, a
-read prints a warning and answers as an empty chain does. `new` refuses there until it is given
+read prints a warning and answers as an empty chain does. Missing it, `new` refuses until it is given
 `--create-label`. Given it, `new` creates the one `handoff` label, confirms it, and then files the
 track's issue. Issues turned off stop it before any write, naming the command that turns them on.
 Never apply the fleet label set to such a fork. A repository under another owner, or an

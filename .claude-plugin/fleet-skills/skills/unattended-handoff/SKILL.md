@@ -319,9 +319,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    every issue develop fixes, `#<issue>` included. It does so per `backlog-burndown` "Assembling the Promotion Body",
    so each closes when the promotion merges. It then closes the lane out, naming the decision issue
    in the close-out comment. Where the round is not narrowed, continue to the promotion pull
-   request. Its body carries a `Fixes` line for every issue develop fixes, assembled per that same
-   section. Hand it to `merge-and-release`, merging only under `main` and merging and releasing
-   under `release`. **A read this step names that cannot run returns `STOP`** rather than
+   request and hand it to `merge-and-release`. The promotion's body carries a `Fixes` line for every
+   issue develop fixes, assembled per that same section. The hand-off merges only under `main`, and
+   merges and releases under `release`. **A read this step names that cannot run returns `STOP`** rather than
    continuing. That is because a read that did not run shows nothing about whether the promotion
    is blocked. **Repeat the blocked-promotion reads immediately before each
    head of the promotion merges**, a head `merge-and-release` re-gates included. Run the `decision`
@@ -345,8 +345,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a merge the harness refuses after one
    retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks only
-   on a choice the maintainer alone can make. The one other ground for parking is an action only the
-   maintainer can take that `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer
+   on a choice the maintainer alone can make, or on a maintainer-only action that
+   `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer
    requested, which its "Expected review loop" sends there. Two others it sends there return `STOP`
    instead, since a later round on another issue would meet the same reviewer. One is a stall still
    pending after the wait that follows clearing the request. The other is a wait ending
@@ -390,7 +390,7 @@ interruption part way leaves the work findable rather than lost.
    nothing but the question, so it closes once answered.
 3. **Comment the state on the handoff**, filing any lesson first per worker step 6 so the comment
    can name it. The comment says what is done, the branch and pull request, and whether the
-   worktree was left standing. It says what remains, and the decision issue it now waits on. That
+   worktree was left standing. It says what remains, and the decision issue the handoff now waits on. That
    issue is named as the one waited on, apart from any lesson issue the comment also names. This comment is what the next session on the lane resumes from, so it
    is complete enough to continue with no other context.
 4. **Label the handoff `blocked`**, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".

@@ -99,8 +99,8 @@ each round boundary, per "Ending the Run".
 
 Rank on these, highest first where they conflict:
 
-- **It blocks other work.** An issue's fix can change a rule, a gate, or a shared contract that
-  other issues' fixes must then obey. That issue is worth doing before them, not after.
+- **It blocks other work.** Some fixes change a rule, a gate, or a shared contract that other issues'
+  fixes must then obey. An issue whose fix does is worth doing before them, not after.
 - **It is a correctness or safety defect** in something that runs, over an improvement to
   something that reads.
 - **It is a root cause rather than a leaf.** A parent issue grouping several filed symptoms is
@@ -176,8 +176,8 @@ for, and it binds harder than any throughput target.
   invisible to the round that has to respect it. Recording it on the issue is what makes the next
   bullet a read of durable state rather than of the orchestrator's memory.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
-  this round. In flight means the files changed by every open **feature** pull request on this
-  repository. It also means the claim comments of every group still holding a branch, parked
+  this round. In flight covers the files changed by every open **feature** pull request on this
+  repository. It also covers the claim comments of every group still holding a branch, parked
   groups from earlier rounds included.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
@@ -440,7 +440,7 @@ still what covers earlier work no promotion has carried.
    not. Fetch first every time: a stale remote-tracking ref reports zero and the round would report
    nothing to promote while develop carries work. Stop and report a failed fetch rather than
    running `git rev-list` anyway. A round in which every group deferred or parked can still owe a
-   promotion pull request. It owes one for work an earlier round landed and no promotion has yet
+   promotion pull request. It can owe one for work an earlier round landed and no promotion has yet
    carried. A
    count of zero is the only case with nothing to promote, and the round reports that instead of
    attempting one.
@@ -448,8 +448,8 @@ still what covers earlier work no promotion has carried.
    review-round budget set before the first round**. That loop repeats until the promotion pull
    request meets every `pr-review-conduct` Merge Gate item except the maintainer's explicit
    permission to merge. Nothing in that loop terminates on its own. So when the budget is reached,
-   stop and put the state to the maintainer. Do not continue spending the run's only forward gear
-   on one pull request.
+   stop rather than keep spending the run's only forward gear on one pull request. Put the state to
+   the maintainer at that point.
 3. Put the ready pull request to the maintainer, per `GOVERNANCE.md` "Communicating with the
    User", with its merge as the action asked for. The maintainer's merge is the run's clock, so one
    reported in a closing paragraph and never actually asked about stalls every round behind it.
