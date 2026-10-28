@@ -71,7 +71,7 @@ secret_state() {
         walked="$walked/$part"
         # `-L` before `-e` throughout: a symlink that does not resolve answers false to `-e`.
         # That is exactly the state a bare existence test reads as an absence.
-        # Reported as unresolved rather than as a missing target.
+        # Such a link is reported as unresolved rather than as a missing target.
         # The reason is that `-e` cannot separate a target that is gone from one that loops back on itself.
         # For a non-root account, `-e` also cannot separate a target that is gone from one sitting behind a directory this account cannot enter.
         # A second reason is that asserting any one of those possibilities would claim more than the test established.
@@ -254,7 +254,7 @@ require_secret() {
 
 # `read_env_value` <env-file> <name>
 # Prints <name> as the env file named by <env-file> sets it, and fails where any line of that file fails.
-# A bash of its own rather than a subshell.
+# This function runs a bash of its own rather than a subshell.
 # That is because a caller reading this inside an `if` condition has errexit off in every subshell as well.
 # For such a caller, a subshell would therefore count only the last line of the file.
 # The child also keeps `set -a` from exporting that file's credentials into anything this script spawns.
