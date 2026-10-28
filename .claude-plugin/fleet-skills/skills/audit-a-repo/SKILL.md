@@ -29,7 +29,7 @@ The audit is the fleet's measurement procedure. The failure shapes it guards aga
 - **Write `reports/<repo>/audit.md` from `reports/_template.md`**, findings ranked most severe first, each with the `file:line` it was judged against, and quote the run stamp. The stamp is quoted because findings are a point-in-time snapshot. All of this is in `AUDIT.md` section 8.
 - **The hub authors the report.** A downstream repo never opens a hub pull request to write its own, which would be self-certification. Downstream context goes into issues filed against the hub instead.
 - **Generate a convergence issue, never compose one**: `uv run --no-project --script spec/audit.py --issue <repo>` emits it from live findings. An agent picking such an issue up re-runs the audit first and acts on the live result, not the pasted findings.
-- **Reconcile registry `driftNotes` in the same pass**: a resolved deviation's note is deleted, not left describing finished work. A note naming a check id is retired by a person, not by a run. Both are in `AUDIT.md` section 8.
+- **Reconcile registry `driftNotes` in the same pass**: a resolved deviation's note is deleted, not left describing finished work. A note naming a check id is retired by a person, not by a run. All of this is in `AUDIT.md` section 8.
 - **Stale-versus-modified classification and the intent staleness advisory need a full hub clone with git history.** In a shallow clone the audit reports one ERROR per repo and exits non-zero, so run `git fetch --unshallow origin` in the hub checkout first. To verify one finding without history, compare against the current hub canonical on `main`, which decides current-match only.
 
 ## After the Report
