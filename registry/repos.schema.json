@@ -82,7 +82,7 @@
                     "$comment": "Length alone, with no pattern: the blank-value rule is spec/validate.py's, which is the gate, and stating it here needed `\\S`, whose set differs between Python and ECMA-262. That divergence had an editor refusing a value the gate accepts, the direction an advisory schema must never be wrong in."
                 },
                 "types": { "type": "array", "items": { "type": "string" } },
-                "profiles": { "type": "object", "additionalProperties": { "enum": ["lint-only", "build"] } },
+                "profiles": { "type": "object", "propertyNames": { "not": { "const": "python" } }, "additionalProperties": { "enum": ["lint-only", "build"] } },
                 "classificationPending": { "type": "boolean" },
                 "groundTruthBranch": { "$ref": "#/$defs/groundTruthBranch" },
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },

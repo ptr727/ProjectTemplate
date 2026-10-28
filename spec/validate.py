@@ -529,6 +529,33 @@ def description_errors_for_repo(repo, name):
     return description_errors(name, repo["description"])
 
 
+def profile_errors(name, profiles_decl, repo_types, type_defs):
+    """Errors for a cataloged entry's `profiles`, each naming one of the repo's types and a profile it allows.
+
+    Python is refused by name rather than by its empty allowed list, per spec/type-model.md. Its profile belongs to
+    each declared directory and is read from that directory's pyproject.toml shape, so a registry value can only
+    restate or contradict it. CI runs no JSON-schema validation, so the shape is guarded here rather than crashing on
+    .items().
+    """
+    if not isinstance(profiles_decl, dict):
+        return [f"{name}: profiles must be an object mapping a type to its profile"]
+    errors = []
+    for tname, prof in profiles_decl.items():
+        allowed = type_defs.get(tname, {}).get("profiles", [])
+        if tname == "python":
+            errors.append(
+                f"{name}: profiles declares 'python', but a Python profile belongs to each pythonDirectories "
+                "entry and is read from its pyproject.toml shape, so remove it"
+            )
+        elif tname not in repo_types:
+            errors.append(f"{name}: profile declared for '{tname}', not one of the repo's types")
+        elif tname in type_defs and prof not in allowed:
+            errors.append(
+                f"{name}: type '{tname}' profile '{prof}' not in its allowed profiles {allowed or '[]'}"
+            )
+    return errors
+
+
 def description_errors(name, desc):
     """Shape errors for a registry entry's optional `description` (GOVERNANCE.md "Repository Details").
 
@@ -1279,22 +1306,7 @@ def main(argv=()):
         for t in repo_types:
             if t not in known_types:
                 errors.append(f"{name}: type '{t}' not defined in project-types.json")
-        # A declared profile must name one of the repo's types and a profile that type allows (spec/type-model.md).
-        # CI runs no JSON-schema validation, so guard the shape here rather than crash on .items().
-        profiles_decl = repo.get("profiles", {})
-        if not isinstance(profiles_decl, dict):
-            errors.append(f"{name}: profiles must be an object mapping a type to its profile")
-            profiles_decl = {}
-        for tname, prof in profiles_decl.items():
-            allowed = types["types"].get(tname, {}).get("profiles", [])
-            if tname not in repo_types:
-                errors.append(
-                    f"{name}: profile declared for '{tname}', not one of the repo's types"
-                )
-            elif tname in known_types and prof not in allowed:
-                errors.append(
-                    f"{name}: type '{tname}' profile '{prof}' not in its allowed profiles {allowed or '[]'}"
-                )
+        errors.extend(profile_errors(name, repo.get("profiles", {}), repo_types, types["types"]))
 
         # The releaseTrigger field is a scope selector, per spec/scope-model.md, so an invalid value would silently fail to match any releaseTrigger-scoped section rather than error.
         trigger = repo.get("releaseTrigger")

@@ -547,6 +547,74 @@ class DescriptionErrorsCase(unittest.TestCase):
         )
 
 
+class ProfileErrorsCase(unittest.TestCase):
+    """registry/repos.json's `profiles`, which Python never appears in (spec/type-model.md "Profiles: build vs lint-only")."""
+
+    TYPE_DEFS: ClassVar[dict[str, dict[str, object]]] = {
+        "python": {"checks": []},
+        "widget": {"profiles": ["build", "lint-only"]},
+        "gizmo": {"checks": []},
+    }
+
+    def test_a_python_profile_is_refused_with_the_per_directory_reason(self) -> None:
+        for prof in ("build", "lint-only"):
+            with self.subTest(prof=prof):
+                errors = validate.profile_errors(
+                    "Fixture", {"python": prof}, ["python"], self.TYPE_DEFS
+                )
+                self.assertEqual(len(errors), 1)
+                self.assertIn("Fixture: profiles declares 'python'", errors[0])
+                self.assertIn("pythonDirectories", errors[0])
+                self.assertIn("pyproject.toml shape", errors[0])
+
+    def test_a_python_profile_is_refused_even_beside_a_valid_one(self) -> None:
+        errors = validate.profile_errors(
+            "Fixture",
+            {"python": "build", "widget": "lint-only"},
+            ["python", "widget"],
+            self.TYPE_DEFS,
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("profiles declares 'python'", errors[0])
+
+    def test_another_type_keeps_its_profile(self) -> None:
+        self.assertEqual(
+            validate.profile_errors("Fixture", {"widget": "lint-only"}, ["widget"], self.TYPE_DEFS),
+            [],
+        )
+
+    def test_a_type_defining_no_profiles_is_still_refused_generically(self) -> None:
+        self.assertEqual(
+            validate.profile_errors("Fixture", {"gizmo": "build"}, ["gizmo"], self.TYPE_DEFS),
+            ["Fixture: type 'gizmo' profile 'build' not in its allowed profiles []"],
+        )
+
+    def test_a_profile_for_an_undeclared_type_is_refused(self) -> None:
+        self.assertEqual(
+            validate.profile_errors("Fixture", {"widget": "build"}, ["gizmo"], self.TYPE_DEFS),
+            ["Fixture: profile declared for 'widget', not one of the repo's types"],
+        )
+
+    def test_a_profiles_value_that_is_not_an_object_is_refused(self) -> None:
+        self.assertEqual(
+            validate.profile_errors("Fixture", ["python"], ["python"], self.TYPE_DEFS),
+            ["Fixture: profiles must be an object mapping a type to its profile"],
+        )
+
+    def test_the_shipped_registry_draws_no_profile_error(self) -> None:
+        type_defs = validate.load("spec/project-types.json")["types"]
+        self.assertNotIn("profiles", type_defs["python"])
+        for repo in validate.load("registry/repos.json")["repos"]:
+            with self.subTest(repo=repo["name"]):
+                self.assertNotIn("python", repo.get("profiles", {}))
+                self.assertEqual(
+                    validate.profile_errors(
+                        repo["name"], repo.get("profiles", {}), repo.get("types", []), type_defs
+                    ),
+                    [],
+                )
+
+
 class TreeSourceRootCase(unittest.TestCase):
     """A tree source naming the repository root is refused however it is spelled."""
 
@@ -1225,6 +1293,18 @@ class RegistryEntryGateCase(unittest.TestCase):
         self.assertIn("Fixture: types must be a list of type-name strings", output)
         self.assertIn("Fixture: type 'pythn' not defined in project-types.json", output)
         self.assertNotIn("not one of the repo's types", output)
+
+    def test_a_declared_python_profile_is_refused_by_the_loop(self) -> None:
+        output = self.run_against(
+            self.entry(
+                status="cataloged",
+                classificationPending=None,
+                hasDevelop=True,
+                types=["python"],
+                profiles={"python": "build"},
+            )
+        )
+        self.assertIn("Fixture: profiles declares 'python'", output)
 
     def test_a_declared_null_types_names_the_missing_types_remedy(self) -> None:
         entry = self.entry(status="cataloged", classificationPending=None)
