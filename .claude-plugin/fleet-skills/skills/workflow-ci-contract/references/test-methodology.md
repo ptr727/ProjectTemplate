@@ -14,7 +14,7 @@ Assert the structural fact each *applicable* D-guarantee implies, and record **p
 
 Most of the evidence is in the workflow files and the composite actions they reach. Where a guarantee's evidence lies outside them, in practice it lies in one of these places. They are the repo's branch ruleset, its Actions and Dependabot secret names, a workflow the repo only calls, or a project or dependency file. They also include a committed file such as `version.json`, `.github/dependabot.yml`, `global.json`, `codecov.yml`, `.gitignore`, or `.editorconfig`.
 
-Cite what each verdict rests on. That is `file:line` for a file in the audited repo. It is its own name where a setting, a ruleset, or a secret name rather than a file is the evidence. Where the guarantee binds a workflow or composite action the audited repo only reaches, it is `<owner>/<repo>@<sha>` plus the `file:line` in that repo. The callee is read at the SHA the caller pins. An **N/A** verdict names the absent construct instead, there being no line to cite.
+Cite what each verdict rests on. That is `file:line` for a file in the audited repo. It is the evidence's own name where a setting, a ruleset, or a secret name rather than a file is the evidence. Where the guarantee binds a workflow or composite action the audited repo only reaches, it is `<owner>/<repo>@<sha>` plus the `file:line` in that repo. The callee is read at the SHA the caller pins. An **N/A** verdict names the absent construct instead, there being no line to cite.
 
 ### 5B. End-to-End Trace Scenarios (No Execution, Deterministic from the YAML)
 
