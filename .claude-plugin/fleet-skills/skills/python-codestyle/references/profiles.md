@@ -2,11 +2,11 @@
 
 ## Adapt before propagating
 
-The rules in `SKILL.md` describe the default Python profile: a package that publishes to PyPI,
-type-checked by pyright in strict mode, dependencies in `[dependency-groups]`. A derived repo
-often differs, and when it does, adapt these fields to match the repo's actual toolchain rather
-than copying verbatim (a verbatim copy that misdescribes the repo is inaccurate and gets rejected
-in review). The axes that commonly vary per repo:
+The rules in `SKILL.md` describe the default Python toolchain: a package that publishes to PyPI,
+type-checked by pyright in strict mode, dependencies in `[dependency-groups]`. A directory in a
+derived repo often differs, so adapt these fields to its actual toolchain rather than copying them
+verbatim. A verbatim copy that misdescribes the directory is inaccurate and gets rejected in
+review. The axes that commonly vary, each set per declared directory:
 
 - **Type checker in CI**: pyright strict, mypy with its strict flags (run in CI and the editor, with
   pyright kept editor-only through Pylance), or both. A repo running both runs pyright itself,
