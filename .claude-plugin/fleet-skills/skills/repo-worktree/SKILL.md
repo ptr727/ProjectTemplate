@@ -26,7 +26,7 @@ description: >-
 
 Two agent sessions once ran concurrently in the same primary checkout, on the same feature
 branch, neither knowing the other was in the tree. One session's commits swept in the other session's uncommitted files. So two commits landed carrying work their subjects never mention,
-committed by a task that never saw it. No rule fired at the moment it was violated, which is the first file edit. That is because the commit-time and review-time skills all run after a sweep has already
+committed by a task that never saw it. No rule fired at the moment it was violated, which is the first file edit. No rule fired because the commit-time and review-time skills all run after a sweep has already
 happened. This skill is that missing task-start surface. `GOVERNANCE.md` "Repository Boundaries
 and Write Safety" keeps the isolation law and wins on any disagreement, and the mechanics below
 are this skill's own content.
@@ -59,7 +59,7 @@ from `develop` unless the task is explicitly about `main`-only content, per `GOV
 "Branching Model". Fetch immediately before creating and base on the remote ref, because a clone
 is whatever it last fetched rather than the branch it names.
 
-The base clone is a fetch source, not a place to do task work. `fetch` and `worktree add` run against it for that purpose. Outside the steps below, nothing else mutates its working tree, index, or HEAD while a task is in progress. Outside those steps, never `checkout`, `pull`, `reset`, `commit`, or any
+The base clone is a fetch source, not a place to do task work. `fetch` and `worktree add` run against it for that purpose. Outside the steps below, nothing else mutates its working tree, index, or HEAD while a task is in progress. While a task is in progress and outside those steps, never `checkout`, `pull`, `reset`, `commit`, or any
 other such command. The steps are "Listing and Cleanup"'s own terminal step and "Creating a
 Worktree"'s return of the base clone to its own working branch. That return applies where a continuation finds the task branch checked out there. That distinction is the one a real incident missed. In that incident, an agent reused a primary checkout as the working directory itself rather than only as the source a
 worktree is created from. On a machine carrying the hub's agent-safety install, Claude Code also
@@ -90,7 +90,7 @@ that same join, so `upstream/acme-core` sits beside the fork it would otherwise 
 segment states the relationship rather than the owner, so a reference checkout is told from a
 working repo without a `git remote` call. And so the names under it never compete with the flat
 namespace above. The join is ambiguous in the abstract, since a hyphen in either half means
-`acme-labs/core` and `acme/labs-core` produce one name. It is kept anyway because it is the fork convention's own join. The ambiguity is inherited from the flat namespace above rather than introduced here. It surfaces at clone time as a directory that already exists, where the
+`acme-labs/core` and `acme/labs-core` produce one name. The join is kept anyway because it is the fork convention's own join. The ambiguity is inherited from the flat namespace above rather than introduced here. The ambiguity surfaces at clone time as a directory that already exists, where the
 second clone takes a hand-picked name. A worktree off one of them keeps the flat worktrees path
 under the same name, `~/repos/worktrees/<owner>-<repo>-<task-slug>`. Contributing a change from
 such a clone is never a push out of it. Fork the upstream first, per the `upstream-contribution-workflow` skill. That fork's own clone then belongs in the flat
@@ -224,7 +224,7 @@ in the new tree.
   installers is the same act, since `prek install` over a pre-commit framework hook moves the original aside and chains to it. That chaining has left every commit in every checkout failing on the
   chained script. A missing or wrong shared hook is reported to the maintainer, not repaired from
   the worktree.
-- **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The one exception is that none of them changes a shared hook or setting
+- **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exception is that none of them may change a shared hook or setting
   from a linked worktree, per the bullet above. Do not infer a replacement command from
   the language alone.
 
@@ -240,7 +240,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   in flight across the whole fleet.
 - **Cleanup after merge is the default terminal step.** Run it after a squash merge into `develop`. Run it again after a merge-commit promotion into `main`, unless the user explicitly says to retain a checkout or branch. A merge or release handoff is incomplete while finished task, conflict-resolution, installer, or release worktrees remain registered.
 - **Verify before removing.** A worktree or branch is removed only once live state proves it
-  finished. For a pull request, that proof is its merged state and head SHA read from GitHub. That proof also has the worktree clean and the local branch at that head or behind it. `cleanup` below checks all of that in code. A dirty worktree stops cleanup because force-removing it would discard work. A detached
+  finished. For a pull request, that proof is its merged state and head SHA read from GitHub. That proof also requires the worktree to be clean and the local branch to be at that head or behind it. `cleanup` below checks all of that in code. A dirty worktree stops cleanup because force-removing it would discard work. A detached
   helper worktree needs no pull request, but its commit must be contained in the branch whose
   completed operation created it.
 - **A pull request merged into `develop` is cleaned up by one command.** Run
@@ -268,7 +268,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   is on `develop` or on the merged branch with no tracked changes. A base clone on the merged
   branch that it cannot switch is one of its refusals. One on another branch, or on `develop` with
   tracked changes or no fast-forward, exits `0` with `base=kept` on its `status=CLEANED` line.
-  That line, and every hand removal, leaves this step to run. Fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
+  That line, and every hand removal, leaves this step to run. The step is to fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
   needed, and fast-forward it with `git merge --ff-only origin/develop`. A completed promotion or
   release does not leave the base clone on `main`. Stop and report a dirty base clone or a
   non-fast-forward instead of switching or reconciling it.

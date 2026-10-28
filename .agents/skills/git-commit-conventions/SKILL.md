@@ -95,8 +95,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   local `git verify-commit` output. `sig` is git's own verdict char. Don't grep localized
   "Good" text, since that varies by git version and locale. Anything else, or the commit failing
   outright, means **do not commit**: surface the actual error to the developer and stop at
-  `git add`. Nothing else is contrary evidence. Not an unreachable agent, not a config value, not a
-  signature type you can't otherwise explain in past history (see below).
+  `git add`. Nothing else is contrary evidence. That includes an unreachable agent, a config value, and a signature type you can't otherwise explain in past history (see below).
 - **A mix of SSH- and GPG-signed commits in history is structural, not a host to track down.**
   `git log --pretty='%G? %GK'` shows distinct shapes, not health states. A commit committed by the PR's own author carries that host's own signature type. By contrast, a commit committed by `GitHub <noreply@github.com>` is a squash-merge. GitHub creates and signs that commit itself,
   server-side, with GitHub's own GPG key, regardless of what the PR author signed with locally.
@@ -106,7 +105,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   clue worth chasing.
 - **Signing must be live before the *first* commit, not retrofitted.** Turning on a
   require-signed-commits rule against a branch that already carries unsigned commits forces a
-  rewrite of that entire history to re-sign it. That rewrite changes every commit SHA. It also makes whoever does the rewrite the committer and signer of every commit in it. That is because a rebase preserves `author` but not the original signatures, and one contributor cannot sign for another. During new-repo setup,
+  rewrite of that entire history to re-sign it. That rewrite changes every commit SHA. It also makes whoever does the rewrite the committer and signer of every commit in it. A rebase preserves `author` but not the original signatures, and one contributor cannot sign for another. During new-repo setup,
   never create commits until signing is verified.
 
 ## Identity, verified not set
@@ -122,7 +121,7 @@ writing a repo-local override. The identity is host configuration set globally o
 it is not. A mismatch is a host fault to surface to the maintainer, not to patch per repo. That is because a local override hides a broken host that then commits wrong in every other repo on that machine.
 A wrong identity is not cosmetic: a private email trips GitHub's email-privacy push protection, and
 an invented author pollutes history. It is also a distinct failure from signing (a wrong author
-does not by itself fail the signature check). The ad-hoc identities that produce one are typically also unsigned, though, which the signing rule above then rejects independently.
+does not by itself fail the signature check). The ad-hoc identities that produce a wrong author are typically also unsigned, though, which the signing rule above then rejects independently.
 
 ## Never force push
 
@@ -141,4 +140,4 @@ any rewrite. See `references/history-rewrite.md` for the full rule.
 
 ## Never run destructive git commands without being asked
 
-`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`, and other commands that discard work require explicit developer instruction. Never use them as a convenience inside a larger task. One narrow cleanup exception applies to `git branch -D <exact-task-branch>` after a squash merge. It requires live proof that the pull request for that exact branch merged, per `repo-worktree`. It also requires a clean worktree with the branch at the verified head SHA or behind it, per `repo-worktree`. The exception never applies to `develop`, an unmerged branch, an unresolved pull request, or a branch with uncommitted work.
+`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`, and other commands that discard work require explicit developer instruction. Never use them as a convenience inside a larger task. One narrow cleanup exception applies to `git branch -D <exact-task-branch>` after a squash merge. It requires live proof that the pull request for that exact branch merged, per `repo-worktree`. That proof also includes a clean worktree with the branch at the verified head SHA or behind it. The exception never applies to `develop`, an unmerged branch, an unresolved pull request, or a branch with uncommitted work.
