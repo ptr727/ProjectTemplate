@@ -26,9 +26,9 @@ These traps were learned the hard way:
   with a plain `gh pr merge --merge`, no `--delete-branch`. If `develop` is ever lost this way,
   restore it to the merged PR's head SHA. That SHA is still reachable as the merge commit's second parent:
   `gh api -X POST "repos/<owner>/<repo>/git/refs" -f ref=refs/heads/develop -f sha="$(gh pr view <n> --json headRefOid --jq .headRefOid)"`.
-- **Spurious EOL-only conflicts resolve by taking `develop`.** The `develop` `.editorconfig`
-  line-ending default may have changed (for example the fleet-wide CRLF-to-LF flip) while `main`
-  hasn't caught up yet. Then `develop -> main` conflicts *whole-file* on every renormalized path.
+- **Spurious EOL-only conflicts resolve by taking `develop`.** When `develop`'s `.editorconfig`
+  line-ending default has changed while `main` hasn't caught up yet, `develop -> main` conflicts
+  *whole-file* on every renormalized path. An example is the fleet-wide CRLF-to-LF flip.
   `develop`'s `required_linear_history` plus PR rulesets forbid resolving on `develop` (no merge
   commit, no force-push). So resolve on a throwaway branch off `main`:
   `git checkout -b promote/develop-to-main origin/main && git merge origin/develop`. Take
