@@ -58,14 +58,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    partial coverage. So a pull request that ever had a partial round goes to the maintainer.
    `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
    so read the field rather than the exit.
-   The coverage this item requires is Copilot's, or the attested local pass above. CodeRabbit
+   The coverage this item requires is Copilot's, or the attested local pass above, and CodeRabbit
    and Qodo are advisory. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
    names Copilot the incumbent and says no candidate is a required reviewer. An advisory
    reviewer's absence blocks nothing, while its findings owe item 3 exactly as Copilot's do.
    `pr_review.py`'s `review_on_head` names Copilot's own coverage specifically, not "no review of
-   any kind covers this head". Take an advisory reviewer carrying the exact head under
-   `other_reviewed`, with an empty review body and no new threads. That is its own ordinary
-   "reviewed, nothing to flag" shape, not a missing review.
+   any kind covers this head". An advisory reviewer carrying the exact head under
+   `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is
+   its own ordinary "reviewed, nothing to flag" shape.
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
    it where it can. A file-count refusal is cleared by splitting the pull request, which is the
    only cause on record that the loop can clear. `pr_review.py wait` exits `41` on every refusal
@@ -167,7 +167,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    since a resync writes the whole text there. It declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker.
    A finding on an intent unit is filed there too, since the defect is still fixed at the source.
-   The carrier adapts its own copy meanwhile. Every other finding, a `style`
+   The carrier adapts its own copy of an intent unit meanwhile. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
 
    A finding the pull request's own body lists also needs an outcome before merge, under
@@ -291,7 +291,7 @@ Run `local-strict-review` against the branch's current diff before every push th
 8. Re-run the loop after every fix push until the checks are green, the current head is covered,
    and no finding remains open.
 
-The review effort setting is user-controlled. The workflow never selects or changes it. `status` reports `effort=lite`, `effort=balanced`, or `effort=max`, lowercased, when the completed review exposes that metadata. It names an inherited setting apart from a chosen one in a separate `effort_source=default|explicit` field. Both read `unknown` when no effort line parses. Missing effort metadata reports `unknown` and does not change coverage or completion. A pending effort-labeled request can complete without a `copilot_work_started` timeline event, so absence of that event never proves the request is abandoned. The bounded timeout reports `PENDING` when no review or terminal answer arrives. `requested=yes` reports that the request was accepted rather than that a round is coming. An accepted request can sit unpicked, printing the same digest as one about to be served. So a driver reading that field as progress is waiting on evidence it does not hold. After a timeout carrying it, rerun `wait` for another bounded interval by default, because the request may still be active. Where a second bounded wait times out as well, read the pending set. Clear it only where no human or team reviewer is requested alongside the bot. That is because the clear replaces that set rather than adding to it, and nothing restores a request it drops. A stall on a pull request that has a human or team reviewer requested goes to the maintainer instead. So does one still pending after the wait that follows a clear. The clear leaves the next `wait` nothing outstanding to defer to, so that run requests afresh. Its own auto-request line is what says so. That is because `wait` reads the reviewer's node id out of the repository's recent reviews, and polls without requesting where it finds none. The hub's `docs/pr-reviewer-reference.md` carries the mutation, and an agent seat can run it. By contrast, removing and re-adding the reviewer in the pull request UI is a step only the maintainer can take. This recovery replaces only the review request and never changes the effort setting. A `wait` ending `REQUEST_NOT_RECORDED`, exit 40, is a different state and takes none of this recovery. The request returned success and left neither a pending reviewer nor a review-request event. That is how an exhausted Copilot allowance has shown itself. So clearing and requesting again does not clear this state, and it goes to the maintainer.
+The review effort setting is user-controlled. The workflow never selects or changes it. `status` reports `effort=lite`, `effort=balanced`, or `effort=max`, lowercased, when the completed review exposes that metadata. It names an inherited setting apart from a chosen one in a separate `effort_source=default|explicit` field. Both fields read `unknown` when no effort line parses. Missing effort metadata reports `unknown` and does not change coverage or completion. A pending effort-labeled request can complete without a `copilot_work_started` timeline event, so absence of that event never proves the request is abandoned. The bounded timeout reports `PENDING` when no review or terminal answer arrives. `requested=yes` reports that the request was accepted rather than that a round is coming. An accepted request can sit unpicked, printing the same digest as one about to be served. So a driver reading that field as progress is waiting on evidence it does not hold. After a timeout carrying it, rerun `wait` for another bounded interval by default, because the request may still be active. Where a second bounded wait times out as well, read the pending set. In that case, clear it only where no human or team reviewer is requested alongside the bot. That is because the clear replaces that set rather than adding to it, and nothing restores a request it drops. A stall on a pull request that has a human or team reviewer requested goes to the maintainer instead. So does one still pending after the wait that follows a clear. The clear leaves the next `wait` nothing outstanding to defer to, so that run requests afresh. Its own auto-request line is what says so. That is because `wait` reads the reviewer's node id out of the repository's recent reviews, and polls without requesting where it finds none. The hub's `docs/pr-reviewer-reference.md` carries the mutation, and an agent seat can run it. By contrast, removing and re-adding the reviewer in the pull request UI is a step only the maintainer can take. This recovery replaces only the review request and never changes the effort setting. A `wait` ending `REQUEST_NOT_RECORDED`, exit 40, is a different state and takes none of this recovery. The request returned success and left neither a pending reviewer nor a review-request event. That is how an exhausted Copilot allowance has shown itself. So clearing and requesting again does not clear this state, and it goes to the maintainer.
 
 Drive to green, a review confirmed on the latest head SHA and every actionable finding closed,
 then apply the Merge Gate above. **Never exit this PR-hosted loop early.** Its pre-push
@@ -311,7 +311,7 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    raised, not once it recurs. Take the fix through `local-strict-review` the same way the push
    that opened the pull request went, per `pr-review-conduct` "Expected review loop". Then reply
    with the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix.
-   The fix is the round the `local-strict-review` pass gets dropped on, and the churn
+   That is the round the `local-strict-review` pass gets dropped on, and the churn
    `local-strict-review` exists to stop. For a finding on platform-specific code (PowerShell, a macOS- or WSL-only
    path), "fixed" means executed on that platform, per
    `agent-conduct` "Before Claiming Done". A fix reasoned out by analogy to a tested equivalent
@@ -398,7 +398,7 @@ never against its confidence label. Classify before responding:
   class's sites in the touched files onto it. File the other sites as one issue naming each, and
   an extension a helper in another repository needs as an issue in that repository.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
-  contradicts the tree or industry norm, **fix the rule, not the code**. Take the rule to the
+  contradicts the tree or industry norm, **fix the rule, not the code**. Take such a rule to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.
 - **Architectural opinion**, a proposed redesign. Surface it with a recommendation, never apply
   it unilaterally.

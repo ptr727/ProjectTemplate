@@ -12,7 +12,8 @@ review. The axes that commonly vary:
   pyright kept editor-only through Pylance), or both. A repo running both runs pyright itself,
   per `SKILL.md` "Toolchain". The clean-compile runs every checker CI runs.
 - **Dependency declaration**: the uv form declares the dev tools CI runs in the `dev` group of
-  `[dependency-groups]`. That is the one group a plain local `uv sync` or `uv run` installs. CI's
+  `[dependency-groups]`. The `dev` group is the one group a plain local `uv sync` or `uv run`
+  installs. CI's
   `uv sync --all-groups --frozen` installs that group too, since the command takes every group and
   no extra. PEP 621
   `[project.optional-dependencies]` (installed with `uv sync --extra <group>`) suits only a tool CI

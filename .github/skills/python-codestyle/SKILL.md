@@ -98,7 +98,8 @@ engine.
 
 From inside a **build**-profile Python project directory in its uv form. A pip-form directory runs
 neither `uv sync` nor `uv run`, since either writes a `uv.lock` that, once committed, makes the
-directory the uv form. It builds its environment as the pip-form block below shows. A
+directory the uv form. A pip-form directory builds its environment as the pip-form block below
+shows. A
 **lint-only** Scripts profile has no `uv.lock` to sync and no pytest to run. For it, substitute
 `uvx` per tool and `unittest` per the Two Profiles section above:
 

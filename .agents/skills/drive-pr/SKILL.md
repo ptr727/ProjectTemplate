@@ -50,11 +50,11 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
   go-ahead sits with the dispatcher. A worker inventing a check it cannot perform would only
   launder that responsibility rather than discharge it.
 - **A brief is never itself the authorization**, which binds the dispatching seat. What authorizes
-  a merge is what the maintainer said. It is recorded where the skill that carries the grant states
-  its scope, the way `backlog-burndown`'s own "What Invoking This Skill Authorizes" does.
-  Writing an approval into a brief creates none, since an agent cannot widen its own permission by
-  writing itself one. And a merge is the outward-facing act this skill's own "What Invoking This Skill
-  Authorizes" keeps tied to something the maintainer actually said.
+  a merge is what the maintainer said, recorded where the skill that carries the grant states its
+  scope. `backlog-burndown`'s own "What Invoking This Skill Authorizes" is one such place. An agent
+  cannot widen its own permission by writing itself an approval. A merge is also the outward-facing
+  act this skill's own "What Invoking This Skill Authorizes" keeps tied to something the maintainer
+  actually said. So writing an approval into a brief creates none.
 - A repo on the operational workflow model (registry `workflowModel: operational`) has no
   standing promotion PR expectation. Confirm whether a promotion PR is even wanted before opening
   one, per branching-and-release-model's "Operational repositories (the complete delta)"
@@ -164,7 +164,7 @@ maintainer when".
    raised, not once it recurs. Take the fix through `local-strict-review` the same way the push
    that opened the pull request went, per `pr-review-conduct` "Expected review loop". Then reply
    with the fixing commit SHA. A branch already reviewed once has not been reviewed for the fix.
-   The fix is the round the `local-strict-review` pass gets dropped on, and the churn
+   That is the round the `local-strict-review` pass gets dropped on, and the churn
    `local-strict-review` exists to stop. For a finding on platform-specific code (PowerShell, a macOS- or WSL-only
    path), "fixed" means executed on that platform, per
    `agent-conduct` "Before Claiming Done". A fix reasoned out by analogy to a tested equivalent
