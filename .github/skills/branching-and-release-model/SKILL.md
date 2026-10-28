@@ -113,9 +113,10 @@ rather than guessing from the repo's contents.
   task and no gate covers it. A full re-run is always available inside its bounded
   window and is the only route once the branch tip has moved:
   `references/release-publish-mechanics.md`.
-- **Adding, dropping, or wiring a release target**, and tracking an upstream release from a
-  wrapper repo: `references/release-publish-mechanics.md`. The questions are which leaf task,
-  which artifact-naming contract, and which seam a given output belongs to. Seams are a GitHub
+- **Adding, dropping, or wiring a release target** is covered in
+  `references/release-publish-mechanics.md`: which leaf task, which artifact-naming contract,
+  which seam a given output belongs to. Tracking an upstream release from a wrapper repo is
+  covered there too. Seams are a GitHub
   Release asset, a package-registry push, an image-registry push, a filesystem deploy, or a
   source-only repo with no build layer at all.
   See also `WORKFLOW.md` for the full CI/CD contract this section's rules are load-bearing
