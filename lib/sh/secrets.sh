@@ -1,15 +1,21 @@
 #!/bin/bash
 
 # Meant to be sourced, never run: `. "$REPO/lib/fleet/sh/secrets.sh"` from a script that has already found its own tree through `BASH_SOURCE`.
-# It sets no shell option, since sourcing it would change the caller's own, and every function answers through its output or its status under any of them.
+# It sets no shell option, since sourcing it would change the caller's own.
+# Every function answers through its output or its status under any of them.
 #
-# The hub hosts this file and a repository carries it byte-for-byte, per GOVERNANCE.md "Hub-Hosted Tooling", so a repository extends it in a file of its own outside the carried directory that sources it, never by editing it.
-# A caller that needs these functions in an elevated shell ships them there by name with `declare -f`, since sourcing this file in the calling shell does not reach one started by `sudo`.
+# The hub hosts this file and a repository carries it byte-for-byte, per GOVERNANCE.md "Hub-Hosted Tooling".
+# So a repository extends it in a file of its own outside the carried directory that sources it, never by editing it.
+# A caller that needs these functions in an elevated shell ships them there by name with `declare -f`.
+# This is because sourcing this file in the calling shell does not reach one started by `sudo`.
 # A function here that calls another is shipped with it, so `secret_verdict` needs `secret_shape_verdict`, `secret_state`, `unresolved_link_reason`, `secret_content_verdict`, `secret_content_state`, and `secret_content_refusal`.
 
 # `unresolved_link_reason`
-# Echoes the clause that says why a symlink answering `-L` true and `-e` false does not resolve, worded for the account running it, so every site that reports such a link composes one sentence instead of spelling its own.
-# Root with its DAC override enters every directory, so a link it cannot resolve has a target that is missing or loops back on itself, and the clause says only that.
+# Echoes the clause that says why a symlink answering `-L` true and `-e` false does not resolve.
+# It is worded for the account running it, so every site that reports such a link composes one sentence instead of spelling its own.
+# Root with its DAC override enters every directory.
+# A link it cannot resolve therefore has a target that is missing or loops back on itself.
+# The clause says only that.
 # A uid 0 without the override, such as one in a user namespace facing an unmapped owner, is read as root all the same.
 # Any other account cannot tell those two from a target sitting behind a directory it cannot enter, and the clause names all three.
 # A caller that tells the two wordings apart does so by the ending ` sits behind a directory this account cannot enter`, fixed text here.
@@ -22,12 +28,18 @@ unresolved_link_reason() {
 }
 
 # `secret_state` <path>
-# One word for what a secret file is, because a gate that skips on a bare `-f` reads four unrelated states as one, since `-f` answers false for each of them.
-# `absent` only where nothing is at the path and every directory leading to it is one this account can actually enter, which is the single state a gate may skip on.
-# `damaged <sentence>` where the path or a directory leading to it is a symlink that does not resolve, or is present in a shape a secret cannot be read from.
-# `unknown <sentence>` where a directory leading to it cannot be entered, or the path is not absolute, so the path's absence was never established rather than observed.
+# One word for what a secret file is, because a gate that skips on a bare `-f` reads four unrelated states as one.
+# The reason is that `-f` answers false for each of them.
+# `absent` only where nothing is at the path and every directory leading to it is one this account can actually enter.
+# It is the single state a gate may skip on.
+# `damaged <sentence>` where the path or a directory leading to it is a symlink that does not resolve.
+# `damaged <sentence>` also where the path or a directory leading to it is present in a shape a secret cannot be read from.
+# `unknown <sentence>` where a directory leading to it cannot be entered, or the path is not absolute.
+# In both cases the path's absence was never established rather than observed.
 # `present` where a regular file is there.
-# The walk starts at the root rather than at the immediate parent, since a single unenterable ancestor makes every component below it answer false to `-e` and that would otherwise read as a proven absence.
+# The walk starts at the root rather than at the immediate parent.
+# The reason is that a single unenterable ancestor makes every component below it answer false to `-e`.
+# That would otherwise read as a proven absence.
 # See `secret_verdict` below for the full check built on it.
 secret_state() {
     local path="$1" walked="" part index last
@@ -35,19 +47,22 @@ secret_state() {
         echo "unknown $path is not an absolute path"
         return 0
     fi
-    # A doubled or trailing slash names the same component again, so both are removed before the split rather than becoming empty components the walk would have to skip.
+    # A doubled or trailing slash names the same component again.
+    # Both are therefore removed before the split rather than becoming empty components the walk would have to skip.
     while [[ $path == *//* ]]; do
         path="${path//\/\//\/}"
     done
     path="${path%/}"
-    # The trim above empties a path that was only slashes, which would otherwise walk no components at all and fall through to `present` without ever reaching the leaf test.
+    # The trim above empties a path that was only slashes.
+    # Such a path would otherwise walk no components at all and fall through to `present` without ever reaching the leaf test.
     # The root is a directory, so it gets the same answer any other non-regular-file leaf gets rather than a fifth state.
     if [[ -z $path ]]; then
         echo "damaged / is not a regular file"
         return 0
     fi
     local -a parts
-    # Split on `/` alone, since `read` stops at the first newline and a path component may hold one, and a split that fails answers rather than walking no components.
+    # Split on `/` alone, since `read` stops at the first newline and a path component may hold one.
+    # A split that fails answers rather than walking no components.
     readarray -d / -t parts < <(printf '%s' "${path#/}") || {
         echo "unknown $path could not be split into its components"
         return 0
@@ -56,8 +71,12 @@ secret_state() {
     for index in "${!parts[@]}"; do
         part="${parts[index]}"
         walked="$walked/$part"
-        # `-L` before `-e` throughout: a symlink that does not resolve answers false to `-e`, which is exactly the state a bare existence test reads as an absence.
-        # Reported as unresolved rather than as a missing target, since `-e` cannot separate a target that is gone from one that loops back on itself or, for a non-root account, one sitting behind a directory this account cannot enter, and asserting any one of them would claim more than the test established.
+        # `-L` before `-e` throughout: a symlink that does not resolve answers false to `-e`.
+        # That is exactly the state a bare existence test reads as an absence.
+        # Reported as unresolved rather than as a missing target.
+        # The reason is that `-e` cannot separate a target that is gone from one that loops back on itself.
+        # For a non-root account, it cannot separate either from one sitting behind a directory this account cannot enter.
+        # Asserting any one of those targets would claim more than the test established.
         if [[ -L $walked && ! -e $walked ]]; then
             echo "damaged $walked is a symlink that does not resolve, so $(unresolved_link_reason)"
             return 0
@@ -89,11 +108,15 @@ secret_state() {
 # `secret_shape_verdict` <path> [private|shared]
 # What `secret_verdict` below answers, from the file's metadata alone, without opening it.
 # `readable` where it is a regular file, not a symlink, gives group and other no access, and this account can read it.
-# `shared` drops the group and other check alone, for a secret a container reads as a Docker secret, which stays group and other readable by design.
+# `shared` drops the group and other check alone, for a secret a container reads as a Docker secret.
+# Such a secret stays group and other readable by design.
 # `absent` where nothing is there, which `secret_state` above establishes rather than infers, so a caller whose secret is optional may skip on it.
 # `refused <sentence>` for everything else, the sentence naming the path and why, so a caller prints it as the reason rather than composing its own.
-# A symlink is refused by name even where it resolves to a private file, since `stat -c %a` reads the link's own 777 rather than its target's mode, and a link is also a second place the file's content can be repointed from.
-# A caller running as root can call this one alone and run `secret_content_state` in the shell it reads the file with, so root never opens the file.
+# A symlink is refused by name even where it resolves to a private file.
+# One reason is that `stat -c %a` reads the link's own 777 rather than its target's mode.
+# Another is that a link is also a second place the file's content can be repointed from.
+# A caller running as root can call this one alone and run `secret_content_state` in the shell it reads the file with.
+# Root then never opens the file.
 secret_shape_verdict() {
     local path="$1" access="${2:-private}" state mode
     # Refused rather than normalized, since the caller reads the spelling it was given, and the kernel answers a trailing slash on a file with "Not a directory".
@@ -217,7 +240,8 @@ secret_set_verdict() {
 }
 
 # `require_secret` <path>
-# Succeeds only where `secret_verdict` answers `readable`, and otherwise prints why to stderr and fails, so a secret that must be there is one bare call before the line that sources it.
+# Succeeds only where `secret_verdict` answers `readable`, and otherwise prints why to stderr and fails.
+# That makes a secret that must be there one bare call before the line that sources it.
 # A bare call under `set -e` stops the script on that failure, where a call in an `if` or before `||` would not.
 require_secret() {
     local verdict
@@ -232,10 +256,15 @@ require_secret() {
 
 # `read_env_value` <env-file> <name>
 # Prints <name> as the env file named by <env-file> sets it, and fails where any line of that file fails.
-# A bash of its own rather than a subshell, because a caller reading this inside an `if` condition has errexit off in every subshell as well, so only the last line of the file would count.
-# The child also keeps `set -a` from exporting that file's credentials into anything this script spawns, and `unset` keeps an operator's already-sourced shell from standing in for the file.
-# The name is held in a variable of the child's own rather than read from `$2` at the end, since the file runs with the positional parameters in view and can change them.
-# What the file itself prints goes to /dev/null rather than into the value, and `BASH_ENV`, `POSIXLY_CORRECT` and `SHELLOPTS` are dropped so nothing but the file runs ahead of the read.
+# A bash of its own rather than a subshell.
+# That is because a caller reading this inside an `if` condition has errexit off in every subshell as well.
+# In a subshell only the last line of the file would count.
+# The child also keeps `set -a` from exporting that file's credentials into anything this script spawns.
+# Likewise `unset` keeps an operator's already-sourced shell from standing in for the file.
+# The name is held in a variable of the child's own rather than read from `$2` at the end.
+# The reason is that the file runs with the positional parameters in view and can change them.
+# What the file itself prints goes to /dev/null rather than into the value.
+# `BASH_ENV`, `POSIXLY_CORRECT` and `SHELLOPTS` are dropped so nothing but the file runs ahead of the read.
 # It checks nothing about the file, so a caller runs `require_secret` on it first.
 read_env_value() {
     # shellcheck disable=SC2016  # Every expansion belongs to the child bash.
