@@ -42,9 +42,8 @@ reach this particular repo.
      `host-setup/bootstrap.sh` or `bootstrap.ps1` keeps. That tree has no git, so `branch: null` there
      is not a detached checkout. A `live.commit` behind the hub's `main` is the answer. So is
      a null one, which means the bootstrap could not resolve the commit it fetched. Re-running
-     `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` is the fix. It takes `--dir` or `-Dir` naming
-     the parent of `live.checkout` where an earlier run kept the tree somewhere other than the
-     default. That is because re-running the installer from any other directory leaves an existing
+     `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` is the fix. Where an earlier run kept the tree somewhere other than the
+     default, give it `--dir` or `-Dir` naming the parent of `live.checkout`. That is because re-running the installer from any other directory leaves an existing
      registration where it is.
    - Where `live` carries no `vcs` and a non-null `commit`, it names a git checkout. One that
      is detached, `branch: null`, or on an old branch is an answer too. Moving that checkout
