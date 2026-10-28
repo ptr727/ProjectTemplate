@@ -86,8 +86,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `refusal=` in the digest line instead. So reading `status`'s exit code as the absence of a
    refusal would falsely satisfy this item on the exact state it exists to catch. That is where
    the unsatisfied item goes to the maintainer. The coverage the other reviewers gave that head is
-   read rather than counted, and named to them. Their permission under item 5 is what allows the
-   merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
+   read rather than counted, and named to the maintainer. The maintainer's permission under item 5
+   is what allows the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
 
    One further case satisfies this item where no coverage reaches the head, and it is the only
    such case. The maintainer adopted it as a standing rule. It applies to a develop -> main
@@ -137,7 +137,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `overview=T/M` beside the number of review threads that round opened. The digest's
    `FINDINGS WITH NO THREAD` block counts the findings the round names that no open entry links
    to a thread on the pull request. The round can name them in that count or in its findings
-   list. That is usually
+   list. What the block counts is usually
    findings the round withheld, the same blind spot under a different name, and sometimes the
    digest undercounting instead. Reading the review body is what tells the two apart, and nothing
    else does. So read it and dispose of what it holds as this section's outcomes require. `T`
@@ -225,8 +225,8 @@ must have done.
   since an advisory reviewer blocks nothing.
 - **Silence is not evidence, and is never read as one on its own.** A reviewer that has posted
   nothing may not have started yet, or may not cover this repository at all. Or it may have
-  reviewed and had nothing to say. Merge Gate item 2 describes that case as its own ordinary
-  shape, and it posts no comment to read. Read the reviews themselves rather than the comments alone, since the third
+  reviewed and had nothing to say. That case posts no comment to read, and Merge Gate item 2
+  describes it as its own ordinary shape. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
 - **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.**
   Merge Gate item 2 requires Copilot's own coverage of the current head. On a pull request into a
@@ -258,7 +258,7 @@ that says only "open a PR" is not such an instruction.
 Run every `scripts/pr_review.py` command below from a hub checkout. The script is hosted there and
 is never carried into a downstream repository.
 
-Run `local-strict-review` against the branch's current diff before every push this loop makes. That covers the push that opens the pull request in step 1 and each one after it. It holds whatever finding a push answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about. So a re-push of a tree a recorded pass already covers needs no second pass. The receipt is keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps the receipt only while the merge base holds. Rebasing onto a target that has moved retires the receipt although no file changed. That push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads. The hub's own `pre-push` hook is one, and a repository has none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around. That skill's refusal table says what each refusal means and what clears it.
+Run `local-strict-review` against the branch's current diff before every push this loop makes. The pass is owed before the push that opens the pull request in step 1 and each one after it. It is owed whatever finding a push answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about. So a re-push of a tree a recorded pass already covers needs no second pass. The receipt is keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps the receipt only while the merge base holds. Rebasing onto a target that has moved retires the receipt although no file changed. That push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads. The hub's own `pre-push` hook is one, and a repository has none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around. That skill's refusal table says what each refusal means and what clears it.
 
 1. Push changes to the PR branch and open the pull request when it does not exist. Once the push
    lands, run `uv run --no-project --script scripts/pr_review.py attest <number> --repo <owner>/<repo> --checkout <worktree>`.
@@ -300,7 +300,7 @@ is not a stopping condition here, and neither is patience running out. Reporting
 PR was opened is an early exit unless the maintainer explicitly instructed the agent not to
 monitor or drive its review.
 
-After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. For a merge into `develop` that procedure is `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`, run from a hub checkout. The pull request loop is incomplete while its finished worktree or local task branch remains. A promotion branch merged into `main` is the exception, which `repo-worktree` leaves for its sweep. It is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
+After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. For a merge into `develop` that procedure is `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`, run from a hub checkout. The pull request loop is incomplete while its finished worktree or local task branch remains. A promotion branch merged into `main` is the exception, which `repo-worktree` leaves for its sweep. The loop is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
 
 ## Every finding ends in a listed outcome
 
@@ -321,9 +321,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    impossible, or the rule that governs it. A finding that is factually correct but not this
    repo's to fix declines the same way. A verbatim-fidelity manifest entry byte-locking the section
    is one such case, and ownership that sits elsewhere is another. Name the boundary and cite what
-   proves it. So does a
-   hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules out,
-   citing that section and the input or deployment it turns on. Each shape closes the thread on
+   proves it. A hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort"
+   rules out declines the same way, citing that section and the input or deployment it turns on. Each shape closes the thread on
    its own evidence, and the agent resolves such a thread itself rather than leaving it for the
    maintainer. What makes that safe is the evidence being checkable by anyone,
    a command and its output, the code path, the quoted rule, a byte-identical diff. So a decline
@@ -332,8 +331,7 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    answer it.
 3. **Real, fixable here, but deliberately left as is, a value call rather than a scope
    boundary, so it is the maintainer's, not the agent's.** Reach for this only once outcome 2 is
-   ruled out, since a scope boundary declines on its own evidence. It never needs this outcome at
-   all. State the finding and why the fix is unwanted, and get an explicit answer in the same
+   ruled out, since a scope boundary declines on its own evidence and never needs this outcome. State the finding and why the fix is unwanted, and get an explicit answer in the same
    turn, before moving to other work. A plan to ask later is resolution by silence the moment
    attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
    and say so, rather than treating the intention to ask as the asking.
@@ -429,12 +427,12 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
   or not. Quote its raw text in the escalation.
 
 An agent that cannot reach the maintainer directly escalates to whoever dispatched it and stops
-that unit of work there. A dispatched subagent is the ordinary case. It never substitutes its own
+that unit of work there. A dispatched subagent is the ordinary case. Such an agent never substitutes its own
 judgment for the escalation because asking is inconvenient from where it sits. It never resolves
 the thread to keep moving either. A dispatcher receiving one puts it to the maintainer at the point
 that work stopped, per `GOVERNANCE.md` "Communicating with the User". This skill's own
-ask-the-maintainer outcome forbids resolution by silence. Deciding it instead, so the
-dispatcher's own work keeps moving, is that same resolution, one seat further from the
+ask-the-maintainer outcome forbids resolution by silence. Deciding the escalated question instead, so
+the dispatcher's own work keeps moving, is that same resolution, one seat further from the
 maintainer. The escalation may travel through several seats. What stays stopped is the
 escalated unit of work, in whichever seat holds it, until the answer arrives. A dispatcher's other
 work is not stopped by it.

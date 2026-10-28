@@ -50,8 +50,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
   go-ahead sits with the dispatcher. A worker inventing a check it cannot perform would only
   launder that responsibility rather than discharge it.
 - **A brief is never itself the authorization**, which binds the dispatching seat. What authorizes
-  a merge is what the maintainer said, recorded where the skill that carries the grant states its
-  scope. `backlog-burndown`'s own "What Invoking This Skill Authorizes" records one that way.
+  a merge is what the maintainer said. It is recorded where the skill that carries the grant states
+  its scope, the way `backlog-burndown`'s own "What Invoking This Skill Authorizes" does.
   Writing an approval into a brief creates none, since an agent cannot widen its own permission by
   writing itself one. And a merge is the outward-facing act this skill's own "What Invoking This Skill
   Authorizes" keeps tied to something the maintainer actually said.
@@ -174,9 +174,8 @@ maintainer when".
    impossible, or the rule that governs it. A finding that is factually correct but not this
    repo's to fix declines the same way. A verbatim-fidelity manifest entry byte-locking the section
    is one such case, and ownership that sits elsewhere is another. Name the boundary and cite what
-   proves it. So does a
-   hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules out,
-   citing that section and the input or deployment it turns on. Each shape closes the thread on
+   proves it. A hardening finding that `GOVERNANCE.md` "Trust Boundaries and Hardening Effort"
+   rules out declines the same way, citing that section and the input or deployment it turns on. Each shape closes the thread on
    its own evidence, and the agent resolves such a thread itself rather than leaving it for the
    maintainer. What makes that safe is the evidence being checkable by anyone,
    a command and its output, the code path, the quoted rule, a byte-identical diff. So a decline
@@ -185,8 +184,7 @@ maintainer when".
    answer it.
 3. **Real, fixable here, but deliberately left as is, a value call rather than a scope
    boundary, so it is the maintainer's, not the agent's.** Reach for this only once outcome 2 is
-   ruled out, since a scope boundary declines on its own evidence. It never needs this outcome at
-   all. State the finding and why the fix is unwanted, and get an explicit answer in the same
+   ruled out, since a scope boundary declines on its own evidence and never needs this outcome. State the finding and why the fix is unwanted, and get an explicit answer in the same
    turn, before moving to other work. A plan to ask later is resolution by silence the moment
    attention moves elsewhere. If the maintainer is not reachable right now, leave the thread open
    and say so, rather than treating the intention to ask as the asking.
