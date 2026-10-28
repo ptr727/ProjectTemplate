@@ -106,7 +106,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    so the hosted review runs once per change, at the promotion in step 6.
 4. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
-   call. That is because it is run from inside the task's own worktree per step 1, where the
+   call. It is run from inside the task's own worktree per step 1, where the
    feature branch is checked out. `gh pr merge --delete-branch` needs to switch that worktree to
    the base branch to delete it. That fails when `develop` is already checked out somewhere else,
    the ordinary case in this layout. Instead run repo-worktree's post-merge cleanup with
