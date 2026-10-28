@@ -252,8 +252,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    over a read window that filled, is a read that cannot run. So the picker returns `STOP` rather
    than ranking a partial list. Picker step 3 and the worker's `decision` read each apply **the
    full-page check** to their own `gh issue list` reads. The check is that a read returning as many
-   rows as its limit may be truncated. Applying it means raising the limit and reading again until a
-   read returns fewer.
+   rows as its limit may be truncated. Where a read does, raise the limit and read again until one
+   returns fewer.
 2. **Prefer an open `auto-*` handoff not carrying `blocked`**, oldest first. That is a lane an
    earlier run parked and the maintainer has since unblocked, or one whose worker died. A live link
    is work already framed. Handoffs on any other track belong to the maintainer's attended lanes and
