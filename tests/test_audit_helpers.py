@@ -2865,9 +2865,9 @@ class CoverageTypesCase(unittest.TestCase):
         candidate_cases = [
             (
                 ["csharp", "python"],
-                {"csharp": "lint-only"},
+                {"csharp": "lint-only", "python": "lint-only"},
                 ["python"],
-                "Python, which declares no registry profile, still owes coverage",
+                "only Python's lint-only owes coverage",
             ),
             (["csharp"], {"csharp": "build"}, ["csharp"], "a build language stays a candidate"),
             (["csharp"], None, ["csharp"], "a malformed profiles value is read as none"),
