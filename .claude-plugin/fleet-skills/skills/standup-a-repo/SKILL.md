@@ -53,7 +53,7 @@ maintainer can supply what section 0A lists.
 
 4. **The instruction set, before authoring anything.** STANDUP.md section 1A. An existing
    repository that `docs/eol-lf-rollout.md` "Per-Repo Conversion" says needs a line-ending
-   conversion lands that conversion first, as its own merged pull request. The feature
+   conversion lands that conversion first, as its own merged pull request. In that case, the feature
    branch from step 2 is cut again from `develop` after that pull request merges. Then carry `CLAUDE.md`,
    `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
