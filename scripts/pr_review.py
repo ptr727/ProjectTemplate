@@ -843,16 +843,15 @@ def digest(
     checks = check_nodes(pr) if checks is None else checks
     refusal = digest_refusal(pr)
     quota = confirmed_quota(owner, repo, refusal) if refusal else ""
-    out, unresolved = render(
-        owner, repo, num, pr, checks, now, grace, stall, quota, seen, HUB, WINDOW
-    )
     reading = ""
     if refusal and possible_quota(refusal) and not quota:
         reading = run_log_reading(*transient_state(owner, repo, num, pr, refusal)) or (
             "  RUN LOG READING: possible quota. The run log was unread or names neither a rate "
             "limit nor a transient fetch failure"
         )
-    return (f"{out}\n{reading}" if reading else out), unresolved
+    return render(
+        owner, repo, num, pr, checks, now, grace, stall, quota, reading, seen, HUB, WINDOW
+    )
 
 
 def report_verdict(pr: dict) -> int:

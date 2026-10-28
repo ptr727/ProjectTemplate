@@ -87,6 +87,7 @@ def render(
     grace: float,
     stall: float,
     quota: str,
+    run_log: str,
     seen: set[str] | None,
     hub: str,
     window: int,
@@ -94,7 +95,8 @@ def render(
     """Render the digest and return it with the unresolved count.
 
     `quota` is the run log's rate-limit sentence for the refusal `digest_refusal` names, read by the
-    caller. Where `seen` is a set, only threads absent from it print, marked new, and are added.
+    caller. `run_log` is the caller's `RUN LOG READING` line for that refusal, empty for none.
+    Where `seen` is a set, only threads absent from it print, marked new, and are added.
     """
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
@@ -213,14 +215,16 @@ def render(
     if refusal:
         lines.append(
             "  COPILOT REFUSED THIS ROUND: the newest Copilot review on this pull request says "
-            "it did not review, so it covers nothing and re-requesting repeats it, and the body "
-            "below is what says which remedy applies"
+            "it did not review, so it covers nothing. The body below, and any run log line under "
+            "it, say whether a re-request is owed or repeats the refusal"
         )
         lines += [
             f"    {ln.rstrip()}" for ln in (refusal.get("body") or "").splitlines() if ln.strip()
         ]
         if quota:
             lines.append(f"  RATE LIMIT FROM THE REVIEWER'S RUN LOG: {quota}")
+        if run_log:
+            lines.append(run_log)
     if notes:
         lines.append(
             f"  REVIEWER OUTPUT NOTED ({len(notes)}): the reader placed part of what the reviewer "
