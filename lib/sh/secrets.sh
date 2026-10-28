@@ -2,7 +2,7 @@
 
 # Meant to be sourced, never run: `. "$REPO/lib/fleet/sh/secrets.sh"` from a script that has already found its own tree through `BASH_SOURCE`.
 # It sets no shell option, since sourcing it would change the caller's own.
-# Every function answers through its output or its status under any of them.
+# Every function answers through its output or its status under any shell option.
 #
 # The hub hosts this file and a repository carries it byte-for-byte, per GOVERNANCE.md "Hub-Hosted Tooling".
 # So a repository extends it in a file of its own outside the carried directory that sources it, never by editing it.
@@ -12,10 +12,10 @@
 
 # `unresolved_link_reason`
 # Echoes the clause that says why a symlink answering `-L` true and `-e` false does not resolve.
-# It is worded for the account running it, so every site that reports such a link composes one sentence instead of spelling its own.
+# The clause is worded for the account running it.
+# Every site that reports such a link thereby composes one sentence instead of spelling its own.
 # Root with its DAC override enters every directory.
-# A link it cannot resolve therefore has a target that is missing or loops back on itself.
-# The clause says only that.
+# A link it cannot resolve therefore has a target that is missing or loops back on itself, and the clause says only that.
 # A uid 0 without the override, such as one in a user namespace facing an unmapped owner, is read as root all the same.
 # Any other account cannot tell those two from a target sitting behind a directory it cannot enter, and the clause names all three.
 # A caller that tells the two wordings apart does so by the ending ` sits behind a directory this account cannot enter`, fixed text here.
@@ -29,17 +29,16 @@ unresolved_link_reason() {
 
 # `secret_state` <path>
 # One word for what a secret file is, because a gate that skips on a bare `-f` reads four unrelated states as one.
-# The reason is that `-f` answers false for each of them.
+# The gate does so because `-f` answers false for each of them.
 # `absent` only where nothing is at the path and every directory leading to it is one this account can actually enter.
 # It is the single state a gate may skip on.
 # `damaged <sentence>` where the path or a directory leading to it is a symlink that does not resolve.
 # `damaged <sentence>` also where the path or a directory leading to it is present in a shape a secret cannot be read from.
 # `unknown <sentence>` where a directory leading to it cannot be entered, or the path is not absolute.
-# In both cases the path's absence was never established rather than observed.
+# In those cases the path's absence was never established rather than observed.
 # `present` where a regular file is there.
-# The walk starts at the root rather than at the immediate parent.
-# The reason is that a single unenterable ancestor makes every component below it answer false to `-e`.
-# That would otherwise read as a proven absence.
+# The walk starts at the root, not the immediate parent, since a single unenterable ancestor makes every component below it answer false to `-e`.
+# That answer would otherwise read as a proven absence.
 # See `secret_verdict` below for the full check built on it.
 secret_state() {
     local path="$1" walked="" part index last
@@ -75,8 +74,8 @@ secret_state() {
         # That is exactly the state a bare existence test reads as an absence.
         # Reported as unresolved rather than as a missing target.
         # The reason is that `-e` cannot separate a target that is gone from one that loops back on itself.
-        # For a non-root account, it cannot separate either from one sitting behind a directory this account cannot enter.
-        # Asserting any one of those targets would claim more than the test established.
+        # For a non-root account, it cannot separate a target that is gone from one sitting behind a directory this account cannot enter.
+        # The same reason covers asserting any one of those targets, which would claim more than the test established.
         if [[ -L $walked && ! -e $walked ]]; then
             echo "damaged $walked is a symlink that does not resolve, so $(unresolved_link_reason)"
             return 0
@@ -116,7 +115,7 @@ secret_state() {
 # One reason is that `stat -c %a` reads the link's own 777 rather than its target's mode.
 # Another is that a link is also a second place the file's content can be repointed from.
 # A caller running as root can call this one alone and run `secret_content_state` in the shell it reads the file with.
-# Root then never opens the file.
+# That way root never opens the file.
 secret_shape_verdict() {
     local path="$1" access="${2:-private}" state mode
     # Refused rather than normalized, since the caller reads the spelling it was given, and the kernel answers a trailing slash on a file with "Not a directory".
@@ -258,7 +257,7 @@ require_secret() {
 # Prints <name> as the env file named by <env-file> sets it, and fails where any line of that file fails.
 # A bash of its own rather than a subshell.
 # That is because a caller reading this inside an `if` condition has errexit off in every subshell as well.
-# In a subshell only the last line of the file would count.
+# For such a caller, a subshell would count only the last line of the file.
 # The child also keeps `set -a` from exporting that file's credentials into anything this script spawns.
 # Likewise `unset` keeps an operator's already-sourced shell from standing in for the file.
 # The name is held in a variable of the child's own rather than read from `$2` at the end.
