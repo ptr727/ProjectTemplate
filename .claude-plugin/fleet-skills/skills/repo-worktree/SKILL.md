@@ -84,7 +84,7 @@ original repo and a fork alike. A fork is named `<upstream-owner>-<upstream-repo
 unique in the flat namespace without an owner segment of its own. A repository adopted as the
 owner's own work rather than kept as a fork is detached from its parent. That repository keeps a plain name, `widget` rather than `initech-widget`, since it no longer tracks anything upstream.
 
-A clone of a repository under another owner is neither of those. Flattening one collides rather than merely reading oddly. That is because `acme/core` joined the way a fork is joined **is** the fork's name, `acme-core`. That is also because, reduced to a bare `core`, `acme/core` names no project and collides with the next
+A clone of a repository under another owner is neither of those. Flattening one collides rather than merely reading oddly. The reason is that `acme/core` joined the way a fork is joined **is** the fork's name, `acme-core`. Reduced instead to a bare `core`, `acme/core` names no project and collides with the next
 `core` cloned from any other owner. Those clones live one level down under `upstream/`, named by
 that same join, so `upstream/acme-core` sits beside the fork it would otherwise land on. The
 segment states the relationship rather than the owner, so a reference checkout is told from a
