@@ -1,8 +1,12 @@
 # Installs the WSL distributions this host runs, and reports how Docker Desktop is integrated with them.
-# It is a fourth script rather than part of upgrade-host.ps1, because installing a distribution stands a new environment up where a platform update brings this one current, and those are different actions on different subjects.
+# It is a fourth script rather than part of upgrade-host.ps1.
+# This is because installing a distribution stands a new environment up, where a platform update brings this one current.
+# It is also because those are different actions on different subjects.
 #
 # The Docker integration is reported and never written.
-# Docker Desktop holds these settings in memory and rewrites its settings file from that copy while it runs, so an edit made here is discarded at Docker's next save and an edit made while it is stopped is undone by the next start.
+# Docker Desktop holds these settings in memory and rewrites its settings file from that copy while it runs.
+# An edit made here is therefore discarded at Docker's next save.
+# An edit made while it is stopped is likewise undone by the next start.
 
 [CmdletBinding()]
 param(
@@ -28,7 +32,8 @@ $DOCKER_DISTRIBUTIONS = @('docker-desktop', 'docker-desktop-data')
 $SETTINGS = Join-Path $env:APPDATA 'Docker\settings-store.json'
 
 # Every parameter is read into a variable here rather than from inside a function.
-# A script parameter reached only from a nested scope reads as declared and never used, which is a finding on each one and hides a parameter that genuinely is unused.
+# A script parameter reached only from a nested scope reads as declared and never used.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     status  = [bool]$Status
     list    = [bool]$List
@@ -100,7 +105,9 @@ function run {
         return 0
     }
     # The command's own output goes to the console rather than down the pipeline.
-    # A native command writes to this function's output stream, so without this the caller receives every line the command printed with the exit code appended, and a check against 0 then compares against the first line of output.
+    # A native command writes to this function's output stream.
+    # Without this the caller receives every line the command printed with the exit code appended.
+    # A check against 0 then compares against the first line of output.
     & $Command @Arguments | Out-Host
     return $LASTEXITCODE
 }
@@ -118,7 +125,8 @@ function confirm {
 # --- WSL ---
 
 # Every wsl.exe call goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
-# WSL_UTF8 changes what wsl.exe emits, where setting the console encoding would only change how this process decodes it and would corrupt in-distribution output that is already UTF-8.
+# WSL_UTF8 changes what wsl.exe emits.
+# Setting the console encoding instead would only change how this process decodes it, and would corrupt in-distribution output that is already UTF-8.
 # A host whose WSL predates WSL_UTF8 still answers in UTF-16, so a result carrying a NUL is stripped rather than reported as unreadable.
 function Invoke-Wsl {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
@@ -185,7 +193,9 @@ function Get-WslAvailable {
 # --- Docker ---
 
 # How Docker Desktop records its WSL integration, read from its settings file.
-# Reported and never written: Docker holds these in memory and rewrites the file from that copy while it runs, so an edit here is discarded at its next save.
+# Reported and never written.
+# Docker holds these in memory and rewrites the file from that copy while it runs.
+# An edit here is therefore discarded at its next save.
 function Get-DockerIntegration {
     if (-not (Test-Path $script:SETTINGS)) { return $null }
     try {
@@ -294,7 +304,8 @@ function Install-Distribution {
     }
     $wanted = $script:WANT_NAMES[0]
 
-    # Checked against the index rather than left to wsl, whose failure for an unknown name is a long help text rather than a message naming the problem.
+    # Checked against the index rather than left to wsl.
+    # Its failure for an unknown name is a long help text rather than a message naming the problem.
     $available = Get-WslAvailable
     if ($available.Count -gt 0 -and ($available | ForEach-Object { $_.Name }) -notcontains $wanted) {
         die "`"$wanted`" is not a distribution this host can install, and -List names the ones it can"
@@ -310,7 +321,8 @@ function Install-Distribution {
     if (-not (confirm "Install $($wanted)?")) { die 'Declined' }
 
     step "Installing $wanted"
-    # The first run account setup is skipped, which is what makes this safe unattended, and it leaves the distribution with no user until somebody launches it.
+    # The first run account setup is skipped, which is what makes this safe unattended.
+    # Skipping it leaves the distribution with no user until somebody launches it.
     $code = run -Command 'wsl.exe' -Arguments '--install', $wanted, '--no-launch'
     if ($code -ne 0) { die "wsl --install exited $code" }
 

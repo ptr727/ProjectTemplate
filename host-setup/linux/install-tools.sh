@@ -1,11 +1,15 @@
 #!/bin/bash
 
 # Installs and upgrades the host tools the fleet's repositories expect, on Debian and Ubuntu based hosts, Proxmox included.
-# A tool comes from the distro where the distro package keeps up, and from upstream where it does not: an apt repository where upstream publishes one, a released binary where it does not.
+# A tool comes from the distro where the distro package keeps up, and from upstream where it does not.
+# From upstream it comes as an apt repository where upstream publishes one, and as a released binary where it does not.
 # No version is written into this script, and each upstream is asked what it carries now, so the script does not go stale between releases.
 #
 # Every step is idempotent.
-# A keyring or sources file is written only when its content differs, a binary is fetched only when the installed version differs, and apt is refreshed only when a sources file changed.
+# The following happen only on a change:
+#   - a keyring or sources file is written only when its content differs
+#   - a binary is fetched only when the installed version differs
+#   - apt is refreshed only when a sources file changed
 # Re-running repairs drift rather than assuming a clean host.
 
 set -Eeuo pipefail
@@ -17,7 +21,8 @@ readonly BIN_DIR="/usr/local/bin"
 # The sudo credential cache drop-in, named for the tooling that writes it, and numbered to sort after a drop-in that arrived with a package.
 readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
 
-# Minutes the cache stays valid, long enough to cover a run started from another terminal and short enough that a host left alone does not stay elevated.
+# Minutes the cache stays valid.
+# The value is long enough to cover a run started from another terminal and short enough that a host left alone does not stay elevated.
 readonly SUDO_TIMESTAMP_TIMEOUT=60
 
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
@@ -26,7 +31,8 @@ readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet
 MANAGED_TOOLS=("${TOOLS[@]}")
 
 # Package sets.
-# The default set is what a tool needs to be useful, and the optional set is what is useful often enough to name but not always wanted, installed only with --optional.
+# The default set is what a tool needs to be useful.
+# The optional set is what is useful often enough to name but not always wanted, installed only with --optional.
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
@@ -262,7 +268,8 @@ confirm() {
     [[ $reply == [yY] || $reply == [yY][eE][sS] ]]
 }
 
-# A minimal install carries no curl, and without this guard the caller sees "command not found" from inside a command substitution, which reads as an answer rather than as a failure.
+# A minimal install carries no curl.
+# Without this guard the caller sees "command not found" from inside a command substitution, which reads as an answer rather than as a failure.
 fetch() {
     command -v curl >/dev/null || return 1
     curl -fsSL --retry 2 --connect-timeout 10 "$@"
@@ -293,7 +300,9 @@ apt_refresh() {
 }
 
 # Install packages.
-# Installing leaves an installed package at its version, so an apt upgrade of a tool the caller did not ask to upgrade cannot ride along, and upgrading passes everything to apt.
+# Installing leaves an installed package at its version.
+# So an apt upgrade of a tool the caller did not ask to upgrade cannot ride along.
+# Upgrading passes everything to apt.
 apt_install() {
     local -a wanted=()
     local package
@@ -310,7 +319,9 @@ apt_install() {
 }
 
 # Packages from a set that are not installed, one per line.
-# Whether a package is installed is asked of dpkg rather than of apt, here and in the sibling scripts, because dpkg answers about the installed state while apt-cache also carries a candidate, and the two disagree on a host whose lists are stale.
+# Whether a package is installed is asked of dpkg rather than of apt, here and in the sibling scripts.
+# This is because dpkg answers about the installed state while apt-cache also carries a candidate.
+# It is also because dpkg and apt-cache disagree on a host whose lists are stale.
 # The candidate is still what apt_candidate_version reports, since that is the question the report asks.
 package_installed() {
     dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
@@ -325,10 +336,18 @@ apt_missing() {
 }
 
 # Whether dpkg owns the file at a path, checking the path as given and, when that misses, its directory canonicalized.
-# On a merged-usr host built after that host's own usrmerge, /bin and /sbin are symlinks into their /usr counterparts and a package records only the canonical /usr/bin or /usr/sbin spelling, so a path spelled through the symlinked directory (/bin/jq) answers "no path found" from dpkg-query -S even when /usr/bin/jq, the same file, is dpkg-owned.
-# A package that predates that host's usrmerge, common on Debian bookworm and Ubuntu jammy/noble, keeps its file list under the pre-merge /bin or /sbin spelling instead, so the given path is checked first rather than only a canonicalized one.
-# Only the directory is canonicalized, never the file name: resolving the leaf too would make a plain, unowned symlink that happens to point at a dpkg-owned file (a hand-installed /usr/local/bin/jq -> /usr/bin/jq, say) misreport as owned.
-# Propagates dpkg-query's own exit status (0 owned, 1 not found, anything else an error) from whichever of the two lookups actually ran, so a caller distinguishing them still can.
+# On a merged-usr host built after that host's own usrmerge, /bin and /sbin are symlinks into their /usr counterparts.
+# A package on such a host records only the canonical /usr/bin or /usr/sbin spelling.
+# A path spelled through the symlinked directory (/bin/jq) therefore answers "no path found" from dpkg-query -S.
+# That holds even when /usr/bin/jq, the same file, is dpkg-owned.
+# A package that predates that host's usrmerge keeps its file list under the pre-merge /bin or /sbin spelling instead.
+# This is common on Debian bookworm and Ubuntu jammy/noble.
+# The given path is therefore checked first rather than only a canonicalized one.
+# Only the directory is canonicalized, never the file name.
+# Resolving the leaf too would make a plain, unowned symlink that happens to point at a dpkg-owned file misreport as owned.
+# One example is a hand-installed /usr/local/bin/jq -> /usr/bin/jq.
+# Propagates dpkg-query's own exit status (0 owned, 1 not found, anything else an error) from whichever of the two lookups actually ran.
+# A caller distinguishing them can therefore still do so.
 dpkg_owns_path() {
     local path="$1" status dir canonical_dir
     dpkg-query -S "$path" >/dev/null 2>&1
@@ -355,7 +374,8 @@ apt_install_displacing() {
         return 0
     fi
 
-    # The simulation is what removals are previewed from, so a simulation that fails to run at all must not read the same as a simulation that ran and found nothing to remove.
+    # The simulation is what removals are previewed from.
+    # A simulation that fails to run at all must therefore not read the same as a simulation that ran and found nothing to remove.
     local sim
     sim=$(apt-get -s install "$package" 2>&1) ||
         die "apt-get -s install $package failed, so removals cannot be previewed before the real install runs: $sim"
@@ -526,7 +546,8 @@ jq_install() {
 
 git_restore_mtime_source() { printf 'MestreLion/git-tools'; }
 
-# Read the version out of the installed script rather than by running it, so a host that is missing the python3 the script runs on still reports what it has.
+# Read the version out of the installed script rather than by running it.
+# A host that is missing the python3 the script runs on then still reports what it has.
 git_restore_mtime_version() {
     local path version
     path=$(command -v git-restore-mtime) || return 0
@@ -537,7 +558,10 @@ git_restore_mtime_version() {
     printf '%s' "$version"
 }
 
-# Upstream attaches no asset to a release, so the script is taken from the tree at the latest release tag rather than from the default branch: a tag is a fixed revision that installs the same bytes twice, where the branch is whatever it holds at the moment of the fetch.
+# Upstream attaches no asset to a release.
+# The script is therefore taken from the tree at the latest release tag rather than from the default branch.
+# A tag is a fixed revision that installs the same bytes twice.
+# The branch is whatever it holds at the moment of the fetch.
 # The version is read from the file that gets installed, so the reported version is the installed one either way.
 git_restore_mtime_fetch() {
     local staged="$TMP_DIR/git-restore-mtime" tag
@@ -576,7 +600,9 @@ node_lts_major() {
     if command -v jq >/dev/null; then
         version=$(jq -r 'first(.[] | select(.lts != false)) | .version' "$index")
     else
-        # One pass over the file rather than a pipeline: upstream serves this index without spaces today and nothing promises that, so the whitespace JSON allows is tolerated, and a reader that stopped early would leave its producer writing to a closed pipe under pipefail.
+        # One pass over the file rather than a pipeline, for the reasons below.
+        # Upstream serves this index without spaces today and nothing promises that, so the whitespace JSON allows is tolerated.
+        # A reader that stopped early would leave its producer writing to a closed pipe under pipefail.
         version=$(awk -v RS='}' '
             !found && /"lts"[[:space:]]*:[[:space:]]*"/ {
                 if (match($0, /"version"[[:space:]]*:[[:space:]]*"v?[0-9]+/)) {
@@ -674,7 +700,8 @@ uv_version() {
     uv --version 2>/dev/null | awk '{ print $2 }'
 }
 
-# Upstream tags without a leading v today, and the installed version never carries one, so the tag is normalized rather than trusted: a tag that gains a prefix would otherwise read as permanently outdated and re-download on every run.
+# Upstream tags without a leading v today, and the installed version never carries one, so the tag is normalized rather than trusted.
+# A tag that gains a prefix would otherwise read as permanently outdated and re-download on every run.
 uv_target() {
     local tag
     tag=$(github_latest_tag "astral-sh/uv") || return 1
@@ -719,10 +746,14 @@ docker_source() {
 }
 
 # Read directly from the CLI rather than from apt_installed_version docker-ce, unlike gh and node.
-# On a WSL distribution using Docker Desktop's own WSL integration, docker is a working command with no docker-ce apt package behind it at all, and reading the apt package version would misreport that working install as absent.
+# On a WSL distribution using Docker Desktop's own WSL integration, docker is a working command with no docker-ce apt package behind it at all.
+# Reading the apt package version would misreport that working install as absent.
 # This also matches exactly what scripts/host_gate.py's own probes and pattern read, in the same order, so the two never disagree about one host.
-# The daemon is asked first and its own banner is the fallback, because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine, and the two carry different versions (a 29.1.3 client against a 29.7.2 engine was measured).
-# A stopped or unreachable daemon makes the first reading exit non-zero, which is what the banner answers, so this reports the weaker number rather than nothing.
+# The daemon is asked first and its own banner is the fallback.
+# This is because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine.
+# It is also because the two carry different versions (a 29.1.3 client against a 29.7.2 engine was measured).
+# A stopped or unreachable daemon makes the first reading exit non-zero, which is what the banner answers.
+# So this reports the weaker number rather than nothing.
 docker_version() {
     command -v docker >/dev/null || return 0
     local engine
@@ -734,8 +765,11 @@ docker_version() {
     docker --version 2>/dev/null | sed -n 's/^Docker version \([0-9][0-9.]*\).*/\1/p'
 }
 
-# Stripped of the epoch and the Debian package revision apt_candidate_version otherwise carries (e.g. "5:29.7.2-1~debian.13~trixie"), so this compares like for like against docker_version's plain reading rather than against dpkg's own packaging metadata.
-# Only the native path reaches here, where the engine docker_version reports and the docker-ce package this reads are the same install, so the two remain comparable now that the engine is what it asks for.
+# Stripped of the epoch and the Debian package revision apt_candidate_version otherwise carries (e.g. "5:29.7.2-1~debian.13~trixie").
+# It therefore compares like for like against docker_version's plain reading rather than against dpkg's own packaging metadata.
+# Only the native path reaches here.
+# There the engine docker_version reports and the docker-ce package this reads are the same install.
+# The two therefore remain comparable now that the engine is what it asks for.
 docker_target() {
     local raw
     raw=$(apt_candidate_version docker-ce)
@@ -745,10 +779,13 @@ docker_target() {
 }
 
 # Old and conflicting packages named here, per Docker's own uninstall list.
-# Debian and Ubuntu never ship a package named docker-ce, so unlike gh and node there is no distro package the upstream one could be confused with, and tool_configured needs no entry for it.
+# Debian and Ubuntu never ship a package named docker-ce.
+# So unlike gh and node there is no distro package the upstream one could be confused with.
+# The function tool_configured therefore needs no entry for it.
 docker_install() {
     # The only sanctioned source inside a WSL distribution is Docker Desktop's own WSL integration, confirmed with the maintainer as a hard rule with no override.
-    # A native install here would run a second engine beside Desktop's, so this is always a skip rather than an install, on the same pattern dotnet_feed uses for an architecture Microsoft's feed does not carry.
+    # A native install here would run a second engine beside Desktop's.
+    # So this is always a skip rather than an install, on the same pattern dotnet_feed uses for an architecture Microsoft's feed does not carry.
     if [[ $IS_WSL == true ]]; then
         warn "This is a WSL distribution, and docker here comes only from Docker Desktop's own WSL integration, never from installing docker-ce directly. Enable it in Docker Desktop under Settings, Resources, WSL integration, or check it from Windows with setup-wsl.ps1 -Status. Skipping the native install."
         # A skip is success only where the integration already answers, since --install/--upgrade otherwise exits 0 having neither installed docker nor found it working.
@@ -786,7 +823,8 @@ docker_install() {
 
     apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-    # Non-root use (usermod -aG docker $USER) is left to the operator, the same way this file leaves orphaned dependencies to a later apt autoremove: it is a user/group choice rather than a question of whether the tool is present and current.
+    # Non-root use (usermod -aG docker $USER) is left to the operator, the same way this file leaves orphaned dependencies to a later apt autoremove.
+    # This is because non-root use is a user/group choice rather than a question of whether the tool is present and current.
 }
 
 # --- dotnet ---
@@ -821,10 +859,13 @@ dotnet_target() {
     apt_candidate_version "$package"
 }
 
-# Microsoft's feed is the fallback rather than the default: where the distro carries .NET, mixing the two feeds is what breaks a host, and Microsoft's feed carries amd64 only.
+# Microsoft's feed is the fallback rather than the default, for these reasons:
+#   - where the distro carries .NET, mixing the two feeds is what breaks a host
+#   - Microsoft's feed carries amd64 only
 dotnet_feed() {
     # The decision rests on what the distro feed carries, so it is made against lists that have been read at least once.
-    # A host whose lists were never populated reports no SDK at all, and adding Microsoft's feed to a distribution that ships its own is the mixing this exists to avoid.
+    # A host whose lists were never populated reports no SDK at all.
+    # Adding Microsoft's feed to a distribution that ships its own is the mixing this exists to avoid.
     apt_refresh
 
     [[ -n $(dotnet_sdk_latest) ]] && return 0
@@ -840,7 +881,9 @@ dotnet_feed() {
 # Register Microsoft's apt repository, the feed powershell always needs and dotnet falls back to when the distro carries no SDK.
 # The upstream deb is the whole registration, keyring and sources file in one, so this installs it rather than reimplementing it with install_keyring and write_sources.
 microsoft_feed() {
-    # The feed already configured is the fast path, so a repeat run or a run selecting both dotnet and powershell does not re-install the deb and force the apt refresh this file reserves for a changed sources file.
+    # The feed already configured is the fast path.
+    # A repeat run, or a run selecting both dotnet and powershell, therefore does not re-install the deb.
+    # Nor does it force the apt refresh this file reserves for a changed sources file.
     if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
         return 0
     fi
@@ -853,7 +896,8 @@ microsoft_feed() {
     apt_refresh
 }
 
-# The default set is the newest SDK, and the optional set is every other SDK line the feed carries, for a host that has to build against more than one.
+# The default set is the newest SDK.
+# The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
     dotnet_feed || return 0
 
@@ -962,7 +1006,8 @@ tool_function() {
 }
 
 # Whether a tool's upstream repository is in place.
-# A tool installed from the distro while its upstream repository is unconfigured reads as current against the distro's own version, which is the one thing the report must not say, so it reads as unmanaged instead.
+# A tool installed from the distro while its upstream repository is unconfigured reads as current against the distro's own version.
+# That is the one thing the report must not say, so it reads as unmanaged instead.
 tool_configured() {
     case "$1" in
     gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
@@ -999,7 +1044,9 @@ tool_status() {
 }
 
 # Puts $BIN_DIR first on PATH when the caller's PATH leaves it out, as a cron job's /usr/bin:/bin does.
-# Every managed binary this script installs lives there, so without it a managed copy reads as missing and a distro copy reads as the answer, with a false note that it shadows the managed one.
+# Every managed binary this script installs lives there.
+# So without it a managed copy reads as missing.
+# A distro copy then reads as the answer, with a false note that it shadows the managed one.
 # A caller whose PATH names $BIN_DIR keeps its own order, so a copy ahead of it is still reported as the real shadow it is.
 ensure_bin_dir_on_path() {
     local dir
@@ -1106,7 +1153,8 @@ tool_note() {
         fi
         ;;
     powershell)
-        # A host without the feed reads no candidate at all, since the distro never carries a powershell package, so the note says why rather than reading as absent.
+        # A host without the feed reads no candidate at all, since the distro never carries a powershell package.
+        # So the note says why rather than reading as absent.
         if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
             note "powershell" "Microsoft's repository is not configured, so no package is available yet"
         fi
@@ -1243,7 +1291,9 @@ tool_unshadow() {
 
 # Install or upgrade one tool.
 # A tool whose install returns non-zero is collected rather than fatal, so one failure does not strand the rest of the run.
-# A refusal is not a failure and does end the run: an unverifiable keyring, a checksum mismatch, or a declined prompt stops everything rather than being collected, because continuing past one would install something nobody vouched for.
+# A refusal is not a failure and does end the run.
+# An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything rather than being collected.
+# This is because continuing past one would install something nobody vouched for.
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
@@ -1267,7 +1317,8 @@ apply_tool() {
 
     # Unshadowing first is safe only when nothing at $BIN_DIR could be made worse by it.
     # --upgrade brings $BIN_DIR current regardless, and --install with nothing there yet has nothing to protect.
-    # --install with a managed copy already in place leaves it at its version by design, so removing a newer shadow first would downgrade what PATH resolves to.
+    # --install with a managed copy already in place leaves it at its version by design.
+    # So removing a newer shadow first would downgrade what PATH resolves to.
     if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
         tool_unshadow "$tool"
     elif [[ -n $(tool_shadow_path "$tool") ]]; then
@@ -1278,7 +1329,8 @@ apply_tool() {
     target=$("$(tool_function "$tool" target)" 2>/dev/null || true)
     status=$(tool_effective_status "$tool" "$installed" "$target")
 
-    # A package set can be part installed while the tool that names it reads as current, so python and dotnet always carry on into the install and the mode decides what apt is asked to do.
+    # A package set can be part installed while the tool that names it reads as current.
+    # So python and dotnet always carry on into the install, and the mode decides what apt is asked to do.
     local package_set=false
     if [[ $tool == "python" || $tool == "dotnet" ]]; then
         package_set=true
@@ -1477,7 +1529,8 @@ sudo_implementations() {
     awk '$1 == "Alternative:" { alt = $2 } alt != "" && $1 == "visudo" { print alt, $2 }' <<<"$query"
 }
 
-# A visudo named by a bare name resolved to a path, since a Debian host keeps /usr/sbin off an unprivileged PATH and the name alone would read there as an implementation that is not installed.
+# A visudo named by a bare name resolved to a path, since a Debian host keeps /usr/sbin off an unprivileged PATH.
+# The name alone would read there as an implementation that is not installed.
 sudo_visudo_path() {
     local name="$1" candidate
     if [[ $name == /* ]]; then
@@ -1498,7 +1551,8 @@ sudo_visudo_path() {
 }
 
 # Whether an implementation parses the drop-in, asked of its own visudo rather than of a version number.
-# Ubuntu ships sudo-rs as its default sudo from 25.10, and it carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
+# Ubuntu ships sudo-rs as its default sudo from 25.10.
+# Sudo-rs carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
 sudo_parses() {
     local file="$1" checker
     checker=$(sudo_visudo_path "$2") || return 1
@@ -1539,7 +1593,8 @@ sudo_timestamp_report() {
 }
 
 # A username escaped for safe embedding in an ERE.
-# A username can legally hold a regex metacharacter (a dot is common in a domain-joined account), and left unescaped it can match a different user's line as if it were this one's.
+# A username can legally hold a regex metacharacter (a dot is common in a domain-joined account).
+# Left unescaped, the metacharacter can match a different user's line as if it were this one's.
 sudo_timestamp_user_re() {
     local user="$1" out="" i c
     for ((i = 0; i < ${#user}; i++)); do
@@ -1553,15 +1608,19 @@ sudo_timestamp_user_re() {
 }
 
 # Whether a drop-in holds nothing but this user's timestamp Defaults, aside from a blank line or a full-line comment.
-# That purity is what makes deleting the whole file safe, since a mixed file would lose whatever else it sets, and picking lines back out of one is guessing, not reading.
-# The allowlist is anchored at both ends, so a line carrying a timestamp assignment plus anything else (a trailing ",requiretty") fails it rather than passing as a prefix match.
+# That purity is what makes deleting the whole file safe.
+# This is because a mixed file would lose whatever else it sets, and picking lines back out of one is guessing, not reading.
+# The allowlist is anchored at both ends.
+# A line carrying a timestamp assignment plus anything else (a trailing ",requiretty") therefore fails it rather than passing as a prefix match.
 sudo_timestamp_file_is_pure() {
     local user="$1" file="$2" user_re allow status
     user_re=$(sudo_timestamp_user_re "$user")
-    # $ here is bash's own end-of-string, and the double quotes strip a backslash before it, so grep receives a plain $ (ERE's end-of-line anchor), never a literal one.
+    # $ here is bash's own end-of-string, and the double quotes strip a backslash before it.
+    # So grep receives a plain $ (ERE's end-of-line anchor), never a literal one.
     allow="^[[:space:]]*(#.*)?$|^[[:space:]]*Defaults:${user_re}[[:space:]]+timestamp_(type|timeout)=[^,[:space:]]+(,[[:space:]]*timestamp_(type|timeout)=[^,[:space:]]+)*[[:space:]]*$"
     "${SUDO[@]}" grep -vE "$allow" "$file" >/dev/null 2>&1 && status=0 || status=$?
-    # Exit 1 means every line matched the allowlist (pure), 0 means one did not (impure), and anything else is a read failure this cannot tell apart from either, so it is never treated as pure.
+    # Exit 1 means every line matched the allowlist (pure), and 0 means one did not (impure).
+    # Anything else is a read failure this cannot tell apart from either, so it is never treated as pure.
     [[ $status -eq 1 ]]
 }
 
@@ -1591,11 +1650,13 @@ configure_sudo_timestamp() {
             die "No sudo on this host parses timestamp_type, which is the setting that shares one cache across terminals. sudo-rs carries no such setting, so install the original sudo with \"apt-get install sudo\" and run this again."
     fi
 
-    # A parse error in any file sudo reads makes every sudo on the host fail, so the set is proved to parse before this adds to it.
+    # A parse error in any file sudo reads makes every sudo on the host fail.
+    # The set is therefore proved to parse before this adds to it.
     "${SUDO[@]}" visudo -cq >/dev/null 2>&1 ||
         die "This host's sudoers does not parse as it stands, so fix that before adding to it (\"visudo -c\" names the file)"
 
-    # An implementation this run would switch to has to parse the set as well, since switching to one that cannot is what locks every user out.
+    # An implementation this run would switch to has to parse the set as well.
+    # This is because switching to one that cannot is what locks every user out.
     if [[ -n $switch_checker ]]; then
         "${SUDO[@]}" "$switch_checker" -cq >/dev/null 2>&1 ||
             die "$switch_to does not parse this host's sudoers, so switching to it would lock every user out. This host is unchanged."
@@ -1604,10 +1665,14 @@ configure_sudo_timestamp() {
     local own_current=false
     "${SUDO[@]}" cmp -s "$staged" "$SUDOERS_FILE" 2>/dev/null && own_current=true
 
-    # Another file setting either option is named rather than merged into, since which one wins is the order sudo reads them in and not something this can decide.
+    # Another file setting either option is named rather than merged into.
+    # This is because which one wins is the order sudo reads them in, and not something this can decide.
     local elsewhere status=0
-    # A name holding a dot or ending in a tilde is one sudo skips, this run's own staged file included, so a setting in it is an override sudo never reads.
-    # Grep's own "no match" exit (1) is folded to 0 inside the privileged shell, so the status sudo hands back distinguishes only "sudo could not even run this" from "the scan ran", never grep's ordinary no-match case from a sudo failure that also happens to exit 1.
+    # A name holding a dot or ending in a tilde is one sudo skips, this run's own staged file included.
+    # A setting in it is therefore an override sudo never reads.
+    # Grep's own "no match" exit (1) is folded to 0 inside the privileged shell.
+    # So the status sudo hands back distinguishes only "sudo could not even run this" from "the scan ran".
+    # It never distinguishes grep's ordinary no-match case from a sudo failure that also happens to exit 1.
     # shellcheck disable=SC2016  # $1/$2 are meant for the inner sh -c script, not this outer shell.
     elsewhere=$("${SUDO[@]}" sh -c '
         out=$(grep -rnsE "$1" --exclude="*.*" --exclude="*~" --exclude="$2" /etc/sudoers /etc/sudoers.d 2>&1)
@@ -1620,14 +1685,18 @@ configure_sudo_timestamp() {
         die "Scanning /etc/sudoers and /etc/sudoers.d for other timestamp_type/timestamp_timeout entries failed: $elsewhere"
     fi
 
-    # Only this user's own entry is ever a delete candidate; a different user's entry, or one with no user named at all, changes something beyond what this run was asked to change, so it is reported and left alone.
+    # Only this user's own entry is ever a delete candidate.
+    # A different user's entry, or one with no user named at all, changes something beyond what this run was asked to change.
+    # Such an entry is therefore reported and left alone.
     local -a delete_files=() unsafe_files=()
     if [[ -n $elsewhere ]]; then
         local candidate user_re
         user_re=$(sudo_timestamp_user_re "$user")
         while read -r candidate; do
             [[ -n $candidate ]] || continue
-            # The main sudoers file is never auto-edited, and a drop-in that sets something else besides is never guessed at line by line, since either mistake risks removing a rule unrelated to this.
+            # The main sudoers file is never auto-edited.
+            # A drop-in that sets something else besides is never guessed at line by line.
+            # This is because either mistake risks removing a rule unrelated to this.
             if [[ $candidate == "${SUDOERS_FILE%/*}"/* ]] && sudo_timestamp_file_is_pure "$user" "$candidate"; then
                 delete_files+=("$candidate")
             else
@@ -1636,7 +1705,8 @@ configure_sudo_timestamp() {
         done < <(grep -E "Defaults:${user_re}[[:space:]]+.*timestamp_(type|timeout)=" <<<"$elsewhere" | awk -F: '{print $1}' | sort -u)
     fi
 
-    # A standing unsafe file still reaches the die below even when this run's own file needs no change, since silently returning here would report success over a same-user conflict this cannot resolve on its own.
+    # A standing unsafe file still reaches the die below even when this run's own file needs no change.
+    # This is because silently returning here would report success over a same-user conflict this cannot resolve on its own.
     if [[ $own_current == true && ${#delete_files[@]} -eq 0 && ${#unsafe_files[@]} -eq 0 ]]; then
         log "$SUDOERS_FILE already carries exactly this, leaving it alone"
         sudo_timestamp_report "$user"
@@ -1673,7 +1743,8 @@ configure_sudo_timestamp() {
     fi
 
     if [[ $own_current == false ]]; then
-        # A drop-in whose name holds a dot is one sudo skips, so the content lands under such a name, is proved where it will be read, and only then is renamed over.
+        # A drop-in whose name holds a dot is one sudo skips.
+        # So the content lands under such a name, is proved where it will be read, and only then is renamed over.
         # Renaming is atomic, which a copy into place is not, and a half-written file in that directory locks every user out of sudo.
         local pending="${SUDOERS_FILE%/*}/.${SUDOERS_FILE##*/}.pending"
         run_root install -m 0440 -o root -g root "$staged" "$pending"

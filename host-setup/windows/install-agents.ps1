@@ -1,8 +1,10 @@
 # Keeps the coding-agent tools a user installed current, and installs one only when it is named.
-# These tools live in the user's own profile and each carries its own updater, so this script runs as that user, never elevated, and drives each tool's updater rather than replacing it.
+# These tools live in the user's own profile and each carries its own updater, so this script runs as that user, never elevated.
+# For the same reason it drives each tool's updater rather than replacing it.
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a scheduled run.
 #
-# A tool installed through a package manager (winget, scoop, choco, npm, bun) is reported and left to that manager, since running the tool's own updater over it would fight the manager for the same files.
+# A tool installed through a package manager (winget, scoop, choco, npm, bun) is reported and left to that manager.
+# This is because running the tool's own updater over it would fight the manager for the same files.
 # The winget packages are already upgraded by upgrade-host.ps1, so winget is not repeated here.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
@@ -27,7 +29,8 @@ $ErrorActionPreference = 'Stop'
 # A non-zero exit from a tool is an answer here rather than a failure.
 $PSNativeCommandUseErrorActionPreference = $false
 
-# Seconds one updater or installer may run before it is treated as hung, long enough for a slow download and short enough that a scheduled run ends.
+# Seconds one updater or installer may run before it is treated as hung.
+# The limit is long enough for a slow download and short enough that a scheduled run ends.
 $STEP_TIMEOUT = 900
 $READ_TIMEOUT = 30
 
@@ -124,7 +127,8 @@ Examples:
 
 # --- Execution ---
 
-# Runs one command with standard input closed and the time bounded, so an updater that stops to ask a question fails rather than hanging a scheduled run.
+# Runs one command with standard input closed and the time bounded.
+# An updater that stops to ask a question therefore fails rather than hanging a scheduled run.
 # A read used to decide what to do and a change both go through this, and only Invoke-Step honors -DryRun.
 function Invoke-Captured {
     param([Parameter(Mandatory)][string]$Command, [string[]]$Arguments = @(), [int]$TimeoutSec = 30)
@@ -193,7 +197,8 @@ function confirm {
     return ((Read-Host "$Question [y/N]") -match '^(y|yes)$')
 }
 
-# Fetches an installer to a file and runs it from there rather than piping it into a shell, so a truncated download fails before it runs rather than part way through.
+# Fetches an installer to a file and runs it from there rather than piping it into a shell.
+# A truncated download then fails before it runs rather than part way through.
 function Invoke-Installer {
     param([Parameter(Mandatory)][string]$Url)
     $pwsh = (Get-Process -Id $PID).Path
@@ -211,7 +216,8 @@ function Invoke-Installer {
     return (Invoke-Step -Command $pwsh -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $file))
 }
 
-# A scheduled run starts with the PATH its account was given, which lacks the per-user directories these installers write to and any change an installer just made to the user PATH.
+# A scheduled run starts with the PATH its account was given.
+# That PATH lacks the per-user directories these installers write to and any change an installer just made to the user PATH.
 # Each is appended rather than prepended, so a caller whose PATH already orders them keeps its own order.
 function Update-SessionPath {
     $separator = [IO.Path]::PathSeparator
@@ -273,7 +279,8 @@ function Get-HerdrOutdated {
     return , $names
 }
 
-# Read from herdr's own status rather than from whether a session is open, since a session on the current binary needs no restart however many panes it holds.
+# Read from herdr's own status rather than from whether a session is open.
+# This is because a session on the current binary needs no restart however many panes it holds.
 # True, false, or $null where herdr could not say.
 function Get-HerdrRestartPending {
     $result = Invoke-Captured -Command 'herdr' -Arguments @('status', '--json') -TimeoutSec $script:READ_TIMEOUT
@@ -463,7 +470,8 @@ function Invoke-ToolUpgrade {
         return
     }
 
-    # The herdr updater refuses to run from inside one of its own panes, so a run there skips that one step rather than failing on a refusal it already knows is coming.
+    # The herdr updater refuses to run from inside one of its own panes.
+    # A run there therefore skips that one step rather than failing on a refusal it already knows is coming.
     if ($ToolName -eq 'herdr' -and $env:HERDR_PANE_ID) {
         log "herdr: at $shownVersion, and this run is inside a herdr pane, which herdr will not update from, run this outside herdr to update it"
         if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
