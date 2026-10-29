@@ -1310,7 +1310,7 @@ def cmd_close(a: argparse.Namespace) -> int:
     """Comment the track's outcome on its issue, then close it, which is how a track ends.
 
     A rerun after the comment landed and the close did not finds the same text as the newest
-    comment. It goes straight to the close rather than posting it twice.
+    comment. The rerun goes straight to the close rather than posting it twice.
     """
     text = outcome_from(Path(a.body_file))
     found, doubts = current_or_refuse(a.repo, a.track)
