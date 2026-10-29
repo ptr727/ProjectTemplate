@@ -65,7 +65,7 @@ fi
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
 # The py launcher answers first because it reaches a registered interpreter whatever is active.
-# A bare python3 is reached through PATH, and a virtual environment can answer there instead.
+# By contrast, a bare python3 is reached through PATH, and a virtual environment can answer there instead.
 if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
     py_name="py -3"

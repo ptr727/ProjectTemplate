@@ -620,8 +620,8 @@ def comment_lines(
 ) -> list[tuple[Line, bool]]:
     """Every comment line in `text`, and whether it is a documentation comment.
 
-    A comment opening on no marker the language declares belongs to a language embedded in it,
-    such as a script in HTML. Such a comment is left out. `shift` is the line `text` starts after.
+    A comment opening on no marker the language declares belongs to a language embedded in it, such
+    as a script in HTML. Such a comment is left out. `shift` is the line `text` starts after.
     """
     starts = Starts(text)
     out: list[tuple[Line, bool]] = []

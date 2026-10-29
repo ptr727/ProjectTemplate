@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Drive every prose_lint gate against input it must reject.
 
-Each case reintroduces a fault and asserts the gate objects to it, because a gate nobody has
-watched fail is a gate nobody knows works. Where a case covers a table, it reads the live table
-rather than restating it. This is because a proof that restates the gated data proves only that the function runs.
+Each case reintroduces a fault and asserts the gate objects to it, because a gate nobody has watched
+fail is a gate nobody knows works. Where a case covers a table, it reads the live table rather than
+restating it. This is because a proof that restates the gated data proves only that the function
+runs.
 
 Run as `python3 tests/test_prose_lint.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -54,8 +55,8 @@ FLEET_LABELS = REPO / "repo-config" / "labels.json"
 def run_prose_gate_action(root: Path, **extra: str) -> subprocess.CompletedProcess[str]:
     """Run the composite action's own script body against `root`, as a runner would.
 
-    The script is read out of the action rather than restated. So a case proves what the action
-    does rather than what this module believes it does.
+    The script is read out of the action rather than restated. So a case proves what the action does
+    rather than what this module believes it does.
     """
     env = (
         dict(os.environ)
@@ -225,11 +226,11 @@ def locale_patched_as_cp1252() -> Iterator[None]:
 def locale_patch_bites() -> bool:
     """Whether patching the locale actually changes how a text-mode pipe decodes, on this host.
 
-    UTF-8 mode decodes as UTF-8 whatever the locale says, so no patch can reach the decoder
-    there. That is the documented workaround for the very defect these cases cover. A
-    container started with no LANG enables it on its own, so it is an ordinary host rather than
-    an exotic one. Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of
-    the several ways an interpreter arrives at a UTF-8 default.
+    UTF-8 mode decodes as UTF-8 whatever the locale says, so no patch can reach the decoder there.
+    That is the documented workaround for the very defect these cases cover. A container started
+    with no LANG enables it on its own, so it is an ordinary host rather than an exotic one.
+    Measuring it beats reading `sys.flags.utf8_mode`, which answers only one of the several ways an
+    interpreter arrives at a UTF-8 default.
 
     On Windows the pipe decodes in a reader thread, whose UnicodeDecodeError never reaches this
     thread, so the thread's own exception hook records it too.
@@ -530,8 +531,8 @@ class TestCharsetRule(BaitCase):
     def test_the_source_carries_no_literal_non_ascii(self) -> None:
         """The table is written as escapes.
 
-        A literal curly quote or U+00A0 in this module's own source is invisible in a diff. The
-        file is scanned by the rule it implements, so a literal would make it self-flagging.
+        A literal curly quote or U+00A0 in this module's own source is invisible in a diff. The file
+        is scanned by the rule it implements, so a literal would make it self-flagging.
         """
         for path in (REPO / "scripts" / "prose_lint.py", Path(__file__)):
             with self.subTest(source=path.name):
@@ -654,8 +655,8 @@ class TestSemicolonRule(BaitCase):
     def test_a_colon_in_an_earlier_sentence_does_not_exempt_a_later_splice(self) -> None:
         """The exemption belongs to the sentence, not the bullet, and the two were unrelated.
 
-        Read over the whole bullet, an enumeration in one sentence excused every semicolon after
-        it. So the gate went silent across 120 semicolons in the docs it exists to check.
+        Read over the whole bullet, an enumeration in one sentence excused every semicolon after it.
+        So the gate went silent across 120 semicolons in the docs it exists to check.
         """
         self.assertEqual(
             ["semicolon"],
@@ -759,8 +760,8 @@ class TestSemicolonRule(BaitCase):
     def test_every_marker_and_bold_spelling_opens_the_bullet_the_same_way(self) -> None:
         """One bullet gets one verdict, whichever marker and strong emphasis spell its label.
 
-        The stripper kept its own narrower marker set and read only `**`. So `+`, `1)`, `__`,
-        and `***` left the label announcing a list and exempted the splice after it.
+        The stripper kept its own narrower marker set and read only `**`. So `+`, `1)`, `__`, and
+        `***` left the label announcing a list and exempted the splice after it.
         """
         labels = (
             "**Inputs**:",
@@ -880,8 +881,8 @@ class TestDashRule(BaitCase):
     def test_every_marker_and_bold_spelling_exempts_the_label_separator(self) -> None:
         """One bullet gets one verdict, whichever marker and strong emphasis spell its label.
 
-        The exemption kept its own narrower marker set and read only `**`. So `+`, `1)`, `__`,
-        and `***` reported the separator the `-` and `**` spelling of the same bullet did not.
+        The exemption kept its own narrower marker set and read only `**`. So `+`, `1)`, `__`, and
+        `***` reported the separator the `-` and `**` spelling of the same bullet did not.
         """
         labels = (
             "**Bug**",
@@ -1373,8 +1374,8 @@ class TestCommentWrapRule(BaitCase):
     def test_an_ellipsis_is_not_a_sentence_terminator(self) -> None:
         """An ellipsis marks an elision inside one sentence, so its closing dot does not end one.
 
-        Reading it as a terminator made a schematic comment two sentences. The split the rule
-        then asked for would have broken the fragment the line exists to show.
+        Reading it as a terminator made a schematic comment two sentences. The split the rule then
+        asked for would have broken the fragment the line exists to show.
         """
         self.assertEqual([], self.flag("a.py", "# .editorconfig: [glob] ... end_of_line = lf\n"))
 
@@ -1388,8 +1389,8 @@ class TestCommentWrapRule(BaitCase):
     def test_an_ellipsis_before_a_question_or_bang_still_terminates(self) -> None:
         """The guard covers the dot alternative only, since `?` and `!` after an ellipsis do end a sentence.
 
-        Guarding the whole terminator class would have read these as one sentence. That is because the `?` and
-        the `!` are each preceded by the ellipsis' closing dot.
+        Guarding the whole terminator class would have read these as one sentence. That is because
+        the `?` and the `!` are each preceded by the ellipsis' closing dot.
         """
         for terminator in ("?", "!"):
             with self.subTest(terminator=terminator):
@@ -1441,9 +1442,9 @@ class TestCommentWrapRule(BaitCase):
     def test_the_scheme_is_case_insensitive(self) -> None:
         """RFC 3986 makes the scheme case-insensitive, so an uppercase one is the same reference.
 
-        The continuation case is the one that matters.
-        That is because a scheme the exemption misses puts the reference line back in the wrap logic.
-        That is the false positive this exemption removes.
+        The continuation case is the one that matters. That is because a scheme the exemption misses
+        puts the reference line back in the wrap logic. That is the false positive this exemption
+        removes.
         """
         self.assertEqual(
             [], self.flag("a.yml", "# HTTPS://example.com/one\n# Describes the format.\n")
@@ -1515,12 +1516,12 @@ class TestCommentWrapRule(BaitCase):
     def test_a_key_and_its_value_are_configuration_rather_than_a_sentence(self) -> None:
         """`comment-case` reads the first character, so a key opening lowercase could not pass.
 
-        The reported case is the `External usage:` header a fleet of ESPHome templates carries.
-        `# packages:` was already exempt as a lone key and the line under it was not. What passed
-        is any key opening on something other than a lowercase letter, and each such spelling
-        changes what a reader pastes. A capitalized, quoted or underscored key changes the key.
-        A leading dash is a different YAML construct from the mapping it belongs to. The same
-        snippet already passes inside a Markdown fence.
+        The reported case is the `External usage:` header a fleet of ESPHome templates carries. `#
+        packages:` was already exempt as a lone key and the line under it was not. What passed is
+        any key opening on something other than a lowercase letter, and each such spelling changes
+        what a reader pastes. A capitalized, quoted or underscored key changes the key. A leading
+        dash is a different YAML construct from the mapping it belongs to. The same snippet already
+        passes inside a Markdown fence.
         """
         header = (
             "# External usage:\n"
@@ -1570,9 +1571,9 @@ class TestCommentWrapRule(BaitCase):
         """One of the exemption's costs, pinned so a later change meets it rather than finds it.
 
         A two-token body carrying no terminator is exempt wherever it sits. A sentence wrapping
-        through one loses the wrap, and the line under it is reported for case instead. A
-        sentence ending on one loses the wrap with no finding at all, which is the quieter half.
-        The sentence guard cannot reach either, the body ending in no punctuation.
+        through one loses the wrap, and the line under it is reported for case instead. A sentence
+        ending on one loses the wrap with no finding at all, which is the quieter half. The sentence
+        guard cannot reach either, the body ending in no punctuation.
         """
         self.assertEqual([], self.flag("c.yml", "# The value the hook reads is\n# empty: false\n"))
         self.assertEqual(
@@ -1584,9 +1585,9 @@ class TestCommentWrapRule(BaitCase):
         """The four shapes the single-token value could not reach, each as a two-line run.
 
         A YAML tag value, a quoted value carrying a space, and a key-value line with a trailing
-        comment each split on a space. So the narrow shape read every one of them as prose and
-        asked the author to capitalize a key a reader pastes. The fourth is the separator rather
-        than the value: `=` spells the same shape that `:` does, and the narrow one read neither.
+        comment each split on a space. So the narrow shape read every one of them as prose and asked
+        the author to capitalize a key a reader pastes. The fourth is the separator rather than the
+        value: `=` spells the same shape that `:` does, and the narrow one read neither.
         """
         for label, text in (
             ("tag", "#   board: !include board.yaml\n#   label: friendly\n"),
@@ -1673,9 +1674,9 @@ class TestCommentWrapRule(BaitCase):
     def test_the_exemption_holds_in_every_comment_syntax(self) -> None:
         """One case per syntax, so a failure names the language whose extractor broke.
 
-        Seven file names covering six specs proved nothing about the markers they never used.
-        These eleven reach ten of the eleven syntaxes the table declares. The kicad spec is the
-        one neither this case nor the run-on case beside it reaches.
+        Seven file names covering six specs proved nothing about the markers they never used. These
+        eleven reach ten of the eleven syntaxes the table declares. The kicad spec is the one
+        neither this case nor the run-on case beside it reaches.
         """
         snippet = "sda: GPIO17"
         for name, text in (
@@ -1697,9 +1698,9 @@ class TestCommentWrapRule(BaitCase):
     def test_a_value_ending_in_a_colon_is_still_configuration(self) -> None:
         """A colon ends configuration rather than a sentence, which is why `KEY_ONLY` exists.
 
-        Guarded with `SENT_END`, whose set carries the colon, an address, an image tag and a
-        drive letter were each refused. Each was told to capitalize its key, which is the finding
-        this exemption exists to remove.
+        Guarded with `SENT_END`, whose set carries the colon, an address, an image tag and a drive
+        letter were each refused. Each was told to capitalize its key, which is the finding this
+        exemption exists to remove.
         """
         for value in ("fd00::", "ghcr.io/o/n:", "C:"):
             with self.subTest(value=value):
@@ -1804,8 +1805,8 @@ class TestCommentWrapRule(BaitCase):
         """A tool matches these verbatim, so a capital or a split would break what reads them.
 
         The reference-link group headers, the ToC-omit directive, and the `agent-safety` install
-        markers all open lowercase or sit adjacent. That reads as a sentence that failed to
-        start or as one wrapping into the next.
+        markers all open lowercase or sit adjacent. That reads as a sentence that failed to start or
+        as one wrapping into the next.
         """
         for marker in (
             "<!-- omit from toc -->",
@@ -1829,7 +1830,8 @@ class TestCommentWrapRule(BaitCase):
         """Read as a real opener it opens a block, and the code lines below are linted as prose.
 
         The documentation form is the same case. Exempting it from linting must not leave the
-        ceiling unbounded. Otherwise the syntax whose doc marker is a line comment reopens the defect.
+        ceiling unbounded. Otherwise the syntax whose doc marker is a line comment reopens the
+        defect.
         """
         for name, text in (
             ("a.cs", "// Match a /* opener here\nvar x = 1; // Two things. Here.\n"),
@@ -2033,8 +2035,8 @@ class TestCommentAddedRule(BaitCase):
         HCL carry a `#` inside a multi-line string, and a git pattern file holds no trailing comment
         at all. PowerShell opens one after almost anything, and shell after its metacharacters. Six
         attempts at deciding it from the marker's neighbourhood each got a language wrong. Each
-        wrong answer either reported a line holding no comment or silenced one that held several.
-        A marker opening its line is unambiguous in every language.
+        wrong answer either reported a line holding no comment or silenced one that held several. A
+        marker opening its line is unambiguous in every language.
         """
         for text, name in (
             ("value = read()  # The second read can disagree.\n", "tool.py"),
@@ -2125,9 +2127,9 @@ class TestCommentAddedRule(BaitCase):
         """`.SYNOPSIS` is a keyword no author may delete, and the rule reported it as prose.
 
         PowerShell documents two help forms. The `<# ... #>` block is read as documentation here,
-        the way `///` is in C#. The `#` form is read as the ordinary comment lines it is written
-        as, which the last case pins. That is because telling it from a remark needs a second grammar in a
-        rule that holds none.
+        the way `///` is in C#. The `#` form is read as the ordinary comment lines it is written as,
+        which the last case pins. That is because telling it from a remark needs a second grammar in
+        a rule that holds none.
         """
         # Written so `comment-wrap` has something to find here.
         # That is what makes the second assertion prove the skip is this rule's own.
@@ -2258,8 +2260,8 @@ class TestCommentAddedRule(BaitCase):
     def test_the_rule_list_says_what_the_rule_does(self) -> None:
         """`--summary` and `--help` print this line, and it said the rule fires on an addition.
 
-        A diff counts a modified line as an added one, so a reworded comment is reported. A
-        reader told otherwise by the rule list meets the finding without expecting it.
+        A diff counts a modified line as an added one, so a reworded comment is reported. A reader
+        told otherwise by the rule list meets the finding without expecting it.
         """
         self.assertIn("adds or edits", prose_lint.RULES["comment-added"])
         findings = prose_lint.check_file(
@@ -2275,8 +2277,9 @@ class TestCommentAddedRule(BaitCase):
     def test_the_message_names_the_label_that_stands_it_down(self) -> None:
         """A finding a reader cannot act on is a finding that gets worked around.
 
-        The label is looked for as the quoted name the message builds from the constant.
-        That is because the bare word also appears in the message's closing clause and matched there instead.
+        The label is looked for as the quoted name the message builds from the constant. That is
+        because the bare word also appears in the message's closing clause and matched there
+        instead.
         """
         findings = prose_lint.check_file(
             self._write(self.PROSE, "tool.py"), {"comment-added"}, None
@@ -2290,9 +2293,8 @@ class TestCommentAddedRule(BaitCase):
     def test_without_a_diff_the_rule_stands_down_and_says_so(self) -> None:
         """Read over a whole tree it would report every comment the repository already holds.
 
-        The environment override is cleared for this case.
-        That is because the note it prints is the other stand-down's.
-        It is also because the docs tell a developer to export that variable.
+        The environment override is cleared for this case. That is because the note it prints is the
+        other stand-down's. It is also because the docs tell a developer to export that variable.
         """
         self.stand_down_setup()
         self.enterContext(mock.patch.dict(os.environ, {"PROSE_ALLOW_COMMENTS": ""}))
@@ -2429,8 +2431,8 @@ class TestCommentAddedRule(BaitCase):
     def test_the_action_clears_the_environment_override(self) -> None:
         """Otherwise a runner's own environment decides a pull request the label was meant to.
 
-        Deleting the action's `unset` passed the suite before this case existed.
-        An org-level `env:` would then disarm the gate on every pull request while the run still exits 0.
+        Deleting the action's `unset` passed the suite before this case existed. An org-level `env:`
+        would then disarm the gate on every pull request while the run still exits 0.
         """
         self.label_setup()
         result = run_prose_gate_action(self.root, PROSE_ALLOW_COMMENTS="1")
@@ -2466,8 +2468,8 @@ class TestCommentAddedRule(BaitCase):
         - Flipping the input's default to `'true'`. Any caller that omits the input then has the
           rule stood down on every run and says nothing.
 
-        Both are read off the structure, since a substring match over the file also passed with the `env:`
-        entry commented out.
+        Both are read off the structure, since a substring match over the file also passed with the
+        `env:` entry commented out.
         """
         self.label_setup()
         action = PROSE_GATE_ACTION.read_text(encoding="utf-8")
@@ -2480,10 +2482,10 @@ class TestCommentAddedRule(BaitCase):
     def test_the_stand_down_is_the_whole_expression_the_workflow_carries(self) -> None:
         """Asserted whole, since a fragment of it left two disarming mutations green.
 
-        Flipping the `||` to `&&` refuses every labeled pull request, and passed while this read
-        one fragment. It is read under the prose step's own `with:`.
-        That is because the same line moved to a sibling step passed a substring match while the gate fell back to the input's default. The
-        promotion's own terms live in the stand-down step, whose cases run its script.
+        Flipping the `||` to `&&` refuses every labeled pull request, and passed while this read one
+        fragment. It is read under the prose step's own `with:`. That is because the same line moved
+        to a sibling step passed a substring match while the gate fell back to the input's default.
+        The promotion's own terms live in the stand-down step, whose cases run its script.
         """
         self.label_setup()
         step = yaml_step(VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8"), "Check prose step")
@@ -2496,8 +2498,7 @@ class TestCommentAddedRule(BaitCase):
     def test_the_promotion_stands_down_only_on_the_release_model(self) -> None:
         """An operational promotion may be the first review its lines get, so the rule runs there.
 
-        Each row after the first varies the release promotion that stands down.
-        So dropping any one
+        Each row after the first varies the release promotion that stands down. So dropping any one
         term of the test, the workflow model's above all, turns a row green that must stay red.
         """
         self.label_setup()
@@ -2584,12 +2585,11 @@ class TestCommentAddedRule(BaitCase):
     def test_the_label_is_read_live_rather_than_off_the_payload(self) -> None:
         """The payload is a snapshot from the event, which a label applied after it never reaches.
 
-        The live answer wins in both directions.
-        So a payload that predates the label, or one
-        that predates its removal, decides nothing while the read succeeds. It ignores case, as
-        the payload's contains() does. The log line is the one the skills tell a driver to look for.
-        The harness sets the labels path and stubs gh, so the step's own path and token are read
-        off the step itself.
+        The live answer wins in both directions. So a payload that predates the label, or one that
+        predates its removal, decides nothing while the read succeeds. It ignores case, as the
+        payload's contains() does. The log line is the one the skills tell a driver to look for. The
+        harness sets the labels path and stubs gh, so the step's own path and token are read off the
+        step itself.
         """
         self.label_setup()
         for live, payload, expected in (
@@ -2646,8 +2646,8 @@ class TestSentenceSplitRule(BaitCase):
     def test_structure_is_not_a_wrapped_sentence(self) -> None:
         """A table row, a quote, a heading, and a link definition are not prose lines.
 
-        A colon, a dash, or a pipe at the end of the previous line introduces what follows it.
-        So the next line starts a new construct rather than continuing a sentence.
+        A colon, a dash, or a pipe at the end of the previous line introduces what follows it. So
+        the next line starts a new construct rather than continuing a sentence.
         """
         for text in (
             "| a | b |\n| c | d |\n",
@@ -3328,10 +3328,9 @@ class TestHomePathRule(BaitCase):
     def test_the_documentation_placeholder_is_not_a_finding(self) -> None:
         """The rule's own wording quotes these shapes to describe them, and must survive its gate.
 
-        A real user segment is required.
-        So the placeholder form does not match, and no exemption
-        list has to carry the files that describe the rule. A stale exemption list is what turns
-        a gate into a work list that damages correct documents.
+        A real user segment is required. So the placeholder form does not match, and no exemption
+        list has to carry the files that describe the rule. A stale exemption list is what turns a
+        gate into a work list that damages correct documents.
         """
         for text in (
             "The shapes are `/home/<name>` and `C:\\Users\\<name>`.\n",
@@ -3344,8 +3343,7 @@ class TestHomePathRule(BaitCase):
         """`/home/vscode` is a fixed name a devcontainer image ships, so it names no environment.
 
         Every one of this repository's 15 home-path hits is this shape, from the devcontainer
-        snippets and the doc describing them.
-        So a rule without this exemption would open with a
+        snippets and the doc describing them. So a rule without this exemption would open with a
         work list of 15 findings and no true positive among them.
         """
         for account in ("vscode", "runner", "root", "ubuntu", "node"):
@@ -3421,9 +3419,8 @@ class TestHomePathRule(BaitCase):
         """Both files are read by the rule they implement, so the bait is assembled.
 
         This is the same guarantee the tier tables carry for non-ASCII, and it is the reason the
-        constants above exist. Written as literals, the gate would report its own definition and
-        its own cases.
-        The only repair would be an exemption naming these files, which is the
+        constants above exist. Written as literals, the gate would report its own definition and its
+        own cases. The only repair would be an exemption naming these files, which is the
         stale-exemption shape that hands out a work list damaging correct documents.
         """
         for path in (REPO / "scripts" / "prose_lint.py", Path(__file__)):
@@ -3683,8 +3680,8 @@ class TestIssueRefRule(unittest.TestCase):
         """A continuation line opens its own line, so the leading test reads it as one.
 
         The extractor reports a non-empty continuation line of an open block as leading, whatever
-        preceded the opener. That is because such a line carries no marker of its own to judge. The finding
-        is wanted, the comment being a real one carrying a real reference.
+        preceded the opener. That is because such a line carries no marker of its own to judge. The
+        finding is wanted, the comment being a real one carrying a real reference.
         """
         self.assertEqual([], self.kinds("a.c", "int y = 2; /* see #1234 for why */\n"))
         self.assertEqual(
@@ -3694,8 +3691,8 @@ class TestIssueRefRule(unittest.TestCase):
     def test_a_block_opener_that_swallows_the_reference_hash_is_read(self) -> None:
         """PowerShell's `<#` is the one opener in the syntax table ending in the marker character.
 
-        The body loses that `#` with the opener, so only the comment as written carries it.
-        Only a block comment bounded by its closer can be read that way without taking in code.
+        The body loses that `#` with the opener, so only the comment as written carries it. Only a
+        block comment bounded by its closer can be read that way without taking in code.
         """
         self.assertEqual(["issue-ref"], self.kinds("a.ps1", "<#1011 was the cause. #>\n"))
         self.assertEqual([], self.kinds("b.ps1", '<# Doc. #> $x = "#1011"\n'))
@@ -3714,8 +3711,8 @@ class TestIssueRefRule(unittest.TestCase):
     def test_a_reference_hugging_a_leading_comment_marker_is_read(self) -> None:
         """The body has the marker off, so the reference's own `#` is gone with it.
 
-        The comment is read as written as well. That is what tells `#N was the cause` from the
-        `# N items` the same body spells once the marker and the space are stripped. Only where the
+        The comment is read as written as well. That is what tells `#N was the cause` from the `# N
+        items` the same body spells once the marker and the space are stripped. Only where the
         marker opens the line, since mid-line the scan's own marker is a guess.
         """
         for name, text in (
@@ -3737,8 +3734,8 @@ class TestIssueRefRule(unittest.TestCase):
         - a shell parameter expansion
         - a trailing comment
 
-        A leading marker is a comment in every
-        language the gate knows, and that is the position this reads.
+        A leading marker is a comment in every language the gate knows, and that is the position
+        this reads.
         """
         for name, text in (
             ("a.yml", "docs: https://example.invalid/spec#4217\n"),
@@ -3809,9 +3806,8 @@ class TestIssueRefRule(unittest.TestCase):
     def test_a_fenced_example_in_instruction_text_is_not_read(self) -> None:
         """A fence is quoted content rather than the document's own prose, as every rule reads it.
 
-        An inline code span is not exempt, and deliberately so.
-        That is because backticks around a reference
-        are how one is ordinarily written rather than a signal that it is being quoted.
+        An inline code span is not exempt, and deliberately so. That is because backticks around a
+        reference are how one is ordinarily written rather than a signal that it is being quoted.
         """
         self.assertEqual([], self.kinds("GOVERNANCE.md", "Text.\n\n```text\nFixes #1011\n```\n"))
         self.assertEqual(
@@ -3873,10 +3869,9 @@ class TestIssueRefRule(unittest.TestCase):
     def test_an_anchor_to_a_heading_is_not_a_reference(self) -> None:
         """A heading that opens on a number anchors to a link destination carrying the same shape.
 
-        The blanking that hides it is also what hid every URL spelling of a real reference.
-        The forge pattern reads those off the unblanked line instead. A destination naming no tracker is
-        untouched by that pattern.
-        So both halves hold at once: the anchor passes and the link text
+        The blanking that hides it is also what hid every URL spelling of a real reference. The
+        forge pattern reads those off the unblanked line instead. A destination naming no tracker is
+        untouched by that pattern. So both halves hold at once: the anchor passes and the link text
         beside it still reports.
         """
         self.assertEqual([], self.kinds("AUDIT.md", "[section 10](#10-converge-apply-the-fixes)\n"))
@@ -3902,9 +3897,8 @@ class TestIssueRefRule(unittest.TestCase):
     def test_a_service_subdomain_is_not_the_forge_host(self) -> None:
         """The tracker is served from the bare host, so a service beside it is a different service.
 
-        `www` is that host's own alias rather than a service of its own.
-        That is why it reads as
-        the host and the two constructed service names below do not.
+        `www` is that host's own alias rather than a service of its own. That is why it reads as the
+        host and the two constructed service names below do not.
         """
         for url in (
             "https://docs.github.com/acme/widget/issues/4242",
@@ -3922,8 +3916,7 @@ class TestIssueRefRule(unittest.TestCase):
 
         Two projects number their trackers independently, so one line can name two references under
         one number and the key cannot tell them apart. The second reports on the run after the first
-        is fixed.
-        That is a round rather than a lost detection, and it is written down either way.
+        is fixed. That is a round rather than a lost detection, and it is written down either way.
         """
         text = (
             "See https://github.com/acme/widget/issues/4242 and "
@@ -4290,8 +4283,7 @@ class TestHashLanguage(BaitCase):
     def test_a_shell_single_quoted_string_takes_no_backslash_escape(self) -> None:
         """Read with C escape rules the trailing backslash eats the closing quote.
 
-        The string would then carry into every line below it.
-        That is the failure the C# verbatim
+        The string would then carry into every line below it. That is the failure the C# verbatim
         form already had within a line, one newline further on.
         """
         self.assertEqual(["comment-wrap"], self.flag("a.sh", f"p='C:\\tmp\\'\n# {self.BAIT}\n"))
@@ -4299,8 +4291,7 @@ class TestHashLanguage(BaitCase):
     def test_a_shell_backslash_outside_a_string_escapes_the_next_character(self) -> None:
         r"""`'\''` is how shell embeds a quote in a single-quoted string, and it balances.
 
-        Read without the outside-string escape it leaves one quote open.
-        That quote then carries and
+        Read without the outside-string escape it leaves one quote open. That quote then carries and
         blanks every line below it - a rule that reads nothing reports nothing.
         """
         self.assertEqual(["comment-wrap"], self.flag("a.sh", f"echo 'don'\\''t'\n# {self.BAIT}\n"))
@@ -4421,8 +4412,7 @@ class TestYamlLanguage(BaitCase):
         """A plain scalar's apostrophe is text, so reading it as an opener hides a real comment.
 
         The masked span would run from the apostrophe to the end of the line, taking the trailing
-        `#` with it.
-        This repo's own workflow YAML also carries the pattern (`the merge-bot's ...`).
+        `#` with it. This repo's own workflow YAML also carries the pattern (`the merge-bot's ...`).
         A quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
         """
         for code in (
@@ -4440,9 +4430,9 @@ class TestYamlLanguage(BaitCase):
     def test_a_single_quoted_yaml_or_toml_scalar_takes_no_backslash_escape(self) -> None:
         r"""A trailing backslash would otherwise consume the closing quote and hide the comment.
 
-        Both languages spell the escape as a doubled quote in the single-quoted form.
-        Both keep the backslash escape in the double-quoted one, so the two forms are read differently
-        in the same file. The bait is a trailing comment, which only survives a correct read.
+        Both languages spell the escape as a doubled quote in the single-quoted form. Both keep the
+        backslash escape in the double-quoted one, so the two forms are read differently in the same
+        file. The bait is a trailing comment, which only survives a correct read.
         """
         for name, code in (
             ("a.yml", "key: 'C:\\tmp\\'"),
@@ -5205,10 +5195,9 @@ class TestDiscovery(unittest.TestCase):
     def test_a_parent_directory_above_the_checkout_does_not_decide_generated(self) -> None:
         """The decision is repository-relative, so the filesystem path above it cannot leak in.
 
-        Judged on the absolute path, a checkout under a parent named `reports` carried that
-        parent into every file's parts.
-        That read the whole scan as deliberately requested.
-        That also put the repository's own generated tree back into an ordinary sweep.
+        Judged on the absolute path, a checkout under a parent named `reports` carried that parent
+        into every file's parts. That read the whole scan as deliberately requested. That also put
+        the repository's own generated tree back into an ordinary sweep.
         """
         repo = self.tmp / "reports" / "checkout"
         (repo / "reports").mkdir(parents=True)
@@ -5257,11 +5246,10 @@ class TestCarriedContent(unittest.TestCase):
 
     The comment-and-doc-style Skill's "Character set" section states the obligation:
     correct-as-you-next-edit assumes someone able to edit the file, and a downstream repo cannot
-    edit a verbatim one, since its copy is byte-matched against the hub's.
-    So the hub sweeps the class and re-vendors.
-    That makes a finding in a verbatim file different in kind from the tree-wide backlog.
-    It is not a correction owed by whoever next edits the file.
-    It is one no downstream repo can make at all.
+    edit a verbatim one, since its copy is byte-matched against the hub's. So the hub sweeps the
+    class and re-vendors. That makes a finding in a verbatim file different in kind from the
+    tree-wide backlog. It is not a correction owed by whoever next edits the file. It is one no
+    downstream repo can make at all.
     """
 
     def verbatim_paths(self) -> list[Path]:
@@ -5306,9 +5294,9 @@ class TestChangedLines(unittest.TestCase):
     """The `--diff` scope, which decides which findings a CI run is allowed to report.
 
     The repo policy is that existing prose is corrected as each file is next edited rather than
-    swept. This parse is the whole mechanism behind it. A parse that returns too little makes
-    a diff-scoped run silently stop reporting. One that returns too much reports the backlog
-    as if the change introduced it.
+    swept. This parse is the whole mechanism behind it. A parse that returns too little makes a
+    diff-scoped run silently stop reporting. One that returns too much reports the backlog as if the
+    change introduced it.
     """
 
     DIFF = (
@@ -5387,9 +5375,9 @@ class TestChangedLines(unittest.TestCase):
     def real_repo(self) -> Path:
         """A committed-into temp repository, with the settings the cases below share.
 
-        A real `git diff` subprocess call is required rather than the mocked helper above.
-        This holds for a case exercising the pipe's own decode or the working tree `changed_lines`
-        reads. That is because a mock that hands back a canned `CompletedProcess` exercises neither.
+        A case exercising the pipe's own decode or the working tree `changed_lines` reads needs a
+        real `git diff` subprocess call, not the mocked helper above. That is because a mock that
+        hands back a canned `CompletedProcess` exercises neither.
         """
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "--quiet", str(root)], check=True)
@@ -5405,9 +5393,9 @@ class TestChangedLines(unittest.TestCase):
     def test_a_carriage_return_in_added_content_does_not_forge_a_file_header(self) -> None:
         """A lone `\\r` inside added content must not open a second file inside this parse.
 
-        Text-mode decoding turns that `\\r` into a line break of its own.
-        So a forged `+++ b/decoy.md` line reads as a real header. It then steals credit for every hunk of the
-        same file that follows it.
+        Text-mode decoding turns that `\\r` into a line break of its own. So a forged `+++
+        b/decoy.md` line reads as a real header. It then steals credit for every hunk of the same
+        file that follows it.
         """
         root = self.real_repo()
         doc = root / "doc.md"
@@ -5446,10 +5434,10 @@ class TestChangedLines(unittest.TestCase):
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.
 
-        Without `--text`, git reports such a file on a `Binary files ... differ` line rather than
-        a `+++` header.
-        And `is_text` rejecting it is what keeps it out of the map, the same way a `+++`-headed
-        binary is dropped. It is therefore not credited with a range no hunk will follow.
+        Without `--text`, git reports such a file on a `Binary files ... differ` line rather than a
+        `+++` header. And `is_text` rejecting it is what keeps it out of the map, the same way a
+        `+++`-headed binary is dropped. It is therefore not credited with a range no hunk will
+        follow.
         """
         root = self.real_repo()
         binary = root / "binary.bin"
@@ -5466,11 +5454,11 @@ class TestChangedLines(unittest.TestCase):
     def test_a_forged_header_in_added_content_does_not_steal_a_later_hunk(self) -> None:
         """A line of added text reading `++ b/decoy.md` must not open a second file mid-block.
 
-        Git prefixes every added line with its own `+`.
-        So content beginning `++ ` arrives in the diff as a line starting `+++ b/decoy.md`.
-        Such a line is indistinguishable from a real header to a parse
-        that trusts any `+++` line regardless of position. The real proof is the second hunk: a
-        parse fooled by the forged header attributes it to `decoy.md` instead of the real file.
+        Git prefixes every added line with its own `+`. So content beginning `++ ` arrives in the
+        diff as a line starting `+++ b/decoy.md`. Such a line is indistinguishable from a real
+        header to a parse that trusts any `+++` line regardless of position. The real proof is the
+        second hunk: a parse fooled by the forged header attributes it to `decoy.md` instead of the
+        real file.
         """
         root = self.real_repo()
         doc = root / "real.md"
@@ -5494,10 +5482,10 @@ class TestChangedLines(unittest.TestCase):
     def test_a_large_binary_change_costs_little_time_or_memory(self) -> None:
         """Removing `--text` must show up as a real cost difference, not merely a correct scope.
 
-        `--text` forced git to render an 18 MB rewrite as a full text patch.
-        This function captured that whole diff into memory before the binary drop could apply to it. Without
-        the flag git reports one `Binary files ... differ` line regardless of the file's size.
-        So the bounds below hold easily now and would not have held with `--text` still in place.
+        `--text` forced git to render an 18 MB rewrite as a full text patch. This function captured
+        that whole diff into memory before the binary drop could apply to it. Without the flag git
+        reports one `Binary files ... differ` line regardless of the file's size. So the bounds
+        below hold easily now and would not have held with `--text` still in place.
         """
         root = self.real_repo()
         binary = root / "large.bin"
@@ -5785,11 +5773,10 @@ class TestCli(unittest.TestCase):
     def test_a_path_under_no_repository_is_refused_rather_than_scoped_to_nothing(self) -> None:
         """A diff needs a repository, and having none is an error rather than an empty scope.
 
-        Discovery falls back to a filesystem walk, and an empty scope would drop every file it
-        found and report a clean run. The refusal now comes from the diff itself, which is where
-        the impossibility actually is.
-        A guard comparing the scan root against the process's own root could not see this at all.
-        That is because there is no root to differ from.
+        Discovery falls back to a filesystem walk, and an empty scope would drop every file it found
+        and report a clean run. The refusal now comes from the diff itself, which is where the
+        impossibility actually is. A guard comparing the scan root against the process's own root
+        could not see this at all. That is because there is no root to differ from.
         """
         # A real directory, since a path that does not exist is refused earlier for another reason.
         # That would pass this assertion without ever reaching the diff.
@@ -5876,9 +5863,9 @@ class TestCli(unittest.TestCase):
         """An unusable diff has three answers, and only one of them is honest.
 
         Scoping to nothing reports a clean run, which is a false pass. Widening to the whole tree
-        reports the existing backlog as though this change introduced it.
-        That is what a CI adoption hits first: an unresolvable base turned PhotoCleaner's first run into 420
-        findings its branch never touched. Failing names the cause and asserts neither.
+        reports the existing backlog as though this change introduced it. That is what a CI adoption
+        hits first: an unresolvable base turned PhotoCleaner's first run into 420 findings its
+        branch never touched. Failing names the cause and asserts neither.
 
         The exit code is distinct from a findings exit, so a caller can tell "the gate could not
         run" from "the gate ran and found something".
@@ -5895,9 +5882,9 @@ class TestCli(unittest.TestCase):
         """An empty value is a base that failed to compute, never a request for a whole tree.
 
         A caller substituting a command's output, `--diff "$(git merge-base origin/develop HEAD)"`,
-        passes an empty string whenever that command fails. Read as truthiness the option
-        vanishes, and the refusal `main` holds for a base it cannot resolve is never reached.
-        The run then reports the whole tree's backlog as though the change introduced it.
+        passes an empty string whenever that command fails. Read as truthiness the option vanishes,
+        and the refusal `main` holds for a base it cannot resolve is never reached. The run then
+        reports the whole tree's backlog as though the change introduced it.
         """
         bait = self.tmp / "bait.md"
         bait.write_text(f"{DUP} thing\n", encoding="utf-8")
@@ -5934,13 +5921,11 @@ class TestScanRootDecidesTheRuleSet(unittest.TestCase):
     """The rule set follows the repository being scanned, never the directory the caller stands in.
 
     Read from `.`, the exemption discarded home-path on a release repository whenever the caller
-    happened to stand in an operational one.
-    It announced the skip on stderr, and exited 0. That
-    silences the rule that exists because real paths reached a public comment.
+    happened to stand in an operational one. In that case it announced the skip on stderr and exited
+    0. That silences the rule that exists because real paths reached a public comment.
 
     Every case here gives the two roots *different* models. `TestOperationalExemption` above mocks
-    `repo_root` to one value for every argument.
-    That cannot tell the caller's repository from the
+    `repo_root` to one value for every argument. That cannot tell the caller's repository from the
     scanned one, and is why this defect survived it.
     """
 
@@ -6162,8 +6147,8 @@ class TestDiffScopeFloor(unittest.TestCase):
         """The honest limit, and the reason zero alone cannot be the test.
 
         An image or a lock file is a real change the rules do not read. So it matches nothing and
-        the run is clean rather than broken. Refusing here would make the gate cry wolf on a
-        commit that adds a logo, which is how a safety check stops being read.
+        the run is clean rather than broken. Refusing here would make the gate cry wolf on a commit
+        that adds a logo, which is how a safety check stops being read.
         """
         blob = self.tmp / "logo.png"
         blob.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00binary")
@@ -6253,8 +6238,8 @@ class TestDiffScopeFloor(unittest.TestCase):
 
         Run from a subdirectory, `git diff` reports repository-relative keys while discovery keys
         off the directory the run started in. So the intersection is empty and the run reports
-        clean. Reading the diff's paths against the working directory would leave this list empty
-        in exactly that case. That would make the floor silent where it is most needed.
+        clean. Reading the diff's paths against the working directory would leave this list empty in
+        exactly that case. That would make the floor silent where it is most needed.
         """
         (self.tmp / "scripts").mkdir()
         nested = self.tmp / "scripts" / "tool.py"
@@ -6374,14 +6359,14 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     - A diff names files relative to the repository top level.
     - A path argument arrives in whatever form the caller typed.
 
-    Mocking `repo_root` or `discover` supplies that join already made, so the cases
-    below build repositories and let git answer. Both defects were reported clean by the 210-case
-    suite at `e2a99f1`, which was green in full, and both are here.
+    Mocking `repo_root` or `discover` supplies that join already made, so the cases below build
+    repositories and let git answer. Both defects were reported clean by the 210-case suite at
+    `e2a99f1`, which was green in full, and both are here.
 
     The invariant is this. The rule set, the file set, the diff, and the keys that join the last two
     are all read from the repository being scanned. None of them is read from the directory the
-    process happens to stand in. A verdict states the scope it covered, since reading nothing prints what
-    finding nothing prints otherwise.
+    process happens to stand in. A verdict states the scope it covered, since reading nothing prints
+    what finding nothing prints otherwise.
     """
 
     BAIT = "# New\n\nA line with a repeated the the word in it.\n"
@@ -6429,9 +6414,9 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
 
         `prose_lint.py . --diff BASE` reported the finding while `prose_lint.py /abs/path --diff
         BASE` reported nothing and exited 0. Discovery returned absolute paths and the diff named
-        repository-relative ones. So the intersection was empty, and an empty intersection is what
-        a clean tree looks like. The same-root guard could not fire, because the run genuinely was
-        in the right repository.
+        repository-relative ones. So the intersection was empty, and an empty intersection is what a
+        clean tree looks like. The same-root guard could not fire, because the run genuinely was in
+        the right repository.
         """
         root = self.repo()
         (root / "DOC.md").write_text(self.BAIT, encoding="utf-8")
@@ -6442,10 +6427,9 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_an_untracked_file_is_in_the_scope_of_the_change_that_adds_it(self) -> None:
         """The second reported defect, on identical bytes either side of a `git add`.
 
-        A new file read clean while unstaged and reported its findings the moment it was
-        committed. `git diff` never names an untracked file, so a change whose whole point is
-        adding one scoped to nothing. A change is exactly when a new file is most worth
-        reading.
+        A new file read clean while unstaged and reported its findings the moment it was committed.
+        `git diff` never names an untracked file, so a change whose whole point is adding one scoped
+        to nothing. A change is exactly when a new file is most worth reading.
         """
         root = self.repo()
         (root / "NEW.md").write_text(self.BAIT, encoding="utf-8")
@@ -6456,8 +6440,8 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_an_untracked_file_is_read_by_a_whole_tree_sweep_too(self) -> None:
         """`git ls-files` omits it as well, so the hole was never particular to `--diff`.
 
-        A sweep was the documented way to check what a diff-scoped run might have missed. It
-        passed over the same file for its own reason.
+        A sweep was the documented way to check what a diff-scoped run might have missed. It passed
+        over the same file for its own reason.
         """
         root = self.repo()
         (root / "NEW.md").write_text(self.BAIT, encoding="utf-8")
@@ -6513,8 +6497,8 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_an_empty_base_is_refused_by_a_real_git_rather_than_by_a_mock(self) -> None:
         """The precondition the empty-value refusal rests on, asserted against git itself.
 
-        `main` routes an empty `--diff` into the resolver rather than treating it as no diff at
-        all. That is only a refusal because git rejects an empty revision.
+        `main` routes an empty `--diff` into the resolver rather than treating it as no diff at all.
+        That is only a refusal because git rejects an empty revision.
         `TestCli.test_an_empty_diff_value_takes_the_refusal_rather_than_widening` mocks the
         resolver, so it would stay green if git ever resolved one. Resolving one to an empty scope
         reads as a clean tree, which is the false pass the routing exists to close.
@@ -6529,12 +6513,11 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         """`git ls-files` prints names relative to its `-C` directory, for `--others` as well.
 
         Review read it the other way round and proposed joining both lists on the repository top
-        level instead. That would point every name at the wrong place and drop the subtree
-        silently. Measured on git 2.51: `git -C sub ls-files --others` prints `untracked.md` and
+        level instead. That would point every name at the wrong place and drop the subtree silently.
+        Measured on git 2.51: `git -C sub ls-files --others` prints `untracked.md` and
         `deep/untracked2.md`, not the `sub/` forms. The tracked half of this is pinned by
-        TestDiscovery. The untracked half is pinned here.
-        That is because the two lists are joined the same way.
-        It is also because a reader has no reason to expect them to differ.
+        TestDiscovery. The untracked half is pinned here. That is because the two lists are joined
+        the same way. It is also because a reader has no reason to expect them to differ.
 
         The keys reported stay repository-relative whichever form the argument took, which is what
         makes a finding in a subtree name a path the repository recognizes.
@@ -6562,12 +6545,11 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_a_subtree_holding_no_tracked_file_is_still_described_by_git(self) -> None:
         """The walk is for a tree git cannot describe, not for one whose answer is empty.
 
-        `tracked_paths` returns None for both, deliberately.
-        That is because an initialized but empty checkout answering with an empty list would scan nothing and read as a pass. Reading that
-        None as "git cannot describe this" sent a subtree holding only new files down the walk,
-        which applies no ignore rules.
-        So a build output under it was scanned and reported. The
-        run also printed that git could not describe a tree git describes perfectly well.
+        `tracked_paths` returns None for both, deliberately. That is because an initialized but
+        empty checkout answering with an empty list would scan nothing and read as a pass. Reading
+        that None as "git cannot describe this" sent a subtree holding only new files down the walk,
+        which applies no ignore rules. So a build output under it was scanned and reported. The run
+        also printed that git could not describe a tree git describes perfectly well.
 
         Whether git can describe a tree is settled by asking git, never by the size of its answer.
         """
@@ -6589,10 +6571,10 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_a_relative_diff_setting_does_not_re_anchor_the_keys(self) -> None:
         """`diff.relative` anchors a diff's paths on the process's directory, not the repository.
 
-        This case passed before the fix too, because both sides were anchored on that directory
-        and agreed by accident. It is pinned because only one side moved.
-        That is, the keys must come from the repository whatever the caller's configuration says.
-        A setting is an input shape like any other.
+        This case passed before the fix too, because both sides were anchored on that directory and
+        agreed by accident. It is pinned because only one side moved. The reason is that the keys
+        must come from the repository whatever the caller's configuration says. A setting is an
+        input shape like any other.
         """
         root = self.repo()
         self.git(root, "config", "diff.relative", "true")
@@ -6626,8 +6608,8 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_the_reported_scope_counts_only_what_the_verdict_covered(self) -> None:
         """A count wider than the read is the same lie in a smaller font.
 
-        The narrowed file set and the lines inside it are what the findings were drawn from.
-        So those are what the note states, with the discovered total beside them for contrast.
+        The narrowed file set and the lines inside it are what the findings were drawn from. So
+        those are what the note states, with the discovered total beside them for contrast.
         """
         root = self.repo()
         (root / "OTHER.md").write_text("# Other\n\nA clean line.\n", encoding="utf-8")
@@ -6643,15 +6625,14 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
 class TestAnEmptyExclusionIsRefused(unittest.TestCase):
     """The exclusion that matches everything, refused rather than applied.
 
-    An exclusion is a substring test. So the empty one is a substring of every key and empties
-    the scan while the run exits 0. That is the false-clean shape the scope line exists to make
-    visible, arriving through an argument rather than through a resolution. A scope of zero
-    prints beside an exit of zero exactly as a clean tree does.
+    An exclusion is a substring test. So the empty one is a substring of every key and empties the
+    scan while the run exits 0. That is the false-clean shape the scope line exists to make visible,
+    arriving through an argument rather than through a resolution. A scope of zero prints beside an
+    exit of zero exactly as a clean tree does.
 
-    It is reachable rather than theoretical. The composite action skips a blank line when it
-    builds the arguments from a repository's exclusions file.
-    A reader reproducing those
-    arguments by hand, which the runbook asks for, has no such step unless it is stated.
+    It is reachable rather than theoretical. The composite action skips a blank line when it builds
+    the arguments from a repository's exclusions file. A reader reproducing those arguments by hand,
+    which the runbook asks for, has no such step unless it is stated.
     """
 
     def run_gate(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -6688,10 +6669,9 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
 
         The action's trim always removes ASCII whitespace and, in a UTF-8 locale, more besides,
         while Python's `str.strip` covers a wider set again. So a line holding only a non-breaking
-        space can survive that trim and arrive here as a non-empty argument.
-        Judged by the wider set it would be read as blank and refused.
-        That would fail that repository's gate on every run over an exclusion that is merely
-        inert.
+        space can survive that trim and arrive here as a non-empty argument. Judged by the wider set
+        it would be read as blank and refused. That would fail that repository's gate on every run
+        over an exclusion that is merely inert.
         """
         r = self.run_gate("--check", "dupword", "--exclude", "\u00a0")
         self.assertNotEqual(2, r.returncode, r.stdout + r.stderr)
@@ -6708,18 +6688,18 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
 class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     """Which copy of the gate produced a verdict, stated rather than inferred from the finding.
 
-    A repository reaches this gate at whatever hub commit its own workflow pins.
-    So CI and a hub checkout run different copies from the moment a rule changes until that pin moves. That gap
-    once cost a full investigation. Three dead-path findings raised by a pin one commit behind
-    the exemption that silences them reproduced against no local run. With neither verdict
-    naming its copy, the only available readings were a wrong invocation or a defect in the
-    action. That is what the issue proposed. Both were wrong, and the version gap was not among the
+    A repository reaches this gate at whatever hub commit its own workflow pins. So CI and a hub
+    checkout run different copies from the moment a rule changes until that pin moves. That gap once
+    cost a full investigation. Three dead-path findings raised by a pin one commit behind the
+    exemption that silences them reproduced against no local run. With neither verdict naming its
+    copy, the only available readings were a wrong invocation or a defect in the action. The defect
+    in the action is what the issue proposed. Both were wrong, and the version gap was not among the
     candidates, because nothing in the output pointed at one.
 
-    So the property under test is that every verdict carries an attribution and that the
-    attribution is never guessed. The second half is the harder one, and it is where the cases
-    concentrate. That is because a checkout containing the script is not a commit describing it.
-    Both ways those come apart produce a well-formed value naming content that was never run.
+    So the property under test is that every verdict carries an attribution and that the attribution
+    is never guessed. The second half is the harder one, and it is where the cases concentrate. That
+    is because a checkout containing the script is not a commit describing it. Both ways those come
+    apart produce a well-formed value naming content that was never run.
     """
 
     def repo_with_script(self, tracked: bool = True) -> tuple[Path, Path, str]:
@@ -6796,12 +6776,11 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     def test_a_checkout_that_tracks_the_script_names_its_own_commit(self) -> None:
         """The value is asserted against that repository's actual HEAD, not against a shape.
 
-        The absence of the moved marker is asserted alongside it.
-        That is because `gate local <head>` is a prefix of `gate local <head>-dirty`.
-        A case reading only for the prefix passes on a
-        resolution that calls every clean copy moved. Dropping the pathspec from the status query
-        does exactly that, because this class writes an untracked sample file into the repository
-        it builds.
+        The absence of the moved marker is asserted alongside it. That is because `gate local
+        <head>` is a prefix of `gate local <head>-dirty`. It is also because a case reading only for
+        the prefix passes on a resolution that calls every clean copy moved. Dropping the pathspec
+        from the status query does exactly that, because this class writes an untracked sample file
+        into the repository it builds.
         """
         _, script, head = self.repo_with_script()
         out = self.verdict(script)
@@ -6823,10 +6802,9 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         """The failure a bare HEAD read cannot see, since it returns a well-formed wrong answer.
 
         The repository's HEAD resolves and describes content this copy never held. What is gated
-        here is trackedness rather than repository identity.
-        A copy committed into an unrelated repository is tracked and clean there, and is still
-        named by that repository's HEAD.
-        The resolution's own docstring states it does not close that case.
+        here is trackedness rather than repository identity. A copy committed into an unrelated
+        repository is tracked and clean there, and is still named by that repository's HEAD. The
+        resolution's own docstring states it does not close that case.
         """
         _, script, head = self.repo_with_script(tracked=False)
         out = self.verdict(script)
@@ -6848,8 +6826,8 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         repository that invoked the hook rather than about the copy that is running.
 
         Reproduced on this branch: the pre-commit run printed `unknown` where the same command
-        printed the commit a moment earlier. The value that arrives instead is not always
-        harmless. That is because another arrangement names a real commit in the wrong repository.
+        printed the commit a moment earlier. The value that arrives instead is not always harmless.
+        That is because another arrangement names a real commit in the wrong repository.
         """
         _, script, head = self.repo_with_script()
         other = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -6934,8 +6912,8 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
     def test_the_default_environment_variables_answer_when_the_context_is_empty(self) -> None:
         """A reference form populating only the environment still names the pin.
 
-        The context's value for a repository-relative reference is undocumented.
-        This is the fallback that keeps a downstream verdict attributed if it turns out to be empty.
+        The context's value for a repository-relative reference is undocumented. This is the
+        fallback that keeps a downstream verdict attributed if it turns out to be empty.
         """
         argv = self.run_block(
             {"GITHUB_ACTION_REPOSITORY": "owner/repo", "GITHUB_ACTION_REF": "cafe123"}
@@ -6945,10 +6923,9 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
     def test_neither_source_set_passes_no_flag_rather_than_half_a_value(self) -> None:
         """A caller naming the action by a workspace-relative path, where the script answers instead.
 
-        What this repository's own run resolves to is deliberately not asserted here. It reaches
-        the gate through a repository-qualified self-reference.
-        What that populates is read off a real run rather than predicted.
-        That is the whole point of naming the copy.
+        What this repository's own run resolves to is deliberately not asserted here. It reaches the
+        gate through a repository-qualified self-reference. What that populates is read off a real
+        run rather than predicted. That is the whole point of naming the copy.
         """
         self.assertNotIn("--provenance", self.run_block({}))
 
@@ -6961,9 +6938,8 @@ class TestTheActionPassesItsOwnPin(unittest.TestCase):
 class TestGitOutputDecodesAsUtf8(unittest.TestCase):
     """A git call must decode its output as UTF-8, never as whatever the locale prefers.
 
-    On Windows the locale encoding is commonly cp1252.
-    A diff or filename carrying a
-    character cp1252 cannot map then raises UnicodeDecodeError with no encoding pinned.
+    On Windows the locale encoding is commonly cp1252. A diff or filename carrying a character
+    cp1252 cannot map then raises UnicodeDecodeError with no encoding pinned.
 
     Each case below skips where the locale patch cannot reach the decoder, rather than passing.
     A pass there would say the fix held when nothing exercised it.
@@ -7014,10 +6990,10 @@ class TestGitOutputDecodesAsUtf8(unittest.TestCase):
 class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
     """A byte git emits that is not UTF-8 must not end the run, on any host.
 
-    Pinning the encoding fixes the locale half of this and leaves the strict half.
-    There a tracked latin-1 file or a filename holding such a byte raises on a decode the handlers
-    around these reads cannot catch. Neither case needs a patched locale to reach, so neither
-    skips the way the cases above do.
+    Pinning the encoding fixes the locale half of this and leaves the strict half. There a tracked
+    latin-1 file or a filename holding such a byte raises on a decode the handlers around these
+    reads cannot catch. Neither case needs a patched locale to reach, so neither skips the way the
+    cases above do.
     """
 
     def git_repo(self) -> Path:
@@ -7050,9 +7026,9 @@ class TestNonUtf8BytesDoNotEndTheRun(unittest.TestCase):
     def test_a_filename_that_is_not_utf8_is_scanned_and_reported(self) -> None:
         """The name reaches this program's own output, where encoding it strictly would raise.
 
-        Run as a child process rather than in this one. `redirect_stdout` hands `main` a
-        `StringIO`, which has no `reconfigure` and so never reaches the call under test.
-        That leaves a case that passes with the fix deleted. A real pipe is the whole of what this covers.
+        Run as a child process rather than in this one. `redirect_stdout` hands `main` a `StringIO`,
+        which has no `reconfigure` and so never reaches the call under test. That leaves a case that
+        passes with the fix deleted. A real pipe is the whole of what this covers.
         """
         root = self.git_repo()
         try:
@@ -7145,15 +7121,15 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     """A name git quotes in a diff header must still land in scope.
 
     `core.quotePath` defaults on and quotes every byte at or above 0x80. So the header of an
-    ordinary non-ASCII filename never matched the `+++ b/` parse and the file left scope. An
-    empty scope is falsy, so `main`'s no-match refusal did not fire either. So the run reported
-    a clean gate on a file it never read. That is the production path, since the action always
-    passes `--diff`.
+    ordinary non-ASCII filename never matched the `+++ b/` parse and the file left scope. An empty
+    scope is falsy, so `main`'s no-match refusal did not fire either. So the run reported a clean
+    gate on a file it never read. That is the production path, since the action always passes
+    `--diff`.
 
-    `NAMES` holds names containing `"` and `\\`, both characters Windows reserves from a
-    filename. So the one case that materializes a `NAMES` file cannot run there. The remaining
-    cases in this class materialize no `NAMES` file and are not limited to POSIX for that reason.
-    Each of those that still carries a `skipUnless` states its own, separate reason for it.
+    `NAMES` holds names containing `"` and `\\`, both characters Windows reserves from a filename.
+    So the one case that materializes a `NAMES` file cannot run there. The remaining cases in this
+    class materialize no `NAMES` file and are not limited to POSIX for that reason. Each of those
+    that still carries a `skipUnless` states its own, separate reason for it.
     """
 
     BAIT = "It has a dupword dupword here.\n"
@@ -7175,10 +7151,10 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def repo(self, quote_path: str, **config: str) -> Path:
         """A committed-into temp repository, with the settings this case depends on pinned.
 
-        `core.quotePath` is set rather than left inherited.
-        That is because it decides which names reach the decoder at all.
-        It is also because a host turning it off would silently retire the headline case.
-        `config` overrides a setting for a case that means to prove the invocation survives it.
+        `core.quotePath` is set rather than left inherited. That is because it decides which names
+        reach the decoder at all. It is also because a host turning it off would silently retire the
+        headline case. `config` overrides a setting for a case that means to prove the invocation
+        survives it.
         """
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -7219,12 +7195,12 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def test_a_name_holding_a_tab_keeps_it_rather_than_losing_its_own_path(self) -> None:
         """The terminator strip rests on git never emitting a raw tab inside a name itself.
 
-        This passes with that strip removed, and is not a regression guard for it. What it holds
-        is the precondition the strip needs.
-        That precondition is that git quotes such a name and escapes the tab as a two-character `\\t`.
-        So no raw tab from the name itself ever reaches the field, and the
-        only raw tab a header can carry is the terminator. Were that not so, stripping at the
-        first tab would cut a real path short and drop the file from scope for a second reason.
+        This passes with that strip removed, and is not a regression guard for it. What it holds is
+        the precondition the strip needs. That precondition is that git quotes such a name and
+        escapes the tab as a two-character `\\t`. So no raw tab from the name itself ever reaches
+        the field, and the only raw tab a header can carry is the terminator. Were that not so,
+        stripping at the first tab would cut a real path short and drop the file from scope for a
+        second reason.
         """
         name = "tab\tname.md"
         for quote_path in ("true", "false"):
@@ -7240,7 +7216,8 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
                 self.assertIn(2, got.get(name, set()))
 
     # Each key is a setting, and each value a hostile setting for it.
-    # Each such setting takes the file out of scope one way or another when the invocation below does not pin against it.
+    # Each such value takes the file out of scope one way or another.
+    # It does so when the invocation below does not pin against it.
     HOST_DIFF_SETTINGS: ClassVar[dict[str, str]] = {
         "diff.noprefix": "true",
         "diff.mnemonicPrefix": "true",
@@ -7267,13 +7244,11 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     ) -> None:
         """`--inter-hunk-context=0` must outrank a nonzero `diff.interHunkContext` host default.
 
-        A host value wide enough to span both changes merges them into one hunk whose unified
-        diff carries the unchanged lines between them as context.
-        This parse credits a
-        merged hunk's whole range to scope. Asserting only that lines 1 and 5 are in scope would
-        still pass with the flag removed.
-        That is because a merged hunk keeps both of those too.
-        What proves the fix is that lines 2, 3, and 4 stay out.
+        A host value wide enough to span both changes merges them into one hunk whose unified diff
+        carries the unchanged lines between them as context. This parse credits a merged hunk's
+        whole range to scope. Asserting only that lines 1 and 5 are in scope would still pass with
+        the flag removed. That is because a merged hunk keeps both of those too. What proves the fix
+        is that lines 2, 3, and 4 stay out.
         """
         root = self.repo("true", **{"diff.interHunkContext": "5"})
         (root / "doc.md").write_text("".join(f"Line {n}.\n" for n in range(1, 6)), encoding="utf-8")
@@ -7293,9 +7268,8 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         """`--no-textconv` must correct the reported line, not merely keep the file in scope.
 
         A driver that prepends a line renumbers every hunk without touching whether the file is
-        diffed at all.
-        So a case asserting only that the name lands in scope would still pass with the flag
-        removed. What proves the fix is the real line number, `2`, rather than the
+        diffed at all. So a case asserting only that the name lands in scope would still pass with
+        the flag removed. What proves the fix is the real line number, `2`, rather than the
         driver-shifted one the same setup produces without it.
         """
         root = self.repo("true")
@@ -7323,9 +7297,8 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         """A `-diff` mark, committed or set as a host default, must still reach scope.
 
         Without `--text`, either route reports the pair as binary on a `Binary files ... differ`
-        line rather than a `+++` header. So no hunk ever names which lines changed. The only
-        scope this parse can build for such a file is the whole of it.
-        That is proved here by a line the
+        line rather than a `+++` header. So no hunk ever names which lines changed. The only scope
+        this parse can build for such a file is the whole of it. That is proved here by a line the
         edit below never touches landing in scope alongside the two it does.
         """
         for source in ("a committed .gitattributes", "a host core.attributesFile"):
@@ -7352,11 +7325,9 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def test_a_non_diffable_file_named_with_a_non_ascii_character_is_credited(self) -> None:
         """A `-diff` path's non-ASCII name reaches scope with no quoting to undo at all.
 
-        `core.quotePath=true` is what the caller pins for the `+++`-header route, which would
-        quote this name.
-        But `git diff --numstat -z` names an undiffable path with no quoting regardless of that
-        setting.
-        So the raw UTF-8 bytes are what this parse actually reads.
+        `core.quotePath=true` is what the caller pins for the `+++`-header route, which would quote
+        this name. But `git diff --numstat -z` names an undiffable path with no quoting regardless
+        of that setting. So the raw UTF-8 bytes are what this parse actually reads.
         """
         root = self.repo("true")
         (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
@@ -7373,13 +7344,11 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def test_a_non_diffable_name_containing_and_is_credited_in_full(self) -> None:
         """A `-diff` file whose name holds " and " must not be split on that substring.
 
-        The parse this replaced read git's prose `Binary files a/<path> and b/<path> differ`
-        line. Its capture backtracked to the rightmost " and " in that line. For a name
-        containing that exact substring, the rightmost split falls inside the name rather than
-        between the two paths.
-        That leaves the captured half without its `b/` prefix and out of
-        scope. `git diff --numstat -z` never renders that prose line at all, so there is no
-        " and " to split on.
+        The parse this replaced read git's prose `Binary files a/<path> and b/<path> differ` line.
+        Its capture backtracked to the rightmost " and " in that line. For a name containing that
+        exact substring, the rightmost split falls inside the name rather than between the two
+        paths. That leaves the captured half without its `b/` prefix and out of scope. `git diff
+        --numstat -z` never renders that prose line at all, so there is no " and " to split on.
         """
         root = self.repo("true")
         (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
@@ -7396,9 +7365,9 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def test_a_non_diffable_name_needing_quoting_and_holding_and_is_credited(self) -> None:
         """A name needing both `core.quotePath` quoting and the " and " split must still land.
 
-        The old capture decoded a quoted match before splitting could even be judged correct.
-        So a name combining both problems proved neither fix alone was enough. `-z` needs no decode
-        step, since the name arrives byte for byte, unquoted, regardless of `core.quotePath`.
+        The old capture decoded a quoted match before splitting could even be judged correct. So a
+        name combining both problems proved neither fix alone was enough. `-z` needs no decode step,
+        since the name arrives byte for byte, unquoted, regardless of `core.quotePath`.
         """
         root = self.repo("true")
         (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
@@ -7415,10 +7384,10 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def test_a_renamed_non_diffable_file_is_credited_at_its_new_path(self) -> None:
         """A rename record names its old and new path as two bare fields, not one.
 
-        Its own record carries no path at all, an empty field where one normally sits.
-        So a parse that expected every record to carry its path inline would misread the fields that
-        follow. Crediting the wrong one would leave the new name out of scope, or resurrect a
-        name the working tree no longer holds.
+        Its own record carries no path at all, an empty field where one normally sits. So a parse
+        that expected every record to carry its path inline would misread the fields that follow.
+        Crediting the wrong one would leave the new name out of scope, or resurrect a name the
+        working tree no longer holds.
         """
         root = self.repo("true")
         (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
@@ -7437,8 +7406,8 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
     def test_a_deletion_header_names_no_file(self) -> None:
         """Asserted on the function, since a deletion's hunk is empty and scopes nothing anyway.
 
-        Reading `/dev/null` as a path would leave `cur` naming a file that is not there.
-        The surrounding loop would then credit it with the next hunk it reads.
+        Reading `/dev/null` as a path would leave `cur` naming a file that is not there. The
+        surrounding loop would then credit it with the next hunk it reads.
         """
         self.assertIsNone(prose_lint.diff_header_path("/dev/null"))
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))

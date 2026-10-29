@@ -6,10 +6,10 @@ A caller declares each directory holding a Python project in validate-task.yml's
 keeps the root, where a root pyproject.toml is tracked, which is the only directory the
 validator gated before the input existed.
 
-The declaration is what decides what is gated, never discovery, since a stray or vendored
-`.py` file would otherwise change the gate silently. Tracked `.py` files that no resolved
-directory covers are therefore reported as a warning rather than gated. The fleet audit,
-which compares the declaration against the registry, is where they become a finding.
+The declaration is what decides what is gated, never discovery, since a stray or vendored `.py` file
+would otherwise change the gate silently. Tracked `.py` files that no resolved directory covers are
+therefore reported as a warning rather than gated. The fleet audit, which compares the declaration
+against the registry, is where they become a finding.
 
 Each directory is classed by the shape that decides how its tools run:
 
@@ -18,7 +18,8 @@ Each directory is classed by the shape that decides how its tools run:
 - `lint-only` for a pyproject.toml with no [project] or [build-system] table.
 - `unsupported` for a project with none of those, whose dependencies the validator cannot install.
 
-A uv workspace member is that last shape, since its lock belongs to the workspace root, which is the directory to declare instead.
+A uv workspace member is that last shape, since its lock belongs to the workspace root, which is the
+directory to declare instead.
 
 Writes `projects` (one `<shape><TAB><directory>` line each), `any`, and `declared` to
 GITHUB_OUTPUT. Exits 1 on a declaration naming a path that is not a tracked Python project.
@@ -105,8 +106,8 @@ def in_directory(directory: str, name: str) -> str:
 def shape(directory: str, tracked_set: set[str], read: Callable[[str], str]) -> str:
     """How the directory's tools run, from its tracked files and its pyproject.toml.
 
-    The pyproject.toml is parsed first whatever the shape. A malformed one therefore fails here rather than
-    reading as a project with no [project] table in a later step.
+    The pyproject.toml is parsed first whatever the shape. A malformed one therefore fails here
+    rather than reading as a project with no [project] table in a later step.
     """
     config = tomllib.loads(read(in_directory(directory, "pyproject.toml")))
     if in_directory(directory, "uv.lock") in tracked_set:

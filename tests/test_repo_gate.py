@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Drive every repo_gate check against a tree it must reject.
 
-Each check runs on a crafted temp root rather than on this repo. So a case proves the check
-objects to the fault instead of proving the repo is currently clean. The coverage floors are the
-other half: a check whose scan matches nothing reports zero issues and reads exactly like a pass.
+Each check runs on a crafted temp root rather than on this repo. So a case proves the check objects
+to the fault instead of proving the repo is currently clean. The coverage floors are the other half:
+a check whose scan matches nothing reports zero issues and reads exactly like a pass.
 
 Run as `python3 tests/test_repo_gate.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -160,8 +160,8 @@ class TestShaPin(TreeCase):
 class ResolveCase(TreeCase):
     """Base for the resolvability pass, with the owner fixed and the network replaced.
 
-    No case here reaches GitHub. The point is what each answer is read as. A case that made a
-    live call would report the fleet's current state rather than this script's reading of it.
+    No case here reaches GitHub. The point is what each answer is read as. A case that made a live
+    call would report the fleet's current state rather than this script's reading of it.
     """
 
     OWNER = "ptr727"
@@ -237,8 +237,8 @@ class TestShaPinResolves(ResolveCase):
         """The two are different states, and this note exists to describe the narrowing exactly.
 
         A pin under this owner skipped because the origin is unreadable is not a pin belonging to
-        somebody else. Saying so in the one line that reports coverage is the same false clean
-        the note was added to prevent.
+        somebody else. Saying so in the one line that reports coverage is the same false clean the
+        note was added to prevent.
         """
         self.answers({})
         with mock.patch.object(repo_gate, "origin_owner", return_value=None):
@@ -262,9 +262,9 @@ class TestShaPinResolves(ResolveCase):
     def test_the_note_prints_where_every_count_is_zero(self) -> None:
         """The all-zero run is the one the note exists for, and it was the one it skipped.
 
-        Guarded on a non-zero counter, the note went silent on a repository carrying no workflow
-        at all. That is exactly the clean line the docstring says nobody should have to infer
-        the check's narrowness from.
+        Guarded on a non-zero counter, the note went silent on a repository carrying no workflow at
+        all. That is exactly the clean line the docstring says nobody should have to infer the
+        check's narrowness from.
         """
         repo_gate.check_sha_pin(self.tmp, [])
         self.assertEqual(1, len(repo_gate.NOTES))
@@ -517,8 +517,8 @@ class TestEolCoverage(GitTreeCase):
 class TestQuotedNames(GitTreeCase):
     """A tracked name git quotes reaches every check as the name on disk.
 
-    The constructed name holds a byte that is not valid UTF-8. That is the case that both crashed the
-    listing under `core.quotePath=false` and, at the default, left an escaped spelling no file
+    The constructed name holds a byte that is not valid UTF-8. That is the case that both crashed
+    the listing under `core.quotePath=false` and, at the default, left an escaped spelling no file
     answers to.
     """
 

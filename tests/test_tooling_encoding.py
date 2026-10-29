@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Assert every tool in this repository decodes a child process as UTF-8 rather than as the locale.
 
-Python decodes a `text=True` pipe with the locale encoding when the call names none. On Linux
-that is UTF-8 and the default is invisible. On Windows it is the ANSI code page, commonly
-cp1252. So output carrying a byte sequence that code page cannot map raises UnicodeDecodeError.
-The tools these calls spawn do not transcode to the console's code page. So a Windows run taking
-the ANSI default reads something the tool never wrote. Naming UTF-8 is what makes that run read
-what a Linux run reads. What a byte outside UTF-8 is worth is a separate question this rule does
-not answer. A call that can meet one answers it with its own `errors`, as `prose_lint.py` and
-`host_gate.py` do. The second matters most, since the tool it runs comes from a declaration a
-downstream repository can extend.
+Python decodes a `text=True` pipe with the locale encoding when the call names none. On Linux that
+is UTF-8 and the default is invisible. On Windows it is the ANSI code page, commonly cp1252. So
+output carrying a byte sequence that code page cannot map raises UnicodeDecodeError. The tools these
+calls spawn do not transcode to the console's code page. So a Windows run taking the ANSI default
+reads something the tool never wrote. Naming UTF-8 is what makes that run read what a Linux run
+reads. What a byte outside UTF-8 is worth is a separate question this rule does not answer. A call
+that can meet one answers it with its own `errors`, as `prose_lint.py` and `host_gate.py` do. The
+second matters most, since the tool it runs comes from a declaration a downstream repository can
+extend.
 
-A test rather than a lint rule because nothing in this repository's toolchain checks it.
-`ruff` has no rule reaching a subprocess call at all. Its rule for the same omission on `open`
-and `read_text`, `PLW1514`, covers neither. This repository does not select it in any case,
-because `pyproject.toml` extends the default set with `I` alone and that rule is preview-gated.
+A test rather than a lint rule because nothing in this repository's toolchain checks it. `ruff` has
+no rule reaching a subprocess call at all. Its rule for the same omission on `open` and `read_text`,
+`PLW1514`, covers neither. This repository does not select it in any case, because `pyproject.toml`
+extends the default set with `I` alone and that rule is preview-gated.
 
 Run as `python3 tests/test_tooling_encoding.py`, or under
 `python3 -m unittest discover -s tests`.
@@ -62,10 +62,10 @@ MINIMUM_CALLS = 70
 def scanned_python_files() -> list[Path]:
     """Every Python file this checkout holds, tracked or newly added and not ignored.
 
-    An untracked file is the whole of what a change adds. So a scan reading only the index
-    passes over the one file a new call is most likely to arrive in. A local virtual
-    environment is untracked too, so the untracked pass excludes the trees named in
-    `UNTRACKED_EXCLUDES` the same way `docker_lint.py` excludes `node_modules`.
+    An untracked file is the whole of what a change adds. So a scan reading only the index passes
+    over the one file a new call is most likely to arrive in. A local virtual environment is
+    untracked too, so the untracked pass excludes the trees named in `UNTRACKED_EXCLUDES` the same
+    way `docker_lint.py` excludes `node_modules`.
     """
     names: set[str] = set()
     for extra in ([], ["--others", "--exclude-standard"]):
@@ -138,8 +138,8 @@ def in_text_mode(call: ast.Call) -> bool:
     """Whether this call decodes its child's output, which is what makes an encoding load bearing.
 
     Per the subprocess docs, naming `encoding` or `errors` puts a call into text mode on its own,
-    not only `text=True`. Both spellings have to arrive here, since a call this returns False for
-    is never judged at all, as these show:
+    not only `text=True`. Both spellings have to arrive here, since a call this returns False for is
+    never judged at all. The calls in question include:
 
     - `errors="replace"` alone takes the locale and hits the exact bug this file exists to catch.
     - `encoding="cp1252"` is text mode in an encoding git does not emit.
