@@ -2196,8 +2196,7 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
     `tempfile` for the rest of the suite. USERPROFILE is the home `ntpath.expanduser` reads, set to
     the one the fixture table expanded `~` against at import. The one case that spawns git creates
     a real checkout, so this test skips it.
-    Only `--selftest` run with the host's own paths
-    covers it.
+    Only `--selftest` run with the host's own paths covers it.
     """
 
     def test_selftest_passes_with_ntpath(self):

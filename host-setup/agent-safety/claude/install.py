@@ -159,7 +159,7 @@ def names_hook(command, name):
     A quoted path is read to its closing quote rather than through the same boundary characters.
     That is because those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
     `runs_hook` accepts whole.
-    The bare-word boundary class below cannot cross the space or the parentheses inside it to reach the deployed name.
+    It is also because the bare-word boundary class below cannot cross the space or the parentheses inside it to reach the deployed name.
 
     Known gap, not chased further here:
     - an unquoted path whose own directory holds one of the bare-word boundary characters.
@@ -196,8 +196,7 @@ def matcher_covers_every_exit_reason(matcher):
     """Whether a SessionEnd matcher has a shape known to run on every exit reason, absent, empty, or `*`.
 
     A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool.
-    An absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
-    the three is a defect.
+    An absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of the three is a defect.
     Unlike `matcher_sees_tool`, there is no single reason to test regex membership against.
     That is because the sweep must fire on every exit reason rather than one particular one.
     So this classifies the shape rather than evaluating a pattern.
@@ -310,7 +309,7 @@ def prefix_runs_directly(prefix):
     Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
     write guard included. A PreToolUse hook that fails is a non-blocking error.
     So a prefix that cannot run that way fails the guard open.
-    The causes are a missing `python3`, a lost execute bit, and a `noexec` mount.
+    This happens from a missing `python3`, a lost execute bit, or a `noexec` mount.
     """
     try:
         done = subprocess.run(
@@ -480,7 +479,7 @@ def read_regular_file(path):
 
     Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
     rather than hanging the read.
-    Nothing can therefore swap the path between the check and the read.
+    Judging on the open descriptor also means nothing can swap the path between the check and the read.
     Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
     """
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
@@ -523,7 +522,7 @@ def write_regular_file(path, data, prior=None, before=None):
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
     The open is tried exclusively first, so a file this call created is told from one it found.
-    A path that is a link always counts as found, so its target is kept. A created file is removed
+    The open being exclusive also means a path that is a link always counts as found, so its target is kept. A created file is removed
     again when the write fails, where the path still holds that same file, leaving it absent as it
     was found.
 
@@ -692,8 +691,7 @@ def render_instructions(local_path, local_text):
     """The whole global instruction file in newline form: a header, each block, then the local file.
 
     Rendered whole rather than merged into whatever the file held. Hand-written sections outside the
-    blocks were never written or checked, so they restated rules in wording the fleet had since
-    changed.
+    blocks were never written or checked, so they restated rules in wording the fleet had since changed.
     Every session on the host read them anyway.
     """
     header = (
@@ -914,7 +912,7 @@ def build_stamp(claude_home, installed, instructions_digest=None):
     An install passes the digest of what it rendered rather than re-reading the file. A write by
     anything else between the install's write and this read would otherwise be stamped as the
     install's own.
-    Otherwise the next run would replace it with no backup.
+    The next run would also replace it with no backup.
     """
     return {
         "stampVersion": STAMP_VERSION,
@@ -1198,7 +1196,7 @@ def report(claude_home):
     Compared on the payload digest rather than on the commit.
     That is because a machine installed from an
     older commit whose kit bytes never changed is current.
-    Reporting it as stale sends someone
+    It is also because reporting it as stale sends someone
     to re-run an installer that would write the same file.
     """
     path = claude_home / "agent-safety-stamp.json"

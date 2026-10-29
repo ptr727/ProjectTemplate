@@ -39,7 +39,7 @@ That is why the sweep uses it for a report rather than for a refusal.
 A clean sweep exits 0 and prints nothing.
 
 What it does not see: a process whose own tool-call shell has already exited is reparented to init.
-It is then no longer a descendant of the agent, and no descendant walk reaches it.
+So that process is no longer a descendant of the agent, and no descendant walk reaches it.
 The leak this exists for is the backgrounded tool-call shell itself, which stays a child of the agent for the session's whole life.
 That one it does see.
 
@@ -518,8 +518,8 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
 
     The tree is the inherited root's, or this session's own where it is the root. Stopping an ended
     session's scope can end an agent nested deeper.
-    So the process table is read again after each stop and the judgment repeated, up to `_TREE_ROUNDS` times and only while `deadline` allows.
-    That is because the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
+    So the process table is read again after each stop and the judgment repeated, up to `_TREE_ROUNDS` times.
+    It repeats only while `deadline` allows, since the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
     and only once nothing is left in it. `table` is None where the process table could not be read,
     which says nothing about which agents run, so no scope is stopped then.
     """
@@ -623,8 +623,7 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
 def orphan_report(table, runner=_systemctl):
     """(exit code, report) for `--orphans`: every tool-call scope on the machine whose agent is gone.
 
-    Read-only, for a session that ended with no sweep. 0 is a clean machine, 1 a finding, 2 a failure
-    to ask.
+    Read-only, for a session that ended with no sweep. 0 is a clean machine, 1 a finding, 2 a failure to ask.
     These are kept apart so a report that could not be made never reads as a clean one.
     """
     if table is None:
@@ -667,8 +666,7 @@ def main():
         payload = json.loads(sys.stdin.read() or "{}")
     except (ValueError, OSError):
         payload = {}
-    # Windows has no session test at all, and a BSD `ps` carries neither `etimes` nor a decimal
-    # `sess`.
+    # Windows has no session test at all, and a BSD `ps` carries neither `etimes` nor a decimal `sess`.
     # So on both the hook is inert rather than printing a failure at every session end.
     if os.name != "posix" or sys.platform == "darwin":
         return 0

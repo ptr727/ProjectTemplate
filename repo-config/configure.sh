@@ -39,7 +39,7 @@
 # Their names are enumerable through the API, and a variable's value too.
 # What this script does not check is therefore a choice about what it owns rather than a limit the API imposes.
 # The policy is worth checking on its own because it decides which refs may deploy at all.
-# On an OIDC publish that is half the gate: a ref the policy excludes mints no token.
+# It is also because, on an OIDC publish, that is half the gate: a ref the policy excludes mints no token.
 # A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run.
 # An environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
@@ -249,7 +249,7 @@ project_payload_ok() {
 # The declared owner therefore needs no kind field for this script to guess wrong from.
 # The declared title is asserted against the live one because a project number is unique only per owner and is reusable.
 # A deleted and recreated project can leave the declared number pointing at a project the fleet never chose.
-# This is the one place that resolves the number before every fleet repo is linked to what it names.
+# That is also because project_node_id is the one place that resolves the number before every fleet repo is linked to what it names.
 project_node_id() { # owner number title
     local out id title
     # -f sends a string and -F sends a typed value, so the login goes through -f.
@@ -412,7 +412,7 @@ apply_project() { # project-node-id
     fi
     rid="$(jqr '.id' <<<"$live")"
     # The call is guarded rather than left to abort on its own.
-    # A bare command substitution ends the run with gh's error and nothing of this script's.
+    # That is because a bare command substitution ends the run with gh's error and nothing of this script's.
     # The failure it was written for is a token that reads projects and cannot write a link.
     # The pre-flight's resolution cannot catch it, because that one is a read.
     # Every other non-zero exit lands here too.
@@ -452,7 +452,7 @@ cmd_apply() {
     fi
     # The project is resolved here rather than in apply_project.
     # That is because it is a read.
-    # Also, a number that resolves to nothing, or to a project titled otherwise, would otherwise abort the run with four groups of writes already applied.
+    # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with four groups of writes already applied.
     project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
@@ -770,8 +770,8 @@ check_environments() {
         return
     fi
     # One list read serves both the per-environment assertions and the undeclared-environment note, and it is the call that surfaces an API or permission failure.
-    # Reading each environment individually instead would let two cases arrive as the same result.
-    # Those are a 404 for a missing environment and a 403 for a token without admin.
+    # Reading each environment individually instead would let a 404 and a 403 arrive as the same result.
+    # The 404 is for a missing environment and the 403 for a token without admin.
     if ! live_envs="$(gh api --paginate "repos/$repo/environments" --jq '.environments[]' | jq -s '.')"; then
         echo "Failed to list environments for $repo (check auth and repo access)." >&2
         fail "could not list the deployment environments on $repo"

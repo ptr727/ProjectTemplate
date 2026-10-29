@@ -12,13 +12,13 @@ The write guard is a hook, and a PreToolUse hook that exits 1 is a non-blocking 
 A scope that failed to start would therefore let the very command the guard denies go ahead.
 An MCP server is long-lived and started outside any session.
 A scope would therefore bound it for its whole life and outlive the session that named it.
-A tool call is told apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last,
-either one enough.
+A tool call is told apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last, either one enough.
 Where a later Claude Code drops both, tool calls run bare too, and the SessionEnd
 sweep's report of surviving processes is what remains.
 
 A `claude` session started from a tool call runs its own tool calls in scopes of its own.
-Those scopes are named for it, each under its own ceiling.
+Those scopes are named for it.
+Each is under its own ceiling.
 That is because sharing the parent's one ceiling would let a heavy build make the kernel kill the nested `claude` instead.
 Every scope of the tree also joins one slice named for the root session, which carries a total ceiling for the whole tree.
 A chain of agents calling agents therefore meets that ceiling however few processes each level adds.
@@ -31,7 +31,7 @@ A runaway fan-out then meets the ceiling and fails with a visible error, instead
 host has to be reset.
 The ceiling belongs to the scope's cgroup rather than to the foreground wait.
 It therefore still holds after the tool moves a timed-out command to the background.
-It also holds after the command's own shell has exited and its children were reparented to init.
+It therefore also holds after the command's own shell has exited and its children were reparented to init.
 See host-setup/agent-safety/README.md requirement 9.
 
 The ceilings default to `DEFAULT_TASKS_MAX` and `DEFAULT_MEMORY_MAX` per scope, and to
@@ -50,8 +50,7 @@ Each scope is named for its session plus a random suffix.
 The SessionEnd hook therefore stops what a session's tool calls left running and nothing else.
 A reused pid therefore never collides with a scope still loaded.
 
-Where no systemd user manager is reachable, a tool call runs without a ceiling and one line on stderr
-says so.
+Where no systemd user manager is reachable, a tool call runs without a ceiling and one line on stderr says so.
 That is because a silent fallback would read as a contained command.
 Linux only: the installer does not
 register this prefix on a host without a user manager.
@@ -239,8 +238,7 @@ def valid_tasks(value):
 def valid_memory(value):
     """Whether `value` is `infinity`, a whole `1%` to `99%` of RAM, or a whole count of M, G, or T.
 
-    A unitless count is bytes to systemd, and one written meaning megabytes kills every command at its
-    start.
+    A unitless count is bytes to systemd, and one written meaning megabytes kills every command at its start.
     So a unit is required, and the size floor is `MIN_MEMORY`.
     """
     if value == "infinity":

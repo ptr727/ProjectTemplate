@@ -1555,7 +1555,7 @@ def _is_primary_checkout_selftest() -> bool | str:
     """Tell a real primary checkout from its linked worktree, the primary's name not valid UTF-8.
 
     "skip" where the case could not run, which is neither a pass nor a failure.
-    Windows refuses such a name, and a host can have no git.
+    That happens because Windows refuses such a name, and a host can have no git.
     """
     with tempfile.TemporaryDirectory() as tmp:
         try:

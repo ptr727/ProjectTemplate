@@ -414,8 +414,7 @@ class ApplyLinkCase(unittest.TestCase):
     def test_a_refused_write_reports_what_the_operator_can_act_on(self) -> None:
         """A bare substitution would end the run with gh's error and nothing of the script's.
 
-        The pre-flight's resolution cannot catch this one, since that is a read and this is the
-        write.
+        The pre-flight's resolution cannot catch this one, since that is a read and this is the write.
         A token holding project read alone therefore reaches here with four groups applied.
         """
         result, calls = self.apply([], gh_status=1)

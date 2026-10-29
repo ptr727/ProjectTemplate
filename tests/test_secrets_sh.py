@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Drive lib/sh/secrets.sh's verdicts and env read against constructed files.
 
-Each case builds its own tree under a temp root and asks the sourced library about it through a
-child bash.
+Each case builds its own tree under a temp root and asks the sourced library about it through a child bash.
 A case therefore proves the function's answer for that shape rather than the state of this
 host. A consumer carries the library byte-for-byte, so these cases are the only place it is tested.
 
