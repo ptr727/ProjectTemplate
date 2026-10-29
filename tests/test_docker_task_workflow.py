@@ -2,7 +2,7 @@
 """Pin the Docker task workflow's login-before-push order and its hook inputs.
 
 Every job that can push to Docker Hub must check the credentials and log in before the first step
-that pushes. That includes the caller's hook step. The hook step must receive the inputs it builds
+that pushes. The caller's hook step is among those steps. The hook step must receive the inputs it builds
 from. The job and step sets are read from the workflow. A reordered, renamed, or added job is
 therefore judged by the same rule rather than by a hard-coded index.
 

@@ -42,6 +42,7 @@ def resolve_description(registry: dict, name: str) -> str | None:
     - more than one entry named NAME
     - a declared description that description_errors() rejects
 
+    The second case is raised rather than read as a different repo.
     spec/validate.py rejects a padded name outright. GitHub itself compares a repo name
     case-insensitively, so a same-name-different-case entry is a data-entry mistake rather than a
     different repo.
