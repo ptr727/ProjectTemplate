@@ -108,7 +108,7 @@ jobs:
           mapfile -t labeled < "$RUNNER_TEMP/labeled.txt"
           mapfile -t titled < "$RUNNER_TEMP/titled.txt"
           # The label carries one open issue per repository.
-          # A second one is a state to report rather than one to pick from.
+          # So a second one is a state to report rather than one to pick from.
           # So is a single one carrying a title this workflow never files under.
           # Refusing on the second shape is what keeps an issue a human labeled from having its body replaced with the work list.
           if [ "${#labeled[@]}" -gt 1 ] || [ "${#labeled[@]}" -ne "${#titled[@]}" ]; then

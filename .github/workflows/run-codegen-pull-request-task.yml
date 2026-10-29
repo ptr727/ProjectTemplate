@@ -11,7 +11,8 @@ on:
 jobs:
 
   # No job-level permissions declared.
-  # Every write here (the checkout, the pull request) uses the App token, so GITHUB_TOKEN needs no scope and the caller can grant permissions: {}.
+  # This is because every write here (the checkout, the pull request) uses the App token.
+  # So GITHUB_TOKEN needs no scope and the caller can grant permissions: {}.
   codegen:
     name: Run ${{ matrix.target.ref }} codegen and pull request job
     runs-on: ubuntu-latest

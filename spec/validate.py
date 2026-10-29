@@ -46,7 +46,7 @@ BRANCH_POLICIES = ("custom", "none")
 # The ASCII floor is this fleet's rule rather than GitHub's, per GOVERNANCE.md "Documentation Style Conventions" and its "Character Set" rule.
 # A non-ASCII environment name is legal on GitHub, and repo-config/configure.sh percent-encodes one correctly.
 # It is refused here because the registry is agent-authored text, and an environment name is an identifier.
-# An identifier is compared exactly rather than being prose read by a person.
+# An environment name is compared exactly rather than being prose read by a person.
 # That is why the `description` field's own pattern stays looser.
 # Its tier-2 and tier-3 characters carry meaning their ASCII form loses, where an identifier's do not.
 # A repo that genuinely needs one is a decision for the maintainer.
@@ -87,7 +87,7 @@ GROUND_TRUTH_BRANCH_SHAPE = (
 # Measured across the fleet's repositories, every stored name is upper case.
 # GitHub documents a secret name as case-insensitive when referenced and stored upper case however it was entered.
 # A lower-case declaration therefore matches no stored name and cannot be made to.
-# It is reported missing from the store on every run against a repository whose store is correct.
+# So it is reported missing from the store on every run against a repository whose store is correct.
 # Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well.
 # This is because requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
 # A name a mechanism already requires, which is every one the registry declares today, keeps its claim and yields the missing-from-the-store finding alone.
@@ -326,7 +326,7 @@ def environment_errors_for_repo(repo, name):
     - a declared entry carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads
     - `branches` is present exactly when `branchPolicy` is "custom"
 
-    That check mode reads `branches` in both directions.
+    That check mode reads that condition in both directions.
     "none" names no branch set, since it admits every ref, so a `branches` beside it would be a declaration
     nothing compares against.
 
@@ -606,7 +606,7 @@ def description_errors(name, desc):
     configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
 
     Already trimmed and single-line is enforced so the registry's own text already reads as exactly what every
-    mirror carries. It does so rather than relying on the whitespace-stripping spec/audit.py and repo-config/configure.sh
+    mirror carries. The check does so rather than relying on the whitespace-stripping spec/audit.py and repo-config/configure.sh
     each do defensively to keep agreeing with each other.
     """
     if not isinstance(desc, str) or not desc.strip():

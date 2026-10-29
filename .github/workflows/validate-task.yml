@@ -507,8 +507,8 @@ jobs:
       # On the release model all of it was reviewed where it landed.
       # So the comment rule stands down there, rather than reporting a whole release's comments as this change's.
       # On the operational model any of it may have landed by direct commit, so the promotion is its first review and the rule runs.
-      # The head branch is tested as well as the base.
-      # A feature branch may target the default branch directly, and that one carries new lines.
+      # The head branch is tested as well as the base, since a feature branch may target the default branch directly.
+      # The feature branch carries new lines.
       # The head repository is tested too, since a fork's branch may be named `develop` and its lines were reviewed nowhere.
       - name: Resolve comment stand-down step
         id: comment-stand-down

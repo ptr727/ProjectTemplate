@@ -1016,7 +1016,7 @@ class ReleaseGuardCase(unittest.TestCase):
 
         No repository gate reads a snippet inside a Markdown file. Blocks here once shipped
         an unquoted `repo=<owner>/<repo>` and an unquoted `--repo <path-to-target-checkout>`,
-        each of which bash parses as a redirection. They died of a syntax error before any
+        each of which bash parses as a redirection. So they died of a syntax error before any
         `set` header took effect. Checking the substituted form is what hid it, so this checks
         the printed form. It checks every shell label rather than `bash` alone, since the second
         of those snippets sat in a `shell`-labeled block.
