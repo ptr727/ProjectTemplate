@@ -297,7 +297,7 @@ function Get-WingetInstalled {
 }
 
 # Whether a Version column token is a version, rather than the Unknown winget prints for an entry recording none.
-# A bare < or > left by its range forms is likewise not a version.
+# A bare < or > left by winget's range forms is likewise not a version.
 function Test-WingetVersion {
     param([string]$Token)
     return $Token -match '^\d'
@@ -1319,7 +1319,7 @@ function Start-DockerDesktop {
 # Boundary note: this script used to be read-only on WSL by design, naming upgrade-host.ps1 -Wsl as a person's own step rather than running it.
 # The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window.
 # That window was what Docker's own integration needed to recover.
-# The maintainer moved it because a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
+# The maintainer moved the boundary because a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
 # Returns whether docker is clear to proceed, and whether this stopped Docker Desktop, which is what Exit-DockerMaintenance needs to know whether it owes a restart.
 function Enter-DockerMaintenance {
     param([Parameter(Mandatory)][bool]$WasRunning, [string]$WslProblem)

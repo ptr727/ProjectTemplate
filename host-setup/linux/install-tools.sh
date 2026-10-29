@@ -321,7 +321,7 @@ apt_install() {
 # Packages from a set that are not installed, one per line.
 # Whether a package is installed is asked of dpkg rather than of apt, here and in the sibling scripts.
 # This is because dpkg answers about the installed state while apt-cache also carries a candidate.
-# It is also because the installed state and the candidate disagree on a host whose lists are stale.
+# It is also because dpkg and apt-cache disagree on a host whose lists are stale.
 # The candidate is still what apt_candidate_version reports, since that is the question the report asks.
 package_installed() {
     dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
@@ -1552,7 +1552,7 @@ sudo_visudo_path() {
 
 # Whether an implementation parses the drop-in, asked of its own visudo rather than of a version number.
 # Ubuntu ships sudo-rs as its default sudo from 25.10.
-# The sudo-rs carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
+# Sudo-rs carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
 sudo_parses() {
     local file="$1" checker
     checker=$(sudo_visudo_path "$2") || return 1
