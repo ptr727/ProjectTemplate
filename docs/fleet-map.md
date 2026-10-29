@@ -279,7 +279,15 @@ Four skills close G9, G10, and G12. They shipped through the [`.agents/skills/`]
 
 ### skill-lifecycle
 
-- **Scope** - Creating, changing, splitting, and retiring a skill. The source-vs-generated split. The regen and `--check` semantics of [`scripts/build_dist.py`][build-dist] and the include regions it fills from a rule's home. The install and stamp semantics of [`scripts/skills_install.py`][skills-install]. The doc-packaging pattern in its three shapes. These are a summary in the law doc with full rules in the skill, the reverse, and a generated include of the doc's section. Trigger-description conventions.
+- **Scope** - Creating, changing, splitting, and retiring a skill:
+  - the source-vs-generated split
+  - the regen and `--check` semantics of [`scripts/build_dist.py`][build-dist] and the include regions it fills from a rule's home
+  - the install and stamp semantics of [`scripts/skills_install.py`][skills-install]
+  - the doc-packaging pattern in its three shapes:
+    - a summary in the law doc with full rules in the skill
+    - the reverse
+    - a generated include of the doc's section
+  - trigger-description conventions
 - **Trigger** - About to create or edit anything under `.agents/skills/` or `.claude-plugin/`.
 - **Packages** - [`.agents/skills/README.md`][skills-readme] procedure content, which then defers to it.
 - **Overlap** - None, and the absence was gap G10. Adjacent to `comment-and-doc-style` for SKILL.md prose only.
