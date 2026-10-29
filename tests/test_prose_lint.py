@@ -2539,8 +2539,8 @@ class TestCommentAddedRule(BaitCase):
     def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
         """The harness feeds the variables, so nothing else reads the step's own wiring.
 
-        The default is pinned too. A caller declaring nothing is a release repository by the
-        registry's own default, so flipping it would run the rule on every such promotion.
+        The default is pinned too, since a caller declaring nothing is a release repository by the
+        registry's own default. Flipping it would run the rule on every such promotion.
         """
         self.label_setup()
         text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
@@ -6572,9 +6572,9 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         """`diff.relative` anchors a diff's paths on the process's directory, not the repository.
 
         This case passed before the fix too, because both sides were anchored on that directory and
-        agreed by accident. It is pinned because only one side moved. The keys
-        must come from the repository whatever the caller's configuration says, because a setting is
-        an input shape like any other.
+        agreed by accident. It is pinned because only one side moved. The keys must come from the
+        repository whatever the caller's configuration says. A setting is an input shape like any
+        other.
         """
         root = self.repo()
         self.git(root, "config", "diff.relative", "true")
