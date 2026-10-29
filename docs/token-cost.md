@@ -2,7 +2,7 @@
 
 Why the [`AGENTS.md`][agents] "Context and Delegation Discipline" rules exist, what they were measured against, and what remains open. This doc is **hub-only** and records a measurement, so it is not carried downstream. Without it those rules read as unmotivated preference and a later agent deletes them.
 
-Measured over 220 Claude Code transcripts and 383 pull requests, June to July 2026. Every figure comes from `message.usage` records de-duplicated by request id, or from the GitHub GraphQL API. Costs use the first-party API rate: Opus $5 in and $25 out per million tokens, cache read at 0.1x. Cache write is at 1.25x on the 5-minute TTL and 2x on the 1-hour.
+Measured over 220 Claude Code transcripts and 383 pull requests, June to July 2026. Every figure comes from `message.usage` records de-duplicated by request id, or from the GitHub GraphQL API. Costs use the first-party API rate: Opus $5 in and $25 out per million tokens, cache read at 0.1x. On the same rate card, cache write is at 1.25x on the 5-minute TTL and 2x on the 1-hour.
 
 ## The Equation
 
