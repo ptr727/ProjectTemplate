@@ -192,14 +192,14 @@ INCLUDE_ROOT = ROOT
 # Empty today, deliberately.
 # The surfaces that drift restate a rule in their own words for their own audience rather than copying it.
 # An include fills a region with a heading's whole body.
-# So every one of them is a pointer instead.
+# Given both, every one of those surfaces is a pointer instead.
 # Declared empty rather than left out.
 # That is because the mechanism is what a restatement measured as copy-shaped needs, and the tuple is where that first one is named.
 INCLUDE_DESTINATIONS: tuple[str, ...] = ()
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
 # A near miss: a comment beginning like a marker that neither pattern above accepts.
-# The pattern is case-folded, so a capitalized one is caught too.
+# The near-miss pattern is case-folded, so a capitalized one is caught too.
 # It also matches on any run of dashes, so the three-dash opener a hand types on both markers is caught rather than read as content.
 _INCLUDE_LIKE = re.compile(r"^<!--+\s*/?\s*include\b", re.IGNORECASE)
 # CommonMark's three-space bound, held for a marker line in any container.
@@ -795,7 +795,7 @@ def main():
             # That result also exits 1 by this flag's own documented contract.
             # OSError alongside ValueError.
             # The is_stale() function reads several files beyond the one call already wrapped in its own try/except.
-            # A permissions problem or a file removed out from under it raises that, not ValueError.
+            # A permissions problem or a file removed out from under it raises OSError, not ValueError.
             print(exc, file=sys.stderr)
             return 2
         if drift:

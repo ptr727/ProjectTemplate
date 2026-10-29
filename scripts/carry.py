@@ -673,7 +673,7 @@ def replace_sections(
         # A region runs to the next level-two heading.
         # So the blank line before that heading is inside it, and a section ending its file has none.
         # Where the two copies differ on that, `comparable_region` reads both as the same content.
-        # In that case the boundary is reconciled to what this document needs rather than copied from the other one.
+        # So where they differ, the boundary is reconciled to what this document needs rather than copied from the other one.
         # The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
         source_ends_file = source_span[1] == len(source_lines)
         target_ends_file = end == len(out)

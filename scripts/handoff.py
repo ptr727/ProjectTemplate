@@ -102,7 +102,7 @@ every subcommand refuses there. A fork under the registry's owner that the regis
 does not list can still use a chain to hold state. One example is a fork kept for an upstream
 contribution. The fleet label set does not belong on such a fork. On such a fork the reads warn
 and answer as an empty chain does.
-`new --create-label` creates the one `handoff` label and nothing else. Every other repository
+On such a fork `new --create-label` creates the one `handoff` label and nothing else. Every other repository
 missing the label refuses. That includes a repository under another owner and an unregistered
 repository of the owner's that is not a fork.
 
