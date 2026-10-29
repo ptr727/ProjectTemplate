@@ -321,15 +321,31 @@ class ReadEnvValue(Tree):
 
 
 class CarriedIndent(unittest.TestCase):
-    def test_the_tree_pins_the_indent_a_carrier_cannot_reformat(self) -> None:
+    def test_the_tree_pins_every_shfmt_setting_a_carrier_cannot_reformat_for(self) -> None:
         """A carrier's own `[*.sh]` must not reach the byte-locked copy `shfmt` checks.
 
+        Each key `shfmt` reads is pinned at the value this library is formatted with.
         Only the one section is set, and no `root = true`, so every other setting stays the carrier's.
         """
         config = configparser.ConfigParser()
         config.read_string((LIBRARY.parent / ".editorconfig").read_text(encoding="utf-8"))
         self.assertEqual(config.sections(), ["*.sh"])
-        self.assertEqual(dict(config["*.sh"]), {"indent_size": "4", "indent_style": "space"})
+        self.assertEqual(
+            dict(config["*.sh"]),
+            {
+                "binary_next_line": "false",
+                "function_next_line": "false",
+                "indent_size": "4",
+                "indent_style": "space",
+                "keep_padding": "false",
+                "minify": "false",
+                "never_split": "false",
+                "shell_variant": "bash",
+                "simplify": "false",
+                "space_redirects": "false",
+                "switch_case_indent": "false",
+            },
+        )
 
 
 if __name__ == "__main__":
