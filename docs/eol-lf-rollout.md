@@ -119,8 +119,7 @@ the row is checked without a conversion pull request of its own.
 - [x] **HomeAutomation-Config** (`release` since its 2026-09-24 reclassification from
       `operational`, `lineEndings: lf`): defaults in place
 - [x] **KiCadLibrary** (`release`): converted in ptr727/KiCadLibrary#57, with its vendor STEP,
-      DXF, and SVG files pinned `-text` beside a matching `.editorconfig` `unset` section. Its PDF
-      and PNG files are pinned `binary`
+      DXF, and SVG files pinned `-text` beside a matching `.editorconfig` `unset` section. PDF and PNG are pinned `binary`
 - [ ] **EspDinIoT** (`release`): `develop` still sets `[*] end_of_line = crlf` and `* -text`,
       and `main` carries neither file
 - [x] **ESPHome-Config** (`operational`, `lineEndings: lf`): defaults in place

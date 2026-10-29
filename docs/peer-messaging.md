@@ -1,6 +1,6 @@
 # Peer Messaging Between Agents (Hub-Only)
 
-The declared method for agent-to-agent messaging between sessions on one host. That makes it a method with stated boundaries rather than a capability each session rediscovers. This doc is **hub-only** and is not carried downstream, per the location decision recorded in [`docs/fleet-map.md`][fleet-map] "Peer Messaging". The transport cannot cross a machine boundary, so the rules bind sessions on the maintainer's own hosts. A carried section is re-evaluated when cross-host messaging is verified. The mechanism needs no build, so this doc is the whole deliverable.
+The declared method for agent-to-agent messaging between sessions on one host. That makes it a method with stated boundaries rather than a capability each session rediscovers. This doc is **hub-only** and is not carried downstream, per the location decision recorded in [`docs/fleet-map.md`][fleet-map] "Peer Messaging". The decision records that the transport cannot cross a machine boundary, so the rules bind sessions on the maintainer's own hosts. It also records that a carried section is re-evaluated when cross-host messaging is verified. The mechanism needs no build, so this doc is the whole deliverable.
 
 ## The Method
 
