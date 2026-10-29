@@ -283,9 +283,7 @@ def select_carried(
 ) -> tuple[dict[str, list[str] | None], list[str]]:
     """What a manifest declares carried over `tracked`, and what it declares that is not there.
 
-    Parameterized on the path set rather than reading the tree itself. So the membership question
-    and the manifest question stay separable. So a caller answering one of them differently does
-    not have to reimplement the other.
+    It is parameterized on the path set rather than reading the tree itself. That keeps the membership question and the manifest question separable, and a caller answering one of them differently does not have to reimplement the other.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
     carries. A declared path the tree does not hold is reported rather than skipped quietly. An absent path is the ordinary case for a file scoped to a project type this hub is not. It is also what a manifest
@@ -454,7 +452,7 @@ def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit, so a concurrent branch touching a different unit merges cleanly.
-    It is also so the diff of a recorded pass reads as the pass rather than as a reordering. The
+    This ordering also keeps the diff of a recorded pass reading as the pass rather than as a reordering. The
     caller holds `ledger_lock` across the read this replaces. That is because two overlapping
     records would otherwise each read a ledger without the other's pass, and the second write would
     drop it.
@@ -572,8 +570,7 @@ def code_span(text: str) -> str:
     spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
     longer than any run inside, padded with a space where the content touches a backtick.
 
-    Non-empty because empty text would render as two literal backticks rather than a span. The
-    pad reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
+    Non-empty because empty text would render as two literal backticks rather than a span. Non-empty also because the pad reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
     a heading or a tracked path, both single-line and stripped, so neither shape reaches here.
     """
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
@@ -700,7 +697,7 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
     record time. So an edit between the review and the record would be attested to by a reviewer
-    who never saw it. That is the one claim this record makes. A format-on-save and a hook autofix are two such edits.
+    who never saw it. A format-on-save and a hook autofix are two such edits. That attestation is the one claim this record makes.
     """
     out: dict[str, str] = {}
     for value in values:

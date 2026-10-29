@@ -915,7 +915,7 @@ class ReceiptCase(RepoCase):
         """The remedy is withheld precisely where following it would stamp unread content.
 
         A pass recorded against one branch and a check measuring another disagree about scope. The
-        ordinary remedy line records this check's scope. That runs, succeeds, replaces the
+        ordinary remedy line records this check's scope. The line then runs, succeeds, replaces the
         correctly scoped receipt, and passes the next check over a diff no reviewer read.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")

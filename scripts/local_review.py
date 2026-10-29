@@ -94,7 +94,7 @@ Usage: python3 scripts/local_review.py status [--target '<branch>']
 
 Exit codes are three-valued on purpose, per AGENTS.md "Report an execution boundary separately
 from a check finding". 0 and 1 are findings the caller acts on. 2 means the check itself did not
-run, which a gate must not silently read as either answer. These include:
+run, which a gate must not silently read as either answer. Cases include:
   - no git repository
   - an unresolvable target ref
   - a receipt that cannot be read off disk
@@ -210,7 +210,7 @@ def emit(text: str, stream: object = None) -> None:
 class CannotRun(Exception):
     """The check could not be performed, as distinct from being performed and failing.
 
-    Raised for an execution boundary the caller must not read as a verdict. These include:
+    Raised for an execution boundary the caller must not read as a verdict. Cases include:
     - no git repository
     - a target ref that does not resolve
     - a receipt that cannot be read off disk
@@ -555,8 +555,8 @@ def state_mark(index: set[str], work: set[str]) -> str:
     `git add` invisible to the key. An untracked file, and that same file staged unchanged, both
     read as the working tree's state alone.
 
-    The index is named only where it actually disagrees with the working tree. Naming it that way
-    rather than merging both sides into one set tells staging A over a working tree of B
+    The index is named only where it actually disagrees with the working tree. That naming,
+    rather than merging both sides into one set, is what tells staging A over a working tree of B
     apart from the reverse. A plain union renders the two identically while `git commit` pushes a
     different one of them.
     """
@@ -718,7 +718,7 @@ def covering_passes(receipt: dict | None, base: str, digest: str, target: str) -
 
     A pass covers the content only when the receipt agrees on all three of target, merge base, and
     digest. The target is checked because a review against one branch says nothing about the same
-    branch retargeted at another. The diff under review is a different one there. Its optional
+    branch retargeted at another. The diff under review is a different one there. The target's optional
     `origin/` prefix is ignored, so naming the same branch two ways is not a mismatch.
     """
     if not receipt:
@@ -735,9 +735,9 @@ def break_stale_lock(lock: Path) -> bool:
 
     Breaking is done under a second lock of its own, and the staleness is re-read after that
     exclusive claim rather than before it. A plain check-then-unlink races, in this sequence:
-    - the observing process is descheduled between the two
-    - the holder releases
-    - another process takes a fresh lock
+    - the observing process can be descheduled between the two
+    - the holder can release
+    - another process can take a fresh lock
     - the unlink then removes a lock that is legitimately held
 
     Re-reading under the breaker means the file being removed is still the same abandoned one that
