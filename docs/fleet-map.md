@@ -191,7 +191,7 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 ### G3: A Failed Tool Floor Names No Install Remedy (Closed)
 
 - **Gap** - The tool catalog detected a stale tool, and the handoff back into `host-setup/` did not exist. A failed floor left the operator or agent to rediscover which installer provides the tool.
-- **Resolution** - Each floored [`spec/host-tools.json`][host-tools] entry carries a per-platform `remedy` beside its `source`, and a below-floor failure prints it as a `REMEDY:` line. The line carries a `host-setup/` path resolved against the checkout the gate runs from, so the command is runnable as printed. The catalog's own note states the field's semantics.
+- **Resolution** - Each floored [`spec/host-tools.json`][host-tools] entry carries a per-platform `remedy` beside its `source`, and a below-floor failure prints it as a `REMEDY:` line. Any `host-setup/` path in the line is resolved against the checkout the gate runs from, so the command is runnable as printed. The catalog's own note states the field's semantics.
 
 ```mermaid
 flowchart LR
