@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from pr_review_rounds import commit_oid, page_flag
+
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
 # A StatusContext's PENDING means the opposite, so `check_nodes` translates it away.
 NOT_STARTED = frozenset({"QUEUED", "PENDING", "REQUESTED"})
@@ -75,14 +77,8 @@ def age(stamp: str, now: datetime) -> float | None:
 def head_commit(pr: dict) -> dict:
     """The commit object whose oid is the head's, or an empty dict where none is."""
     head = pr.get("headRefOid") or ""
-    return next(
-        (
-            c.get("commit") or {}
-            for c in ((pr.get("commits") or {}).get("nodes") or [])
-            if (c.get("commit") or {}).get("oid") == head
-        ),
-        {},
-    )
+    nodes = (pr.get("commits") or {}).get("nodes") or []
+    return next((c.get("commit") or {} for c in nodes if commit_oid(c) == head), {})
 
 
 def unkeyed_actions_suite(pr: dict, suite: dict) -> bool:
@@ -376,8 +372,7 @@ def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: li
 
 def checks_truncated(pr: dict) -> bool:
     """True where the head's rollup carries more contexts than the query asked for."""
-    contexts = (head_commit(pr).get("statusCheckRollup") or {}).get("contexts") or {}
-    return bool((contexts.get("pageInfo") or {}).get("hasNextPage"))
+    return page_flag(head_commit(pr).get("statusCheckRollup") or {}, "contexts", "hasNextPage")
 
 
 def checks_unread(nodes: list[dict]) -> list[str]:

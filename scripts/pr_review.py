@@ -229,6 +229,7 @@ from pr_review_rounds import (
     REVIEWER,
     answered_outside_review,
     attested,
+    commit_oid,
     copilot_bot_id,
     coverage,
     describe,
@@ -650,9 +651,7 @@ def node_cause(owner: str, repo: str, node: dict) -> tuple[str, str, str] | None
     """`run_cause` for an error refusal's own commit and submission time, else None."""
     if not possible_quota(node):
         return None
-    return run_cause(
-        owner, repo, (node.get("commit") or {}).get("oid") or "", node.get("submittedAt") or ""
-    )
+    return run_cause(owner, repo, commit_oid(node) or "", node.get("submittedAt") or "")
 
 
 def confirmed_quota(owner: str, repo: str, node: dict) -> str:

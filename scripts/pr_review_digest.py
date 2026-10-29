@@ -23,6 +23,7 @@ from pr_review_rounds import (
     collected,
     coverage,
     first_comment,
+    head_nodes,
     head_reviews,
     newest_of,
     open_threads,
@@ -152,11 +153,7 @@ def render(
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
     other_on_head = [
-        login
-        for login in OTHER_REVIEWERS
-        if any(
-            (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
-        )
+        login for login in OTHER_REVIEWERS if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
     ]
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
