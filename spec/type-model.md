@@ -1,14 +1,14 @@
 # Project Type Model
 
-Companion to [section-model.md][section-model] and [fidelity-model.md][fidelity-model]. Those define how carried *content* is verified. This one defines how a repo's **types** (what it is built from and for) are declared, validated, and checked. It is the ground truth an agent or human consults before adding a type, a profile, or a type check, not a judgment re-derived each session.
+Companion to [section-model.md][section-model] and [fidelity-model.md][fidelity-model]. Those define how carried *content* is verified. This one defines how a repo's **types** (what it is built from and for) are declared, validated, and checked. It is the ground truth an agent or human consults before adding a type, a profile, or a type check. It is not a judgment re-derived each session.
 
-**Rollout status.** This model is being wired in stages. Where a rule below names a check `audit.py` does not yet run, or a schema field not yet defined, this doc is the contract that implementation realizes.
+**Rollout status.** This model is being wired in stages. A rule below may name a check `audit.py` does not yet run, or a schema field not yet defined. In that case this doc is the contract that implementation realizes.
 
 ## Declaration is the source of truth
 
 A repo's types are **declared** in its [registry/repos.json][repos] entry (`types`), and a language type may also declare a **profile** (below). The audit runs the checks for each declared type plus the cross-cutting dimensions. Declaration, not inference, is authoritative: the registry states what the repo *is*, and [project-types.json][types] holds each type's requirements and checks.
 
-This mirrors the fleet principle that *the registry is ground truth about reality, not intent* (the `setup.driftnotes.current` check, over the registry `driftNotes` field): a declaration is a claim about the repo that must match what the repo actually contains.
+This mirrors the fleet principle that *the registry is ground truth about reality, not intent* (the `setup.driftnotes.current` check, over the registry `driftNotes` field). A declaration is a claim about the repo that must match what the repo actually contains.
 
 ## Detection validates, it does not classify
 
@@ -32,31 +32,31 @@ A false declaration is always a finding: a claim the repo does not back is drift
 A language type is present at one of two **depths**, declared as its `profile`:
 
 - **build** - the language is compiled, tested, and/or packaged in this repo. Its full check set applies (style, type-check, tests, coverage, packaging).
-- **lint-only** - the language is present and style-checked here, but not built or packaged in this repo. Its lint/style/type-check checks apply, and build and packaging checks are N/A. Test and coverage checks are N/A too, except for Python, whose lint-only directories still owe a suite run under coverage.
+- **lint-only** - the language is present and style-checked here, but not built or packaged in this repo. Its lint/style/type-check checks apply. Build and packaging checks are N/A. Test and coverage checks are N/A too, except for Python. Python's lint-only directories still owe a suite run under coverage.
 
 Python's profile belongs to each declared Python directory rather than to the repository, per [CODESTYLE.md][codestyle] "Python", so one repository may hold both depths. The registry therefore declares no `python` profile. The registry's `pythonDirectories` lists the directories, and each one's `pyproject.toml` shape states its profile.
 
-Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile, and a check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build and package checks set `build`, and so does a coverage check for a language other than Python. The coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file, or its .codecov.yml alternative) is N/A for a lint-only language other than Python, and otherwise follows tests: the audit reads the repo's tree for tests and holds the requirement N/A where it finds none.
+Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile. A check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build and package checks set `build`. A coverage check for a language other than Python sets it too. The coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file, or its .codecov.yml alternative) is N/A for a lint-only language other than Python. Otherwise it follows tests: the audit reads the repo's tree for tests and holds the requirement N/A where it finds none.
 
 A registry profile is **declared and validated**, not merely detected. Python is the exception, because its structural read of each directory's `pyproject.toml` already is the profile. A repository-wide value could not describe a repository holding both depths. It would also be a second classification of a shape that already states one. So [validate.py][validate] refuses a `python` entry in `profiles`.
 
 ### Consequence for cross-cutting checks
 
-A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` or `.codecov.yml` file presence) are **tests-aware**: they are N/A for a lint-only language other than Python, and for any language the repo carries no tests for. A language with no tests here must never manufacture a coverage finding, whether it is lint-only or a package-only build language whose tests live elsewhere or are not yet written.
+A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` or `.codecov.yml` file presence) are **tests-aware**. They are N/A for a lint-only language other than Python, and for any language the repo carries no tests for. A language with no tests here must never manufacture a coverage finding. That holds whether it is lint-only or a package-only build language whose tests live elsewhere or are not yet written.
 
 ## Languages
 
 Language types carry the style and type-check requirements for their language, gated by profile. A language that is only ever linted in the fleet is `lint-only` by nature and defines no build/test/package checks:
 
-- **cpp** - C/C++ present for style only. The check of record is **clang-format** (a shared config driving the editor, the CLI, and CI, a `parity.lang` arm), feeding the operational lint CI. Deeper semantic and static analysis is intentionally out of scope here. For a codegen or config repo, the C++ is scaffolded and completed by its downstream toolchain (an ESPHome compile), which does the compilation-time checking, and clang-tidy would need a compile database the repo does not have. A repo's `.h` is read as C++ by context (Arduino/ESPHome), since the extension alone is ambiguous.
+- **cpp** - C/C++ present for style only. The check of record is **clang-format** (a shared config driving the editor, the CLI, and CI, a `parity.lang` arm), feeding the operational lint CI. Deeper semantic and static analysis is intentionally out of scope here. For a codegen or config repo, the C++ is scaffolded and completed by its downstream toolchain (an ESPHome compile), which does the compilation-time checking. For such a repo, clang-tidy would need a compile database the repo does not have. A repo's `.h` is read as C++ by context (Arduino/ESPHome), since the extension alone is ambiguous.
 
 ## Generators
 
-A **generator** type is what a repo builds its deliverable *with*, where the deliverable is not code: a static-site generator, a documentation builder. It is named for the generator (`hugo`) rather than for the transport that ships the result, because what a repo builds and where the result lands are separate axes. The destination lives in the registry `publish[]` entry (`{ target, mechanism }`), so a repo changes transport without changing type, and a second transport is a new **mechanism** rather than a new type. Baking the transport into the type is what makes the set explode combinatorially: one generator over two transports would otherwise need two types.
+A **generator** type is what a repo builds its deliverable *with*, where the deliverable is not code: a static-site generator, a documentation builder. It is named for the generator (`hugo`) rather than for the transport that ships the result. That is because what a repo builds and where the result lands are separate axes. The destination lives in the registry `publish[]` entry (`{ target, mechanism }`), so a repo changes transport without changing type. A second transport is thus a new **mechanism** rather than a new type. Baking the transport into the type is what makes the set explode combinatorially: one generator over two transports would otherwise need two types.
 
-There is no `static-site` to `hugo` hierarchy while the type has one member. Instead each check's `assert` is phrased without naming the generator wherever the requirement generalizes (the URL-contract gate and its length floor, the rendered output never committed, the generator pinned by version and digest, vendored-dependency provenance), and names it only where a generator-specific construct *is* the letter, such as a build flag. When a second generator joins the fleet, promoting the generic checks to a shared type is then a registry edit rather than a rewrite, which is the property the phrasing rule exists to preserve. Paying for that abstraction at one member would be the more expensive mistake.
+There is no `static-site` to `hugo` hierarchy while the type has one member. Instead each check's `assert` is phrased without naming the generator wherever the requirement generalizes. Examples are the URL-contract gate and its length floor, the rendered output never committed, the generator pinned by version and digest, and vendored-dependency provenance. A check names the generator only where a generator-specific construct *is* the letter, such as a build flag. When a second generator joins the fleet, promoting the generic checks to a shared type is then a registry edit rather than a rewrite. That is the property the phrasing rule exists to preserve. Paying for that abstraction at one member would be the more expensive mistake.
 
-A generator type declares no `profiles`. Build versus lint-only is a depth of *language* presence, so a profile on a generator type would assert nothing, and `spec/validate.py` rejects a declared profile whose type does not define one.
+A generator type declares no `profiles`. Build versus lint-only is a depth of *language* presence, so a profile on a generator type would assert nothing. `spec/validate.py` rejects a declared profile whose type does not define one.
 
 ## Runtime Libraries
 
