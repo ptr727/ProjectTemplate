@@ -1,14 +1,21 @@
 name: Deploy site task
 
-# Reusable deploy of a built site to a filesystem on a host the project owns, hosted here once since the environment binding, the deploy-key handling, and the atomic upload-then-flip sequence are identical across every site repo.
+# Reusable deploy of a built site to a filesystem on a host the project owns.
+# It is hosted here once since the environment binding, the deploy-key handling, and the atomic upload-then-flip sequence are identical across every site repo.
 # It is a separate dispatch from the release, so a redeploy of an unchanged commit mints no tag.
 # That matters because redeploying is routine: a host rebuild, a rollback, or proving a branch on a non-production environment.
 # See WORKFLOW.md D4.6 and D5.6.
 #
-# A required deploy hook, one composite action the caller owns, covers what is genuinely the site's own: assembling the release bundle (its generator, its precompression, whatever it stamps into the bundle), pruning old releases, and verifying the live site against its own URL contract.
+# A required deploy hook, one composite action the caller owns, covers what is genuinely the site's own:
+#  - assembling the release bundle (its generator, its precompression, whatever it stamps into the bundle)
+#  - pruning old releases
+#  - verifying the live site against its own URL contract
 # It runs three times, once each for build, prune, and verify, passing mode plus whichever of bundle-path, release-id, and environment that mode needs.
-# A hook declares all four inputs in its own action.yml, since a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
-# A composite action's own steps are not guaranteed to read the caller's vars context directly, so each invocation also passes the GitHub Environment variables that mode needs (SITE_BASE_URL, DEPLOY_SSH_USER, DEPLOY_SSH_HOST) as plain env vars, the same mechanism the upload and flip steps below use.
+# A hook declares all four inputs in its own action.yml.
+# This is because a composite action rejects an invocation that supplies an input it does not declare, even one a different mode leaves unset.
+# A composite action's own steps are not guaranteed to read the caller's vars context directly.
+# Each invocation therefore also passes the GitHub Environment variables that mode needs (SITE_BASE_URL, DEPLOY_SSH_USER, DEPLOY_SSH_HOST) as plain env vars.
+# That is the same mechanism the upload and flip steps below use.
 # The verify invocation also carries an optional SITE_AUTH_TOKEN_ID/SITE_AUTH_TOKEN secret pair the same way, for a hook whose live check needs its own token-gated auth.
 # It also carries SITE_EXTRA_BASE_URL and an optional SITE_EXTRA_AUTH_TOKEN_ID/SITE_EXTRA_AUTH_TOKEN pair, for a second site the bundle serves on its own hostname behind its own gate.
 # The upload and the flip stay here as the one atomic sequence every site repo shares, so a hook cannot fork that guarantee.
@@ -16,7 +23,8 @@ name: Deploy site task
 # The transport's options are pinned rather than left to the runner's OpenSSH defaults, and declared once so the two transfers cannot drift apart.
 # StrictHostKeyChecking=yes refuses an unknown or changed host key outright, where the default asks and a non-interactive runner then resolves that ambiguously.
 # UserKnownHostsFile names the file the deploy key step writes, so the check reads the pinned value rather than whatever the runner image happens to carry.
-# BatchMode=yes makes every prompt an immediate failure, so a credential problem surfaces as a failed step rather than as a job that hangs to its timeout.
+# BatchMode=yes makes every prompt an immediate failure.
+# A credential problem therefore surfaces as a failed step rather than as a job that hangs to its timeout.
 # IdentitiesOnly=yes stops the agent offering other keys, so the deploy authenticates as the confined account or not at all.
 
 on:
@@ -85,7 +93,8 @@ jobs:
           esac
 
   # Every host-specific value comes from the environment, so this file names no host, path, or address.
-  # The caller still maps DEPLOY_SSH_PRIVATE_KEY via workflow_call.secrets (required below), but this job's own binding is what determines the real value: cross-repository it resolves from the caller's environments, per docs/reusable-workflows.md "Deploy-site." (a caller job with uses: cannot carry environment: itself).
+  # The caller still maps DEPLOY_SSH_PRIVATE_KEY via workflow_call.secrets (required below), but this job's own binding is what determines the real value.
+  # Cross-repository it resolves from the caller's environments, per docs/reusable-workflows.md "Deploy-site." (a caller job with uses: cannot carry environment: itself).
   deploy:
     name: Deploy site job
     runs-on: ubuntu-latest
@@ -107,7 +116,8 @@ jobs:
 
       # Fail fast on a misconfigured environment, before any build, upload, or flip work runs.
       # A silently empty variable or secret would otherwise let the deploy proceed and only surface as a broken site-url output or a late SSH/rsync failure.
-      # GitHub enforces only that the caller maps a required secret, never that the mapped value is non-empty, so an unset environment secret reaches here as an empty string.
+      # GitHub enforces only that the caller maps a required secret, never that the mapped value is non-empty.
+      # An unset environment secret therefore reaches here as an empty string.
       - name: Assert environment variables and secrets are set step
         env:
           SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
@@ -175,7 +185,8 @@ jobs:
           echo "::error::Required hook missing: .github/actions/deploy/action.yml"
           exit 1
 
-      # Asserted here rather than left to the upload's rsync error, so a hook that misses the contract fails naming the hook rather than a path that looks like a transport problem.
+      # Asserted here rather than left to the upload's rsync error.
+      # A hook that misses the contract therefore fails naming the hook rather than a path that looks like a transport problem.
       - name: Assert build hook produced the bundle contract step
         env:
           RELEASE_ID: ${{ steps.release.outputs.id }}

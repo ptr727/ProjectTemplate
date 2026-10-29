@@ -119,7 +119,8 @@ runs:
       with:
         name: pypi-build-${{ inputs.branch }}
         path: ${{ inputs.project-dir }}/dist/*
-        # A build that emits nothing would otherwise only warn, create no artifact at all, and fail one job later on a download that cannot say why.
+        # A build that emits nothing would otherwise only warn and create no artifact at all.
+        # It would fail one job later on a download that cannot say why.
         if-no-files-found: error
         # Consumed within the run by the caller stub's publish-pypi job, so minimize artifact storage.
         retention-days: 1

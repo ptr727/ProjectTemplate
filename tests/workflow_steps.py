@@ -1,7 +1,7 @@
 """Read one named step out of a workflow or composite action, bounded to that step.
 
-The readers work by indentation. A step is sliced out before any key is looked for in it, so a step missing a key reads as missing rather
-than as the next step's key.
+The readers work by indentation. A step is sliced out before any key is looked for in it. A step missing a key therefore reads as missing
+rather than as the next step's key.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 def step_script_text(text: str, name: str) -> str:
     """The `run` block of the step called `name` in `text`, dedented as a runner reads it.
 
-    The `run:` key is looked for only at the step's own key level, so a step without one fails
+    The `run:` key is looked for only at the step's own key level. A step without one therefore fails
     here rather than reading the next step's script.
     """
     step = yaml_step(text, name)
@@ -65,8 +65,8 @@ def yaml_value(text: str, *keys: str) -> str | None:
 
     The text is raw rather than a parsed value, so quotes and a trailing comment are kept.
 
-    Each key is looked for only among its parent's direct children, the shallowest lines under it,
-    and a comment line is no key at all, so a commented-out or relocated entry reads as absent.
+    Each key is looked for only among its parent's direct children, the shallowest lines under it.
+    A comment line is no key at all. A commented-out or relocated entry therefore reads as absent.
     """
     lines = [
         line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")
