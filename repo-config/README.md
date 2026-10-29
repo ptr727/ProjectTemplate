@@ -68,7 +68,7 @@ Every fleet repository is linked to one user-level project, `Fleet Engineering`,
 
 The title is declared alongside the number because a project number is unique only per owner and is reusable. A project that is deleted and recreated can leave the declared number pointing at a project the fleet never chose. `apply` writes the link into every fleet repository, so a number pointing somewhere else would be applied everywhere. `apply` resolves the number and compares the title in its pre-flight, before the first of its five write groups. So a number that resolves to nothing or to a project titled otherwise stops the run with nothing written rather than part way through.
 
-The link is read and written through GraphQL rather than the REST endpoints the other groups use. So both modes need project access on the token beside the admin the ruleset endpoints require. A token that cannot read projects stops `apply` in its pre-flight with nothing written, naming the scope to grant. Under `check` it reads as a failing project group. A token that can read them but not write one reaches the link write itself and fails there.
+The link is read and written through GraphQL rather than the REST endpoints the other groups use. So both modes need project access on the token beside the admin the ruleset endpoints require. A token that cannot read projects stops `apply` in its pre-flight with nothing written, naming the scope to grant. Under `check` such a token reads as a failing project group. A token that can read them but not write one reaches the link write itself and fails there.
 
 A repository linked to a project of its own is left alone, like a label the payload does not declare. `check` reports how many such links a repository carries and asserts none of them.
 
