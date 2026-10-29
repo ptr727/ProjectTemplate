@@ -703,8 +703,8 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
     record time. So an edit between the review and the record would be attested to by a reviewer
-    who never saw it. A format-on-save and a hook autofix are examples of such edits. That is the
-    one claim this record makes.
+    who never saw it. A format-on-save and a hook autofix are examples of such edits. That attestation
+    is the one claim this record makes.
     """
     out: dict[str, str] = {}
     for value in values:
