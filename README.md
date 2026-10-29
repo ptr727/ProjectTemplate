@@ -73,7 +73,7 @@ Nothing here is installed as a dependency. The rules are read, and the baseline 
 
 ## What This Repo Is
 
-**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository. The drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome: an agent stands a repository up, changes it, and releases it on its own. That agent lands in the same known-good shape every time. The guardrails are what make granting that autonomy sound rather than reckless.
+**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository. The drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome: an agent stands a repository up, changes it, and releases it on its own, and lands in the same known-good shape every time. The guardrails are what make granting that autonomy sound rather than reckless.
 
 **Guardrails here enable rather than restrain.** A rule earns its place by removing a decision an agent would otherwise make differently every time. A rule can instead earn it by making a failure loud that would otherwise pass green. Write safety bounds what an agent can reach outside the project in front of it. The review loop closes before anything merges. The audit proves the result instead of accepting the agent's report of it. Autonomy extends exactly as far as the verification reaches.
 
