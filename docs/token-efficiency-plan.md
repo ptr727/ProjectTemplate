@@ -306,7 +306,7 @@ sibling disambiguations in the same change.
       carried-file guard with the ledger rules as a `references/` file, or two skills with
       sharpened boundaries, on the measured activation overlap.
 - [ ] Confirm the deliberate non-folds: `standup-a-repo`, `resync-a-repo`, `audit-a-repo`, and
-      `check-this-repo` stay separate because each names which session it is in. Confirm too that `agent-conduct` stays the moment-based umbrella beside the task-based specialists.
+      `check-this-repo` stay separate because each names which session it is in. Confirm also that `agent-conduct` stays the moment-based umbrella beside the task-based specialists, as a deliberate non-fold.
 
 Exit criteria: every boundary decision is recorded in the fleet-map Decision Ledger with its
 measured basis, and executed or declined accordingly.
