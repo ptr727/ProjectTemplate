@@ -11,8 +11,9 @@
 #
 # A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
 # That tree lives under the data directory rather than the cache.
-# The next such run replaces that tree whole.
-# That tree is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
+# The bootstrap still needs no git and modifies no checkout of anyone's, because of the following.
+#   - The next such run replaces that tree whole.
+#   - That tree is never a git checkout.
 
 set -Eeuo pipefail
 

@@ -668,7 +668,7 @@ def installer_tree(root: Path, platform: str, wrapper: str) -> Path:
 class TestDirectoryLockOrder(unittest.TestCase):
     """A run refused the directory lock stops before anything that removes a tree.
 
-    Each loader's cleanup removes trees by their fixed names. A refused run that reached that cleanup would
+    Each loader's cleanup removes trees by their fixed names. So a refused run that reached that cleanup would
     delete the trees of the very run holding the lock.
     """
 

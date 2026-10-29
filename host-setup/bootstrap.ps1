@@ -8,8 +8,9 @@
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
 # A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
-# That tree is replaced whole by the next such run.
-# That tree is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
+# The bootstrap still needs no git and modifies no checkout of anyone's, because of the following.
+#   - That tree is replaced whole by the next such run.
+#   - That tree is never a git checkout.
 #
 # An unverified loader is worse than none, which is why this one does more than its Linux peer before it trusts anything.
 # It does the following:

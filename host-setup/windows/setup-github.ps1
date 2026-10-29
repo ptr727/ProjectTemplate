@@ -8,8 +8,9 @@
 # The script stops at each and prints the key to paste and where to paste it.
 # The script checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
 #
-# The path settings are written in the tilde form the Linux peer writes, because git expands it on Windows too.
-# A home shared with a WSL distribution then carries one value rather than two that disagree.
+# The path settings are written in the tilde form the Linux peer writes, because of the following.
+#   - Git expands it on Windows too.
+#   - A home shared with a WSL distribution then carries one value rather than two that disagree.
 
 [CmdletBinding()]
 param(

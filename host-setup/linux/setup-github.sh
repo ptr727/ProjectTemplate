@@ -236,8 +236,9 @@ ensure_known_host() {
 # Enrolling the host key is ensure_known_host's job, in configure mode, where changing the host is the point.
 #
 # A status run also refuses to prompt, since it may be run unattended and a passphrase prompt would hang it.
-# Configure may prompt, because a passphrase for a key with no agent is a question only the operator can answer.
-# Configure may also prompt because it is already an interactive action.
+# Configure may prompt, because of the following.
+#   - A passphrase for a key with no agent is a question only the operator can answer.
+#   - Configure is already an interactive action.
 ssh_probe() {
     local -a opts=(-o StrictHostKeyChecking=yes -o ConnectTimeout=10)
     if [[ $MODE == "status" ]]; then
