@@ -46,7 +46,7 @@ One pull request measuring the remaining carried surface against the carry-versu
   - **Issue** - None filed, and [#305][issue-305] covers the propagation half from the other direction.
   - **Checked** - `develop` at `743fc81` on 2026-08-26, where [`spec/files.json`][files] declares it at `intent`.
   - **Open** - Whether it moves.
-  - **Settled** - The test is stated: a repository carries the content it is audited against and the configuration that describes it. A repository reaches machinery whose content is identical in every repository.
+  - **Settled** - The test is stated: a repository carries the content it is audited against and the configuration that describes it. The test's other half is that a repository reaches machinery whose content is identical in every repository.
   - **Settled** - `repo-config/configure.sh` is the first file moved across. It carries the ledger's only `retire` disposition and names six repos, NxWitness, aiopurpleair, homeassistant-purpleair, ESPHome-NonRoot, VSCode-Server-DotNetCore and LanguageTags.
   - **Settled** - [`spec/secrets.json`][secrets]'s adapted `baseline`/`mechanisms` carry is the second, retired outright rather than moved (ptr727/ProjectTemplate#993). That is because `baseline` applies to every fleet repo by definition and `mechanisms`/`targetMechanisms`/`typeMechanisms` resolve centrally. `spec/audit.py` reads the hub's own file plus `registry/repos.json`, so no downstream repo needs a replacement local copy.
   - **Settled** - An unreachable hub means the tool did not run, reported as not run rather than worked around. The reason is that a hand-rolled substitute is the duplicated effort the model exists to end.
@@ -227,7 +227,7 @@ One pull request routing the disproof record from the provider-agnostic contract
 - **State that a disproof is recorded where it survives the pull request, not only in the thread.** The record exists in [`.github/copilot-instructions.md`][copilot-instructions] "Disproved Claims" and nothing agent-agnostic points at it.
   - **Blocked by** - Nothing.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `756a53e` on 2026-08-07, where outcome 2 of "Every Finding Ends in an Action" ends at the thread. There "Responding and Resolution Expectations" requires the proof and says nothing about where it then lives. There the only pointer to the runbook is scoped to provider mechanics.
+  - **Checked** - `develop` at `756a53e` on 2026-08-07, where outcome 2 of "Every Finding Ends in an Action" ends at the thread. On that `develop`, "Responding and Resolution Expectations" requires the proof and says nothing about where it then lives. On that `develop`, the only pointer to the runbook is scoped to provider mechanics.
   - **Open** - Whether the destination is named in the byte-locked text at all. The reason is that a repository is free to keep its record elsewhere. A further part of the reason is that a rule naming one file is a rule that has to be true in every copy.
   - **Settled** - The write side is where the gap bites rather than the read side. That is because an agent following the loop is already routed to the runbook for mechanics, and an agent posting a decline is routed nowhere.
   - **Settled** - "Durable Knowledge and Self-Improvement" already requires durable knowledge to reach a committed file. So this states where one class of it goes rather than adding an obligation.
@@ -365,7 +365,7 @@ Two loaders exist so a copy-paste snippet takes a stock OS install to a configur
 - **Run `bootstrap.sh` unattended against a fresh Debian and a fresh Ubuntu image, and again to confirm the second run is idempotent.** `--host --yes` finishing clean, with nothing to fix, is the signal. A re-run reporting no further changes confirms idempotency rather than assuming it.
   - **Blocked by** - VM access to a current image of each, and one still-supported older release per distribution. The reason is that the contract's floors are meant to hold there too.
   - **Issue** - None filed.
-  - **Checked** - `develop` at `82a87d3` on 2026-08-13, where this loader has existed since #674. There it carries no record of a run against an image with nothing preinstalled.
+  - **Checked** - `develop` at `82a87d3` on 2026-08-13, where this loader has existed since #674. On that `develop`, it carries no record of a run against an image with nothing preinstalled.
   - **Open** - Which images, who runs the pass, and whether a failure blocks the loader or is filed and worked separately. The reason is that a fresh-host pass can turn up findings well past what one pull request should carry.
 
 - **Run `bootstrap.ps1` unattended against a fresh Windows 10 image with no App Installer, and a fresh Windows 11 image. Run it again unattended on each to confirm idempotency.** The Windows 10 case is the one that exercises the winget-missing remedy this loader prints but has never had checked against a real console. Windows 11 is the expected common case, App Installer and `winget` both present. `-Host -Yes` finishing clean on each, then a clean re-run, is the same signal as the Linux entry above.
@@ -424,7 +424,7 @@ Regenerate [reports/divergences.md][divergences-report] before using it as the w
   - **Detail** - The hub cannot prove four things about the task. They are cross-repository resolution of the pin, the first Dependabot bump of it, the `rules` input end to end, and `merge-app` itself. All four are proof items in the stage 1 list of [`docs/reusable-workflows.md`][reusable-workflows-doc], the first two naming PhotoCleaner and the other two citing a homeassistant-purpleair run.
 
 - **Carry the `Local Verification` heading into every repository's `OPERATIONS.md`.** The heading leads the file and states what verifying a change there requires. It names the part of the repo's contract CI structurally cannot exercise. A repo whose gates are entirely in CI says that under it rather than omitting it.
-  - **Hub state** - Done, verified `develop` at `8e10a2c` on 2026-08-06, where [`spec/section-model.md`][section-model] and [`STANDUP.md`][standup] declare six headings. There this repo's own [`OPERATIONS.md`][operations] leads with the section.
+  - **Hub state** - Done, verified `develop` at `8e10a2c` on 2026-08-06, where [`spec/section-model.md`][section-model] and [`STANDUP.md`][standup] declare six headings. On that `develop`, this repo's own [`OPERATIONS.md`][operations] leads with the section.
   - **Outstanding** - Every repo carrying an `OPERATIONS.md`, which is every repo, since none holds the heading yet.
   - **Issue** - [#597][issue-597], filed from a downstream repo whose pre-merge gate sat under a heading of its own invention. That gate was skipped by an agent following every carried rule correctly.
   - **Rides with** - The `verbatim` re-vendor above. The reason is that the carried [`GOVERNANCE.md`][governance] rule that points at the heading lands in the same visit, and neither half works alone.
