@@ -5,7 +5,7 @@ The JSON report exists so a program can read what the table tells a person.
 Its contract is therefore the shape a program parses:
 
 - every field present on every row
-- a version that was not read written as null
+- a version that was not read is written as null
 - each note filed under the tool that raised it
 
 Each installer's report is driven through its own functions with the host reads stubbed.
