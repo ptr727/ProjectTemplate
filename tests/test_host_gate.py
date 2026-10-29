@@ -935,7 +935,7 @@ class TestLocalOverlay(unittest.TestCase):
 
         This replaced a check that the shipped overlay violates the fleet schema. That coupled a
         schema-design invariant to one data instance. An overlay that legitimately grew a full tool
-        entry would satisfy the fleet schema and fail the test. The split stayed just as
+        entry would satisfy the fleet schema and fail the test. Even then the split stayed just as
         justified. What justifies it is that the overlay schema accepts everything the fleet schema
         does and more. The assertion is therefore made in both directions over constructed
         documents.

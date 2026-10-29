@@ -48,11 +48,11 @@ Subcommands
            installer registers for it.
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet. 0 is also the exit where the review
-           covering it states no partial coverage and its verdict counts what it flags. 42 = the
+           covering the head states no partial coverage and its verdict counts what it flags. 42 = the
            round covering the head states it read fewer files than the pull request changed. 42 is
-           also the exit for a round that states nothing it can believe while an earlier round on
-           record states partial coverage. 50 = that round opens on a verdict other than the clean
-           one, while all of these hold:
+           also the exit where the round covering the head states nothing it can believe while an
+           earlier round on record states partial coverage. 50 = that round opens on a verdict
+           other than the clean one, while all of these hold:
            - It counts no finding.
            - It opens no thread.
            - It collapses no suppressed or previously-missed finding.
@@ -106,7 +106,7 @@ Subcommands
            finding gets, and none decides an exit code.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way. The failure is a node id typed
-           into a mutation. It resolves globally and so writes to a real thread somewhere
+           into a mutation. Such an id resolves globally and so writes to a real thread somewhere
            rather than failing. This takes a pull request number and words from the
            finding, queries the id itself, and offers no argument an id fits in. A finding
            posted twice on one file, threads whose opening comments read the same, is
@@ -157,7 +157,7 @@ Subcommands
            - A refusal on the head.
            - The pull request's newest review being a quota or error refusal on any head.
            - The reviewer's newest activity elsewhere in the repository being a quota refusal
-             nothing answered since, while this head carries none of its own.
+             nothing answered since while this head carries none of its own.
            Proceed on the other reviewers' coverage rather than retrying, and pass
            --ignore-quota-signal once the quota is believed to have reset. A transient error
            refusal whose one re-request is pending exits 30 instead. 42 and 50 = the review landed
@@ -176,7 +176,7 @@ Subcommands
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
            30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
            empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
-           49 = no Copilot round covers this head and none was requested. This is the case for a
+           49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
            for the head. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.

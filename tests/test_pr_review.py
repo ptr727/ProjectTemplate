@@ -2,7 +2,7 @@
 """Drive pr_review's digest and wait loop against responses they must read correctly.
 
 The script exists to collapse a poll cycle into one invocation. Its failure mode is therefore a wrong
-answer rather than a crash, such as:
+answer rather than a crash:
 
 - a review attributed to the wrong login
 - a review counted against a stale head
@@ -852,7 +852,7 @@ class TestOtherReviewers(GqlCase):
 
     `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
     ruleset-gated merge. That held first since only Copilot's own threads counted and then since
-    only known reviewer logins did. Every open thread now counts, and a login only attributes it.
+    only known reviewer logins did. So every open thread now counts, and a login only attributes it.
     Coverage and refusal reading stay Copilot-only. `review_on_head` above names Copilot's own coverage
     specifically, the reviewer this script requests and waits for, not "no review of any kind
     covers this head".
@@ -1355,7 +1355,7 @@ class TestDigestReportsTheAnswer(GqlCase):
 class TestCheckShapes(unittest.TestCase):
     """`mergeStateStatus` folds every one of these into `BLOCKED`, and each wants its own answer.
 
-    The run this exists for polled `BLOCKED` for twenty-five minutes. The pull request's only
+    The run this exists for polled `BLOCKED` for twenty-five minutes on a pull request. That pull request's only
     unfinished check was a rollup job no runner ever took. The run learned the cause from the
     maintainer rather than from the digest.
     """
@@ -2657,7 +2657,7 @@ class TestCli(GqlCase):
         leaves an earlier round covering it while the fresh one this wait was called to watch
         for is still outstanding. Naming that earlier `rounds=` count on `--min-rounds` is what
         `wait` needs to hold out for one beyond it. Otherwise `wait` reads `reviewed_head` alone and
-        reports the earlier round as done at once. It never waits for the fresh one the
+        reports the earlier round as done at once, never waiting for the fresh one the
         re-request was for. The first poll here carries that shape: one review already on the
         head, a request still pending. Without the flag,
         `wait` returns on it unpolled, per `test_wait_returns_zero_once_the_review_lands_on_the_head`.
@@ -4129,7 +4129,7 @@ class TestCli(GqlCase):
         self.assertIn("auto-request:", out)
 
     def test_a_push_off_the_reviewed_head_keeps_the_repo_wide_quota_reading(self) -> None:
-        """A round on the head when the wait begins lets the request and poll run. The
+        """A round on the head when the wait begins lets the request and poll run. Even so, the
         reading itself stands, since a push during the wait can leave the final head with no
         Copilot activity of its own. That is exactly what the repo-wide reading reports. The opening
         shape is answered twice, since the wait's liveness read and its snapshot each take one.

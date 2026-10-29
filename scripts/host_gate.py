@@ -55,7 +55,7 @@ def compare(found: tuple[int, ...], floor: tuple[int, ...]) -> int:
     """Sign of found minus floor, comparing element-wise with the shorter padded by zeros.
 
     Padding rather than comparing lengths is what lets a two-part `2025.08` sit against a three-part
-    `2025.8.0`. Neither reads as the larger for having more components.
+    `2025.8.0`. It does so without either reading as the larger for having more components.
     """
     width = max(len(found), len(floor))
     a = found + (0,) * (width - len(found))
@@ -70,8 +70,8 @@ def probe(argv: list[str]) -> str | None:
     stdout. Reading only stdout would report a working tool as unreadable.
 
     A non-zero exit is not an answer, and reading it as one is a mistake this made on its first run.
-    The mistake: `git restore-mtime --version` on a host without the tool prints git's own
-    "not a git command" text and exits 1. That counted as the probe having run and reported the tool
+    It happened like this: `git restore-mtime --version` on a host without the tool prints git's
+    own "not a git command" text and exits 1. That counted as the probe having run and reported the tool
     as unreadable rather than absent. Those two have opposite remedies, fix this file against
     install the tool. The exit code therefore decides, and a failing probe falls through to the next
     one.
@@ -452,9 +452,9 @@ def package_source(tool: dict) -> str | None:
 def overlay_above(start: Path) -> Path | None:
     """The nearest ancestor of `start` carrying a host-tools.json, or None.
 
-    A bare run layers only the declaration at the working directory itself. Hence an overlay at the
-    root of the repo the run is inside goes unapplied without a word. That happens when the run
-    starts in a subdirectory. Naming that directory lets the run say what it skipped and which re-run applies it.
+    A bare run layers only the declaration at the working directory itself. Hence, when the run starts in a
+    subdirectory, an overlay at the root of the repo the run is inside goes unapplied without a
+    word. Naming that directory lets the run say what it skipped and which re-run applies it.
 
     An overlay declaring no tool is passed over in silence, because every repository carries the
     file whether or not it adds anything. Warning on presence alone would therefore tell the
@@ -581,7 +581,7 @@ def main(argv: list[str] | None = None) -> int:
     local_path = Path(a.repo or ".") / "host-tools.json"
     # Every repository carries this file, an empty tools list where it adds nothing, so an absence is a conformance miss rather than the ordinary case.
     # It is still silent here, because this gate measures a host against floors.
-    # The script that reports a baseline file a repository does not carry is spec/audit.py.
+    # It is silent also because spec/audit.py is what reports a baseline file a repository does not carry.
     if not a.no_local and local_path.is_file():
         local = read_declaration(local_path, "repository host tool declaration")
         if isinstance(local, str):
