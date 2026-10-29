@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Exercise local_review.py's content key, receipt handling, and exit codes against real git trees.
 
-Every case builds a throwaway repository with real remote-tracking refs, because the whole
+Every case builds a throwaway repository with real remote-tracking refs. That is because the whole
 mechanism rests on git's own merge-base, index, and attribute behavior rather than on anything
 this module could stub convincingly.
 
-The fixture isolates git's global and system configuration. Without that, a host with commit
-signing on cannot commit inside the fixture at all, and a host with a different `core.autocrlf`
-answers the attribute cases differently than CI does.
+The fixture isolates git's global and system configuration. Without that, a host with commit signing
+on cannot commit inside the fixture at all. Without that isolation, a host with a different
+`core.autocrlf` answers the attribute cases differently than CI does.
 
 Run as `python3 tests/test_local_review.py`, or under
 `python3 -m unittest discover -s tests`.
@@ -47,8 +47,8 @@ def run(cwd: Path, *args: str) -> str:
 class RepoCase(unittest.TestCase):
     """A throwaway repository with one base commit and origin/develop plus origin/main refs.
 
-    The remote refs are planted with update-ref rather than by adding a real remote and fetching,
-    so the fixture needs no network and no second repository on disk. origin/main exists so a case
+    The remote refs are planted with update-ref rather than by adding a real remote and fetching.
+    So the fixture needs no network and no second repository on disk. origin/main exists so a case
     can record against one target and verify against another.
     """
 
@@ -132,9 +132,9 @@ class ContentKeyCase(RepoCase):
         """The same property where git rewrites content on the way into the index.
 
         A blob id computed by hashing raw working-tree bytes cannot equal the one git stores for a
-        CRLF file under `text` attributes, so the two states never collapse and `git add` moves
-        the key. This repository's own .gitattributes applies such a filter to every text file, so
-        this is the configuration the engine actually runs under, not an exotic one.
+        CRLF file under `text` attributes. So the two states never collapse, and `git add` moves
+        the key. This repository's own .gitattributes applies such a filter to every text file.
+        So this is the configuration the engine actually runs under, not an exotic one.
         """
         (self.tmp / ".gitattributes").write_text("* text eol=crlf\n", encoding="utf-8")
         run(self.tmp, "add", ".gitattributes")
@@ -196,7 +196,7 @@ class ContentKeyCase(RepoCase):
     def test_a_copy_and_a_move_do_not_share_a_key(self) -> None:
         """Comparing states against the merge base means a deletion is always visible.
 
-        A diff listing with rename detection reports only a rename's destination, so turning a
+        A diff listing with rename detection reports only a rename's destination. So turning a
         copy into a move would leave the source's deletion out of the key entirely.
         """
         run(self.tmp, "mv", "base.txt", "moved.txt")
@@ -221,8 +221,8 @@ class ContentKeyCase(RepoCase):
     def test_a_slashed_target_prefers_the_remote_over_a_local_branch(self) -> None:
         """A branch such as release/v1 is an ordinary name, not a fully qualified ref.
 
-        Treating any slash as "already a ref" measures against the local branch of that name, and
-        a local branch that has moved on then defines the review scope with no error at all, which
+        Treating any slash as "already a ref" measures against the local branch of that name.
+        A local branch that has moved on then defines the review scope with no error at all. That
         is a silent wrong answer rather than a failure.
         """
         run(self.tmp, "update-ref", "refs/remotes/origin/release/v1", "HEAD")
@@ -292,7 +292,7 @@ class ContentKeyCase(RepoCase):
     def test_a_local_branch_named_origin_target_cannot_shadow_the_origin_ref(self) -> None:
         """The `origin/<target>` step is qualified too, since the fleet default takes it.
 
-        `refs/remotes/origin/feat` sits at the base commit, and a local branch literally named
+        `refs/remotes/origin/feat` sits at the base commit. A local branch literally named
         `origin/feat` sits at the task tip, which the short name would resolve to first.
         """
         base = run(self.tmp, "rev-parse", "HEAD").strip()
@@ -363,8 +363,8 @@ class ContentKeyCase(RepoCase):
     def test_the_digest_mixes_the_merge_base(self) -> None:
         """The other half: two different bases over one identical mark set differ.
 
-        Asserting only that two targets give different digests is weaker than it looks, since the
-        changed-path sets usually differ too and the digest would move on that alone.
+        Asserting only that two targets give different digests is weaker than it looks. That is
+        because the changed-path sets usually differ too, and the digest would move on that alone.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         base, digest, _ = local_review.current_state(self.target, self.tmp)
@@ -388,7 +388,7 @@ class ContentKeyCase(RepoCase):
     def test_a_path_that_is_not_valid_utf8_is_keyed_under_its_real_name(self) -> None:
         """A name holding a raw high byte is what exercises the decoding, and a valid one is not.
 
-        A merely non-ASCII name such as an accented one is valid UTF-8, so it round-trips under a
+        A merely non-ASCII name such as an accented one is valid UTF-8. So it round-trips under a
         strict decoder and proves nothing about the surrogateescape handling the engine relies on.
         """
         raw = b"docs/broken-\xff-name.md"
@@ -446,8 +446,8 @@ class ContentKeyCase(RepoCase):
         """Reading the tree stages it, and staging writes blobs, so the writes are redirected.
 
         Without the redirection this read permanently deposits the content of every unignored
-        untracked file into the repository, a stray secret among them, from a command whose whole
-        contract is that it only looks.
+        untracked file into the repository, a stray secret among them. It does so from a command
+        whose whole contract is that it only looks.
         """
         (self.tmp / ".env").write_text("TOKEN=constructed-not-real\n", encoding="utf-8")
         objects = local_review.git_dir(self.tmp) / "objects"
@@ -473,7 +473,7 @@ class ContentKeyCase(RepoCase):
     def test_the_object_store_resolves_inside_a_linked_worktree(self) -> None:
         """The fleet runs every task in a linked worktree, whose git directory holds no objects.
 
-        The store lives in the common directory there, so joining `objects` onto the worktree's own
+        The store lives in the common directory there. So joining `objects` onto the worktree's own
         git directory names a path that does not exist and attaches nothing as an alternate. The
         containment case above cannot catch this: its fixture is a primary checkout, where the
         joined path happens to be right.
@@ -526,7 +526,7 @@ class ContentKeyCase(RepoCase):
         """A git hook runs with GIT_INDEX_FILE set, and a hook is the intended capture point.
 
         Inheriting it would make the real-index read answer for whatever index the caller pointed
-        at, which during a partial commit is a pending one holding different content.
+        at. During a partial commit, that index is a pending one holding different content.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         expected = self.digest()
@@ -568,8 +568,8 @@ class ContentKeyCase(RepoCase):
 class DanglingRemoteTrackingCase(RepoCase):
     """A remote-tracking ref that exists but resolves to no object refuses rather than falls through.
 
-    `show-ref --verify` rejects both shapes below, and reading that as "no such ref" reached the
-    as-written step, where a local branch sharing the short name defined the review scope.
+    `show-ref --verify` rejects both shapes below. Reading that as "no such ref" reached the
+    as-written step. There a local branch sharing the short name defined the review scope.
     """
 
     def shadow_with_a_local_branch(self) -> None:
@@ -669,7 +669,7 @@ class HeadContentCase(RepoCase):
     """Content the pushed commit carries that the index and working tree no longer show.
 
     The index and the working tree describe what is about to be committed, never what is already
-    committed, so a key built from those two alone stops seeing a path the moment the tree agrees
+    committed. So a key built from those two alone stops seeing a path the moment the tree agrees
     with the merge base again. The commit still carries it, and a push still delivers it.
     """
 
@@ -697,7 +697,7 @@ class HeadContentCase(RepoCase):
 
         A path in the set only because HEAD disagrees with the base is one the branch committed and
         the tree has since put back. Committing that undo drops it, and the key moves. That is the
-        key following what a push delivers rather than the commit-boundary property breaking: before
+        key following what a push delivers rather than the commit-boundary property breaking. Before
         the commit a push delivers the change, and after it a push delivers the undo.
         """
         (self.tmp / "base.txt").write_text("changed\n", encoding="utf-8")
@@ -714,12 +714,12 @@ class HeadContentCase(RepoCase):
         """The half of the property that must survive, next to the half above that moved.
 
         Staged first, so the only thing between the two digests is the commit, which is the one
-        operation the HEAD read newly sees. Staging is left out on purpose: `git add` on a modified
-        tracked file collapses a mark that named the index separately, which moves the key by the
+        operation the HEAD read newly sees. Staging is left out on purpose. `git add` on a modified
+        tracked file collapses a mark that named the index separately. That moves the key by the
         existing design `state_mark` documents and would hide what this case is measuring.
 
-        It is a floor rather than a proof of the HEAD read, and it passes with that read reverted,
-        since both paths are in the set through their working-tree state either way.
+        It is a floor rather than a proof of the HEAD read, and it passes with that read reverted.
+        That is because both paths are in the set through their working-tree state either way.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         (self.tmp / "base.txt").write_text("edited\n", encoding="utf-8")
@@ -774,8 +774,8 @@ class ReceiptCase(RepoCase):
     def test_an_unreadable_receipt_reports_the_boundary_even_with_nothing_to_gate(self) -> None:
         """A receipt that cannot be read off disk is the check not running, whatever the change set.
 
-        The empty-change answer is a verdict, so reaching it without having tried to read the
-        receipt would convert an execution boundary into a cheerful covered, which is the one
+        The empty-change answer is a verdict. So reaching it without having tried to read the
+        receipt would convert an execution boundary into a cheerful covered. That is the one
         reading a gate must never take.
         """
         self.assertEqual(len(self.marks()), 0, "the fixture branch already carries content")
@@ -792,7 +792,7 @@ class ReceiptCase(RepoCase):
         """Proves the case above by the one byte that separates it from a gated branch.
 
         Without this, a branch that happened to carry no content would pass for the same reason a
-        reviewed one does, and the exemption would be untested where it actually fires.
+        reviewed one does. The exemption would then be untested where it actually fires.
         """
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
@@ -825,7 +825,7 @@ class ReceiptCase(RepoCase):
         """Reading the target out of the receipt and comparing against it is self-fulfilling.
 
         A branch retargeted after a pass was recorded would otherwise verify against the branch it
-        used to target and pass, never having been reviewed against the diff being pushed.
+        used to target and pass. It would never have been reviewed against the diff being pushed.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         self.record("agent-skill", target="main")
@@ -866,7 +866,7 @@ class ReceiptCase(RepoCase):
         """Unusable content is a real answer about coverage, unlike a file that cannot be read.
 
         Decoding inside the block guarding the disk read raises UnicodeDecodeError past both
-        handlers, so the boundary code is reported for a receipt that was read perfectly well.
+        handlers. So the boundary code is reported for a receipt that was read perfectly well.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         local_review.receipt_path(self.tmp).write_bytes(b"\xff\xfe not utf-8 at all")
@@ -902,8 +902,8 @@ class ReceiptCase(RepoCase):
     def test_record_refuses_content_that_moved_since_the_review(self) -> None:
         """The load-bearing path: a pass must attest to what a reviewer actually saw.
 
-        Nothing binds the moment the review finished to the moment it is recorded, so a
-        format-on-save or a hook autofix in between would otherwise be stamped as reviewed.
+        Nothing binds the moment the review finished to the moment it is recorded.
+        So a format-on-save or a hook autofix in between would otherwise be stamped as reviewed.
         """
         (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
         reviewed = self.digest()
@@ -918,7 +918,7 @@ class ReceiptCase(RepoCase):
         """The remedy is withheld precisely where following it would stamp unread content.
 
         A pass recorded against one branch and a check measuring another disagree about scope. The
-        ordinary remedy line records this check's scope, which runs, succeeds, replaces the
+        ordinary remedy line records this check's scope. The line runs, succeeds, replaces the
         correctly scoped receipt, and passes the next check over a diff no reviewer read.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
@@ -943,8 +943,8 @@ class ReceiptCase(RepoCase):
     def test_the_check_failure_prints_a_command_that_actually_runs(self) -> None:
         """The remedy line is the one actionable thing the failure emits.
 
-        It has to carry every required flag and the real digest, or following it lands the reader
-        on a usage error instead of a recorded pass.
+        It has to carry every required flag and the real digest. Otherwise following it lands the
+        reader on a usage error instead of a recorded pass.
         """
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
         err = io.StringIO()
@@ -966,7 +966,7 @@ class ReceiptCase(RepoCase):
         """git permits them in a ref name, confirmed for `;`, `$(...)`, `&`, and a quote.
 
         Interpolating one raw into a line the reader is invited to paste would let a branch name
-        run commands, so the printed value has to survive a shell round trip as one argument.
+        run commands. So the printed value has to survive a shell round trip as one argument.
         """
         name = "feat;echo-pwned"
         run(self.tmp, "branch", name)
@@ -985,11 +985,11 @@ class ReceiptCase(RepoCase):
     def run_piped(self, args: list[str], shell: str) -> int:
         """Run the CLI for real with its output piped into a reader that exits first.
 
-        Driven through a shell rather than in process, because the failure being tested is a
-        genuine EPIPE on a descriptor, and the exit code being tested includes the one the
-        interpreter produces during its own shutdown flush, which no in-process case can reach.
-        The suite's own interpreter is named rather than a bare `python3`, which the shell could
-        resolve to a different one.
+        This helper runs the CLI through a shell rather than in process. That is because the failure
+        being tested is a genuine EPIPE on a descriptor. It is also because the exit code being
+        tested includes the one the interpreter produces during its own shutdown flush. No
+        in-process case can reach that exit code. The suite's own interpreter is named rather than a
+        bare `python3`, which the shell could resolve to a different one.
         """
         python = shlex.quote(Path(sys.executable).as_posix())
         script = f"{python} {shlex.quote(SCRIPT.as_posix())} {' '.join(args)} {shell}"
@@ -1119,7 +1119,7 @@ class ReceiptCase(RepoCase):
         """Checking staleness and then unlinking is a race the breaker lock exists to close.
 
         The observing process can be descheduled between the two, the holder can release, and
-        another process can take a fresh lock, which the unlink would then remove.
+        another process can take a fresh lock. The unlink would then remove it.
         """
         lock = Path(str(local_review.receipt_path(self.tmp)) + ".lock")
         lock.write_text("", encoding="utf-8")
@@ -1306,8 +1306,8 @@ class BackendCase(RepoCase):
     def test_the_backend_is_given_the_merge_base_not_the_target_tip(self) -> None:
         """The two differ the moment the target moves, and only one is what the receipt claims.
 
-        The fake CLI records its own argv, since asserting on the exit code alone would let the
-        argument contract drift back to the tip with nothing objecting.
+        The fake CLI records its own argv. That is because asserting on the exit code alone would
+        let the argument contract drift back to the tip with nothing objecting.
         """
         argv_log = self.outside / "argv.txt"
         self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)
@@ -1341,8 +1341,8 @@ class BackendCase(RepoCase):
     def test_the_backend_is_asked_to_include_untracked_files(self) -> None:
         """The receipt scope includes them and the CLI excludes them by default.
 
-        Without the flag a pass would claim coverage of files the run never read, and a changed
-        set of only untracked files would record a clean review of nothing.
+        Without the flag a pass would claim coverage of files the run never read. Without it a
+        changed set of only untracked files would record a clean review of nothing.
         """
         argv_log = self.outside / "argv2.txt"
         self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)

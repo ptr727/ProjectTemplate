@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Exercise canonical_review.py's unit model, ledger, and sweep against real manifests and git trees.
 
-Two kinds of case live here. The unit-model and ledger cases run against crafted inputs, because
-the properties they assert are about text and JSON rather than about git. The sweep and record
-cases build a throwaway repository with real remote-tracking refs, for `test_local_review.py`'s
-reason: the mechanism rests on git's own file listing and merge-base rather than on anything this
-module could stub convincingly. A third, smaller set reads this repository's own tree, since a unit
-table that silently stops covering a canonical reports exactly what a healthy one does.
+Three kinds of case live here. The unit-model and ledger cases run against crafted inputs, because the
+properties they assert are about text and JSON rather than about git. The sweep and record cases
+build a throwaway repository with real remote-tracking refs, for `test_local_review.py`'s reason.
+That reason is that the mechanism rests on git's own file listing and merge-base rather than on
+anything this module could stub convincingly. A third, smaller set reads this repository's own tree.
+That is because a unit table that silently stops covering a canonical reports exactly what a healthy
+one does.
 
 Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py`,
 or under `-m unittest discover -s tests` the same way.
@@ -58,7 +59,7 @@ class UnitModelCase(unittest.TestCase):
 
         `spec/audit.py` locates a named section for the fidelity hash. This module locates every
         section for the review unit. A case that only exercised this module would pass while the
-        two disagreed about where a section stops, which is precisely the state that lets drift
+        two disagreed about where a section stops. That is precisely the state that lets drift
         hide after a fenced sample.
         """
         text = "intro\n\n## Alpha\n\na body\n\n```\n## Fenced\n```\n\ntail\n\n## Beta\n\nb body\n"
@@ -91,13 +92,13 @@ class UnitModelCase(unittest.TestCase):
         self.assertIn("two level-two sections", str(caught.exception))
 
     def test_two_sections_differing_only_in_case_refuse(self) -> None:
-        """The declared-name lookup folds case and spec/audit.py's heading match folds, so a pair
-        differing only in case is one name to every reader but this guard.
+        """The declared-name lookup folds case and spec/audit.py's heading match folds.
+        So a pair differing only in case is one name to every reader but this guard.
 
-        Left unfolded, the pair passed here as two distinct keys, and `build_units`' own folded
-        lookup then resolved a manifest declaring either spelling to the last of them while
+        Left unfolded, the pair passed here as two distinct keys. `build_units`' own folded
+        lookup then resolved a manifest declaring either spelling to the last of them. In contrast,
         spec/audit.py resolves the same declaration to the first. A pass would be recorded over one
-        section's bytes while the fidelity check hashes the other's, and the first section would be
+        section's bytes while the fidelity check hashes the other's. The first section would be
         no unit at all."""
         text = "intro\n\n## Alpha\n\nFIRST\n\n## alpha\n\nSECOND\n"
         with self.assertRaises(cr.CannotRun):
@@ -138,7 +139,7 @@ class RepoCase(unittest.TestCase):
 
     The remote ref is planted with update-ref rather than by fetching a second repository, so the
     fixture needs no network. The manifest declares one entry of each disposition the selector has
-    to tell apart, which is what lets a case assert that the excluded ones stay excluded.
+    to tell apart. That is what lets a case assert that the excluded ones stay excluded.
     """
 
     def setUp(self) -> None:
@@ -272,9 +273,9 @@ class ManifestCase(RepoCase):
         self.assertEqual(offending, [], "a file no repository receives became canonical content")
 
     def test_an_ignored_file_in_a_carried_tree_is_not_canonical_content(self) -> None:
-        """A filesystem walk took whatever sat in the tree. The undecodable case is the loud one:
-        it takes every subcommand to exit 2, so the local block, CI, and the sweep all stop until
-        someone finds the file, and no repository carries it."""
+        """A filesystem walk took whatever sat in the tree. The undecodable case is the loud one.
+        It takes every subcommand to exit 2, so the local block, CI, and the sweep all stop until
+        someone finds the file. No repository carries it."""
         for tree in (cr.GENERATED_SKILLS, cr.AUTHORED_SKILLS):
             (self.tmp / tree / "demo" / ".DS_Store").write_bytes(b"\xff\xfe\x00rubbish")
         units = self.units()
@@ -289,7 +290,7 @@ class ManifestCase(RepoCase):
         self.assertIn(f"{cr.AUTHORED_SKILLS}/fresh/SKILL.md > One", self.units())
 
     def test_a_declared_section_matches_the_heading_case_insensitively(self) -> None:
-        """spec/audit.py matches case-folded, so matching exactly here would silently stop gating a
+        """spec/audit.py matches case-folded. So matching exactly here would silently stop gating a
         section the fidelity check still hashes, and report it as not held at all."""
         spec = self.manifest()
         for entry in spec["baseline"]:
@@ -306,7 +307,7 @@ class ManifestCase(RepoCase):
         self.assertIn(f"{cr.AUTHORED_SKILLS}/demo/SKILL.md > Use It", self.units())
 
     def test_a_sectioned_entry_carries_its_declared_sections_and_no_others(self) -> None:
-        """A section this hub keeps for itself is read by no carrier, so demanding a pass on it
+        """A section this hub keeps for itself is read by no carrier. So demanding a pass on it
         would be this tool inventing an obligation the manifest does not state."""
         units = self.units()
         self.assertIn("SECT.md > Carried", units)
@@ -329,7 +330,7 @@ class CodeSpanCase(unittest.TestCase):
     """A unit key is a heading, and a heading may name a command, so a key can hold a backtick."""
 
     def test_a_key_holding_a_backtick_stays_one_span(self) -> None:
-        """Single backticks split such a key into two spans with the middle rendered as prose, which
+        """Single backticks split such a key into two spans with the middle rendered as prose. That
         puts the path and the digest in different spans and makes the record argument uncopyable."""
         key = "doc.md > Executing a `develop -> main` promotion safely=sha256:beef"
         span = cr.code_span(key)
@@ -366,8 +367,11 @@ class SweepCase(RepoCase):
         self.assertNotIn("canonical_review.py record", output)
 
     def test_a_never_read_unit_is_asked_for_within_the_bound(self) -> None:
-        """The case the retired gate refused: a unit nothing here has read is one a carrier receives
-        unread, so leaving the whole backlog out left newly authored content with no reader at all."""
+        """This is the case the retired gate refused.
+
+        A unit nothing here has read is one a carrier receives unread. So leaving the whole backlog
+        out left newly authored content with no reader at all.
+        """
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
         self.assertIn(f"{cr.BACKLOG_SLICE} unit(s) from the never-read backlog", output)
@@ -375,7 +379,7 @@ class SweepCase(RepoCase):
         self.assertEqual(len(listed), cr.BACKLOG_SLICE, "the slice is bounded by BACKLOG_SLICE")
 
     def test_the_backlog_slice_takes_the_newest_committed_first(self) -> None:
-        """A unit just authored here is the one a carrier is about to receive unread, so it comes
+        """A unit just authored here is the one a carrier is about to receive unread. So it comes
         ahead of a unit that has been unread for months."""
         self.write("LATE.md", "## Late\n\nbody\n")
         spec = self.manifest()
@@ -394,8 +398,9 @@ class SweepCase(RepoCase):
 
     def test_a_carried_file_no_commit_holds_leads_the_slice(self) -> None:
         """`tracked_files` counts a carried file this branch created and has not committed, and it is
-        the newest content there is. `git log` answers for it with a zero exit and no output, which
-        read as the undatable case would sort it last, the exact inverse of the documented order."""
+        the newest content there is. `git log` answers for it with a zero exit and no output. Read
+        as the undatable case, that would sort it last, the exact inverse of the documented order.
+        """
         self.write("BRAND.md", "## Brand\n\nbody\n")
         spec = self.manifest()
         spec["baseline"].append({"path": "BRAND.md", "fidelity": "verbatim", "whole": True})
@@ -413,8 +418,8 @@ class SweepCase(RepoCase):
 
     def test_a_repository_with_no_commits_dates_nothing_and_still_sweeps(self) -> None:
         """The third answer `newest_commit_times` documents. With no commit at all `git log` exits
-        128 rather than answering, so every path is undatable, and the order has to degrade to the
-        tie-break rather than raising out of a sweep that can otherwise run."""
+        128 rather than answering, so every path is undatable. Because of that the order has to
+        degrade to the tie-break rather than raising out of a sweep that can otherwise run."""
         fresh = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         run(fresh, "init", "--initial-branch=develop", ".")
         (fresh / "spec").mkdir()
@@ -431,10 +436,11 @@ class SweepCase(RepoCase):
 
     def test_every_stale_unit_is_asked_for_whatever_the_bound(self) -> None:
         """The bound is on the backlog alone. Stale text is content a carrier is receiving right now
-        that a pass here has been retired from, so none of it waits for a later round.
+        that a pass here has been retired from. So none of it waits for a later round.
 
-        More stale units than `BACKLOG_SLICE`, deliberately: with fewer, applying the bound to this
-        list as well would leave the case green and the property it is named for unbound.
+        This case uses more stale units than `BACKLOG_SLICE`, deliberately. With fewer, applying the
+        bound to this list as well would leave the case green and the property it is named for
+        unbound.
         """
         self.cover_all()
         self.write("DOC.md", "edited\n\n## Alpha\n\nedited\n\n## Beta\n\nedited\n")
@@ -610,7 +616,7 @@ class LedgerCase(RepoCase):
         self.assertEqual(entries["DOC.md > Alpha"]["digest"], self.units()["DOC.md > Alpha"])
 
     def test_a_recorded_pass_names_a_hub_commit(self) -> None:
-        """The fixture's `task` branch has made no commit of its own yet, so its merge-base against
+        """The fixture's `task` branch has made no commit of its own yet. So its merge-base against
         `origin/develop` and its own `HEAD` are the same commit here. That coincidence is why this
         much still holds against `HEAD`. The case where they diverge, and only the merge-base is
         what gets stamped, is `test_a_recorded_pass_names_the_merge_base_not_the_branch_tip` below.
@@ -651,7 +657,7 @@ class LedgerCase(RepoCase):
         self.assertIn("no such carried canonical unit", output)
 
     def test_record_refuses_a_headless_reviewer(self) -> None:
-        """A headless backend earns a pass by being run, and this engine runs none, so recording
+        """A headless backend earns a pass by being run, and this engine runs none. So recording
         one by hand would attest to a review that produced no completion event at all."""
         headless = sorted(k for k, v in cr.REVIEWERS.items() if v["headless"])
         self.assertTrue(headless, "the backend table stopped declaring a headless reviewer")
@@ -677,9 +683,9 @@ class LedgerCase(RepoCase):
         )
 
     def test_two_records_in_either_order_produce_one_ledger(self) -> None:
-        """The ledger is the state two branches merge, so the order two passes were recorded in
-        has to leave no trace in it beyond the stamps, or the same two passes on two branches
-        would be two different files."""
+        """The ledger is the state two branches merge. So the order two passes were recorded in
+        has to leave no trace in it beyond the stamps. Otherwise the same two passes on two
+        branches would be two different files."""
         alpha, beta = "DOC.md > Alpha", "DOC.md > Beta"
 
         def payload() -> dict[str, Any]:
@@ -718,7 +724,7 @@ class LedgerCase(RepoCase):
 
     def test_a_held_lock_refuses_the_record_rather_than_writing_past_it(self) -> None:
         """Two overlapping records would each read a ledger without the other's pass and the
-        second write would drop one, so a record that cannot take the lock records nothing."""
+        second write would drop one. So a record that cannot take the lock records nothing."""
         lock = Path(str(cr.ledger_lock(self.tmp)) + ".lock")
         lock.write_bytes(b"")
         self.addCleanup(lock.unlink, missing_ok=True)
@@ -747,7 +753,7 @@ class BoundaryCase(RepoCase):
     """A crash is the check not having run, and must never read as the not-covered verdict."""
 
     def test_an_unexpected_failure_reports_the_boundary_rather_than_a_verdict(self) -> None:
-        """Exit 1 is what a caller folds as "a unit moved past its pass", so a crash that fell
+        """Exit 1 is what a caller folds as "a unit moved past its pass". So a crash that fell
         through to the interpreter's own exit 1 would report an execution boundary as a finding.
         `units` stands in for any of them: it reads git and the tree on every subcommand."""
         for boom in (OSError("no fd"), subprocess.TimeoutExpired("git", 1), RuntimeError("x")):
@@ -815,7 +821,7 @@ class ReportCase(RepoCase):
 class LiveTreeCase(unittest.TestCase):
     """Read this repository's own manifest, so a table that stops covering a canonical fails loudly.
 
-    A gate that finds nothing is indistinguishable from a gate with nothing to find, so these
+    A gate that finds nothing is indistinguishable from a gate with nothing to find. So these
     assert a floor on what a healthy run covers rather than only that a run happened.
     """
 
