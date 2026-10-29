@@ -33,7 +33,15 @@ The **map** of how a human or an agent enters the fleet system. The **register**
 
 ## Scope and Non-Goals
 
-This doc governs five things. The first three are the entry-point routing map, the gap register with a defined handoff per gap, and the resolved skills install model. The last two are the proposals for new skills and the phased roadmap. It does not author skills, which ship through the [`.agents/skills/`][skills-readme] pipeline in changes of their own. It does not restate any procedure. It treats multi-agent coordination as a documented pattern only, with the rules in [`docs/peer-messaging.md`][peer-messaging]. The version history that produced the current skill-based model is in [`HISTORY.md`][history], so this doc states only what is.
+This doc governs five things:
+
+- the entry-point routing map
+- the gap register with a defined handoff per gap
+- the resolved skills install model
+- the proposals for new skills
+- the phased roadmap
+
+It does not author skills, which ship through the [`.agents/skills/`][skills-readme] pipeline in changes of their own. It does not restate any procedure. It treats multi-agent coordination as a documented pattern only, with the rules in [`docs/peer-messaging.md`][peer-messaging]. The version history that produced the current skill-based model is in [`HISTORY.md`][history], so this doc states only what is.
 
 ## System Map
 
@@ -278,7 +286,12 @@ Four skills close G9, G10, and G12. They shipped through the [`.agents/skills/`]
 
 ### agent-conduct
 
-- **Scope** - The conduct rules with no skill surface. They are verification before claiming done, asking instead of assuming, and recording a lesson when a failure surfaces one. The rest are accounting at handoff for the questions parked rather than asked, and the delegation summary.
+- **Scope** - The conduct rules with no skill surface:
+  - verification before claiming done
+  - asking instead of assuming
+  - recording a lesson when a failure surfaces one
+  - accounting at handoff for the questions parked rather than asked
+  - the delegation summary
 - **Trigger** - **Narrow, at decision moments** rather than always-on. Each moment is one where a conduct rule is about to be broken and nothing else fires. Which moments those are is the skill's own `description` frontmatter. The skill may add to it without this contract changing, so read the count and the wording there. Deliberately not always-on. The carried [`AGENTS.md`][agents] sections are the always-on layer. An always-on conduct skill would duplicate them and spend the tokens the delegation rules exist to save.
 - **Packages** - `Verification Discipline`, `Communicating with the User`, and `Durable Knowledge and Self-Improvement` from [`GOVERNANCE.md`][governance], which keep authority.
 - **Overlap** - The commit, review, and doc skills each carry their own conduct rules already. This skill points rather than restates where one of those owns the moment.
