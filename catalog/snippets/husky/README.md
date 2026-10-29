@@ -8,7 +8,7 @@ runs **language formatting/lint and the fleet's shared doc gates**. For .NET it 
 prose/comment-style gate and the whole-tree line-ending check. Copy `../hub_fetch_run.py`
 alongside `pre-commit` for the doc gates to run. The script fetches those two checks fresh from
 `ptr727/ProjectTemplate`'s `main` branch and runs them, rather than vendoring or pinning a copy.
-A pin nothing keeps current goes stale by construction. CI (this repo's own, and the hub's) is
+A pin that nothing keeps current goes stale by construction. CI (this repo's own, and the hub's) is
 the backstop for a change that lands broken on `main` before it does real damage locally. The prose gate adds one
 `api.github.com` commit lookup to its fetch, with a `git ls-remote` against `github.com`
 where that fails. An allow-list permitting only
