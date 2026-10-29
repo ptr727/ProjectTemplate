@@ -2,7 +2,7 @@
 
 Why the [`AGENTS.md`][agents] "Context and Delegation Discipline" rules exist, what they were measured against, and what remains open. This doc is **hub-only** and records a measurement, so it is not carried downstream. Without it those rules read as unmotivated preference and a later agent deletes them.
 
-Measured over 220 Claude Code transcripts and 383 pull requests, June to July 2026. Every figure comes from `message.usage` records de-duplicated by request id, or from the GitHub GraphQL API. Costs use the first-party API rate: Opus $5 in and $25 out per million tokens, cache read at 0.1x, cache write at 1.25x on the 5-minute TTL and 2x on the 1-hour.
+Measured over 220 Claude Code transcripts and 383 pull requests, June to July 2026. Every figure comes from `message.usage` records de-duplicated by request id, or from the GitHub GraphQL API. Costs use the first-party API rate: Opus $5 in and $25 out per million tokens, cache read at 0.1x. Cache write is at 1.25x on the 5-minute TTL and 2x on the 1-hour.
 
 ## The Equation
 
@@ -10,7 +10,7 @@ Measured over 220 Claude Code transcripts and 383 pull requests, June to July 20
 cost ~= 0.1 x (requests) x (average context)
 ```
 
-A session's context grows monotonically and every request re-reads all of it at the cache-read rate, so a token added early is paid for again on every request that follows. Both factors were large: 18,254 requests at an average of about 386,000 tokens of context, for **7.05 billion prompt tokens** and roughly **$5,086**.
+A session's context grows monotonically and every request re-reads all of it at the cache-read rate. So a token added early is paid for again on every request that follows. Both factors were large: 18,254 requests at an average of about 386,000 tokens of context, for **7.05 billion prompt tokens** and roughly **$5,086**.
 
 | Component | Cost | Share |
 | --- | ---: | ---: |
@@ -19,7 +19,7 @@ A session's context grows monotonically and every request re-reads all of it at 
 | Output | $528 | 10.4% |
 | Fresh input | $9 | 0.2% |
 
-**Output verbosity is not the lever.** Output was 0.30% of prompt volume and 10.4% of cost, so instructing an agent to write less prose targets a tenth of the bill at best. The cache is also working correctly at a 98.4% read share. The problem is the volume being re-read, not the hit rate.
+**Output verbosity is not the lever.** Output was 0.30% of prompt volume and 10.4% of cost. So instructing an agent to write less prose targets a tenth of the bill at best. The cache is also working correctly at a 98.4% read share. The problem is the volume being re-read, not the hit rate.
 
 ## The Root Cause: Sessions Outliving Their Task
 
@@ -63,9 +63,9 @@ Two measured attributions. Both **overlap** with the counterfactual above rather
 | `CODESTYLE.md` | 56 | $32 |
 | `AUDIT.md` | 27 | $17 |
 
-Median 199 requests remained in the session after such a read, p90 6,005, and only 36.9% of all reads used a range. `AGENTS.md` was **not** auto-loaded by any harness (the session baseline was 33,000 to 37,000 tokens with none of its text present), so the whole cost came from explicit whole-file reads.
+Median 199 requests remained in the session after such a read, p90 6,005, and only 36.9% of all reads used a range. `AGENTS.md` was **not** auto-loaded by any harness (the session baseline was 33,000 to 37,000 tokens with none of its text present). So the whole cost came from explicit whole-file reads.
 
-The rule text could not simply be cut: 16 of 18 sections were declared `fidelity: verbatim` and carried byte-identically to the fleet. So the file was split instead (`AGENTS.md` from 87,457 to 7,789 bytes as a router, with the rule text in [`GOVERNANCE.md`][governance]), and reading one section now costs about 3,200 bytes against 87,457.
+The rule text could not simply be cut: 16 of 18 sections were declared `fidelity: verbatim` and carried byte-identically to the fleet. So the file was split instead (`AGENTS.md` from 87,457 to 7,789 bytes as a router, with the rule text in [`GOVERNANCE.md`][governance]). Reading one section now costs about 3,200 bytes against 87,457.
 
 ### GitHub orchestration: $938, 27% of the cache-read bill
 
@@ -77,7 +77,7 @@ The rule text could not simply be cut: 16 of 18 sections were declared `fidelity
 | CI status polling | 463 | $80 | 545 B |
 | Create pull request | 190 | $36 | 384 B |
 
-This inverts the obvious fix. The `gh` output was already tiny at 574 bytes average, while the turns carrying it were billed against about 417,000 tokens of context, a ratio near 960 to 1. **100% of gh-issuing turns contained exactly one gh call**, so there was no batching at all. Compressing gh output saves nothing and removing turns saves everything, which is what [`scripts/pr_review.py`][pr-review] does.
+This inverts the obvious fix. The `gh` output was already tiny at 574 bytes average. Meanwhile, the turns carrying it were billed against about 417,000 tokens of context, a ratio near 960 to 1. **100% of gh-issuing turns contained exactly one gh call**, so there was no batching at all. Compressing gh output saves nothing and removing turns saves everything, which is what [`scripts/pr_review.py`][pr-review] does.
 
 ## Review Round-Trips
 
@@ -88,7 +88,7 @@ This inverts the obvious fix. The `gh` output was already tiny at 574 bytes aver
 ## What Is Not Settled
 
 - **Model and effort tiering is unquantified.** The mix was 17,851 Opus requests, 390 Haiku, and zero Sonnet, with a global high effort setting, so the headroom is obvious. The saving is not: establishing it needs deliberate paired runs, and no number is claimed here.
-- **Fresh-context self-review is unproven.** An estimate put 44% of findings within reach of a reviewer reading the diff against the docs, but that was an estimate, and a same-model no-context review was tried and found far less than Copilot did. Removing context does not remove shared priors. Treat it as an experiment, and give any retest the finding taxonomy rather than a generic instruction to be adversarial.
+- **Fresh-context self-review is unproven.** An estimate put 44% of findings within reach of a reviewer reading the diff against the docs, but that was an estimate. A same-model no-context review was tried and found far less than Copilot did. Removing context does not remove shared priors. Treat it as an experiment, and give any retest the finding taxonomy rather than a generic instruction to be adversarial.
 - **The semicolon and dash rules are warn-first, and the charset and duplicate-word rules gate, being clean tree-wide.** Compare their hits against the next batch of review findings before enforcing them, and do not claim the mechanical share until that comparison exists.
 
 ## Re-measuring

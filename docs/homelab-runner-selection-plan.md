@@ -90,7 +90,7 @@ The organization-level Copilot runner type applies to both code review and the c
 
 The proposed implementation adds a dedicated `copilot-code-review.yml` workflow, which does not exist yet. Its `copilot-setup-steps` job runs on `ubuntu-latest`.
 
-The organization policy is the authorization boundary. An earlier draft of this plan pinned the image and asserted `runner.environment` at runtime, and neither is kept, since an assertion does not make a job safe after GitHub has assigned it to the wrong runner.
+The organization policy is the authorization boundary. An earlier draft of this plan pinned the image and asserted `runner.environment` at runtime. Neither is kept, since an assertion does not make a job safe after GitHub has assigned it to the wrong runner.
 
 ## Configuration Contract
 
@@ -246,7 +246,7 @@ Automated tests cover:
 Static workflow verification also covers action pinning, actionlint custom labels, job dependencies, and workflow syntax.
 
 Live verification covers both selection branches. Only a live run can prove runner registration and Copilot integration.
-Before the runner-group checkpoint is complete, capture live API evidence for the exact runner group, `visibility: selected`, a selected repository set exactly equal to `ptr727/ProjectTemplate`, `restricted_to_workflows: true`, a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and `allows_public_repositories` equal to the documented opt-in. Reject extra or missing selected repositories and workflows. Assert the restriction flag and selected-workflow value together because GitHub ignores the value when the flag is false. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
+Before the runner-group checkpoint is complete, capture live API evidence for the exact runner group. The evidence covers `visibility: selected`, a selected repository set exactly equal to `ptr727/ProjectTemplate`, and `restricted_to_workflows: true`. It also covers a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and `allows_public_repositories` equal to the documented opt-in. Reject extra or missing selected repositories and workflows. Assert the restriction flag and selected-workflow value together because GitHub ignores the value when the flag is false. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
 Run a live negative canary that proves the GitHub-hosted output cannot select a homelab runner.
 
 ## Planned Repository Surfaces
@@ -320,7 +320,7 @@ Implementation waits for an explicit decision on each item.
 - [ ] GitHub-hosted default branch exercised.
 - [ ] CloudInit public opt-in reviewed in its owning repository.
 - [ ] Restricted organization runner group and runner registered.
-- [ ] Live runner-group API evidence asserts `visibility: selected`, a repository set containing only `ptr727/ProjectTemplate`, `restricted_to_workflows: true`, a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and the documented public-repository setting.
+- [ ] Live runner-group API evidence asserts `visibility: selected`, a repository set containing only `ptr727/ProjectTemplate`, and `restricted_to_workflows: true`. It also asserts a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and the documented public-repository setting.
 - [ ] Direct-label and unapproved-ref negative canaries are rejected.
 - [ ] The GitHub-hosted output cannot select a homelab runner in a live negative canary.
 - [ ] CloudInit provisioning evidence is linked from its owning repository.

@@ -4,11 +4,10 @@ The rollout plan for [issue #766][issue-766], optimizing the fleet instruction s
 token cost and behavioral accuracy. The objectives come from the issue and its maintainer
 comments. The gap analysis measures this repository at commit `5b8e008`, and the phases are
 ordered so every reduction lands behind a measurement that can veto it. This doc is **hub-only**
-and is not carried downstream, the same way [`docs/token-cost.md`][token-cost] is hub-only,
-because it tracks the hub's own campaign rather than a fact a downstream repo needs.
+and is not carried downstream, the same way [`docs/token-cost.md`][token-cost] is hub-only. This is because it tracks the hub's own campaign rather than a fact a downstream repo needs.
 
 The companion docs are [`docs/token-cost.md`][token-cost], which measured why recurring context
-is the cost driver, and [`docs/fleet-map.md`][fleet-map], which holds the skill Gap Register and
+is the cost driver, and [`docs/fleet-map.md`][fleet-map]. The latter holds the skill Gap Register and
 Decision Ledger this plan routes boundary decisions through. The first structural reduction,
 [PR #773][pr-773], landed before this doc and is recorded as Phase 0 below.
 
@@ -43,11 +42,9 @@ only trustworthy while that rule holds.
   only when the subcase appears.
 - **O4, empirical decisions for locked content.** The byte-locked `AGENTS.md` sections and the
   skill boundary map change only on measured downstream evidence, never on hub-file size alone.
-- **O5, preserve the invariants.** Safety, authorization, verification, and merge gates keep
-  their exact semantics, decision-point duplication stays, and deterministic `WHEN / DO / UNLESS`
+- **O5, preserve the invariants.** Safety, authorization, verification, and merge gates keep their exact semantics. Decision-point duplication stays. Deterministic `WHEN / DO / UNLESS`
   phrasing never softens into suggestion wording.
-- **O6, agent-executable delivery.** Every work item is a checkbox sized for one task, with an
-  execution protocol, so agents apply the changes and record the results in this doc.
+- **O6, agent-executable delivery.** Every work item is a checkbox sized for one task, with an execution protocol. So agents apply the changes and record the results in this doc.
 
 ## Cost Model
 
@@ -127,16 +124,14 @@ Markdown lints clean, `python3 scripts/prose_lint.py` passes, and
 
 ## Phased Delivery
 
-The first step is Phase 1, the measuring sticks, paired with the already-proven reductions of
-Phases 2 and 3 which need no measurement to start, only to accept. Phase 4 rides along normal
+The first step is Phase 1, the measuring sticks. It is paired with the already-proven reductions of Phases 2 and 3 which need no measurement to start, only to accept. Phase 4 rides along normal
 work in downstream repos rather than dedicated trips, per the second maintainer comment on
 [issue #766][issue-766]. Phases 5, 6, and 7 are gated and start only on Phase 4 evidence.
 
 ### Phase 0: First Structural Reduction (complete)
 
 [PR #773][pr-773] expanded `references/` in `python-codestyle` (17,312 to 8,696 B),
-`dotnet-codestyle` (15,959 to 11,562 B), and `git-commit-conventions` (12,784 to 11,869 B), with
-all rules moved rather than deleted. Recorded here so the later metrics rows have their starting
+`dotnet-codestyle` (15,959 to 11,562 B), and `git-commit-conventions` (12,784 to 11,869 B). All rules were moved rather than deleted. Recorded here so the later metrics rows have their starting
 point.
 
 ### Phase 1: Baseline and Benchmark
@@ -144,30 +139,24 @@ point.
 Establishes G5 and G6, the two instruments every later phase reads.
 
 - [ ] Add `scripts/token_inventory.py`: measures per-layer sizes, the `AGENTS.md` and
-      `.github/copilot-instructions.md` section splits, and per-skill description, body, and
-      reference bytes, emitting the tables this doc carries. Cover it with a unittest under
+      `.github/copilot-instructions.md` section splits, and per-skill description, body, and reference bytes. It emits the tables this doc carries. Cover it with a unittest under
       `tests/` and document it in `scripts/README.md`. Verify it reproduces the baseline
       below.
 - [ ] Author `docs/token-benchmark.md`: the structured prompt set from
-      [issue #766][issue-766], positive and negative routing cases per skill, each recording
-      prompt, expected skills, expected rules consulted, required action, forbidden action,
+      [issue #766][issue-766], positive and negative routing cases per skill. Each case records prompt, expected skills, expected rules consulted, required action, forbidden action,
       required verification, and expected escalation. Seed it with at least the three example
-      cases from the issue: `repo-worktree` on a trivial fix, `pr-review-conduct` on a green
+      cases from the issue. They are `repo-worktree` on a trivial fix, `pr-review-conduct` on a green
       merge request, and `dotnet-codestyle` on a suppression request. Add two negative cases
       where sibling skills must stay inactive.
-- [ ] Record the benchmark's baseline run, before any Phase 2 edit, in the benchmark doc, run by
-      the maintainer or an agent over the seeded cases, repeated where nondeterminism shows.
+- [ ] Record the benchmark's baseline run, before any Phase 2 edit, in the benchmark doc. The maintainer or an agent runs it over the seeded cases, and repeats it where nondeterminism shows.
 
-Exit criteria: the inventory script runs clean from a hub checkout, the benchmark doc exists with
-a recorded baseline, and this doc's Metrics table is reproducible by command rather than by hand.
+Exit criteria: the inventory script runs clean from a hub checkout. The benchmark doc exists with a recorded baseline. This doc's Metrics table is reproducible by command rather than by hand.
 
 ### Phase 2: Skill Body Progressive Disclosure
 
 Closes G2 and G4 by continuing the [PR #773][pr-773] pattern. The body keeps the common
 execution path and the `WHEN / DO / UNLESS` gates. Rationale stays only where it changes how a
-rule is interpreted, per finding 3 of [issue #766][issue-766]. Each item is one task: edit,
-regenerate the dist tree, spot-check the benchmark cases that route to the skill, mark the box,
-append the metrics row.
+rule is interpreted, per finding 3 of [issue #766][issue-766]. Each item is one task. It covers editing, regenerating the dist tree, spot-checking the benchmark cases that route to the skill, marking the box, and appending the metrics row.
 
 - [ ] `comment-and-doc-style` (14,726 B): keep the charset tiers, the semicolon and spaced-hyphen
       rules, the comment rules, and the PR-title rules in the body. Move the extended Markdown
@@ -189,22 +178,19 @@ append the metrics row.
 - [ ] `dotnet-codestyle` (11,562 B) and `python-codestyle` (8,758 B): second pass, one skill per
       change. Move the remaining extended examples and uncommon analyzer or profile cases into
       the existing `references/` trees.
-- [ ] Narrative trim umbrella, one change per skill: `agent-conduct` (6,680 B), `skill-lifecycle`
-      (8,105 B), `copilot-instructions-keeper` (6,140 B), `audit-a-repo` (5,907 B),
-      `resync-a-repo` (5,151 B), `standup-a-repo` (6,150 B), `check-this-repo`
+- [ ] Narrative trim umbrella, one change per skill. The skills are `agent-conduct` (6,680 B), `skill-lifecycle` (8,105 B), `copilot-instructions-keeper` (6,140 B), `audit-a-repo` (5,907 B), and `resync-a-repo` (5,151 B). The rest are `standup-a-repo` (6,150 B), `check-this-repo`
       (4,367 B), `upstream-contribution-workflow` (5,672 B), `shell-codestyle` (3,584 B), and
       `workflow-ci-contract` (8,201 B). Shorten each `Why This Exists` to the rationale that
       changes interpretation, and move any mechanics a rare path needs into `references/`. Check
       this box only when every named skill is done in its own change.
 
 Exit criteria: no skill body over 10 KB remains without either a `references/` split or a
-recorded reason its content must stay whole, every moved rule is reachable from its body, and
-the benchmark shows no routing or behavior regression.
+recorded reason its content must stay whole. Every moved rule is reachable from its body. The benchmark shows no routing or behavior regression.
 
 ### Phase 3: Copilot Runbook Reduction
 
 Closes G1, the single largest tier 1 block in the fleet. The runbook is carried at intent
-fidelity to every repo and loaded whole by every Copilot session, so each byte removed is
+fidelity to every repo and loaded whole by every Copilot session. So each byte removed is
 removed twenty-two times over.
 
 The split: recognition and decision material stays, fallback mechanics moves. The carried file
@@ -221,7 +207,7 @@ Disproved Claims ledger survives untouched.
 - [ ] Author `docs/copilot-review-mechanics.md` carrying the moved mechanics, whole and
       unchanged.
 - [ ] Rewrite the runbook section to the split above, keeping every recognition shape and
-      decision gate byte-for-byte where feasible, target under 12 KB for the whole
+      decision gate byte-for-byte where feasible. Target under 12 KB for the whole
       `.github/copilot-instructions.md`.
 - [ ] Run the PR-review benchmark cases before and after, and record both in the benchmark doc.
       A Copilot agent's review loop on a cross-owner target is the case most at risk, so cover
@@ -229,16 +215,14 @@ Disproved Claims ledger survives untouched.
 - [ ] Sweep the prose that asserts the old runbook shape, including sibling docs and skills that
       quote the runbook length or structure.
 
-Exit criteria: the carried file carries no embedded query that the hub-hosted helper already
-implements, the keeper confirms ledger preservation, and the benchmark shows the review loop
+Exit criteria: the carried file carries no embedded query that the hub-hosted helper already implements. The keeper confirms ledger preservation. The benchmark shows the review loop
 still executes.
 
 ### Phase 4: Downstream and Provider Measurement
 
 Closes G7, per the second maintainer comment on [issue #766][issue-766]. Measure during normal
 work already happening in downstream repos, not on dedicated trips. For each representative
-shape, capture the context composition: effective `AGENTS.md` content, repo-specific additions,
-provider always-on instructions, skill discovery metadata, activated skill bodies, references
+shape, capture the context composition: effective `AGENTS.md` content, repo-specific additions, provider always-on instructions, and skill discovery metadata. Also capture activated skill bodies, references
 actually loaded, and the total attributable to fleet instructions.
 
 - [ ] .NET shape: `PhotoCleaner` or `PlexCleaner`
@@ -285,27 +269,22 @@ benchmark's negative cases decide, run before and after each change.
 - [ ] `resync-a-repo` (798 B)
 - [ ] `carried-instruction-file-guard` (776 B)
 
-Exit criteria: discovery metadata shrank materially where the provider matrix says it is
-recurring, every description keeps its negative boundaries, and the benchmark routing record
+Exit criteria: discovery metadata shrank materially where the provider matrix says it is recurring. Every description keeps its negative boundaries. The benchmark routing record
 shows no missed or false activation introduced.
 
 ### Phase 6: AGENTS.md Reduction Decision
 
-Closes G8. Gated on Phase 4 data. The question is not whether the 17,508 B file can shrink. The
-question is how many recurring tokens per downstream task a cut removes, and whether that saving
-justifies a fleet-wide verbatim sweep, per the second maintainer comment on [issue #766][issue-766].
+Closes G8. Gated on Phase 4 data. The question is not whether the 17,508 B file can shrink. The question, per the second maintainer comment on [issue #766][issue-766], is how many recurring tokens per downstream task a cut removes. It is also whether that saving justifies a fleet-wide verbatim sweep.
 
 - [ ] Write the decision record from the Phase 4 matrix: projected per-task token saving of a
-      40-60% cut against the sweep cost, appended to Metrics.
+      40-60% cut against the sweep cost. Append the record to Metrics.
 - [ ] On approval, rewrite the three verbatim sections in one hub pull request. State the
       bootstrap once, without the diagram-plus-prose duplication. State the discipline rules as
       rules. Slim the `Where the Rules Live` map, which Phase 5 already shortened the rows of.
       Update `spec/section-model.md` and sweep every cross-reference. The target from
       [issue #766][issue-766] is 40-60% overall, subject to the benchmark.
 - [ ] Run the full benchmark before and after the rewrite, and record it.
-- [ ] Execute the fleet re-vendor sweep, one resync per repo, tracked as a per-repo checklist in
-      this phase in the style of [`docs/eol-lf-rollout.md`][eol-lf-rollout], added when the
-      rewrite merges.
+- [ ] Execute the fleet re-vendor sweep, one resync per repo. Track it as a per-repo checklist in this phase in the style of [`docs/eol-lf-rollout.md`][eol-lf-rollout]. Add the checklist when the rewrite merges.
 - [ ] On decline, record the decision and the measurement behind it, and close the phase.
 
 Exit criteria: either the reduction landed with equivalent benchmark behavior and a completed
@@ -314,8 +293,7 @@ sweep, or a recorded decline with numbers.
 ### Phase 7: Skill Boundary Review
 
 Closes G9. Gated on Phases 2 and 5, so decisions read post-compression sizes rather than today's.
-Decisions route through the [`docs/fleet-map.md`][fleet-map] Gap Register and Decision Ledger,
-and execution follows the `skill-lifecycle` Skill, whose retirement sweep deletes map rows and
+Decisions route through the [`docs/fleet-map.md`][fleet-map] Gap Register and Decision Ledger. Execution follows the `skill-lifecycle` Skill, whose retirement sweep deletes map rows and
 sibling disambiguations in the same change.
 
 - [ ] Re-measure and identify any skill still over 10 KB of body or activating on a surface its
@@ -328,8 +306,7 @@ sibling disambiguations in the same change.
       carried-file guard with the ledger rules as a `references/` file, or two skills with
       sharpened boundaries, on the measured activation overlap.
 - [ ] Confirm the deliberate non-folds: `standup-a-repo`, `resync-a-repo`, `audit-a-repo`, and
-      `check-this-repo` stay separate because each names which session it is in, and
-      `agent-conduct` stays the moment-based umbrella beside the task-based specialists.
+      `check-this-repo` stay separate because each names which session it is in. `agent-conduct` stays the moment-based umbrella beside the task-based specialists.
 
 Exit criteria: every boundary decision is recorded in the fleet-map Decision Ledger with its
 measured basis, and executed or declined accordingly.
@@ -387,7 +364,7 @@ From [issue #766][issue-766], binding every phase.
 - Canonical policy docs optimize for correctness and maintainability, not byte count, since they
   are read one section at a time.
 - Behavioral evaluation is a human-reviewed benchmark over a structured prompt set, run before
-  and after, never a CI-gated deterministic suite, and repeated runs are expected where routing
+  and after, never a CI-gated deterministic suite. Repeated runs are expected where routing
   is nondeterministic.
 
 <!-- Internal -->

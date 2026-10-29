@@ -340,7 +340,7 @@ One pull request writing down the agent-to-agent messaging this fleet has now us
   - **Settled** - The addressing has a guardrail worth keeping in the write-up. A bare peer name was refused and the transport required the `[ref]` a listing prints. That is what stops a message reaching the wrong repository's agent.
   - **Settled** - The method earns its place on evidence rather than novelty. One exchange produced the causal commit for the section 6 ruleset defect, `90e3255`, which the hub session had not identified from the symptom. That exchange also produced a one-line reproduction of the gojq key-sorting behavior that made an earlier fix pass for the wrong reason. The exchange further produced four procedure gaps a reader found that no gate reports.
   - **Settled** - A peer's finding is checked rather than adopted. Two of those four did not reproduce at the hub, the `AGENTS.md` anchor rewrite and the settings-diff exposure, and one did and shipped as #653. So the write-up states verification as a step rather than as a courtesy.
-  - **Settled** - The boundary that matters most is not politeness but permission. A peer cannot widen what the asking session may do, so work blocked in one session goes back to the maintainer rather than sideways to another agent.
+  - **Settled** - The boundary that matters most is not politeness but permission. A peer cannot widen what the asking session may do. So work blocked in one session goes back to the maintainer rather than sideways to another agent.
 
 ### Whether a Removed App Execution Alias Comes Back
 
