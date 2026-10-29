@@ -277,7 +277,8 @@ jobs:
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
-    # A repo with a tracker outside the built-in codegen and upstream-version pairs adds a with: block carrying a rules JSON array of head or head-prefix plus base.
+    # A repo with a tracker outside the built-in codegen and upstream-version pairs adds a with: block.
+    # The block carries a rules JSON array of head or head-prefix plus base.
     # A repo that keeps the repository-wide auto-delete off and still wants bot branches gone sets delete-branch true in the same block.
 ```
 
@@ -368,7 +369,8 @@ jobs:
     uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: read
-    # A Docker repo maps DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN by name here, since the task logs in to Docker Hub on every build for the higher rate limit.
+    # A Docker repo maps DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN by name here.
+    # That is because the task logs in to Docker Hub on every build for the higher rate limit.
     with:
       smoke: true
       github: false
