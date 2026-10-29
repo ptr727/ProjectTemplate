@@ -4,7 +4,7 @@ The rollout plan for [issue #766][issue-766], optimizing the fleet instruction s
 token cost and behavioral accuracy. The objectives come from the issue and its maintainer
 comments. The gap analysis measures this repository at commit `5b8e008`, and the phases are
 ordered so every reduction lands behind a measurement that can veto it. This doc is **hub-only**
-and is not carried downstream, the same way [`docs/token-cost.md`][token-cost] is hub-only. This is because it tracks the hub's own campaign rather than a fact a downstream repo needs.
+and is not carried downstream, the same way [`docs/token-cost.md`][token-cost] is hub-only. The reason is that this doc tracks the hub's own campaign rather than a fact a downstream repo needs.
 
 The companion docs are [`docs/token-cost.md`][token-cost], which measured why recurring context
 is the cost driver, and [`docs/fleet-map.md`][fleet-map]. The latter holds the skill Gap Register and
@@ -150,13 +150,13 @@ Establishes G5 and G6, the two instruments every later phase reads.
       where sibling skills must stay inactive.
 - [ ] Record the benchmark's baseline run, before any Phase 2 edit, in the benchmark doc. The maintainer or an agent runs it over the seeded cases, and repeats it where nondeterminism shows.
 
-Exit criteria: the inventory script runs clean from a hub checkout. The benchmark doc exists with a recorded baseline. This doc's Metrics table is reproducible by command rather than by hand.
+Exit criteria: the inventory script runs clean from a hub checkout. Another is that the benchmark doc exists with a recorded baseline. Another is that this doc's Metrics table is reproducible by command rather than by hand.
 
 ### Phase 2: Skill Body Progressive Disclosure
 
 Closes G2 and G4 by continuing the [PR #773][pr-773] pattern. The body keeps the common
 execution path and the `WHEN / DO / UNLESS` gates. Rationale stays only where it changes how a
-rule is interpreted, per finding 3 of [issue #766][issue-766]. Each item is one task. It covers editing, regenerating the dist tree, spot-checking the benchmark cases that route to the skill, marking the box, and appending the metrics row.
+rule is interpreted, per finding 3 of [issue #766][issue-766]. Each item is one task. The steps: edit, regenerate the dist tree, spot-check the benchmark cases that route to the skill, mark the box, append the metrics row.
 
 - [ ] `comment-and-doc-style` (14,726 B): keep the charset tiers, the semicolon and spaced-hyphen
       rules, the comment rules, and the PR-title rules in the body. Move the extended Markdown
@@ -178,14 +178,14 @@ rule is interpreted, per finding 3 of [issue #766][issue-766]. Each item is one 
 - [ ] `dotnet-codestyle` (11,562 B) and `python-codestyle` (8,758 B): second pass, one skill per
       change. Move the remaining extended examples and uncommon analyzer or profile cases into
       the existing `references/` trees.
-- [ ] Narrative trim umbrella, one change per skill. The skills are `agent-conduct` (6,680 B), `skill-lifecycle` (8,105 B), `copilot-instructions-keeper` (6,140 B), `audit-a-repo` (5,907 B), and `resync-a-repo` (5,151 B). The rest are `standup-a-repo` (6,150 B), `check-this-repo`
+- [ ] Narrative trim umbrella, one change per skill. The umbrella covers `agent-conduct` (6,680 B), `skill-lifecycle` (8,105 B), `copilot-instructions-keeper` (6,140 B), `audit-a-repo` (5,907 B), and `resync-a-repo` (5,151 B). It also covers `standup-a-repo` (6,150 B), `check-this-repo`
       (4,367 B), `upstream-contribution-workflow` (5,672 B), `shell-codestyle` (3,584 B), and
       `workflow-ci-contract` (8,201 B). Shorten each `Why This Exists` to the rationale that
       changes interpretation, and move any mechanics a rare path needs into `references/`. Check
       this box only when every named skill is done in its own change.
 
 Exit criteria: no skill body over 10 KB remains without either a `references/` split or a
-recorded reason its content must stay whole. Every moved rule is reachable from its body. The benchmark shows no routing or behavior regression.
+recorded reason its content must stay whole. Another is that every moved rule is reachable from its body. Another is that the benchmark shows no routing or behavior regression.
 
 ### Phase 3: Copilot Runbook Reduction
 
@@ -215,14 +215,14 @@ Disproved Claims ledger survives untouched.
 - [ ] Sweep the prose that asserts the old runbook shape, including sibling docs and skills that
       quote the runbook length or structure.
 
-Exit criteria: the carried file carries no embedded query that the hub-hosted helper already implements. The keeper confirms ledger preservation. The benchmark shows the review loop
+Exit criteria: the carried file carries no embedded query that the hub-hosted helper already implements. Another is that the keeper confirms ledger preservation. Another is that the benchmark shows the review loop
 still executes.
 
 ### Phase 4: Downstream and Provider Measurement
 
 Closes G7, per the second maintainer comment on [issue #766][issue-766]. Measure during normal
 work already happening in downstream repos, not on dedicated trips. For each representative
-shape, capture the context composition: effective `AGENTS.md` content, repo-specific additions, provider always-on instructions, and skill discovery metadata. Also capture activated skill bodies, references
+shape, capture the context composition: effective `AGENTS.md` content, repo-specific additions, provider always-on instructions, and skill discovery metadata. For each such shape, the composition also includes activated skill bodies, references
 actually loaded, and the total attributable to fleet instructions.
 
 - [ ] .NET shape: `PhotoCleaner` or `PlexCleaner`
@@ -269,7 +269,7 @@ benchmark's negative cases decide, run before and after each change.
 - [ ] `resync-a-repo` (798 B)
 - [ ] `carried-instruction-file-guard` (776 B)
 
-Exit criteria: discovery metadata shrank materially where the provider matrix says it is recurring. Every description keeps its negative boundaries. The benchmark routing record
+Exit criteria: discovery metadata shrank materially where the provider matrix says it is recurring. Another is that every description keeps its negative boundaries. Another is that the benchmark routing record
 shows no missed or false activation introduced.
 
 ### Phase 6: AGENTS.md Reduction Decision
