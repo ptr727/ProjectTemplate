@@ -60,7 +60,7 @@ A finding at either point is a **host** misconfiguration to fix on the machine o
 
 The scratch commit exercises the whole signing pipeline rather than one delivery path. That is because `ssh-add -L` or `gpg --list-secret-keys` only prove an agent holds a key. They say nothing about a host that signs straight from a key file with no agent running at all. That is a live and correctly configured case [git-commit-conventions][git-commit-conventions] documents in "Signing, verified not configured", the same rules [GOVERNANCE.md "Git and Commit Rules"][governance-git-and-commit-rules] points to. Signing is **SSH or GPG**, so this judges the configured format by its actual result, never by which delivery path produced it. A passing result is `sig=G`, or `sig=U` for a cryptographically good signature from an unrecognized signer. That signer is either a GPG key whose trust is merely undefined or an SSH key missing from the local `allowed_signers` file. A missing `--global` value, `sig` not reading `G` or `U`, or either printed email not matching the noreply address is a **host** misconfiguration to surface to the maintainer ([`docs/host-setup.md`][host-setup] is the setup procedure), not something to patch per repo. Patching it locally hides a broken host that then produces wrong identities in every other repo on that machine.
 
-After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B, which places it between the init and the first commit. So nothing here is a prompt to init early:
+After `git init` and before the first commit, confirm the repo added no override of its own. This one needs a repository, since `--local` fails outside one. Read it here and run it in section 0B. That section places it between the init and the first commit, so nothing here is a prompt to init early:
 
 ```shell
 git config --local --get user.email || true    # expect no output
@@ -192,7 +192,7 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 ## 4. Apply Settings, Rulesets, and Secrets
 
-**Read the remote and the repository before running anything else here**. That is because this is the first step needing either and every step before it passes without both:
+**Read the remote and the repository before running anything else here**. That is because this is the first step needing either and every step before it passes without both. The commands follow:
 
 ```shell
 git remote get-url origin                                 # expect a URL, not an error
