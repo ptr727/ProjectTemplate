@@ -711,6 +711,53 @@ class IncludeCase(TreeCase):
         self.assertEqual(self.skill_text(), body)
         self.assertFalse(build_dist.is_stale())
 
+    def test_a_marker_indented_past_the_bound_outside_a_code_block_is_refused(self) -> None:
+        """GitHub renders a list item's deep marker as a region, so leaving it unfilled must not pass --check."""
+        for indent, width in (("    ", 4), ("\t", 4), ("  \t", 4), ("      ", 6)):
+            with self.subTest(indent=indent):
+                body = (
+                    f"1.  Step one.\n\n{indent}<!-- include: RULES.md > Alpha -->\n"
+                    f"{indent}<!-- /include -->\n"
+                )
+                self.make_skill("foo", body)
+                with self.assertRaisesRegex(ValueError, f"SKILL.md:3: .* indented {width} columns"):
+                    build_dist.regenerate()
+                self.assertEqual(self.skill_text(), body)
+
+    def test_a_deep_marker_in_a_source_body_is_refused(self) -> None:
+        """A source is scanned for regions of its own before its body is read, so a deep marker there is refused too."""
+        (self.tmp / "RULES.md").write_text(
+            "## Alpha\n\n1.  Step.\n\n    <!-- /include -->\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "RULES.md:5: .* indented 4 columns"):
+            build_dist.regenerate()
+
+    def test_a_deep_end_marker_under_a_shallow_opener_is_refused(self) -> None:
+        """The probe for a region's end reads markers the same way, so it cannot run past a deep one."""
+        self.make_skill(
+            "foo", "<!-- include: RULES.md > Alpha -->\n\n1.  Step.\n\n    <!-- /include -->\n"
+        )
+        with self.assertRaisesRegex(ValueError, "SKILL.md:5: .* indented 4 columns"):
+            build_dist.regenerate()
+
+    def test_a_deep_near_miss_is_named_as_a_near_miss(self) -> None:
+        """The form is the first thing to fix, so its message comes before the indentation's."""
+        self.make_skill("foo", "1.  Step.\n\n    <!-- Include the table here -->\n")
+        with self.assertRaisesRegex(ValueError, "matches neither form"):
+            build_dist.regenerate()
+
+    def test_a_marker_in_a_list_items_own_code_sample_is_content(self) -> None:
+        """A list item's code block is a sample however deep it sits, so the bound never reaches it."""
+        for body in (
+            "1.  Step.\n\n    ```markdown\n    <!-- include: RULES.md > Nowhere -->\n    ```\n",
+            "1.  Step.\n\n        <!-- include: RULES.md > Nowhere -->\n",
+        ):
+            with self.subTest(body=body):
+                self.make_skill("foo", body)
+                build_dist.regenerate()
+                self.assertEqual(self.skill_text(), body)
+
     @requires_symlink
     def test_a_symlinked_skill_directory_is_refused_before_any_fill(self) -> None:
         """The fill writes through whatever the walk found, so the symlink check has to run before it."""
