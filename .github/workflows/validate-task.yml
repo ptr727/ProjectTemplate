@@ -309,7 +309,7 @@ jobs:
 
       # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
       # They install under the first interpreter the caller names, since they need not resolve under the one this job pins.
-      # UV_PYTHON is what every uv call below reads for that interpreter.
+      # UV_PYTHON is what every uv call below reads for that first interpreter the caller names.
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:

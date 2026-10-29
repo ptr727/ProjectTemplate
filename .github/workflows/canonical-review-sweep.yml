@@ -6,7 +6,7 @@ name: Sweep canonical review coverage action
 # A workflow can therefore only name the units it asks for and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
 # The issue's label comes from the fleet label set in repo-config/labels.json.
-# On a repository where repo-config/configure.sh has not applied that set, the first run that finds work fails at gh issue create.
+# So on a repository where repo-config/configure.sh has not applied that set, the first run that finds work fails at gh issue create.
 # It fails rather than filing an unlabeled issue no later run would find.
 # A run that finds no work says nothing about the label either way.
 # This is because the listing below returns an empty set for a label that does not exist.

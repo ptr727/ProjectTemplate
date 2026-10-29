@@ -45,8 +45,8 @@ BRANCH_POLICIES = ("custom", "none")
 # Nothing downstream splits the value on one either.
 # The ASCII floor is this fleet's rule rather than GitHub's, per GOVERNANCE.md "Documentation Style Conventions" and its "Character Set" rule.
 # A non-ASCII environment name is legal on GitHub, and repo-config/configure.sh percent-encodes one correctly.
-# It is refused here because the registry is agent-authored text, and an environment name is an identifier.
-# An environment name is compared exactly rather than being prose read by a person.
+# It is refused here because the registry is agent-authored text, and an environment name is an identifier compared exactly.
+# It is not prose read by a person.
 # That is why the `description` field's own pattern stays looser.
 # Its tier-2 and tier-3 characters carry meaning their ASCII form loses, where an identifier's do not.
 # A repo that genuinely needs one is a decision for the maintainer.
