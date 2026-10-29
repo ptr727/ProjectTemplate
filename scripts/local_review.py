@@ -2,80 +2,80 @@
 """Record and verify that a local review pass covered this branch's current content.
 
 `AGENTS.md` and the `local-strict-review` skill hold the rule about when a local review is owed.
-This script is what makes that rule checkable rather than a second copy of it: a review pass
-records a receipt keyed on the content it reviewed, and a capture point (a git pre-push hook, a
-skill step, a session about to claim done) asks whether a receipt still covers what is about to
-be pushed.
+This script is what makes that rule checkable rather than a second copy of it. A review pass
+records a receipt keyed on the content it reviewed. A capture point asks whether a receipt still
+covers what is about to be pushed. Examples are a git pre-push hook, a skill step, and a session
+about to claim done.
 
 The key is over the content of the changed paths, plus the merge-base commit that fixes what
 "changed" means. It is deliberately not over the diff text. Which paths count is read from three
-sides, the commit at HEAD, the real index, and the staged working tree, and each path's recorded
+sides, the commit at HEAD, the real index, and the staged working tree. Each path's recorded
 state is read from the last two alone. That split is what lets a review run before the commit while
-the check runs at the push: reviewing untracked work and then committing it unchanged leaves the key
-identical, while changing one byte moves it.
+the check runs at the push. Reviewing untracked work and then committing it unchanged leaves the key
+identical. Changing one byte moves it.
 
-Every identity in the key is computed by git rather than reconstructed here, which is the point
+Every identity in the key is computed by git rather than reconstructed here. That is the point
 worth stating plainly, because reconstructing one is where this went wrong twice. A blob id read
-off the working tree by hashing its raw bytes does not equal the id git stores whenever a filter
-sits between them, and this repository's own `.gitattributes` applies one to every text file, so
+off the working tree by hashing its raw bytes does not equal the id git stores. That happens
+whenever a filter sits between them. This repository's own `.gitattributes` applies one to every text file, so
 `git add` moved the key on any CRLF file. A file mode derived from `stat` disagrees with git's on
 any checkout where `core.fileMode` is off. So the working tree's own state is read by staging it
-into a throwaway index that git builds, and the result is compared against the real index that git
+into a throwaway index that git builds. The result is compared against the real index that git
 already maintains. Both sides then carry git's own answer, filters, modes, renames, deletions,
 symlinks, and submodules included.
 
 Each path contributes the set of distinct states it is in, the throwaway index's and the real
 one's. When they agree the set collapses to one member, which is what makes `git add` and
-`git commit` invisible to the key. When they diverge, because content is staged that the working
-tree no longer holds, or because a mode changed, the set has more than one member and the key
+`git commit` invisible to the key. They diverge when content is staged that the working
+tree no longer holds, or when a mode changed. The set then has more than one member, and the key
 moves. Reading the real index rather than the working tree alone is what stops content being
 staged that the key never saw.
 
 That invisibility is a property of an untracked file rather than of `git add` in general. Staging a
-**modified tracked** file collapses a state that named the index separately, since the index held
-the base content and now holds the working tree's, so the key moves although no content changed.
-The consequence for a caller is an ordering one: record a pass over what is already committed, and
+**modified tracked** file collapses a state that named the index separately. That is because the
+index held the base content and now holds the working tree's. So the key moves although no content
+changed. The consequence for a caller is an ordering one. Record a pass over what is already committed, and
 staging can no longer move the key underneath it.
 
 HEAD is read for membership only, and never for a path's state. Without it, content already
-committed and then undone in the tree leaves the changed set entirely, since the index, the working
-tree, and the merge base then all agree the path is absent or unchanged while the commit a push
-delivers still carries it. `git rm` a file the branch added is the shortest way there, and where it
+committed and then undone in the tree leaves the changed set entirely. That is because the index,
+the working tree, and the merge base then all agree the path is absent or unchanged. The commit a
+push delivers still carries it. `git rm` a file the branch added is the shortest way there, and where it
 was the only changed path the whole set empties. Keeping HEAD out of the state is what leaves the
-ordinary commit invisible: a path already in the set through its index and working-tree state keeps
+ordinary commit invisible. A path already in the set through its index and working-tree state keeps
 the same recorded state once HEAD holds that state too.
 
 What the key covers is the net content this branch introduces against its target, not the series
-of commits that produced it, and the difference is worth stating plainly because two consequences
+of commits that produced it. The difference is worth stating plainly because two consequences
 follow. An interactive rebase or an amend that leaves the tree byte-identical, changing only commit
 messages or authorship, keeps the same key. So does a branch that adds a file in one commit and
-deletes it in a later one: the commits carry content, the net result carries none, and the key
+deletes it in a later one. The commits carry content, the net result carries none, and the key
 follows the net result.
 
 That is the intended scope rather than a gap. A feature branch reaches `develop` as a squash and
-`develop` reaches `main` as a merge, so the net diff is what actually lands, and it is what a
+`develop` reaches `main` as a merge. So the net diff is what actually lands, and it is what a
 reviewer reads. Commit messages are governed by `git-commit-conventions` rather than by a content
-review. But a capture point built on this must not be described as covering the commit series, and
-a reviewer who needs to see intermediate churn has to read the range itself.
+review. But a capture point built on this must not be described as covering the commit series.
+A reviewer who needs to see intermediate churn has to read the range itself.
 
 Three known cases move the key though nothing that would be pushed changed, all erring toward
 demanding another review rather than skipping one. An intent-to-add entry (`git add -N`, which
-some tooling issues implicitly) sits in the real index as the empty blob while the throwaway index
+some tooling issues implicitly) sits in the real index as the empty blob. The throwaway index
 holds the real content. A new untracked file that `.gitignore` does not cover enters the changed
-set, since a file not yet added is exactly what a review has to read. And staging a modified tracked
+set. That is because a file not yet added is exactly what a review has to read. And staging a modified tracked
 file moves the key for the reason the paragraph above gives.
 
-What this key does not do, and what a push-time caller has to add for itself, is tie the content it
-describes to the commit a push delivers. It reads the index and the working tree, and a push carries
-HEAD, so the two describe the same content only while the working tree agrees with HEAD. Where they
+What this key does not do is tie the content it describes to the commit a push delivers. A
+push-time caller has to add that for itself. It reads the index and the working tree, and a push
+carries HEAD. So the two describe the same content only while the working tree agrees with HEAD. Where they
 disagree, HEAD can hold content the tree has since replaced, which a pass over the tree never read.
-Membership puts that path in the digest and stops there, and a pass recorded in that state is
+Membership puts that path in the digest and stops there. A pass recorded in that state is
 recorded over that same digest and covers it, so `check` answers covered and nothing here refuses.
-Closing it is the caller's own test, not a better message from this one: `.husky/pre-push` compares
-the working tree against HEAD and refuses the push itself, and a capture point that skips that test
+Closing it is the caller's own test, not a better message from this one. `.husky/pre-push` compares
+the working tree against HEAD and refuses the push itself. A capture point that skips that test
 has no protection against this whatever `check` says.
 
-This script holds no review logic. It drives backends: `agent-skill` is the `local-strict-review`
+This script holds no review logic. It drives backends. `agent-skill` is the `local-strict-review`
 subagent pass, which only a live agent session can run, so the engine records it rather than
 invoking it. `coderabbit-cli` is headless and is the one backend a git hook can execute by itself.
 
@@ -87,7 +87,7 @@ Usage: python3 scripts/local_review.py status [--target '<branch>']
            what the current content digest is, and which backends hold a pass on it.
        python3 scripts/local_review.py record --reviewer '<id>' --expect-digest '<digest>'
                                              [--target '<branch>'] [--findings '<count>']
-           record that <id> reviewed the content `status` reported as <digest>, refusing when the
+           record that <id> reviewed the content `status` reported as <digest>. It refuses when the
            content has moved since.
        python3 scripts/local_review.py check [--target '<branch>']
            exit 0 covered, 1 not covered, 2 could not run. A branch holding no net content
@@ -97,11 +97,15 @@ Usage: python3 scripts/local_review.py status [--target '<branch>']
 
 Exit codes are three-valued on purpose, per AGENTS.md "Report an execution boundary separately
 from a check finding". 0 and 1 are findings the caller acts on. 2 means the check itself did not
-run (no git repository, an unresolvable target ref, a receipt that cannot be read off disk, a
-missing backend binary), which a gate must not silently read as either answer. Every unexpected
-failure reports 2 as well, since a crash is the check not having run rather than a verdict of not
-covered. `status` reports rather than gating, so it is 0 whether or not the content is covered,
-and 2 only when it could not run at all.
+run, which a gate must not silently read as either answer. The cases are:
+  - no git repository
+  - an unresolvable target ref
+  - a receipt that cannot be read off disk
+  - a missing backend binary
+
+Every unexpected failure reports 2 as well, since a crash is the check not having run rather than
+a verdict of not covered. `status` reports rather than gating, so it is 0 whether or not the content is covered.
+It is 2 only when it could not run at all.
 """
 
 import argparse
@@ -152,8 +156,8 @@ BACKENDS = {
 def silence(stream: object) -> None:
     """Point a stream's descriptor at the null device, so a later flush cannot raise.
 
-    Guarded because a stream is not always backed by a descriptor: embedded in another process, or
-    under a test that replaces it, there is nothing to redirect, and the guard against a second
+    Guarded because a stream is not always backed by a descriptor. Embedded in another process, or
+    under a test that replaces it, there is nothing to redirect. The guard against a second
     failure would raise one itself. The descriptor is closed once the duplicate is installed,
     since dup2 leaves the original open and this module is importable into a long-lived process.
     """
@@ -173,8 +177,8 @@ def closed_reader(e: BaseException) -> bool:
     """Whether a write failed because the reader at the other end of a pipe went away.
 
     POSIX reports that as EPIPE, which Python raises as BrokenPipeError. Windows reports the same
-    event as EINVAL on the write, a plain OSError, so testing for the subclass alone misses it
-    there and the interpreter's own shutdown flush then exits 120.
+    event as EINVAL on the write, a plain OSError. So testing for the subclass alone misses it
+    there, and the interpreter's own shutdown flush then exits 120.
     """
     if isinstance(e, BrokenPipeError):
         return True
@@ -185,12 +189,13 @@ def emit(text: str, stream: object = None) -> None:
     """Write a line, tolerating a reader that closed the pipe before it arrived.
 
     Every subcommand does its work and then reports, so a reader exiting first has not made the
-    command fail. Letting the error propagate would replace a real verdict with a boundary, or,
-    once the exit code is already decided, escape as a shutdown flush that exits 120.
+    command fail. Letting the error propagate would replace a real verdict with a boundary.
+    Once the exit code is already decided, it would instead escape as a shutdown flush that exits
+    120.
 
     Absorbing it here rather than at the top level is what keeps each verdict its own. A blanket
     "no verdict yet, so report success" would turn a broken pipe on the diagnostics `check` writes
-    into an exit 0, which reads as covered, for a branch that is not.
+    into an exit 0. That reads as covered, for a branch that is not.
     """
     target = sys.stdout if stream is None else stream
     try:
@@ -209,9 +214,11 @@ def emit(text: str, stream: object = None) -> None:
 class CannotRun(Exception):
     """The check could not be performed, as distinct from being performed and failing.
 
-    Raised for an execution boundary the caller must not read as a verdict: no git repository, a
-    target ref that does not resolve, a receipt that cannot be read off disk, a backend binary
-    that is not installed.
+    Raised for an execution boundary the caller must not read as a verdict. The cases are:
+    - no git repository
+    - a target ref that does not resolve
+    - a receipt that cannot be read off disk
+    - a backend binary that is not installed
     """
 
 
@@ -226,10 +233,10 @@ def git(*args: str, root: Path | None = None, env: dict[str, str] | None = None)
     """Run a git command from `root` and return its stdout, raising CannotRun when git fails.
 
     Every call names its working directory rather than inheriting the process's own, because git
-    reports paths relative to different places depending on the subcommand, so running two of them
+    reports paths relative to different places depending on the subcommand. So running two of them
     from different directories silently keys a path under a name that does not resolve.
 
-    Decoding is UTF-8 with surrogateescape rather than the locale's encoding, so a path holding a
+    Decoding is UTF-8 with surrogateescape rather than the locale's encoding. So a path holding a
     non-ASCII byte round-trips to the same name on disk instead of decoding into a name that
     misses. `core.quotePath=false` stops git escaping those bytes before they are ever decoded.
     """
@@ -272,7 +279,7 @@ def objects_dir(root: Path) -> Path:
 
     Asked of git rather than joined onto the git directory. A linked worktree's own git directory
     holds no `objects` at all, since the store lives in the common directory shared with every
-    other worktree, and the fleet runs every task in a linked worktree. Joining the path by hand
+    other worktree. The fleet runs every task in a linked worktree. Joining the path by hand
     names a directory that does not exist there, which silently attaches nothing as an alternate.
     """
     # `--git-path` alone, without `--path-format=absolute`, because that option needs git 2.31 and
@@ -285,7 +292,7 @@ def objects_dir(root: Path) -> Path:
 def receipt_path(root: Path) -> Path:
     """Where this worktree's receipt lives.
 
-    Inside the git directory rather than the working tree, so the receipt can never be committed
+    Inside the git directory rather than the working tree. So the receipt can never be committed
     by accident, is never picked up as untracked content, and needs no .gitignore entry.
     """
     return git_dir(root) / RECEIPT_NAME
@@ -305,14 +312,14 @@ def ref_name_exists(ref: str, root: Path) -> bool:
 
     `for-each-ref` lists a ref naming an absent object, on a files or a reftable store alike. It
     also lists refs nested under the name, so only an exact match counts. It skips a symbolic ref
-    whose target is gone, which `symbolic-ref` reads instead, and it skips a loose ref file that
-    is empty or holds no valid content, which neither command reports, so that file is looked for
+    whose target is gone, which `symbolic-ref` reads instead. It also skips a loose ref file that
+    is empty or holds no valid content, which neither command reports. So that file is looked for
     directly. A reftable store holds no loose ref files, so that last check finds nothing there.
     `symbolic-ref -q` exits non-zero for any name that is not a symbolic ref, an absent one
     included. A name `check-ref-format` rejects is never a ref git reads, so it is never looked
-    for on disk, where a `..` in it would reach outside the ref store. The file is read with
-    `stat` rather than `Path.is_file`, which answers False for a name too long on Python 3.14,
-    so only a path that is not there counts as absent. Any other failure, such as a name the
+    for on disk. There a `..` in it would reach outside the ref store. The file is read with
+    `stat` rather than `Path.is_file`, which answers False for a name too long on Python 3.14.
+    So only a path that is not there counts as absent. Any other failure, such as a name the
     filesystem rejects as too long, raises CannotRun.
     """
     try:
@@ -345,8 +352,8 @@ def remote_tracking_ref(name: str, root: Path) -> str | None:
     Raises CannotRun where the ref exists but does not resolve to a commit.
 
     `show-ref --verify` also rejects a ref whose object is missing, or a symbolic ref whose target
-    is gone. Returning None for those would fall through to the as-written step in `target_ref`,
-    where a local branch sharing the short name then defines the review scope.
+    is gone. Returning None for those would fall through to the as-written step in `target_ref`.
+    There a local branch sharing the short name then defines the review scope.
     """
     ref = f"refs/remotes/{name}"
     try:
@@ -370,24 +377,24 @@ def target_ref(target: str, root: Path) -> str:
 
     A target that is already a remote-tracking ref as written, such as `upstream/main`, is tried
     first, in its qualified form, before anything else. Without that check first, the
-    `origin/<target>` preference below is unconditional and can mis-scope this exact case: if a
+    `origin/<target>` preference below is unconditional and can mis-scope this exact case. If a
     branch literally named `upstream/main` also exists on `origin`, `origin/upstream/main` would
     resolve and win, silently measuring the caller's explicitly named remote against `origin`
     instead.
 
     Otherwise, `origin/<target>` is tried next as a remote-tracking ref, so an ordinary fleet
-    branch name works and so does one holding a slash. Treating any slash as "already a full ref",
-    which an earlier version did, silently measured a target such as `release/v1` against the
-    local branch of that name rather than the remote one, and a local branch that has moved on
+    branch name works and so does one holding a slash. Treating any slash as "already a full ref"
+    is what an earlier version did. It silently measured a target such as `release/v1` against the
+    local branch of that name rather than the remote one. A local branch that has moved on
     then defines the review scope with no error at all.
 
-    A value that resolves only as written is used as written last, which is what lets a
+    A value that resolves only as written is used as written last. That is what lets a
     fork-based flow name another remote's branch even when it is not already a remote-tracking
-    ref (for example a local-only branch checked out from that remote).
+    ref. An example is a local-only branch checked out from that remote.
 
     A remote-tracking result is matched by its exact name and returned fully qualified, as
     `refs/remotes/...`. Git resolves a short name such as `upstream/main` against `refs/heads/`
-    before `refs/remotes/`, so a local branch literally named that would otherwise define the
+    before `refs/remotes/`. So a local branch literally named that would otherwise define the
     review scope in place of the remote-tracking ref this function chose.
 
     A target already written as `refs/remotes/...` is not also tried under `origin/`, where a
@@ -429,15 +436,15 @@ def _ls_files_states(out: str) -> dict[str, set[str]]:
 
     An unmerged path emits one record per stage, so the states are collected into a set rather
     than assigned. Keeping only the last record would silently reduce a conflicted index to one
-    side of the conflict, and a pass recorded mid-conflict would then cover the resolution.
+    side of the conflict. A pass recorded mid-conflict would then cover the resolution.
 
     The stage number is part of the state whenever it is not the ordinary zero. This is defense
-    rather than a fix for a demonstrated case: a review argued that two stages of one conflict can
-    carry an identical mode and object, which dropping the stage would collapse into a state
-    reading as no conflict, but no construction produced it. Where our side's content equals the
+    rather than a fix for a demonstrated case. A review argued that two stages of one conflict can
+    carry an identical mode and object. Dropping the stage would collapse them into a state
+    reading as no conflict. But no construction produced it. Where our side's content equals the
     base, git records no modification and applies the other side's delete cleanly rather than
-    conflicting, checked against a delete opposite an untouched file, an identical rewrite, and a
-    mode-only change. The stage costs nothing to carry, so it stays.
+    conflicting. That was checked against a delete opposite an untouched file, an identical
+    rewrite, and a mode-only change. The stage costs nothing to carry, so it stays.
     """
     states: dict[str, set[str]] = {}
     for record in _zsplit(out):
@@ -463,7 +470,7 @@ def base_states(base: str, root: Path) -> dict[str, str]:
 def index_states(root: Path) -> dict[str, set[str]]:
     """Every path in the real index, with every stage it holds.
 
-    The whole index is listed rather than a path list, which also keeps the call clear of the
+    The whole index is listed rather than a path list. That also keeps the call clear of the
     argument-length ceiling a branch touching tens of thousands of paths would otherwise hit.
     """
     return _ls_files_states(git("ls-files", "-s", "-z", root=root))
@@ -472,9 +479,9 @@ def index_states(root: Path) -> dict[str, set[str]]:
 def alternate_entry(path: Path) -> str:
     """One entry for GIT_ALTERNATE_OBJECT_DIRECTORIES, quoted where it has to be.
 
-    The variable holds a list separated by the platform's path separator, so a repository checked
+    The variable holds a list separated by the platform's path separator. So a repository checked
     out under a path containing one would otherwise split into two directories that do not exist.
-    Git reads a double-quoted entry as a single path, which was verified rather than assumed: under
+    Git reads a double-quoted entry as a single path. That was verified rather than assumed. Under
     an object directory holding a colon, the unquoted form fails with "object directory /tmp/... does
     not exist" while the quoted form resolves the object.
     """
@@ -485,23 +492,23 @@ def alternate_entry(path: Path) -> str:
 def worktree_states(root: Path) -> dict[str, set[str]]:
     """Every path as git would stage it right now, read by actually staging it.
 
-    A throwaway index is seeded from the real one and `git add -A` is run against that, so git
+    A throwaway index is seeded from the real one and `git add -A` is run against that. So git
     computes each blob and mode exactly as a real `git add` would, with every filter, attribute,
     and `core.fileMode` setting applied. Seeding from the real index rather than starting empty
     keeps git's cached stat information, so the scan is a refresh rather than a full re-hash.
 
     Staging writes objects, and those writes are redirected into a throwaway object directory with
-    the real store attached as an alternate, so git can still read every existing object, and
+    the real store attached as an alternate. So git can still read every existing object, and
     every alternate that store itself chains to, while writing none of its own. Without that redirection this read would permanently deposit the content of every
-    untracked file into the repository, an unignored `.env` or key file among them, recoverable
-    long afterwards from a command the caller had every reason to believe only looked.
+    untracked file into the repository. An unignored `.env` or key file would be among them. That
+    content would be recoverable long afterwards from a command the caller had every reason to believe only looked.
 
     Both throwaway paths carry a unique name and live in the git directory. A fixed name would let
-    two invocations in one worktree delete each other's index mid-read, and a name under the
+    two invocations in one worktree delete each other's index mid-read. A name under the
     working tree would be staged as untracked content by the very command being run.
 
-    One requirement this places on the repository: a `clean` filter has to be deterministic, since
-    the same content is staged once when a pass is recorded and again when it is checked. A filter
+    One requirement this places on the repository is that a `clean` filter has to be deterministic.
+    That is because the same content is staged once when a pass is recorded and again when it is checked. A filter
     embedding a timestamp would move the key between two invocations that changed nothing.
     """
     gd = git_dir(root)
@@ -548,14 +555,14 @@ def unlink_read_only(func: object, path: str, exc: BaseException) -> None:
 def state_mark(index: set[str], work: set[str]) -> str:
     """One path's state, with the working tree's side named separately from the index's.
 
-    A missing index entry contributes nothing rather than a state of its own, which is what keeps
-    `git add` invisible to the key: an untracked file, and that same file staged unchanged, both
+    A missing index entry contributes nothing rather than a state of its own. That is what keeps
+    `git add` invisible to the key. An untracked file, and that same file staged unchanged, both
     read as the working tree's state alone.
 
     The index is named only where it actually disagrees with the working tree. Naming it that way
-    rather than merging both sides into one set is what tells staging A over a working tree of B
-    apart from the reverse, which a plain union renders identically while `git commit` pushes a
-    different one of the two.
+    rather than merging both sides into one set tells staging A over a working tree of B
+    apart from the reverse. A plain union renders the two identically while `git commit` pushes a
+    different one of them.
     """
     mark = "w:" + ",".join(sorted(work)) if work else "w:absent"
     if index and index != work:
@@ -566,23 +573,27 @@ def state_mark(index: set[str], work: set[str]) -> str:
 def fingerprints(base: str, root: Path) -> dict[str, str]:
     """Every changed path and the state it is in.
 
-    A path is changed when any of three sides, the commit at HEAD, the real index, or the staged
-    working tree, disagrees with the merge base. Comparing states rather than reading a diff
-    listing means renames, deletions, mode changes, and submodule bumps are all just a state that
-    differs, with no per-case handling and no rename detection to disable.
+    A path is changed when any of three sides disagrees with the merge base. The sides are:
+    - the commit at HEAD
+    - the real index
+    - the staged working tree
+
+    Comparing states rather than reading a diff listing means renames, deletions, mode changes,
+    and submodule bumps are all just a state that differs. There is no per-case handling and no
+    rename detection to disable.
 
     HEAD decides membership and contributes nothing to the mark, which is what callers can rely on
     in both directions. A path already differing from the base by its index and working-tree state
-    keeps its mark once HEAD holds that state too, so `git commit` alone never moves the key. That
-    is `git commit` alone: `git add` on a modified tracked file does move it, by collapsing a mark
-    that named the index separately, so the invisible-commit property covers untracked work rather
+    keeps its mark once HEAD holds that state too. So `git commit` alone never moves the key. That
+    is `git commit` alone. `git add` on a modified tracked file does move it, by collapsing a mark
+    that named the index separately. So the invisible-commit property covers untracked work rather
     than every edit. And a path in the set only because HEAD disagrees with the base leaves the set
-    when that undo is committed, so the key does move there, correctly, since a push delivered the
-    change before that commit and delivers the undo after it.
+    when that undo is committed. So the key does move there. That is correct, since a push delivered
+    the change before that commit and delivers the undo after it.
 
     What this is not is the content a push would deliver, which is HEAD's alone. It moves where a
-    push would carry nothing new, staging a modified tracked file being the plainest example, and it
-    holds still while HEAD's own content changes under a fixed index and working tree. A caller
+    push would carry nothing new, staging a modified tracked file being the plainest example. It
+    also holds still while HEAD's own content changes under a fixed index and working tree. A caller
     gating a push closes that second gap itself, by testing the working tree against HEAD.
     """
     at_base = base_states(base, root)
@@ -609,7 +620,7 @@ def content_digest(base: str, marks: dict[str, str]) -> str:
 
     Paths are hashed in sorted order and a NUL follows every field, so two different path sets
     cannot collide by concatenating to the same string. The digest is derived from the repository
-    on every call and never read back from the receipt, which is what makes a hand-edited receipt
+    on every call and never read back from the receipt. That is what makes a hand-edited receipt
     report stale rather than current.
     """
     h = hashlib.sha256()
@@ -711,7 +722,7 @@ def covering_passes(receipt: dict | None, base: str, digest: str, target: str) -
 
     A pass covers the content only when the receipt agrees on all three of target, merge base, and
     digest. The target is checked because a review against one branch says nothing about the same
-    branch retargeted at another, where the diff under review is a different one. Its optional
+    branch retargeted at another. The diff under review is a different one there. Its optional
     `origin/` prefix is ignored, so naming the same branch two ways is not a mismatch.
     """
     if not receipt:
@@ -727,11 +738,14 @@ def break_stale_lock(lock: Path) -> bool:
     """Remove `lock` if it is abandoned, reporting whether anything was removed.
 
     Breaking is done under a second lock of its own, and the staleness is re-read after that
-    exclusive claim rather than before it. A plain check-then-unlink races: the observing process
-    can be descheduled between the two, the holder can release, another process can take a fresh
-    lock, and the unlink then removes a lock that is legitimately held. Re-reading under the
-    breaker means the file being removed is still the same abandoned one that was observed, since
-    a lock taken in between is not old enough to qualify.
+    exclusive claim rather than before it. A plain check-then-unlink races. The following can occur:
+    - the observing process can be descheduled between the two
+    - the holder can release
+    - another process can take a fresh lock
+    - the unlink then removes a lock that is legitimately held
+
+    Re-reading under the breaker means the file being removed is still the same abandoned one that
+    was observed. That is because a lock taken in between is not old enough to qualify.
     """
     breaker = Path(str(lock) + ".break")
     try:
@@ -760,9 +774,9 @@ def held_lock(path: Path, timeout: float = 10.0) -> int:
     """Take an exclusive lock at `<path>.lock`, or raise once waiting has gone on too long.
 
     Recording is a read, a merge, and a write, here and in `canonical_review.py`, which guards its
-    ledger with this same helper. The replace below is atomic on its own, but two backends
+    ledger with this same helper. The replace below is atomic on its own. But two backends
     recording concurrently over one unchanged diff would both read a receipt without the other's
-    pass and the second write would drop it, which is exactly the accumulation this file
+    pass, and the second write would drop it. That is exactly the accumulation this file
     promises. The lock is what makes the promise true rather than usually true.
     """
     lock = Path(str(path) + ".lock")
@@ -789,11 +803,11 @@ def write_pass(
     """Add one backend's pass to the receipt, dropping any pass that no longer covers the content.
 
     Passes accumulate so a sequence of backends over one unchanged diff builds up on one receipt.
-    A pass recorded against a different digest is dropped rather than kept, since it reviewed
+    A pass recorded against a different digest is dropped rather than kept. That is because it reviewed
     content that no longer exists and would otherwise vote for a diff nobody read.
 
-    The file is replaced rather than rewritten in place, so a reader never observes a half-written
-    receipt and a process killed mid-write leaves the previous one intact.
+    The file is replaced rather than rewritten in place. So a reader never observes a half-written
+    receipt, and a process killed mid-write leaves the previous one intact.
     """
     path = receipt_path(root)
     fd_lock = held_lock(path)
@@ -841,26 +855,25 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
 
     `--agent` is the CLI's documented structured-JSON mode for agent integrations. The base handed
     to it is the merge-base commit itself rather than the target's tip, because the two differ the
-    moment the target moves: reviewing against the tip would cover the reverse of every commit the
-    target gained since this branch forked, which is not what the receipt claims.
+    moment the target moves. Reviewing against the tip would cover the reverse of every commit the
+    target gained since this branch forked. That is not what the receipt claims.
 
-    The base is passed as `--base-commit`, which the CLI documents as taking a commit hash, rather
-    than `--base`, which it documents as taking a branch name. Handing a merge-base sha to the
+    The base is passed as `--base-commit`, which the CLI documents as taking a commit hash. It is not
+    passed as `--base`, which the CLI documents as taking a branch name. Handing a merge-base sha to the
     branch flag was the earlier mistake here. `--include-untracked` is passed because the CLI
-    excludes untracked files by default while this receipt's own scope includes them, so without
+    excludes untracked files by default while this receipt's own scope includes them. Without
     it a pass would claim coverage of files the run never read.
 
     A completion event is required rather than assumed. A CLI build that does not understand
-    `--agent`, or a run truncated part way, emits no findings and exits zero, which would
+    `--agent`, or a run truncated part way, emits no findings and exits zero. That would
     otherwise be recorded as a clean review of content nothing read. A completion reporting
     `review_skipped` is refused for the same reason: it is the CLI saying it looked at nothing.
 
-    None of this has been executed against a real CLI on this host, so the invocation follows the
+    None of this has been executed against a real CLI on this host. So the invocation follows the
     vendor's documented flag semantics rather than observed behavior, and the backend stays opt-in
-    until someone runs it. A rate-limited or errored run
-    likewise returns an error and the caller records no pass, since the CLI shares its hourly
-    budget with this account's pull request reviews and a budget exhaustion must never look like a
-    review.
+    until someone runs it. A rate-limited or errored run likewise returns an error and the caller
+    records no pass. That is because the CLI shares its hourly budget with this account's pull
+    request reviews, and a budget exhaustion must never look like a review.
     """
     # Only the documented binary name.
     # A bare `cr` is a common short name for unrelated tools.
@@ -924,12 +937,12 @@ def resolve_target(explicit: str | None) -> str:
     """The branch this work targets.
 
     The receipt is never consulted here. Reading the target back out of the receipt and then
-    comparing the receipt against it is self-fulfilling, so a branch retargeted after a pass was
+    comparing the receipt against it is self-fulfilling. So a branch retargeted after a pass was
     recorded would verify against the branch it used to target and pass. Defaulting `record` from
     the receipt while `check` defaults to the fleet branch would also strand a receipt that can
-    never cover, so both resolve the same way.
+    never cover. So both resolve the same way.
 
-    An explicitly empty value is rejected rather than treated as absent, since a hook written as
+    An explicitly empty value is rejected rather than treated as absent. That is because a hook written as
     `--target "$VAR"` with the variable unset would otherwise silently gate the wrong branch.
     """
     if explicit is None:
