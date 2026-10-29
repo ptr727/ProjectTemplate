@@ -85,7 +85,7 @@ The Keychain prompt for the passphrase appears on first use after each reboot, a
 
 ### Windows (without WSL)
 
-Native Windows is **not supported** for the devcontainer setup in this repo. Use WSL2 instead. The reason: VS Code Dev Containers needs a Linux-like file system for the bind-mounts to behave consistently. Docker Desktop's WSL2 backend is the supported path.
+Native Windows is **not supported** for the devcontainer setup in this repo. Use WSL2 instead. The reason: VS Code Dev Containers needs a Linux-like file system for the bind-mounts to behave consistently. A second part of the reason is that Docker Desktop's WSL2 backend is the supported path.
 
 If you must work on Windows directly without a devcontainer, OpenSSH for Windows can sign with `gpg.format=ssh`, but the bind-mounted devcontainer setup expects Linux/WSL2 paths.
 

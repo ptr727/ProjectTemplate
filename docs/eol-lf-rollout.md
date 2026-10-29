@@ -4,7 +4,7 @@ Tracks the fleet-wide line-ending default flip (CRLF to LF) repo by repo. The po
 in [GOVERNANCE.md "Line Endings"][governance-line-endings] and the `comment-and-doc-style` Skill's
 [`references/line-endings.md`][line-endings]. This doc is the rollout checklist only, not a
 restatement of the rule. It is **hub-only** and is not carried downstream, the same way
-[`docs/fleet-map.md`][fleet-map] is hub-only. This is because it tracks the hub's own migration rather
+[`docs/fleet-map.md`][fleet-map] is hub-only. The reason is that this doc tracks the hub's own migration rather
 than a fact a downstream repo's own docs need to carry.
 
 **Maintenance rule.** The conversion pull request lands in the converted repo, so check its box
@@ -52,8 +52,7 @@ per the [`branching-and-release-model`][branching-and-release-model] Skill, and 
 1. **Merge the hub's defaults into `.editorconfig` and `.gitattributes`, never overwrite either
    file.** Remove the old fleet defaults, `[*] end_of_line = crlf` and `* -text`, rather than
    leaving them beside the new ones. Remove the old fleet's per-type LF pins too, since the new
-   `[*]` default covers them. Examples are `*.sh`, `uv.lock`, Dockerfiles, and its by-path script
-   pins. Put the hub's `* text=auto eol=lf` line first in `.gitattributes` and its `[*]` section
+   `[*]` default covers them. Examples are `*.sh`, `uv.lock`, Dockerfiles, and the old fleet's by-path script pins. Put the hub's `* text=auto eol=lf` line first in `.gitattributes` and its `[*]` section
    first in `.editorconfig`. Then come the `*.bat` / `*.cmd` CRLF pins, then every attribute and section
    that is the repo's own, and then the step 2 pins. Examples of the repo's own are LFS filters,
    `linguist-generated`, `export-ignore`, and the repo's own path pins. In both files a later match

@@ -5,7 +5,7 @@ Tracks the fleet-wide local-hook posture change repo by repo. The policy itself 
 canonical configs live in [`catalog/snippets/husky/`][snippets-husky] and
 [`catalog/snippets/pre-commit/`][snippets-pre-commit]. This doc is the rollout checklist only,
 not a restatement of the rule. It is **hub-only** and is not carried downstream, the same way
-[`docs/eol-lf-rollout.md`][eol-lf-rollout] is hub-only. This is because it tracks the hub's own migration
+[`docs/eol-lf-rollout.md`][eol-lf-rollout] is hub-only. The reason is that this doc tracks the hub's own migration
 rather than a fact a downstream repo's own docs need to carry.
 
 **Maintenance rule.** This file is hub-only, so a downstream repo's own conversion PR cannot edit
