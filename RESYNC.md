@@ -2,7 +2,7 @@
 
 How an agent brings a repository that is **already stood up** back into line with the current hub. This is the procedure a request to sync a repository with the hub resolves to. It is the third of three entry points. [`STANDUP.md`][standup] takes a repository from nothing to operational, and [`AUDIT.md`][audit] measures one and changes nothing. This file applies what the measurement found, in an order that matters.
 
-Resyncing invents nothing. It is [`AUDIT.md`][audit] run for the findings, then each finding applied by the remedy its class already carries. What this file adds is the **order** and the **remedies that remove content rather than update it**. It also adds an honest account of **what a resync cannot detect**. A findings list states none of these on its own.
+Resyncing invents nothing. It is [`AUDIT.md`][audit] run for the findings, then each finding applied by the remedy its class already carries. What this file adds is the **order** and the **remedies that remove content rather than update it**. It also adds an honest account of **what a resync cannot detect**. A findings list states none of those additions on its own.
 
 ```mermaid
 flowchart TD
