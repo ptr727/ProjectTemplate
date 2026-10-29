@@ -857,10 +857,10 @@ class RepoOwnedTreeGateCase(unittest.TestCase):
 class RegistryNameUniquenessCase(unittest.TestCase):
     """A registry name is the key both configure.sh and audit.py resolve an entry by.
 
-    The check lives inside `main()`, so this runs the real script against a scratch tree rather
+    The check lives inside `main()`. So this runs the real script against a scratch tree rather
     than calling a function that does not exist to be called. The registry is a self-contained
-    fixture rather than the live one plus an entry, so an unrelated registry edit cannot move
-    the result and the two cases differ only in the thing under test.
+    fixture rather than the live one plus an entry. An unrelated registry edit therefore cannot
+    move the result, and the two cases differ only in the thing under test.
     """
 
     def run_against(self, names: list[str]) -> str:
@@ -963,7 +963,8 @@ class RegistryNameNormalizerCase(unittest.TestCase):
         found = [part.strip() for group in lines for part in group if part]
         self.assertEqual(len(found), 3, f"expected three narrowing lines, got: {found}")
         block = "\n".join(found)
-        # One dict as both globals and locals, because with two a comprehension's free variable resolves against the empty globals and raises below 3.12 rather than reading the local.
+        # One dict as both globals and locals.
+        # This is because with two, a comprehension's free variable resolves against the empty globals and raises below 3.12 rather than reading the local.
         scope: dict = {
             "a": type("Args", (), {"names": typed})(),
             "repos": [{"name": n} for n in declared],
@@ -1092,8 +1093,8 @@ class RegistryEnvironmentCase(unittest.TestCase):
                 )
 
     def test_a_name_padded_with_something_str_strip_does_not_remove_is_rejected(self) -> None:
-        """The defect a whitespace test cannot reach: each of these is invisible, is left standing by str.strip(),
-        and is exactly as unmatchable by configure.sh's `select(.name == $n)` as a trailing space.
+        """The defect a whitespace test cannot reach: each of these is invisible and is left standing by str.strip().
+        Each is exactly as unmatchable by configure.sh's `select(.name == $n)` as a trailing space.
         """
         for pad in ("\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u00ad", "\u180e"):
             name = f"pypi{pad}"
@@ -1123,7 +1124,7 @@ class RegistryEnvironmentCase(unittest.TestCase):
     def test_identical_padded_names_report_the_padding_and_defer_the_duplicate(self) -> None:
         """A padded name never reaches the seen set, so the duplicate it also is surfaces on the run after the padding is fixed.
 
-        Reporting the padding alone is the deliberate half: the duplicate is a consequence of it
+        Reporting the padding alone is the deliberate half. The duplicate is a consequence of it
         rather than a second defect, and naming both would report a symptom beside its cause.
         """
         self.assertEqual(
@@ -1178,8 +1179,8 @@ class RegistryEnvironmentCase(unittest.TestCase):
         )
 
     def test_a_ref_pattern_carrying_a_slash_and_a_star_is_accepted(self) -> None:
-        """A deployment branch policy name is a pattern, so a grammar fitted to the three plain names the registry
-        declares today would pass every test here and refuse the first adopter declaring a release line.
+        """A deployment branch policy name is a pattern. A grammar fitted to the three plain names the registry
+        declares today would therefore pass every test here. It would refuse the first adopter declaring a release line.
         """
         self.assertEqual(
             self.errors(
@@ -1223,7 +1224,7 @@ class RegistryEnvironmentCase(unittest.TestCase):
 class RegistryEntryGateCase(unittest.TestCase):
     """The checks that live inside `main()`, run as the real script against a scratch tree.
 
-    Calling the helper functions directly proves the grammar and leaves the wiring unproven: deleting the
+    Calling the helper functions directly proves the grammar and leaves the wiring unproven. Deleting the
     `errors.extend(...)` line, or putting a `.strip()` back before the url match, leaves every direct-call test green.
     The registry is a self-contained fixture rather than the live one plus an entry, so an unrelated registry edit
     cannot move the result.
@@ -1378,7 +1379,7 @@ class RegistryEntryGateCase(unittest.TestCase):
 
         This is the shape that pins the comparison, and it is the one a future loosening would silently admit.
         A case-only mismatch is refused by spec/resolve_description.py's near-miss guard as well, which aborts
-        configure.sh before any assertion runs, so what this adds is the gate catching it over the whole
+        configure.sh before any assertion runs. What this adds is the gate catching it over the whole
         registry in CI rather than one repo at apply time.
         """
         self.assertIn(
@@ -1394,7 +1395,7 @@ class RegistryEntryGateCase(unittest.TestCase):
     def test_agreement_is_the_names_own_grammar(self) -> None:
         """A name carrying an invisible character is refused with no pattern of its own, since no url segment holds one.
 
-        This is the case a `.strip()` truthiness test admitted: the value is already trimmed, so it passed both name
+        This is the case a `.strip()` truthiness test admitted. The value is already trimmed, so it passed both name
         checks and then matched no entry in configure.sh or spec/audit.py.
         """
         zero_width = "Fixture\u200b"
@@ -1407,8 +1408,8 @@ class RegistryEntryGateCase(unittest.TestCase):
     def test_a_name_outside_the_console_code_page_is_reported_as_utf8(self) -> None:
         """A Windows console defaults to an ANSI code page, which cannot encode every character a name may carry.
 
-        The child is given cp1252 on every host, so removing the entry point's UTF-8 reconfigure fails this on Linux
-        too, where the streams are otherwise UTF-8 already and no other case here would notice.
+        The child is given cp1252 on every host. Removing the entry point's UTF-8 reconfigure therefore fails this on Linux
+        too. The streams are otherwise UTF-8 already on Linux, and no other case here would notice.
         """
         console = {
             k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")
@@ -1435,8 +1436,8 @@ class RegistryEntryGateCase(unittest.TestCase):
     def test_a_cataloged_repo_declaring_false_satisfies_the_requirement(self) -> None:
         """The requirement is presence, and a truthiness test would report this legitimate declaration as absent.
 
-        The case above runs on a backlog fixture, where the cataloged-only requirement cannot fire at all, so it
-        proves the type check and nothing about the requirement. This one is what the truthiness mutant fails.
+        The case above runs on a backlog fixture, where the cataloged-only requirement cannot fire at all. It
+        therefore proves the type check and nothing about the requirement. This one is what the truthiness mutant fails.
         """
         output = self.run_against(
             self.entry(
@@ -1465,7 +1466,8 @@ class RegistryEntryGateCase(unittest.TestCase):
 
     def test_a_required_secret_that_is_not_a_github_secret_name_is_refused(self) -> None:
         """A padded name is reported missing from the actions store on every run, and the unpadded one goes unrequired."""
-        # The lower-case pair is the same never-satisfiable shape as the padded one, since the store holds upper case and neither declaration can ever match a name in it.
+        # The lower-case pair is the same never-satisfiable shape as the padded one.
+        # This is because the store holds upper case and neither declaration can ever match a name in it.
         for declared in (
             " CODECOV_TOKEN",
             "CODECOV_TOKEN ",
@@ -1533,8 +1535,8 @@ class RegistryEntryGateCase(unittest.TestCase):
     ) -> None:
         """The publish cross-check builds a set from the same value, further down the same per-entry iteration.
 
-        Every error prints after the loop has finished, so an unguarded set() there raises on the malformed value
-        before anything is printed, and the operator gets a traceback in place of the message this check appended,
+        Every error prints after the loop has finished. An unguarded set() there therefore raises on the malformed value
+        before anything is printed. The operator gets a traceback in place of the message this check appended,
         which is the one finding that would have named the defect.
         """
         output = self.run_against(
@@ -1630,9 +1632,9 @@ class RegistryEntryGateCase(unittest.TestCase):
     def test_a_bare_string_drift_notes_is_refused(self) -> None:
         """A duck-typed container test admits it, and its characters are then judged one at a time as notes.
 
-        Its requiredSecrets twin has this case. Without it here only the null shape was covered, and a None is
-        not iterable either, so it does not tell a type test from a container test. The mutant is not silent on
-        this input, since the two spaces are refused as empty notes, so the assertion is on the message that
+        Its requiredSecrets twin has this case. Without it here only the null shape was covered. A None is
+        not iterable either, so that shape does not tell a type test from a container test. The mutant is not silent on
+        this input, since the two spaces are refused as empty notes. The assertion is therefore on the message that
         names the whole value rather than on the run being clean.
         """
         self.assertIn(
@@ -1683,10 +1685,10 @@ class GroundBranchReaderCase(unittest.TestCase):
 
     The defect this pins is a resolve that was correct and unreached. A reader resolving the key itself consults
     no registry defaults, so a declared `defaults.groundTruthBranch` validated clean and was read by nothing.
-    That is the defect whatever shape the resolve takes, and refusing the read is one rule where naming the
-    shapes was an enumeration that kept leaving a gap. Stated as a property of any reader rather than as a history
-    of the three files READERS names, because the history differs per file and pinning it here bought nothing:
-    three attempts to state it precisely each shipped a different false claim about spec/audit.py, while the rule
+    That is the defect whatever shape the resolve takes. Refusing the read is one rule where naming the
+    shapes was an enumeration that kept leaving a gap. It is stated as a property of any reader rather than as a history
+    of the three files READERS names. This is because the history differs per file and pinning it here bought nothing.
+    Three attempts to state it precisely each shipped a different false claim about spec/audit.py, while the rule
     itself never depended on which file carried what.
 
     What this cannot establish is that a call which does reach the function passes it anything useful.
@@ -1694,8 +1696,8 @@ class GroundBranchReaderCase(unittest.TestCase):
     and source text cannot tell the two apart. That gap is covered behaviorally where it can be:
     spec/workflow_reuse.py's --selftest resolves through its injected reader and fails if its site stops
     consulting the defaults, and tests/test_audit_helpers.py's ground cases pin the function's three steps. The remaining
-    sites need a live GitHub API, so that gap is open at each of them and this rule does not close it: the rule
-    refuses a reader resolving the key, which a call passing nothing useful is not.
+    sites need a live GitHub API, so that gap is open at each of them and this rule does not close it.
+    The rule refuses a reader resolving the key, which a call passing nothing useful is not.
     """
 
     READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
@@ -1751,7 +1753,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
 
     Two obligations, and they are different obligations. A pattern the schema copies from validate.py must stay
     byte-identical to it, or the editor and the gate drift apart silently. A pattern the schema states on its own
-    must never refuse a value validate.py accepts, since an editor rejecting a valid registry is the direction
+    must never refuse a value validate.py accepts. This is because an editor rejecting a valid registry is the direction
     an earlier attempt was reverted for.
     """
 
@@ -1767,9 +1769,9 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
     def assert_portable(self, pattern: str) -> None:
         r"""The two constructs measured to mean different things in Python re and ECMA-262, refused by shape.
 
-        `$` matches before a trailing newline in Python and only at the end in ECMA-262, so `"main\n"` satisfies a
+        `$` matches before a trailing newline in Python and only at the end in ECMA-262. So `"main\n"` satisfies a
         `$`-anchored pattern in one engine and not the other. `\s` and `\S` name different sets, ECMA-262's
-        whitespace including U+FEFF where Python's does not. Their union is every character in both engines, which
+        whitespace including U+FEFF where Python's does not. Their union is every character in both engines. That
         is what makes the `(?![\s\S])` terminator itself portable and why it is excluded from the body checked here.
         """
         self.assertTrue(pattern.startswith("^"), pattern)
@@ -1947,7 +1949,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
         """The schema's own statement rather than a copy, so the direction is what has to hold.
 
         A tier-2 or tier-3 non-ASCII character is legitimate in a description, and no portable positive grammar
-        enumerates one, so this pattern states less than description_errors() does on purpose.
+        enumerates one. So this pattern states less than description_errors() does on purpose.
         """
         pattern = re.compile(self.props["description"]["pattern"])
         # Split rather than filtered by the validator's own verdict, so that every entry carries an assertion.
@@ -1971,7 +1973,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
 
     def test_the_description_pattern_refuses_a_trailing_newline(self) -> None:
         """The bug the `$` anchor carried: `$` matches just before one in Python, so check-jsonschema accepted a
-        value description_errors() refuses, and an ECMA-262 editor refused the same value. Two engines, two answers.
+        value description_errors() refuses. An ECMA-262 editor refused the same value. Two engines, two answers.
         """
         pattern = self.props["description"]["pattern"]
         self.assertIsNone(re.compile(pattern).search("A short tagline.\n"))
@@ -2012,10 +2014,11 @@ class RegistryUrlIdentityCase(unittest.TestCase):
     def test_a_dot_only_segment_resolves_to_none(self) -> None:
         """Measured against the live API: `repos/../rate_limit` returns 200 with the rate-limit document.
 
-        GitHub decodes and then normalizes a dot segment, and `repos/%2e%2e/rate_limit` returns 200 the same way, so
-        percent-encoding is no defense and the value has to be refused before it is ever addressed. The two positions
-        are refused by different halves of the grammar, the owner by its character class and the repo by the guard
-        after it, so both are listed here rather than left to whichever half happens to hold.
+        GitHub decodes and then normalizes a dot segment, and `repos/%2e%2e/rate_limit` returns 200 the same way.
+        Percent-encoding is therefore no defense, and the value has to be refused before it is ever addressed.
+        The two positions are refused by different halves of the grammar. The owner is refused by its character class
+        and the repo by the guard after it. Both are therefore listed here rather than left to whichever half happens
+        to hold.
         """
         for url in (
             "https://github.com/../rate_limit",
@@ -2073,8 +2076,8 @@ class AuditRepoSlugCase(unittest.TestCase):
     def test_a_url_the_grammar_refuses_answers_with_a_sentinel_rather_than_raising(self) -> None:
         """spec/fidelity_honesty.py and spec/workflow_reuse.py call this on every entry with no handler.
 
-        Raising would abort a whole fleet report over one malformed entry, which instead 404s and lands in the
-        unreadable bucket beside its healthy siblings, so the gate refuses such a url and this stays generous.
+        Raising would abort a whole fleet report over one malformed entry. That entry instead 404s and lands in the
+        unreadable bucket beside its healthy siblings. So the gate refuses such a url and this stays generous.
         """
         for url in self.UNPARSEABLE:
             with self.subTest(url=url):
@@ -2087,7 +2090,7 @@ class AuditRepoSlugCase(unittest.TestCase):
     def test_no_fallback_slug_is_built_out_of_the_url_it_could_not_parse(self) -> None:
         """Taking the url's last two path segments produced a plausible slug rather than a failing one.
 
-        `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com, and a `?` in the
+        `https://gitlab.test/owner/Repo` became `owner/Repo` and read that repository on github.com. A `?` in the
         url survived into the value, where `repos/owner/Repo?tab=readme/branches/main` is a request to
         `repos/owner/Repo` with the rest as a query string. Both address something other than what was declared.
         """
@@ -2185,7 +2188,7 @@ class RegistryGroundTruthBranchCase(unittest.TestCase):
                 self.assertEqual(self.errors(value), [])
 
     def test_a_value_that_would_re_parse_the_url_is_rejected(self) -> None:
-        """`?` and `#` do not fail the request, they send a different one, which is why the url field's own grammar
+        """`?` and `#` do not fail the request, they send a different one. That is why the url field's own grammar
         excludes both and why a value landing in the same URLs has to as well.
         """
         for value in (
@@ -2220,7 +2223,7 @@ class RegistryGroundTruthBranchCase(unittest.TestCase):
 
 class RegistryPythonDirectoriesCase(unittest.TestCase):
     """A declared pythonDirectories entry must already be the canonical form
-    .github/actions/python-directories/python_directories.py's normalize() would resolve it to, since
+    .github/actions/python-directories/python_directories.py's normalize() would resolve it to. This is because
     spec/audit.py's cross-check compares the registry value against a caller's declaration with no
     further normalization on the registry side.
 
@@ -2333,7 +2336,7 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
     """The helper is wired into both ledger loops, which no test of the helper alone can show.
 
     Deleting either call site, or handing the `dispositions` loop the `gap` label, leaves every helper
-    test green, and `spec/validate.py` green too whenever the live ledger is compliant.
+    test green. It leaves `spec/validate.py` green too whenever the live ledger is compliant.
     So this runs the real script against a scratch tree whose ledger defers in both arrays.
     """
 
@@ -2437,12 +2440,16 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
 class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
     """spec/divergences.schema.json is advisory, since CI runs no JSON-schema validation, so it answers to spec/validate.py.
 
-    The conditional has to stay present for both arrays, since a schema that stops asserting the rule leaves
+    The conditional has to stay present for both arrays. This is because a schema that stops asserting the rule leaves
     an editor green on exactly the entry the gate refuses. The two are deliberately unequal, and in one
-    direction only: the schema refuses an absent, null, empty, or non-string value, and the gate refuses every
-    one of those plus a value that is only whitespace. A schema pattern closing that last gap would refuse a
-    value the gate accepts, which is the direction an earlier attempt was reverted for on the registry schema, for this same
-    reason: U+FEFF is an ECMA-262 `\\s` character and `str.strip` does not remove it, so a `\\S` pattern would
+    direction only:
+    - the schema refuses an absent, null, empty, or non-string value
+    - the gate refuses every one of those plus a value that is only whitespace
+
+    A schema pattern closing that last gap would refuse a value the gate accepts.
+    That is the direction an earlier attempt was reverted for on the registry schema.
+    The reason here is the same one.
+    U+FEFF is an ECMA-262 `\\s` character and `str.strip` does not remove it, so a `\\S` pattern would
     refuse a value this gate keeps.
     """
 

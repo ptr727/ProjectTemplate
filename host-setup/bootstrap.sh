@@ -4,11 +4,16 @@
 # It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix.
 # It reads no payload, no table, and no sibling module: it obtains a tree and runs one entry point inside that tree.
 #
-# A tarball rather than a clone, because a clone needs git on a host that may not have it, and because a tarball of a resolved commit cannot be stale.
+# It fetches a tarball rather than a clone, for these reasons:
+#   - A clone needs git on a host that may not have it.
+#   - A tarball of a resolved commit cannot be stale.
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
 # A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
-# That tree lives under the data directory rather than the cache, is replaced whole by the next such run, and is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
+# That tree lives under the data directory rather than the cache.
+# The bootstrap still needs no git and modifies no checkout of anyone's, because of the following.
+#   - The next such run replaces that tree whole.
+#   - That tree is never a git checkout.
 
 set -Eeuo pipefail
 
@@ -107,7 +112,9 @@ resolve_ref() {
 
     # An unauthenticated request is rate limited per address, so a busy network can lose the lookup while the download itself is fine.
     # The run continues and says it cannot name its own revision, which is worth a warning rather than a refusal.
-    # This fallback is deliberate and gates no mutation: download_tree falls back to fetching $REF by name when RESOLVED is empty, exactly as it would if resolve_ref did not exist, and it has its own die on a real download failure.
+    # This fallback is deliberate and gates no mutation.
+    # The download_tree function falls back to fetching $REF by name when RESOLVED is empty, exactly as it would if resolve_ref did not exist.
+    # The download_tree function also has its own die on a real download failure.
     warn "Could not resolve $REF to a commit, so this run cannot be attributed to one"
     RESOLVED=""
     return 0
@@ -131,7 +138,8 @@ default_dir() {
 
 # The paths this script creates under DIR, named in one place so the trap and the download agree.
 # DIR itself is never removed, since --dir may name a directory the caller owns and put other things in.
-# A kept tree and a transient one take different names, so a report run sharing a --dir with a host run never removes the tree Claude Code loads.
+# A kept tree and a transient one take different names.
+# A report run sharing a --dir with a host run therefore never removes the tree Claude Code loads.
 tree_name() {
     if keeps_tree; then printf 'skills-tree'; else printf 'tree'; fi
 }
@@ -141,9 +149,12 @@ retired_path() { printf '%s\n' "$DIR/$(tree_name).old"; }
 archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
 lock_path() { printf '%s\n' "$DIR/$(tree_name).lock"; }
 
-# Two runs sharing a --dir use the same fixed names, so without this one run's removal of its staging tree, or its exit cleanup, can delete a tree the other is still extracting into.
-# The lock is the kernel's rather than a file whose presence is the lock, so a run that dies releases it, and bootstrap.ps1 opens the same file with FileShare.None, which .NET implements as a flock on Linux.
-# The file is left in place, since removing it while another run holds it open would let a third run lock a new file under the same name.
+# Two runs sharing a --dir use the same fixed names.
+# So without this lock, one run's removal of its staging tree, or its exit cleanup, can delete a tree the other is still extracting into.
+# The lock is the kernel's rather than a file whose presence is the lock, so a run that dies releases it.
+# The bootstrap.ps1 script opens the same file with FileShare.None, which .NET implements as a flock on Linux.
+# The file is left in place.
+# That is because removing it while another run holds it open would let a third run lock a new file under the same name.
 lock_dir() {
     local lock
     lock=$(lock_path)
@@ -155,8 +166,11 @@ lock_dir() {
 }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
-# DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-# An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
+# DIR is a caller-supplied path, so a tree under it is not necessarily ours.
+# Pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
+# An empty directory counts as ours for two reasons.
+#   - It holds nothing to lose.
+#   - No live run can be filling it while this one holds the lock.
 # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
 # A directory that cannot be listed is not known to be empty, so it stays somebody else's.
 is_ours() {
@@ -197,7 +211,8 @@ download_tree() {
         die "Could not download $REPO at $REF. Check the ref exists and that this host reaches codeload.github.com."
 
     # The archive holds one top-level directory named for the repository and the revision.
-    # It is extracted beside the tree rather than over it, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
+    # It is extracted beside the tree rather than over it.
+    # A failed download or extract therefore leaves a kept tree, and the plugin loading it, as they were.
     staging=$(staging_path)
     remove_owned "$staging"
     mkdir -p "$staging"
@@ -214,7 +229,8 @@ download_tree() {
     return 0
 }
 
-# Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
+# Moves the old tree aside before the new one takes its name, and removes it only after.
+# No failure part way therefore leaves the name empty or half-deleted.
 swap_in() {
     local staging tree retired moved=false
     staging=$(staging_path)
@@ -243,11 +259,13 @@ swap_in() {
 }
 
 cleanup() {
-    # Removes each path this run can create by its fixed name rather than through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
+    # Removes each path this run can create by its fixed name.
+    # It does not go through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
     rm -f "$(archive_path)"
     # A path that is not ours was already refused where it mattered, at the download.
     # Refusing again from the exit trap would print the same error a second time, after the one that actually stopped the run.
-    # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
+    # A swap stopped between its two renames leaves the old tree aside and nothing at the name.
+    # The old tree therefore goes back rather than away.
     if is_ours "$(retired_path)"; then
         if is_ours "$(tree_path)"; then
             if ! remove_tree "$(retired_path)"; then
@@ -299,7 +317,8 @@ report() {
     fi
 }
 
-# The agent tools live in a user's home, and root's holds none on a host where a person uses them, so a root run skips them and says so.
+# The agent tools live in a user's home, and root's holds none on a host where a person uses them.
+# A root run therefore skips them and says so.
 agents_user() {
     if [[ $EUID -eq 0 ]]; then
         info "Running as root, so no user's coding-agent tools are read, run this as that user to include them"

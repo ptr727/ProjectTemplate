@@ -2,10 +2,14 @@ name: Check upstream version task
 
 # Upstream-version tracker for a wrapper repo, hosted here once.
 # A required resolve-upstream hook sets a versions step output, a JSON object of name -> version, one key or several for a multi-component pin.
-# The task writes that object to a committed state file beside version.json, diffs it against the prior state, and opens a rolling App-signed bump PR per branch that the merge-bot auto-merges.
+# The task:
+#  - writes that object to a committed state file beside version.json
+#  - diffs it against the prior state
+#  - opens a rolling App-signed bump PR per branch that the merge-bot auto-merges
 # Call it from a scheduled entry-point workflow, and matrix only the branches that ship the version, since a CI-only version uses ["develop"].
 # A tracker whose bump waits for a human sets auto-merge false.
-# The head then carries a marker no merge-bot rule matches, whatever bump-branch-prefix names, so the pull request needs a maintainer decision instead of merging on its own.
+# The head then carries a marker no merge-bot rule matches, whatever bump-branch-prefix names.
+# The pull request therefore needs a maintainer decision instead of merging on its own.
 # With auto-merge true the default bump-branch-prefix, upstream-version, matches the merge-bot task's built-in upstream-version-main and upstream-version-develop pairs.
 
 on:
@@ -43,7 +47,9 @@ on:
 
 jobs:
 
-  # No job-level permissions declared: every write here (the checkout, the pull request) uses the App token, so GITHUB_TOKEN needs no scope and the caller can grant permissions: {}.
+  # No job-level permissions declared.
+  # This is because every write here (the checkout, the pull request) uses the App token.
+  # So GITHUB_TOKEN needs no scope and the caller can grant permissions: {}.
   check-upstream-version:
     name: Check upstream version job
     runs-on: ubuntu-latest

@@ -2,9 +2,9 @@
 """Tests for the GitHub CLI half of the setup-github scripts, on both platforms.
 
 Both scripts report the account `gh` is logged in as and whether its git protocol for github.com
-is ssh, and neither changes that protocol unless the opt-in flag asks for it, `--configure`
-included. Each script is driven through its own functions with `gh` stubbed, since a real run reads
-and writes the configuration of the host it runs on.
+is ssh. Neither script changes that protocol unless the opt-in flag asks for it, `--configure`
+included. Each script is driven through its own functions with the `gh` command stubbed. The reason is that a
+real run reads and writes the configuration of the host it runs on.
 
 Run as `python3 tests/test_setup_github.py`, or under `python3 -m unittest discover -s tests`.
 """

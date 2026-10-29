@@ -8,8 +8,10 @@ name: Build Docker image task
 # The in-job Docker Hub description push that earlier per-repo copies carried is dropped here in favor of publish-docker-readme-task.yml, per docs/reusable-workflows.md "The Docker Family" (stage 5).
 # The overview then publishes once per release rather than once per image build.
 #
-# The image set comes from a docker-prepare hook, the caller's own, or the hub default emitting the single vanilla entry the image input implies, unless the caller passes matrix directly.
-# A required docker-build-base hook, with no hub default, runs first when build-base is set, for a multi-image repo whose base layer is built once and shared across every product image.
+# Unless the caller passes matrix directly, the image set comes from a docker-prepare hook.
+# That is the caller's own, or the hub default emitting the single vanilla entry the image input implies.
+# A required docker-build-base hook, with no hub default, runs first when build-base is set.
+# It is for a multi-image repo whose base layer is built once and shared across every product image.
 # See docs/reusable-workflows.md "The Docker Family" for the design.
 
 on:
@@ -117,8 +119,8 @@ jobs:
           branch: ${{ inputs.branch }}
           semver2: ${{ inputs.semver2 }}
 
-      # Fails here with a named cause, rather than later inside fromJSON, whichever path produced the matrix
-      # (the caller's matrix input, a caller's own docker-prepare hook, or the hub default).
+      # Fails here with a named cause, rather than later inside fromJSON.
+      # This holds whichever path produced the matrix (the caller's matrix input, a caller's own docker-prepare hook, or the hub default).
       - name: Validate Docker build matrix step
         env:
           MATRIX: ${{ inputs.matrix != '' && inputs.matrix || (steps.hook.outputs.matrix || steps.default.outputs.matrix) }}

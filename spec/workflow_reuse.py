@@ -9,21 +9,25 @@ Read-only and owner-run. The measurement reads the live fleet, so CI runs only i
 Reuses spec/audit.py's fleet machinery (gh, normalize, registry).
 
 The hub hosts a standard workflow once, as a `workflow_call` reusable workflow a downstream repo reaches by a
-pinned `uses:`, and a downstream repo carries only a caller stub plus a composite-action hook for what is
+pinned `uses:`. A downstream repo carries only a caller stub plus a composite-action hook for what is
 genuinely its own. This tool measures the distance from that model, so the burn-down is a number rather than
 an impression:
 
-  1. Every `.github/workflows/*.yml` in every cataloged repo, read from its ground-truth branch, is inventoried
-     and compared line by line against the hub canonical of the same name (the hub's own workflow or the
-     catalog snippet), after the same normalization the verbatim engine applies (line endings, action pins,
-     job needs), so a Dependabot bump is not counted as divergence.
-  2. Copies of one canonical are clustered by similarity to a cluster leader, which answers the question that
+  1. Every `.github/workflows/*.yml` in every cataloged repo, read from its ground-truth branch, is
+     inventoried. Each is compared line by line against the hub canonical of the same name (the hub's own
+     workflow or the catalog snippet). That comparison is made after the same normalization the verbatim
+     engine applies (line endings, action pins, job needs). A Dependabot bump is therefore not counted as
+     divergence.
+  2. Copies of one canonical are clustered by similarity to a cluster leader. That answers the question that
      decides whether a job is worth hosting once: how many genuinely distinct variants of it the fleet runs.
-  3. A file that reaches a hub reusable workflow or a hub composite action is counted as a caller, which is
+  3. A file that reaches a hub reusable workflow or a hub composite action is counted as a caller. That is
      the state every carried copy converges to.
 
-The output is a fleet total (files, lines, the share of lines byte-identical to a canonical, callers), a
-per-workflow table, a per-repo table, and the repo-invented workflows no canonical names.
+The output is:
+  - a fleet total (files, lines, the share of lines byte-identical to a canonical, callers)
+  - a per-workflow table
+  - a per-repo table
+  - the repo-invented workflows no canonical names
 
 Usage: uv run --no-project --script spec/workflow_reuse.py [--report] [--selftest]
 """
@@ -38,7 +42,7 @@ import audit  # sibling, import-safe (its main is guarded)
 REPORT_PATH = "reports/workflow-reuse.md"  # the generated, checked-in burn-down report (--report)
 WORKFLOW_DIR = ".github/workflows"
 # Two copies at or above this ratio are one variant.
-# 0.85 rather than higher, because a copy that differs only in its per-repo target list or its comment wording is the same variant for the purpose of hosting the job once.
+# 0.85 rather than higher, since copies differing only in their per-repo target list or comment wording are the same variant for hosting the job once.
 CLUSTER_THRESHOLD = 0.85
 _USES = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
 
@@ -59,7 +63,7 @@ def canonical_texts():
 def fetch_dir(slug, path, ref):
     """The filenames under a directory on a ref, empty where the directory is absent.
 
-    A 404 here is a repo that carries no workflows, which is a real state rather than an unread one, so it
+    A 404 here is a repo that carries no workflows. That is a real state rather than an unread one, so it
     counts as zero files. A failure other than 404 raises inside audit.gh, so nothing is silently skipped.
     """
     listing = audit.gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
@@ -97,8 +101,8 @@ def cluster(copies):
 
     Each copy, in name order, joins the first cluster whose leader (its first member) it matches at the
     threshold, else it starts a cluster. So a member is guaranteed similar to its leader rather than to every
-    other member. Leader clustering rather than an exhaustive partition on purpose: the count of variants is
-    what the report needs, and a stricter partition would only split a borderline pair into two clusters that
+    other member. Leader clustering rather than an exhaustive partition on purpose, because the count of variants is
+    what the report needs. A stricter partition would only split a borderline pair into two clusters that
     read the same to a maintainer.
     """
     lines = {r: norm_lines(t) for r, t in copies.items()}
@@ -121,7 +125,7 @@ def measure(registry, canon, hub_slug, reader=fetch, lister=fetch_dir):
 
     Returns per-file rows, the files that were listed but could not be read inline, and the downstream repos
     carrying no workflow at all. An unreadable file is named rather than dropped, since a dropped file and an
-    absent one print the same, and an empty repo is named so the repo count is a count of what was measured.
+    absent one print the same. An empty repo is named so the repo count is a count of what was measured.
     """
     rows, unreadable, empty = [], [], []
     for entry in registry["repos"]:
@@ -334,7 +338,8 @@ def _selftest():
     assert cluster({"r1": big, "r2": near, "r3": far}) == [["r1", "r2"], ["r3"]]
 
     registry = {
-        # A defaults branch that is neither the fleet "main" nor the one "Two" declares, so the three-step resolve is told apart from either shortcut it could collapse to.
+        # The defaults branch is neither the fleet "main" nor the one "Two" declares.
+        # That tells the three-step resolve apart from either shortcut it could collapse to.
         "defaults": {"groundTruthBranch": "release/9.9"},
         "repos": [
             {
@@ -379,7 +384,8 @@ def _selftest():
     assert unreadable == ["Two:big.yml"], unreadable
     assert empty == ["Gone"], empty
     # "Two" declares its own branch and "One" declares none, so this pins the entry step and the defaults step together.
-    # A reader resolving the field itself, with the fleet value as its own fallback, reads that fallback for "One" and fails here, which is what makes the wiring proven rather than merely present.
+    # A reader resolving the field itself, with the fleet value as its own fallback, reads that fallback for "One" and fails here.
+    # That is what makes the wiring proven rather than merely present.
     assert seen_refs["Two"] == "develop" and seen_refs["One"] == "release/9.9"
     total = summarize(rows)
     assert total["files"] == 3 and total["canonical_named"] == 2 and total["callers"] == 1, total
