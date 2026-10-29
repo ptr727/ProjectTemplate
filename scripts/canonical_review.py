@@ -535,9 +535,9 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     Three answers rather than two. A commit dates the path. A path no commit holds, staged or merely
     unignored, is a file this branch has created and not committed. `tracked_files` deliberately
     counts that as a unit. The path is the newest content there is rather than an undatable one, so
-    it sorts first. Anything else sorts last. Such a path is, in the ordinary case, a git failure.
-    It is also every path in a repository with no commits at all, where git exits 128 rather than
-    answering. The order is a priority rather than a claim about the content, so a uniform last is
+    it sorts first. Anything else sorts last. In the ordinary case that is
+    a path for which git failed. In a repository with no commits at all it is every path, since git
+    exits 128 rather than answering. The order is a priority rather than a claim about the content, so a uniform last is
     harmless there.
     """
     times: dict[str, float] = {}
