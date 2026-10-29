@@ -368,7 +368,8 @@ class SweepCase(RepoCase):
     def test_a_never_read_unit_is_asked_for_within_the_bound(self) -> None:
         """This is the case the retired gate refused.
 
-        A unit nothing here has read is one a carrier receives unread. So leaving the whole backlog out left newly authored content with no reader at all.
+        A unit nothing here has read is one a carrier receives unread. So leaving the whole backlog
+        out left newly authored content with no reader at all.
         """
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
