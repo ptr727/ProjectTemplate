@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise canonical_review.py's unit model, ledger, and sweep against real manifests and git trees.
 
-Two kinds of case live here. The unit-model and ledger cases run against crafted inputs, because the
+Three kinds of case live here. The unit-model and ledger cases run against crafted inputs, because the
 properties they assert are about text and JSON rather than about git. The sweep and record cases
 build a throwaway repository with real remote-tracking refs, for `test_local_review.py`'s reason.
 That reason is that the mechanism rests on git's own file listing and merge-base rather than on
