@@ -101,14 +101,14 @@ def check_nodes(pr: dict) -> list[dict]:
     unrecognized union member has empty values and an `unreadable` key naming its type.
 
     A CheckRun and a StatusContext spell every field differently, so both are normalized here. Runs
-    group by workflow and name, or by app and name where the suite has no workflow run, and an
+    group by workflow and name, or by app and name where the suite has no workflow run. An
     unreadable workflow groups an Actions run by its own suite. Each group keeps every run of its
     highest suite id, since `startedAt` misorders overlapping runs. A name only an older suite
     carries stays, since the merge gate still reads it.
 
     A finished check only an older suite carries is marked `superseded`, with `newer_run`, while
-    the workflow's newest suite has not completed, since a cancelled run's aggregator fails over
-    jobs nobody waits on. The head commit's own suites count toward the newest one as well.
+    the workflow's newest suite has not completed. The reason is that a cancelled run's
+    aggregator fails over jobs nobody waits on. The head commit's own suites count toward the newest one as well.
     """
     # No match reports nothing rather than another commit's rollup, and `checks_unreadable` says so.
     commit = head_commit(pr)

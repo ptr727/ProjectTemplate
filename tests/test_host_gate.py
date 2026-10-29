@@ -2,7 +2,7 @@
 """Tests for scripts/host_gate.py.
 
 Two of these exist because the first live run produced them rather than because they were designed.
-A probe that ran and failed was read as the tool being unreadable rather than absent, and the
+A probe that ran and failed was read as the tool being unreadable rather than absent. The
 remedy line under a floor failure was counted as a second issue. Both are cheap to assert and
 neither was visible from reading the code.
 """
@@ -23,9 +23,9 @@ def tool(name, minimum=None, required=True, probes=None, pattern=r"v(\d+(?:\.\d+
     """A declaration entry, defaulted so a case states only the field it is about.
 
     The default probe is a Python one-liner rather than `true`, for two reasons. `true` is not a
-    binary on native Windows, and it prints nothing, so a case that forgot to override `probes`
-    would read as `unreadable` and pass or fail for a reason unrelated to what it tests. This one
-    exists wherever the tests run and answers the default pattern.
+    binary on native Windows, and it prints nothing. A case that forgot to override `probes`
+    would therefore read as `unreadable` and pass or fail for a reason unrelated to what it tests.
+    This one exists wherever the tests run and answers the default pattern.
     """
     entry = {
         "name": name,
@@ -240,7 +240,7 @@ class TestCheck(unittest.TestCase):
         """One bad field costs its own output line, not the run and the findings already collected.
 
         The hub declaration is shape-checked by spec/validate.py in CI and by nothing at gate
-        runtime, so the below-floor read has to survive a non-dict field and a non-string command.
+        runtime. The below-floor read therefore has to survive a non-dict field and a non-string command.
         """
         entry = tool(
             "gh",
@@ -528,8 +528,8 @@ class TestUncompilablePatternAtReadTime(unittest.TestCase):
 class TestBareRunOverlayWarning(unittest.TestCase):
     """A bare run inside a repo whose root carries an overlay names what it skipped.
 
-    The default --repo reads the working directory alone, so a run started in a subdirectory reads
-    nothing and used to say nothing, which is the silent skip the warning closes. An explicit
+    The default --repo reads the working directory alone. A run started in a subdirectory therefore
+    reads nothing and used to say nothing, which is the silent skip the warning closes. An explicit
     --repo and --no-local each stay silent, since both are a choice the caller made.
 
     An overlay declaring nothing stays silent too. Every repository carries the file whether or not
@@ -830,10 +830,13 @@ class TestLocalOverlay(unittest.TestCase):
     """This repo's own root host-tools.json, and the schema it points at.
 
     The overlay borrowed the fleet schema once, and that schema forbids both shapes an overlay is for:
-    `minItems: 1` rejects the empty list a repo with nothing to add carries, and the per-entry
-    `required` list rejects the partial entry that lets a repo raise one floor without restating a
-    tool. Neither is caught by running the gate, because CI runs no JSON-schema validation at all and
-    the pointer's only reader is a schema-aware editor, so the file showed as invalid where it is
+
+    - `minItems: 1` rejects the empty list a repo with nothing to add carries.
+    - The per-entry `required` list rejects the partial entry that lets a repo raise one floor
+      without restating a tool.
+
+    Neither is caught by running the gate, because CI runs no JSON-schema validation at all.
+    The pointer's only reader is a schema-aware editor, so the file showed as invalid where it is
     edited and nowhere else.
     """
 
@@ -856,7 +859,7 @@ class TestLocalOverlay(unittest.TestCase):
         The overlay schema was written by hand from the fleet one and quietly relaxed two more things:
         `minimum` lost its version pattern and `source` lost its named platforms and its closed
         property set. A schema-aware editor then accepted a floor the gate rejects and a source key
-        that reaches no platform, while the tests next door said only two axes differed.
+        that reaches no platform. Meanwhile the tests next door said only two axes differed.
 
         Comparing each shared field is what keeps the duplication honest, since the alternative is a
         cross-file `$ref` that editors resolve inconsistently. The two intended differences are
@@ -868,7 +871,8 @@ class TestLocalOverlay(unittest.TestCase):
         # `description` is editor help rather than a constraint, so it is not compared.
         # `required.default` is excluded because the two files mean different things by an omitted `required`, which this test found rather than assumed.
         # In the fleet declaration every entry is an addition, so omitting it means true.
-        # In an overlay, merge() applies only the fields an entry carries, so omitting it means inherit the hub's value, and declaring a default of true would tell an editor the opposite.
+        # In an overlay, merge() applies only the fields an entry carries, so omitting it means inherit the hub's value.
+        # Declaring a default of true in an overlay would tell an editor the opposite.
         ignore = {"description"}
         for field in sorted(overlay):
             drop = ignore | ({"default"} if field == "required" else set())
@@ -887,7 +891,8 @@ class TestLocalOverlay(unittest.TestCase):
         """Asserted as a difference rather than as two absolute values.
 
         A change that tightened the overlay schema back to the fleet one would satisfy a check written
-        against either file alone, since each would still be internally consistent.
+        against either file alone.
+        That holds because each file would still be internally consistent.
         """
         self.assertEqual(self.fleet_schema["properties"]["tools"]["minItems"], 1)
         self.assertEqual(self.local_schema["properties"]["tools"]["minItems"], 0)
@@ -929,10 +934,11 @@ class TestLocalOverlay(unittest.TestCase):
         """The justification for the split, stated about the schemas rather than about today's data.
 
         This replaced a check that the shipped overlay violates the fleet schema. That coupled a
-        schema-design invariant to one data instance: an overlay that legitimately grew a full tool
-        entry would satisfy the fleet schema and fail the test, while the split stayed just as
+        schema-design invariant to one data instance. An overlay that legitimately grew a full tool
+        entry would satisfy the fleet schema and fail the test. The split stayed just as
         justified. What justifies it is that the overlay schema accepts everything the fleet schema
-        does and more, so the assertion is made in both directions over constructed documents.
+        does and more. The assertion is therefore made in both directions over constructed
+        documents.
         """
         full = {
             "name": "jq",
@@ -986,9 +992,10 @@ class TestShippedDeclaration(unittest.TestCase):
         """A floor is justified or it is not there, so this asserts the set rather than a count.
 
         Two kinds qualify. A measured floor sits above a version known to break a documented
-        procedure, and a target floor names the version the repo's toolchain is configured for.
+        procedure. A target floor names the version the repo's toolchain is configured for.
         The set is asserted so that adding a floor is a deliberate edit here rather than a silent
-        one in the data, which is what caught the python3 floor being added without this line.
+        one in the data.
+        Asserting the set is what caught the python3 floor being added without this line.
         """
         floors = {t["name"] for t in self.data["tools"] if t["minimum"] is not None}
         self.assertEqual(
@@ -1000,8 +1007,8 @@ class TestShippedDeclaration(unittest.TestCase):
         """docs/host-setup.md restates the floors, so the doc goes stale the moment the data moves.
 
         The table's other columns answer presence, and a tool below its floor answers `--version`
-        like any other, so the Floor column is the only thing there that distinguishes present from
-        sufficient. A number that drifts out of step with the data is worse than an absent one,
+        like any other. The Floor column is therefore the only thing there that distinguishes present
+        from sufficient. A number that drifts out of step with the data is worse than an absent one,
         since a host reads the table and stops.
         """
 
@@ -1057,7 +1064,7 @@ class TestShippedDeclaration(unittest.TestCase):
         """A target floor's `why` has to distinguish itself from a measured one.
 
         A reader who takes a target floor for a measured one goes looking for a defect report that
-        does not exist, which is the failure the two-kinds wording was written to prevent.
+        does not exist. That is the failure the two-kinds wording was written to prevent.
         The set is asserted rather than one entry, so a target floor added without the wording
         fails here instead of reading as measured. Each one is named individually, since a check
         that only counted them would pass on a wrong substitution.
@@ -1078,12 +1085,12 @@ class TestShippedDeclaration(unittest.TestCase):
     def test_the_docker_floor_is_read_from_the_engine_before_the_client_banner(self):
         """The docker floor is an engine number, so the engine is what has to be asked for it.
 
-        The client and the engine are one package on a native install and two on a WSL host taking
+        The client and the engine are one package on a native install. They are two on a WSL host taking
         docker from Docker Desktop's integration, where the CLI on PATH is packaged by the
         distribution. A 29.1.3 client was recorded there against a 29.7.2 engine, so reading the
         banner failed a host that clears this floor. Probe order is the whole fix, which is why it
-        is asserted as an order rather than as a set, and the banner stays as the second probe
-        because a stopped daemon answers nothing at all.
+        is asserted as an order rather than as a set.
+        The banner stays as the second probe because a stopped daemon answers nothing at all.
         """
         docker = {t["name"]: t for t in self.data["tools"]}["docker"]
         self.assertEqual(
@@ -1094,7 +1101,7 @@ class TestShippedDeclaration(unittest.TestCase):
     def test_the_docker_pattern_reads_both_of_its_probes_and_nothing_else(self):
         """One pattern spans two probes whose output shares no prefix, which is what makes the
         `Docker version ` half optional. An optional prefix that is not anchored reads the first
-        digits anywhere in the output, so the anchor is asserted here by the case it exists for."""
+        digits anywhere in the output. The anchor is therefore asserted here by the case it exists for."""
         pattern = {t["name"]: t for t in self.data["tools"]}["docker"]["pattern"]
 
         def read(text):

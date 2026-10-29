@@ -2,18 +2,24 @@
 """Host tool versions against the floors in spec/host-tools.json - one command, one digest.
 
 Why this exists: the verification block in docs/host-setup.md ran `--version` on each tool and read
-only whether it answered. Presence is the weaker half of the contract, because the two host defects
-this fleet has actually hit are both version facts that a present, working binary reports cleanly.
+only whether it answered. Presence is the weaker half of the contract. That is because the two host
+defects this fleet has actually hit are both version facts that a present, working binary reports
+cleanly.
 
 A stale `gh` is the first. The GitHub CLI maintainers name the community-distributed 2.45.x and
-2.46.x as broken by deprecated GitHub APIs, and a host carrying one answers `gh --version` perfectly
+2.46.x as broken by deprecated GitHub APIs. A host carrying one answers `gh --version` perfectly
 while `gh pr edit` exits non-zero having applied nothing. That one is measured rather than argued:
-this host carried a distribution 2.46.0, two workarounds were written into OPERATIONS.md as
-permanent behavior, and both symptoms went away on 2.97.0 from the official repository.
+
+- This host carried a distribution 2.46.0.
+- Two workarounds were written into OPERATIONS.md as permanent behavior.
+- Both symptoms went away on 2.97.0 from the official repository.
 
 An old `git-restore-mtime` is the second, and it is worse, because it fails silently in the
-direction that reads as success: a release before 2025.08 calls `git whatchanged`, current git
-refuses it, and the tool then prints its ordinary statistics and exits 0 having restored nothing.
+direction that reads as success:
+
+- A release before 2025.08 calls `git whatchanged`.
+- Current git refuses it.
+- The tool then prints its ordinary statistics and exits 0 having restored nothing.
 
 Both are invisible to a presence check and both are one comparison away from being caught, which is
 the whole argument for this file. See docs/host-setup.md for the contract this reads and
@@ -49,7 +55,7 @@ def compare(found: tuple[int, ...], floor: tuple[int, ...]) -> int:
     """Sign of found minus floor, comparing element-wise with the shorter padded by zeros.
 
     Padding rather than comparing lengths is what lets a two-part `2025.08` sit against a three-part
-    `2025.8.0` without either reading as the larger for having more components.
+    `2025.8.0`. Neither reads as the larger for having more components.
     """
     width = max(len(found), len(floor))
     a = found + (0,) * (width - len(found))
@@ -61,13 +67,14 @@ def probe(argv: list[str]) -> str | None:
     """The combined output of one probe, or None where the probe did not answer.
 
     stderr is joined in deliberately, since a version banner on stderr is as good an answer as one on
-    stdout and reading only stdout would report a working tool as unreadable.
+    stdout. Reading only stdout would report a working tool as unreadable.
 
-    A non-zero exit is not an answer, and reading it as one is a mistake this made on its first run:
-    `git restore-mtime --version` on a host without the tool prints git's own "not a git command"
-    text and exits 1, which counted as the probe having run and reported the tool as unreadable
-    rather than absent. Those two have opposite remedies, fix this file against install the tool, so
-    the exit code decides and a failing probe falls through to the next one.
+    A non-zero exit is not an answer, and reading it as one is a mistake this made on its first run.
+    The mistake: `git restore-mtime --version` on a host without the tool prints git's own
+    "not a git command" text and exits 1. That counted as the probe having run and reported the tool
+    as unreadable rather than absent. Those two have opposite remedies, fix this file against
+    install the tool. The exit code therefore decides, and a failing probe falls through to the next
+    one.
     """
     try:
         p = subprocess.run(
@@ -96,8 +103,10 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
     fix this file's pattern, or act on the version.
     """
     # Every probe that answered is remembered, rather than any one of them standing for the rest.
-    # Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce, and naming one of several that did is the same error at smaller scale.
-    # The pattern has to match one of these, so all of them are what the reader needs, and picking the first or the last is a guess either way.
+    # Naming a probe that never ran sends the reader to fix a pattern against output they cannot reproduce.
+    # Naming one of several that did is the same error at smaller scale.
+    # The pattern has to match one of these, so all of them are what the reader needs.
+    # Picking the first or the last is a guess either way.
     answered: list[str] = []
     for argv in tool["probes"]:
         out = probe(argv)
@@ -114,7 +123,8 @@ def read_tool(tool: dict) -> tuple[str, str | None, str | None]:
             return "read", m.group(1), " ".join(argv)
     if not answered:
         return "absent", None, None
-    # A plain separator, since the caller is what decides how a command is marked up and doing it here nests the caller's own backticks inside these.
+    # A plain separator, since the caller is what decides how a command is marked up.
+    # Doing it here nests the caller's own backticks inside these.
     return "unreadable", None, ", ".join(answered)
 
 
@@ -124,14 +134,15 @@ REQUIRED_FIELDS = ("name", "probes", "pattern", "minimum", "why")
 def field_problems(entry: dict) -> list[str]:
     """Type problems among the fields an entry actually carries, named one per problem.
 
-    The hub declaration is shape-checked by spec/validate.py, and a repository's is checked by
-    nothing at all, so the gate cannot assume either the types or the values it reads. Only fields
+    The hub declaration is shape-checked by spec/validate.py. A repository's is checked by
+    nothing at all. The gate therefore cannot assume either the types or the values it reads. Only fields
     that are present are judged, which is what lets an override carry one field without restating an
     entry.
 
     Reading a field for truthiness rather than type is what makes this necessary rather than tidy.
-    `required: 0` is falsy and is not `False`, so a guard written against the literal lets it through
-    and a required tool becomes optional, which is the relaxation the merge rule exists to refuse.
+    `required: 0` is falsy and is not `False`. A guard written against the literal therefore lets it
+    through, and a required tool becomes optional. That is the relaxation the merge rule exists to
+    refuse.
     """
     problems = []
     if "name" in entry and (not isinstance(entry["name"], str) or not entry["name"]):
@@ -201,9 +212,9 @@ def read_declaration(path: Path, what: str) -> list[dict] | str:
     """The `tools` array from a declaration file, or a diagnostic string where it cannot be had.
 
     Both declarations come through here so a shape guard added to one cannot go missing from the
-    other, which is what happened when only the repository-local file was checked. Neither is
-    validated at the point it is read: `spec/validate.py` covers the hub file, and nothing at all
-    covers a repository's, so this reads as though neither had run.
+    other. That is what happened when only the repository-local file was checked. Neither is
+    validated at the point it is read. `spec/validate.py` covers the hub file, and nothing at all
+    covers a repository's. This therefore reads as though neither had run.
 
     Returning the diagnostic rather than raising keeps the caller's exit codes in one place, and a
     `str` is unambiguous against a `list` of entries.
@@ -229,7 +240,7 @@ def contract_problems(tools: list[dict]) -> list[str]:
 
     spec/validate.py and the schema both enforce it on the hub declaration, and neither can see the
     result of layering. A repository adding a floor to a hub entry that never carried a source
-    leaves both files correct on their own and the combination wrong, and the symptom is a failure
+    leaves both files correct on their own and the combination wrong. The symptom is a failure
     printing no remedy, which is the one thing requiring a source exists to prevent.
 
     The platform keys are read here too, since a source naming a key nothing looks up is a source
@@ -279,20 +290,34 @@ def contract_problems(tools: list[dict]) -> list[str]:
 def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     """The hub declaration with a repository's own layered over it, plus any rejected overrides.
 
-    A repository states what the fleet cannot know: that a tool the hub calls optional is mandatory
-    there, that it needs a floor the hub has no opinion on, or that it depends on a tool no other
-    repository has. Adding a new tool needs the same fields the hub's own entries carry, since a
+    A repository states what the fleet cannot know:
+
+    - That a tool the hub calls optional is mandatory there.
+    - That it needs a floor the hub has no opinion on.
+    - That it depends on a tool no other repository has.
+
+    Adding a new tool needs the same fields the hub's own entries carry. The reason is that a
     local entry the gate cannot probe is worth less than no entry.
 
-    Overriding is **tighten-only**. A local entry may raise a floor, add one where the hub declares
-    none, and turn an optional tool required. It may not lower a floor, remove one, or turn a
-    required tool optional, because those are the edits that quietly retire a fleet check from inside
+    Overriding is **tighten-only**. A local entry may:
+
+    - Raise a floor.
+    - Add one where the hub declares none.
+    - Turn an optional tool required.
+
+    It may not:
+
+    - Lower a floor.
+    - Remove one.
+    - Turn a required tool optional.
+
+    The reason is that those are the edits that quietly retire a fleet check from inside
     the repository it was written to protect. A rejected override is reported rather than dropped,
     so a repository that tried to relax a floor hears about it instead of appearing to succeed.
 
     Names match without regard to case, so a repository writing `GH` overrides the hub's `gh` rather
     than silently adding a second entry beside it. Keying on the exact spelling would turn a
-    misspelled override into an addition, which is the one outcome the author could not have
+    misspelled override into an addition. That is the one outcome the author could not have
     intended and the gate would report as success.
     """
     by_key = {t["name"].lower(): dict(t) for t in base}
@@ -302,7 +327,8 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
         if not isinstance(name, str) or not name:
             rejected.append("a local entry carries no name, so it was ignored")
             continue
-        # Types are checked before anything is applied, so a wrong one is refused rather than bypassing a guard written against a literal or crashing a later read.
+        # Types are checked before anything is applied.
+        # A wrong one is therefore refused rather than bypassing a guard written against a literal or crashing a later read.
         problems = field_problems(entry)
         if problems:
             rejected.append(f"local tool {name} was ignored: {'; '.join(problems)}")
@@ -358,9 +384,9 @@ def platform_key() -> str:
 def platform_field(tool: dict, field: str) -> str | None:
     """The current platform's value under `field`, or None where the entry does not usably carry one.
 
-    The shape checks report a malformed declaration, and this read stays crash-free beside them,
-    so one bad field costs its own output line rather than the whole run and the findings already
-    collected.
+    The shape checks report a malformed declaration, and this read stays crash-free beside them.
+    One bad field therefore costs its own output line rather than the whole run and the findings
+    already collected.
     """
     values = tool.get(field)
     value = values.get(platform_key()) if isinstance(values, dict) else None
@@ -377,9 +403,10 @@ def quote_argument(value: str) -> str:
 def resolve_remedy(command: str, root: Path | None = None) -> str:
     """A remedy command with a repo-relative installer path made absolute against this checkout.
 
-    The catalog stores host-setup/ paths repo-relative so the data stays portable, and the gate
-    runs from any working directory, so the path is resolved against the tree this script lives in
-    and quoted where the shell needs it, to keep the printed command runnable as printed.
+    The catalog stores host-setup/ paths repo-relative so the data stays portable. The gate
+    runs from any working directory. The path is therefore resolved against the tree this script
+    lives in, and quoted where the shell needs it. That keeps the printed command runnable as
+    printed.
     """
     if not command.startswith("host-setup/"):
         return command
@@ -425,16 +452,16 @@ def package_source(tool: dict) -> str | None:
 def overlay_above(start: Path) -> Path | None:
     """The nearest ancestor of `start` carrying a host-tools.json, or None.
 
-    A bare run layers only the declaration at the working directory itself, so an overlay at the
-    root of the repo the run is inside goes unapplied without a word when the run starts in a
-    subdirectory. Naming that directory lets the run say what it skipped and which re-run applies it.
+    A bare run layers only the declaration at the working directory itself. Hence an overlay at the
+    root of the repo the run is inside goes unapplied without a word. That happens when the run
+    starts in a subdirectory. Naming that directory lets the run say what it skipped and which re-run applies it.
 
     An overlay declaring no tool is passed over in silence, because every repository carries the
-    file whether or not it adds anything, so warning on presence alone would tell the operator to
-    re-run a command that applies a declaration adding nothing. An overlay this cannot parse is
-    named rather than passed over, since whether it declares anything is exactly what the failed
-    parse leaves unknown, and the re-run is what turns that into the diagnostic read_declaration
-    already writes.
+    file whether or not it adds anything. Warning on presence alone would therefore tell the
+    operator to re-run a command that applies a declaration adding nothing. An overlay this cannot
+    parse is named rather than passed over, since whether it declares anything is exactly what the
+    failed parse leaves unknown. It is also named since the re-run is what turns that into the
+    diagnostic read_declaration already writes.
 
     The walk stops at the nearest carrier either way, empty or not.
     """
@@ -506,7 +533,8 @@ def check(tools: list[dict]) -> list[str]:
             src = platform_field(tool, "source")
             rem = platform_field(tool, "remedy")
             # The head line stays the scannable fact and the rationale follows it, rather than being inlined into it.
-            # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable, and the longest entry is not the one that needs it least.
+            # An entry's why runs to a paragraph, so inlining made the one line a reader scans in CI output unreadable.
+            # The longest entry is not the one that needs it least.
             issues.append(
                 f"{name} {version} is below the {floor_text} floor"
                 + f"\nWHY: {tool['why']}"
@@ -552,7 +580,8 @@ def main(argv: list[str] | None = None) -> int:
     rejected: list[str] = []
     local_path = Path(a.repo or ".") / "host-tools.json"
     # Every repository carries this file, an empty tools list where it adds nothing, so an absence is a conformance miss rather than the ordinary case.
-    # It is still silent here, because this gate measures a host against floors and spec/audit.py is what reports a baseline file a repository does not carry.
+    # It is still silent here, because this gate measures a host against floors.
+    # The script that reports a baseline file a repository does not carry is spec/audit.py.
     if not a.no_local and local_path.is_file():
         local = read_declaration(local_path, "repository host tool declaration")
         if isinstance(local, str):
@@ -573,7 +602,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[{status:4}] host-tools  {len(issues)} issue(s) over {len(tools)} declared tool(s)")
     for i in issues:
         # A finding may carry continuation lines, indented under it rather than counted beside it.
-        # Every line is split rather than only the first, since partitioning once leaves later newlines inside one printed line and loses the indent on all but the first.
+        # Every line is split rather than only the first, since partitioning once leaves later newlines inside one printed line.
+        # It also loses the indent on all but the first.
         head, *rest = i.split("\n")
         print(f"         {head}")
         for tail in rest:

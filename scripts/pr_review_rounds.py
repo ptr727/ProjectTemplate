@@ -366,7 +366,7 @@ def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
     """Whether a file table names exactly the changed files, a glob row matching what it names.
 
     A glob matches one segment at a time, `*` and `?` never crossing a `/`, and every other
-    character is literal, so a row of `src/*` names `src/a.py` and not `src/sub/b.py`.
+    character is literal. A row of `src/*` therefore names `src/a.py` and not `src/sub/b.py`.
     """
 
     def hits(entry: str, path: str) -> bool:
@@ -551,9 +551,9 @@ def matching_threads(threads: list[dict], match: str, path: str | None) -> list[
     """Threads whose finding text contains `match`, narrowed by `path` where one is given.
 
     Matched on the finding's words rather than a line number, which a fix push moves.
-    Case-insensitive, and both sides fold typographic characters through `_TYPOGRAPHIC_FOLD` and
-    whitespace to a single space, as `describe()` does, so a pattern copied from a printed line
-    matches the raw body.
+    Case-insensitive. Both sides fold typographic characters through `_TYPOGRAPHIC_FOLD` and
+    whitespace to a single space, as `describe()` does. A pattern copied from a printed line
+    therefore matches the raw body.
     """
     needle = fold_finding(match)
     return [
@@ -613,8 +613,14 @@ def holds(pr: dict) -> bool:
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 
-    Only on a pull request into a non-default branch, on a head its writer attests, where no round
-    on record read part of a diff and the whole review history is in view. A refusal on this head
+    It stands in only where all of these hold:
+
+    - The pull request is into a non-default branch.
+    - The head is one its writer attests.
+    - No round on record read part of a diff.
+    - The whole review history is in view.
+
+    A refusal on this head
     is Copilot's own word, which only a later Copilot round on the head spends.
     """
     return (
