@@ -92,7 +92,7 @@ systemctl --user show -p TasksMax -p MemoryMax "claude-tree-$(echo "$AGENT_CONTA
 
 The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner. The denial names `GH_WRITE_GUARD_ALLOW` as the way past it. That grant is the maintainer's to make. Making it is a deliberate act taken outside the session, rather than something an agent does for itself once blocked. This is the one denial a maintainer has to act on, because it is the only one with a grant behind it. The others name a shape to stop using, while this one names a target that may be entirely legitimate.
 
-**The case that raises it is usually a fork.** `origin` is your own fork under your own owner. `upstream` is the project it was forked from under someone else's. Everything aimed at the fork is in scope and never denies. Only the half that leaves the owner stops. That half includes filing an issue on the upstream, opening a pull request against it, or commenting on one there. The grant therefore names the upstream alone, and the fork needs no grant at all. That asymmetry is what a reader hits first, since half the session's writes succeed and the other half do not.
+**The case that raises it is usually a fork.** `origin` is your own fork under your own owner. `upstream` is the project it was forked from under someone else's. Everything aimed at the fork is in scope and never denies. Only the half that leaves the owner stops. That half includes filing an issue on the upstream, opening a pull request against it, and commenting on one there. The grant therefore names the upstream alone, and the fork needs no grant at all. That asymmetry is what a reader hits first, since half the session's writes succeed and the other half do not.
 
 **The grant goes in the checkout's `.claude/settings.local.json`, as an `env` block:**
 
@@ -108,7 +108,7 @@ The guard denies a `gh` write whose explicit target sits under an owner other th
 
 Tokens are separated by **any run of whitespace or commas**. So `a/b c/d`, `a/b,c/d`, and `a/b, c/d` all parse to the same two grants and the choice is cosmetic. A token carrying no `/` is ignored, so a malformed entry grants nothing rather than granting everything. A malformed entry also fails silently, which is why the confirmation step below is worth running. Grant the narrowest thing that unblocks the work. That is because a repository grant does not extend to that owner's other repositories, and that containment is the property worth keeping.
 
-**The grant is per checkout, not per host.** `.claude/settings.local.json` lives in the working tree and is git-ignored. So it applies to sessions started in that checkout. It does not follow the agent into another repository's sessions. That is the intended scope: a grant made to file one upstream issue from one fork does not quietly become a standing permission everywhere.
+**The grant is per checkout, not per host.** `.claude/settings.local.json` lives in the working tree and is git-ignored. So it applies to sessions started in that checkout, and it does not follow the agent into another repository's sessions. That is the intended scope: a grant made to file one upstream issue from one fork does not quietly become a standing permission everywhere.
 
 **Restart the session afterward.** The hook reads the value from the environment the session was launched with. That is what makes the channel one an agent cannot use on itself. It is equally why a grant added to a live session does nothing until that session restarts.
 
