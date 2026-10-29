@@ -21,8 +21,10 @@ from pr_review_rounds import (
     REVIEWER,
     answered_outside_review,
     collected,
+    commit_oid,
     coverage,
     first_comment,
+    head_nodes,
     head_reviews,
     newest_of,
     open_threads,
@@ -109,7 +111,7 @@ def render(
     # Every round's notes, since a renamed section on an earlier round hides a finding too.
     notes = [
         *dict.fromkeys(
-            f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
+            f"round {(commit_oid(node) or 'unknown')[:8]}: {n}"
             for node in revs
             for n in reading(node).notes
             if node not in on_head or n not in {p.note for p in reading(node).unplaced}
@@ -152,11 +154,7 @@ def render(
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
     other_on_head = [
-        login
-        for login in OTHER_REVIEWERS
-        if any(
-            (n.get("commit") or {}).get("oid") == head for n in reviewer_nodes(pr, "reviews", login)
-        )
+        login for login in OTHER_REVIEWERS if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
     ]
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None

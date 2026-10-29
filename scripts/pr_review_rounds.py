@@ -138,6 +138,22 @@ def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
     ]
 
 
+def commit_oid(node: dict) -> str | None:
+    """The oid of the commit this node carries, or None where the payload names none."""
+    return (node.get("commit") or {}).get("oid")
+
+
+def page_flag(pr: dict, field: str, key: str) -> bool:
+    """One `pageInfo` flag of the connection under `field`, false where the payload omits it."""
+    return bool(((pr.get(field) or {}).get("pageInfo") or {}).get(key))
+
+
+def head_nodes(pr: dict, nodes: list[dict]) -> list[dict]:
+    """The nodes carrying the current head's commit, in the order given."""
+    head = pr["headRefOid"]
+    return [n for n in nodes if commit_oid(n) == head]
+
+
 def answered_outside_review(pr: dict) -> dict | None:
     """The reviewer's newest plain comment, where it postdates its newest formal review."""
     comments = reviewer_nodes(pr, "comments")
@@ -157,13 +173,12 @@ def window_blind(pr: dict, field: str, login: str = REVIEWER) -> bool:
     login's in view bounds every hidden one as older. `hasPreviousPage` says whether anything is
     back there at all.
     """
-    older = ((pr.get(field) or {}).get("pageInfo") or {}).get("hasPreviousPage")
-    return bool(older) and not reviewer_nodes(pr, field, login)
+    return page_flag(pr, field, "hasPreviousPage") and not reviewer_nodes(pr, field, login)
 
 
 def threads_truncated(pr: dict) -> bool:
     """True where `reviewThreads(first:100)` cut off before the actual thread count."""
-    return bool(((pr.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"))
+    return page_flag(pr, "reviewThreads", "hasNextPage")
 
 
 def reviews_truncated(pr: dict) -> bool:
@@ -172,7 +187,7 @@ def reviews_truncated(pr: dict) -> bool:
     A finding count needs every round read, so an older windowed-out round can hide a suppressed or
     outside-diff-range finding. `hasPreviousPage` means the unread reviews are the oldest.
     """
-    return bool(((pr.get("reviews") or {}).get("pageInfo") or {}).get("hasPreviousPage"))
+    return page_flag(pr, "reviews", "hasPreviousPage")
 
 
 def refusal_of(node: dict) -> str:
@@ -203,10 +218,7 @@ def stopping_refusal(pr: dict) -> dict | None:
 
 def refusing_review(pr: dict) -> dict | None:
     """The reviewer's newest review carrying the current head, where that review is a refusal."""
-    head = pr["headRefOid"]
-    newest = newest_of(
-        [n for n in reviewer_nodes(pr, "reviews") if (n.get("commit") or {}).get("oid") == head]
-    )
+    newest = newest_of(head_nodes(pr, reviewer_nodes(pr, "reviews")))
     return newest if newest is not None and refusal_of(newest) else None
 
 
@@ -228,12 +240,7 @@ def head_reviews(pr: dict) -> list[dict]:
     A refusal is a formal review with the head's commit and no threads, so it satisfies every check
     a clean pass does. One list serves coverage and the round count.
     """
-    head = pr["headRefOid"]
-    return [
-        n
-        for n in reviewer_nodes(pr, "reviews")
-        if (n.get("commit") or {}).get("oid") == head and not refusal_of(n)
-    ]
+    return [n for n in head_nodes(pr, reviewer_nodes(pr, "reviews")) if not refusal_of(n)]
 
 
 def reviewed_head(pr: dict) -> bool:
@@ -253,8 +260,7 @@ def head_review_done(pr: dict, min_rounds: int) -> bool:
     revs = reviewer_nodes(pr, "reviews")
     head = pr["headRefOid"]
     return any(
-        i >= min_rounds and (n.get("commit") or {}).get("oid") == head and not refusal_of(n)
-        for i, n in enumerate(revs)
+        i >= min_rounds and commit_oid(n) == head and not refusal_of(n) for i, n in enumerate(revs)
     )
 
 
@@ -286,7 +292,7 @@ def changed_paths(pr: dict) -> tuple[list[str], bool]:
     """The paths this pull request changes, and whether that list is incomplete."""
     files = pr.get("files") or {}
     paths = [n.get("path") or "" for n in (files.get("nodes") or [])]
-    return [p for p in paths if p], bool((files.get("pageInfo") or {}).get("hasNextPage"))
+    return [p for p in paths if p], page_flag(pr, "files", "hasNextPage")
 
 
 def reviewer_login_drift(pr: dict) -> list[str]:
@@ -394,13 +400,12 @@ def table_cover(pr: dict) -> tuple[str, str]:
         return "", "a round on this pull request states partial coverage, so no table stands in"
     if reviews_truncated(pr):
         return "", "the review history runs past the window, so a partial round could sit unseen"
-    head = pr["headRefOid"]
     tabled = [
         n
         for n in reviewer_nodes(pr, "reviews")
         if not refusal_of(n) and reading(n).table is not None
     ]
-    own = [n for n in tabled if (n.get("commit") or {}).get("oid") == head]
+    own = head_nodes(pr, tabled)
     node = newest_of(own) or newest_of(tabled)
     if node is None:
         return "", "no round carries a file table"
@@ -408,7 +413,7 @@ def table_cover(pr: dict) -> tuple[str, str]:
     if cut or files_unread(pr) or not changed:
         return "", "the changed-file list is incomplete or empty, so no table can be matched"
     named = reading(node).table or ()
-    where = ((node.get("commit") or {}).get("oid") or "")[:8] or "a commit this cannot name"
+    where = (commit_oid(node) or "")[:8] or "a commit this cannot name"
     if not table_matches(named, changed):
         return "", (
             f"the table on {where} names {len(named)} path(s) where the pull request changes "
@@ -482,8 +487,11 @@ def qodo_comments_blind(pr: dict) -> bool:
     """True where Qodo's findings comment can sit behind the comments window unseen."""
     if window_blind(pr, "comments", QODO_LOGIN):
         return True
-    older = ((pr.get("comments") or {}).get("pageInfo") or {}).get("hasPreviousPage")
-    return bool(older) and bool(reviewer_nodes(pr, "comments", QODO_LOGIN)) and not qodo_comment(pr)
+    return (
+        page_flag(pr, "comments", "hasPreviousPage")
+        and bool(reviewer_nodes(pr, "comments", QODO_LOGIN))
+        and not qodo_comment(pr)
+    )
 
 
 def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.Section]], str]:
@@ -496,7 +504,7 @@ def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.
     head = pr["headRefOid"]
     found = []
     for node in reviewer_nodes(pr, "reviews", login):
-        oid = (node.get("commit") or {}).get("oid") or ""
+        oid = commit_oid(node) or ""
         where = (
             "commit unknown, treat as outstanding"
             if not oid
