@@ -309,7 +309,7 @@ def prefix_runs_directly(prefix):
     Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
     write guard included. A PreToolUse hook that fails is a non-blocking error.
     So a prefix that cannot run that way fails the guard open.
-    This happens from a missing `python3`, a lost execute bit, or a `noexec` mount.
+    A prefix can fail to run that way from a missing `python3`, a lost execute bit, or a `noexec` mount.
     """
     try:
         done = subprocess.run(
@@ -522,7 +522,7 @@ def write_regular_file(path, data, prior=None, before=None):
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
     The open is tried exclusively first, so a file this call created is told from one it found.
-    The open being exclusive also means a path that is a link always counts as found, so its target is kept. A created file is removed
+    A path that is a link always counts as found, so its target is kept. A created file is removed
     again when the write fails, where the path still holds that same file, leaving it absent as it
     was found.
 
