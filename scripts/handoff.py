@@ -4,14 +4,14 @@
 Why this exists: a handoff written to a file fails in ways that an issue does not. The file is
 not found where the next session looks. More than one candidate is found and nothing says which is
 current. And there is no history, so a later round re-runs a path an earlier round already tried
-and already wrote down. The value of a handoff is the record of what has been attempted, and one
-overwritten file on one machine is the shape that cannot hold it. See the `session-handoff` Skill
+and already wrote down. The value of a handoff is the record of what has been attempted.
+One overwritten file on one machine is the shape that cannot hold it. See the `session-handoff` Skill
 for what belongs in a handoff, and GOVERNANCE.md "Hub-Hosted Tooling" for why this is reached from
 a hub checkout rather than carried.
 
 A track holds one issue, created when the track starts and closed when its work is complete. Each
 session close replaces the body in place and bumps the round, after first appending the outgoing
-body to the same issue as a comment, so the track's history stays on one issue in order. An issue
+body to the same issue as a comment. So the track's history stays on one issue in order. An issue
 filed per session costs a create, a comment, and a close every round, and those links crowd out
 the issues that describe work.
 
@@ -20,35 +20,44 @@ hand-edited issue still reads:
 
   <!-- handoff: v1 track=<slug> round=<n> previous=<issue number or none> -->
 
-`previous=` names the closed issue the track continues from, an issue filed per session before
-the track's issue became a standing one, or a closed-out lane the track reopens, and `none`
-otherwise. It stays fixed while the round moves. Each archived round carries its own line:
+`previous=` names the closed issue the track continues from, and `none` otherwise.
+That issue is either an issue filed per session before the track's issue became a standing one,
+or a closed-out lane the track reopens. `previous=` stays fixed while the round moves. Each archived round carries its own line:
 
   <!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->
 
 The title is for humans and nothing parses it. The invariant a reader checks is that exactly one
-open issue carries the `handoff` label for a given track in a given repository, read from the
-metadata block rather than from the label, since an issue carrying the label and no block belongs
-to no readable track. Zero open is two states rather than one: a track that has never had a
-handoff, and a lane closed out whose newest issue is closed. `new` continues from that closed
-issue where one exists. Two or more open on one track is a defect to report, never one to resolve
-by picking, so every command that would have to choose refuses and names both.
+open issue carries the `handoff` label for a given track in a given repository. It is read from
+the metadata block rather than from the label. That is because an issue carrying the label and no
+block belongs to no readable track. Zero open is two states rather than one:
 
-A head resolved that way can still be one the track has moved past, where another issue already
-names it as predecessor, holds a higher round, or holds the same round. `new` and `close` refuse
-onto such a head, and `current`, `resume`, and `chain` answer from it with a notice naming each
-such issue, since answering from it silently is how a search reads "no match" over text in the
-lane.
+  - a track that has never had a handoff
+  - a lane closed out whose newest issue is closed
+
+In the second, `new` continues from that closed issue where one exists. Two or more open on one
+track is a defect to report, never one to resolve by picking. So every command that would have to
+choose refuses and names both.
+
+A head resolved that way can still be one the track has moved past. That is a head where another
+issue:
+
+  - already names it as predecessor
+  - holds a higher round
+  - holds the same round
+
+`new` and `close` refuse onto such a head. `current`, `resume`, and `chain` answer from it with a
+notice naming each such issue. Both exist because answering from it silently is how a search
+reads "no match" over text in the lane.
 
 Subcommands
   current  The open handoff issue for a track, number and URL. Read-only.
   resume   That issue's body, then a one-line index of the last N earlier rounds. Read-only.
   chain    List one track's rounds newest first, the current body, then each archived round,
-           then the closed issue `previous=` names, optionally only those whose text matches a
+           then the closed issue `previous=` names. Optionally list only those whose text matches a
            regular expression, which is how a session answers "has this already been tried"
            without reading every round. A walk that stopped at `--limit` names the round it
-           stopped short of, since a capped search reading exactly like an exhaustive one is the
-           false "not tried yet" this exists to prevent. Read-only.
+           stopped short of. That is because a capped search reading exactly like an exhaustive
+           one is the false "not tried yet" this exists to prevent. Read-only.
   new      Create the track's issue where it has none open. Otherwise append the outgoing body
            as a comment, then replace the body and bump the round. Either way it prints the
            issue number. A rerun after an interrupted run finishes it rather than repeating it.
@@ -61,41 +70,46 @@ Subcommands
 
 Exit codes
   0  the command did what it says.
-  1  a refusal the caller can act on: the label is missing, other than where `tracks` answers
-     an unregistered fork under the fleet's owner or `new --create-label` creates the label there,
-     no handoff is open on the track, a track is ambiguous, a handoff carries no metadata block, a
-     body is over the hard cap, or the command line itself was wrong. A usage error is a refusal, so
-     `Parser` below moves it here off argparse's own 2.
+  1  a refusal the caller can act on:
+       - the label is missing, other than where `tracks` answers an unregistered fork under the
+         fleet's owner or `new --create-label` creates the label there
+       - no handoff is open on the track
+       - a track is ambiguous
+       - a handoff carries no metadata block
+       - a body is over the hard cap
+       - the command line itself was wrong
+     A usage error is a refusal. So `Parser` below moves it here off argparse's own 2.
   2  the command did not run to an answer: `gh` failed, a write did not confirm, or an exception
      nobody modeled reached the top. A refusal and a failure to reach one never share a code,
      which is the whole reason the two are separated.
 
 Usage
-  python3 scripts/handoff.py current --repo OWNER/NAME [--track T]
-  python3 scripts/handoff.py resume  --repo OWNER/NAME [--track T] [--history N]
-  python3 scripts/handoff.py chain   --repo OWNER/NAME [--track T] [--limit N] [--grep PATTERN]
-  python3 scripts/handoff.py new     --repo OWNER/NAME [--track T] --title S --body-file PATH
-                                     [--create-label]
-  python3 scripts/handoff.py close   --repo OWNER/NAME [--track T] --body-file PATH
-  python3 scripts/handoff.py tracks  --repo OWNER/NAME [--json]
+  - python3 scripts/handoff.py current --repo OWNER/NAME [--track T]
+  - python3 scripts/handoff.py resume  --repo OWNER/NAME [--track T] [--history N]
+  - python3 scripts/handoff.py chain   --repo OWNER/NAME [--track T] [--limit N] [--grep PATTERN]
+  - python3 scripts/handoff.py new     --repo OWNER/NAME [--track T] --title S --body-file PATH
+                                       [--create-label]
+  - python3 scripts/handoff.py close   --repo OWNER/NAME [--track T] --body-file PATH
+  - python3 scripts/handoff.py tracks  --repo OWNER/NAME [--json]
 
-Every subcommand takes `--repo`, with no default, for the reason `pr_review.py` requires one: an
-issue number resolves in every repository, and a chain read out of the wrong one is well formed.
+Every subcommand takes `--repo`, with no default, for the reason `pr_review.py` requires one.
+That is because an issue number resolves in every repository, and a chain read out of the wrong
+one is well formed.
 Add `--dry-run` to any writing subcommand to print the calls it would make and write nothing.
 
 A repository missing the label is drift on a fleet repository, one `registry/repos.json` lists, and
-every subcommand refuses there. A fork under the registry's owner that the registry does not list,
-such as one kept for an upstream contribution, can still use a chain to hold state, and the fleet
-label set does not belong on it. There the reads warn and answer as an empty chain does, and
+every subcommand refuses there. The exception is a fork under the registry's owner that the registry
+does not list, such as one kept for an upstream contribution. It can still use a chain to hold state, and the
+fleet label set does not belong on it. There the reads warn and answer as an empty chain does.
 `new --create-label` creates the one `handoff` label and nothing else. Every other repository
-missing the label refuses, a repository under another owner and an unregistered repository of the
-owner's that is not a fork among them.
+missing the label refuses. That includes a repository under another owner and an unregistered
+repository of the owner's that is not a fork.
 
-The two writing subcommands, `new` and `close`, are bounded whatever the label state, an
-in-process refusal of the kind `pr_review.py` makes, with the owner read from the registry. They
+The two writing subcommands, `new` and `close`, are bounded whatever the label state. The bound is
+an in-process refusal of the kind `pr_review.py` makes, with the owner read from the registry. They
 refuse a repository under another owner before any call, and an unregistered repository of the
-owner's unless it is a fork, since these writes run as subprocesses a write guard on the caller
-never sees. That write scope bounds no read.
+owner's unless it is a fork. That is because these writes run as subprocesses a write guard on the
+caller never sees. That write scope bounds no read.
 """
 
 from __future__ import annotations
@@ -247,8 +261,8 @@ def run_gh(argv: list[str]) -> str:
 def gh(argv: list[str], *, dry_run: bool = False) -> str:
     """`run_gh`, or, under a dry run, the call printed and nothing sent.
 
-    The dry run is the first thing anyone wants before trusting this to close an issue, so it sits
-    on the one path every read and every write goes through rather than on each write separately.
+    The dry run is the first thing anyone wants before trusting this to close an issue.
+    So it sits on the one path every read and every write goes through rather than on each write separately.
     """
     if dry_run:
         print(f"  would run: gh {' '.join(argv)}")
@@ -269,11 +283,11 @@ def rows_of(data: object, what: str, field: str) -> list[dict]:
     """`data` as a list of rows each carrying `field`, refusing every other shape.
 
     A row that is not an object, or one missing the field its reader asks `gh` for, would
-    otherwise raise out of a comprehension and reach the blind catch as an unmodeled error, which
-    reports exit 2 without saying what `gh` actually returned.
+    otherwise raise out of a comprehension. It would reach the blind catch as an unmodeled error,
+    which reports exit 2 without saying what `gh` actually returned.
 
-    The guarantee stops at that one field. A command consuming these rows reads fields of its own,
-    and an absent one still lands on the blind catch, which is the honest place for a shape nobody
+    The guarantee stops at that one field. A command consuming these rows reads fields of its own.
+    An absent one still lands on the blind catch, which is the honest place for a shape nobody
     named.
     """
     if not isinstance(data, list):
@@ -308,8 +322,8 @@ def label_present(repo: str) -> bool:
 def registry() -> tuple[str, set[str]]:
     """The registry's owner and its repository names, lowercased, as GitHub compares them.
 
-    An unreadable registry is a failure to answer rather than an answer, since reading it as empty
-    would move every fleet repository onto the warning path.
+    An unreadable registry is a failure to answer rather than an answer. That is because reading it
+    as empty would move every fleet repository onto the warning path.
     """
     try:
         data = json.loads(REGISTRY.read_text(encoding="utf-8"))
@@ -412,16 +426,18 @@ def create_label(repo: str, dry_run: bool) -> None:
 def without_label(a: argparse.Namespace) -> int | None:
     """What a repository missing the label gets, or None where the subcommand goes on to run.
 
-    On a fleet repository it is drift, and every subcommand refuses, since degrading there would
-    report an empty chain on a repository that has one, the failure `decision` demonstrated.
+    On a fleet repository it is drift, and every subcommand refuses. That is because degrading
+    there would report an empty chain on a repository that has one, the failure `decision`
+    demonstrated.
     On an unregistered fork under the registry's owner no issue can carry a label that does not
-    exist, so an empty chain is the true answer there rather than a degraded one, and only
+    exist. So an empty chain is the true answer there rather than a degraded one, and only
     `new --create-label` writes anything.
 
-    The body is read once, before the label is created, and that read is the one `new` files, so a
-    body `new` would refuse leaves no label behind. Everything else refuses before any write. A
-    repository under another owner, or an unregistered one of the owner's that is not a fork,
-    refuses here for a read and in `require_write_scope` for a write, which runs first.
+    The body is read once, before the label is created, and that read is the one `new` files.
+    So a body `new` would refuse leaves no label behind. Everything else refuses before any write.
+    A repository under another owner refuses here for a read and in `require_write_scope` for a
+    write. So does an unregistered one of the owner's that is not a fork. `require_write_scope`
+    runs first.
     """
     repo = a.repo
     create = getattr(a, "create_label", False)
@@ -484,8 +500,8 @@ def without_label(a: argparse.Namespace) -> int | None:
 def parse_marker(body: str, number: int) -> dict[str, str] | None:
     """The metadata block in one body, or None where it carries none.
 
-    More than one block is a refusal rather than a pick, since the two can disagree about the track
-    and nothing else in the body decides between them.
+    More than one block is a refusal rather than a pick. That is because the two can disagree about
+    the track and nothing else in the body decides between them.
     """
     found = MARKER.findall(body or "")
     if not found:
@@ -531,8 +547,8 @@ def rounds_of(comments: list[dict], track: str) -> list[dict]:
 
     A comment carrying no mark is an ordinary comment, such as a parking note, and is not a
     round. One carrying several is not a round either, since its round cannot be read. On a public
-    repository anyone can comment, so a mark counts only from an account with write access and
-    only on a comment nobody has hidden, which keeps an outsider from writing a round into the
+    repository anyone can comment. So a mark counts only from an account with write access and
+    only on a comment nobody has hidden. That keeps an outsider from writing a round into the
     track's history or blocking `new` with a conflicting one.
     """
     found = []
@@ -552,9 +568,9 @@ def with_marker(body: str, track: str, round_: int, previous: int | None) -> str
     """`body` with the metadata block as its last line, replacing any block already in it.
 
     Only newlines are stripped from the end. `MARKER`'s tail is an ordered suffix rather than a
-    set of characters, so removing any character that suffix may itself hold can turn a line the
-    grammar rejects into one it accepts: `-->\\r ` is not a block and `-->\\r` is, so taking off
-    one space revives it, and the revived line then sits beside the one this appends and leaves a
+    set of characters. So removing any character that suffix may itself hold can turn a line the
+    grammar rejects into one it accepts. Here `-->\\r ` is not a block and `-->\\r` is, so taking off
+    one space revives it. The revived line then sits beside the one this appends and leaves a
     body no command can read. A newline is the one thing the tail can never hold, since `$` sits
     before it, so stripping newlines alone can revive nothing.
     """
@@ -668,9 +684,9 @@ def open_handoffs(repo: str) -> list[dict]:
 def require_marked(rows: list[dict]) -> None:
     """Refuse while any open handoff carries no metadata block.
 
-    Such an issue belongs to an unknown track, so it could be the one the caller asked about, and
+    Such an issue belongs to an unknown track. So it could be the one the caller asked about, and
     picking around it would answer a question the data does not settle. Settling it is a hand edit,
-    adding the block to that issue's body or taking the label off it, and `tracks` surveys without
+    adding the block to that issue's body or taking the label off it. `tracks` surveys without
     refusing so an operator can see the state at all.
     """
     broken = [row["malformed"] for row in rows if row.get("malformed")]
@@ -717,23 +733,29 @@ def walk(
     """The track's rounds from issue `start` backwards, at most `limit` of them.
 
     Each issue gives its body, which is the round it holds now, then its archived rounds newest
-    first, and the walk then moves to the issue its block names as `previous=`. `skip_body` leaves
+    first. The walk then moves to the issue its block names as `previous=`. `skip_body` leaves
     out the start issue's own body, for a caller that has printed it already.
 
     Returns the rounds and, where the walk ended anywhere but at a `previous=none`, a phrase saying
     where and why. A caller that printed only the rounds could not tell a chain of four from the
-    first four of forty, and a search reporting no match over a walk that stopped early is the
+    first four of forty. A search reporting no match over a walk that stopped early is the
     false "not tried yet" this whole mechanism exists to prevent.
 
     `cap` is the flag the caller bounded the walk with, `--limit` for `chain` and `--history` for
-    `resume`, since a message naming the other one sends a reader to a flag that subcommand
-    rejects.
+    `resume`. That is because a message naming the other one sends a reader to a flag that
+    subcommand rejects.
 
-    Five things end a walk short. The cap, a link whose body carries no metadata block, which
-    names nothing before it and is not guessed past, a link whose block cannot be read at all, an
-    ancestor `gh` cannot resolve, and a number already seen, since a cycle would otherwise read as
-    an endless chain. Each returns its own phrase rather than the clean end's None, because all
-    five leave links unread and only the first is a number the caller chose.
+    Five things end a walk short:
+
+    - The cap.
+    - A link whose body carries no metadata block, which names nothing before it and is not
+      guessed past.
+    - A link whose block cannot be read at all.
+    - An ancestor `gh` cannot resolve.
+    - A number already seen, since a cycle would otherwise read as an endless chain.
+
+    Each returns its own phrase rather than the clean end's None. That is because all five leave
+    links unread and only the first is a number the caller chose.
     """
     links: list[dict] = []
     seen: set[int] = set()
@@ -804,8 +826,8 @@ def day(stamp: str | None) -> str:
 def describe(link: dict) -> str:
     """One walked round as a line, carrying its own track.
 
-    The track is printed rather than assumed from the track the walk started on, because `walk`
-    follows each marker's `previous=` and nothing stops a hand-edited issue naming a
+    The track is printed rather than assumed from the track the walk started on. That is because
+    `walk` follows each marker's `previous=` and nothing stops a hand-edited issue naming a
     predecessor on another lane. Printing it is what makes that visible to the reader. An
     archived round reads `ROUND` in the state column and its close date in the date column.
     """
@@ -821,7 +843,7 @@ def describe(link: dict) -> str:
 def body_from(path: Path) -> str:
     """The body a `new` will file, refused where it is over the hard cap or already carries a block.
 
-    A body carrying its own block would leave two after the append, which `parse_marker` then reads
+    A body carrying its own block would leave two after the append. `parse_marker` then reads that
     as the refusal it is, one round later and on a live issue rather than here.
     """
     try:
@@ -855,8 +877,8 @@ def body_arg(body: str, dry_run: bool):
     """The `--body-file` argument for one write, as a real temporary file or as a placeholder.
 
     A dry run writes no file, because the path it would print names a temporary directory the
-    preview has already removed, and a reader checking a previewed call should find every part of
-    it legible rather than one part pointing at nothing.
+    preview has already removed. It is also because a reader checking a previewed call should find
+    every part of it legible rather than one part pointing at nothing.
     """
     if dry_run:
         yield "<body-file>"
@@ -1056,15 +1078,15 @@ def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> di
     """The newest closed handoff on a track, or None where the track has never had one.
 
     A track with no open handoff is either one that has never had a handoff or one whose lane was
-    closed out, and the two are not the same. Reading the second as the first makes the next `new`
-    start a second chain at round 1 with `previous=none`, orphaning every link already written,
-    which is the failure the chain exists to prevent.
+    closed out. The two are not the same. Reading the second as the first makes the next `new`
+    start a second chain at round 1 with `previous=none`, orphaning every link already written.
+    That is the failure the chain exists to prevent.
 
-    The head is the highest round rather than the highest issue number, because a chain is ordered
-    by round everywhere else and an issue number only agrees with that where the links were filed
-    in order. They disagree wherever a lower-numbered issue joined the lane later, and picking by
-    number there hands `new` a predecessor that is not the head, so it files a second link at a
-    round already taken and the real chain goes unreachable while every step exits 0. The number
+    The head is the highest round rather than the highest issue number. That is because a chain is
+    ordered by round everywhere else. An issue number only agrees with that where the links
+    were filed in order. They disagree wherever a lower-numbered issue joined the lane later.
+    Picking by number there hands `new` a predecessor that is not the head. So it files a second
+    link at a round already taken, and the real chain goes unreachable while every step exits 0. The number
     breaks a tie between two links claiming one round, which is itself a defect the reader should
     not have to resolve.
 
@@ -1157,18 +1179,18 @@ def cmd_tracks(a: argparse.Namespace) -> int:
 def cmd_new(a: argparse.Namespace) -> int:
     """Create the track's issue, or archive its outgoing round and replace the body in place.
 
-    The archive comment is written before the body is replaced, so a failure between the two
+    The archive comment is written before the body is replaced. So a failure between the two
     leaves the outgoing round both archived and still in the body rather than in neither. A rerun
-    then finds that round archived and only replaces the body, and a rerun after a run that wrote
+    then finds that round archived and only replaces the body. A rerun after a run that wrote
     everything finds the body already current and writes nothing.
 
-    The read of the head and the writes that follow it are not serialized, so two sessions closing
+    The read of the head and the writes that follow it are not serialized. So two sessions closing
     on one track at once can both archive the same round. The body is re-read immediately before
     it is replaced, and a change since the archive refuses rather than overwriting text nobody here
     has seen. Naming a track per lane is what keeps two sessions off one issue in the first place.
 
     After `--create-label` the chain is empty by construction, since a label this run just created
-    sits on no issue yet, so no chain read is made, which also keeps a dry run from querying a label
+    sits on no issue yet. So no chain read is made. That also keeps a dry run from querying a label
     it never created.
     """
     body = getattr(a, "body", None)
@@ -1209,7 +1231,7 @@ def cmd_new(a: argparse.Namespace) -> int:
 def replace_round(a: argparse.Namespace, head: dict, title: str, body: str) -> int:
     """Archive the head's outgoing round as a comment, then write the next round over its body.
 
-    Every identifier written to is the head's own number, read in this run, and the outgoing body
+    Every identifier written to is the head's own number, read in this run. The outgoing body
     archived is the one read immediately before, never one carried from earlier in the run.
     """
     number = int(head["number"])
@@ -1287,7 +1309,7 @@ def cmd_close(a: argparse.Namespace) -> int:
     """Comment the track's outcome on its issue, then close it, which is how a track ends.
 
     A rerun after the comment landed and the close did not finds the same text as the newest
-    comment and goes straight to the close rather than posting it twice.
+    comment. It goes straight to the close rather than posting it twice.
     """
     text = outcome_from(Path(a.body_file))
     found, doubts = current_or_refuse(a.repo, a.track)
@@ -1325,7 +1347,7 @@ def track_links(repo: str, track: str, rows: list[dict], closed: list[dict] | No
     """The links on `track`, the open ones taken from `rows` and the closed ones from `closed`.
 
     A row whose block is absent or cannot be read could be on this track, so it is named in
-    `unreadable` rather than skipped, and a closed read that fills its window sets `full`, since a
+    `unreadable` rather than skipped. A closed read that fills its window sets `full`, since a
     link past it is unseen. Each caller decides whether those refuse or are reported. A caller
     that already read the closed list passes it as `closed`, and one that passes none has it read here.
     """
@@ -1357,10 +1379,10 @@ def head_doubts(head: dict, lane: Lane) -> list[str]:
     """Each reason `head` may not be its track's head, one sentence apiece, empty where none.
 
     `on_track` takes an open link whatever round it holds, and `newest_closed` breaks a tie on one
-    round by issue number, so either can resolve a link the chain has already moved past. Three
+    round by issue number. So either can resolve a link the chain has already moved past. Three
     states show it: a link already naming it as predecessor, a link at a higher round, and another
     link at its own round. Answering from such a head is how a search reads "no match" over text
-    in the lane, so the reads print these, and `new` and `close` refuse on them.
+    in the lane. So the reads print these, and `new` and `close` refuse on them.
     """
     number = int(head["number"])
     round_ = int(head["marker"]["round"])
