@@ -42,8 +42,8 @@ import audit  # sibling, import-safe (its main is guarded)
 REPORT_PATH = "reports/workflow-reuse.md"  # the generated, checked-in burn-down report (--report)
 WORKFLOW_DIR = ".github/workflows"
 # Two copies at or above this ratio are one variant.
-# 0.85 rather than higher, because of copies that differ only in their per-repo target list or comment wording.
-# Those are the same variant for the purpose of hosting the job once.
+# 0.85 rather than higher, since copies differing only in their per-repo target list or comment wording are the same variant.
+# This is for the purpose of hosting the job once.
 CLUSTER_THRESHOLD = 0.85
 _USES = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
 

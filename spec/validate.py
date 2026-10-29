@@ -45,8 +45,8 @@ BRANCH_POLICIES = ("custom", "none")
 # Nothing downstream splits the value on one either.
 # The ASCII floor is this fleet's rule rather than GitHub's, per GOVERNANCE.md "Documentation Style Conventions" and its "Character Set" rule.
 # A non-ASCII environment name is legal on GitHub, and repo-config/configure.sh percent-encodes one correctly.
-# It is refused here because the registry is agent-authored text.
-# It is also refused because an environment name is an identifier compared exactly rather than prose read by a person.
+# It is refused here because the registry is agent-authored text, and an environment name is an identifier.
+# An identifier is compared exactly rather than being prose read by a person.
 # That is why the `description` field's own pattern stays looser.
 # Its tier-2 and tier-3 characters carry meaning their ASCII form loses, where an identifier's do not.
 # A repo that genuinely needs one is a decision for the maintainer.
@@ -58,8 +58,8 @@ ENVIRONMENT_NAME_PATTERN = r"^[!-~](?:[ -~]*[!-~])?(?![\s\S])"
 # The space is the one printable character excluded, since a git ref name cannot carry one.
 DEPLOYMENT_BRANCH_PATTERN = r"^[!-~]+(?![\s\S])"
 # A ground-truth branch name reaches spec/audit.py raw, as the `{ground}` in `repos/{slug}/branches/{ground}` and as the value of a `?ref=` query parameter.
-# So it admits only the characters that are both unreserved in RFC 3986 and legal in a git ref name.
-# The one addition is the `/` a branch name may carry.
+# So it admits only characters that are both unreserved in RFC 3986 and legal in a git ref name, plus `/`.
+# A branch name may carry that `/`.
 # A `?` or a `#` there would re-parse the URL into a different request rather than fail.
 # That is why the url field's own grammar excludes both and why this one has to as well.
 # `..` is refused for the same reason and it is the sharpest case.
@@ -331,7 +331,7 @@ def environment_errors_for_repo(repo, name):
     nothing compares against.
 
     Presence (`"branches" in env`) is the test rather than truthiness. So a declared empty list under "custom" is
-    read as declaring that the environment allows nothing, rather than as absent. That is what configure.sh then asserts.
+    read as declaring that the environment allows nothing, rather than as absent. configure.sh then asserts that the environment allows nothing.
     Presence is the test for the field itself too, matching description_errors_for_repo. An explicit
     `"environments": null` is declared-but-invalid, not absent, so it reaches the list check below rather than
     passing as a repo that declares none.
@@ -394,7 +394,7 @@ def environment_errors_for_repo(repo, name):
                 )
             # Both sides are sorted and joined by configure.sh before comparing.
             # A name declared twice therefore makes the joined declaration longer than any live set can be.
-            # It reports as drift on an environment that has none.
+            # Such a name reports as drift on an environment that has none.
             elif duplicates := sorted(
                 b for b, count in collections.Counter(branches).items() if count > 1
             ):
@@ -600,8 +600,8 @@ def description_errors(name, desc):
 
     Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
 
-    Link-free is enforced because spec/audit_markdown.py's description_findings() strips Markdown links from the README's
-    own tagline before comparing. It never re-strips the declared field it compares that tagline against. A
+    Link-free is enforced because of an asymmetry in spec/audit_markdown.py's description_findings().
+    It strips Markdown links from the README's own tagline before comparing. It never re-strips the declared field it compares that tagline against. A
     declared value carrying a link would therefore report as a permanent readme mismatch. In addition, repo-config/
     configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
 
@@ -1175,8 +1175,7 @@ def main(argv=()):
     # A repo declaring `groundTruthBanch` validates clean, and the audit reads main without ever saying that the declaration it was given went unread.
     # The key set is read out of the schema rather than restated here, so the rule has one statement.
     # A second list in this file would drift from the first in the direction nobody checks.
-    # The reason is a key added to the schema and not to the list.
-    # It would be reported as unknown on the entry that legitimately declares it.
+    # The drift: a key added to the schema and not to the list would be reported as unknown on the entry that legitimately declares it.
     # The two objects the registry's own consumers index are the ones checked.
     # A nested object is left to the schema, and to the per-field checks that already read it.
     # A schema this file cannot read is reported rather than skipped.
@@ -1255,8 +1254,7 @@ def main(argv=()):
         # What they are told reads as a repo declaring no environment and no description rather than as a registry that disagrees with itself.
         # The model case is silent outright, since jq resolves the fallback and exits 0 with a value.
         # A name differing only by letter case is caught there already, by spec/resolve_description.py's near-miss guard, which raises and exits the script before any assertion runs.
-        # It is refused here as well because that guard runs at apply time on one repo.
-        # This runs over the whole registry in CI.
+        # It is refused here as well because that guard runs at apply time on one repo, where this runs over the whole registry in CI.
         # It is also refused here because the guard is a consumer rather than the rule.
         # Compared against github_identity()'s segment rather than against the raw url, so this reads the same string spec/audit.py addresses, with an optional trailing `.git` already stripped.
         # Agreement is also the whole of the name's own grammar, and deliberately so.
@@ -1264,7 +1262,7 @@ def main(argv=()):
         # So a name that equals one carries no invisible character and needs no pattern of its own to say so.
         # A separate grammar was the other candidate and was rejected.
         # It would be a second statement of the same shape, free to drift from the first.
-        # This one cannot disagree with the url it is read from.
+        # The agreement rule cannot disagree with the url it is read from.
         url_name = slug.split("/", 1)[1]
         if name != url_name:
             errors.append(
@@ -1419,7 +1417,7 @@ def main(argv=()):
         # The elements are filtered rather than the container type tested, because a list is not the only shape that reaches this.
         # An unhashable element, a nested list being one, satisfies a container test and raises on the way into the set.
         # A non-string element has already been reported by name above, so dropping it here loses no finding.
-        # It also lets the cross-check below run on the part of the declaration that is readable.
+        # Dropping it also lets the cross-check below run on the part of the declaration that is readable.
         required = (
             {s for s in secrets_decl if isinstance(s, str)}
             if isinstance(secrets_decl, list)

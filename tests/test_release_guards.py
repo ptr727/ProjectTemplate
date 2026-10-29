@@ -47,7 +47,7 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     unwanted opener walks into its body. A block illustrating Markdown would then hand out the
     blocks it contains.
 
-    A line is refused unless the fence run is the whole of it bar two things. Those are up to three
+    A line is refused unless the fence run is the whole of it bar the allowed extras. Those are up to three
     leading spaces and an info string carrying no backtick or tilde. Some of what that refuses a
     renderer reads, and the indent cases are why the rule is drawn there. A renderer measures a
     fence's indent against its list item's content column and takes four spaces past that as an
@@ -554,7 +554,7 @@ class ReleaseGuardCase(unittest.TestCase):
         """validate-release refuses a branch git would not accept as a name, on a smoke run too.
 
         Such a value can carry a newline and a :: command into any later step that prints the branch.
-        It can equally carry a ##[ token, which the runner reads anywhere in a line.
+        It can equally carry a ##[ token, which the runner reads anywhere in a line, into such a step.
         The refusal never echoes it.
         """
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
@@ -1019,7 +1019,7 @@ class ReleaseGuardCase(unittest.TestCase):
         each of which bash parses as a redirection. They died of a syntax error before any
         `set` header took effect. Checking the substituted form is what hid it, so this checks
         the printed form. It checks every shell label rather than `bash` alone, since the second
-        of those shipped blocks sat in a `shell`-labeled block.
+        of those snippets sat in a `shell`-labeled block.
         """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
         blocks = shell_blocks(audit)

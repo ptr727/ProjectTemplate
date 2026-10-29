@@ -43,13 +43,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: develop
-          # Full history, because the backlog slice orders never-read units by their file's last commit.
-          # A shallow clone dates every path to the tip commit.
-          # That would collapse that order to the unit key and file the alphabet's first units every week.
+          # Full history, because the backlog slice orders never-read units by their file's last commit and a shallow clone dates every path to the tip commit.
+          # That would collapse the order to the unit key and file the alphabet's first units every week.
           fetch-depth: 0
           # The job holds issues: write, and checkout persists that token in .git/config by default.
           # Nothing here needs git authentication, since every git call here reads local state, in the step below and inside the engines alike.
-          # Every gh call takes GH_TOKEN.
+          # Nor does any gh call need it, since every gh call takes GH_TOKEN.
           persist-credentials: false
 
       # The engine declares markdown-it-py inline, which uv resolves for it.

@@ -3,7 +3,7 @@ name: Publish Docker Hub readme task
 # Pushes the size-limited Docker Hub repository overview.
 # It is hosted here once since the login, the repository-list resolution, and the push step are identical across every Docker repo.
 # Caller-gated in the doc sense, the publisher invokes this from its main leg.
-# It is gated again here on the branch input, so a caller that invokes this task on every branch still pushes only once.
+# This task is gated again here on the branch input, so a caller that invokes this task on every branch still pushes only once.
 # The overview has no per-branch context.
 # The repository list is either passed directly (repositories) or derived from a manifest (manifest plus manifest-jq).
 # That covers single- and multi-image repos without per-repo glue.
