@@ -476,7 +476,7 @@ def skill_documents():
     """Every Markdown file under the authored skills tree, as root-relative POSIX paths.
 
     Symlinks are refused before the walk, since a fill writes through whatever the walk found.
-    It is also because a skill directory that is a symlink would put generated text into the tree it points at.
+    Symlinks are also refused because a skill directory that is a symlink would put generated text into the tree it points at.
     """
     out = []
     for name in skill_names():
@@ -631,8 +631,8 @@ def include_destinations():
     include_documents() reaches this on every walk, and an ordinary build declares nothing for it
     to answer about. Where the tuple does have an entry, a manifest that cannot be read is refused
     rather than read as carrying nothing. So is one that parses into something other than the
-    shape it declares. That is because a check that waves a declaration through when it could not run has
-    stopped checking.
+    shape it declares. A check that waves a declaration through because it could not run has
+    stopped checking. That is the reason for the refusal.
     """
     if not INCLUDE_DESTINATIONS:
         return []

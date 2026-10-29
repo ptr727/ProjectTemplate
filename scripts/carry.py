@@ -673,7 +673,7 @@ def replace_sections(
         # A region runs to the next level-two heading.
         # So the blank line before that heading is inside it, and a section ending its file has none.
         # Where the two copies differ on that, `comparable_region` reads both as the same content.
-        # So the boundary is reconciled to what this document needs rather than copied from the other one.
+        # In that case the boundary is reconciled to what this document needs rather than copied from the other one.
         # The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
         source_ends_file = source_span[1] == len(source_lines)
         target_ends_file = end == len(out)
@@ -858,7 +858,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     `carried-instruction-file-guard` skill exists to stop.
     """
     # Ahead of every other check, because which repository was named does not depend on the hub's state.
-    # And because reporting a stale hub for an argument that could never be valid names the wrong problem.
+    # It is also ahead because reporting a stale hub for an argument that could never be valid names the wrong problem.
     if name == HUB_NAME:
         raise CarryError("the hub's own copy is the canonical, so it is never a re-vendor target")
     registry = load_json(hub / "registry/repos.json")

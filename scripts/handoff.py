@@ -21,13 +21,13 @@ hand-edited issue still reads:
   <!-- handoff: v1 track=<slug> round=<n> previous=<issue number or none> -->
 
 `previous=` names the closed issue the track continues from, and `none` otherwise.
-That issue can be an issue filed per session before the track's issue became a standing one,
+That issue is either an issue filed per session before the track's issue became a standing one,
 or a closed-out lane the track reopens. `previous=` stays fixed while the round moves. Each archived round carries its own line:
 
   <!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->
 
 The title is for humans and nothing parses it. The invariant a reader checks is that exactly one
-open issue carries the `handoff` label for a given track in a given repository. It is read from
+open issue carries the `handoff` label for a given track in a given repository. The track is read from
 the metadata block rather than from the label. That is because an issue carrying the label and no
 block belongs to no readable track. Zero open is two states rather than one:
 
@@ -99,8 +99,9 @@ Add `--dry-run` to any writing subcommand to print the calls it would make and w
 
 A repository missing the label is drift on a fleet repository, one `registry/repos.json` lists, and
 every subcommand refuses there. A fork under the registry's owner that the registry
-does not list can still use a chain to hold state. An example is one kept for an upstream
-contribution. The fleet label set does not belong on it. There the reads warn and answer as an empty chain does.
+does not list can still use a chain to hold state. One example is a fork kept for an upstream
+contribution. The fleet label set does not belong on such a fork. On such a fork the reads warn
+and answer as an empty chain does.
 `new --create-label` creates the one `handoff` label and nothing else. Every other repository
 missing the label refuses. That includes a repository under another owner and an unregistered
 repository of the owner's that is not a fork.

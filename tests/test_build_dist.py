@@ -28,7 +28,7 @@ class TreeCase(unittest.TestCase):
     """Redirects every module path onto a temp tree so a case never touches this repo's own.
 
     The declared destinations are emptied along with the paths, since they name this repository's
-    own files. It is also because validating them against a temp tree would fail every case here for a reason
+    own files. Validating them against a temp tree would fail every case here for a reason
     none of them is about. A case that wants one declares it.
     """
 
