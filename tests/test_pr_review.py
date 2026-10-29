@@ -5578,6 +5578,37 @@ class TestReplyArguments(unittest.TestCase):
             with self.subTest(argv=argv):
                 self.assertTrue(self.err(argv).strip().endswith(f"error: {first}"), argv)
 
+    def test_a_wait_only_flag_is_rejected_off_wait_even_at_its_default(self) -> None:
+        """The default value is refused too, since `status` reads it no more than any other."""
+        argv = {
+            "status": ["status", "7"],
+            "reply": ["reply", "7", "--match", "x", "--body", "b"],
+            "comment": ["comment", "7", "--body", "b"],
+            "claims": ["claims", "7"],
+            "attest": ["attest", "7"],
+        }
+        for flag in (["--timeout", "2700"], ["--min-rounds", "0"], ["--ignore-quota-signal"]):
+            for cmd, head in argv.items():
+                with self.subTest(flag=flag[0], cmd=cmd):
+                    self.assertTrue(
+                        self.err([*head, "--repo", "o/r", *flag])
+                        .strip()
+                        .endswith(f"error: {flag[0]} belongs to `wait`, not `{cmd}`")
+                    )
+
+    def test_wait_still_reads_the_defaults_of_its_own_flags(self) -> None:
+        """Unset until the ownership check has read them, they still reach `wait` as before."""
+        seen: list[tuple[int, int]] = []
+
+        def fake_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
+            seen.append((a.timeout, a.min_rounds))
+            return 0
+
+        with mock.patch.object(pr_review, "run_wait", fake_wait):
+            pr_review.main(["wait", "7", "--repo", "o/r"])
+            pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "5", "--min-rounds", "3"])
+        self.assertEqual([(2700, 0), (5, 3)], seen)
+
     def test_every_owner_in_the_table_is_a_subcommand(self) -> None:
         """A misspelled owner would refuse its flag on the one command it belongs to."""
         commands = set(pr_review.COMMANDS)
