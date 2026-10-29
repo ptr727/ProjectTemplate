@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 
-# A human-facing front end over the scripts this fleet otherwise authors for an agent following instructions: the host tooling in host-setup/linux/, and the repo-level tools in scripts/ and spec/ that ptr727/ProjectTemplate hosts and every other repo reaches rather than carries.
-# Menu options rather than a command a human has to already know, and a forcing function on the tools it fronts: a task with no discoverable menu entry is a gap in the tools themselves.
+# A human-facing front end over the scripts this fleet otherwise authors for an agent following instructions.
+# The scripts are:
+#   - the host tooling in host-setup/linux/
+#   - the repo-level tools in scripts/ and spec/ that ptr727/ProjectTemplate hosts and every other repo reaches rather than carries
+# Menu options rather than a command a human has to already know, and a forcing function on the tools it fronts.
+# A task with no discoverable menu entry is a gap in the tools themselves.
 #
-# Fetchable on its own, like bootstrap.sh: run from a hub checkout directly, or curl this one file into a downstream repo and it clones the hub itself.
-# Where bootstrap.sh stands a host up and stops, this loops so a human answers more than one question in a sitting, and it knows the difference between "the hub" and "a repo this host happens to be sitting in" so it can offer each their own tasks.
+# Fetchable on its own, like bootstrap.sh.
+# Run it from a hub checkout directly, or curl this one file into a downstream repo and it clones the hub itself.
+# Where bootstrap.sh stands a host up and stops, this loops so a human answers more than one question in a sitting.
+# This menu knows the difference between "the hub" and "a repo this host happens to be sitting in".
+# So this menu can offer each their own tasks.
 
 set -Eeuo pipefail
 
@@ -25,7 +32,9 @@ DOWNSTREAM_ROOT=""
 DOWNSTREAM_NAME=""
 
 # The reader half of the fetch/use reader-writer lock over $DIR/hub, the writer half being fetch_hub's own exclusive flock, unchanged.
-# Global rather than function-local: the fd is opened by hub_read_lock_acquire in one function and closed by hub_read_lock_release in a later, separate call in the same caller, so it has to survive the return in between.
+# Global rather than function-local.
+# The fd is opened by hub_read_lock_acquire in one function and closed by hub_read_lock_release in a later, separate call in the same caller.
+# So the fd has to survive the return in between.
 HUB_READ_LOCK_FD=""
 
 # --- Output ---
@@ -38,7 +47,8 @@ die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
 }
-# Reports a task-time error without ending the process, unlike die: a dispatched action's failure returns to the menu, and only a startup failure (bad arguments, no git) is fatal.
+# Reports a task-time error without ending the process, unlike die.
+# A dispatched action's failure returns to the menu, and only a startup failure (bad arguments, no git) is fatal.
 fail() { printf 'ERROR: %s\n' "$*" >&2; }
 
 usage() {
@@ -67,7 +77,8 @@ EOF
 
 # --- Hub resolution ---
 
-# The owner/name from a remote.origin.url in any of the shapes git or the GitHub UI hand out, or empty where the checkout carries no origin at all (a fresh init, or a worktree add mid-flight).
+# The owner/name from a remote.origin.url in any of the shapes git or the GitHub UI hand out.
+# Empty where the checkout carries no origin at all (a fresh init, or a worktree add mid-flight).
 origin_slug() {
     local root="$1" url slug
     url=$(git -C "$root" config --get remote.origin.url 2>/dev/null) || return 0
@@ -78,7 +89,8 @@ origin_slug() {
     printf '%s\n' "$slug"
 }
 
-# A marker sitting beside the clone rather than inside it, so a --dir pointed at a directory this run does not own is never the one removed on exit.
+# A marker sitting beside the clone rather than inside it.
+# So a --dir pointed at a directory this run does not own is never the one removed on exit.
 # Inside the clone it would be an untracked file, and carry.py's own hub-is-clean check would then refuse the tree this run just fetched for it.
 marker_path() { printf '%s\n' "$DIR/hub.owned"; }
 
@@ -98,23 +110,39 @@ hub_fetched_here() {
 }
 
 # Acquires the reader half of the fetch/use lock, held from immediately before ensure_hub_root's own freshness check through the caller's entire use of $HUB_ROOT.
-# Scoping it to only a final tool invocation would leave ensure_hub_root's own git reads unlocked, the same interleaving one call frame up from the read this lock exists to close: a concurrent fetch_hub's rm -rf could still land between ensure_hub_root confirming $HUB_ROOT is fresh and the caller actually reading a file under it.
-# Shared (flock -s) rather than exclusive, since concurrent reads don't conflict with each other, only with a writer, so this only blocks behind an in-progress fetch_hub or cleanup.
-# A no-op in --dry-run: dry-run's own branch in ensure_hub_root never fetches and never reads $DIR/hub (it resolves HUB_ROOT from cwd or fails outright), so there is nothing here for it to protect, and --dry-run must not create $DIR or a lock file where neither existed, since fetching is documented as the one real host change this script makes.
+# Scoping it to only a final tool invocation would leave ensure_hub_root's own git reads unlocked.
+# That is the same interleaving one call frame up from the read this lock exists to close.
+# A concurrent fetch_hub's rm -rf could still land between ensure_hub_root confirming $HUB_ROOT is fresh and the caller actually reading a file under it.
+# Shared (flock -s) rather than exclusive, since concurrent reads don't conflict with each other, only with a writer.
+# So this only blocks behind an in-progress fetch_hub or cleanup.
+# A no-op in --dry-run.
+# Dry-run's own branch in ensure_hub_root never fetches and never reads $DIR/hub (it resolves HUB_ROOT from cwd or fails outright).
+# So there is nothing here for dry-run to protect.
+# Also, --dry-run must not create $DIR or a lock file where neither existed.
+# That is because fetching is documented as the one real host change this script makes.
 hub_read_lock_acquire() {
     [[ $DRY_RUN == true ]] && return 0
     mkdir -p "$DIR"
-    # Checked explicitly, not left to fail silently into the flock call below: this function is always called as `hub_read_lock_acquire || ...`, and set -e is suspended for a callee's own body in that shape, confirmed live, so an unwritable $DIR would otherwise leave HUB_READ_LOCK_FD unset and surface only flock's own confusing error about a missing fd.
+    # Checked explicitly, not left to fail silently into the flock call below.
+    # This function is always called as `hub_read_lock_acquire || ...`, and set -e is suspended for a callee's own body in that shape, confirmed live.
+    # So an unwritable $DIR would otherwise leave HUB_READ_LOCK_FD unset and surface only flock's own confusing error about a missing fd.
     if ! exec {HUB_READ_LOCK_FD}>"$DIR/hub.lock"; then
         fail "Could not open $DIR/hub.lock for locking (permission, or the directory is not writable)"
         return 1
     fi
-    # A quick non-blocking probe first, so a session that has to wait says so instead of looking hung: another session's fetch_hub or host_tool can hold the exclusive lock for as long as a full clone or a long OS package upgrade takes.
-    # A busy lock's own failure is silent (confirmed live), so any stderr this specific call produces is a real error (a missing flock, a bad fd), not contention, and prints as one instead of the misleading "waiting" framing below.
+    # A quick non-blocking probe first, so a session that has to wait says so instead of looking hung.
+    # Another session's fetch_hub or host_tool can hold the exclusive lock for as long as a full clone or a long OS package upgrade takes.
+    # A busy lock's own failure is silent (confirmed live).
+    # So any stderr this specific call produces is a real error (a missing flock, a bad fd), not contention.
+    # Such an error prints as one instead of the misleading "waiting" framing below.
     local probe_err
     if ! probe_err=$(flock -sn "$HUB_READ_LOCK_FD" 2>&1); then
         if [[ -n $probe_err ]]; then
-            # A real error, not contention: retrying via the blocking call below would not help and risks a second, more confusing failure (or a hang, if the failure mode is one blocking mode does not handle the same way), so this fails immediately instead of falling through to it.
+            # A real error, not contention.
+            # Retrying via the blocking call below would not help.
+            # Retrying also risks a second, more confusing failure.
+            # Retrying risks a hang as well, if the failure mode is one blocking mode does not handle the same way.
+            # So this fails immediately instead of falling through to it.
             fail "flock -sn reported: $probe_err"
             exec {HUB_READ_LOCK_FD}>&-
             HUB_READ_LOCK_FD=""
@@ -131,21 +159,33 @@ hub_read_lock_acquire() {
 }
 
 # Releases the fd hub_read_lock_acquire opened.
-# Safe to call even when acquire failed or was never called, so a caller's cleanup path never has to track whether it actually holds the lock.
+# Safe to call even when acquire failed or was never called.
+# So a caller's cleanup path never has to track whether it actually holds the lock.
 hub_read_lock_release() {
     [[ -n $HUB_READ_LOCK_FD ]] || return 0
     exec {HUB_READ_LOCK_FD}>&-
     HUB_READ_LOCK_FD=""
 }
 
-# `ensure_hub_root` is `fetch_hub`'s only caller, and it only ever runs inside a `hub_read_lock_acquire` span (`host_tool`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first), so $HUB_READ_LOCK_FD is always already open here.
-# Escalating that same fd from shared to exclusive, rather than opening a second fd on the same lock file, is what makes this safe: flock treats two different fds on one file as independent lock holders even within one process, so a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever, verified by reproducing exactly that hang before this fix.
-# `flock` changes an already-held fd's own lock type in place with no such deadlock, since the kernel recognizes it as the same holder taking a different mode, not a second competing one.
-# The conversion itself is not atomic (flock(2): the shared lock is dropped before the exclusive one is granted), so another session's own conversion could win the gap and clone first, but fetch_hub_locked's own remove_unowned_hub_check re-verifies ownership before removing or recloning, so that race costs a redundant clone at worst, never a torn one.
-# Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span, rather than holding exclusive (which would still be correct, only more conservative than necessary).
+# `ensure_hub_root` is `fetch_hub`'s only caller.
+# `ensure_hub_root` only ever runs inside a `hub_read_lock_acquire` span (`host_tool`, `audit_repo`, `check_skills_dist`, `carry_action` all acquire it first).
+# So $HUB_READ_LOCK_FD is always already open here.
+# Escalating that same fd from shared to exclusive, rather than opening a second fd on the same lock file, is what makes this safe.
+# The reason is that flock treats two different fds on one file as independent lock holders even within one process.
+# So a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever.
+# The deadlock was verified by reproducing exactly that hang before this fix.
+# `flock` changes an already-held fd's own lock type in place with no such deadlock.
+# That is because the kernel recognizes the conversion as the same holder taking a different mode, not a second competing one.
+# The conversion itself is not atomic (flock(2): the shared lock is dropped before the exclusive one is granted).
+# So another session's own conversion could win the gap and clone first.
+# But fetch_hub_locked's own remove_unowned_hub_check re-verifies ownership before removing or recloning.
+# So that race costs a redundant clone at worst, never a torn one.
+# Downgraded back to shared once the fetch itself is done, restoring reader concurrency for the rest of the caller's own read-and-use span.
+# That is done rather than holding exclusive, which would still be correct, only more conservative than necessary.
 fetch_hub() {
     # --dry-run promises to change nothing, and this clone (or re-clone) is the one real change this function itself makes to the host.
-    # The reader lock (hub_read_lock_acquire) already no-ops under --dry-run, never opening a lock at all, so without this check fetch_hub would instead fail on its own "no reader lock held" internal-error message below.
+    # The reader lock (hub_read_lock_acquire) already no-ops under --dry-run, never opening a lock at all.
+    # So without this check fetch_hub would instead fail on its own "no reader lock held" internal-error message below.
     # This check exists to give the clearer, task-specific diagnostic first.
     [[ $DRY_RUN == true ]] && {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change --dry-run does not make. Run without --dry-run, or from inside a hub checkout already on $DEFAULT_REF."
@@ -181,24 +221,31 @@ fetch_hub_locked() {
         fail "Could not remove $DIR/hub to fetch it again. Check that nothing holds a file under it."
         return 1
     fi
-    # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
+    # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds.
+    # Git can leave a partial directory behind on a failed or interrupted clone.
+    # An unmarked one would then block every retry until removed by hand.
     if ! printf '%s\n' "$token" >"$(marker_path)"; then
         fail "Could not write $(marker_path). Check that $DIR is writable."
         return 1
     fi
     HUB_FETCH_TOKEN="$token"
-    # A full clone of the default branch first, whatever $REF names: spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
+    # A full clone of the default branch first, whatever $REF names.
+    # That is because spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from.
+    # A shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
     git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
         {
             fail "Could not clone $HUB_REPO. Check that this host reaches github.com."
-            # The marker goes with the directory it marked: an orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
+            # The marker goes with the directory it marked.
+            # An orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
             rm -rf "$DIR/hub" "$(marker_path)"
             return 1
         }
-    # Set the moment the clone lands, whatever $REF still has to do: cleanup is gated on this, and a later ref-specific failure below must still remove the tree this step already created.
+    # Set the moment the clone lands, whatever $REF still has to do.
+    # Cleanup is gated on this flag, and a later ref-specific failure below must still remove the tree this step already created.
     HUB_FETCHED=true
     # A branch name is already checked out by the clone above.
-    # A tag, a pull request ref, or a commit needs an explicit fetch and checkout, since "git clone --branch" only takes a branch or a tag, not an arbitrary commit.
+    # A tag, a pull request ref, or a commit needs an explicit fetch and checkout.
+    # That is because "git clone --branch" only takes a branch or a tag, not an arbitrary commit.
     if [[ $REF != "$DEFAULT_REF" ]]; then
         git -C "$DIR/hub" fetch --quiet origin "$REF" ||
             {
@@ -219,9 +266,13 @@ fetch_hub_locked() {
 # Read by detect_downstream_root so the hub is never misclassified as a downstream repo, whatever ref was asked for.
 IS_HUB_CHECKOUT=false
 
-# A checkout already sitting on the hub is a candidate to reuse as is, so a maintainer working in their own ProjectTemplate tree never pays for a second clone of the repo they are standing in.
-# Only for the default ref: naming any other --ref always fetches fresh, even from inside the hub itself, since AUDIT.md and the sync procedure both rely on this loader reaching a ref other than whatever happens to be checked out locally.
-# HUB_ROOT set here is tentative, verified against a freshly fetched origin/main by ensure_hub_root before any tool actually reads it, since a candidate this stale is exactly the wrong answer for an audit or a Skills-distribution check.
+# A checkout already sitting on the hub is a candidate to reuse as is.
+# So a maintainer working in their own ProjectTemplate tree never pays for a second clone of the repo they are standing in.
+# Only for the default ref.
+# Naming any other --ref always fetches fresh, even from inside the hub itself.
+# That is because AUDIT.md and the sync procedure both rely on this loader reaching a ref other than whatever happens to be checked out locally.
+# HUB_ROOT set here is tentative, verified against a freshly fetched origin/main by ensure_hub_root before any tool actually reads it.
+# The verification matters since a candidate this stale is exactly the wrong answer for an audit or a Skills-distribution check.
 detect_hub_root() {
     local top
     top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
@@ -232,7 +283,8 @@ detect_hub_root() {
 }
 
 # Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
-# A failed git command must never read the same as its emptiest possible success, so each one's own exit status is captured rather than only its output.
+# A failed git command must never read the same as its emptiest possible success.
+# So each one's own exit status is captured rather than only its output.
 hub_root_clean_on_default_ref() {
     local status branch
     status=$(git -C "$HUB_ROOT" status --porcelain) || return 1
@@ -241,7 +293,8 @@ hub_root_clean_on_default_ref() {
     [[ $branch == "$DEFAULT_REF" ]]
 }
 
-# A ref other than $DEFAULT_REF is fetched into a ref named for it rather than read from FETCH_HEAD, since another session sharing $DIR/hub can fetch a different ref into FETCH_HEAD between this fetch and its read.
+# A ref other than $DEFAULT_REF is fetched into a ref named for it rather than read from FETCH_HEAD.
+# That is because another session sharing $DIR/hub can fetch a different ref into FETCH_HEAD between this fetch and its read.
 hub_ref_commit() {
     if [[ $REF == "$DEFAULT_REF" ]]; then
         git -C "$HUB_ROOT" fetch --quiet origin "$DEFAULT_REF" || return 1
@@ -252,16 +305,22 @@ hub_ref_commit() {
     git -C "$HUB_ROOT" rev-parse "refs/menu/$REF^{commit}"
 }
 
-# Confirms a tentative HUB_ROOT is clean and still on the commit this session's own $REF resolves to on origin before any tool reads it, checked here rather than at startup so opening the menu costs no network call until a hub-dependent task actually runs.
-# A local checkout that has moved on (a feature branch, a commit behind, an uncommitted edit) falls back to a real fetch rather than being trusted, the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
+# Confirms a tentative HUB_ROOT is clean and still on the commit this session's own $REF resolves to on origin before any tool reads it.
+# The check runs here rather than at startup, so opening the menu costs no network call until a hub-dependent task actually runs.
+# A local checkout that has moved on falls back to a real fetch rather than being trusted.
+# Examples of a checkout that has moved on include a feature branch, a commit behind, and an uncommitted edit.
+# This matches the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
 ensure_hub_root() {
     if [[ -n $HUB_ROOT ]]; then
         if [[ $DRY_RUN == true ]]; then
-            # No network call, since confirming freshness against origin means fetching, which --dry-run does not do, but this still confirms the checkout is clean and actually on main: detect_hub_root checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
+            # No network call, since confirming freshness against origin means fetching, which --dry-run does not do.
+            # This still confirms the checkout is clean and actually on main.
+            # That is because detect_hub_root checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
             hub_root_clean_on_default_ref && return 0
             HUB_ROOT=""
         else
-            # The freshness check below itself fetches, which updates FETCH_HEAD and the ref it fetches into even though it touches no working file, so it is as much a change as fetch_hub's own clone.
+            # The freshness check below itself fetches, which updates FETCH_HEAD and the ref it fetches into even though it touches no working file.
+            # So the freshness check is as much a change as fetch_hub's own clone.
             local status head ref_head
             if ref_head=$(hub_ref_commit) &&
                 status=$(git -C "$HUB_ROOT" status --porcelain) && [[ -z $status ]] &&
@@ -293,12 +352,17 @@ detect_downstream_root() {
 cleanup() {
     [[ $KEEP == true || $HUB_FETCHED == false ]] && return 0
     [[ -e "$(marker_path)" ]] || return 0
-    # Released first and unconditionally, even though a normal exit has already released it: an interrupt (Ctrl-C) fires this EXIT trap with $HUB_READ_LOCK_FD still open mid-dispatch, and this process's own still-held shared lock would otherwise deadlock the exclusive wait below against itself, reproduced and confirmed before this fix.
+    # Released first and unconditionally, even though a normal exit has already released it.
+    # An interrupt (Ctrl-C) fires this EXIT trap with $HUB_READ_LOCK_FD still open mid-dispatch.
+    # In that case, this process's own still-held shared lock would otherwise deadlock the exclusive wait below against itself.
+    # The deadlock was reproduced and confirmed before this fix.
     # The read that fd was protecting is being abandoned along with the rest of this process, so releasing it here costs nothing.
     hub_read_lock_release
     # Exclusive, the same writer half fetch_hub takes, so this waits out a concurrent reader still mid-use rather than deleting the tree out from under it.
     local lock_fd
-    # Checked explicitly, the same reasoning hub_read_lock_acquire's own open already applies: cleanup runs from an EXIT trap, not a plain top-level statement, so an unwritable $DIR here would otherwise leave lock_fd unset and surface only flock's own confusing error about a missing fd.
+    # Checked explicitly, the same reasoning hub_read_lock_acquire's own open already applies.
+    # Cleanup runs from an EXIT trap, not a plain top-level statement.
+    # So an unwritable $DIR here would otherwise leave lock_fd unset and surface only flock's own confusing error about a missing fd.
     if ! exec {lock_fd}>"$DIR/hub.lock"; then
         fail "Could not open $DIR/hub.lock for locking (permission, or the directory is not writable)"
         return 1
@@ -306,7 +370,8 @@ cleanup() {
     local probe_err
     if ! probe_err=$(flock -n "$lock_fd" 2>&1); then
         if [[ -n $probe_err ]]; then
-            # A real error, not contention, the same distinction hub_read_lock_acquire's own probe already makes: retrying via the blocking call below would not help and risks a second, more confusing failure.
+            # A real error, not contention, the same distinction hub_read_lock_acquire's own probe already makes.
+            # Retrying via the blocking call below would not help and risks a second, more confusing failure.
             fail "flock -n reported: $probe_err"
             exec {lock_fd}>&-
             return 1
@@ -322,7 +387,8 @@ cleanup() {
         exec {lock_fd}>&-
         return 0
     fi
-    # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
+    # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it.
+    # A suppressed removal failure must not leave a leftover hub with no marker to explain it.
     rm -rf "$DIR/hub"
     [[ -e "$DIR/hub" ]] || rm -f "$(marker_path)"
     exec {lock_fd}>&-
@@ -341,7 +407,9 @@ host_tool() {
 }
 
 # Every host tool runs from inside the hub tree, and this is the only place a path inside it is named, matching bootstrap.sh's run_tool.
-# Resolves the hub root itself rather than assuming a caller already did: a host task must work standalone, off a downstream checkout, or off no checkout at all, none of which set HUB_ROOT on their own.
+# Resolves the hub root itself rather than assuming a caller already did.
+# A host task must work standalone, off a downstream checkout, or off no checkout at all.
+# None of those set HUB_ROOT on their own.
 host_tool_locked() {
     local tool="$1"
     shift
@@ -390,13 +458,15 @@ install_agents() {
     fi
 }
 
-# The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs and need no cd.
+# The Python tools under scripts/ and spec/ resolve their own root from __file__ rather than the working directory.
+# So they are called by absolute path from wherever this script runs and need no cd.
 # Checked here rather than upfront in main, the same reasoning host-setup/linux/install-skills.sh already carries.
 # A host with no uv yet can still use every host action, and only the actions that need uv name it as their own prerequisite.
 # The prerequisite failure returns 127, bash's own "command not found" convention.
 # So a caller reading a specific exit code from the tool itself, such as build_dist.py's 0-clean/1-stale contract, can tell "uv never ran" apart from "uv ran and returned 1".
 # Callers hold the reader lock themselves, hub_read_lock_acquire before their own ensure_hub_root call, rather than this function taking it.
-# Every caller pairs this with ensure_hub_root and the lock has to cover both, so taking it only here would still leave ensure_hub_root's own reads unlocked, the gap this whole reader-half addition exists to close.
+# Every caller pairs this with ensure_hub_root and the lock has to cover both.
+# So taking it only here would still leave ensure_hub_root's own reads unlocked, the gap this whole reader-half addition exists to close.
 # Every hub tool a task runs declares its libraries inline, so uv runs each one rather than a bare python3, which has none of them.
 hub_uv_script() {
     command -v uv >/dev/null || {
@@ -412,7 +482,10 @@ hub_uv_script() {
 # Not reentrant: hub_read_lock_acquire's exec unconditionally overwrites HUB_READ_LOCK_FD, so a nested call would leak the outer fd and silently drop the lock it represented.
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
-    # 2, not 1, for every failure of this wrapper's own preconditions: check_skills_dist's own caller reads 1 as scripts/build_dist.py --check's "stale" result, so a wrapper-level failure must not collide with the wrapped command's own exit code, the same reasoning Invoke-CheckSkillsDist's own Confirm-HubRoot fix already applies on the PowerShell side.
+    # 2, not 1, for every failure of this wrapper's own preconditions.
+    # The caller of check_skills_dist reads 1 as scripts/build_dist.py --check's "stale" result.
+    # So a wrapper-level failure must not collide with the wrapped command's own exit code.
+    # Invoke-CheckSkillsDist's own Confirm-HubRoot fix already applies the same reasoning on the PowerShell side.
     (($# > 0)) || {
         fail "with_hub_read_lock called with no command (internal error)"
         return 2
@@ -447,7 +520,8 @@ check_skills_dist() {
     local rc=0
     with_hub_read_lock hub_uv_script scripts/build_dist.py --check || rc=$?
     # Only 0 (clean) and 1 (stale) are outcomes scripts/build_dist.py --check documents for itself, so only those two read as a check result.
-    # Anything else, 127 included, is with_hub_read_lock, hub_uv_script, or the tool itself failing to run rather than a finding, and is reported as the task error it is.
+    # Anything else, 127 included, is with_hub_read_lock, hub_uv_script, or the tool itself failing to run rather than a finding.
+    # That failure is reported as the task error it is.
     case "$rc" in
     0) info "Every generated Skills distribution matches .agents/skills/" ;;
     1) info "A generated Skills distribution is stale. This menu does not regenerate it from a fetched checkout, since the result has to be committed in the hub itself." ;;
@@ -465,7 +539,9 @@ carry_action() {
             fail "No downstream repo checkout found. Run this menu from inside the target repo's own worktree."
             return 1
         }
-    # Its hub argument must be exactly on origin/main by carry.py's own requirement, and a non-default --ref checks out something else entirely, so this would always fail deep inside carry.py with no clue why.
+    # Its hub argument must be exactly on origin/main by carry.py's own requirement.
+    # A non-default --ref checks out something else entirely.
+    # So this would always fail deep inside carry.py with no clue why.
     # Refused here instead, with the actual reason.
     [[ $REF == "$DEFAULT_REF" ]] ||
         {
@@ -511,7 +587,9 @@ print_menu() {
     log "Hub, $HUB_REPO:"
     log "  13  Audit a cataloged repo"
     log "  14  Check the generated Skills distributions are current"
-    # Also gated on REF: carry.py always rejects a hub checkout that is not exactly on the default ref, so these tasks cannot work in a non-default --ref session regardless of a downstream repo being detected.
+    # Also gated on REF.
+    # The carry.py script always rejects a hub checkout that is not exactly on the default ref.
+    # So these tasks cannot work in a non-default --ref session regardless of a downstream repo being detected.
     if [[ -n $DOWNSTREAM_ROOT && $REF == "$DEFAULT_REF" ]]; then
         log ""
         log "Downstream, the repo this menu is run from:"
@@ -525,7 +603,9 @@ print_menu() {
     log ""
 }
 
-# A failing task (a real install error, a network hiccup) is reported and returns to the menu rather than ending the session, so dispatch's own exit status cannot double as "quit": QUIT is a separate flag the q/Q case sets, read by the loop after every dispatch regardless of whether the task it ran succeeded.
+# A failing task (a real install error, a network hiccup) is reported and returns to the menu rather than ending the session.
+# So dispatch's own exit status cannot double as "quit".
+# QUIT is a separate flag the q/Q case sets, read by the loop after every dispatch regardless of whether the task it ran succeeded.
 QUIT=false
 BAD_CHOICE=false
 
@@ -546,7 +626,8 @@ dispatch() {
     13) audit_repo ;;
     14) check_skills_dist ;;
     15) carry_action check ;;
-    # --dry-run changes nothing, and carry.py itself has no dry-run mode, so a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
+    # --dry-run changes nothing, and carry.py itself has no dry-run mode.
+    # So a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
     16)
         if [[ $DRY_RUN == true ]]; then
             carry_action check
@@ -580,7 +661,9 @@ interactive_menu() {
         rc=0
         dispatch "$choice" || rc=$?
         [[ $QUIT == true ]] && break
-        # A dedicated flag rather than a reserved return code: every dispatched task's own exit code passes through unchanged, and a tool that happens to exit 2 for its own reason (scripts/carry.py's "not uniquely registered", for one) must not be misread as an unrecognized choice.
+        # A dedicated flag rather than a reserved return code.
+        # Every dispatched task's own exit code passes through unchanged.
+        # A tool that happens to exit 2 for its own reason (scripts/carry.py's "not uniquely registered", for one) must not be misread as an unrecognized choice.
         [[ $BAD_CHOICE == true ]] && continue
         if ((rc == 0)); then
             step "Done"

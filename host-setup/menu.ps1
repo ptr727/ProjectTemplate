@@ -1,10 +1,18 @@
-# A human-facing front end over the scripts this fleet otherwise authors for an agent following instructions: the host tooling in host-setup\windows\, and the repo-level tools in scripts\ and spec\ that ptr727/ProjectTemplate hosts and every other repo reaches rather than carries.
-# Menu options rather than a command a human has to already know, and a forcing function on the tools it fronts: a task with no discoverable menu entry is a gap in the tools themselves.
+# A human-facing front end over the scripts this fleet otherwise authors for an agent following instructions.
+# The scripts are:
+#   - the host tooling in host-setup\windows\
+#   - the repo-level tools in scripts\ and spec\ that ptr727/ProjectTemplate hosts and every other repo reaches rather than carries
+# Menu options rather than a command a human has to already know, and a forcing function on the tools it fronts.
+# A task with no discoverable menu entry is a gap in the tools themselves.
 #
-# Fetchable on its own, like bootstrap.ps1: run from a hub checkout directly, or download this one file into a downstream repo and it clones the hub itself.
-# Where bootstrap.ps1 stands a host up and stops, this loops so a human answers more than one question in a sitting, and it knows the difference between "the hub" and "a repo this host happens to be sitting in" so it can offer each their own tasks.
+# Fetchable on its own, like bootstrap.ps1.
+# Run it from a hub checkout directly, or download this one file into a downstream repo and it clones the hub itself.
+# Where bootstrap.ps1 stands a host up and stops, this loops so a human answers more than one question in a sitting.
+# This menu knows the difference between "the hub" and "a repo this host happens to be sitting in".
+# So this menu can offer each their own tasks.
 #
-# Runs under Windows PowerShell 5.1, the one shell a fresh Windows host guarantees, and hands off to PowerShell 7 the same way bootstrap.ps1 does, since every host-setup\windows script it drives requires that version.
+# Runs under Windows PowerShell 5.1, the one shell a fresh Windows host guarantees.
+# This script hands off to PowerShell 7 the same way bootstrap.ps1 does, since every host-setup\windows script it drives requires that version.
 
 [CmdletBinding()]
 param(
@@ -16,7 +24,8 @@ param(
     [Alias('h')][switch]$Help
 )
 
-# Captured before anything else touches scope, so the pwsh handoff below can rebuild the argument list this process was bound with, rather than reaching for an automatic variable from inside a nested function.
+# Captured before anything else touches scope, so the pwsh handoff below can rebuild the argument list this process was bound with.
+# This avoids reaching for an automatic variable from inside a nested function.
 $SCRIPT_BOUND_PARAMETERS = $PSBoundParameters
 
 Set-StrictMode -Version Latest
@@ -28,14 +37,17 @@ $HUB_REPO = 'ptr727/ProjectTemplate'
 $HUB_URL = "https://github.com/$HUB_REPO"
 $DEFAULT_REF = 'main'
 
-# Every parameter is read into a variable here rather than from inside a function, matching bootstrap.ps1: a parameter reached only from a nested scope reads as declared and never used.
+# Every parameter is read into a variable here rather than from inside a function, matching bootstrap.ps1.
+# A parameter reached only from a nested scope reads as declared and never used.
 $DRY_RUN = [bool]$DryRun
 $ASSUME_YES = [bool]$Yes
 $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
 $KEEP = [bool]$Keep
 $WANT_HELP = [bool]$Help
 
-# No placeholder for $DIR here, matching bootstrap.ps1: PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable, and Resolve-Directory's own assignment in main is what gives it its resolved value.
+# No placeholder for $DIR here, matching bootstrap.ps1.
+# PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable.
+# Resolve-Directory's own assignment in main is what gives that variable its resolved value.
 $HUB_ROOT = ''
 $HUB_FETCHED = $false
 $HUB_FETCH_TOKEN = ''
@@ -54,7 +66,8 @@ function info { param([string]$Message) Write-Host "  $Message" }
 function step { param([string]$Message) Write-Host "`n==> $Message" }
 function warn { param([string]$Message) [Console]::Error.WriteLine("WARNING: $Message") }
 function die { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Message"); exit 1 }
-# Reports a task-time error without ending the process, unlike die: a dispatched action's failure returns to the menu, and only a startup failure (bad arguments, no git) is fatal.
+# Reports a task-time error without ending the process, unlike die.
+# A dispatched action's failure returns to the menu, and only a startup failure (bad arguments, no git) is fatal.
 function fail { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Message") }
 
 function usage {
@@ -84,9 +97,11 @@ redirected run is not a place to answer a menu.
 
 # --- pwsh handoff ---
 #
-# Everything above this point, and the four functions below, run under Windows PowerShell 5.1: no ternary or null-coalescing operator, no multi-argument Join-Path, nothing newer than that runtime parses.
+# Everything above this point, and the four functions below, run under Windows PowerShell 5.1.
+# That means no ternary or null-coalescing operator, no multi-argument Join-Path, nothing newer than that runtime parses.
 # Everything past the handoff may use whatever pwsh 7 accepts, though it mostly does not need to.
-# Identical in shape to bootstrap.ps1's own handoff, kept as a separate copy rather than a shared module: a script fetched alone would otherwise fail on a missing sibling file.
+# Identical in shape to bootstrap.ps1's own handoff, kept as a separate copy rather than a shared module.
+# A script fetched alone would otherwise fail on a missing sibling file.
 
 function Resolve-Pwsh {
     $command = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -130,7 +145,9 @@ function Get-ForwardedArgument {
 }
 
 # The same parameters Get-ForwardedArgument forwards, rendered as one pasteable command-line string rather than split into argv elements.
-# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape: a value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted, which is exactly the bug guessing from shape produced here before.
+# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape.
+# A value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted.
+# That is exactly the bug guessing from shape produced here before.
 function Format-ForwardedArgumentForDisplay {
     $parts = foreach ($key in $script:SCRIPT_BOUND_PARAMETERS.Keys) {
         $value = $script:SCRIPT_BOUND_PARAMETERS[$key]
@@ -154,7 +171,8 @@ function Invoke-PwshHandoff {
 
 # --- Hub resolution ---
 
-# The owner/name from a remote.origin.url in any of the shapes git or the GitHub UI hand out, or empty where the checkout carries no origin at all.
+# The owner/name from a remote.origin.url in any of the shapes git or the GitHub UI hand out.
+# Empty where the checkout carries no origin at all.
 function Get-OriginSlug {
     param([Parameter(Mandatory)][string]$Root)
     $url = (& git -C $Root config --get remote.origin.url 2>$null)
@@ -167,7 +185,8 @@ function Get-OriginSlug {
     return $slug
 }
 
-# A marker sitting beside the clone rather than inside it, so a -Dir pointed at a directory this run does not own is never the one removed on exit.
+# A marker sitting beside the clone rather than inside it.
+# So a -Dir pointed at a directory this run does not own is never the one removed on exit.
 function Get-MarkerPath { Join-Path $script:DIR 'hub.owned' }
 
 # Answers whether an existing $DIR\hub may be removed: absent, or created by this run.
@@ -187,8 +206,11 @@ function Test-HubFetchedHere {
 
 function Get-HubLockPath { Join-Path $script:DIR 'hub.lock' }
 
-# The file menu.sh locks, held with FileShare.None, which .NET implements as an exclusive flock on Linux and which on Windows refuses any other open handle, so the two menus sharing one -Dir serialize against each other.
-# A session that dies releases it, and the file stays in place, matching menu.sh, since removing it while held would let a third session lock a new file under the same name.
+# The file menu.sh locks, held with FileShare.None.
+# On Linux, .NET implements FileShare.None as an exclusive flock, and on Windows FileShare.None refuses any other open handle.
+# So the two menus sharing one -Dir serialize against each other.
+# A session that dies releases it, and the file stays in place, matching menu.sh.
+# That is because removing it while held would let a third session lock a new file under the same name.
 function Lock-Hub {
     $lock = Get-HubLockPath
     try {
@@ -202,7 +224,8 @@ function Lock-Hub {
         try {
             return [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
         } catch [System.Management.Automation.MethodInvocationException] {
-            # A held lock is a sharing or lock violation on Windows and the flock's EWOULDBLOCK on Linux, each carried in the HResult, where a full disk or a read-only mount is a plain IOException too and would otherwise be waited on forever.
+            # A held lock is a sharing or lock violation on Windows and the flock's EWOULDBLOCK on Linux, each carried in the HResult.
+            # By contrast, a full disk or a read-only mount is a plain IOException too and would otherwise be waited on forever.
             # The open does not block on either platform, so a held lock is waited out by retrying it.
             $reason = $_.Exception.InnerException
             $code = $reason.HResult -band 0xFFFF
@@ -222,14 +245,27 @@ function Lock-Hub {
 
 function Invoke-WithHubLock {
     # The single lock over $script:DIR\hub, shared by every writer (Invoke-FetchHub, Invoke-Cleanup) and every reader (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubUvScript span) alike.
-    # Unlike menu.sh, which gives readers a genuine shared mode, every caller here takes the same exclusive lock, trading reader concurrency for a locking scheme simple enough to get right.
-    # That trade is not always brief: Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade, so a second session waiting here can wait as long as that run takes, not just for a quick read.
-    # It still closes the actual TOCTOU: a concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it, since both now hold this same lock for that whole span, not just around the read's own final call.
-    # A span already holding the lock runs the scriptblock as it is, since Invoke-FetchHub is reached from inside one through Confirm-HubRoot, and a second open of the file would wait on this session's own lock forever.
-    # -DryRun runs it unlocked too, matching menu.sh, since a dry run never fetches or reads $DIR\hub, and it must not create $DIR or a lock file where neither existed.
-    # A lock that cannot be taken at all returns $Failed without running the scriptblock, the value each caller already returns for its own task failing, since a $false would read as exit code 0 to a caller comparing it with -eq.
+    # Unlike menu.sh, which gives readers a genuine shared mode, every caller here takes the same exclusive lock.
+    # This trades reader concurrency for a locking scheme simple enough to get right.
+    # That trade is not always brief.
+    # Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade.
+    # So a second session waiting here can wait as long as that run takes, not just for a quick read.
+    # It still closes the actual TOCTOU.
+    # A concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it.
+    # That is because both the reader and the fetch now hold this same lock for that whole span.
+    # The lock is not held just around the read's own final call.
+    # A span already holding the lock runs the scriptblock as it is.
+    # That is because Invoke-FetchHub is reached from inside such a span through Confirm-HubRoot.
+    # A second open of the file would wait on this session's own lock forever.
+    # -DryRun runs it unlocked too, matching menu.sh, since a dry run never fetches or reads $DIR\hub.
+    # Likewise, a dry run must not create $DIR or a lock file where neither existed.
+    # A lock that cannot be taken at all returns $Failed without running the scriptblock.
+    # That is the value each caller already returns for its own task failing.
+    # A $false is avoided since it would read as exit code 0 to a caller comparing it with -eq.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
-    # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site, where a bare closure reads as an unused parameter to it, since the rule does not trace a variable read inside a nested scriptblock back to the enclosing function's own param() block.
+    # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site.
+    # A bare closure reads as an unused parameter to that rule instead.
+    # That is because the rule does not trace a variable read inside a nested scriptblock back to the enclosing function's own param() block.
     param([Parameter(Mandatory)][scriptblock]$ScriptBlock, [object[]]$ArgumentList = @(), [object]$Failed = 1)
     if ($script:HUB_LOCK -or $script:DRY_RUN) { return (& $ScriptBlock @ArgumentList) }
     $script:HUB_LOCK = Lock-Hub
@@ -248,8 +284,11 @@ function Invoke-FetchHub {
         fail "This task needs a fetched hub checkout, and fetching one is itself a change -DryRun does not make. Run without -DryRun, or from inside a hub checkout already on $script:DEFAULT_REF."
         return $false
     }
-    # Held for the fetch's own span rather than for the rest of this session: Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch, and holding the lock that long would block every other menu sharing this -Dir until this session quits.
-    # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race: every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubUvScript span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
+    # Held for the fetch's own span rather than for the rest of this session.
+    # Invoke-InteractiveMenu's loop keeps a session alive well past its one fetch.
+    # Holding the lock that long would block every other menu sharing this -Dir until this session quits.
+    # A second session starting its own fetch while this one is still reading the tree it just cloned is not a residual race.
+    # That is because every read (Invoke-HostTool, and each action's Confirm-HubRoot-then-Invoke-HubUvScript span) takes this same lock itself, via Invoke-WithHubLock, for its own whole span.
     return (Invoke-WithHubLock -Failed $false -ScriptBlock { Invoke-FetchHubLocked })
 }
 
@@ -265,7 +304,9 @@ function Invoke-FetchHubLocked {
             return $false
         }
     }
-    # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds: git can leave a partial directory behind on a failed or interrupted clone, and an unmarked one would then block every retry until removed by hand.
+    # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds.
+    # Git can leave a partial directory behind on a failed or interrupted clone.
+    # An unmarked one would then block every retry until removed by hand.
     $token = [guid]::NewGuid().ToString('N')
     try {
         Set-Content -LiteralPath (Get-MarkerPath) -Value $token
@@ -274,17 +315,23 @@ function Invoke-FetchHubLocked {
         return $false
     }
     $script:HUB_FETCH_TOKEN = $token
-    # A full clone of the default branch first, whatever -Ref names: spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from, and a shallow clone would read every file as changed at the truncation boundary.
-    # Piped to Out-Host rather than left bare: an unassigned native call's stdout otherwise joins this function's own return value, which return $true/$false below would then be appended to instead of replacing.
+    # A full clone of the default branch first, whatever -Ref names.
+    # That is because spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from.
+    # A shallow clone would read every file as changed at the truncation boundary.
+    # Piped to Out-Host rather than left bare.
+    # An unassigned native call's stdout otherwise joins this function's own return value.
+    # The return $true/$false below would then be appended to that value instead of replacing it.
     & git clone --quiet --branch $script:DEFAULT_REF --single-branch $script:HUB_URL $hubPath | Out-Host
     if ($LASTEXITCODE -ne 0) {
         fail "Could not clone $script:HUB_REPO. Check that this host reaches github.com."
-        # The marker goes with the directory it marked: an orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
+        # The marker goes with the directory it marked.
+        # An orphaned one left behind would grant false ownership to whatever unrelated directory a person later puts at this same path.
         Remove-Item -LiteralPath $hubPath -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath (Get-MarkerPath) -Force -ErrorAction SilentlyContinue
         return $false
     }
-    # Set the moment the clone lands, whatever -Ref still has to do: Invoke-Cleanup is gated on this, and a later ref-specific failure below must still remove the tree this step already created.
+    # Set the moment the clone lands, whatever -Ref still has to do.
+    # Invoke-Cleanup is gated on this flag, and a later ref-specific failure below must still remove the tree this step already created.
     $script:HUB_FETCHED = $true
     if ($script:REF -ne $script:DEFAULT_REF) {
         & git -C $hubPath fetch --quiet origin $script:REF | Out-Host
@@ -315,7 +362,8 @@ function Test-HubCheckout {
 }
 
 # Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
-# A failed git call must never read the same as its emptiest possible success, so $LASTEXITCODE is checked after each one rather than only its output.
+# A failed git call must never read the same as its emptiest possible success.
+# So $LASTEXITCODE is checked after each one rather than only its output.
 function Test-HubCleanOnDefaultRef {
     $status = & git -C $script:HUB_ROOT status --porcelain
     if ($LASTEXITCODE -ne 0 -or $status) { return $false }
@@ -343,7 +391,9 @@ function Get-HubRefCommit {
 function Confirm-HubRoot {
     if ($script:HUB_ROOT) {
         if ($script:DRY_RUN) {
-            # No network call, since confirming freshness against origin means fetching, which -DryRun does not do, but this still confirms the checkout is clean and actually on main: Test-HubCheckout checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
+            # No network call, since confirming freshness against origin means fetching, which -DryRun does not do.
+            # This still confirms the checkout is clean and actually on main.
+            # That is because Test-HubCheckout checked only origin identity, and a dirty or feature-branch checkout must not be read as the hub's main either.
             if (Test-HubCleanOnDefaultRef) { return $true }
             $script:HUB_ROOT = ''
         } else {
@@ -381,12 +431,16 @@ function Test-DownstreamCheckout {
 function Invoke-Cleanup {
     if ($script:KEEP -or -not $script:HUB_FETCHED) { return }
     if (-not (Test-Path -LiteralPath (Get-MarkerPath))) { return }
-    # Same exclusive lock every reader and writer takes, via Invoke-WithHubLock, so this waits out another session still mid-use rather than deleting the tree out from under it.
-    # No -ArgumentList needed: the scriptblock only reads script-scoped state ($script:DIR, Get-MarkerPath), not a local parameter of this function, so there is nothing for PSReviewUnusedParameter to flag here the way Invoke-HostTool's own $Tool/$Arguments needed forwarding.
+    # Same exclusive lock every reader and writer takes, via Invoke-WithHubLock.
+    # So this waits out another session still mid-use rather than deleting the tree out from under it.
+    # No -ArgumentList needed.
+    # The scriptblock only reads script-scoped state ($script:DIR, Get-MarkerPath), not a local parameter of this function.
+    # So there is nothing for PSReviewUnusedParameter to flag here the way Invoke-HostTool's own $Tool/$Arguments needed forwarding.
     Invoke-WithHubLock -ScriptBlock {
         if (-not (Test-HubFetchedHere)) { return }
         $hubPath = Join-Path $script:DIR 'hub'
-        # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it: a suppressed removal failure must not leave a leftover hub with no marker to explain it.
+        # The marker is removed only once the directory it marks is actually gone, rather than unconditionally alongside it.
+        # A suppressed removal failure must not leave a leftover hub with no marker to explain it.
         Remove-Item -LiteralPath $hubPath -Recurse -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path -LiteralPath $hubPath)) { Remove-Item -LiteralPath (Get-MarkerPath) -Force -ErrorAction SilentlyContinue }
     }
@@ -395,10 +449,12 @@ function Invoke-Cleanup {
 # --- Running a tool ---
 
 # Every host tool runs from inside the hub tree, and this is the only place a path inside it is named.
-# Spawned as its own pwsh process rather than dot-sourced, since every host-setup\windows script ends its own main with exit, which would otherwise end this menu too.
+# Spawned as its own pwsh process rather than dot-sourced.
+# That is because every host-setup\windows script ends its own main with exit, which would otherwise end this menu too.
 function Invoke-HostTool {
     param([Parameter(Mandatory)][string]$Tool, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
-    # The whole body runs inside Invoke-WithHubLock, Confirm-HubRoot included, not just the final invocation, since locking only around the last call would still leave Confirm-HubRoot's own reads unlocked, the same gap menu.sh's equivalent fix closes.
+    # The whole body runs inside Invoke-WithHubLock, Confirm-HubRoot included, not just the final invocation.
+    # That is because locking only around the last call would still leave Confirm-HubRoot's own reads unlocked, the same gap menu.sh's equivalent fix closes.
     return (Invoke-WithHubLock -ArgumentList @($Tool, $Arguments) -ScriptBlock {
             param($Tool, $Arguments)
             if (-not (Confirm-HubRoot)) { return 1 }
@@ -439,7 +495,8 @@ function Invoke-AgentsInstall {
     return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments (@('-Install') + $words))
 }
 
-# The Python tools under scripts\ and spec\ resolve their own root from __file__ rather than the working directory, so they are called by absolute path from wherever this script runs.
+# The Python tools under scripts\ and spec\ resolve their own root from __file__ rather than the working directory.
+# So they are called by absolute path from wherever this script runs.
 # Checked here rather than upfront in main, since a host with no uv yet can still use every host action.
 # Only the actions that need uv name it as their own prerequisite.
 # Every hub tool a task runs declares its libraries inline, so uv runs each one rather than a bare Python, which has none of them.
@@ -470,7 +527,8 @@ function Invoke-AuditRepo {
 function Invoke-CheckSkillsDist {
     $rc = Invoke-WithHubLock -Failed 2 -ScriptBlock {
         # 2, not 1: scripts\build_dist.py --check documents 1 as its own "stale" result, and the switch below reads that value as a genuine check outcome.
-        # A Confirm-HubRoot failure must not collide with it, or a failed confirmation reports as "stale" with exit code 0 instead of the failure it actually is.
+        # A Confirm-HubRoot failure must not collide with it.
+        # Otherwise a failed confirmation reports as "stale" with exit code 0 instead of the failure it actually is.
         if (-not (Confirm-HubRoot)) { return 2 }
         return (Invoke-HubUvScript -ScriptPath 'scripts/build_dist.py' -Arguments '--check')
     }
@@ -492,7 +550,8 @@ function Invoke-CarryAction {
         fail "No downstream repo checkout found. Run this menu from inside the target repo's own worktree."
         return 1
     }
-    # A non-default -Ref checks out something other than the origin/main scripts/carry.py's hub argument requires, so this is refused here with the actual reason rather than failing deep inside that tool.
+    # A non-default -Ref checks out something other than the origin/main scripts/carry.py's hub argument requires.
+    # So this is refused here with the actual reason rather than failing deep inside that tool.
     if ($script:REF -ne $script:DEFAULT_REF) {
         fail "Pulling hub files needs the hub's $script:DEFAULT_REF branch, and this session was started with -Ref $script:REF. Run without -Ref, or start a separate session on $script:DEFAULT_REF for this task."
         return 1
@@ -531,7 +590,9 @@ function Show-Menu {
     log '   5  Upgrade the host OS packages'
     log '   6  Report git and GitHub setup'
     log '   7  Configure git and GitHub'
-    # Only setup-wsl.ps1's -Status runs here: its -Install needs a distribution name, which no menu entry collects, and installing one nobody asked for is exactly what this stays out of.
+    # Only setup-wsl.ps1's -Status runs here.
+    # The -Install action of setup-wsl.ps1 needs a distribution name, which no menu entry collects.
+    # Installing one nobody asked for is exactly what this stays out of.
     log '   8  Report the WSL platform and the distributions installed'
     log '   9  Report fleet Skills install status'
     log '  10  Install or update the fleet Skills'
@@ -556,7 +617,9 @@ function Show-Menu {
     log ''
 }
 
-# A failing task is reported and returns to the menu rather than ending the session, so this cannot double as "quit": QUIT is a separate flag the q/Q case sets, read by the loop after every dispatch regardless of whether the task it ran succeeded.
+# A failing task is reported and returns to the menu rather than ending the session.
+# So the dispatch return value cannot double as "quit".
+# QUIT is a separate flag the q/Q case sets, read by the loop after every dispatch regardless of whether the task it ran succeeded.
 function Invoke-Dispatch {
     param([string]$Choice)
     switch ($Choice) {
@@ -577,7 +640,8 @@ function Invoke-Dispatch {
         '15' { return (Invoke-CheckSkillsDist) }
         '16' { return (Invoke-CarryAction 'check') }
         '17' {
-            # -DryRun changes nothing, and scripts/carry.py itself has no dry-run mode, so a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
+            # -DryRun changes nothing, and scripts/carry.py itself has no dry-run mode.
+            # So a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check') }
             return (Invoke-CarryAction 'apply')
         }
@@ -603,7 +667,9 @@ function Invoke-InteractiveMenu {
         $script:BAD_CHOICE = $false
         $rc = Invoke-Dispatch $choice
         if ($script:QUIT) { break }
-        # A dedicated flag rather than a reserved return code: every dispatched task's own exit code passes through unchanged, and a tool that happens to exit 2 for its own reason (scripts/carry.py's "not uniquely registered", for one) must not be misread as an unrecognized choice.
+        # A dedicated flag rather than a reserved return code.
+        # Every dispatched task's own exit code passes through unchanged.
+        # A tool that happens to exit 2 for its own reason (scripts/carry.py's "not uniquely registered", for one) must not be misread as an unrecognized choice.
         if ($script:BAD_CHOICE) { continue }
         if ($rc -eq 0) {
             step 'Done'
@@ -635,11 +701,15 @@ function Resolve-Directory {
     return $trimmed
 }
 
-# The lines a piped-in run is told to paste instead, shared by both places that print them: the handoff below needs a real file to hand off to pwsh, and Test-Interactive needs a real console to ask on, and a run with neither reaches this the same way.
+# The lines a piped-in run is told to paste instead, shared by both places that print them.
+# The handoff below needs a real file to hand off to pwsh.
+# Test-Interactive needs a real console to ask on.
+# A run with neither reaches this the same way.
 function Show-DownloadAndRunRemedy {
     info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
     info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:HUB_REPO/$script:DEFAULT_REF/host-setup/menu.ps1 -OutFile menu.ps1"
-    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation: the original invocation's own flags (-DryRun among them) belong on the re-run this remedy is telling the caller to make.
+    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation.
+    # The original invocation's own flags (-DryRun among them) belong on the re-run this remedy is telling the caller to make.
     $forwarded = Format-ForwardedArgumentForDisplay
     $suffix = if ($forwarded) { " $forwarded" } else { '' }
     info "  powershell -ExecutionPolicy Bypass -File menu.ps1$suffix"
@@ -649,7 +719,9 @@ function main {
     if ($script:WANT_HELP) { usage; exit 0 }
 
     if ($PSVersionTable.PSVersion.Major -lt 7) {
-        # $PSCommandPath is empty for a script read through Invoke-Expression or a similar pipe, and the handoff below needs a real path to re-invoke under pwsh, so this cannot wait for Test-Interactive to say the same thing for a different reason.
+        # $PSCommandPath is empty for a script read through Invoke-Expression or a similar pipe.
+        # The handoff below needs a real path to re-invoke under pwsh.
+        # So this cannot wait for Test-Interactive to say the same thing for a different reason.
         if (-not $PSCommandPath) {
             warn 'This needs a real file to hand off to PowerShell 7, and a piped-in script has none.'
             info 'Download the file and run it, rather than piping it:'
@@ -672,8 +744,16 @@ function main {
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { die 'git is required' }
 
-    # Every task runs in a child process piped through this one, so its output is decoded by the child reading a native tool, encoded again by the child writing to this pipe, and decoded by this process reading it, while whatever a tool writes to stderr goes to the console and is rendered there.
-    # Each of those follows the console's code page, and on an OEM default a UTF-8 tool such as docker desktop prints its check mark as three unrelated characters, so the console is switched to UTF-8 for the menu's lifetime, which a child pwsh inherits at startup, and put back on the way out.
+    # Every task runs in a child process piped through this one.
+    # So its output passes through these steps:
+    #   - decoded by the child reading a native tool
+    #   - encoded again by the child writing to this pipe
+    #   - decoded by this process reading it
+    # Whatever a tool writes to stderr goes to the console and is rendered there.
+    # Each of those follows the console's code page.
+    # On an OEM default, a UTF-8 tool such as docker desktop prints its check mark as three unrelated characters.
+    # So the console is switched to UTF-8 for the menu's lifetime, and put back on the way out.
+    # A child pwsh inherits the UTF-8 console at startup.
     $previousEncoding = [Console]::OutputEncoding
     $switchedEncoding = $false
     if (-not [Console]::IsOutputRedirected) {

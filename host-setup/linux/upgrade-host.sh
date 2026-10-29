@@ -1,12 +1,19 @@
 #!/bin/bash
 
 # Upgrades this host, on Debian and Ubuntu based hosts, Proxmox and WSL included.
-# Two levels: the packages of the release the host is on, which is routine, and the release itself, which is not and so is a separate action behind its own flag.
+# Two levels:
+#   - The packages of the release the host is on, which is routine.
+#   - The release itself, which is not and so is a separate action behind its own flag.
 #
-# A release upgrade is refused on a host this script cannot carry across safely: Proxmox, whose major upgrades are a documented procedure with its own preconditions, and a distribution that is neither Debian nor Ubuntu, where the sources rewrite below has no meaning.
-# Refusing is the whole point of running this rather than apt by hand: the package upgrade is the same everywhere, and the release upgrade is where hosts differ.
+# A release upgrade is refused on a host this script cannot carry across safely:
+#   - Proxmox, whose major upgrades are a documented procedure with its own preconditions.
+#   - A distribution that is neither Debian nor Ubuntu, where the sources rewrite below has no meaning.
+# Refusing is the whole point of running this rather than apt by hand.
+# The package upgrade is the same everywhere, and the release upgrade is where hosts differ.
 #
-# One script rather than one per host: the package path, the WSL and reboot handling, and the command line are shared, and only the release path branches.
+# One script rather than one per host:
+#   - The package path, the WSL and reboot handling, and the command line are shared.
+#   - Only the release path branches.
 
 set -Eeuo pipefail
 
@@ -99,7 +106,8 @@ detect_host() {
     fi
 
     if [[ $ASSUME_YES == true ]]; then
-        # Keep the installed config file on a packaging conflict, since an unattended run has nobody to answer the prompt, and a replaced config is the harder half to notice afterwards.
+        # Keep the installed config file on a packaging conflict, since an unattended run has nobody to answer the prompt.
+        # A replaced config is also the harder half to notice afterwards.
         export DEBIAN_FRONTEND=noninteractive
         APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
     fi
@@ -137,7 +145,8 @@ confirm() {
     [[ $reply == [yY] || $reply == [yY][eE][sS] ]]
 }
 
-# A minimal install carries no curl, and without this guard the caller sees "command not found" from inside a command substitution, which reads as an answer rather than as a failure.
+# A minimal install carries no curl.
+# Without this guard the caller sees "command not found" from inside a command substitution, which reads as an answer rather than as a failure.
 fetch() {
     command -v curl >/dev/null || return 1
     curl -fsSL --retry 2 --connect-timeout 10 "$@"
@@ -174,12 +183,15 @@ refresh_snaps() {
 }
 
 upgradable_count() {
-    # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone, so the two are told apart here rather than both printing 0.
-    # This only ever backs a status report, so the answer here is "unknown" rather than a die: nothing downstream mutates on the strength of this count.
+    # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone.
+    # So the two are told apart here rather than both printing 0.
+    # This only ever backs a status report, so the answer here is "unknown" rather than a die.
+    # Nothing downstream mutates on the strength of this count.
     local out status=0
     out=$(apt list --upgradable 2>/dev/null) || status=$?
     if [[ $status -ne 0 ]]; then
-        # Re-run once more, stdout discarded this time, so the diagnostic comes from a pipe head bounds in memory rather than a file this would otherwise have to size-cap and clean up itself.
+        # Re-run once more, stdout discarded this time.
+        # So the diagnostic comes from a pipe head bounds in memory, rather than a file this would otherwise have to size-cap and clean up itself.
         printf 'unknown, apt list --upgradable failed (exit %s): %s' "$status" "$(apt list --upgradable 2>&1 >/dev/null | head -c 200 | tr '\n' ' ')"
         return 0
     fi
@@ -250,7 +262,8 @@ release_preconditions() {
         die "Held packages block a release upgrade, unhold them first: $held"
     fi
 
-    # A dpkg --audit that fails to run is not the same as one that runs and finds nothing, and only the second one clears the way into a release upgrade.
+    # A dpkg --audit that fails to run is not the same as one that runs and finds nothing.
+    # Only the one that runs and finds nothing clears the way into a release upgrade.
     local audit status=0
     audit=$("${SUDO[@]}" dpkg --audit 2>&1) || status=$?
     if [[ $status -ne 0 ]]; then
@@ -289,7 +302,8 @@ backup_sources() {
     run_root install -d -m 0755 "$target"
 
     # A missing file is skipped, since a host on deb822 alone carries no sources.list.
-    # A copy that fails for any other reason stops the upgrade: this backup is the only way back, and finding out it was never taken belongs before the sources are rewritten rather than after.
+    # A copy that fails for any other reason stops the upgrade, because this backup is the only way back.
+    # Finding out it was never taken belongs before the sources are rewritten rather than after.
     if [[ -f /etc/apt/sources.list ]]; then
         run_root cp -a /etc/apt/sources.list "$target/"
     fi
@@ -301,7 +315,8 @@ backup_sources() {
 # --- Release, Debian ---
 
 # The fetch is captured before it is parsed rather than piped into the parser.
-# Under pipefail a reader that stops early, as a parser looking for one line does, leaves the fetch writing to a closed pipe, and a successful download then reports itself as a failure.
+# Under pipefail a reader that stops early, as a parser looking for one line does, leaves the fetch writing to a closed pipe.
+# A successful download then reports itself as a failure.
 debian_suite_codename() {
     local release
     release=$(fetch "https://deb.debian.org/debian/dists/$1/Release" 2>/dev/null) || return 1
@@ -309,9 +324,15 @@ debian_suite_codename() {
 }
 
 # The release after the one this host is on.
-# Both distributions support one step at a time, so this never reaches past the next one, and a host further behind is upgraded by running the script again.
-# Returns 0 and prints the next release, 1 when the host is already on the newest, and 2 when the index could not be read at all.
-# The last two are not the same answer: a host that cannot reach the index is not a host with nothing to upgrade to, and reporting it as one is the dangerous reading.
+# Both distributions support one step at a time, so this never reaches past the next one.
+# A host further behind is upgraded by running the script again.
+# Returns:
+#   - 0 and prints the next release.
+#   - 1 when the host is already on the newest.
+#   - 2 when the index could not be read at all.
+# The last two are not the same answer.
+# A host that cannot reach the index is not a host with nothing to upgrade to.
+# Reporting it as one is the dangerous reading.
 debian_next_codename() {
     local current="$1" suite previous="" codename read_any=false
 
@@ -331,8 +352,10 @@ debian_next_codename() {
 }
 
 # Sources that point somewhere other than Debian's own mirrors.
-# The new release may not have a suite for them yet, so they are named rather than rewritten, and what to do about them is the operator's call.
-# Each entry is judged on its own URI rather than by the file holding it, since one file can hold both a Debian mirror and a third party repository and the second one still breaks the update.
+# The new release may not have a suite for them yet, so they are named rather than rewritten.
+# What to do about them is the operator's call.
+# Each entry is judged on its own URI rather than by the file holding it.
+# That is because one file can hold both a Debian mirror and a third party repository, and the second one still breaks the update.
 debian_third_party_sources() {
     local file
 
@@ -376,7 +399,8 @@ debian_third_party_sources() {
 }
 
 # Rewrite the release codename in the sources that point at Debian's own mirrors, in both the legacy one-line format and deb822.
-# A deb822 stanza is rewritten as a unit, because the URI that decides whether it is Debian's sits on a different line from the suite that names the release.
+# A deb822 stanza is rewritten as a unit.
+# That is because the URI that decides whether it is Debian's sits on a different line from the suite that names the release.
 debian_rewrite_sources() {
     local from="$1" to="$2" file staged rewritten=0
 
@@ -432,7 +456,9 @@ debian_rewrite_sources() {
         info "Rewrote $file"
     done
 
-    # Naming what was looked for rather than what was missing: a host on a mirror of its own still names the codename, and being told no source names it would send the reader looking for the wrong thing.
+    # Naming what was looked for rather than what was missing:
+    #   - A host on a mirror of its own still names the codename.
+    #   - Being told no source names it would send the reader looking for the wrong thing.
     [[ $rewritten -gt 0 ]] ||
         die "No apt source pointing at a Debian mirror names \"$from\", so there is nothing to rewrite. A host on a mirror other than one under debian.org, or one tracking \"stable\" rather than a codename, is moved by editing its sources itself."
 }
@@ -471,7 +497,8 @@ debian_release_upgrade() {
     step "Reading the $next package lists"
     apt_get update
 
-    # The release notes take the minimal upgrade first, so the packages that need no new dependencies land before the ones that pull in a changed dependency set.
+    # The release notes take the minimal upgrade first.
+    # So the packages that need no new dependencies land before the ones that pull in a changed dependency set.
     step "Upgrading without new packages"
     apt_get upgrade --without-new-pkgs
 
@@ -544,7 +571,8 @@ release_summary() {
             printf 'unknown until update-manager-core is installed'
             return 0
         fi
-        # The check exits non-zero when nothing is offered, and prints its progress either way, so the exit code decides and the output only names the release.
+        # The check exits non-zero when nothing is offered, and prints its progress either way.
+        # So the exit code decides and the output only names the release.
         # It reads the same as any user, so it runs without sudo and a status report never asks for a password.
         local check summary
         if check=$(do-release-upgrade -c 2>&1); then

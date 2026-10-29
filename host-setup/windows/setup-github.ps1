@@ -1,11 +1,15 @@
 # Sets up git and GitHub on a Windows host: the SSH key, the git configuration, and commit signing.
 # Every step is idempotent, so a re-run repairs a half configured host rather than duplicating what is already there.
 #
-# Two steps cannot be automated, because they happen in a browser: registering the public key as an authentication key, and registering the same key as a signing key.
+# Two steps cannot be automated, because they happen in a browser:
+#   - Registering the public key as an authentication key.
+#   - Registering the same key as a signing key.
 # Both are gates rather than suggestions.
-# The script stops at each, prints the key to paste and where to paste it, and checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
+# The script stops at each and prints the key to paste and where to paste it.
+# The script checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
 #
-# The path settings are written in the tilde form the Linux peer writes, because git expands it on Windows too, and a home shared with a WSL distribution then carries one value rather than two that disagree.
+# The path settings are written in the tilde form the Linux peer writes, because git expands it on Windows too.
+# A home shared with a WSL distribution then carries one value rather than two that disagree.
 
 [CmdletBinding()]
 param(
@@ -29,7 +33,8 @@ $PSNativeCommandUseErrorActionPreference = $false
 $KEY = Join-Path $HOME '.ssh\id_ed25519'
 $ALLOWED_SIGNERS = Join-Path $HOME '.config\git\allowed_signers'
 
-# Git expands a leading tilde in a path setting on Windows as well, and the hosts already configured by hand hold the tilde form, so writing that form leaves an already configured host untouched.
+# Git expands a leading tilde in a path setting on Windows as well.
+# The hosts already configured by hand hold the tilde form, so writing that form leaves an already configured host untouched.
 # File operations use the expanded paths above, since only git expands the tilde.
 $KEY_SETTING = '~/.ssh/id_ed25519.pub'
 $ALLOWED_SIGNERS_SETTING = '~/.config/git/allowed_signers'
@@ -45,7 +50,8 @@ $DEFAULT_NAME = 'Pieter Viljoen'
 $DEFAULT_EMAIL = 'ptr727@users.noreply.github.com'
 
 # Every parameter is read into a variable here rather than from inside a function.
-# A script parameter reached only from a nested scope reads as declared and never used, which is a finding on each one and hides a parameter that genuinely is unused.
+# A script parameter reached only from a nested scope reads as declared and never used.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     status    = [bool]$Status
     configure = [bool]$Configure
@@ -133,7 +139,9 @@ function run {
         return 0
     }
     # The command's own output goes to the console rather than down the pipeline.
-    # A native command writes to this function's output stream, so without this the caller receives every line the command printed with the exit code appended, and a check against 0 then compares against the first line of output.
+    # A native command writes to this function's output stream.
+    # So without this the caller receives every line the command printed with the exit code appended.
+    # A check against 0 then compares against the first line of output.
     & $Command @Arguments | Out-Host
     return $LASTEXITCODE
 }
@@ -153,7 +161,8 @@ function confirm {
 # Both git and ssh ship with Git for Windows, and neither is installed from here.
 # Installing them belongs to install-tools.ps1, so a gap is named with the command that closes it rather than closed twice in two scripts.
 # Every executable this script calls is named, rather than the three it is most obviously about.
-# One left out fails partway through with whatever that command says when it is missing, in place of the one message here that names the remedy.
+# One left out fails partway through with whatever that command says when it is missing.
+# That is in place of the one message here that names the remedy.
 function Test-Prerequisite {
     $absent = @()
     foreach ($tool in 'git', 'ssh', 'ssh-keygen', 'ssh-keyscan', 'ssh-add') {
@@ -189,7 +198,8 @@ function New-KeyIfAbsent {
 }
 
 # The ACL is reported and never rewritten.
-# Creating the key with ssh-keygen already sets it correctly on Windows, and rewriting an ACL is hard to undo and hard to preview under -DryRun, so a wrong one is named with the command that repairs it.
+# Creating the key with ssh-keygen already sets it correctly on Windows.
+# Rewriting an ACL is hard to undo and hard to preview under -DryRun, so a wrong one is named with the command that repairs it.
 function Test-KeyAcl {
     if (-not (Test-Path $script:KEY)) { return $null }
     $acl = Get-Acl $script:KEY
@@ -222,7 +232,8 @@ function Add-KnownHost {
     }
 
     # What was offered is checked against what GitHub publishes before it is recorded, matching the Linux peer.
-    # Recording whatever answered would persist a substituted key on the one run where nothing yet pins the real one, and every later connection would then verify against it.
+    # Recording whatever answered would persist a substituted key on the one run where nothing yet pins the real one.
+    # Every later connection would then verify against it.
     $temp = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString() + '.pub')
     try {
         [IO.File]::WriteAllText($temp, ($scanned -join "`n") + "`n")
@@ -260,7 +271,8 @@ function Add-KnownHost {
 
 # --- GitHub, read only ---
 
-# Every probe refuses to write a host key, so asking whether authentication works cannot enroll github.com behind the reader's back and a status run stays a read-only action.
+# Every probe refuses to write a host key.
+# So asking whether authentication works cannot enroll github.com behind the reader's back, and a status run stays a read-only action.
 # A status run also refuses to prompt, since it may be run unattended and a passphrase prompt would hang it.
 function Get-SshGreeting {
     param([switch]$ManagedKeyOnly)
@@ -268,7 +280,8 @@ function Get-SshGreeting {
     if ($script:MODE -eq 'status') { $options += @('-o', 'BatchMode=yes') }
     if ($ManagedKeyOnly) {
         if (-not (Test-Path $script:KEY)) { return '' }
-        # The ssh client offers the default identity files and an agent's keys besides whatever is named, so a host carrying another account's key authenticates as that account.
+        # The ssh client offers the default identity files and an agent's keys besides whatever is named.
+        # So a host carrying another account's key authenticates as that account.
         # An empty config file is what isolates the managed key, since the default identity files count as configured identities on their own.
         $options += @('-F', 'NUL', '-o', 'IdentitiesOnly=yes', '-i', $script:KEY)
     }
@@ -281,7 +294,8 @@ function Get-GreetingUser {
     return ''
 }
 
-# Prefer the account the managed key belongs to, since that is the one the registration checks are about, and say so when the host answers as somebody else.
+# Prefer the account the managed key belongs to, since that is the one the registration checks are about.
+# Say so when the host answers as somebody else.
 function Resolve-GitHubUser {
     $general = Get-GreetingUser (Get-SshGreeting)
     $managed = Get-GreetingUser (Get-SshGreeting -ManagedKeyOnly)
@@ -297,8 +311,10 @@ function Resolve-GitHubUser {
     $script:GITHUB_USER = $general
 }
 
-# GitHub publishes both key lists for an account, so a registration can be checked from the host without a token and without the browser that made it.
-# Each returns registered, missing, or unknown, and the third is not the second: a momentary failure to reach GitHub reported as "not registered" sends the reader to register a key that is already there.
+# GitHub publishes both key lists for an account.
+# So a registration can be checked from the host without a token and without the browser that made it.
+# Each returns registered, missing, or unknown, and the third is not the second.
+# A momentary failure to reach GitHub reported as "not registered" sends the reader to register a key that is already there.
 # PowerShell separates those two by itself, since an account with no signing key returns an empty list where an unreachable GitHub throws.
 function Test-KeyRegistered {
     param([ValidateSet('auth', 'signing')][string]$Kind)
@@ -381,7 +397,8 @@ function Set-GitIdentity {
     $changed = 0
     if (Set-GitConfig 'user.name' $script:WANT_NAME) { $changed++ }
     if (Set-GitConfig 'user.email' $script:WANT_EMAIL) { $changed++ }
-    # Git Credential Manager ships with Git for Windows and is what gh expects there, where the Linux peer writes a cache helper because no manager exists.
+    # Git Credential Manager ships with Git for Windows and is what gh expects there.
+    # The Linux peer writes a cache helper instead, because no manager exists there.
     # Written only where nothing is set, so a host already carrying a helper keeps it.
     if (-not (Get-GitConfig 'credential.helper')) {
         if (Set-GitConfig 'credential.helper' 'manager') { $changed++ }
@@ -439,7 +456,8 @@ function Set-Signing {
 }
 
 # Sign a commit in a throwaway repository and verify it.
-# This proves the configuration end to end, which reading the settings back cannot: a wrong allowed signers entry reads as correct and fails only when a signature is checked.
+# This proves the configuration end to end, which reading the settings back cannot.
+# A wrong allowed signers entry reads as correct and fails only when a signature is checked.
 function Test-Signing {
     $repository = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
     try {
@@ -460,7 +478,8 @@ function Test-Signing {
 # --- Agent ---
 
 # On Windows the agent is a service rather than a socket, and both starting it and setting it to start automatically need administrator.
-# Reported with the command that fixes it rather than run, on the same rule as the key ACL: this script does not elevate, and naming the change is better than half applying it.
+# Reported with the command that fixes it rather than run, on the same rule as the key ACL.
+# This script does not elevate, and naming the change is better than half applying it.
 function Show-AgentStatus {
     log ''
     log 'SSH agent'
@@ -580,7 +599,8 @@ function Show-Status {
 
     log ''
     log 'Registration, as GitHub publishes it'
-    # Which account to ask about comes from authentication, so with none there is no question to ask, and that reads differently from having asked and failed.
+    # Which account to ask about comes from authentication, so with none there is no question to ask.
+    # That reads differently from having asked and failed.
     if (-not $script:GITHUB_USER -or -not (Get-KeyBody)) {
         missing 'Authentication key registered, unknown until authentication works'
         missing 'Signing key registered, unknown until authentication works'
@@ -602,7 +622,8 @@ function Show-Status {
         if ($value) { ok "$key = $value" } else { missing $key }
     }
 
-    # The shared checkout settings are reported apart, because absent is the right state for a host one account uses and listing them as missing would read as two gaps to close.
+    # The shared checkout settings are reported apart, because absent is the right state for a host one account uses.
+    # Listing them as missing would read as two gaps to close.
     $shared = @(& git config --global --get-all safe.directory 2>$null)
     if ($shared.Count -gt 0) {
         $unique = @($shared | Sort-Object -Unique)
@@ -629,7 +650,10 @@ function Invoke-Configure {
     Add-KnownHost
 
     # The local configuration comes first, because none of it needs GitHub.
-    # A host that cannot authenticate yet, which is every host between creating its key and registering it, still ends this run with its identity, its signing configuration, and a commit that verifies locally.
+    # A host that cannot authenticate yet, which is every host between creating its key and registering it, still ends this run with:
+    #   - Its identity.
+    #   - Its signing configuration.
+    #   - A commit that verifies locally.
     Set-GitIdentity
     Set-SharedCheckout
     Set-Signing

@@ -3,16 +3,20 @@
 # Sets up git and GitHub on a host: the SSH key, the git configuration, and commit signing.
 # Every step is idempotent, so a re-run repairs a half configured host rather than duplicating what is already there.
 #
-# Two steps cannot be automated, because they happen in a browser: registering the public key as an authentication key, and registering the same key as a signing key.
+# Two steps cannot be automated, because they happen in a browser:
+#   - Registering the public key as an authentication key.
+#   - Registering the same key as a signing key.
 # Both are gates rather than suggestions.
-# The script stops at each, prints the key to paste and where to paste it, and checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
+# The script stops at each and prints the key to paste and where to paste it.
+# The script checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
 
 set -Eeuo pipefail
 
 readonly KEY="$HOME/.ssh/id_ed25519"
 readonly ALLOWED_SIGNERS="$HOME/.config/git/allowed_signers"
 
-# Git expands a leading tilde in a path setting, and the hosts already configured by hand hold the tilde form, so writing that form leaves an already configured host untouched.
+# Git expands a leading tilde in a path setting.
+# The hosts already configured by hand hold the tilde form, so writing that form leaves an already configured host untouched.
 # File operations use the expanded paths above, since the shell does not expand a tilde inside a variable.
 # shellcheck disable=SC2088  # The tilde is meant to stay literal here, git is what expands it.
 readonly KEY_SETTING="~/.ssh/id_ed25519.pub"
@@ -140,7 +144,8 @@ ensure_prerequisites() {
     readarray -t packages < <(prerequisites_missing)
     [[ ${#packages[@]} -eq 0 ]] && return 0
 
-    # Everything above this point works anywhere, and installing is the first step that does not, so a host without apt is told that rather than meeting a missing command part way through.
+    # Everything above this point works anywhere.
+    # Installing is the first step that does not, so a host without apt is told that rather than meeting a missing command part way through.
     command -v apt-get >/dev/null ||
         die "apt-get not found, and installing ${packages[*]} needs it. Install them with this host's package manager, then run this again."
 
@@ -152,7 +157,9 @@ ensure_prerequisites() {
 # --- Key ---
 
 # The key as its type and body, without the trailing comment.
-# That is the form both of GitHub's published lists carry: the .keys endpoint publishes two fields per line, and the signing keys API keeps the comment in a separate title field rather than in the key.
+# That is the form both of GitHub's published lists carry:
+#   - The .keys endpoint publishes two fields per line.
+#   - The signing keys API keeps the comment in a separate title field rather than in the key.
 # A local public key carries three fields, so a comparison that skipped this would never match.
 key_body() {
     local file="${1:-$KEY.pub}"
@@ -165,7 +172,10 @@ ensure_key() {
         return 0
     fi
 
-    # A private key with no public half is the harder case, because everything downstream reads the public one: the registration paste, the allowed signers entry, and both registration checks.
+    # A private key with no public half is the harder case, because everything downstream reads the public one:
+    #   - The registration paste.
+    #   - The allowed signers entry.
+    #   - Both registration checks.
     # The public key is derived from the private key rather than the pair being regenerated, since regenerating would invalidate a key that is already registered.
     if [[ -f $KEY ]]; then
         step "Deriving the missing public key from the private key"
@@ -186,7 +196,8 @@ ensure_key() {
 }
 
 # The first enrollment is the one moment a substituted host key would be accepted for good, and every later connection trusts whatever was recorded here.
-# So what github.com offers is checked against the fingerprints GitHub publishes before it is written down, and a check that cannot run is a refusal rather than a warning, since recording an unchecked key is what this prevents.
+# So what github.com offers is checked against the fingerprints GitHub publishes before it is written down.
+# A check that cannot run is a refusal rather than a warning, since recording an unchecked key is what this prevents.
 ensure_known_host() {
     ssh-keygen -F github.com >/dev/null 2>&1 && return 0
 
@@ -219,11 +230,13 @@ ensure_known_host() {
 
 # --- GitHub, read only ---
 
-# Every probe refuses to write a host key, so asking whether authentication works cannot enroll github.com behind the reader's back and a status run stays a read-only action.
+# Every probe refuses to write a host key.
+# So asking whether authentication works cannot enroll github.com behind the reader's back, and a status run stays a read-only action.
 # Enrolling the host key is ensure_known_host's job, in configure mode, where changing the host is the point.
 #
 # A status run also refuses to prompt, since it may be run unattended and a passphrase prompt would hang it.
-# Configure may prompt, because a passphrase for a key with no agent is a question only the operator can answer, and it is already an interactive action.
+# Configure may prompt, because a passphrase for a key with no agent is a question only the operator can answer.
+# Configure is already an interactive action.
 ssh_probe() {
     local -a opts=(-o StrictHostKeyChecking=yes -o ConnectTimeout=10)
     if [[ $MODE == "status" ]]; then
@@ -242,10 +255,13 @@ github_auth_user() {
 }
 
 # The same question asked of the managed key alone.
-# The ssh client offers the default identity files and an agent's keys besides whatever is named, so a host carrying another account's key authenticates as that account, and every check below would then be asking about the wrong one.
+# The ssh client offers the default identity files and an agent's keys besides whatever is named.
+# So a host carrying another account's key authenticates as that account, and every check below would then be asking about the wrong one.
 # IdentitiesOnly is not enough by itself, since the default files count as configured identities.
 #
-# That isolation is also why this is a second probe rather than a replacement: a host reaching GitHub through a proxy or over port 443 needs the config this probe discards, so a failure here means the managed key did not answer rather than that the host cannot reach GitHub.
+# That isolation is also why this is a second probe rather than a replacement.
+# A host reaching GitHub through a proxy or over port 443 needs the config this probe discards.
+# So a failure here means the managed key did not answer, rather than that the host cannot reach GitHub.
 github_auth_user_managed() {
     [[ -f $KEY ]] || return 1
 
@@ -254,7 +270,8 @@ github_auth_user_managed() {
     printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
 }
 
-# Prefer the account the managed key belongs to, since that is the one the registration checks are about, and say so when the host answers as somebody else.
+# Prefer the account the managed key belongs to, since that is the one the registration checks are about.
+# Say so when the host answers as somebody else.
 resolve_github_user() {
     local general managed
     general=$(github_auth_user)
@@ -274,11 +291,14 @@ resolve_github_user() {
     return 0
 }
 
-# GitHub publishes both key lists for an account, so a registration can be checked from the host without a token and without the browser that made it.
+# GitHub publishes both key lists for an account.
+# So a registration can be checked from the host without a token and without the browser that made it.
 # Each fetch is captured before it is searched rather than piped into the search.
-# Under pipefail a search that stops at its first match leaves the fetch writing to a closed pipe, so a key that is registered reports itself as missing on any list long enough for the timing to matter.
+# Under pipefail a search that stops at its first match leaves the fetch writing to a closed pipe.
+# So a key that is registered reports itself as missing on any list long enough for the timing to matter.
 # Each returns 0 registered, 1 not registered, and 2 when the answer could not be read at all.
-# The third is not the second: a momentary failure to reach GitHub reported as "not registered" sends the reader to register a key that is already there.
+# The third is not the second.
+# A momentary failure to reach GitHub reported as "not registered" sends the reader to register a key that is already there.
 github_auth_key_registered() {
     local body keys
     body=$(key_body) || return 2
@@ -304,7 +324,9 @@ github_signing_key_registered() {
 
 # A registration is a browser step, so this prints what to paste and where, then stops.
 # The consequence of not registering differs per caller, so each says its own rather than this saying one for all.
-# Authentication failing stops everything that reaches GitHub, signing not being registered stops nothing locally, and a host authenticating with another key is working and not managed.
+# Authentication failing stops everything that reaches GitHub.
+# Signing not being registered stops nothing locally.
+# A host authenticating with another key is working and not managed.
 registration_needed() {
     local kind="$1" type="$2"
     log ""
@@ -347,7 +369,8 @@ git_config_add_once() {
 }
 
 # The flag wins, then whatever the host already carries, then the default.
-# Reading the host first is what keeps a machine configured for somebody else from being rewritten by a run meant to be safe to repeat, and it is why the defaults are not written into the variables at the top.
+# Reading the host first is what keeps a machine configured for somebody else from being rewritten by a run meant to be safe to repeat.
+# Reading the host first is also why the defaults are not written into the variables at the top.
 resolve_identity() {
     local existing
 
@@ -381,7 +404,8 @@ configure_git() {
 }
 
 # A checkout several accounts share needs two settings that are relaxations rather than defaults, so they are applied only for a path the caller names.
-# The safe.directory setting turns off the ownership check git added to stop a repository owned by someone else running its hooks as you, and widening it to every path on a host is a different decision from widening it to one directory that is known to be shared.
+# The safe.directory setting turns off the ownership check git added to stop a repository owned by someone else running its hooks as you.
+# Widening that setting to every path on a host is a different decision from widening it to one directory that is known to be shared.
 # A host with one account needs neither, which is why nothing here runs without the flag.
 configure_shared_checkout() {
     [[ -n $SHARED_CHECKOUT ]] || return 0
@@ -438,7 +462,8 @@ configure_signing() {
 }
 
 # Sign a commit in a throwaway repository and verify it.
-# This proves the configuration end to end, which reading the settings back cannot: a wrong allowed signers entry reads as correct and fails only when a signature is checked.
+# This proves the configuration end to end, which reading the settings back cannot.
+# A wrong allowed signers entry reads as correct and fails only when a signature is checked.
 signing_works() {
     local repo="$TMP_DIR/signing-check"
     rm -rf "$repo"
@@ -601,7 +626,8 @@ status() {
         fi
     done
 
-    # The shared checkout settings are reported apart, because absent is the right state for a host one account uses and listing them as missing would read as two gaps to close.
+    # The shared checkout settings are reported apart, because absent is the right state for a host one account uses.
+    # Listing them as missing would read as two gaps to close.
     local -a shared=()
     readarray -t shared < <(git config --global --get-all safe.directory 2>/dev/null || true)
     if [[ ${#shared[@]} -gt 0 ]]; then
@@ -638,7 +664,10 @@ configure() {
     ensure_known_host
 
     # The local configuration comes first, because none of it needs GitHub.
-    # A host that cannot authenticate yet, which is every host between creating its key and registering it, still ends this run with its identity, its signing configuration, and a commit that verifies locally.
+    # A host that cannot authenticate yet, which is every host between creating its key and registering it, still ends this run with:
+    #   - Its identity.
+    #   - Its signing configuration.
+    #   - A commit that verifies locally.
     configure_git
     configure_shared_checkout
     configure_signing
@@ -653,7 +682,8 @@ configure() {
         die "A commit did not verify. Check $ALLOWED_SIGNERS holds this host's key against $EMAIL."
     fi
 
-    # Authentication is the gate for everything GitHub answers: without it this host reaches no private repository, and the registration check below has no account to read.
+    # Authentication is the gate for everything GitHub answers.
+    # Without it this host reaches no private repository, and the registration check below has no account to read.
     step "Checking SSH authentication to GitHub"
     resolve_github_user
     if [[ -z $GITHUB_USER ]]; then
@@ -664,13 +694,15 @@ configure() {
         info "Authenticated as $GITHUB_USER, with the managed key"
     else
         # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.
-        # Reporting it as an ordinary line let a run end in "Done" on a host whose managed key was registered nowhere, which is the state this script exists to leave behind.
+        # Reporting it as an ordinary line let a run end in "Done" on a host whose managed key was registered nowhere.
+        # A host whose managed key is registered nowhere is the state this script exists to leave behind.
         registration_needed "authentication" "Authentication"
         warn "This host authenticates with a key other than the managed one, so the managed key is registered nowhere and revoking this host alone would not cut its access"
     fi
 
     # Signing is the second gate.
-    # The configuration above is what signs and verifies locally, and the registration is what makes GitHub show the commit as verified, so only one of those two can be done from here.
+    # The configuration above is what signs and verifies locally.
+    # The registration is what makes GitHub show the commit as verified, so only one of those two can be done from here.
     step "Checking the signing key registration"
     local signing_rc=0
     github_signing_key_registered || signing_rc=$?
