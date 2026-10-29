@@ -21,6 +21,7 @@ from pr_review_rounds import (
     REVIEWER,
     answered_outside_review,
     collected,
+    commit_oid,
     coverage,
     first_comment,
     head_nodes,
@@ -110,7 +111,7 @@ def render(
     # Every round's notes, since a renamed section on an earlier round hides a finding too.
     notes = [
         *dict.fromkeys(
-            f"round {((node.get('commit') or {}).get('oid') or 'unknown')[:8]}: {n}"
+            f"round {(commit_oid(node) or 'unknown')[:8]}: {n}"
             for node in revs
             for n in reading(node).notes
             if node not in on_head or n not in {p.note for p in reading(node).unplaced}
