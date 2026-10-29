@@ -338,7 +338,7 @@ def _selftest():
     assert cluster({"r1": big, "r2": near, "r3": far}) == [["r1", "r2"], ["r3"]]
 
     registry = {
-        # A defaults branch that is neither the fleet "main" nor the one "Two" declares.
+        # The defaults branch is neither the fleet "main" nor the one "Two" declares.
         # That tells the three-step resolve apart from either shortcut it could collapse to.
         "defaults": {"groundTruthBranch": "release/9.9"},
         "repos": [
