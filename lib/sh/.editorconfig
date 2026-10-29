@@ -1,0 +1,12 @@
+[*.sh]
+binary_next_line = false
+function_next_line = false
+indent_size = 4
+indent_style = space
+keep_padding = false
+minify = false
+never_split = false
+shell_variant = bash
+simplify = false
+space_redirects = false
+switch_case_indent = false
