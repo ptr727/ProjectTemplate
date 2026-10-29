@@ -42,9 +42,9 @@ def resolve_description(registry: dict, name: str) -> str | None:
     - more than one entry named NAME
     - a declared description that description_errors() rejects
 
-    A same-name-different-case entry is a data-entry mistake rather than a different repo. This is
-    because spec/validate.py rejects a padded name outright, and GitHub itself compares a repo name
-    case-insensitively.
+    spec/validate.py rejects a padded name outright. GitHub itself compares a repo name
+    case-insensitively, so a same-name-different-case entry is a data-entry mistake rather than a
+    different repo.
     """
     if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
         raise ResolveError("registry is not an object with a 'repos' array")
