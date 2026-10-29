@@ -44,7 +44,7 @@ only trustworthy while that rule holds.
   skill boundary map change only on measured downstream evidence, never on hub-file size alone.
 - **O5, preserve the invariants.** Safety, authorization, verification, and merge gates keep their exact semantics. Decision-point duplication stays. Deterministic `WHEN / DO / UNLESS`
   phrasing never softens into suggestion wording.
-- **O6, agent-executable delivery.** Every work item is a checkbox sized for one task, with an execution protocol. So agents apply the changes and record the results in this doc.
+- **O6, agent-executable delivery.** Every work item is a checkbox sized for one task, with an execution protocol. This lets agents apply the changes and record the results in this doc.
 
 ## Cost Model
 
@@ -150,7 +150,7 @@ Establishes G5 and G6, the two instruments every later phase reads.
       where sibling skills must stay inactive.
 - [ ] Record the benchmark's baseline run, before any Phase 2 edit, in the benchmark doc. The maintainer or an agent runs it over the seeded cases, and repeats it where nondeterminism shows.
 
-Exit criteria: the inventory script runs clean from a hub checkout. Another is that the benchmark doc exists with a recorded baseline. Another is that this doc's Metrics table is reproducible by command rather than by hand.
+Exit criteria: the inventory script runs clean from a hub checkout. Another is that the benchmark doc exists with a recorded baseline. The other is that this doc's Metrics table is reproducible by command rather than by hand.
 
 ### Phase 2: Skill Body Progressive Disclosure
 
@@ -185,7 +185,7 @@ rule is interpreted, per finding 3 of [issue #766][issue-766]. Each item is one 
       this box only when every named skill is done in its own change.
 
 Exit criteria: no skill body over 10 KB remains without either a `references/` split or a
-recorded reason its content must stay whole. Another is that every moved rule is reachable from its body. Another is that the benchmark shows no routing or behavior regression.
+recorded reason its content must stay whole. Another is that every moved rule is reachable from its body. The other is that the benchmark shows no routing or behavior regression.
 
 ### Phase 3: Copilot Runbook Reduction
 
@@ -215,7 +215,7 @@ Disproved Claims ledger survives untouched.
 - [ ] Sweep the prose that asserts the old runbook shape, including sibling docs and skills that
       quote the runbook length or structure.
 
-Exit criteria: the carried file carries no embedded query that the hub-hosted helper already implements. Another is that the keeper confirms ledger preservation. Another is that the benchmark shows the review loop
+Exit criteria: the carried file carries no embedded query that the hub-hosted helper already implements. Another is that the keeper confirms ledger preservation. The other is that the benchmark shows the review loop
 still executes.
 
 ### Phase 4: Downstream and Provider Measurement
@@ -269,7 +269,7 @@ benchmark's negative cases decide, run before and after each change.
 - [ ] `resync-a-repo` (798 B)
 - [ ] `carried-instruction-file-guard` (776 B)
 
-Exit criteria: discovery metadata shrank materially where the provider matrix says it is recurring. Another is that every description keeps its negative boundaries. Another is that the benchmark routing record
+Exit criteria: discovery metadata shrank materially where the provider matrix says it is recurring. Another is that every description keeps its negative boundaries. The other is that the benchmark routing record
 shows no missed or false activation introduced.
 
 ### Phase 6: AGENTS.md Reduction Decision
@@ -306,7 +306,7 @@ sibling disambiguations in the same change.
       carried-file guard with the ledger rules as a `references/` file, or two skills with
       sharpened boundaries, on the measured activation overlap.
 - [ ] Confirm the deliberate non-folds: `standup-a-repo`, `resync-a-repo`, `audit-a-repo`, and
-      `check-this-repo` stay separate because each names which session it is in. `agent-conduct` stays the moment-based umbrella beside the task-based specialists.
+      `check-this-repo` stay separate because each names which session it is in. Confirm too that `agent-conduct` stays the moment-based umbrella beside the task-based specialists.
 
 Exit criteria: every boundary decision is recorded in the fleet-map Decision Ledger with its
 measured basis, and executed or declined accordingly.

@@ -22,8 +22,7 @@ pending, which is expected, not stale. It is stale only once the audit has confi
 by hand during an `AUDIT.md` run like every sibling check in that dimension, never by
 `spec/audit.py` itself. A repo with no local hook mechanism wired at all is a `linter-parity`
 defect, the same severity a missing markdownlint config already gets. A repo mid-convergence stays operational, per the existing carve-out in
-GOVERNANCE.md. Such a repo has the doc-gate half wired and the language-format half not yet,
-because its own corpus does not pass it clean. Two catalog snippets carry
+GOVERNANCE.md. Such a repo has the doc-gate half wired and the language-format half not yet because its own corpus does not pass it clean. Two catalog snippets carry
 the canonical shape. One is Husky.Net
 (`catalog/snippets/husky/`, for a repo already keeping a .NET tool manifest declaring it). The other
 is the `pre-commit` framework (`catalog/snippets/pre-commit/`, for a repo without one and for any repo
