@@ -1,12 +1,17 @@
 #!/bin/bash
 
 # Installs the fleet skills for the current user, by driving the hub-hosted installer in the tree this script sits in.
-# This is the one script here that reaches outside host-setup/, deliberately: the skills content lives at the tree root, so a copy fetched without the tree has nothing to install, and the independent-fetchability rule the sibling scripts follow cannot apply to it.
+# This is the one script here that reaches outside host-setup/, deliberately.
+# The skills content lives at the tree root, so a copy fetched without the tree has nothing to install.
+# The independent-fetchability rule the sibling scripts follow therefore cannot apply to it.
 # Python is its one dependency, which is why the bootstrap runs it last: install-tools.sh provides the interpreter before this needs one.
-# It is also the one script here that takes no sudo at all, where install-tools.sh and upgrade-host.sh elevate per command themselves, which is what refuse_sudo below exists to hold the operator to.
+# It is also the one script here that takes no sudo at all.
+# The scripts install-tools.sh and upgrade-host.sh elevate per command themselves instead.
+# Holding the operator to the no-sudo rule is what refuse_sudo below exists to do.
 #
 # Every step is idempotent, because the installer it drives is.
-# SKILLS_SOURCE_COMMIT, where the caller sets it, names the commit of a tree git cannot answer for, which is what a tarball fetched by the bootstrap is.
+# SKILLS_SOURCE_COMMIT, where the caller sets it, names the commit of a tree git cannot answer for.
+# A tarball fetched by the bootstrap is such a tree.
 
 set -Eeuo pipefail
 
@@ -64,9 +69,15 @@ parse_args() {
 }
 
 # A skills install is per user and writes only under that user's home, so sudo buys it nothing and costs it correctness twice over.
-# The installer resolves its target as the running user's home, so under sudo the skills land in /root/.agents/skills rather than in the invoking user's, and it looks the claude CLI up on PATH, which sudo has replaced with its own secure_path, so a claude installed on the invoking user's PATH reads as absent and the run reports the marketplace unregistered.
-# Neither shows up as a failure, since the run still exits 0, and a later --report as the actual user then calls the same tree uninstalled.
-# The test is SUDO_USER rather than a bare EUID, because a host whose working account is root (a container, a Proxmox node) carries no SUDO_USER and installs for root correctly, and refusing there would break an install that was right.
+# The installer resolves its target as the running user's home.
+# Under sudo the skills therefore land in /root/.agents/skills rather than in the invoking user's.
+# The installer also looks the claude CLI up on PATH, which sudo has replaced with its own secure_path.
+# A claude installed on the invoking user's PATH therefore reads as absent, and the run reports the marketplace unregistered.
+# Neither shows up as a failure, since the run still exits 0.
+# A later --report as the actual user then calls the same tree uninstalled.
+# The test is SUDO_USER rather than a bare EUID.
+# This is because a host whose working account is root (a container, a Proxmox node) carries no SUDO_USER and installs for root correctly.
+# Refusing there would break an install that was right.
 # --report is refused with the rest: run under sudo it reads root's stamp and answers for a machine state nobody installed.
 refuse_sudo() {
     [[ $EUID -eq 0 && -n ${SUDO_USER:-} && $SUDO_USER != "root" ]] || return 0

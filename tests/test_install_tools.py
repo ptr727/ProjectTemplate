@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Tests for the host tool installers' JSON report, on both platforms.
 
-The JSON report exists so a program can read what the table tells a person, so its contract is the
-shape a program parses: every field present on every row, a version that was not read written as
-null, and each note filed under the tool that raised it. Each installer's report is driven through
-its own functions with the host reads stubbed, since a real report reads the host it runs on.
+The JSON report exists so a program can read what the table tells a person.
+Its contract is therefore the shape a program parses:
+
+- every field present on every row
+- a version that was not read written as null
+- each note filed under the tool that raised it
+
+Each installer's report is driven through its own functions with the host reads stubbed.
+This is because a real report reads the host it runs on.
 
 Run as `python3 tests/test_install_tools.py`, or under `python3 -m unittest discover -s tests`.
 """

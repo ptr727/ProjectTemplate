@@ -1,10 +1,12 @@
 #!/bin/bash
 
 # Keeps the coding-agent tools a user installed current, and installs one only when it is named.
-# These tools live in the user's own home and each carries its own updater, so this script runs as that user, never as root, and drives each tool's updater rather than replacing it.
+# These tools live in the user's own home and each carries its own updater, so this script runs as that user, never as root.
+# For the same reason it drives each tool's updater rather than replacing it.
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a nightly run.
 #
-# A tool installed through a package manager (npm, Homebrew, mise, Nix, apt) is reported and left to that manager, since running the tool's own updater over it would fight the manager for the same files.
+# A tool installed through a package manager (npm, Homebrew, mise, Nix, apt) is reported and left to that manager.
+# This is because running the tool's own updater over it would fight the manager for the same files.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 set -Eeuo pipefail
@@ -12,7 +14,8 @@ set -Eeuo pipefail
 # The managed agent tools, in no particular order, since none depends on another.
 readonly TOOLS=(claude codex opencode herdr cswap)
 
-# Seconds one updater or installer may run before it is treated as hung, long enough for a slow download and short enough that a nightly run ends.
+# Seconds one updater or installer may run before it is treated as hung.
+# The limit is long enough for a slow download and short enough that a nightly run ends.
 readonly STEP_TIMEOUT=900
 
 MODE="report"
@@ -191,7 +194,8 @@ confirm() {
     [[ $reply == [yY] || $reply == [yY][eE][sS] ]]
 }
 
-# Fetches an installer to a file and runs it from there rather than piping it into a shell, so a truncated download fails before it runs rather than part way through.
+# Fetches an installer to a file and runs it from there rather than piping it into a shell.
+# A truncated download then fails before it runs rather than part way through.
 run_installer() {
     local url="$1" shell="$2" file
     file="$TMP_DIR/$(basename "$url").installer"
@@ -291,7 +295,8 @@ herdr_outdated_integrations() {
     return 0
 }
 
-# Read from herdr's own status rather than from whether a session is open, since a session on the current binary needs no restart however many panes it holds.
+# Read from herdr's own status rather than from whether a session is open.
+# This is because a session on the current binary needs no restart however many panes it holds.
 # Returns 0 when a restart is pending, 1 when none is, and 2 when herdr's answer could not be read.
 herdr_restart_pending() {
     local out answer
@@ -435,7 +440,8 @@ upgrade_tool() {
         return 0
     fi
 
-    # The herdr updater refuses to run from inside one of its own panes, so a run there skips that one step rather than failing on a refusal it already knows is coming.
+    # The herdr updater refuses to run from inside one of its own panes.
+    # A run there therefore skips that one step rather than failing on a refusal it already knows is coming.
     if [[ $tool == "herdr" && -n ${HERDR_PANE_ID:-} ]]; then
         log "herdr: at ${installed:-an unreadable version}, and this run is inside a herdr pane, which herdr will not update from, run this outside herdr to update it"
         herdr_post || FAILED+=("herdr integrations")
@@ -613,7 +619,8 @@ main() {
         exit 0
     fi
 
-    # Root's home holds none of these tools on a host where a person uses them, so a root run would report everything absent and install into the wrong home.
+    # Root's home holds none of these tools on a host where a person uses them.
+    # A root run would therefore report everything absent and install into the wrong home.
     [[ $EUID -ne 0 ]] ||
         die "Agent tools live in a user's home, so this runs as that user, for example: runuser -u <user> -- install-agents.sh $*"
     [[ -n ${HOME:-} && -d $HOME ]] || die "HOME is not set to a directory, so there is no user's home to read the tools from"

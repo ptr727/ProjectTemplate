@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Tests for `host-setup/linux/install-agents.sh`, the per-user agent tool updater.
 
-The contract under test is the one a nightly run relies on: an upgrade drives only the tools
-already installed, a tool a package manager owns is left to that manager, nothing is installed
-unless it is named, and herdr's integrations and restart state reach the output. Each tool is a stub
-on a PATH of the test's own that records how it was called, since the real tools update over the
-network and would change the host running the test.
+The contract under test is the one a nightly run relies on:
+
+- an upgrade drives only the tools already installed
+- a tool a package manager owns is left to that manager
+- nothing is installed unless it is named
+- herdr's integrations and restart state reach the output
+
+Each tool is a stub on a PATH of the test's own that records how it was called.
+This is because the real tools update over the network and would change the host running the test.
 
 Run as `python3 tests/test_install_agents.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -269,7 +273,8 @@ SCRIPT_PS = ROOT / "host-setup" / "windows" / "install-agents.ps1"
 
 
 @unittest.skipUnless(PWSH, "needs pwsh to run the Windows updater")
-# The stubs are bash scripts, and a hosted Windows runner is elevated, which the updater refuses by design, so this harness runs the Windows script under pwsh on a POSIX host.
+# The stubs are bash scripts, and a hosted Windows runner is elevated, which the updater refuses by design.
+# This harness therefore runs the Windows script under pwsh on a POSIX host.
 @unittest.skipIf(sys.platform == "win32", "drives the Windows updater with POSIX stub tools")
 class TestInstallAgentsWindows(unittest.TestCase):
     """`install-agents.ps1`, run whole under pwsh on this host against stub tools.

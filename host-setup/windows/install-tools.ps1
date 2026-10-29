@@ -1,5 +1,6 @@
 # Installs and upgrades the host tools the fleet's repositories expect, on native Windows, through winget.
-# Every tool in the contract has a winget package, so winget is the only source here, where the Linux script needs three because an apt feed trails upstream on half its tools.
+# Every tool in the contract has a winget package, so winget is the only source here.
+# The Linux script needs three, because an apt feed trails upstream on half its tools.
 # No version is written into this script, and winget is asked what each package carries now, so the script does not go stale between releases.
 #
 # Every step is idempotent.
@@ -7,7 +8,10 @@
 # Re-running repairs drift rather than assuming a clean host.
 #
 # Nothing here elevates, and no scope is passed unless the caller names one.
-# An installer that needs administrator raises its own prompt, which is the path with the fewest failures: forcing user scope installs a second copy beside a machine wide one, and some installers fail outright when launched from an already elevated process.
+# An installer that needs administrator raises its own prompt.
+# That is the path with the fewest failures.
+# Forcing user scope installs a second copy beside a machine wide one.
+# Some installers fail outright when launched from an already elevated process.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
 # Without it a stray word binds to the first parameter that takes a value, and a mistyped tool name is reported against -Scope instead.
@@ -38,7 +42,8 @@ $PSNativeCommandUseErrorActionPreference = $false
 $NOT_FOUND = -1978335212
 
 # Every parameter is read into a variable here rather than from inside a function.
-# A script parameter reached only from a nested scope reads as declared and never used, which is a finding on each one and hides a parameter that genuinely is unused.
+# A script parameter reached only from a nested scope reads as declared and never used.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     report    = [bool]$Report
     install   = [bool]$Install
@@ -86,7 +91,9 @@ function Get-NoteText {
 }
 
 # A path with the home directory replaced by the variable that names it.
-# A report is written to be pasted into an issue or a pull request, so a path it prints carries the account name into wherever it is pasted, and the comments here already avoid writing one for the same reason.
+# A report is written to be pasted into an issue or a pull request.
+# A path it prints therefore carries the account name into wherever it is pasted.
+# The comments here already avoid writing one for the same reason.
 # The variable is what a reader expands themselves, so the path stays as actionable as it was.
 function Hide-Home {
     param([string]$Path)
@@ -177,7 +184,9 @@ function run {
         return 0
     }
     # The command's own output goes to the console rather than down the pipeline.
-    # A native command writes to this function's output stream, so without this the caller receives every line the command printed with the exit code appended, and a check against 0 then compares against the first line of output.
+    # A native command writes to this function's output stream.
+    # Without this the caller receives every line the command printed with the exit code appended.
+    # A check against 0 then compares against the first line of output.
     & $Command @Arguments | Out-Host
     return $LASTEXITCODE
 }
@@ -189,9 +198,13 @@ function Test-OutputToConsole {
 }
 
 # The run wrapper above, for a command that writes UTF-8 whatever the console's code page, as Docker's CLI does.
-# A console left at its OEM default decodes those bytes as that code page, so the check mark docker desktop prints on success reads as three unrelated characters.
-# The console is switched to UTF-8 for this one call and put back after, rather than for the whole run, so every other native tool here keeps the decoding it was written against.
-# Output redirected to a file or a pipe is left alone: PowerShell keeps writing it in the encoding it started with, so decoding the command as UTF-8 there would turn the check mark into one lossy byte where it otherwise passes through intact.
+# A console left at its OEM default decodes those bytes as that code page.
+# The check mark docker desktop prints on success therefore reads as three unrelated characters.
+# The console is switched to UTF-8 for this one call and put back after, rather than for the whole run.
+# Every other native tool here therefore keeps the decoding it was written against.
+# Output redirected to a file or a pipe is left alone.
+# PowerShell keeps writing it in the encoding it started with.
+# Decoding the command as UTF-8 there would therefore turn the check mark into one lossy byte, where it otherwise passes through intact.
 # A process with no console at all refuses the switch, and that is not a failure either, since nothing renders the bytes there.
 function Invoke-Utf8Run {
     param([Parameter(Mandatory)][string]$Command, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
@@ -225,10 +238,13 @@ function confirm {
 # --- winget ---
 
 # The version column of every row winget printed for one id.
-# The offsets come from the header rather than from a whitespace split, because a package name carries spaces and splitting on them moves the version into the name.
-# A row is kept only where the id column holds the id that was asked for, which drops the trailing count line without a list of strings to ignore.
+# The offsets come from the header rather than from a whitespace split.
+# This is because a package name carries spaces, and splitting on them moves the version into the name.
+# A row is kept only where the id column holds the id that was asked for.
+# That drops the trailing count line without a list of strings to ignore.
 # Every list returning function here returns with a leading comma, which is what stops PowerShell unrolling a one element array into the element.
-# Without it a single installed version arrives as a string, and asking a string for its Count is an error under Set-StrictMode rather than the 1 the caller expects.
+# Without it a single installed version arrives as a string.
+# Asking a string for its Count is an error under Set-StrictMode rather than the 1 the caller expects.
 function Read-WingetTable {
     param([string]$Text, [string]$Id)
     $rows = @()
@@ -246,7 +262,8 @@ function Read-WingetTable {
 }
 
 # The id and version of every row winget printed for a source search, unfiltered by id.
-# Shares the header driven offsets with Read-WingetTable, but keeps the id column instead of assuming the caller already knows it, which is what Resolve-ToolPackage needs from a family search.
+# Shares the header driven offsets with Read-WingetTable, but keeps the id column instead of assuming the caller already knows it.
+# Resolve-ToolPackage needs that from a family search.
 function Read-WingetSearchTable {
     param([string]$Text, [string]$Prefix)
     $rows = @()
@@ -266,7 +283,8 @@ function Read-WingetSearchTable {
 }
 
 # The installed versions of one package id, or an empty list where none is installed.
-# The exit code decides rather than the output text, since a missing id and an unreadable source both print prose and only the code tells them apart.
+# The exit code decides rather than the output text.
+# This is because a missing id and an unreadable source both print prose, and only the code tells them apart.
 # A null answer means the question could not be answered, which is not the same as none installed.
 function Get-WingetInstalled {
     param([Parameter(Mandatory)][string]$Id, [string]$InScope)
@@ -278,15 +296,19 @@ function Get-WingetInstalled {
     return , (Read-WingetTable -Text $text -Id $Id)
 }
 
-# Whether a Version column token is a version, rather than the Unknown winget prints for an entry recording none or the bare < or > its range forms leave.
+# Whether a Version column token is a version, rather than the Unknown winget prints for an entry recording none.
+# A bare < or > left by its range forms is likewise not a version.
 function Test-WingetVersion {
     param([string]$Token)
     return $Token -match '^\d'
 }
 
-# One version for a package winget lists more than once, or nothing where the rows do not describe one product or one of them carries no version.
-# Rows sharing a major version are side by side builds of one product and the newest is the answer, which is what a dotnet SDK line looks like.
-# Rows whose majors differ are two products sharing an id, which is what the legacy WSL installer looks like beside WSL itself, and there no single version compares.
+# One version for a package winget lists more than once.
+# The result is nothing where the rows do not describe one product, or one of them carries no version.
+# Rows sharing a major version are side by side builds of one product, and the newest is the answer.
+# That is what a dotnet SDK line looks like.
+# Rows whose majors differ are two products sharing an id, and there no single version compares.
+# That is what the legacy WSL installer looks like beside WSL itself.
 function Resolve-InstalledVersion {
     param([string[]]$Version)
     if (-not $Version -or $Version.Count -eq 0) { return $null }
@@ -305,7 +327,8 @@ function Resolve-InstalledVersion {
 }
 
 # What the source carries now, read without installing anything.
-# The show command prints one Version line even for an id the list command answers with several rows, which is what makes it the reader for the target rather than a second list call.
+# The show command prints one Version line even for an id the list command answers with several rows.
+# That is what makes it the reader for the target rather than a second list call.
 function Get-WingetAvailable {
     param([Parameter(Mandatory)][string]$Id)
     $text = (& winget show --id $Id --exact --source winget --disable-interactivity 2>&1 | Out-String -Width 500)
@@ -329,8 +352,11 @@ function Get-WingetScope {
     return , $found
 }
 
-# Whether winget wrote the uninstall entry for this package itself, which it does for a portable or an archive package and not for an exe or an msi.
-# This is the only positive evidence of provenance available, and its absence proves nothing: winget runs the vendor's own installer for an exe or an msi, so that entry is identical whether winget invoked it or a person did.
+# Whether winget wrote the uninstall entry for this package itself.
+# It does that for a portable or an archive package, and not for an exe or an msi.
+# This is the only positive evidence of provenance available, and its absence proves nothing.
+# For an exe or an msi, winget runs the vendor's own installer.
+# That entry is therefore identical whether winget invoked it or a person did.
 # Reported where present and silent where not, rather than being turned into a claim it cannot support.
 function Test-WingetOwnedEntry {
     param([Parameter(Mandatory)][string]$Id)
@@ -347,7 +373,9 @@ function Test-WingetOwnedEntry {
 }
 
 # The package ids winget refuses to move as part of an upgrade of everything.
-# A package lands here because its manifest asks for it, which is the author saying the application updates itself, and the version winget reports is then the one the installer first wrote rather than the one the application runs.
+# A package lands here because its manifest asks for it.
+# That is the author saying the application updates itself.
+# The version winget reports is then the one the installer first wrote rather than the one the application runs.
 # Read once and cached, since it costs a full upgrade query.
 function Get-ExplicitUpgrade {
     if ($null -ne $script:EXPLICIT) { return , $script:EXPLICIT }
@@ -372,9 +400,18 @@ function Get-ExplicitUpgrade {
 }
 
 # The package id winget's own catalog says produced the version this tool reports as installed.
-# `winget list --id X --exact` answers yes for a package sharing this tool's family even where X itself is not what is installed (a host running OpenJS.NodeJS, the Current channel, reads as OpenJS.NodeJS.LTS because the two share a publisher and a name), but the version it reports comes straight from the installed entry regardless of which id was asked about, so matching that version against every id in the family, read from a plain source search rather than an id scoped one, is what tells the ids apart without trusting the id column winget answered with at all.
-# A tool naming no family resolves to its own package unchanged and costs nothing extra, and a version matching none of the family's ids does the same, since a family search that cannot confirm anything is no worse than not asking.
-# A version matching more than one id falls back the same way rather than picking the first: two ids sharing a version happens right at a channel handoff, when a major that just left Current has not yet lost its old id from the search results, and picking between them by list order would be a guess wearing the shape of an answer.
+# `winget list --id X --exact` answers yes for a package sharing this tool's family even where X itself is not what is installed.
+# For example, a host running OpenJS.NodeJS, the Current channel, reads as OpenJS.NodeJS.LTS, because the two share a publisher and a name.
+# The version it reports still comes straight from the installed entry, regardless of which id was asked about.
+# So the version is matched against every id in the family, read from a plain source search rather than an id scoped one.
+# That is what tells the ids apart without trusting the id column winget answered with at all.
+# A tool naming no family resolves to its own package unchanged and costs nothing extra.
+# A version matching none of the family's ids does the same.
+# This is because a family search that cannot confirm anything is no worse than not asking.
+# A version matching more than one id falls back the same way rather than picking the first.
+# Two ids sharing a version happens right at a channel handoff.
+# That is when a major that just left Current has not yet lost its old id from the search results.
+# Picking between them by list order would be a guess wearing the shape of an answer.
 function Resolve-ToolPackage {
     param([Parameter(Mandatory)][hashtable]$Tool, [string]$Installed)
     if (-not $Tool.Family -or -not $Installed) { return $Tool.Package }
@@ -386,7 +423,8 @@ function Resolve-ToolPackage {
 }
 
 # Install, upgrade and remove, named here so the flags appear once in this file.
-# No scope is passed unless the caller named one, because winget then acts on the copy it found and naming a different scope adds a copy rather than replacing one.
+# No scope is passed unless the caller named one.
+# This is because winget then acts on the copy it found, and naming a different scope adds a copy rather than replacing one.
 function Invoke-WingetInstall {
     param([Parameter(Mandatory)][string]$Id)
     $arguments = @('install', '--id', $Id, '--exact', '--source', 'winget', '--disable-interactivity',
@@ -396,7 +434,9 @@ function Invoke-WingetInstall {
 }
 
 # An upgrade takes the named scope too, on the same rule as an install.
-# Reaching here with a scope that disagrees with the installed copy is already refused, so the scope named here is one a copy sits in, and passing it is what says which copy to move where a tool is installed in both.
+# Reaching here with a scope that disagrees with the installed copy is already refused.
+# So the scope named here is one a copy sits in.
+# Passing it is what says which copy to move where a tool is installed in both.
 function Invoke-WingetUpgrade {
     param([Parameter(Mandatory)][string]$Id)
     $arguments = @('upgrade', '--id', $Id, '--exact', '--source', 'winget', '--disable-interactivity',
@@ -405,8 +445,11 @@ function Invoke-WingetUpgrade {
     return (run 'winget' @arguments)
 }
 
-# The scope to remove from is the one the copy was found in, which the caller passes, rather than the one the caller asked to end up in.
-# Removing in the requested scope finds nothing where the copy sits in the other one, so the old copy survives and the install that follows adds a second beside it, which is the state -Reinstall exists to clear.
+# The scope to remove from is the one the copy was found in, which the caller passes.
+# It is not the one the caller asked to end up in.
+# Removing in the requested scope finds nothing where the copy sits in the other one.
+# So the old copy survives, and the install that follows adds a second beside it.
+# That is the state -Reinstall exists to clear.
 function Invoke-WingetRemove {
     param([Parameter(Mandatory)][string]$Id, [string]$InScope)
     $arguments = @('uninstall', '--id', $Id, '--exact', '--disable-interactivity', '--silent')
@@ -418,10 +461,16 @@ function Invoke-WingetRemove {
 $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir'
 
 # The entries of the installer log one failed winget call wrote that say why it failed, or none where no such log or entry exists.
-# All winget reports is that the installer exited non-zero, with a code the installer chose, so the reason lives in that log and nowhere a person reads by default.
-# A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text, which is the whole reason, so an entry keeps its indented continuation lines rather than being read one line at a time.
-# Capped at the last few matches so a verbose MSI log cannot flood the console, with the log's own path printed beside them for the rest.
-# Whether files were in use is read from every entry before that cap, and an in-use entry is always among those shown, the first one put back where none survived the cap, so a run of later error and abort lines cannot push the actual reason out of the report.
+# All winget reports is that the installer exited non-zero, with a code the installer chose.
+# So the reason lives in that log and nowhere a person reads by default.
+# A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text.
+# That text is the whole reason.
+# So an entry keeps its indented continuation lines rather than being read one line at a time.
+# Capped at the last few matches so a verbose MSI log cannot flood the console.
+# The log's own path is printed beside them for the rest.
+# Whether files were in use is read from every entry before that cap.
+# An in-use entry is always among those shown, the first one put back where none survived the cap.
+# So a run of later error and abort lines cannot push the actual reason out of the report.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
     $result = @{ Log = $null; Entries = @(); InUse = $false }
@@ -450,9 +499,14 @@ function Get-InstallerFailureReason {
     return $result
 }
 
-# The directory one installed file's package owns, read as the child of the container it was installed into, or nothing where the file sits in no such container.
-# A tool's executable can sit several levels down its own tree and in more than one place, Git for Windows carrying git.exe in both cmd and mingw64\bin, so walking up from the executable a fixed number of levels lands on a different directory depending on which copy PATH resolved.
-# Anything outside these containers is left unread rather than guessed at: py.exe sits in the Windows directory on a machine wide Python install, and reading that as Python's tree would name half the host.
+# The directory one installed file's package owns, read as the child of the container it was installed into.
+# The result is nothing where the file sits in no such container.
+# A tool's executable can sit several levels down its own tree and in more than one place.
+# Git for Windows carries git.exe in both cmd and mingw64\bin.
+# So walking up from the executable a fixed number of levels lands on a different directory depending on which copy PATH resolved.
+# Anything outside these containers is left unread rather than guessed at.
+# On a machine wide Python install, py.exe sits in the Windows directory.
+# Reading that as Python's tree would name half the host.
 function Get-InstallRoot {
     param([Parameter(Mandatory)][string]$Path)
     $containers = @(
@@ -463,7 +517,10 @@ function Get-InstallRoot {
         "$env:LOCALAPPDATA\Programs\Python"
         "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
     )
-    # Longest first, so a container nested inside another, WinGet's machine wide package directory inside Program Files or the per-user Python directory every line installs beside its siblings in, answers before the one holding it would claim every package in it as one tree.
+    # Longest first.
+    # A container nested inside another therefore answers before the one holding it.
+    # Examples are WinGet's machine wide package directory inside Program Files, and the per-user Python directory every line installs beside its siblings in.
+    # Otherwise the holding container would claim every package in it as one tree.
     foreach ($container in ($containers | Where-Object { $_ } | Sort-Object Length -Descending)) {
         $prefix = "$($container.TrimEnd('\'))\"
         if (-not $Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
@@ -476,9 +533,14 @@ function Get-InstallRoot {
 }
 
 # Every running process whose executable sits inside the tree one tool installed, which is what an installer refusing over files in use is refusing over.
-# Matching the tool's own process name misses the helpers a tool ships and leaves running in the background, such as the GnuPG key daemon Git for Windows carries, which outlives the git command that started it and blocks Git's own upgrade.
-# Executable names the file to read the tree from where the probe sits outside it, as py does for Python: the launcher installs in a directory of its own, while what blocks an upgrade is the interpreter the line installed.
-# A process is matched by the probe's name only where no tree could be read, since once one is, a same-named process running from somewhere else, py.exe beside an upgraded Python line, holds nothing the installer replaces.
+# Matching the tool's own process name misses the helpers a tool ships and leaves running in the background.
+# An example is the GnuPG key daemon Git for Windows carries.
+# It outlives the git command that started it and blocks Git's own upgrade.
+# Executable names the file to read the tree from where the probe sits outside it, as py does for Python.
+# The launcher installs in a directory of its own, while what blocks an upgrade is the interpreter the line installed.
+# A process is matched by the probe's name only where no tree could be read.
+# This is because once a tree is read, a same-named process running from somewhere else holds nothing the installer replaces.
+# An example is py.exe beside an upgraded Python line.
 function Get-ToolHolder {
     param([Parameter(Mandatory)][string]$Probe, [string]$Executable)
     $source = $Executable
@@ -500,11 +562,21 @@ function Get-ToolHolder {
     return , @($holders | Sort-Object Id -Unique)
 }
 
-# What a failed winget call owes its reader: winget's code, the reason the installer's own log gives, and the processes that may hold the tool's files.
+# What a failed winget call owes its reader:
+#   - winget's code
+#   - the reason the installer's own log gives
+#   - the processes that may hold the tool's files
 # The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
 # The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
-# Windows will not replace a file that is open, so the processes running from the tool's install are named only where something says files were in use: an installer log entry in Inno Setup's or Windows' own in-use wording, or winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial.
-# Anything else names nobody, since a Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree, and blaming those would send the reader after the wrong thing.
+# Windows will not replace a file that is open.
+# So the processes running from the tool's install are named only where something says files were in use.
+# Something says so in one of these ways:
+#   - an installer log entry in Inno Setup's or Windows' own in-use wording
+#   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
+# Anything else names nobody.
+# This is because a Git upgrade that failed on a download leaves no log.
+# It still finds every open Git Bash running from Git's own tree.
+# Blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
     warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
@@ -534,8 +606,15 @@ function Write-InstallFailure {
 
 # Managed tools, in the order a report lists them.
 # Every one is a single winget package, which is what makes this a table where the Linux script needs four functions per tool.
-# Probe names the executable that proves the tool is present when winget knows no package for it, and it is py for python rather than python3 because py is registered by the interpreter's own installer while python3 is created by Repair-PythonName below, and a probe that answers only because this script wrote it proves nothing about the package.
-# Family names the id prefix winget's catalog shares across every channel and pinned major a tool ships under, and is empty everywhere but node: node alone ships as more than one id (Current, LTS, and one per pinned major back to 4), any of which is fine on a host as long as its version clears Available, and Resolve-ToolPackage is what finds which one that is.
+# Probe names the executable that proves the tool is present when winget knows no package for it.
+# It is py for python rather than python3.
+# This is because py is registered by the interpreter's own installer, while python3 is created by Repair-PythonName below.
+# A probe that answers only because this script wrote it proves nothing about the package.
+# Family names the id prefix winget's catalog shares across every channel and pinned major a tool ships under.
+# It is empty everywhere but node.
+# Only node ships as more than one id (Current, LTS, and one per pinned major back to 4).
+# Any of those ids is fine on a host as long as its version clears Available.
+# Resolve-ToolPackage is what finds which one that is.
 $TOOLS = @(
     @{ Name = 'git'; Package = 'Git.Git'; Probe = 'git'; Optional = @(); Family = '' }
     @{ Name = 'gh'; Package = 'GitHub.cli'; Probe = 'gh'; Optional = @(); Family = '' }
@@ -635,12 +714,14 @@ function Get-ToolState {
     $rows = Get-WingetInstalled -Id $Tool.Package
     $state = @{
         # The id acted on from here down.
-        # Reading rows above already answered whether something from this tool's family is installed and at what version, and this may still change below, to the id that version actually belongs to, before anything here is reported or acted on.
+        # Reading rows above already answered whether something from this tool's family is installed and at what version.
+        # The id acted on may still change below, to the id that version actually belongs to, before anything here is reported or acted on.
         Package   = $Tool.Package
         Installed = $null
         Rows      = @()
         # Whether the installed state was read at all, kept apart from what it said.
-        # Folding a failed read into an empty list would report a tool whose state is unknown as one that is not installed, and an install would then run against a host nobody measured.
+        # Folding a failed read into an empty list would report a tool whose state is unknown as one that is not installed.
+        # An install would then run against a host nobody measured.
         Readable  = ($null -ne $rows)
         Available = (Get-WingetAvailable -Id $Tool.Package)
         Scope     = @()
@@ -680,8 +761,10 @@ function Get-ToolStatus {
 function Add-ToolNote {
     param([Parameter(Mandatory)][hashtable]$Tool, [Parameter(Mandatory)][hashtable]$State)
     if ($Tool.Name -eq 'python') {
-        # The note reads the alias's own target package rather than describing every alias as the placeholder, because a report that promises an action the apply then refuses is worse than no report at all.
-        # A Microsoft Store Python registers aliases under these same two names carrying the same tag, and Repair-PythonName deliberately leaves those alone, so the two have to be told apart here as well.
+        # The note reads the alias's own target package rather than describing every alias as the placeholder.
+        # This is because a report that promises an action the apply then refuses is worse than no report at all.
+        # A Microsoft Store Python registers aliases under these same two names carrying the same tag, and Repair-PythonName deliberately leaves those alone.
+        # So the two have to be told apart here as well.
         foreach ($name in $script:PYTHON_ALIAS_NAMES) {
             $stub = Join-Path $script:PYTHON_ALIAS_DIR $name
             if (-not (Test-AppExecutionAlias -Path $stub)) { continue }
@@ -695,7 +778,9 @@ function Add-ToolNote {
             }
         }
         # The fleet contract uses python3 as the interpreter name on every platform, so what that name actually reaches here is the fact worth reporting.
-        # A foreign python3 earlier on PATH, from MSYS2, Cygwin or Scoop, is the state nothing else surfaces: it is a real interpreter and answers cleanly, so it is the wrong one silently rather than loudly, and PATH order alone decides it.
+        # A foreign python3 earlier on PATH, from MSYS2, Cygwin or Scoop, is the state nothing else surfaces.
+        # It is a real interpreter and answers cleanly.
+        # So it is the wrong one silently rather than loudly, and PATH order alone decides it.
         $line = Get-PythonLine -Version $State.Installed
         $interpreter = if ($line) { Get-PythonLineInterpreter -Line $line } else { $null }
         $shim = if ($interpreter) { Join-Path (Split-Path -Parent $interpreter) 'python3.exe' } else { $null }
@@ -706,8 +791,11 @@ function Add-ToolNote {
             note 'python' "python3 resolves to $(Hide-Home $resolved) rather than to the managed $line interpreter at $(Hide-Home $shim), and PATH order alone decides that"
         }
         # Compared against the managed interpreter where one could be resolved, and against the weaker shape test otherwise.
-        # The fallback matters because the registry lookup failing is exactly the state where a reader most needs to be told what python reaches, and a check that goes quiet there would be silent on the worst host rather than on the best one.
-        # Every read of the resolved command sits inside this guard rather than beside it, because Set-StrictMode turns a property read on a host where python answers nothing into a terminating error, which would crash the report on exactly the host that most needs one.
+        # The fallback matters because the registry lookup failing is exactly the state where a reader most needs to be told what python reaches.
+        # A check that goes quiet there would be silent on the worst host rather than on the best one.
+        # Every read of the resolved command sits inside this guard rather than beside it.
+        # This is because Set-StrictMode turns a property read on a host where python answers nothing into a terminating error.
+        # That error would crash the report on exactly the host that most needs one.
         $python = @(Get-Command python -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
         if ($python) {
             $wrongPython = if ($interpreter) { $python.Source -ne $interpreter } else { $python.Source -notmatch 'Python\d' }
@@ -756,7 +844,8 @@ function Read-DotnetSdkList {
     return , @($Line | ForEach-Object { ($_ -split ' ', 2)[0] } | Where-Object { $_ -match '^\d+\.\d+\.\d+' })
 }
 
-# Every SDK dotnet itself can see, since Visual Studio and other winget SDK packages land theirs in the same directory, where the row's own winget package never lists them.
+# Every SDK dotnet itself can see.
+# This is because Visual Studio and other winget SDK packages land theirs in the same directory, where the row's own winget package never lists them.
 function Get-DotnetSdk {
     if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) { return , @() }
     $lines = @(& dotnet --list-sdks)
@@ -765,7 +854,8 @@ function Get-DotnetSdk {
 }
 
 # The newest SDK above the version winget installed, which is the one a caller runs wherever no global.json pins another.
-# A prerelease compares equal to its own release, so on an equal key the release wins, and between two prereleases the later one does, since dotnet lists in ascending order.
+# A prerelease compares equal to its own release, so on an equal key the release wins.
+# Between two prereleases the later one wins, since dotnet lists in ascending order.
 function Get-UntrackedDotnetSdk {
     param([string]$Installed, [string[]]$Sdk)
     if (-not $Installed) { return $null }
@@ -788,22 +878,37 @@ $APPEXECLINK_TAG = '0x8000001b'
 # Read from the environment rather than written out, because the expanded form names a real account and the prose gate rejects that.
 $PYTHON_ALIAS_DIR = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
 
-# Both names rather than python3 alone: python.exe is stubbed the same way and lies identically the moment PATH order puts the alias directory ahead of a real interpreter.
+# Both names rather than python3 alone.
+# The name python.exe is stubbed the same way and lies identically the moment PATH order puts the alias directory ahead of a real interpreter.
 $PYTHON_ALIAS_NAMES = @('python.exe', 'python3.exe')
 
 # The one package whose python aliases this script will remove, which is the App Installer placeholder that offers to open the Microsoft Store.
-# The tag alone does not identify it: a Microsoft Store Python installs aliases under these same two names carrying this same tag, and those reach a real interpreter the operator chose, so removing one on the tag alone would delete a working setup rather than a placeholder.
+# The tag alone does not identify it.
+# A Microsoft Store Python installs aliases under these same two names carrying this same tag, and those reach a real interpreter the operator chose.
+# So removing one on the tag alone would delete a working setup rather than a placeholder.
 $PYTHON_ALIAS_PACKAGE = 'Microsoft.DesktopAppInstaller_'
 
 # Whether a file is one of Windows' app execution alias stubs rather than a real executable someone put there.
-# Four conditions together, because the deletion this gates cannot be undone and the alias directory is one a person may legitimately have put a program in: the file exists, it is empty, it is a reparse point, and its reparse tag is the app execution alias one.
-# Reading the tag at all is what fsutil is here for, and no other reader answers with it: PowerShell surfaces the ReparsePoint attribute but leaves LinkType empty for this tag, so the attribute alone cannot tell an alias stub from a symlink or a junction, and deleting on the attribute alone would delete either.
+# Four conditions together, because both of these hold:
+#   - the deletion this gates cannot be undone
+#   - the alias directory is one a person may legitimately have put a program in
+# The conditions are:
+#   - the file exists
+#   - it is empty
+#   - it is a reparse point
+#   - its reparse tag is the app execution alias one
+# Reading the tag at all is what fsutil is here for, and no other reader answers with it.
+# PowerShell surfaces the ReparsePoint attribute but leaves LinkType empty for this tag.
+# So the attribute alone cannot tell an alias stub from a symlink or a junction.
+# Deleting on the attribute alone would delete either.
 function Test-AppExecutionAlias {
     param([Parameter(Mandatory)][string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item -or $item.PSIsContainer -or $item.Length -ne 0) { return $false }
     if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
-    # Checked before it is called, the same way Stop-DockerDesktop checks for the docker CLI: an absent command is a PowerShell exception rather than a native exit code, so calling it blind would crash a report rather than answer one.
+    # Checked before it is called, the same way Stop-DockerDesktop checks for the docker CLI.
+    # An absent command is a PowerShell exception rather than a native exit code.
+    # So calling it blind would crash a report rather than answer one.
     # Answering false where the tag cannot be read is the safe direction, since every caller only ever deletes on a true.
     if (-not (Get-Command fsutil.exe -ErrorAction SilentlyContinue)) { return $false }
     $text = (& fsutil.exe reparsepoint query $Path 2>&1 | Out-String)
@@ -812,8 +917,12 @@ function Test-AppExecutionAlias {
 }
 
 # The package family an app execution alias points at, or nothing where that cannot be read.
-# Only fsutil exposes the reparse buffer at all, and it prints it as a hex dump, so the bytes are decoded from the hex columns rather than from the ASCII rendering beside them, which is lossy for every byte outside printable ASCII.
-# The buffer is UTF-16 and holds several null separated strings, of which the family is the one carrying an underscore and no path separator, verified against the Windows Terminal, App Installer, Notepad and Get Help aliases on a fleet host.
+# Only fsutil exposes the reparse buffer at all, and it prints it as a hex dump.
+# So the bytes are decoded from the hex columns rather than from the ASCII rendering beside them.
+# That rendering is lossy for every byte outside printable ASCII.
+# The buffer is UTF-16 and holds several null separated strings.
+# The family is the one carrying an underscore and no path separator.
+# That was verified against the Windows Terminal, App Installer, Notepad and Get Help aliases on a fleet host.
 function Get-AppExecutionAliasPackage {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Get-Command fsutil.exe -ErrorAction SilentlyContinue)) { return $null }
@@ -842,7 +951,8 @@ function Get-PythonLine {
 }
 
 # The registry roots PEP 514 interpreters register under, in the order a lookup should prefer them.
-# The 32 bit view is listed because a 32 bit interpreter on a 64 bit host registers there and nowhere else, and an ARM64 host reaches an emulated x64 install the same way.
+# The 32 bit view is listed because a 32 bit interpreter on a 64 bit host registers there and nowhere else.
+# An ARM64 host reaches an emulated x64 install through this view the same way.
 $PYTHON_REGISTRY_ROOTS = @(
     'HKCU:\SOFTWARE\Python\PythonCore'
     'HKLM:\SOFTWARE\Python\PythonCore'
@@ -851,10 +961,16 @@ $PYTHON_REGISTRY_ROOTS = @(
 )
 
 # Every registered key for one line, as root and key name, bare key first.
-# PEP 514 lets a line qualify its tag by architecture, so 3.13 is joined by 3.13-32 on a 32 bit install and 3.13-arm64 on an ARM64 one, and a lookup that matches only the bare tag finds nothing on either host while the interpreter is plainly installed.
+# PEP 514 lets a line qualify its tag by architecture.
+# So 3.13 is joined by 3.13-32 on a 32 bit install and 3.13-arm64 on an ARM64 one.
+# A lookup that matches only the bare tag finds nothing on either host while the interpreter is plainly installed.
 # The bare tag sorts first so a host carrying both is answered with its native build rather than whichever key enumerated first.
-# The bare tags and the qualified ones are collected into separate lists and joined at the end, rather than one list a bare tag is pushed onto the front of.
-# Pushing onto the front looks like it expresses the same preference and does not: each root's bare tag lands ahead of the one before it, so the last root searched is answered first and the root order above is inverted for exactly the hosts that carry a line in both.
+# The bare tags and the qualified ones are collected into separate lists and joined at the end.
+# They are not collected into one list a bare tag is pushed onto the front of.
+# Pushing onto the front looks like it expresses the same preference, and it does not.
+# Each root's bare tag lands ahead of the one before it.
+# So the last root searched is answered first.
+# The root order above is therefore inverted for exactly the hosts that carry a line in both.
 function Get-PythonLineTag {
     param([Parameter(Mandatory)][string]$Line)
     $bare = @()
@@ -869,14 +985,21 @@ function Get-PythonLineTag {
 }
 
 # The interpreter one Python line installed, read from that line's own PEP 514 registry key.
-# That key is what the python.org installer writes and what the py launcher itself reads, so it answers for the line asked about rather than for whatever PATH resolves, which is the whole difference this function exists for, and it answers on a host whose PATH has not been refreshed since the install either.
-# HKCU then HKLM, matching the two scopes winget installs into, and the second is not a fallback for a missing line: a line installed machine wide is registered in that root and in no other.
+# That key is what the python.org installer writes and what the py launcher itself reads.
+# So it answers for the line asked about rather than for whatever PATH resolves.
+# That is the whole difference this function exists for.
+# It also answers on a host whose PATH has not been refreshed since the install.
+# HKCU then HKLM, matching the two scopes winget installs into.
+# The second is not a fallback for a missing line.
+# A line installed machine wide is registered in that root and in no other.
 function Get-PythonLineInterpreter {
     param([Parameter(Mandatory)][string]$Line)
     foreach ($tag in (Get-PythonLineTag -Line $Line)) {
         $properties = Get-ItemProperty -LiteralPath "$($tag.Root)\$($tag.Name)\InstallPath" -ErrorAction SilentlyContinue
         if (-not $properties) { continue }
-        # ExecutablePath is preferred over the key's default value because PEP 514 lets a line name an executable that is not the default value's own python.exe, and reading the directory would then name a file that line does not run.
+        # ExecutablePath is preferred over the key's default value.
+        # This is because PEP 514 lets a line name an executable that is not the default value's own python.exe.
+        # Reading the directory would then name a file that line does not run.
         $default = [string]$properties.'(default)'
         $candidates = @($properties.ExecutablePath)
         if ($default) { $candidates += (Join-Path $default 'python.exe') }
@@ -888,12 +1011,16 @@ function Get-PythonLineInterpreter {
 }
 
 # Every Python line PEP 514 says is installed here, as line to interpreter.
-# That is more than the one line this script manages, because each winget id installs its own copy and uninstalling one does not touch another, so lines accumulate on a host that has ever moved between them.
+# That is more than the one line this script manages.
+# This is because each winget id installs its own copy, and uninstalling one does not touch another.
+# So lines accumulate on a host that has ever moved between them.
 function Get-PythonLineMap {
     $map = [ordered]@{}
     foreach ($root in $script:PYTHON_REGISTRY_ROOTS) {
         foreach ($key in (Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
-            # Keyed on the bare line rather than the architecture qualified tag, so a host carrying 3.13 and 3.13-32 reports one line rather than two that mean the same thing to a caller comparing against the managed one.
+            # Keyed on the bare line rather than the architecture qualified tag.
+            # Two lines that mean the same thing to a caller comparing against the managed one are then reported as one.
+            # An example is a host carrying 3.13 and 3.13-32.
             $line = ($key.PSChildName -split '-')[0]
             if ($map.Contains($line)) { continue }
             $interpreter = Get-PythonLineInterpreter -Line $line
@@ -904,7 +1031,8 @@ function Get-PythonLineMap {
 }
 
 # Where python3 answers from right now, or nothing where it does not answer at all.
-# Filtered to an application because Get-Command alone also answers with a function or an alias defined in this session, and neither of those is what a command run from another shell reaches.
+# Filtered to an application because Get-Command alone also answers with a function or an alias defined in this session.
+# Neither of those is what a command run from another shell reaches.
 function Get-Python3OnPath {
     $found = @(Get-Command 'python3' -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
     if ($found) { return $found.Source }
@@ -912,7 +1040,9 @@ function Get-Python3OnPath {
 }
 
 # Whether an interpreter is a virtual environment's rather than a host one.
-# A report distinguishes the two because an activated environment legitimately puts its own interpreter first, which is right for running project code and is not drift worth naming, while every other interpreter answering ahead of the managed one is.
+# A report distinguishes the two because an activated environment legitimately puts its own interpreter first.
+# That is right for running project code and is not drift worth naming.
+# Every other interpreter answering ahead of the managed one is drift worth naming.
 # The marker is the environment's own pyvenv.cfg, which sits one directory above the Scripts directory the interpreter is in.
 function Test-PythonVirtualEnv {
     param([string]$Path)
@@ -924,20 +1054,39 @@ function Test-PythonVirtualEnv {
 
 # On Windows the name python3 lies twice over, and this is the one place both lies are fixed.
 # Windows ships app execution alias stubs called python.exe and python3.exe that only ever offer to open the Microsoft Store.
-# They fail loudly rather than quietly, writing to stderr and exiting 9009 as measured on a fleet host, so a chained command does stop on one, and the harm is not a false pass.
-# What they do is occupy the name: the alias directory is on PATH by default, so wherever it sits ahead of the install directory the stub answers and the installed interpreter cannot be reached under that name at all.
+# They fail loudly rather than quietly, writing to stderr and exiting 9009 as measured on a fleet host.
+# So a chained command does stop on one, and the harm is not a false pass.
+# What they do is occupy the name.
+# The alias directory is on PATH by default.
+# So wherever it sits ahead of the install directory, the stub answers and the installed interpreter cannot be reached under that name at all.
 # Removing the stub file is the only mechanism here, and it frees the name immediately, which is verified rather than assumed.
-# It is not the same act as the Settings toggle, though, and the difference is measured: the toggle keeps reading On afterwards, since whatever store it reads is not this file and no documented interface writes that store.
-# So the alias can return when App Installer is next serviced, this removal runs again on the next apply rather than assuming a host stays fixed, and turning the toggle off in Settings is what stops it coming back at all.
-# The package's own copy under the App Installer subdirectory is deliberately untouched, since winget.exe and the package manager server sit beside it and removing one would break winget itself.
-# And the interpreter winget installs registers python.exe but no python3.exe of its own, so removing the stub alone would leave the name simply absent on a host that does have Python.
-# Both halves therefore run together, the stub goes and a real python3.exe is put beside the interpreter this script manages, which is what makes python3 the one interpreter name the fleet uses on every platform rather than a name that means something different here.
-# Nothing below names a version: the line comes from whatever winget reports installed for the managed id, so this keeps working unchanged when that id moves to a later line.
+# It is not the same act as the Settings toggle, though, and the difference is measured.
+# The toggle keeps reading On afterwards.
+# This is because whatever store it reads is not this file, and no documented interface writes that store.
+# So the alias can return when App Installer is next serviced.
+# This removal runs again on the next apply rather than assuming a host stays fixed.
+# Turning the toggle off in Settings is what stops it coming back at all.
+# The package's own copy under the App Installer subdirectory is deliberately untouched.
+# This is because winget.exe and the package manager server sit beside it, and removing one would break winget itself.
+# And the interpreter winget installs registers python.exe but no python3.exe of its own.
+# So removing the stub alone would leave the name simply absent on a host that does have Python.
+# Both halves therefore run together.
+# The stub goes, and a real python3.exe is put beside the interpreter this script manages.
+# That is what makes python3 the one interpreter name the fleet uses on every platform.
+# It is not a name that means something different here.
+# Nothing below names a version.
+# The line comes from whatever winget reports installed for the managed id.
+# So this keeps working unchanged when that id moves to a later line.
 function Repair-PythonName {
     param([string]$Installed)
 
     # The replacement is resolved before anything is removed, and a failure to resolve one ends the run here with both aliases still in place.
-    # The other order frees the name and then discovers it has nothing to put there, which is worse than either half alone: an unmanaged or unreadable python leaves a host with the Store alias deleted, no python3 created, and not even the Store offer it started with.
+    # The other order frees the name and then discovers it has nothing to put there.
+    # That is worse than either half alone.
+    # An unmanaged or unreadable python leaves a host with:
+    #   - the Store alias deleted
+    #   - no python3 created
+    #   - not even the Store offer it started with
     $line = Get-PythonLine -Version $Installed
     if (-not $line) {
         note 'python' 'winget reports no version installed for the managed package, so there is no interpreter here for python3 to sit beside, and the app execution aliases are left alone rather than removed with nothing to replace them'
@@ -953,7 +1102,8 @@ function Repair-PythonName {
         $stub = Join-Path $script:PYTHON_ALIAS_DIR $name
         if (-not (Test-AppExecutionAlias -Path $stub)) { continue }
         # Which package the alias points at decides whether it goes, because the tag alone cannot tell a placeholder from a working setup.
-        # An unreadable family is left alone on the same rule, since not knowing what an alias reaches is a reason to keep it rather than a reason to delete it.
+        # An unreadable family is left alone on the same rule.
+        # This is because not knowing what an alias reaches is a reason to keep it rather than a reason to delete it.
         $package = Get-AppExecutionAliasPackage -Path $stub
         if (-not $package) {
             warn "$name is an app execution alias whose target package could not be read, so it is left alone rather than removed on a guess"
@@ -977,8 +1127,11 @@ function Repair-PythonName {
     }
 
     # Beside the interpreter rather than anywhere else on PATH, and a copy rather than a launcher script.
-    # The containing directory is what CPython resolves its own prefix from, so a copy placed there runs as that interpreter and a copy placed anywhere else does not run at all.
-    # A .cmd or .bat shim would be worse than useless: Git Bash appends .exe and nothing else when it resolves a bare name, so a shim in either of those forms is invisible to exactly the shell the reported failure came from.
+    # The containing directory is what CPython resolves its own prefix from.
+    # So a copy placed there runs as that interpreter, and a copy placed anywhere else does not run at all.
+    # A .cmd or .bat shim would be worse than useless.
+    # Git Bash appends .exe and nothing else when it resolves a bare name.
+    # So a shim in either of those forms is invisible to exactly the shell the reported failure came from.
     $shim = Join-Path (Split-Path -Parent $interpreter) 'python3.exe'
     $source = Get-Item -LiteralPath $interpreter -ErrorAction SilentlyContinue
     $existing = Get-Item -LiteralPath $shim -ErrorAction SilentlyContinue
@@ -991,7 +1144,9 @@ function Repair-PythonName {
         info "Creating python3 beside the $line interpreter at $(Hide-Home $shim)"
         # Two different failures land here and the remedy differs, so the message names both rather than guessing between them.
         # A machine wide install sits under a directory this unelevated run cannot write, and the rest of this script deliberately stays unelevated.
-        # And Windows will not replace an executable that is open, which is what an editor or a language server still holding the old shim looks like, so the process is named where one is running, the same way a failed winget install names it.
+        # And Windows will not replace an executable that is open.
+        # An editor or a language server still holding the old shim is what that looks like.
+        # So the process is named where one is running, the same way a failed winget install names it.
         try {
             Copy-Item -LiteralPath $interpreter -Destination $shim -Force -ErrorAction Stop
             $script:CHANGED += "python created python3 beside the $line interpreter"
@@ -1002,15 +1157,20 @@ function Repair-PythonName {
             } else {
                 'copy python.exe to python3.exe there by hand from a prompt that can write that directory, or reinstall python user wide'
             }
-            # Warned and failed rather than noted, because this is the half of the contract that did not hold: python is installed and python3 still does not reach it.
-            # A note would be the wrong instrument twice over, since it reads as an aside and, on an apply, it is printed under a heading a reader scanning for failures does not look at.
+            # Warned and failed rather than noted, because this is the half of the contract that did not hold.
+            # Python is installed and python3 still does not reach it.
+            # A note would be the wrong instrument twice over.
+            # It reads as an aside.
+            # On an apply it is also printed under a heading a reader scanning for failures does not look at.
             warn "python could not write python3 beside the $line interpreter at $(Hide-Home $shim): $($_.Exception.Message). $remedy"
             $script:FAILED += 'python'
             return
         }
     }
 
-    # A line this script does not manage can carry a python3 of its own and win on PATH, so it is reported and left alone: this run did not necessarily create it, and removing another line's interpreter is not this script's to do.
+    # A line this script does not manage can carry a python3 of its own and win on PATH.
+    # So it is reported and left alone.
+    # This is because this run did not necessarily create it, and removing another line's interpreter is not this script's to do.
     foreach ($entry in (Get-PythonLineMap).GetEnumerator()) {
         if ($entry.Key -eq $line) { continue }
         $stale = Join-Path (Split-Path -Parent $entry.Value) 'python3.exe'
@@ -1026,8 +1186,10 @@ function Repair-PythonName {
 $DOCKER_WSL_FLOOR = '2.1.5'
 
 # Every wsl.exe read goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
-# A wsl.exe call that changes the host instead of reading it goes through Invoke-WslRun below, which applies the same guard to a live streamed run rather than a captured one.
-# Mirrored from upgrade-host.ps1 rather than shared with it, on the same rule as the rest of this directory: a script here has to stay independently fetchable.
+# A wsl.exe call that changes the host instead of reading it goes through Invoke-WslRun below.
+# That function applies the same guard to a live streamed run rather than a captured one.
+# Mirrored from upgrade-host.ps1 rather than shared with it, on the same rule as the rest of this directory.
+# A script here has to stay independently fetchable.
 function Invoke-Wsl {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     $previous = $env:WSL_UTF8
@@ -1042,7 +1204,10 @@ function Invoke-Wsl {
     }
 }
 
-# The mutation-side counterpart to Invoke-Wsl: runs a wsl.exe command that changes the host through the same run wrapper every other mutating command in this script uses, with the same WSL_UTF8 guard applied around it, so its live streamed output does not read to a person as NUL separated characters either.
+# The mutation-side counterpart to Invoke-Wsl.
+# It runs a wsl.exe command that changes the host through the same run wrapper every other mutating command in this script uses.
+# The same WSL_UTF8 guard is applied around it.
+# So its live streamed output does not read to a person as NUL separated characters either.
 function Invoke-WslRun {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
     $previous = $env:WSL_UTF8
@@ -1066,8 +1231,11 @@ function Get-WslPlatformVersion {
 }
 
 # What stands between this host and installing or upgrading docker, or $null where nothing does.
-# A pure report either way, used as-is for -Report's note and as Enter-DockerMaintenance's own pre-check below, which is what actually drives the WSL platform update this used to only name.
-# Standing up WSL from nothing with wsl --install stays a person's own step regardless, since that is a different action on a different subject from bringing an existing platform current, the same reasoning that keeps distribution installs in setup-wsl.ps1 rather than folded in here.
+# A pure report either way, used as-is for -Report's note and as Enter-DockerMaintenance's own pre-check below.
+# Enter-DockerMaintenance is what actually drives the WSL platform update this used to only name.
+# Standing up WSL from nothing with wsl --install stays a person's own step regardless.
+# This is because that is a different action on a different subject from bringing an existing platform current.
+# It is the same reasoning that keeps distribution installs in setup-wsl.ps1 rather than folded in here.
 function Test-WslReadyForDocker {
     if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
         return "wsl.exe was not found, and Docker Desktop needs WSL2. Install it with: wsl --install --no-distribution"
@@ -1084,16 +1252,23 @@ function Test-WslReadyForDocker {
 
 # --- Docker ---
 
-# The processes that mean Docker Desktop is up when its own CLI cannot answer, mirrored from upgrade-host.ps1's Get-DockerProcess rather than shared with it, on the same rule as the rest of this directory: a script here has to stay independently fetchable.
+# The processes that mean Docker Desktop is up when its own CLI cannot answer.
+# They are mirrored from upgrade-host.ps1's Get-DockerProcess rather than shared with it, on the same rule as the rest of this directory.
+# A script here has to stay independently fetchable.
 $DOCKER_PROCESSES = @('Docker Desktop', 'com.docker.backend', 'com.docker.build')
 
-# Whether Docker Desktop answers as running right now, preferring its own CLI over a process probe, since the CLI is what agrees with what the tray icon shows and a vmmem process surviving a crash is not the same as the backend actually being up.
-# Falls back to the process probe where the CLI itself cannot answer (missing from PATH, or the status call failing), rather than reading either as "not running" outright: that reading is what let Enter-DockerMaintenance run wsl --update against a Docker Desktop this function wrongly reported as already down.
+# Whether Docker Desktop answers as running right now, preferring its own CLI over a process probe.
+# This is because the CLI is what agrees with what the tray icon shows.
+# A vmmem process surviving a crash is not the same as the backend actually being up.
+# Falls back to the process probe where the CLI itself cannot answer (missing from PATH, or the status call failing).
+# Neither case is read as "not running" outright.
+# That reading is what let Enter-DockerMaintenance run wsl --update against a Docker Desktop this function wrongly reported as already down.
 function Test-DockerDesktopRunning {
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $text = (& docker desktop status --format json 2>&1 | Out-String)
         if ($LASTEXITCODE -eq 0) {
-            # Parsed rather than matched, the same way setup-wsl.ps1 reads Docker's own settings file, with the regex kept as a fallback for a CLI version that ever answers non-JSON rather than reading that as "not running".
+            # Parsed rather than matched, the same way setup-wsl.ps1 reads Docker's own settings file.
+            # The regex is kept as a fallback for a CLI version that ever answers non-JSON, rather than reading that as "not running".
             try {
                 return ((ConvertFrom-Json $text -ErrorAction Stop).Status -eq 'running')
             } catch {
@@ -1105,7 +1280,9 @@ function Test-DockerDesktopRunning {
 }
 
 function Stop-DockerDesktop {
-    # Test-DockerDesktopRunning can answer true through the process probe alone, with the docker CLI missing or off PATH, and & docker there is a command-not-found PowerShell throws rather than a native exit code this can warn on, so this checks first rather than let that surface as a crash.
+    # Test-DockerDesktopRunning can answer true through the process probe alone, with the docker CLI missing or off PATH.
+    # The & docker call there is a command-not-found PowerShell throws rather than a native exit code this can warn on.
+    # So this checks first rather than let that surface as a crash.
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         warn 'docker desktop stop needs the docker CLI, which is not on PATH; stop Docker Desktop by hand from its tray icon'
         return 1
@@ -1127,11 +1304,25 @@ function Start-DockerDesktop {
     return $code
 }
 
-# Everything a docker install, upgrade or reinstall needs from Docker Desktop and WSL before winget touches the package is folded into one window rather than run twice: Docker Desktop holds the WSL service open, so a platform update fails part way while it is running, the same reason upgrade-host.ps1 -Wsl refuses outright.
-# Docker Desktop's own per distro WSL integration also goes stale across an engine bump often enough that it has a name on Docker's own tracker, surfacing as "WSL integration with distro '<name>' unexpectedly stopped" the next time anything in that distro touches docker, and the in app "Restart the WSL integration" button on that dialog does not clear it, since it retries the proxy inside the distro that is already running against the same stale state.
-# Both are fixed the same way where Docker Desktop is running to begin with: stopped, WSL brought current, every distro shut down with it so each one's integration remounts fresh rather than being patched in place, and Docker Desktop started again once the docker package itself is also settled, by Exit-DockerMaintenance below; a run that finds Docker Desktop already stopped has nothing to restore and none of that runs.
+# Everything a docker install, upgrade or reinstall needs from Docker Desktop and WSL before winget touches the package is folded into one window.
+# It is not run twice.
+# Docker Desktop holds the WSL service open, so a platform update fails part way while it is running.
+# That is the same reason upgrade-host.ps1 -Wsl refuses outright.
+# Docker Desktop's own per distro WSL integration also goes stale across an engine bump.
+# It does so often enough that it has a name on Docker's own tracker.
+# It surfaces as "WSL integration with distro '<name>' unexpectedly stopped" the next time anything in that distro touches docker.
+# The in app "Restart the WSL integration" button on that dialog does not clear it.
+# This is because it retries the proxy inside the distro that is already running against the same stale state.
+# Both are fixed the same way where Docker Desktop is running to begin with:
+#   - Docker Desktop is stopped
+#   - WSL is brought current
+#   - every distro is shut down with it, so each one's integration remounts fresh rather than being patched in place
+#   - Docker Desktop is started again once the docker package itself is also settled, by Exit-DockerMaintenance below
+# A run that finds Docker Desktop already stopped has nothing to restore, and none of that runs.
 # Boundary note: this script used to be read-only on WSL by design, naming upgrade-host.ps1 -Wsl as a person's own step rather than running it.
-# The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window for its own integration to recover, since a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
+# The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window.
+# That window is what its own integration needs to recover.
+# The boundary moved there since a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
 # Returns whether docker is clear to proceed, and whether this stopped Docker Desktop, which is what Exit-DockerMaintenance needs to know whether it owes a restart.
 function Enter-DockerMaintenance {
     param([Parameter(Mandatory)][bool]$WasRunning, [string]$WslProblem)
@@ -1139,7 +1330,8 @@ function Enter-DockerMaintenance {
     $result = @{ Proceed = $true; Stopped = $false }
     if (-not $WasRunning -and -not $WslProblem) { return $result }
 
-    # Test-WslReadyForDocker's own string carries a remedy clause for a caller that will not fix WSL itself, "Update it with: host-setup\windows\upgrade-host.ps1 -Wsl", which reads as misleading and duplicative embedded in a prompt for a run about to do exactly that.
+    # Test-WslReadyForDocker's own string carries a remedy clause for a caller that will not fix WSL itself, "Update it with: host-setup\windows\upgrade-host.ps1 -Wsl".
+    # That clause reads as misleading and duplicative embedded in a prompt for a run about to do exactly that.
     $wslReason = if ($WslProblem) { $WslProblem -replace '\s*Update it with:.*$', '' } else { $WslProblem }
     $question = if ($WslProblem -and $WasRunning) {
         "docker needs WSL updated first ($wslReason). Stop Docker Desktop, update WSL, and restart Docker Desktop to continue?"
@@ -1154,8 +1346,12 @@ function Enter-DockerMaintenance {
         return $result
     }
 
-    # Gated on whether Docker Desktop is still observed running after the attempt, not on Stop-DockerDesktop's own exit code: a non-zero exit that still left Docker Desktop stopped is not a reason to refuse the run and, just as importantly, not a reason to leave Stopped unset, which would tell Exit-DockerMaintenance below there is nothing to restart and strand the host stopped when it started running.
-    # Skipped under -DryRun, where nothing actually stopped and Docker Desktop is still genuinely running, which would otherwise read every dry run on a live host as this exact failure rather than as a preview.
+    # Gated on whether Docker Desktop is still observed running after the attempt, not on Stop-DockerDesktop's own exit code.
+    # A non-zero exit that still left Docker Desktop stopped is not a reason to refuse the run.
+    # It is, just as importantly, not a reason to leave Stopped unset.
+    # Leaving it unset would tell Exit-DockerMaintenance below there is nothing to restart, and strand the host stopped when it started running.
+    # Skipped under -DryRun, where nothing actually stopped and Docker Desktop is still genuinely running.
+    # The check would otherwise read every dry run on a live host as this exact failure rather than as a preview.
     if ($WasRunning) {
         Stop-DockerDesktop | Out-Null
         if (-not $script:DRY_RUN -and (Test-DockerDesktopRunning)) {
@@ -1166,10 +1362,16 @@ function Enter-DockerMaintenance {
         $result.Stopped = $true
     }
     if ($WslProblem) {
-        # Installing through wsl --update's own MSI raises a UAC prompt when this pwsh is not itself elevated, the state the rest of this script deliberately stays in (running elevated trades this one prompt for winget installers elsewhere that fail pre-elevated instead).
-        # Nothing can answer that prompt without a person at the console, so a run with neither would hang rather than fail, which -Yes is supposed to rule out, not walk into unattended.
+        # Installing through wsl --update's own MSI raises a UAC prompt when this pwsh is not itself elevated.
+        # Not being elevated is the state the rest of this script deliberately stays in.
+        # Running elevated trades this one prompt for winget installers elsewhere that fail pre-elevated instead.
+        # Nothing can answer that prompt without a person at the console.
+        # So a run with neither elevation nor a person would hang rather than fail.
+        # That is what -Yes is supposed to rule out, not walk into unattended.
         if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
-            # Built rather than a fixed string, because whether this refusal itself restarts Docker Desktop depends on whether $result.Stopped is set, and a run that found it already stopped restarts nothing for the remedy below to run into.
+            # Built rather than a fixed string.
+            # This is because whether this refusal itself restarts Docker Desktop depends on whether $result.Stopped is set.
+            # A run that found it already stopped restarts nothing for the remedy below to run into.
             $restartNote = if ($result.Stopped) { ' This refusal also restarts Docker Desktop, to leave the host as it found it, so it may already be running again by the time this is read.' } else { '' }
             warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running.$restartNote"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
@@ -1180,7 +1382,9 @@ function Enter-DockerMaintenance {
         info 'This restarts every distribution, so anything running inside one is stopped'
         $updateCode = Invoke-WslRun '--update'
         if ($updateCode -ne 0) { warn "wsl --update exited $updateCode" }
-        # Skipped under -DryRun on the same rule as the stop check above: wsl --update never ran, so WSL is still genuinely behind, and re-checking it here would read every dry run as this same failure rather than as a preview.
+        # Skipped under -DryRun on the same rule as the stop check above.
+        # The command wsl --update never ran, so WSL is still genuinely behind.
+        # Re-checking it here would read every dry run as this same failure rather than as a preview.
         $stillBroken = if ($script:DRY_RUN) { $null } else { Test-WslReadyForDocker }
         if ($stillBroken) {
             warn "docker skipped, still $stillBroken after the update"
@@ -1192,8 +1396,11 @@ function Enter-DockerMaintenance {
     return $result
 }
 
-# The other half of Enter-DockerMaintenance, run once the docker package itself is settled: shuts every WSL distro down so each one's integration remounts fresh, then starts Docker Desktop again.
-# A no-op where Enter-DockerMaintenance never stopped anything, so a run that changed nothing about Docker Desktop does not restart it for no reason, and a run that was declined does not either.
+# The other half of Enter-DockerMaintenance, run once the docker package itself is settled.
+# It shuts every WSL distro down so each one's integration remounts fresh, then starts Docker Desktop again.
+# A no-op where Enter-DockerMaintenance never stopped anything.
+# A run that changed nothing about Docker Desktop therefore does not restart it for no reason.
+# A run that was declined does not either.
 function Exit-DockerMaintenance {
     param([Parameter(Mandatory)][bool]$Stopped)
     if (-not $Stopped) { return }
@@ -1224,7 +1431,8 @@ function Show-Report {
         $first = $script:NOTE_TEXTS.Count
         $record = Get-Tool $tool
         $state = Get-ToolState -Tool $record
-        # Every row is printed only where they did not resolve to one version, since a dotnet line carrying three side by side builds resolves cleanly and listing all three would overflow the column for nothing.
+        # Every row is printed only where they did not resolve to one version.
+        # This is because a dotnet line carrying three side by side builds resolves cleanly, and listing all three would overflow the column for nothing.
         if (-not $script:JSON_OUTPUT) {
             $installed = if (-not $state.Installed -and $state.Rows.Count -gt 0) { $state.Rows -join ',' } elseif ($state.Installed) { $state.Installed } else { '-' }
             $available = if ($state.Available) { $state.Available } else { '-' }
@@ -1267,12 +1475,17 @@ function Show-Report {
 
 # Install, upgrade or reinstall one tool.
 # A tool whose install returns non-zero is collected rather than fatal, so one failure does not strand the rest of the run.
-# A refusal is not a failure and does end the run: a declined prompt, or a scope that disagrees with the installed copy, stops everything rather than being collected, because continuing past either would install a copy nobody asked for.
+# A refusal is not a failure and does end the run.
+# A declined prompt, or a scope that disagrees with the installed copy, stops everything rather than being collected.
+# This is because continuing past either would install a copy nobody asked for.
 function Invoke-ToolApply {
     param([Parameter(Mandatory)][string]$ToolName)
     $record = Get-Tool $ToolName
     $state = Get-ToolState -Tool $record
-    # The id fresh work goes to, which is the installed id itself except in exactly one case: an outdated tool resolved to an id outside the tool's own default, which for node means a pinned major that is frozen and can never itself clear Available, so the default is the only id capable of fixing it.
+    # The id fresh work goes to, which is the installed id itself except in exactly one case.
+    # That case is an outdated tool resolved to an id outside the tool's own default.
+    # For node that means a pinned major that is frozen and can never itself clear Available.
+    # So the default is the only id capable of fixing it.
     $target = if ($state.Status -eq 'outdated' -and $state.Package -ne $record.Package) { $record.Package } else { $state.Package }
 
     if ($state.Status -eq 'unmanaged') {
@@ -1288,7 +1501,8 @@ function Invoke-ToolApply {
         return
     }
 
-    # Naming a scope the installed copy does not sit in would add a second copy beside it, so the removal is asked for rather than done on the way past.
+    # Naming a scope the installed copy does not sit in would add a second copy beside it.
+    # So the removal is asked for rather than done on the way past.
     if ($script:WANT_SCOPE -and $state.Rows.Count -gt 0 -and $state.Scope.Count -gt 0 -and
         $state.Scope -notcontains $script:WANT_SCOPE -and $script:MODE -ne 'reinstall') {
         die "${ToolName}: installed $($state.Scope -join ' and ') wide at $(if ($state.Installed) { $state.Installed } else { $state.Rows -join ', ' }), and -Scope $($script:WANT_SCOPE) was given. Installing would add a second copy beside it. Remove the existing copy first with: install-tools.ps1 -Reinstall $ToolName -Scope $($script:WANT_SCOPE)"
@@ -1303,7 +1517,8 @@ function Invoke-ToolApply {
             if (-not (confirm "Remove $($state.Package) at $($state.Rows -join ', ')$where and $($again)?")) {
                 die 'Declined'
             }
-            # Every copy is removed, each in the scope it was found in, since a tool present in both scopes is exactly the shadowing this action exists to clear.
+            # Every copy is removed, each in the scope it was found in.
+            # This is because a tool present in both scopes is exactly the shadowing this action exists to clear.
             # An empty scope means winget reported none, and there the removal names none either and lets winget act on what it finds.
             $found = if ($state.Scope.Count -gt 0) { $state.Scope } else { @('') }
             foreach ($scope in $found) {
@@ -1324,7 +1539,8 @@ function Invoke-ToolApply {
         log "${ToolName}: winget lists $($state.Rows -join ', ') under one id, so -Reinstall is the action that resolves it"
         return
     } elseif (($script:MODE -eq 'upgrade' -or $script:MODE -eq 'install') -and $state.Status -eq 'outdated' -and $target -ne $state.Package) {
-        # Named ahead of the plain install-mode branch below, since -Upgrade would hit this same fixed-release wall, so pointing -Install at -Upgrade here would only trade one dead end for another.
+        # Named ahead of the plain install-mode branch below, since -Upgrade would hit this same fixed-release wall.
+        # So pointing -Install at -Upgrade here would only trade one dead end for another.
         log "${ToolName}: $($state.Package) at $($state.Installed) is a fixed release and cannot advance under that id, -Reinstall $ToolName replaces it with $target"
         return
     } elseif ($script:MODE -eq 'install' -and $state.Status -eq 'outdated') {
@@ -1336,7 +1552,9 @@ function Invoke-ToolApply {
     }
 
     # Reached only once real work is about to happen: every "leave it alone" status above already returned.
-    # That is deliberate here, not incidental: an already current docker with a stale WSL platform has nothing this run needs to fix, and gating on WSL readiness any earlier would skip a tool that was never going to change anyway.
+    # That is deliberate here, not incidental.
+    # An already current docker with a stale WSL platform has nothing this run needs to fix.
+    # Gating on WSL readiness any earlier would skip a tool that was never going to change anyway.
     $dockerMaintenance = $null
     if ($ToolName -eq 'docker') {
         $wasRunning = Test-DockerDesktopRunning
@@ -1348,7 +1566,9 @@ function Invoke-ToolApply {
         }
         $dockerMaintenance = Enter-DockerMaintenance -WasRunning $wasRunning -WslProblem $wslProblem
         if (-not $dockerMaintenance.Proceed) {
-            # $wslProblem is empty on the path where Enter-DockerMaintenance refused over a failed Docker Desktop stop rather than a WSL gap, and that reason was already warned there, but a bare "docker skipped, " with nothing after the comma still reads as a broken log line rather than a completed one.
+            # $wslProblem is empty on the path where Enter-DockerMaintenance refused over a failed Docker Desktop stop rather than a WSL gap.
+            # That reason was already warned there.
+            # A bare "docker skipped, " with nothing after the comma still reads as a broken log line rather than a completed one.
             warn "docker skipped$(if ($wslProblem) { ", $wslProblem" } else { ', Docker Desktop maintenance failed, see the warning above' })"
             $script:FAILED += $ToolName
             return
@@ -1402,9 +1622,16 @@ function Invoke-Apply {
     foreach ($tool in $script:SELECTED) {
         step $tool
         Invoke-ToolApply -ToolName $tool
-        # Owed after the package itself is settled, on every path Invoke-ToolApply returns by rather than only the one where winget did work, which is where this deviates from the docker branch inside that function.
-        # Docker Desktop only needs stopping when the package is about to move, so its window belongs past the statuses that leave a tool alone, while an app execution alias stub returns on a host whose python has been current for months and a reinstall removes the interpreter this puts python3 beside, so this belongs after all of them instead.
-        # A failed tool is the one case this does skip, and it is the case that matters most: a reinstall whose install half failed has already removed the interpreter, so removing the Store alias on top of it would leave the host with no python, no python3, and no way to get one.
+        # Owed after the package itself is settled, on every path Invoke-ToolApply returns by rather than only the one where winget did work.
+        # That is where this deviates from the docker branch inside that function.
+        # Docker Desktop only needs stopping when the package is about to move.
+        # So its window belongs past the statuses that leave a tool alone.
+        # An app execution alias stub returns on a host whose python has been current for months.
+        # A reinstall removes the interpreter this puts python3 beside.
+        # So this belongs after all of them instead.
+        # A failed tool is the one case this does skip, and it is the case that matters most.
+        # A reinstall whose install half failed has already removed the interpreter.
+        # So removing the Store alias on top of it would leave the host with no python, no python3, and no way to get one.
         # The version is re-read here rather than taken from inside that function, so the line it acts on is the one the host carries now.
         if ($tool -eq 'python' -and $script:FAILED -notcontains $tool) {
             Repair-PythonName -Installed (Resolve-InstalledVersion -Version (Get-WingetInstalled -Id (Get-Tool $tool).Package))
@@ -1419,8 +1646,10 @@ function Invoke-Apply {
         log 'Nothing changed'
     }
 
-    # Printed here as well as under a report, because an apply is where most notes are actually raised and until now none of them reached the console.
-    # Every note this script writes during an apply was collected into a list only Show-Report rendered, so a declined docker maintenance cycle and every python finding were both discarded by the one mode that had just performed the work they describe.
+    # Printed here as well as under a report.
+    # This is because an apply is where most notes are actually raised, and until now none of them reached the console.
+    # Every note this script writes during an apply was collected into a list only Show-Report rendered.
+    # So a declined docker maintenance cycle and every python finding were both discarded by the one mode that had just performed the work they describe.
     if ($script:NOTES.Count -gt 0) {
         log ''
         log 'Notes:'
