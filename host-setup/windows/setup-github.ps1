@@ -162,7 +162,7 @@ function confirm {
 # Installing them belongs to install-tools.ps1, so a gap is named with the command that closes it rather than closed twice in two scripts.
 # Every executable this script calls is named, rather than the three it is most obviously about.
 # One left out fails partway through with whatever that command says when it is missing.
-# That is in place of the one message here that names the remedy.
+# That failure comes in place of the one message here that names the remedy.
 function Test-Prerequisite {
     $absent = @()
     foreach ($tool in 'git', 'ssh', 'ssh-keygen', 'ssh-keyscan', 'ssh-add') {
@@ -398,7 +398,7 @@ function Set-GitIdentity {
     if (Set-GitConfig 'user.name' $script:WANT_NAME) { $changed++ }
     if (Set-GitConfig 'user.email' $script:WANT_EMAIL) { $changed++ }
     # Git Credential Manager ships with Git for Windows and is what gh expects there.
-    # The Linux peer writes a cache helper instead, because no manager exists there.
+    # The Linux peer writes a cache helper instead, because no manager exists on Linux.
     # Written only where nothing is set, so a host already carrying a helper keeps it.
     if (-not (Get-GitConfig 'credential.helper')) {
         if (Set-GitConfig 'credential.helper' 'manager') { $changed++ }

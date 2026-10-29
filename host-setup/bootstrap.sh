@@ -149,12 +149,11 @@ archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
 lock_path() { printf '%s\n' "$DIR/$(tree_name).lock"; }
 
 # Two runs sharing a --dir use the same fixed names.
-# Without this lock, one run can delete a tree the other is still extracting into.
-# That run does so through its removal of its staging tree or through its exit cleanup.
+# So without this lock, one run's removal of its staging tree or its exit cleanup can delete a tree the other is still extracting into.
 # The lock is the kernel's rather than a file whose presence is the lock, so a run that dies releases it.
 # The bootstrap.ps1 script opens the same file with FileShare.None, which .NET implements as a flock on Linux.
 # The file is left in place.
-# Removing it while another run holds it open would let a third run lock a new file under the same name.
+# That is because removing it while another run holds it open would let a third run lock a new file under the same name.
 lock_dir() {
     local lock
     lock=$(lock_path)
@@ -168,8 +167,9 @@ lock_dir() {
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
 # DIR is a caller-supplied path, so a tree under it is not necessarily ours.
 # Pointing --dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
-# An empty directory counts as ours, since it holds nothing to lose.
-# It also counts as ours, since no live run can be filling it while this one holds the lock.
+# An empty directory counts as ours for two reasons.
+#   - It holds nothing to lose.
+#   - No live run can be filling it while this one holds the lock.
 # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
 # A directory that cannot be listed is not known to be empty, so it stays somebody else's.
 is_ours() {

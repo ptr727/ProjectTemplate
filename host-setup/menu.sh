@@ -117,7 +117,7 @@ hub_fetched_here() {
 # So this only blocks behind an in-progress fetch_hub or cleanup.
 # A no-op in --dry-run.
 # Dry-run's own branch in ensure_hub_root never fetches and never reads $DIR/hub (it resolves HUB_ROOT from cwd or fails outright).
-# So there is nothing here for dry-run to protect.
+# So there is nothing here for the reader lock to protect.
 # Also, --dry-run must not create $DIR or a lock file where neither existed.
 # That is because fetching is documented as the one real host change this script makes.
 hub_read_lock_acquire() {
@@ -142,7 +142,7 @@ hub_read_lock_acquire() {
             # Retrying via the blocking call below would not help.
             # Retrying also risks a second, more confusing failure.
             # Retrying risks a hang as well, if the failure mode is one blocking mode does not handle the same way.
-            # So this fails immediately instead of falling through to it.
+            # So this fails immediately instead of falling through to the blocking call.
             fail "flock -sn reported: $probe_err"
             exec {HUB_READ_LOCK_FD}>&-
             HUB_READ_LOCK_FD=""
@@ -175,7 +175,7 @@ hub_read_lock_release() {
 # So a second fd's blocking exclusive wait would deadlock against the first fd's own shared hold forever.
 # The deadlock was verified by reproducing exactly that hang before this fix.
 # `flock` changes an already-held fd's own lock type in place with no such deadlock.
-# That is because the kernel recognizes the conversion as the same holder taking a different mode, not a second competing one.
+# That is because the kernel recognizes the already-held fd as the same holder taking a different mode, not a second competing one.
 # The conversion itself is not atomic (flock(2): the shared lock is dropped before the exclusive one is granted).
 # So another session's own conversion could win the gap and clone first.
 # But fetch_hub_locked's own remove_unowned_hub_check re-verifies ownership before removing or recloning.

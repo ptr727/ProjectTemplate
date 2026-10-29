@@ -15,7 +15,7 @@ and the tooling changes one, and neither calls the other. Without a check at thi
 be declared required and be one nothing here can install. A host would discover that tool as a gate
 it cannot satisfy.
 
-That assertion runs once per platform, because the two installers do not manage the same set. The
+That assertion runs once per platform for two reasons. The two installers do not manage the same set. The
 difference between the sets is a decision rather than an accident. `git-restore-mtime` serves a Linux deploy path and
 the spec declares it not applicable on Windows.
 
@@ -200,8 +200,8 @@ class TestSpecCoverage(unittest.TestCase):
 
     def spec_tools(self) -> list[dict]:
         """The tools the spec declares."""
-        # A malformed or unreadable spec is a finding this reports beside the others.
-        # A traceback would end the run and take the checks after it with it.
+        # A malformed or unreadable spec is a finding this reports beside the others, rather than a traceback that ends the run.
+        # Such a traceback would also take the checks after it with it.
         try:
             return json.loads(HOST_TOOLS.read_text(encoding="utf-8"))["tools"]
         except (OSError, ValueError, KeyError) as error:
@@ -446,8 +446,8 @@ class TestSpecCoverage(unittest.TestCase):
         anywhere in the repair path would silently keep targeting the old line the day that ID moves.
         That outcome is the failure mode this asserts against rather than merely documents.
 
-        Comments are stripped before the match, because the invariant is about what the code
-        resolves. The invariant is not about what the prose may use as an example. The
+        Comments are stripped before the match for one reason. The invariant is about what the code
+        resolves and not about what the prose may use as an example. The
         architecture-qualified tag rule is far clearer written as `3.13` beside `3.13-arm64` than
         described in the abstract. A version named there cannot make a lookup target the wrong line.
         """

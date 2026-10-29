@@ -304,7 +304,7 @@ function Invoke-FetchHubLocked {
             return $false
         }
     }
-    # Marked as ours before git can create anything under $DIR/hub, not only once the clone also succeeds.
+    # Marked as ours before git can create anything under $hubPath, not only once the clone also succeeds.
     # Git can leave a partial directory behind on a failed or interrupted clone.
     # An unmarked one would then block every retry until removed by hand.
     $token = [guid]::NewGuid().ToString('N')

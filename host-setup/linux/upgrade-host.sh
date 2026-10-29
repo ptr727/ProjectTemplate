@@ -9,7 +9,7 @@
 #   - Proxmox, whose major upgrades are a documented procedure with its own preconditions.
 #   - A distribution that is neither Debian nor Ubuntu, where the sources rewrite below has no meaning.
 # Refusing is the whole point of running this rather than apt by hand.
-# The package upgrade is the same everywhere, and the release upgrade is where hosts differ.
+# The reason is that the package upgrade is the same everywhere, and the release upgrade is where hosts differ.
 #
 # One script rather than one per host:
 #   - The package path, the WSL and reboot handling, and the command line are shared.

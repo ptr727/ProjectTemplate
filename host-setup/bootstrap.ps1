@@ -282,8 +282,9 @@ function Test-Ownership {
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
     if (-not ($item -and $item.PSIsContainer)) { return $false }
-    # An empty directory counts as ours, since it holds nothing to lose.
-    # It also counts as ours, since no live run can be filling it while this one holds the lock.
+    # An empty directory counts as ours for two reasons.
+    #   - It holds nothing to lose.
+    #   - No live run can be filling it while this one holds the lock.
     # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
     # A directory that cannot be read is not known to be either, so it stays somebody else's.
     # On Linux, that case includes the marker check itself throwing.
@@ -296,13 +297,12 @@ function Test-Ownership {
 }
 
 # Two runs sharing a -Dir use the same fixed names.
-# Without this lock, one run can delete a tree the other is still extracting into.
-# That run does so through its removal of its staging tree or through its cleanup.
+# So without this lock, one run's removal of its staging tree or its cleanup can delete a tree the other is still extracting into.
 # The lock is the file system's rather than a file whose presence is the lock, so a run that dies releases it.
 # FileShare.None is the share mode .NET implements as a flock on Linux.
 # That flock is the lock bootstrap.sh takes on the same file.
 # The file is left in place.
-# Removing it while another run holds it open would let a third run lock a new file under the same name.
+# That is because removing it while another run holds it open would let a third run lock a new file under the same name.
 function Lock-Directory {
     $lock = Get-LockPath
     New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
