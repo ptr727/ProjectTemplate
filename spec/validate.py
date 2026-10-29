@@ -28,20 +28,29 @@ CONSUMER_MODELS = ("push", "pull")
 # GitHub's "protected branches only" form is deliberately absent, since it counts classic branch protection and this fleet configures rulesets instead.
 BRANCH_POLICIES = ("custom", "none")
 # Positive grammars for the registry values a consumer resolves by exact comparison and then puts into a request path.
-# A negative whitespace test cannot state any of these, because str.strip() removes the 29 characters Python calls whitespace and leaves U+200B, U+2060, U+FEFF and U+00AD standing.
-# Each of those is invisible and each is exactly as unmatchable by an exact comparison as a trailing space, so refusing padding admits the zero-width twin that fails in the same place for the same reason.
+# A negative whitespace test cannot state any of these.
+# This is because str.strip() removes the 29 characters Python calls whitespace and leaves U+200B, U+2060, U+FEFF and U+00AD standing.
+# Each of those is invisible and each is exactly as unmatchable by an exact comparison as a trailing space.
+# Refusing padding therefore admits the zero-width twin that fails in the same place for the same reason.
 # Stated positively a grammar admits nothing invisible, needs no notion of whitespace at all, and cannot drift when a Python release changes what str.isspace() answers.
 # Each pattern below means the same thing in Python re and in ECMA-262, the engine an editor resolving registry/repos.schema.json actually uses.
 # That schema therefore carries these exact strings, and tests/test_spec_validate.py asserts that it still does.
-# The portability is what makes an editor-side copy safe at all, since an earlier attempt was reverted for leaving the editor refusing values the gate allowed.
+# The portability is what makes an editor-side copy safe at all.
+# This is because an earlier attempt was reverted for leaving the editor refusing values the gate allowed.
 # `$` is end-of-string in only one of the two, since Python's also matches just before a trailing newline.
 # `(?![\s\S])` is end-of-string in both, because `\s` and `\S` name different sets in the two engines while their union is every character in each.
 # One line of printable ASCII with no leading or trailing space, for a deployment environment `name`.
 # The check mode in repo-config/configure.sh resolves that name with `select(.name == $n)` and then percent-encodes it into one URL path segment.
-# An interior space is admitted, since GitHub documents no character restriction on the name beyond length and uniqueness and nothing downstream splits the value on one.
-# The ASCII floor is this fleet's rule rather than GitHub's, per GOVERNANCE.md "Documentation Style Conventions" and its "Character Set" rule: a non-ASCII environment name is legal on GitHub and repo-config/configure.sh percent-encodes one correctly, and it is refused here because the registry is agent-authored text and an environment name is an identifier compared exactly rather than prose read by a person.
-# That is why the `description` field's own pattern stays looser: its tier-2 and tier-3 characters carry meaning their ASCII form loses, where an identifier's do not.
-# A repo that genuinely needs one is a decision for the maintainer, and a refusal naming the shape is a better place to raise it than a silent mismatch against the live environment.
+# An interior space is admitted, since GitHub documents no character restriction on the name beyond length and uniqueness.
+# Nothing downstream splits the value on one either.
+# The ASCII floor is this fleet's rule rather than GitHub's, per GOVERNANCE.md "Documentation Style Conventions" and its "Character Set" rule.
+# A non-ASCII environment name is legal on GitHub, and repo-config/configure.sh percent-encodes one correctly.
+# It is refused here because the registry is agent-authored text.
+# It is also refused because an environment name is an identifier compared exactly rather than prose read by a person.
+# That is why the `description` field's own pattern stays looser.
+# Its tier-2 and tier-3 characters carry meaning their ASCII form loses, where an identifier's do not.
+# A repo that genuinely needs one is a decision for the maintainer.
+# A refusal naming the shape is a better place to raise it than a silent mismatch against the live environment.
 ENVIRONMENT_NAME_PATTERN = r"^[!-~](?:[ -~]*[!-~])?(?![\s\S])"
 # A deployment branch policy name is a ref pattern rather than a ref, so `releases/*` is a legitimate declaration.
 # This admits every visible ASCII character rather than the alphabet the three names the registry declares today happen to use.
@@ -49,12 +58,18 @@ ENVIRONMENT_NAME_PATTERN = r"^[!-~](?:[ -~]*[!-~])?(?![\s\S])"
 # The space is the one printable character excluded, since a git ref name cannot carry one.
 DEPLOYMENT_BRANCH_PATTERN = r"^[!-~]+(?![\s\S])"
 # A ground-truth branch name reaches spec/audit.py raw, as the `{ground}` in `repos/{slug}/branches/{ground}` and as the value of a `?ref=` query parameter.
-# So it admits only the characters that are both unreserved in RFC 3986 and legal in a git ref name, plus the `/` a branch name may carry.
-# A `?` or a `#` there would re-parse the URL into a different request rather than fail, which is why the url field's own grammar excludes both and why this one has to as well.
-# `..` is refused for the same reason and it is the sharpest case: measured against the live API, `branches/a/../../../../../zen` returns GitHub's /zen body with a 200, so a value the gate accepted would have this repository's ground-truth head read out of a different endpoint entirely.
+# So it admits only the characters that are both unreserved in RFC 3986 and legal in a git ref name.
+# The one addition is the `/` a branch name may carry.
+# A `?` or a `#` there would re-parse the URL into a different request rather than fail.
+# That is why the url field's own grammar excludes both and why this one has to as well.
+# `..` is refused for the same reason and it is the sharpest case.
+# Measured against the live API, `branches/a/../../../../../zen` returns GitHub's /zen body with a 200.
+# A value the gate accepted would therefore have this repository's ground-truth head read out of a different endpoint entirely.
 # The leading lookahead is what refuses it, since a positive character class cannot say "no two of these adjacent" and `(?![\s\S]*\.\.)` is a whole-string negation both engines read identically.
-# `~` is excluded although RFC 3986 calls it unreserved, because `git check-ref-format refs/heads/~x` rejects it, so admitting it would refuse nothing and promise a name no repository can hold.
-# Neither end may be a `.` or a `/`, which is git's rule rather than a whitespace one, and every other admitted character is allowed at either end so that `_wip` and `wip-` both pass.
+# `~` is excluded although RFC 3986 calls it unreserved, because `git check-ref-format refs/heads/~x` rejects it.
+# Admitting it would therefore refuse nothing and promise a name no repository can hold.
+# Neither end may be a `.` or a `/`, which is git's rule rather than a whitespace one.
+# Every other admitted character is allowed at either end so that `_wip` and `wip-` both pass.
 GROUND_TRUTH_BRANCH_PATTERN = (
     r"^(?![\s\S]*\.\.)[A-Za-z0-9_-](?:[A-Za-z0-9._/-]*[A-Za-z0-9_-])?(?![\s\S])"
 )
@@ -62,16 +77,25 @@ GROUND_TRUTH_BRANCH_PATTERN = (
 GROUND_TRUTH_BRANCH_SHAPE = (
     "ASCII letters, digits, and . _ - /, with neither end a . or a /, and no .."
 )
-# A `requiredSecrets` name is resolved against the repository actions store by an exact comparison, so it is the same class of value as the three above and takes the same treatment.
-# The shape a name must have to be resolvable against the actions store spec/audit.py compares it to, rather than a shape fitted to the four names the registry declares today.
-# That comparison is an exact set difference against the names GitHub's API returns, so a declaration that is not character-for-character one of them is unresolvable rather than merely untidy.
+# A `requiredSecrets` name is resolved against the repository actions store by an exact comparison.
+# It is therefore the same class of value as the three above and takes the same treatment.
+# The shape a name must have to be resolvable against the actions store spec/audit.py compares it to.
+# Not a shape fitted to the four names the registry declares today.
+# That comparison is an exact set difference against the names GitHub's API returns.
+# A declaration that is not character-for-character one of them is therefore unresolvable rather than merely untidy.
 # Upper case is part of the shape for that reason.
-# Measured across the fleet's repositories, every stored name is upper case, and GitHub documents a secret name as case-insensitive when referenced and stored upper case however it was entered.
-# A lower-case declaration therefore matches no stored name and cannot be made to, so it is reported missing from the store on every run against a repository whose store is correct.
-# Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well, since requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
+# Measured across the fleet's repositories, every stored name is upper case.
+# GitHub documents a secret name as case-insensitive when referenced and stored upper case however it was entered.
+# A lower-case declaration therefore matches no stored name and cannot be made to.
+# It is reported missing from the store on every run against a repository whose store is correct.
+# Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well.
+# This is because requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
 # A name a mechanism already requires, which is every one the registry declares today, keeps its claim and yields the missing-from-the-store finding alone.
-# The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away: GitHub refuses to store such a name at all, so a repo declaring one collects a missing-from-the-store finding that nothing it can do retires.
-# Refusing lower case outright is what makes that prefix clause exact rather than approximate, since a case-insensitive prefix needs no case-insensitive test once no lower-case name is admitted.
+# The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away.
+# GitHub refuses to store such a name at all.
+# A repo declaring one therefore collects a missing-from-the-store finding that nothing it can do retires.
+# Refusing lower case outright is what makes that prefix clause exact rather than approximate.
+# This is because a case-insensitive prefix needs no case-insensitive test once no lower-case name is admitted.
 # A negative lookahead rather than a second check, so the schema's advisory copy stays one pattern and cannot express less than the gate.
 SECRET_NAME_PATTERN = r"^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\s\S])"
 SECRET_NAME_SHAPE = (
@@ -87,9 +111,12 @@ SECRET_NAME_RE = re.compile(SECRET_NAME_PATTERN)
 # Otherwise a query string or fragment folds into the repo name instead of failing to match.
 # A duplicate identity here would let spec/audit.py's fleet membership check silently shadow one entry with the other.
 # `(?![\s\S])` rather than `$`, for the reason given below at the grammars.
-# `$` also matches just before a trailing newline in Python, so a newline-padded url parsed here while a space-padded one did not, and the padding reached spec/audit.py's request path either way.
+# `$` also matches just before a trailing newline in Python.
+# So a newline-padded url parsed here while a space-padded one did not, and the padding reached spec/audit.py's request path either way.
 # The two segments name GitHub's own character sets rather than "anything that is not a delimiter".
-# GitHub restricts an owner to letters, digits and hyphens and a repository name to letters, digits, `.`, `_` and `-`, replacing anything else at creation time, so naming those sets refuses no url that can exist.
+# GitHub restricts an owner to letters, digits and hyphens and a repository name to letters, digits, `.`, `_` and `-`.
+# It replaces anything else at creation time.
+# Naming those sets therefore refuses no url that can exist.
 GITHUB_URL_RE = re.compile(
     r"^https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?(?![\s\S])"
 )
@@ -129,17 +156,17 @@ TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
 def _bracket_matches(text, open_char, close_char):
     """Map from each open_char index in text to the index just past its balanced close_char.
 
-    A character class like `[^\\]]*` cannot count depth, so it stops at the first close and misses a link
+    A character class like `[^\\]]*` cannot count depth. It stops at the first close and misses a link
     label carrying its own nested brackets, e.g. `[API [docs]](url)`. Counting only open_char/close_char
     nesting, ignoring the other bracket type, needs one such map per bracket type rather than one pass
     mixing both. Built with a single left-to-right stack pass over the whole text rather than one depth-
-    counting scan per open position: re-scanning from every unmatched open is what made a prior version of
-    this walk O(N^2) on a run of N unmatched opens. A close pops the most recently pushed open, the same pairing a fresh depth count from
-    that open would find, so this is one pass, not N. An open with no closing partner, or a close with
+    counting scan per open position. Re-scanning from every unmatched open is what made a prior version of
+    this walk O(N^2) on a run of N unmatched opens. A close pops the most recently pushed open. That is the same pairing a fresh depth count from
+    that open would find. So this is one pass rather than N passes. An open with no closing partner, or a close with
     nothing open, is left out of the map, same as before.
 
     A backslash-escaped delimiter (`\\[`, `\\]`, `\\(`, `\\)`) is skipped rather than pushed or popped,
-    matching Markdown's own escaping rule, so a literal bracket inside a label does not corrupt the nesting
+    matching Markdown's own escaping rule. So a literal bracket inside a label does not corrupt the nesting
     count.
     """
     stack = []
@@ -196,7 +223,7 @@ def is_str_list(v):
 def investigate_tracking_errors(label, entry):
     """Require a tracking value on an `investigate` disposition, the one disposition that names no outcome.
 
-    Every other value in the vocabulary states what happens to the divergence, where this one states that nobody has decided yet. With `tracking` null beside it the ledger records a decision as owed while naming nowhere it is being made, so the deferral reads as an omission instead. The field stays optional under every other disposition, which already names its own outcome.
+    Every other value in the vocabulary states what happens to the divergence, where this one states that nobody has decided yet. With `tracking` null beside it the ledger records a decision as owed while naming nowhere it is being made. The deferral therefore reads as an omission instead. The field stays optional under every other disposition, which already names its own outcome.
     """
     if entry.get("disposition") != "investigate":
         return []
@@ -211,8 +238,9 @@ def investigate_tracking_errors(label, entry):
 def escapes_repo_root(value):
     """Whether `ROOT / value` could resolve outside ROOT on some host.
 
-    `PurePosixPath` alone misses a backslash (Windows treats it as a separator, though POSIX reads it as one filename) and a Windows drive letter such as `C:`.
-    A drive is refused in any component rather than only the first, since joining one Windows reads as a drive, such as `C:x` or `1:x`, onto a Windows path discards everything joined before it.
+    `PurePosixPath` alone misses a backslash (Windows treats it as a separator, though POSIX reads it as one filename). It also misses a Windows drive letter such as `C:`.
+    A drive is refused in any component rather than only the first.
+    This is because joining one Windows reads as a drive, such as `C:x` or `1:x`, onto a Windows path discards everything joined before it.
     """
     parts = pathlib.PurePosixPath(value).parts
     return (
@@ -261,7 +289,7 @@ def alternatives_errors(baseline):
 def reduces_to_repo_root(value):
     """Whether `value` reduces to the repository root under POSIX path rules.
 
-    A raw-string compare against "." accepts "./" and ".///.", which the schema also allows and which `scripts/carry.py` then refuses, so a manifest author gets a green validator and a failing carrier. Backslash and drive-letter spellings are `escapes_repo_root`'s subject and are not read here.
+    A raw-string compare against "." accepts "./" and ".///.", which the schema also allows and which `scripts/carry.py` then refuses. So a manifest author gets a green validator and a failing carrier. Backslash and drive-letter spellings are `escapes_repo_root`'s subject and are not read here.
     """
     return pathlib.PurePosixPath(value) == pathlib.PurePosixPath(".")
 
@@ -269,7 +297,7 @@ def reduces_to_repo_root(value):
 def symlinked_component(root, value):
     """The first component of `root / value`, as a path relative to `root`, that is a symlink, or None.
 
-    `scripts/carry.py` refuses a tree path with any symlinked component, while `is_dir()` follows one, so without this the validator accepts a source the carrier refuses on every host.
+    `scripts/carry.py` refuses a tree path with any symlinked component, while `is_dir()` follows one. So without this the validator accepts a source the carrier refuses on every host.
     """
     current = root
     for part in pathlib.PurePosixPath(value).parts:
@@ -294,15 +322,17 @@ def canonical_file_in_root(rel_path):
 def environment_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `environments` (a repo using no deployment environment declares none).
 
-    Absence is not checked, since most of the fleet uses no environment. What is checked is that a declared entry
-    carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads, and that
-    `branches` is present exactly when `branchPolicy` is "custom", which that check mode reads in both directions.
+    Absence is not checked, since most of the fleet uses no environment. What is checked is that:
+    - a declared entry carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads
+    - `branches` is present exactly when `branchPolicy` is "custom"
+
+    That check mode reads `branches` in both directions.
     "none" names no branch set, since it admits every ref, so a `branches` beside it would be a declaration
     nothing compares against.
 
-    Presence (`"branches" in env`) is the test rather than truthiness, so a declared empty list under "custom" is
-    read as declaring that the environment allows nothing, which configure.sh then asserts, rather than as absent.
-    Presence is the test for the field itself too, matching description_errors_for_repo: an explicit
+    Presence (`"branches" in env`) is the test rather than truthiness. So a declared empty list under "custom" is
+    read as declaring that the environment allows nothing, rather than as absent. That is what configure.sh then asserts.
+    Presence is the test for the field itself too, matching description_errors_for_repo. An explicit
     `"environments": null` is declared-but-invalid, not absent, so it reaches the list check below rather than
     passing as a repo that declares none.
     """
@@ -322,8 +352,12 @@ def environment_errors_for_repo(repo, name):
         if not isinstance(env_name, str) or not env_name:
             errors.append(f"{where} missing or empty 'name'")
         # The grammar rather than a padding test, per ENVIRONMENT_NAME_PATTERN, because what reaches the consumer depends on which padding it is.
-        # A trailing space survives into a name that matches no live environment, a trailing newline is eaten by command substitution on the way, and a zero-width space fails exactly like the first while no whitespace test names it.
-        # A blank name lands here rather than on the branch above, since it is a non-empty string of the wrong shape and reading it as absent needs the notion of whitespace this grammar exists to drop.
+        # A trailing space survives into a name that matches no live environment.
+        # A trailing newline is eaten by command substitution on the way.
+        # A zero-width space fails exactly like the first while no whitespace test names it.
+        # A blank name lands here rather than on the branch above.
+        # This is because it is a non-empty string of the wrong shape.
+        # Reading it as absent needs the notion of whitespace this grammar exists to drop.
         elif not ENVIRONMENT_NAME_RE.search(env_name):
             errors.append(
                 f"{where} name {env_name!r} is not one line of printable ASCII with no leading or trailing space"
@@ -333,7 +367,8 @@ def environment_errors_for_repo(repo, name):
             errors.append(f"{where} duplicate environment '{env_name}'")
         else:
             seen.add(env_name)
-        # Absence is reported as absence rather than through the value branch, whose repr of a missing field differs from the valid value "none" by case alone.
+        # Absence is reported as absence rather than through the value branch.
+        # That branch's repr of a missing field differs from the valid value "none" by case alone.
         if "branchPolicy" not in env:
             errors.append(f"{where} missing 'branchPolicy' (expected {', '.join(BRANCH_POLICIES)})")
             continue
@@ -351,12 +386,15 @@ def environment_errors_for_repo(repo, name):
                 isinstance(b, str) and b for b in branches
             ):
                 errors.append(f"{where} branches must be a list of non-empty strings")
-            # A declared branch name reaches its comparison the same way, so it takes a grammar of its own for the reason given at DEPLOYMENT_BRANCH_PATTERN rather than one borrowed from the name above.
+            # A declared branch name reaches its comparison the same way.
+            # It therefore takes a grammar of its own for the reason given at DEPLOYMENT_BRANCH_PATTERN rather than one borrowed from the name above.
             elif malformed := [b for b in branches if not DEPLOYMENT_BRANCH_RE.search(b)]:
                 errors.append(
                     f"{where} branches {malformed!r} are not printable ASCII with no spaces"
                 )
-            # Both sides are sorted and joined by configure.sh before comparing, so a name declared twice makes the joined declaration longer than any live set can be and reports as drift on an environment that has none.
+            # Both sides are sorted and joined by configure.sh before comparing.
+            # A name declared twice therefore makes the joined declaration longer than any live set can be.
+            # It reports as drift on an environment that has none.
             elif duplicates := sorted(
                 b for b, count in collections.Counter(branches).items() if count > 1
             ):
@@ -371,12 +409,13 @@ def environment_errors_for_repo(repo, name):
 def ground_truth_branch_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `groundTruthBranch` (a repo reading "main" declares none).
 
-    Presence is the test rather than truthiness, matching description_errors_for_repo, because spec/audit.py's
-    ground_branch_of() also defaults only on absence, at both the entry level and the registry defaults level it
-    resolves through: a declared `""` is returned and then addressed, rather than being replaced by "main".
+    Presence is the test rather than truthiness, matching description_errors_for_repo.
+    That is because spec/audit.py's ground_branch_of() also defaults only on absence, at both the entry level
+    and the registry defaults level it resolves through.
+    A declared `""` is returned and then addressed, rather than being replaced by "main".
 
     spec/audit.py, spec/fidelity_honesty.py and spec/workflow_reuse.py each concatenate the value straight into a
-    request path and a `?ref=` query value, so the grammar is what makes the declared value and the addressed one
+    request path and a `?ref=` query value. So the grammar is what makes the declared value and the addressed one
     the same string.
     """
     if "groundTruthBranch" not in repo:
@@ -462,12 +501,12 @@ def python_directories_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `pythonDirectories` (a repo declaring none passes none).
 
     Each entry must already be the canonical, repository-relative form that
-    .github/actions/python-directories/python_directories.py's normalize() would resolve it to,
-    since spec/audit.py's cross-check compares the registry value against a caller's declared
+    .github/actions/python-directories/python_directories.py's normalize() would resolve it to.
+    This is because spec/audit.py's cross-check compares the registry value against a caller's declared
     `python-directories` value with no further normalization on the registry side. A value this
     function would accept but normalize() would rewrite (a trailing slash, a redundant `./`)
-    would read as clean here and then mismatch every caller that already wrote it in canonical
-    form, which is why the checks below mirror normalize()'s refusals plus an exact-normpath
+    would read as clean here. It would then mismatch every caller that already wrote it in canonical
+    form. That is why the checks below mirror normalize()'s refusals plus an exact-normpath
     equality test rather than reusing normalize() itself and trusting its rewrite.
 
     Presence is the test rather than truthiness, matching description_errors_for_repo, so a
@@ -562,12 +601,12 @@ def description_errors(name, desc):
     Absence is not checked here, since the field is optional. `desc` is only passed in once a repo declares it.
 
     Link-free is enforced because spec/audit_markdown.py's description_findings() strips Markdown links from the README's
-    own tagline before comparing, but never re-strips the declared field it compares that tagline against. A
-    declared value carrying a link would therefore report as a permanent readme mismatch, and repo-config/
+    own tagline before comparing. It never re-strips the declared field it compares that tagline against. A
+    declared value carrying a link would therefore report as a permanent readme mismatch. In addition, repo-config/
     configure.sh would push the literal Markdown source to GitHub's About panel, which does not render it.
 
     Already trimmed and single-line is enforced so the registry's own text already reads as exactly what every
-    mirror carries, rather than relying on the whitespace-stripping spec/audit.py and repo-config/configure.sh
+    mirror carries. It does so rather than relying on the whitespace-stripping spec/audit.py and repo-config/configure.sh
     each do defensively to keep agreeing with each other.
     """
     if not isinstance(desc, str) or not desc.strip():
@@ -586,11 +625,11 @@ def description_errors(name, desc):
 def github_identity(url):
     """The `<owner>/<repo>` spec/audit.py addresses, or None where the url is not one this fleet can address.
 
-    One definition rather than two. spec/audit.py's repo_slug() took the last two path segments of the raw value, so
-    a trailing `.git`, which GITHUB_URL_RE makes optional and strips for the identity, survived into every
-    `repos/{slug}/...` request, and a padded url passed a check made on `.strip()` while the request kept the
-    padding. A validator can only be as strict as its consumer where the two read the value the same way, so the
-    consumer calls this rather than re-deriving a looser answer of its own.
+    One definition rather than two. spec/audit.py's repo_slug() took the last two path segments of the raw value.
+    A trailing `.git`, which GITHUB_URL_RE makes optional and strips for the identity, therefore survived into every
+    `repos/{slug}/...` request. A padded url also passed a check made on `.strip()` while the request kept the
+    padding. A validator can only be as strict as its consumer where the two read the value the same way.
+    So the consumer calls this rather than re-deriving a looser answer of its own.
 
     Case is preserved, since the slug is what the audit prints and addresses. The identity comparison that dedupes
     the registry lowercases this result itself, at the one place that needs a case-insensitive answer.
@@ -600,10 +639,17 @@ def github_identity(url):
         return None
     owner, repo = match.group(1), match.group(2)
     # GitHub decodes and then normalizes a dot segment, so a segment that is nothing but dots is refused rather than addressed.
-    # The owner class above already refuses one, which is the position it mattered in: measured against the live API, `repos/../rate_limit` returned 200 with the rate-limit document and `repos/../..` returned the API root, and percent-encoding is no defense since `repos/%2e%2e/rate_limit` returned 200 the same way.
-    # The repo class admits `.`, so only that position reaches this check, and it is refused for a narrower reason: `repos/ptr727/../rate_limit` returned 404 rather than a different document, but the normalization eats a segment either way, so what a read addresses stops being decided by the declaration and starts being decided by the shape of that read.
+    # The owner class above already refuses one, which is the position it mattered in.
+    # Measured against the live API, `repos/../rate_limit` returned 200 with the rate-limit document and `repos/../..` returned the API root.
+    # Percent-encoding is no defense, since `repos/%2e%2e/rate_limit` returned 200 the same way.
+    # The repo class admits `.`, so only that position reaches this check.
+    # It is refused for a narrower reason.
+    # `repos/ptr727/../rate_limit` returned 404 rather than a different document.
+    # But the normalization eats a segment either way.
+    # What a read addresses therefore stops being decided by the declaration and starts being decided by the shape of that read.
     # The check is here rather than in the pattern because a character class cannot say "not only dots".
-    # Only `.` and `..` normalize, so refusing a segment that is nothing but dots is the whole of it, and `..a`, `.github` and `v1.0` are untouched.
+    # Only `.` and `..` normalize, so refusing a segment that is nothing but dots is the whole of it.
+    # `..a`, `.github` and `v1.0` are untouched.
     if repo.strip(".") == "":
         return None
     return f"{owner}/{repo}"
@@ -696,7 +742,7 @@ def version_literal_errors(root):
     """Reject a three-part version or commit SHA anywhere in the hub's own instruction documents.
 
     Verbatim sections are scanned too, since spec/audit.py excises them on every downstream run and
-    every carrier inherits their bytes, so a literal there has to be stopped before it merges here.
+    every carrier inherits their bytes. So a literal there has to be stopped before it merges here.
     """
     errors = []
     for source in VERSION_LITERAL_SCANNED:
@@ -863,7 +909,8 @@ def main(argv=()):
 
     # The README model is indexed directly by spec/audit.py, so a key that is absent or the wrong type crashes the audit mid-run rather than reporting.
     # The schema marks each one required, but CI runs no JSON-schema validation, so the guard that actually runs is this one.
-    # Checked as a set rather than one key at a time, since guarding only the keys a review happened to name is how the other four came to be unguarded.
+    # Checked as a set rather than one key at a time.
+    # This is because guarding only the keys a review happened to name is how the other four came to be unguarded.
     readme_model = load("spec/readme-sections.json")
     if not isinstance(readme_model, dict):
         errors.append("readme-sections.json: top level is not an object")
@@ -882,7 +929,8 @@ def main(argv=()):
                     f"readme-sections.json: '{key}' must be a non-empty {'array' if want is list else 'object'}, and spec/audit.py indexes it directly"
                 )
         # The distribution prefixes are what tell a repo's own URLs from a third party's.
-        # Their absence fails open rather than loud: link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
+        # Their absence fails open rather than loud.
+        # In that case link_kind would classify every own URL as external, canonical naming would quietly stop being enforced, and the audit would still report green.
         prefixes = (
             readme_model.get("distribution", {}).get("urlPrefixes")
             if isinstance(readme_model.get("distribution"), dict)
@@ -894,7 +942,9 @@ def main(argv=()):
             )
         else:
             # Every prefix, not merely one of them.
-            # A broad entry added beside a valid one would pass an any() guard while making link_kind read a third party's URL as this repo's own, which is the failure the guard exists to stop.
+            # A broad entry added beside a valid one would pass an any() guard.
+            # It would also make link_kind read a third party's URL as this repo's own.
+            # That is the failure the guard exists to stop.
             loose = [p for p in prefixes if "{slug}" not in p and "{owner}" not in p]
             if loose:
                 errors.append(
@@ -912,7 +962,9 @@ def main(argv=()):
                 )
 
     # CI runs no JSON-schema validation, so shape-check the shared tool catalog here.
-    # A duplicate name is the failure worth catching: the audit keys on it, so the second entry silently shadows the first and half the fleet is measured against a description nobody can see.
+    # A duplicate name is the failure worth catching.
+    # The audit keys on it, so the second entry silently shadows the first.
+    # Half the fleet is then measured against a description nobody can see.
     # The top level is read defensively rather than assumed: a malformed file (a bare array, say) would raise
     # AttributeError off .get and crash the run, which is the opposite of what shape-checking here is for.
     catalog = load("spec/third-party-tools.json")
@@ -1117,14 +1169,22 @@ def main(argv=()):
     # An advisory schema stricter than the gate is the direction an earlier attempt was reverted for.
     errors.extend(ground_truth_branch_errors_for_repo(reg_defaults, "defaults"))
 
-    # Both the defaults object and a repo entry are marked `additionalProperties: false` in registry/repos.schema.json, and no gate runs that schema, so a misspelled key passes CI today.
-    # It fails silently rather than loudly: a repo declaring `groundTruthBanch` validates clean and the audit reads main without ever saying that the declaration it was given went unread.
+    # Both the defaults object and a repo entry are marked `additionalProperties: false` in registry/repos.schema.json, and no gate runs that schema.
+    # So a misspelled key passes CI today.
+    # It fails silently rather than loudly.
+    # A repo declaring `groundTruthBanch` validates clean, and the audit reads main without ever saying that the declaration it was given went unread.
     # The key set is read out of the schema rather than restated here, so the rule has one statement.
-    # A second list in this file would drift from the first in the direction nobody checks, since a key added to the schema and not to the list would be reported as unknown on the entry that legitimately declares it.
+    # A second list in this file would drift from the first in the direction nobody checks.
+    # The reason is a key added to the schema and not to the list.
+    # It would be reported as unknown on the entry that legitimately declares it.
     # The two objects the registry's own consumers index are the ones checked.
     # A nested object is left to the schema, and to the per-field checks that already read it.
-    # A schema this file cannot read is reported rather than skipped, since skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
-    # The load is inside the guard because that is where the file is actually unreadable, and the ways it can be are not one shape: an absent or unopenable file raises OSError, and bytes that are not valid UTF-8 or not valid JSON each raise a ValueError, JSONDecodeError and UnicodeDecodeError both being one.
+    # A schema this file cannot read is reported rather than skipped.
+    # This is because skipping would leave the unknown-key check silently absent, which reads exactly like a registry with no unknown keys.
+    # The load is inside the guard because that is where the file is actually unreadable.
+    # The ways it can be are not one shape.
+    # An absent or unopenable file raises OSError.
+    # Bytes that are not valid UTF-8 or not valid JSON each raise a ValueError, JSONDecodeError and UnicodeDecodeError both being one.
     # ValueError is named rather than its two subclasses, so a third way of being undecodable does not escape by not having been enumerated.
     try:
         schema = load("registry/repos.schema.json")
@@ -1174,7 +1234,8 @@ def main(argv=()):
             continue
         # Matched on the raw value rather than on `.strip()`, because spec/audit.py's repo_slug() builds its request path from what the registry declares.
         # A value accepted here after trimming would be the string checked here and a different string requested there.
-        # A blank url reaches this error rather than the one above for the same reason the environment name does, since it is a non-empty string of the wrong shape.
+        # A blank url reaches this error rather than the one above for the same reason the environment name does.
+        # It is a non-empty string of the wrong shape.
         # A url that is a well-formed URI but not this exact shape (http://, a path suffix) would otherwise pass here.
         # It would only surface later as a false DEFECT, since membership_findings() can never resolve it to an identity.
         slug = github_identity(repo["url"])
@@ -1185,23 +1246,33 @@ def main(argv=()):
         if identity in seen_identities:
             errors.append(f"{name}: duplicate registry entry for '{identity}'")
         seen_identities.add(identity)
-        # The key and the identity must name the same repository, since repo-config/configure.sh derives its lookup key from the repo argument, `name="${repo##*/}"`, rather than from the registry.
-        # An entry whose name differs by more than letter case resolves to nothing there and the run continues: the workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload, and the environment and description assertions are skipped while the run still reports no drift.
-        # Each skipped assertion prints a note naming the repo it found no entry for, so a reader is told something, and what they are told reads as a repo declaring no environment and no description rather than as a registry that disagrees with itself.
+        # The key and the identity must name the same repository.
+        # This is because repo-config/configure.sh derives its lookup key from the repo argument, `name="${repo##*/}"`, rather than from the registry.
+        # An entry whose name differs by more than letter case resolves to nothing there and the run continues.
+        # The workflow-model lookup falls through to defaults.workflowModel, so a repo declared operational is checked against the release ruleset payload.
+        # The environment and description assertions are skipped while the run still reports no drift.
+        # Each skipped assertion prints a note naming the repo it found no entry for, so a reader is told something.
+        # What they are told reads as a repo declaring no environment and no description rather than as a registry that disagrees with itself.
         # The model case is silent outright, since jq resolves the fallback and exits 0 with a value.
         # A name differing only by letter case is caught there already, by spec/resolve_description.py's near-miss guard, which raises and exits the script before any assertion runs.
-        # It is refused here as well because that guard runs at apply time on one repo, where this runs over the whole registry in CI, and because the guard is a consumer rather than the rule.
+        # It is refused here as well because that guard runs at apply time on one repo.
+        # This runs over the whole registry in CI.
+        # It is also refused here because the guard is a consumer rather than the rule.
         # Compared against github_identity()'s segment rather than against the raw url, so this reads the same string spec/audit.py addresses, with an optional trailing `.git` already stripped.
         # Agreement is also the whole of the name's own grammar, and deliberately so.
-        # GITHUB_URL_RE holds the repo segment to the letters, digits, `.`, `_` and `-` GitHub itself allows, so a name that equals one carries no invisible character and needs no pattern of its own to say so.
-        # A separate grammar was the other candidate and was rejected for being a second statement of the same shape, free to drift from the first, where this one cannot disagree with the url it is read from.
+        # GITHUB_URL_RE holds the repo segment to the letters, digits, `.`, `_` and `-` GitHub itself allows.
+        # So a name that equals one carries no invisible character and needs no pattern of its own to say so.
+        # A separate grammar was the other candidate and was rejected.
+        # It would be a second statement of the same shape, free to drift from the first.
+        # This one cannot disagree with the url it is read from.
         url_name = slug.split("/", 1)[1]
         if name != url_name:
             errors.append(
                 f"{name}: name and url disagree, the url naming repo '{url_name}' - repo-config/configure.sh keys the registry on the url's segment, so this entry resolves to nothing there"
             )
 
-        # Checked per entry for the reason given at the defaults check above, and on every status, since a backlog or archived entry is read by the fleet membership check and by whatever promotes it later.
+        # Checked per entry for the reason given at the defaults check above, and on every status.
+        # This is because a backlog or archived entry is read by the fleet membership check and by whatever promotes it later.
         if repo_keys is not None:
             stray = sorted(set(repo) - repo_keys)
             if stray:
@@ -1221,22 +1292,29 @@ def main(argv=()):
         eol = repo.get("lineEndings")
         if eol is not None and eol not in ("lf", "crlf"):
             errors.append(f"{name}: lineEndings '{eol}' invalid (expected lf or crlf)")
-        # An operational repo's endings follow the consuming app's platform, so they must be declared, where a release repo omits the field and takes the fleet LF default.
+        # An operational repo's endings follow the consuming app's platform, so they must be declared.
+        # A release repo omits the field and takes the fleet LF default.
         # Resolve the effective model the way configure.sh does, from the repo, then the defaults, then release.
         # The requirement then holds even where a repo relies on an operational defaults.workflowModel rather than setting its own.
         effective_model = model or default_model or "release"
         if effective_model == "operational" and eol is None:
             errors.append(f"{name}: operational repo must declare lineEndings (lf or crlf)")
-        # Read by spec/audit.py as `bool(entry.get("hasDevelop"))` and compared against the live branch, so the coercion decides the answer wherever the declared value is not already a boolean.
-        # The string "no" reads as True and an empty list reads as False, and the DRIFT line prints the raw value either way, so the report would name a value that is not what was compared.
-        # Presence is the test rather than truthiness, since a declared `false` is the answer for a repo that has no develop branch and must not be read as an undeclared field.
+        # Read by spec/audit.py as `bool(entry.get("hasDevelop"))` and compared against the live branch.
+        # So the coercion decides the answer wherever the declared value is not already a boolean.
+        # The string "no" reads as True and an empty list reads as False.
+        # The DRIFT line prints the raw value either way, so the report would name a value that is not what was compared.
+        # Presence is the test rather than truthiness, since a declared `false` is the answer for a repo that has no develop branch.
+        # It must not be read as an undeclared field.
         if "hasDevelop" in repo and not isinstance(repo["hasDevelop"], bool):
             errors.append(
                 f"{name}: hasDevelop {repo['hasDevelop']!r} must be true or false, and spec/audit.py coerces whatever is declared"
             )
         # Compared exactly against the names GitHub stores, by spec/audit.py's secret audit and by this file's own requires/forbids cross-check below.
-        # A padded element is therefore reported missing from the actions store on every run while the unpadded name it was meant to be goes unrequired, and a non-string element reaches a set membership test that answers False for every name there is.
-        # A positive grammar rather than a padding test, per the grammars at the top of this file, and SECRET_NAME_PATTERN there is the one statement of what it admits.
+        # A padded element is therefore reported missing from the actions store on every run.
+        # The unpadded name it was meant to be goes unrequired meanwhile.
+        # A non-string element reaches a set membership test that answers False for every name there is.
+        # A positive grammar rather than a padding test, per the grammars at the top of this file.
+        # SECRET_NAME_PATTERN there is the one statement of what it admits.
         # Presence is the test rather than `is not None`, since a declared null is a value of the wrong type and not an undeclared field.
         # The key is read by spec/audit.py as `entry.get("requiredSecrets", [])`, which returns the null rather than the default, so a null reaches set() there and raises.
         secrets_decl = repo.get("requiredSecrets")
@@ -1249,7 +1327,8 @@ def main(argv=()):
                         errors.append(
                             f"{name}: requiredSecrets entry {s!r} is not a GitHub secret name ({SECRET_NAME_SHAPE})"
                         )
-        # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names, so a non-string element raises there mid-run rather than reporting.
+        # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names.
+        # So a non-string element raises there mid-run rather than reporting.
         # An audit that raises reports nothing at all, where the malformed note it choked on would have been one line.
         # Presence rather than `is not None`, for the reason requiredSecrets gives above: `entry.get("driftNotes", [])` returns a declared null, which is then iterated.
         notes_decl = repo.get("driftNotes")
@@ -1264,11 +1343,13 @@ def main(argv=()):
                         )
         # Optional, since a repo whose callers pass no python-directories input declares nothing.
         errors.extend(python_directories_errors_for_repo(repo, name))
-        # Optional per GOVERNANCE.md "Repository Details": a repo that has not adopted the field yet is unaffected, since spec/audit_markdown.py's description_findings() falls back to the README tagline for it.
+        # Optional per GOVERNANCE.md "Repository Details".
+        # A repo that has not adopted the field yet is unaffected, since spec/audit_markdown.py's description_findings() falls back to the README tagline for it.
         errors.extend(description_errors_for_repo(repo, name))
         # Optional, and read by repo-config/configure.sh's check mode rather than by any check here.
         # CI runs no JSON-schema validation, so the schema's own required-fields and branches-iff-custom rules are enforced here or nowhere.
-        # A malformed entry would otherwise reach configure.sh, where a missing branchPolicy asserts against the literal "null" jq prints and reports drift on a repo that has none.
+        # A malformed entry would otherwise reach configure.sh.
+        # There, a missing branchPolicy asserts against the literal "null" jq prints and reports drift on a repo that has none.
         errors.extend(environment_errors_for_repo(repo, name))
 
         status = repo.get("status")
@@ -1324,7 +1405,8 @@ def main(argv=()):
             )
 
         # Required on a cataloged repo, which is the set spec/audit.py audits, because there an absent field is not read as undeclared.
-        # It is coerced to False and compared against the live branch, so omitting it asserts that the repo has no develop branch rather than declining to say.
+        # It is coerced to False and compared against the live branch.
+        # So omitting it asserts that the repo has no develop branch rather than declining to say.
         # The type check above holds wherever the field is declared, and this is the one status that must declare it.
         if "hasDevelop" not in repo:
             errors.append(
@@ -1332,9 +1414,12 @@ def main(argv=()):
             )
 
         # Built from the well-formed elements alone rather than from the declared value, since the check above appends an error and does not stop the loop.
-        # Every error is printed after the loop, so anything that raises here costs the operator the message naming the defect and hands over a traceback instead.
-        # The elements are filtered rather than the container type tested, because a list is not the only shape that reaches this: an unhashable element, a nested list being one, satisfies a container test and raises on the way into the set.
-        # A non-string element has already been reported by name above, so dropping it here loses no finding and lets the cross-check below run on the part of the declaration that is readable.
+        # Every error is printed after the loop.
+        # So anything that raises here costs the operator the message naming the defect and hands over a traceback instead.
+        # The elements are filtered rather than the container type tested, because a list is not the only shape that reaches this.
+        # An unhashable element, a nested list being one, satisfies a container test and raises on the way into the set.
+        # A non-string element has already been reported by name above, so dropping it here loses no finding.
+        # It also lets the cross-check below run on the part of the declaration that is readable.
         required = (
             {s for s in secrets_decl if isinstance(s, str)}
             if isinstance(secrets_decl, list)
@@ -1364,13 +1449,15 @@ def main(argv=()):
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
             # The repo's mechanism label, oidc or static-secret, must match the target mechanism's kind.
-            # An OIDC mechanism may still require a non-secret stored value, NUGET_USERNAME for a NuGet login being one, so an empty requires list is not the signal.
+            # An OIDC mechanism may still require a non-secret stored value, NUGET_USERNAME for a NuGet login being one.
+            # So an empty requires list is not the signal.
             # The match is on the explicit kind instead.
             kind = spec_mech.get("kind")
             if kind and mech != kind:
                 errors.append(f"{name}: {target} labeled '{mech}' but its mechanism is '{kind}'")
 
-    # Every files.json appliesTo selector must resolve to a known token, and no project type may collide with a reserved selector, since a flat token set is only unambiguous while the namespaces stay disjoint.
+    # Every files.json appliesTo selector must resolve to a known token, and no project type may collide with a reserved selector.
+    # This is because a flat token set is only unambiguous while the namespaces stay disjoint.
     # An unknown token fails open, never matching, so a required file or section would silently apply nowhere.
     reserved = set(WORKFLOW_MODELS) | set(RELEASE_TRIGGERS) | set(CONSUMER_MODELS)
     clash = known_types & reserved
@@ -1392,7 +1479,8 @@ def main(argv=()):
             else (applies_to if isinstance(applies_to, list) else [applies_to])
         )
         for tok in tokens:
-            # CI runs no JSON-schema validation, so guard the type here rather than crash on an unhashable token, a nested object being one, reaching the set-membership test below.
+            # CI runs no JSON-schema validation, so guard the type here.
+            # An unhashable token, a nested object being one, would otherwise crash on reaching the set-membership test below.
             if not isinstance(tok, str):
                 errors.append(f"files.json: {where} appliesTo has a non-string token {tok!r}")
             elif tok not in universe:
@@ -1563,7 +1651,8 @@ def main(argv=()):
         check_selector(path, item.get("appliesTo", "*"))
 
         # The fidelity field governs how faithfully the unit is checked, per spec/fidelity-model.md.
-        # CI runs no schema validation, so shape-check the fidelity fields here rather than let a malformed contract or an outside-root reference slip through and crash a later check.
+        # CI runs no schema validation, so shape-check the fidelity fields here.
+        # A malformed contract or an outside-root reference would otherwise slip through and crash a later check.
         fid = item.get("fidelity", "presence")
         if fid not in FIDELITIES:
             errors.append(
@@ -1674,7 +1763,8 @@ def main(argv=()):
 
         # Every declared section must resolve to a real `## <heading>` in the hub's own copy of the file, per spec/section-model.md "Enforcement".
         # Without this, a renamed or mistyped section name declares a region that does not exist.
-        # The downstream verbatim byte-match in audit.py then has nothing to compare, and the section silently stops being checked anywhere, which is the quiet-narrowing failure Verification Discipline forbids.
+        # The downstream verbatim byte-match in audit.py then has nothing to compare.
+        # The section silently stops being checked anywhere, which is the quiet-narrowing failure Verification Discipline forbids.
         # This is Markdown only, and only where the hub ships the file.
         if path.endswith(".md") and (ROOT / path).exists():
             hub_text = (ROOT / path).read_text(encoding="utf-8", errors="replace")

@@ -1,6 +1,8 @@
 # The hub's own validate hook, run by validate-task.yml's validate job for this repo.
-# The fleet doc-lint block and the Python leg in validate-task.yml, which runs the unittest suite under tests/, do not cover the rest of the hub's own machinery.
-# Carrying this hook makes the hub exercise the override path on every hub pull request, where a repo with no hook of its own exercises the hub default at .github/actions/validate-default.
+# The fleet doc-lint block and the Python leg in validate-task.yml do not cover the rest of the hub's own machinery.
+# That Python leg runs the unittest suite under tests/.
+# Carrying this hook makes the hub exercise the override path on every hub pull request.
+# A repo with no hook of its own exercises the hub default at .github/actions/validate-default instead.
 name: Validate repository (hub)
 description: Registry and spec validation, the audit helper suite and the self-tests outside the unittest suite, the fleet-skills freshness check, and the unclassified-character report.
 
@@ -43,9 +45,11 @@ runs:
       shell: bash
       run: uv run --no-project --script scripts/build_dist.py --check
 
-    # The burn-down goes to the run's job summary rather than into the tree, on every event since it describes the commit rather than a comparison against a base.
+    # The burn-down goes to the run's job summary rather than into the tree.
+    # It does so on every event, since it describes the commit rather than a comparison against a base.
     # GOVERNANCE.md "Verification Discipline".
-    # The step fails only on the engine's boundary exit, meaning it could not read what it needs rather than having read it and found a unit uncovered, since a boundary is not a verdict about coverage.
+    # The step fails only on the engine's boundary exit, since a boundary is not a verdict about coverage.
+    # That exit means the engine could not read what it needs, rather than having read it and found a unit uncovered.
     # Read-only, and `!cancelled()` so it renders after an earlier step failed.
     - name: Render the canonical review burn-down step
       if: ${{ !cancelled() }}

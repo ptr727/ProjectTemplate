@@ -536,7 +536,9 @@ def canonical_blob_sha(path):
     Raises OSError where path is absent from that commit or is not a regular file there.
     """
     rev = _hub_main_rev()
-    # Read via git ls-tree, not git rev-parse <rev>:<path>, which resolves a directory to a tree object id just as readily as a file to a blob one, silently breaking the regular-file promise above.
+    # Read via git ls-tree, not git rev-parse <rev>:<path>.
+    # The latter resolves a directory to a tree object id just as readily as a file to a blob one.
+    # That silently breaks the regular-file promise above.
     result = subprocess.run(
         ["git", "ls-tree", rev, "--", path],
         cwd=ROOT,
@@ -2403,7 +2405,8 @@ def main(argv=None):
     wanted = {n.casefold() for n in a.names}
     repos = [r for r in spec["registry"]["repos"] if r.get("status") == "cataloged"]
     if wanted:
-        # Keyed on the entry name rather than the owner/repo identity, and a name is unambiguous because spec/validate.py refuses one that duplicates another up to case, when it is run.
+        # Keyed on the entry name rather than the owner/repo identity.
+        # A name is unambiguous because spec/validate.py refuses one that duplicates another up to case, when it is run.
         repos = [r for r in repos if r["name"].casefold() in wanted]
         missing = wanted - {r["name"].casefold() for r in repos}
         if missing:

@@ -2,7 +2,7 @@
 
 A git hook sets some of them (`GIT_DIR`, `GIT_INDEX_FILE`, and the like). A script or test that
 builds a temporary repository with `git -C <tmp>` or `cwd=<tmp>` and inherits them builds it
-inside the hook's own repository instead, and reads its answers back from there.
+inside the hook's own repository instead. Such a script or test also reads its answers back from there.
 
 The list is what `git rev-parse --local-env-vars` prints.
 """

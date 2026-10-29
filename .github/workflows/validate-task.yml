@@ -10,8 +10,11 @@ name: Validate task
 # The validate job is the validate hook, a repo's own domain checks.
 # Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
 # No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs, markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions, test-matrix and workflow-model are the optional inputs, and CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
-# Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit, so each implementation is reproducible against the caller's released pin without a second checkout.
+# No required inputs.
+# The optional inputs are markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions, test-matrix and workflow-model.
+# CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
+# Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit.
+# Each implementation is therefore reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
     inputs:
@@ -295,7 +298,8 @@ jobs:
           directories: ${{ inputs.python-directories }}
           report-uncovered: 'true'
 
-      # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale, where the action SHA above is Dependabot-tracked.
+      # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale.
+      # The action SHA above is Dependabot-tracked.
       # This is the one place the fleet's uvx tools are pinned or floated, decided here.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
@@ -304,7 +308,8 @@ jobs:
           python-version: "3.13"
 
       # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
-      # They install under the first interpreter the caller names, since they need not resolve under the one this job pins, and UV_PYTHON is what every uv call below reads for it.
+      # They install under the first interpreter the caller names, since they need not resolve under the one this job pins.
+      # UV_PYTHON is what every uv call below reads for it.
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
@@ -313,7 +318,8 @@ jobs:
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
           set -Eeuo pipefail
-          # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+          # One resolve over the collected requirements files, since the glob sorts the base file last.
+          # A per-file install would let its pins downgrade what the test file just resolved.
           install_requirements() {
             if [ -n "${PIP_PYTHON:-}" ]; then
               export UV_PYTHON="$PIP_PYTHON"
@@ -385,8 +391,11 @@ jobs:
 
       # Mypy takes precedence where a config declares both, matching every repo that runs mypy in CI today.
       # A pyright-only config, with no mypy section, falls back to pyright instead.
-      # A declared directory's standalone mypy.ini or .mypy.ini, setup.cfg [mypy] section, or pyrightconfig.json counts too, the placement a Home Assistant integration keeps, while the undeclared root reads only the pyproject sections it always did.
-      # A declared subdirectory configuring neither falls back to the repository root's config and runs the checker from the root, the way a monorepo keeping one config there runs it.
+      # A declared directory's standalone mypy.ini or .mypy.ini, setup.cfg [mypy] section, or pyrightconfig.json counts too.
+      # That is the placement a Home Assistant integration keeps.
+      # By contrast, the undeclared root reads only the pyproject sections it always did.
+      # A declared subdirectory configuring neither falls back to the repository root's config and runs the checker from the root.
+      # That is the way a monorepo keeping one config there runs it.
       # A repo that genuinely wants both enforced adds the second as its own validate hook step.
       - name: Type check Python step
         if: steps.python.outputs.any == 'true'
@@ -452,7 +461,8 @@ jobs:
                 # The venv's own mypy imports the plugins installed beside it and targets its interpreter already.
                 (cd "$config_dir" && "$venv_python" -m mypy "${targets[@]}") < /dev/null
               else
-                # Left alone, mypy under uvx targets the interpreter it runs under, so the venv's version is passed unless the config pins its own, which the flag would override.
+                # Left alone, mypy under uvx targets the interpreter it runs under.
+                # The venv's version is therefore passed unless the config pins its own, which the flag would override.
                 version_args=()
                 if ! pins_python_version "$config_dir"; then
                   version_args=(--python-version "$("$venv_python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')")
@@ -497,7 +507,8 @@ jobs:
       # On the release model all of it was reviewed where it landed.
       # So the comment rule stands down there, rather than reporting a whole release's comments as this change's.
       # On the operational model any of it may have landed by direct commit, so the promotion is its first review and the rule runs.
-      # The head branch is tested as well as the base, since a feature branch may target the default branch directly and that one carries new lines.
+      # The head branch is tested as well as the base, since a feature branch may target the default branch directly.
+      # The default branch carries new lines.
       # The head repository is tested too, since a fork's branch may be named `develop` and its lines were reviewed nowhere.
       - name: Resolve comment stand-down step
         id: comment-stand-down
@@ -553,14 +564,18 @@ jobs:
 
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own guard instead, a tree-detection one on the .NET half and the resolved Python directories on the Python half.
-  # A caller with no *Tests*.csproj and no Python directory runs every guard false, and the job reports success having done nothing, which is the clean skip this job promises.
+  # A caller with no *Tests*.csproj and no Python directory runs every guard false.
+  # The job reports success having done nothing, which is the clean skip this job promises.
   # See D1.6 for a declared Python directory with no tests/.
   # See D1.2 for the undeclared root.
   # The matrix dimension is the interpreter, or the test-matrix leg when that is set.
   # A caller naming neither runs the single leg this job ran before the input existed.
   # A python-versions leg names an interpreter whether or not one ran.
   # So a .NET-only caller reports a Python version its Python steps never used.
-  # A caller naming several also repeats this job's .NET half once per leg, which spends runner minutes and re-uploads an identical report rather than measuring anything new, and splitting the two halves into jobs of their own is what that costs, owed by the first repo to carry both a .NET test project and more than one interpreter.
+  # A caller naming several also repeats this job's .NET half once per leg.
+  # That spends runner minutes and re-uploads an identical report rather than measuring anything new.
+  # Splitting the two halves into jobs of their own is what that costs.
+  # The first repo to carry both a .NET test project and more than one interpreter owes it.
   unit-test:
     name: Unit test job (${{ matrix.label || format('Python {0}', matrix.python-version) }})
     needs: test-matrix
@@ -595,7 +610,8 @@ jobs:
           dotnet-version: 10.x
 
       # --coverage-output stays unset because pinning one filename gives every test project in the solution the same path, and the last to finish overwrites the rest.
-      # The default <guid>.cobertura.xml written instead is a name codecov-cli's finder does not match, so each report is prefixed rather than renamed, keeping the guid that makes it unique.
+      # The default <guid>.cobertura.xml written instead is a name codecov-cli's finder does not match.
+      # Each report is therefore prefixed rather than renamed, keeping the guid that makes it unique.
       - name: Run unit tests step
         if: hashFiles('**/*Tests*.csproj') != ''
         run: |
@@ -693,7 +709,8 @@ jobs:
           HOOK_LEG: ${{ inputs.test-matrix != '' }}
         run: |
           set -Eeuo pipefail
-          # One resolve over the collected requirements files, since the glob sorts the base file last and a per-file install would let its pins downgrade what the test file just resolved.
+          # One resolve over the collected requirements files, since the glob sorts the base file last.
+          # A per-file install would let its pins downgrade what the test file just resolved.
           install_requirements() {
             if [ -n "${PIP_PYTHON:-}" ]; then
               export UV_PYTHON="$PIP_PYTHON"

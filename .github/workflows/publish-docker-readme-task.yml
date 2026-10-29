@@ -1,7 +1,9 @@
 name: Publish Docker Hub readme task
 
-# Pushes the size-limited Docker Hub repository overview, hosted here once since the login, the repository-list resolution, and the push step are identical across every Docker repo.
-# Caller-gated in the doc sense, the publisher invokes this from its main leg, and gated again here on the branch input, so a caller that invokes this task on every branch still pushes only once.
+# Pushes the size-limited Docker Hub repository overview.
+# It is hosted here once since the login, the repository-list resolution, and the push step are identical across every Docker repo.
+# Caller-gated in the doc sense, the publisher invokes this from its main leg.
+# It is gated again here on the branch input, so a caller that invokes this task on every branch still pushes only once.
 # The overview has no per-branch context.
 # The repository list is either passed directly (repositories) or derived from a manifest (manifest plus manifest-jq).
 # That covers single- and multi-image repos without per-repo glue.
@@ -118,7 +120,8 @@ jobs:
     name: Publish Docker Hub readme job
     runs-on: ubuntu-latest
     needs: get-repos
-    # Redundant with get-repos's own branch gate (a skipped need already skips this job by default), stated explicitly so the main-only guarantee does not depend on the needs skip-cascade alone.
+    # Redundant with get-repos's own branch gate (a skipped need already skips this job by default).
+    # It is stated explicitly so the main-only guarantee does not depend on the needs skip-cascade alone.
     if: ${{ inputs.branch == 'main' }}
     permissions:
       contents: read

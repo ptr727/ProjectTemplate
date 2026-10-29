@@ -43,42 +43,46 @@ FENCE_LINE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^`~
 def fenced_blocks(markdown: str) -> list[FencedBlock]:
     """Every fenced code block in `markdown`, dedented by its own opener's indent.
 
-    The label is filtered by the caller rather than by the scan, because a scanner that skips
-    an unwanted opener walks into its body, so a block illustrating Markdown would hand out the
+    The label is filtered by the caller rather than by the scan, because a scanner that skips an
+    unwanted opener walks into its body. A block illustrating Markdown would then hand out the
     blocks it contains.
 
-    A line is refused unless the fence run is the whole of it bar up to three leading spaces
-    and an info string carrying no backtick or tilde. Some of what that refuses a renderer
-    reads, and the indent cases are why the rule is drawn there: a renderer measures a fence's
-    indent against its list item's content column and takes four spaces past that as an
-    indented code block instead, so a scan guessing at the container reads a block a renderer
-    does not or misses one it does. Refusing makes a shape this cannot read fail loudly rather
-    than go unchecked, which is the whole reason the scan exists, and widening it is a
+    A line is refused unless the fence run is the whole of it bar two things. Those are up to three
+    leading spaces and an info string carrying no backtick or tilde. Some of what that refuses a
+    renderer reads, and the indent cases are why the rule is drawn there. A renderer measures a
+    fence's indent against its list item's content column and takes four spaces past that as an
+    indented code block instead. A scan guessing at the container therefore reads a block a
+    renderer does not, or misses one it does. Refusing makes a shape this cannot read fail loudly
+    rather than go unchecked, which is the whole reason the scan exists. Widening it is a
     deliberate edit here.
 
-    Legal Markdown is among what this refuses, a fence under a second list level and one
-    carrying a tilde in its info string among it, and the refused cases below are the list.
+    Legal Markdown is among what this refuses. A fence under a second list level is among it, and
+    so is one carrying a tilde in its info string. The refused cases below are the list.
     No document here uses any of it today. Only `AUDIT.md` and `docs/reusable-workflows.md` are
     under test, so that stays true by convention rather than by check.
 
     One container case is left rather than refused. An HTML block holding an odd number of
-    fence-shaped lines flips the open and closed parity, since a renderer reads the block as raw
-    HTML and this scan reads each of those lines as a fence, and an unlabelled block can be lost
-    that way. A labelled opener landing in closer position always raises on its info string, so
-    a block carrying a label, which is the only kind this is read for, cannot be lost through
-    it. Recognising an HTML block needs the container reasoning above, so the bound is what
+    fence-shaped lines flips the open and closed parity. That is because a renderer reads the block
+    as raw HTML and this scan reads each of those lines as a fence. An unlabelled block can be lost
+    that way. A labelled opener landing in closer position always raises on its info string. A
+    block carrying a label, which is the only kind this is read for, therefore cannot be lost
+    through it. Recognising an HTML block needs the container reasoning above, so the bound is what
     holds rather than the shape being handled.
 
-    Only a space or a tab may follow a closing fence, and this takes only a space as a body's
+    Only a space or a tab may follow a closing fence. This takes only a space as a body's
     indent, where a renderer expands a tab to a column first.
     Python calls a character whitespace, or a line ending, where a renderer keeps it as content.
     `str.strip` with no argument, `str.isspace`, `str.splitlines` and a newline-only split each
-    read one of those as whitespace to discard. They closed a block early and left the rest
-    unread, ate the start of a body line, rewrote a separator as a line ending, and swallowed a
-    body opened on a carriage return. Naming too wide a class does the same: a blank test
+    read one of those as whitespace to discard. They:
+    - closed a block early and left the rest unread
+    - ate the start of a body line
+    - rewrote a separator as a line ending
+    - swallowed a body opened on a carriage return
+
+    Naming too wide a class does the same. A blank test
     of spaces and tabs took a tab for an indent and sliced a column a renderer expands.
-    Every comparison here names the
-    characters it means, and a test of its own holds that rule over this function's source,
+    Every comparison here names the characters it means.
+    A test of its own holds that rule over this function's source,
     since writing the next comparison bare is how each of those arrived.
     """
     blocks: list[FencedBlock] = []
@@ -214,8 +218,8 @@ def fenced_shell_block(markdown: str, marker: str) -> str:
     """The one fenced shell block in `markdown` containing `marker`.
 
     Anchoring on what a block is about rather than on a variable name inside it keeps this
-    finding the block after the block is rewritten, which is how a rename silently stopped the
-    probe below from being exercised at all.
+    finding the block. It keeps finding the block after the block is rewritten, which is how a
+    rename silently stopped the probe below from being exercised at all.
     """
     blocks = [block for block in shell_blocks(markdown) if marker in block]
     if len(blocks) != 1:
@@ -369,9 +373,9 @@ class ReleaseGuardCase(unittest.TestCase):
         """github-release re-dispatches the publisher and cancels itself once the head's workflows differ, per D4.7.
 
         GITHUB_TOKEN's tag create answers 403 at a commit whose .github/workflows tree no longer
-        matches its branch's head, so the step decides before the create step runs. It dispatches only where
-        every push since was a release bot's, which the stub proves by running the step's own --jq
-        filter against a constructed repository activity response.
+        matches its branch's head. The step therefore decides before the create step runs. It dispatches
+        only where every push since was a release bot's. The stub proves that by running the step's own
+        --jq filter against a constructed repository activity response.
         """
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         marker = "      - name: Supersede a release the token cannot tag step\n"
@@ -549,8 +553,9 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_release_gate_refuses_a_branch_git_would_not_name(self) -> None:
         """validate-release refuses a branch git would not accept as a name, on a smoke run too.
 
-        Such a value can carry a newline and a :: command, or a ##[ token the runner reads anywhere
-        in a line, into any later step that prints the branch. The refusal never echoes it.
+        Such a value can carry a newline and a :: command into any later step that prints the branch.
+        It can equally carry a ##[ token, which the runner reads anywhere in a line.
+        The refusal never echoes it.
         """
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         marker = "      - name: Validate branch and version consistency step\n"
@@ -594,8 +599,8 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_no_run_script_interpolates_a_ref_name(self) -> None:
         """No run: script interpolates an expression that `names_a_ref` flags.
 
-        An expression is pasted into the script before bash parses it, and git accepts a branch
-        named like x$(id), so an interpolated name would run as code in a job holding the token.
+        An expression is pasted into the script before bash parses it. Git accepts a branch
+        named like x$(id). An interpolated name would therefore run as code in a job holding the token.
         """
         paths = [
             *sorted((REPO / ".github/workflows").glob("*.y*ml")),
@@ -773,20 +778,21 @@ class ReleaseGuardCase(unittest.TestCase):
 
         Python calls a character whitespace, or a line ending, where a renderer keeps it as
         content. Five silent defects in this scanner were one bare predicate each, two written
-        with the scanner and the rest while fixing something else in it, so the rule is worth
+        with the scanner and the rest while fixing something else in it. The rule is therefore worth
         more than the fixes.
         A comparison needing a wider class than the characters it names states that inline and
-        says why, and the exemptions are counted so a second cannot be added quietly.
+        says why. The exemptions are counted so a second cannot be added quietly.
 
         A sixth defect named its characters and named one too many, `strip(" \t")` where only a
-        space carries an indent, and this cannot see that: any argument opening with a quote is
+        space carries an indent. This cannot see that: any argument opening with a quote is
         taken as deliberate. Naming a class is where the rule stops and reading the class against
         the format begins, which is what the behaviour cases are for.
 
-        The four functions named below are read, rather than only the one that had the defects,
-        since moving a predicate into another of them is the cheapest way past a check that reads
-        one. Module-level code is not read, and the set of functions is a literal here rather than
-        derived, so a predicate placed outside both is caught by the behaviour cases or not at all.
+        The four functions named below are read, rather than only the one that had the defects.
+        This is because moving a predicate into another of them is the cheapest way past a check
+        that reads one. Module-level code is not read, and the set of functions is a literal here
+        rather than derived. A predicate placed outside both is therefore caught by the behaviour
+        cases or not at all.
         """
         # The detector is run against source written to fail it.
         # One that only ever sees a clean file can stop working with nothing to show for it.
@@ -863,12 +869,12 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_shell_block_extractor_reads_every_fence_shape(self) -> None:
         """A block the extractor skips is a block the guard silently never tests.
 
-        Each case pins one rule, and a rule no case exercises can be dropped without any test
+        Each case pins one rule. A rule no case exercises can be dropped without any test
         noticing, so a rule added to the extractor is owed a case here. The read cases are the
-        shapes this scan accepts rather than the ones these documents happen to use, since a
-        rule is worth pinning before a document reaches for it. Everything else is refused,
-        some of it legal Markdown a renderer reads, because a scan that guesses at the
-        container a fence sits in is the silent miss this scan exists to prevent.
+        shapes this scan accepts rather than the ones these documents happen to use. This is
+        because a rule is worth pinning before a document reaches for it. Everything else is
+        refused, some of it legal Markdown a renderer reads. This is because a scan that guesses at
+        the container a fence sits in is the silent miss this scan exists to prevent.
         """
         read = [
             ("three backticks", "```bash\nA=1\n```\n", ["A=1"]),
@@ -1008,12 +1014,12 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
 
-        No repository gate reads a snippet inside a Markdown file, and blocks here once shipped
+        No repository gate reads a snippet inside a Markdown file. Blocks here once shipped
         an unquoted `repo=<owner>/<repo>` and an unquoted `--repo <path-to-target-checkout>`,
-        each of which bash parses as a redirection, so they died of a syntax error before any
+        each of which bash parses as a redirection. They died of a syntax error before any
         `set` header took effect. Checking the substituted form is what hid it, so this checks
-        the printed form, and every shell label rather than `bash` alone, since the second of
-        those sat in a `shell`-labeled block.
+        the printed form. It checks every shell label rather than `bash` alone, since the second
+        of those shipped blocks sat in a `shell`-labeled block.
         """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
         blocks = shell_blocks(audit)
@@ -1035,7 +1041,7 @@ class ReleaseGuardCase(unittest.TestCase):
         """AUDIT.md's ecosystem probe reports an API failure rather than reading it as a clean tree.
 
         A failed read that returns nothing looks exactly like a repository declaring no
-        ecosystem, so the probe has to exit non-zero rather than print a MISSING line nobody
+        ecosystem. The probe therefore has to exit non-zero rather than print a MISSING line nobody
         can tell from a real finding.
         """
         audit = (REPO / "AUDIT.md").read_text(encoding="utf-8")
@@ -1668,7 +1674,7 @@ gh() {
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.
 
         The required check goes green on the one version the task ran while the repository goes on
-        claiming the rest, so the fan-out is asserted here rather than left to be read by eye.
+        claiming the rest. The fan-out is therefore asserted here rather than left to be read by eye.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
@@ -1714,9 +1720,9 @@ gh() {
         """A ref: on any checkout moves the gate off the commit a publisher releases.
 
         A bare checkout of the workflow repository fetches github.sha, and a reusable workflow reads
-        its caller's github context, so the bare form is what validates the exact commit a publisher
-        pins. No step in the task carries a ref: at all, asserted file-wide over block, flow, and
-        quoted keys, so no step shape or mapping style carries one past the check.
+        its caller's github context. The bare form is therefore what validates the exact commit a
+        publisher pins. No step in the task carries a ref: at all. That is asserted file-wide over
+        block, flow, and quoted keys, so no step shape or mapping style carries one past the check.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         self.assertIn("actions/checkout@", workflow)
@@ -1731,8 +1737,8 @@ gh() {
 
         The step's whole script is run against a stand-in dotnet, since a presence check on the
         assertion would stay green if its condition were inverted. Every case starts from a tree
-        already holding a renamed report, which is what a committed one looks like, so a check that
-        counted it would pass a run that measured nothing.
+        already holding a renamed report, which is what a committed one looks like. A check that
+        counted it would therefore pass a run that measured nothing.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
@@ -1784,11 +1790,11 @@ gh() {
         """fromJSON admits a JSON array of numbers, which is not a list of interpreter versions.
 
         An empty entry is the value that would otherwise carry a run green on an interpreter nobody
-        chose, since setup-uv reads an empty input as an absent one. An unquoted entry is admitted
-        by fromJSON as a number, and uv resolves some of those rather than refusing them, so that
-        shape carries a run green too. The step's whole script is run here, not just its filter, since
-        inverting the condition or exiting zero would leave a filter-only assertion green while
-        the step admitted everything. It is run from a file rather than through `-c`, for the reason
+        chose. That is because setup-uv reads an empty input as an absent one. An unquoted entry is
+        admitted by fromJSON as a number, and uv resolves some of those rather than refusing them.
+        That shape carries a run green too. The step's whole script is run here, not just its filter.
+        This is because inverting the condition or exiting zero would leave a filter-only assertion
+        green while the step admitted everything. It is run from a file rather than through `-c`, for the reason
         `host_capability.bash_path` gives.
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")

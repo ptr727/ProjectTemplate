@@ -2,9 +2,9 @@
 """Pin the Docker task workflow's login-before-push order and its hook inputs.
 
 Every job that can push to Docker Hub must check the credentials and log in before the first step
-that pushes, the caller's hook step included, and the hook step must receive the inputs it builds
-from. The job and step sets are read from the workflow, so a reordered, renamed, or added job is
-judged by the same rule rather than by a hard-coded index.
+that pushes. That includes the caller's hook step. The hook step must receive the inputs it builds
+from. The job and step sets are read from the workflow. A reordered, renamed, or added job is
+therefore judged by the same rule rather than by a hard-coded index.
 
 The reader is an indentation reader on the standard library alone, not a YAML or shell parser.
 Its remaining limits are listed here, and all but the last two have a `KnownLimitsCase` case below, so a change that alters one is noticed.
@@ -16,7 +16,9 @@ A block-scalar login value is not read as the secret.
 An inverted credential check is accepted, and the secret assignments and `-z` tests are matched as text anywhere in the step.
 A push by `docker compose push`, `imagetools create`, `--output type=image,push=true`, or a buildx-level option before `build` is missed.
 `with: push: false` is read as a push, and only lowercase `--push=false` and `--push=0` are read as no push.
-Two further limits have no case: a bare `-` sequence item ends the step list, and a `run` body less than two columns deeper than its key is not read.
+Two further limits have no case:
+- a bare `-` sequence item ends the step list
+- a `run` body less than two columns deeper than its key is not read
 """
 
 from __future__ import annotations

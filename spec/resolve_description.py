@@ -2,13 +2,14 @@
 """Resolve one repo's declared registry/repos.json description, for repo-config/configure.sh.
 
 Delegates to description_errors() (validate.py) so configure.sh validates a declared description
-against the exact same contract spec/audit_markdown.py's description_findings() does, rather than a third
-hand-rolled copy of the same rules.
+against the exact same contract spec/audit_markdown.py's description_findings() does.
+This avoids a third hand-rolled copy of the same rules.
 
 Prints the declared description to stdout and exits 0 when the repo has no declared description
-(nothing printed) or exactly one valid one. Exits 1 with a message on stderr for anything
-configure.sh should fail loud on: a malformed registry, more than one entry named NAME, or a
-declared description that description_errors() rejects.
+(nothing printed) or exactly one valid one.
+Exits 1 with a message on stderr for anything configure.sh should fail loud on.
+That is a malformed registry, more than one entry named NAME, or a declared description that
+description_errors() rejects.
 
 Usage: resolve_description.py [--] REGISTRY_PATH NAME
 
@@ -34,12 +35,16 @@ def resolve_description(registry: dict, name: str) -> str | None:
     """The declared description for NAME in REGISTRY, or None if the repo has none declared.
 
     Raises ResolveError for anything the caller should fail loud on rather than silently read as
-    absent: a registry that is not an object carrying a `repos` array, an entry whose own name
-    would match NAME once whitespace and case differences are normalized away but not otherwise
-    (spec/validate.py rejects a padded name outright, and a GitHub repo name is compared
-    case-insensitively by GitHub itself, so a same-name-different-case entry is a data-entry
-    mistake rather than a different repo), more than one entry named NAME, or a declared
-    description that description_errors() rejects.
+    absent:
+    - a registry that is not an object carrying a `repos` array
+    - an entry whose own name would match NAME once whitespace and case differences are normalized
+      away but not otherwise
+    - more than one entry named NAME
+    - a declared description that description_errors() rejects
+
+    The near-match entry is a data-entry mistake rather than a different repo. spec/validate.py
+    rejects a padded name outright, and GitHub itself compares a repo name case-insensitively, so a
+    same-name-different-case entry is a data-entry mistake.
     """
     if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
         raise ResolveError("registry is not an object with a 'repos' array")

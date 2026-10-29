@@ -1,10 +1,15 @@
 name: Sweep canonical review coverage action
 
 # The periodic half of GOVERNANCE.md "Verification Discipline"'s carried-content rule.
-# This files the work rather than doing it: the read is an adversarial pass by an agent, so a workflow can only name the units it asks for and hand them to a session that can run it.
+# This files the work rather than doing it.
+# The read is an adversarial pass by an agent.
+# A workflow can therefore only name the units it asks for and hand them to a session that can run it.
 # Hub-only, since the canonical content is authored here and a carrier has nothing of its own to sweep.
-# The issue's label comes from the fleet label set in repo-config/labels.json, so on a repository where repo-config/configure.sh has not applied that set the first run that finds work fails at gh issue create rather than filing an unlabeled issue no later run would find.
-# A run that finds no work says nothing about the label either way, since the listing below returns an empty set for a label that does not exist.
+# The issue's label comes from the fleet label set in repo-config/labels.json.
+# On a repository where repo-config/configure.sh has not applied that set, the first run that finds work fails at gh issue create.
+# It fails rather than filing an unlabeled issue no later run would find.
+# A run that finds no work says nothing about the label either way.
+# This is because the listing below returns an empty set for a label that does not exist.
 
 on:
   schedule:
@@ -29,14 +34,22 @@ jobs:
     steps:
 
       # The ref is named rather than left to the default a scheduled run checks out, which is the default branch.
-      # The passes this issue asks for are worked on a develop-based branch, per the repo-worktree base rule, so measuring main would name units against text that branch does not hold, refuse each record on a digest the tree has moved past, and re-file the same list every week until a promotion carried the fix.
+      # The passes this issue asks for are worked on a develop-based branch, per the repo-worktree base rule.
+      # Measuring main would therefore:
+      #  - name units against text that branch does not hold
+      #  - refuse each record on a digest the tree has moved past
+      #  - re-file the same list every week until a promotion carried the fix
       - name: Checkout repository step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: develop
-          # Full history, because the backlog slice orders never-read units by their file's last commit and a shallow clone dates every path to the tip commit, which would collapse that order to the unit key and file the alphabet's first units every week.
+          # Full history, because the backlog slice orders never-read units by their file's last commit.
+          # A shallow clone dates every path to the tip commit.
+          # That would collapse that order to the unit key and file the alphabet's first units every week.
           fetch-depth: 0
-          # The job holds issues: write, and checkout persists that token in .git/config by default, where nothing here needs git authentication: every git call here reads local state, in the step below and inside the engines alike, and every gh call takes GH_TOKEN.
+          # The job holds issues: write, and checkout persists that token in .git/config by default.
+          # Nothing here needs git authentication, since every git call here reads local state, in the step below and inside the engines alike.
+          # Every gh call takes GH_TOKEN.
           persist-credentials: false
 
       # The engine declares markdown-it-py inline, which uv resolves for it.
@@ -52,7 +65,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          # The engine's three-valued exit is read rather than folded: 0 is no unit owing a read, 1 is work to file, and 2 is the sweep never having run, which is not a verdict either way.
+          # The engine's three-valued exit is read rather than folded:
+          #  - 0 is no unit owing a read
+          #  - 1 is work to file
+          #  - 2 is the sweep never having run, which is not a verdict either way
           status=0
           uv run --no-project --script scripts/canonical_review.py sweep > "$RUNNER_TEMP/sweep.md" || status=$?
           if [ "$status" -gt 1 ]; then
@@ -71,24 +87,30 @@ jobs:
           TITLE: Canonical content review sweep
         run: |
           set -Eeuo pipefail
-          # The commit this run measured, read from the checkout rather than from GITHUB_SHA, which on a scheduled event names the default branch's head and not the develop tip checked out above.
+          # The commit this run measured, read from the checkout rather than from GITHUB_SHA.
+          # On a scheduled event GITHUB_SHA names the default branch's head and not the develop tip checked out above.
           head_sha="$(git rev-parse HEAD)"
           # A renamed or removed section leaves its pass naming a unit the tree no longer holds.
           # The renamed text is read again under its new key, which the work list reaches, where the stranded pass is not.
-          # Warned rather than filed, since no pass closes an orphan and an issue that cannot be closed is worse than a warning nobody has to act on.
-          # `.orphanedPasses | length` answers 0 for an absent key rather than failing, so the field is asserted: a renamed one has to stop the step rather than stop the warning.
+          # Warned rather than filed, since no pass closes an orphan.
+          # An issue that cannot be closed is worse than a warning nobody has to act on.
+          # `.orphanedPasses | length` answers 0 for an absent key rather than failing, so the field is asserted.
+          # A renamed one has to stop the step rather than stop the warning.
           orphans="$(uv run --no-project --script scripts/canonical_review.py status | jq 'if has("orphanedPasses") then (.orphanedPasses | length) else error("canonical_review.py status carries no orphanedPasses field") end')"
           if [ "$orphans" -gt 0 ]; then
             echo "::warning::$orphans recorded pass(es) name a unit this tree no longer holds, so a section was renamed or removed, and a renamed one is read again under its new key in the never-read backlog"
           fi
           # Every number a write below targets is read here, in this run, rather than constructed.
-          # Each producer writes to a file rather than into a process substitution, since mapfile reports success whatever the producer did, so a failed listing or filter would read as no open issue and file a second one beside the first.
+          # Each producer writes to a file rather than into a process substitution, since mapfile reports success whatever the producer did.
+          # A failed listing or filter would then read as no open issue and file a second one beside the first.
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$LABEL" --json number,title > "$RUNNER_TEMP/issues.json"
           jq -r '.[].number' "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/labeled.txt"
           jq -r --arg t "$TITLE" '.[] | select(.title == $t) | .number' "$RUNNER_TEMP/issues.json" > "$RUNNER_TEMP/titled.txt"
           mapfile -t labeled < "$RUNNER_TEMP/labeled.txt"
           mapfile -t titled < "$RUNNER_TEMP/titled.txt"
-          # The label carries one open issue per repository, so a second one, or a single one carrying a title this workflow never files under, is a state to report rather than one to pick from.
+          # The label carries one open issue per repository.
+          # A second one is a state to report rather than one to pick from.
+          # So is a single one carrying a title this workflow never files under.
           # Refusing on the second shape is what keeps an issue a human labeled from having its body replaced with the work list.
           if [ "${#labeled[@]}" -gt 1 ] || [ "${#labeled[@]}" -ne "${#titled[@]}" ]; then
             echo "::error::open $LABEL issue(s) ${labeled[*]} are not the single issue titled '$TITLE' that this workflow files, so which one it owns is undecided and a hand edit is what settles it"
@@ -103,7 +125,8 @@ jobs:
             fi
           elif [ -n "$number" ]; then
             # Closed rather than left open, so the issue's own state answers whether any unit is owed a read.
-            # A unit that owes a read again is filed as a new issue rather than reopening this one, since the listing above reads open issues only.
+            # A unit that owes a read again is filed as a new issue rather than reopening this one.
+            # This is because the listing above reads open issues only.
             gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "Every carried canonical unit has been read at its current text, measured on develop at $head_sha. A unit that moves past its pass, and one newly authored or newly carried, is filed as a new sweep issue."
             gh issue close "$number" --repo "$GITHUB_REPOSITORY"
           else
