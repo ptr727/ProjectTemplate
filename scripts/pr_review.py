@@ -121,6 +121,7 @@ Subcommands
            - Once one is pending.
            - Under a refusal or quota reading below, since a request into a reached limit spends
              quota and returns the same refusal.
+
            An error refusal whose run log
            names a transient fetch failure is owed one re-request, unless the round before it was
            an error refusal too. A re-request already made after the refusal is never sent again.

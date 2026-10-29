@@ -72,8 +72,8 @@ def probe(argv: list[str]) -> str | None:
     A non-zero exit is not an answer, and reading it as one is a mistake this made on its first run.
     It happened like this: `git restore-mtime --version` on a host without the tool prints git's
     own "not a git command" text and exits 1. That counted as the probe having run and reported the tool
-    as unreadable rather than absent. Those two have opposite remedies, fix this file against
-    install the tool. The exit code therefore decides, and a failing probe falls through to the next
+    as unreadable rather than absent. Those two have opposite remedies. Unreadable means fix this
+    file, and absent means install the tool. The exit code therefore decides, and a failing probe falls through to the next
     one.
     """
     try:
