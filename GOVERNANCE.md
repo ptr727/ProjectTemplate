@@ -182,7 +182,7 @@ The full CRLF/LF policy is in the `comment-and-doc-style` Skill referenced above
 
 ### Sentence Structure
 
-ASD-STE100's structural half is the adopted house style: short sentences, one instruction per sentence, active voice, and imperative mood for procedure steps. Its controlled dictionary is deliberately not adopted. The full rules, the sentence word cap, and the opt-in `sentence-length` check that enforces the cap are in the `comment-and-doc-style` Skill referenced above.
+ASD-STE100's structural half is the adopted house style: short sentences, one instruction per sentence, active voice, and imperative mood for procedure steps. Its controlled dictionary is deliberately not adopted. The full rules, the sentence word cap, and the default `sentence-length` check that enforces the cap are in the `comment-and-doc-style` Skill referenced above.
 
 ### Incidental Counts
 
