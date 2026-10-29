@@ -575,8 +575,8 @@ function Get-ToolHolder {
 #   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
 # Anything else names nobody.
 # This is because a Git upgrade that failed on a download leaves no log.
-# Such an upgrade also still finds every open Git Bash running from Git's own tree.
-# It is also because blaming those would send the reader after the wrong thing.
+# It is also because such an upgrade still finds every open Git Bash running from Git's own tree.
+# And blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
     warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
@@ -952,7 +952,7 @@ function Get-PythonLine {
 
 # The registry roots PEP 514 interpreters register under, in the order a lookup should prefer them.
 # The 32 bit view is listed because a 32 bit interpreter on a 64 bit host registers there and nowhere else.
-# An ARM64 host reaches an emulated x64 install the same way.
+# It is also listed because an ARM64 host reaches an emulated x64 install the same way.
 $PYTHON_REGISTRY_ROOTS = @(
     'HKCU:\SOFTWARE\Python\PythonCore'
     'HKLM:\SOFTWARE\Python\PythonCore'
@@ -1160,7 +1160,7 @@ function Repair-PythonName {
             # Warned and failed rather than noted, because this is the half of the contract that did not hold.
             # Python is installed and python3 still does not reach it.
             # A note would be the wrong instrument twice over, since it reads as an aside.
-            # It is also, on an apply, printed under a heading a reader scanning for failures does not look at.
+            # It is also the wrong instrument since, on an apply, it is printed under a heading a reader scanning for failures does not look at.
             warn "python could not write python3 beside the $line interpreter at $(Hide-Home $shim): $($_.Exception.Message). $remedy"
             $script:FAILED += 'python'
             return
@@ -1320,7 +1320,7 @@ function Start-DockerDesktop {
 # A run that finds Docker Desktop already stopped has nothing to restore, and none of that runs.
 # Boundary note: this script used to be read-only on WSL by design, naming upgrade-host.ps1 -Wsl as a person's own step rather than running it.
 # The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window.
-# The docker version bump's own integration needs that window to recover.
+# That window was what Docker's own integration needed to recover.
 # The maintainer moved it because a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
 # Returns whether docker is clear to proceed, and whether this stopped Docker Desktop, which is what Exit-DockerMaintenance needs to know whether it owes a restart.
 function Enter-DockerMaintenance {
@@ -1370,7 +1370,7 @@ function Enter-DockerMaintenance {
         if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
             # Built rather than a fixed string.
             # This is because whether this refusal itself restarts Docker Desktop depends on whether $result.Stopped is set.
-            # It is also because a run that found it already stopped restarts nothing for the remedy below to run into.
+            # It is also because a run that found Docker Desktop already stopped restarts nothing for the remedy below to run into.
             $restartNote = if ($result.Stopped) { ' This refusal also restarts Docker Desktop, to leave the host as it found it, so it may already be running again by the time this is read.' } else { '' }
             warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running.$restartNote"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }
@@ -1627,7 +1627,7 @@ function Invoke-Apply {
         # So its window belongs past the statuses that leave a tool alone.
         # An app execution alias stub returns on a host whose python has been current for months.
         # A reinstall removes the interpreter this puts python3 beside.
-        # So this belongs after all of them instead.
+        # So this belongs after all of those statuses instead.
         # A failed tool is the one case this does skip, and it is the case that matters most.
         # A reinstall whose install half failed has already removed the interpreter.
         # So removing the Store alias on top of it would leave the host with no python, no python3, and no way to get one.

@@ -1552,7 +1552,7 @@ sudo_visudo_path() {
 
 # Whether an implementation parses the drop-in, asked of its own visudo rather than of a version number.
 # Ubuntu ships sudo-rs as its default sudo from 25.10.
-# It carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
+# The sudo-rs carries no timestamp_type at all, so a host can hold a sudo that rejects the one setting this writes.
 sudo_parses() {
     local file="$1" checker
     checker=$(sudo_visudo_path "$2") || return 1
