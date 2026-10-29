@@ -42,7 +42,7 @@ A registry profile is **declared and validated**, not merely detected. Python is
 
 ### Consequence for cross-cutting checks
 
-A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` or `.codecov.yml` file presence) are **tests-aware**. They are N/A for a lint-only language other than Python, and for any language the repo carries no tests for. A language with no tests here must never manufacture a coverage finding. That holds whether it is lint-only or a package-only build language whose tests live elsewhere or are not yet written.
+A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` or `.codecov.yml` file presence) are **tests-aware**. They are N/A for a lint-only language other than Python, and for any language the repo carries no tests for. A language with no tests here must never manufacture a coverage finding. That holds whether the language is lint-only or a package-only build language whose tests live elsewhere or are not yet written.
 
 ## Languages
 
