@@ -106,8 +106,9 @@ detect_host() {
     fi
 
     if [[ $ASSUME_YES == true ]]; then
-        # Keep the installed config file on a packaging conflict, since an unattended run has nobody to answer the prompt.
-        # A replaced config is also the harder half to notice afterwards.
+        # Keep the installed config file on a packaging conflict, because of the following.
+        #   - An unattended run has nobody to answer the prompt.
+        #   - A replaced config is the harder half to notice afterwards.
         export DEBIAN_FRONTEND=noninteractive
         APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
     fi
@@ -302,8 +303,9 @@ backup_sources() {
     run_root install -d -m 0755 "$target"
 
     # A missing file is skipped, since a host on deb822 alone carries no sources.list.
-    # A copy that fails for any other reason stops the upgrade, because this backup is the only way back.
-    # Finding out it was never taken belongs before the sources are rewritten rather than after.
+    # A copy that fails for any other reason stops the upgrade, because of the following.
+    #   - This backup is the only way back.
+    #   - Finding out it was never taken belongs before the sources are rewritten rather than after.
     if [[ -f /etc/apt/sources.list ]]; then
         run_root cp -a /etc/apt/sources.list "$target/"
     fi

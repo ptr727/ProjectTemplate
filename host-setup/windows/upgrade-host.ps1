@@ -276,8 +276,9 @@ function Show-Status {
     log 'Self-updating, so winget reports the version it was installed at rather than the version it runs:'
     foreach ($row in $upgradable.Explicit) {
         info "$($row.Id)  installed at $($row.Version), source carries $($row.Available)"
-        # No command is printed for these, deliberately: winget cannot move them.
-        # Offering one invites a full reinstall over a working copy in pursuit of a number that does not change.
+        # No command is printed for these, deliberately, because of the following.
+        #   - winget cannot move them.
+        #   - Offering one invites a full reinstall over a working copy in pursuit of a number that does not change.
         if ($script:SELF_UPDATE_NOTE.ContainsKey($row.Id)) {
             info "  $($script:SELF_UPDATE_NOTE[$row.Id])"
         } else {

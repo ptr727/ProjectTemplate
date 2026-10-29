@@ -225,7 +225,7 @@ function Lock-Hub {
             return [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
         } catch [System.Management.Automation.MethodInvocationException] {
             # A held lock is a sharing or lock violation on Windows and the flock's EWOULDBLOCK on Linux, each carried in the HResult.
-            # A full disk or a read-only mount is instead a plain IOException, which would otherwise be waited on forever.
+            # A full disk or a read-only mount is a plain IOException too, and would otherwise be waited on forever.
             # The open does not block on either platform, so a held lock is waited out by retrying it.
             $reason = $_.Exception.InnerException
             $code = $reason.HResult -band 0xFFFF
@@ -262,7 +262,7 @@ function Invoke-WithHubLock {
     # That is also because a dry run must not create $DIR or a lock file where neither existed.
     # A lock that cannot be taken at all returns $Failed without running the scriptblock.
     # That is the value each caller already returns for its own task failing.
-    # That value is the caller's own rather than $false, since $false would read as exit code 0 to a caller comparing it with -eq.
+    # That is the caller's own value rather than a fixed $false, since a $false would read as exit code 0 to a caller comparing it with -eq.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
     # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site.
     # A bare closure reads as an unused parameter to that rule instead.
