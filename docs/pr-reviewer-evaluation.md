@@ -14,15 +14,15 @@ This document measures whether additional automated reviewers improve the fleet'
 
 ## Status
 
-**State:** Active evaluation, on public repositories only\
-**Incumbent:** GitHub Copilot\
-**Candidates:** CodeRabbit and Qodo, each on its open-source tier\
-**Installed but unconfigured:** the Claude GitHub App\
-**Samples:** [ProjectTemplate pull request #891][pr-891], [pull request #892][pr-892], and [pull request #893][pr-893]
+- **State:** Active evaluation, on public repositories only
+- **Incumbent:** GitHub Copilot
+- **Candidates:** CodeRabbit and Qodo, each on its open-source tier
+- **Installed but unconfigured:** the Claude GitHub App
+- **Samples:** [ProjectTemplate pull request #891][pr-891], [pull request #892][pr-892], and [pull request #893][pr-893]
 
 No candidate is a required reviewer. A candidate remains advisory until it meets the first-class support criteria below.
 
-Which repositories each reviewer actually covers, how each is triggered, and which committed file shapes each one live in [`pr-reviewer-reference.md`][pr-reviewer-reference], since that is behavior a review loop reads rather than a measurement this document argues about.
+Which repositories each reviewer actually covers, how each is triggered, and which committed file shapes each one live in [`pr-reviewer-reference.md`][pr-reviewer-reference]. The reason is that this is behavior a review loop reads rather than a measurement this document argues about.
 
 ## Evaluation Method
 
@@ -80,7 +80,7 @@ Qodo posted five findings:
 
 Copilot posted three terminal error responses and no findings. This sample therefore measures candidate value during an incumbent outage, not comparative recall over the same completed review.
 
-After `develop` advanced, CodeRabbit added two true positives: the organization Copilot runner policy also governs the cloud agent, and homelab labels must not overlap the hosted selector. Qodo added no finding.
+After `develop` advanced, CodeRabbit added two true positives. One is that the organization Copilot runner policy also governs the cloud agent. The other is that homelab labels must not overlap the hosted selector. Qodo added no finding.
 
 ### 2026-08-21: Pull Request #892
 
@@ -103,7 +103,7 @@ After the corrective push, CodeRabbit completed an explicitly triggered incremen
 
 Successive documentation-only follow-ups found two true positives: a compound-modifier error and inconsistent reviewer-attempt counts. The later comment that identified the resulting log-total mismatch repeated the count-reconciliation root. Qodo added no finding.
 
-Later follow-ups found six more true positives: upstream draft handoff, live runner authorization evidence, duplicate-root bookkeeping, the active workflow-restriction flag, the exact repository set, and the exact workflow set.
+Later follow-ups found six more true positives. They were upstream draft handoff, live runner authorization evidence, duplicate-root bookkeeping, the active workflow-restriction flag, the exact repository set, and the exact workflow set.
 
 Copilot posted terminal error responses on at least four successive pull request heads and supplied no review coverage.
 
@@ -148,7 +148,7 @@ The expansion should preserve one compact command while adding provider adapters
 
 `status` should report every enabled reviewer on one line and then list unresolved findings grouped by provider. `wait` should finish only when each selected reviewer reaches a recognized terminal state.
 
-The Copilot adapter is `scripts/pr_review_copilot.py`, with its spellings in `scripts/reviewers/copilot.json`, and a provider joins it as a vocabulary file read by the same code path. Provider support must not weaken its refusal, partial-coverage, or suppressed-finding readings. A part it cannot place on a round covering the head holds the merge gate until an owner, member, or collaborator acknowledges it with written outcomes.
+The Copilot adapter is `scripts/pr_review_copilot.py`, with its spellings in `scripts/reviewers/copilot.json`. A provider joins it as a vocabulary file read by the same code path. Provider support must not weaken its refusal, partial-coverage, or suppressed-finding readings. A part it cannot place on a round covering the head holds the merge gate. The hold lasts until an owner, member, or collaborator acknowledges the part with written outcomes.
 
 ## Next Evaluation Steps
 

@@ -5,14 +5,14 @@ Tracks the fleet-wide local-hook posture change repo by repo. The policy itself 
 canonical configs live in [`catalog/snippets/husky/`][snippets-husky] and
 [`catalog/snippets/pre-commit/`][snippets-pre-commit]. This doc is the rollout checklist only,
 not a restatement of the rule. It is **hub-only** and is not carried downstream, the same way
-[`docs/eol-lf-rollout.md`][eol-lf-rollout] is hub-only, because it tracks the hub's own migration
+[`docs/eol-lf-rollout.md`][eol-lf-rollout] is hub-only. This is because it tracks the hub's own migration
 rather than a fact a downstream repo's own docs need to carry.
 
 **Maintenance rule.** This file is hub-only, so a downstream repo's own conversion PR cannot edit
-it, and the audit that judges `parity.hooks` is always hub-authored, never a repo's own report of
+it. The audit that judges `parity.hooks` is always hub-authored, never a repo's own report of
 itself, per `AUDIT.md`. Once the hub's post-merge audit reports a repo's `parity.hooks` operational,
-the hub opens that repo's own small hub-side PR, the next step of the same `resync-a-repo` pass,
-and checks the repo's box below in it. A repo's box stays unchecked while that follow-up PR is
+the hub opens that repo's own small hub-side PR.
+That PR is the next step of the same `resync-a-repo` pass, and the hub checks the repo's box below in it. A repo's box stays unchecked while that follow-up PR is
 pending, which is expected, not stale. It is stale only once the audit has confirmed
 `parity.hooks` operational and no follow-up PR exists to show for it.
 
@@ -20,16 +20,16 @@ pending, which is expected, not stale. It is stale only once the audit has confi
 
 `spec/project-types.json`'s `crossCutting.linter-parity` dimension gained `parity.hooks`, judged
 by hand during an `AUDIT.md` run like every sibling check in that dimension, never by
-`spec/audit.py` itself: a repo with no local hook mechanism wired at all is a `linter-parity`
-defect, the same severity a missing markdownlint config already gets. A repo mid-convergence, the
-doc-gate half wired and the language-format half not yet because its own corpus does not pass it
-clean, stays operational, per the existing carve-out in GOVERNANCE.md. Two catalog snippets carry
-the canonical shape: Husky.Net
-(`catalog/snippets/husky/`, for a repo already keeping a .NET tool manifest declaring it) and the
-`pre-commit` framework (`catalog/snippets/pre-commit/`, for a repo without one and for any repo
+`spec/audit.py` itself. A repo with no local hook mechanism wired at all is a `linter-parity`
+defect, the same severity a missing markdownlint config already gets. A repo mid-convergence stays operational, per the existing carve-out in
+GOVERNANCE.md. Such a repo has the doc-gate half wired and the language-format half not yet,
+because its own corpus does not pass it clean. Two catalog snippets carry
+the canonical shape. One is Husky.Net
+(`catalog/snippets/husky/`, for a repo already keeping a .NET tool manifest declaring it). The other
+is the `pre-commit` framework (`catalog/snippets/pre-commit/`, for a repo without one and for any repo
 that prefers it). Both carry the
 same shared doc gates, the diff-scoped prose/comment-style gate and the whole-tree line-ending
-check, fetched fresh from the hub's `main` branch at run time via `hub_fetch_run.py` rather than
+check. The gates are fetched fresh from the hub's `main` branch at run time via `hub_fetch_run.py` rather than
 vendored or pinned.
 
 ## Per-Repo Conversion
@@ -40,15 +40,16 @@ Enable it (`git config core.hooksPath .husky`, or `uv tool install pre-commit` o
 then `dotnet husky install`, which generates `.husky/_/husky.sh`, the file the hook sources.
 Confirm the doc gates run clean against the repo's current tree.
 Open the PR through the repo's normal branching model.
-A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first
-and adds the language half once it does, per the mid-convergence carve-out. That partial state is
+A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first.
+It adds the language half once its corpus does, per the mid-convergence carve-out. That partial state is
 not a reason to leave the box unchecked, since the doc-gate half alone already satisfies
 `parity.hooks`' intent tier. After the downstream PR merges and the hub's post-merge audit
 confirms `parity.hooks` operational, open the small hub-side PR the maintenance rule above
-describes and check the box below in it.
+describes. Check the box below in it.
 
-A repo declaring neither `csharp` nor `python` in `registry/repos.json` (an `eda` repo with no
-Python, and any repo with no fleet-covered language) has no language-format half to add: the
+A repo declaring neither `csharp` nor `python` in `registry/repos.json` has no language-format half to add.
+That includes an `eda` repo with no
+Python, and any repo with no fleet-covered language. The
 doc-gate half alone is the complete, operational state for that repo, not an incomplete one a
 later resync should mistake for unfinished work.
 
