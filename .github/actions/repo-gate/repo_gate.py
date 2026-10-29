@@ -237,9 +237,9 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     squash merge deletes the branch a pin was taken from, and the pin outlives the commit. A
     third-party action's tag is stable by comparison, and reading one would make every local run of
     this gate depend on a stranger's repository answering. The cost is stated rather than left to be
-    found, and it is real.
-    A fabricated pin on a third-party action is still only shape-checked here. The counts below
-    print on every run so that narrowness is visible rather than inferred from a clean line.
+    found, and it is real. A fabricated pin on a third-party action is still only shape-checked
+    here. The counts below print on every run so that narrowness is visible rather than inferred
+    from a clean line.
     """
     bad = []
     owner = origin_owner(root)

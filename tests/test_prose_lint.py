@@ -1516,8 +1516,8 @@ class TestCommentWrapRule(BaitCase):
     def test_a_key_and_its_value_are_configuration_rather_than_a_sentence(self) -> None:
         """`comment-case` reads the first character, so a key opening lowercase could not pass.
 
-        The reported case is the `External usage:` header a fleet of ESPHome templates carries. `#
-        packages:` was already exempt as a lone key and the line under it was not. What passed is
+        The reported case is the `External usage:` header a fleet of ESPHome templates carries.
+        `# packages:` was already exempt as a lone key and the line under it was not. What passed is
         any key opening on something other than a lowercase letter, and each such spelling changes
         what a reader pastes. A capitalized, quoted or underscored key changes the key. A leading
         dash is a different YAML construct from the mapping it belongs to. The same snippet already
@@ -2539,9 +2539,8 @@ class TestCommentAddedRule(BaitCase):
     def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
         """The harness feeds the variables, so nothing else reads the step's own wiring.
 
-        The default is pinned too, because flipping it would run the rule on every such promotion.
-        That holds since a caller declaring nothing is a release repository by the registry's own
-        default.
+        The default is pinned too. A caller declaring nothing is a release repository by the
+        registry's own default, so flipping it would run the rule on every such promotion.
         """
         self.label_setup()
         text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
@@ -3712,8 +3711,8 @@ class TestIssueRefRule(unittest.TestCase):
     def test_a_reference_hugging_a_leading_comment_marker_is_read(self) -> None:
         """The body has the marker off, so the reference's own `#` is gone with it.
 
-        The comment is read as written as well. That is what tells `#N was the cause` from the `# N
-        items` the same body spells once the marker and the space are stripped. Only where the
+        The comment is read as written as well. That is what tells `#N was the cause` from the
+        `# N items` the same body spells once the marker and the space are stripped. Only where the
         marker opens the line, since mid-line the scan's own marker is a guess.
         """
         for name, text in (
@@ -4413,8 +4412,8 @@ class TestYamlLanguage(BaitCase):
         """A plain scalar's apostrophe is text, so reading it as an opener hides a real comment.
 
         The masked span would run from the apostrophe to the end of the line, taking the trailing
-        `#` with it. This repo's own workflow YAML carries the pattern (`the merge-bot's ...`).
-        A quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
+        `#` with it. This repo's own workflow YAML carries the pattern (`the merge-bot's ...`). A
+        quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
         """
         for code in (
             "key: don't",
@@ -5394,9 +5393,9 @@ class TestChangedLines(unittest.TestCase):
     def test_a_carriage_return_in_added_content_does_not_forge_a_file_header(self) -> None:
         """A lone `\\r` inside added content must not open a second file inside this parse.
 
-        Text-mode decoding turns that `\\r` into a line break of its own. So a forged `+++
-        b/decoy.md` line reads as a real header. It then steals credit for every hunk of the same
-        file that follows it.
+        Text-mode decoding turns that `\\r` into a line break of its own. So a forged
+        `+++ b/decoy.md` line reads as a real header. It then steals credit for every hunk of the
+        same file that follows it.
         """
         root = self.real_repo()
         doc = root / "doc.md"
@@ -6413,11 +6412,11 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
     def test_an_absolute_path_argument_reads_what_the_relative_one_reads(self) -> None:
         """The reported defect: same directory, same repository, same ref, and a clean verdict.
 
-        `prose_lint.py . --diff BASE` reported the finding while `prose_lint.py /abs/path --diff
-        BASE` reported nothing and exited 0. Discovery returned absolute paths and the diff named
-        repository-relative ones. So the intersection was empty, and an empty intersection is what a
-        clean tree looks like. The same-root guard could not fire, because the run genuinely was in
-        the right repository.
+        `prose_lint.py . --diff BASE` reported the finding while
+        `prose_lint.py /abs/path --diff BASE` reported nothing and exited 0. Discovery returned
+        absolute paths and the diff named repository-relative ones. So the intersection was empty,
+        and an empty intersection is what a clean tree looks like. The same-root guard could not
+        fire, because the run genuinely was in the right repository.
         """
         root = self.repo()
         (root / "DOC.md").write_text(self.BAIT, encoding="utf-8")
@@ -6429,8 +6428,8 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         """The second reported defect, on identical bytes either side of a `git add`.
 
         A new file read clean while unstaged and reported its findings the moment it was committed.
-        `git diff` never names an untracked file, so a change whose whole point is adding one scoped
-        to nothing. A change is exactly when a new file is most worth reading.
+        `git diff` never names an untracked file, so a change whose whole point is adding one is
+        scoped to nothing. A change is exactly when a new file is most worth reading.
         """
         root = self.repo()
         (root / "NEW.md").write_text(self.BAIT, encoding="utf-8")
@@ -6573,9 +6572,9 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         """`diff.relative` anchors a diff's paths on the process's directory, not the repository.
 
         This case passed before the fix too, because both sides were anchored on that directory and
-        agreed by accident. It is pinned because only one side moved. The reason is that the keys
-        must come from the repository whatever the caller's configuration says. A setting is an
-        input shape like any other.
+        agreed by accident. It is pinned because only one side moved. The keys
+        must come from the repository whatever the caller's configuration says, because a setting is
+        an input shape like any other.
         """
         root = self.repo()
         self.git(root, "config", "diff.relative", "true")
@@ -6777,11 +6776,11 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
     def test_a_checkout_that_tracks_the_script_names_its_own_commit(self) -> None:
         """The value is asserted against that repository's actual HEAD, not against a shape.
 
-        The absence of the moved marker is asserted alongside it. That is because `gate local
-        <head>` is a prefix of `gate local <head>-dirty`. It is also because a case reading only for
-        the prefix passes on a resolution that calls every clean copy moved. Dropping the pathspec
-        from the status query does exactly that, because this class writes an untracked sample file
-        into the repository it builds.
+        The absence of the moved marker is asserted alongside it. That is because
+        `gate local <head>` is a prefix of `gate local <head>-dirty`. It is also because a case
+        reading only for the prefix passes on a resolution that calls every clean copy moved.
+        Dropping the pathspec from the status query does exactly that, because this class writes an
+        untracked sample file into the repository it builds.
         """
         _, script, head = self.repo_with_script()
         out = self.verdict(script)
@@ -7348,8 +7347,9 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         The parse this replaced read git's prose `Binary files a/<path> and b/<path> differ` line.
         Its capture backtracked to the rightmost " and " in that line. For a name containing that
         exact substring, the rightmost split falls inside the name rather than between the two
-        paths. That leaves the captured half without its `b/` prefix and out of scope. `git diff
-        --numstat -z` never renders that prose line at all, so there is no " and " to split on.
+        paths. That leaves the captured half without its `b/` prefix and out of scope.
+        `git diff --numstat -z` never renders that prose line at all, so there is no " and " to
+        split on.
         """
         root = self.repo("true")
         (root / ".gitattributes").write_text("*.md -diff\n", encoding="utf-8")
