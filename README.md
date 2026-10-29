@@ -73,7 +73,7 @@ Nothing here is installed as a dependency. The rules are read, and the baseline 
 
 ## What This Repo Is
 
-**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository. For the same reason, the drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome: an agent stands a repository up, changes it, and releases it on its own, and lands in the same known-good shape every time. The guardrails are what make granting that autonomy sound rather than reckless.
+**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository. For the same reason, the drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome: an agent stands a repository up, changes it, and releases it on its own. Every time, it lands in the same known-good shape. The guardrails are what make granting that autonomy sound rather than reckless.
 
 **Guardrails here enable rather than restrain.** A rule earns its place by removing a decision an agent would otherwise make differently every time. A rule can instead earn it by making a failure loud that would otherwise pass green. Write safety bounds what an agent can reach outside the project in front of it. The review loop closes before anything merges. The audit proves the result instead of accepting the agent's report of it. Autonomy extends exactly as far as the verification reaches.
 
@@ -125,7 +125,15 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
   | `intent` | Reach the same outcome, judged by meaning | The repo owns the wording and shape. |
   | `presence` | The unit exists | The repo owns all of it. |
 
-- **The human contributes where domain expertise is decisive, and only there.** The maintainer keeps what an agent cannot know or must not decide: creating a repository, granting a write outside the owner boundary, changing a ruleset, approving every merge, and every judgment about the domain a repo actually serves. The agent takes the mechanical scale-out, which is the part that does not benefit from human attention and degrades under it. A repo's own knowledge also has a declared destination rather than an improvised one, chosen by what the content is. The destinations are `CODESTYLE.md` for conventions beyond the carried rules and `ARCHITECTURE.md` for how a code repo is built. They are also `OPERATIONS.md` for how a live-service repo is run and `TODO.md` for its backlog. Which of those a repo carries follows from what it is, so this hub holds the two that apply to it. Domain expertise therefore lands somewhere declared instead of being diluted into a carried file that the next re-vendor overwrites.
+- **The human contributes where domain expertise is decisive, and only there.** The maintainer keeps what an agent cannot know or must not decide:
+
+  - creating a repository
+  - granting a write outside the owner boundary
+  - changing a ruleset
+  - approving every merge
+  - every judgment about the domain a repo actually serves
+
+  The agent takes the mechanical scale-out, which is the part that does not benefit from human attention and degrades under it. A repo's own knowledge also has a declared destination rather than an improvised one, chosen by what the content is. The destinations are `CODESTYLE.md` for conventions beyond the carried rules and `ARCHITECTURE.md` for how a code repo is built. They are also `OPERATIONS.md` for how a live-service repo is run and `TODO.md` for its backlog. Which of those a repo carries follows from what it is, so this hub holds the two that apply to it. Domain expertise therefore lands somewhere declared instead of being diluted into a carried file that the next re-vendor overwrites.
 
 ## How This Repo Operates
 
