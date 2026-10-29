@@ -321,7 +321,7 @@ Should agent-authored prose adopt ASD-STE100, a controlled language standard, or
 
 **Recommendation**: adopt the structural half (short sentences, one instruction per sentence, active voice, imperative procedure steps) as house style, codified incrementally as `prose_lint.py` checks. Do not adopt the controlled dictionary. The existing rules already lean this way, so this is a direction confirmed rather than a new regime.
 
-**Decision**: adopted as recommended, the structural half as house style and no controlled dictionary. The first structural check is the `sentence-length` rule in [`scripts/prose_lint.py`][prose-lint], capped at ASD-STE100's 25-word descriptive limit. It ships opt-in like `sentence-split`, since at landing it counted 1686 over-cap sentences in the hub's own corpus. A default or CI gate would fail whole files nobody is editing. Promotion into `DEFAULT_RULES` or CI is a separate decision, taken if and when the corpus converges. The decision is recorded in `GOVERNANCE.md` "Documentation Style Conventions" under "Sentence Structure", with the full house-style rules in the `comment-and-doc-style` skill. The skill also states why the two unlintable halves stay authoring discipline.
+**Decision**: adopted as recommended, the structural half as house style and no controlled dictionary. The first structural check is the `sentence-length` rule in [`scripts/prose_lint.py`][prose-lint], capped at ASD-STE100's 25-word descriptive limit. It shipped opt-in like `sentence-split`, since at landing it counted 1686 over-cap sentences in the hub's own corpus. A default or CI gate would have failed whole files nobody was editing. Promotion into `DEFAULT_RULES` and CI waited for the corpus to converge. The hub's corpus now reads zero over-cap sentences, so the rule runs by default. That reaches the whole fleet, scoped in CI and the hooks to each sentence a change touches. The decision is recorded in `GOVERNANCE.md` "Documentation Style Conventions" under "Sentence Structure", with the full house-style rules in the `comment-and-doc-style` skill. The skill also states why the two unlintable halves stay authoring discipline.
 
 ## Adoption and Operation Roadmap
 
@@ -361,7 +361,7 @@ Design-doc first: this doc merges. Then each unchecked item becomes an issue lin
 - [ ] Refresh cadence observed in practice, revisited if the manual cadence fails
 - [ ] Register rows retired as they close, per the maintenance rule
 - [ ] Peer-messaging promotion re-evaluated after cross-host verification
-- [x] STE structural checks land in `prose_lint.py` incrementally: adopted, the first (`sentence-length`, opt-in) shipped, and the rest land on evidence per the decision above
+- [x] STE structural checks land in `prose_lint.py` incrementally: adopted, the first (`sentence-length`) runs by default, and the rest land on evidence per the decision above
 
 ## Decision Ledger Cross-References
 

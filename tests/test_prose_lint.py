@@ -2673,7 +2673,7 @@ class TestSentenceSplitRule(BaitCase):
 
 
 class TestSentenceLengthRule(BaitCase):
-    """The opt-in `sentence-length` rule on Markdown blocks, comment runs, and docstrings."""
+    """The default `sentence-length` rule on Markdown blocks, comment runs, and docstrings."""
 
     def test_a_sentence_over_the_cap_is_flagged(self) -> None:
         over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
@@ -2768,10 +2768,20 @@ class TestSentenceLengthRule(BaitCase):
         over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
         self.assertEqual([], self.kinds(f'x = "{over}."\n', {"sentence-length"}, name="bait.py"))
 
-    def test_the_rule_is_opt_in(self) -> None:
-        """Adoption is incremental, so the default set stays unchanged until a promotion."""
-        self.assertNotIn("sentence-length", prose_lint.DEFAULT_RULES)
-        self.assertIn("sentence-length", prose_lint.RULES)
+    def test_a_bare_run_checks_the_rule(self) -> None:
+        """The cap gates by default, so a run nobody parameterized catches an over-cap sentence."""
+        self.assertIn("sentence-length", prose_lint.DEFAULT_RULES)
+        bait = self.tmp / "bait.md"
+        words = ["alpha", "beta"] * prose_lint.SENTENCE_WORD_CAP
+        bait.write_text(" ".join(words[: prose_lint.SENTENCE_WORD_CAP + 1]) + ".\n", "utf-8")
+        out = io.StringIO()
+        with (
+            mock.patch.object(prose_lint, "discover", return_value=[bait]),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(1, prose_lint.main([]))
+        self.assertIn(":1: sentence-length", out.getvalue())
 
     def test_an_over_cap_shell_comment_is_flagged(self) -> None:
         self.assertEqual(
