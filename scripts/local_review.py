@@ -100,7 +100,6 @@ from a check finding". 0 and 1 are findings the caller acts on. 2 means the chec
 run, which a gate must not silently read as either answer. Cases include no git repository, an
 unresolvable target ref, a receipt that cannot be read off disk, and a missing backend binary.
 
-
 Every unexpected failure reports 2 as well, since a crash is the check not having run rather than a
 verdict of not covered. `status` reports rather than gating, so it is 0 whether or not the content
 is covered. It is 2 only when it could not run at all.

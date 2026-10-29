@@ -455,7 +455,7 @@ def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit, so a concurrent branch touching a different unit merges cleanly.
-    Together they also keep the diff of a recorded pass reading as the pass rather than as a
+    Together the two properties also keep the diff of a recorded pass reading as the pass rather than as a
     reordering. The caller holds `ledger_lock` across the read this replaces. That is because two
     overlapping records would otherwise each read a ledger without the other's pass, and the second
     write would drop it.

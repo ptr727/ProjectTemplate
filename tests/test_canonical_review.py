@@ -8,8 +8,7 @@ The mechanism rests on git's own file listing and merge-base rather than on anyt
 could stub convincingly. A third, smaller set reads this repository's own tree. That is because a
 unit table that silently stops covering a canonical reports exactly what a healthy one does.
 
-Run as `uv run --no-project --with-requirements tests/requirements.txt python
-tests/test_canonical_review.py`, or under `-m unittest discover -s tests` the same way.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py`, or under `-m unittest discover -s tests` the same way.
 """
 
 import contextlib
