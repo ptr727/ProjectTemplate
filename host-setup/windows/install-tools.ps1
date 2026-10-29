@@ -573,10 +573,9 @@ function Get-ToolHolder {
 # Something says so in one of these ways:
 #   - an installer log entry in Inno Setup's or Windows' own in-use wording
 #   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
-# Anything else names nobody.
-# This is because a Git upgrade that failed on a download leaves no log.
-# It is also because such an upgrade still finds every open Git Bash running from Git's own tree.
-# And blaming those would send the reader after the wrong thing.
+# Anything else names nobody, for this reason.
+# A Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree.
+# Blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
     warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
@@ -1072,8 +1071,7 @@ function Test-PythonVirtualEnv {
 # So removing the stub alone would leave the name simply absent on a host that does have Python.
 # Both halves therefore run together.
 # The stub goes, and a real python3.exe is put beside the interpreter this script manages.
-# That is what makes python3 the one interpreter name the fleet uses on every platform.
-# That is what makes it that name rather than a name that means something different here.
+# That is what makes python3 the one interpreter name the fleet uses on every platform, rather than a name that means something different here.
 # Nothing below names a version.
 # The line comes from whatever winget reports installed for the managed id.
 # So this keeps working unchanged when that id moves to a later line.

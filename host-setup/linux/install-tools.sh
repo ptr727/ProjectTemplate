@@ -859,9 +859,9 @@ dotnet_target() {
     apt_candidate_version "$package"
 }
 
-# Microsoft's feed is the fallback rather than the default.
-# Where the distro carries .NET, mixing the two feeds is what breaks a host.
-# Microsoft's feed carries amd64 only.
+# Microsoft's feed is the fallback rather than the default, for these reasons:
+#   - where the distro carries .NET, mixing the two feeds is what breaks a host
+#   - Microsoft's feed carries amd64 only
 dotnet_feed() {
     # The decision rests on what the distro feed carries, so it is made against lists that have been read at least once.
     # A host whose lists were never populated reports no SDK at all.
