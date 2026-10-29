@@ -21,11 +21,11 @@ Prerequisite: complete [host setup][host-setup] first. Without git config, an SS
 
 The .NET container additionally ships the `csharpier`/`dotnet-outdated` local tools (restored by `catalog/snippets/devcontainer/dotnet/post-create.sh`). The Python container additionally ships `uv` (installed by `catalog/snippets/devcontainer/python/post-create.sh` from a version-pinned URL) and pre-syncs the Python package venv where one is present.
 
-Each devcontainer's extension list is the workspace catalog's `base.jsonc` set plus that container's own language fragment and `docker.jsonc`, and a repo carrying one drops the Docker extension where it ships no Docker target.
+Each devcontainer's extension list is the workspace catalog's `base.jsonc` set plus that container's own language fragment and `docker.jsonc`. A repo carrying a devcontainer drops the Docker extension where it ships no Docker target.
 
 ## Bind Mounts (Both Containers)
 
-The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly and `gh` is pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead. See [`gh` credential store][gh-credential-store] below for the full picture.
+The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly. The mounts also make `gh` pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead. See [`gh` credential store][gh-credential-store] below for the full picture.
 
 | Host path | Container path | Mode | Purpose |
 | --------- | -------------- | ---- | ------- |
@@ -33,9 +33,9 @@ The host SSH key, allowed-signers file, and `gh` config directory are mounted in
 | `~/.config/git/allowed_signers` | `/home/vscode/.config/git/allowed_signers` | read-only | Maps your email to your public key so `git verify-commit` and `git log --show-signature` work inside the container. |
 | `~/.config/gh` | `/home/vscode/.config/gh` | read-write | `gh` CLI auth state shared with the host. See [`gh` credential store][gh-credential-store] below. |
 
-VS Code Dev Containers automatically copies your host `~/.gitconfig` into the container at startup, so `user.name`, `user.email`, `user.signingkey`, `gpg.format`, and `commit.gpgsign` propagate without an explicit mount.
+VS Code Dev Containers automatically copies your host `~/.gitconfig` into the container at startup. So `user.name`, `user.email`, `user.signingkey`, `gpg.format`, and `commit.gpgsign` propagate without an explicit mount.
 
-The SSH agent is forwarded automatically by the Dev Containers extension via `SSH_AUTH_SOCK`, so signing works as long as the agent on the host has your key loaded.
+The SSH agent is forwarded automatically by the Dev Containers extension via `SSH_AUTH_SOCK`. So signing works as long as the agent on the host has your key loaded.
 
 ## Lifecycle Commands
 
@@ -60,7 +60,7 @@ To force them to run again after editing a script: VS Code -> Command Palette ->
 | WSL2 | file (no native credential store) |
 | macOS | macOS Keychain |
 
-The bind-mount of `~/.config/gh` covers the **file** case. If your host stores the token in Keychain or libsecret, the bind-mount carries the rest of `gh` config but **not the token**, so the container will report "no authentication" until you either:
+The bind-mount of `~/.config/gh` covers the **file** case. If your host stores the token in Keychain or libsecret, the bind-mount carries the rest of `gh` config but **not the token**. So the container will report "no authentication" until you either:
 
 1. Re-run `gh auth login` inside the container (writes a file token to the mounted directory), or
 2. Skip in-container `gh` and run those commands on the host instead.
@@ -96,7 +96,7 @@ which dotnet                                       # nothing - dotnet intentiona
 cd "<package>" && uv sync && uv run pytest         # tests pass
 ```
 
-If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed signers`, the bind-mount of `allowed_signers` is missing or the file on the host is empty, so re-run the snippet in [host setup][host-setup].
+If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed signers`, the bind-mount of `allowed_signers` is missing or the file on the host is empty. In that case, re-run the snippet in [host setup][host-setup].
 
 ## Troubleshooting
 

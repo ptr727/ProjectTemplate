@@ -7,7 +7,7 @@ If you haven't generated a key and configured git yet, follow [host setup][host-
 ## Why SSH Signing
 
 - **One key for everything**. Same `id_ed25519` you use for `git push` also signs commits. No GPG keyring, no expirations to chase.
-- **GitHub native**. GitHub treats authentication and signing keys independently but accepts the same public key for both, so register it twice on the SSH and GPG keys page.
+- **GitHub native**. GitHub treats authentication and signing keys independently but accepts the same public key for both. So register it twice on the SSH and GPG keys page.
 - **Survives rotation cleanly**. When you rotate the key, update the `allowed_signers` file and old signatures still verify against the historical entry.
 
 ## Configuration
@@ -85,13 +85,13 @@ The Keychain prompt for the passphrase appears on first use after each reboot, a
 
 ### Windows (without WSL)
 
-Native Windows is **not supported** for the devcontainer setup in this repo. Use WSL2 instead. The reason: VS Code Dev Containers needs a Linux-like file system for the bind-mounts to behave consistently, and Docker Desktop's WSL2 backend is the supported path.
+Native Windows is **not supported** for the devcontainer setup in this repo. Use WSL2 instead. The reason: VS Code Dev Containers needs a Linux-like file system for the bind-mounts to behave consistently. A second part of the reason is that Docker Desktop's WSL2 backend is the supported path.
 
 If you must work on Windows directly without a devcontainer, OpenSSH for Windows can sign with `gpg.format=ssh`, but the bind-mounted devcontainer setup expects Linux/WSL2 paths.
 
 ## Verify Signing
 
-The `-S` flag and `-c gpg.format=ssh` override are explicit so the verification works even before `commit.gpgsign` and `gpg.format` are set globally, which is useful when verifying a fresh setup mid-configuration.
+The `-S` flag and `-c gpg.format=ssh` override are explicit so the verification works even before `commit.gpgsign` and `gpg.format` are set globally. That is useful when verifying a fresh setup mid-configuration.
 
 ```shell
 git -c gpg.format=ssh commit -S --allow-empty -m "verify-signing"

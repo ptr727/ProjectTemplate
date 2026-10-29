@@ -1,23 +1,23 @@
 # Husky snippet
 
 `pre-commit` is the reference git pre-commit hook (installed under `.husky/` by Husky). It
-runs **language formatting/lint and the fleet's shared doc gates**: CSharpier and
-`dotnet format` style via `dotnet husky run` for .NET, plus `ruff format --check` / `ruff check` /
-the repo's type checker for a Python repo (native tooling, no Docker, the same checks the
-`../pre-commit/.pre-commit-config.yaml` snippet runs), plus the diff-scoped prose/comment-style
-gate and the whole-tree line-ending check. Copy `../hub_fetch_run.py` alongside `pre-commit` for
-the doc gates to run: it fetches those two checks fresh from `ptr727/ProjectTemplate`'s `main`
-branch and runs them, rather than vendoring or pinning a copy. A pin nothing keeps current
-goes stale by construction, and CI (this repo's own, and the hub's) is the backstop for a
-change that lands broken on `main` before it does real damage locally. The prose gate adds one
+runs **language formatting/lint and the fleet's shared doc gates**. For .NET it runs CSharpier and
+`dotnet format` style via `dotnet husky run`. For a Python repo it runs `ruff format --check` /
+`ruff check` / the repo's type checker (native tooling, no Docker, the same checks the
+`../pre-commit/.pre-commit-config.yaml` snippet runs). It also runs the diff-scoped
+prose/comment-style gate and the whole-tree line-ending check. Copy `../hub_fetch_run.py`
+alongside `pre-commit` for the doc gates to run. The script fetches those two checks fresh from
+`ptr727/ProjectTemplate`'s `main` branch and runs them, rather than vendoring or pinning a copy.
+A pin that nothing keeps current goes stale by construction. CI (this repo's own, and the hub's) is
+the backstop for a change that lands broken on `main` before it does real damage locally. The prose gate adds one
 `api.github.com` commit lookup to its fetch, with a `git ls-remote` against `github.com`
 where that fails. An allow-list permitting only
 `raw.githubusercontent.com` gets an unresolved-commit fallback. These are network calls
 alongside the Docker pulls the Lint tasks below already do. A fetch failure fails the commit
 rather than silently skipping the gate.
 
-This snippet is for a repo that already keeps a .NET tool manifest declaring Husky.Net, since
-the hook sources `.husky/_/husky.sh`, a file `dotnet husky install` generates after
+This snippet is for a repo that already keeps a .NET tool manifest declaring Husky.Net.
+That is because the hook sources `.husky/_/husky.sh`, a file `dotnet husky install` generates after
 `dotnet tool restore` restores that manifest. This snippet ships no manifest, so a host .NET
 toolchain alone is not enough and a repo without one uses `../pre-commit/` instead. Neither snippet is scoped to a language by
 what it runs, and the two shared doc gates are what every repo owes either way.
@@ -37,7 +37,8 @@ A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **
 editor. The fleet's `[*]` `.editorconfig` default already gives it LF, no path-specific
 override needed. A CRLF shebang breaks execution.
 
-Both language blocks run unconditionally, with no tool-presence guard: a repo that keeps a
+Both language blocks run unconditionally, with no tool-presence guard.
+A repo that keeps a
 block declares that tool required, so a missing one fails the commit loudly rather than
 skipping the check silently. Drop the `dotnet husky run` block in a repo with no .NET project,
-and the Python block in a repo with no Python, rather than leaving either in place to no-op.
+and the Python block in a repo with no Python. Do not leave either in place to no-op.

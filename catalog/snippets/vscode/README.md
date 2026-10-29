@@ -27,4 +27,4 @@ The standard set holds only extensions that work without a separately installed 
 
 ## Composing a Workspace
 
-A repo's `<Repo>.code-workspace` is a single-folder workspace (`"folders": [{ "path": "." }]`) that merges `base.jsonc` with the per-type fragments for the languages and targets it ships: the merged `extensions.recommendations` is the standard set plus each type's additions, and the merged `settings` are the shared editor defaults plus each type's formatter block. This repo's own `ProjectTemplate.code-workspace` carries `base.jsonc` plus `python.jsonc`'s extensions and formatter block, for its Python scripts tree.
+A repo's `<Repo>.code-workspace` is a single-folder workspace (`"folders": [{ "path": "." }]`). It merges `base.jsonc` with the per-type fragments for the languages and targets it ships. The merged `extensions.recommendations` is the standard set plus each type's additions, and the merged `settings` are the shared editor defaults plus each type's formatter block. This repo's own `ProjectTemplate.code-workspace` carries `base.jsonc` plus `python.jsonc`'s extensions and formatter block, for its Python scripts tree.
