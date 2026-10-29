@@ -102,7 +102,7 @@ Owned by [`STANDUP.md`][standup], packaged as the `standup-a-repo` skill. No ope
 
 The hub has moved and a downstream repo is behind. The agent runs [`RESYNC.md`][resync] from a hub checkout, which runs [`AUDIT.md`][audit] end to end and applies the findings in a load-bearing order.
 
-The routing and the load-bearing apply order are diagrammed at the top of [`RESYNC.md`][resync]. The deletion triage is in its section 4. The audit pipeline with its verdicts is in [`AUDIT.md`][audit].
+The routing and the load-bearing apply order are diagrammed at the top of [`RESYNC.md`][resync]. The deletion triage is in section 4 of that same doc. The audit pipeline with its verdicts is in [`AUDIT.md`][audit].
 
 Owned by [`RESYNC.md`][resync] and [`AUDIT.md`][audit], packaged as the `resync-a-repo` skill with the `carried-instruction-file-guard` and `copilot-instructions-keeper` skills firing inside it. No open gaps sit on this path. G3, the audit-to-install bridge, G4, the prose-deletion sweep, and G5, the intent-staleness advisory, are closed and their rows record the resolutions.
 
