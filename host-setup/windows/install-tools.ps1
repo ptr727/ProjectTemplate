@@ -409,7 +409,7 @@ function Get-ExplicitUpgrade {
 # A version matching none of the family's ids does the same.
 # This is because a family search that cannot confirm anything is no worse than not asking.
 # A version matching more than one id falls back the same way rather than picking the first.
-# Two ids sharing a version happen right at a channel handoff.
+# Two ids share a version right at a channel handoff.
 # That is when a major that just left Current has not yet lost its old id from the search results.
 # Picking between them by list order would be a guess wearing the shape of an answer.
 function Resolve-ToolPackage {
@@ -888,7 +888,7 @@ $PYTHON_ALIAS_NAMES = @('python.exe', 'python3.exe')
 $PYTHON_ALIAS_PACKAGE = 'Microsoft.DesktopAppInstaller_'
 
 # Whether a file is one of Windows' app execution alias stubs rather than a real executable someone put there.
-# These conditions are required together, for these reasons:
+# All the conditions below are required together, for these reasons:
 #   - the deletion this gates cannot be undone
 #   - the alias directory is one a person may legitimately have put a program in
 # The conditions are:
