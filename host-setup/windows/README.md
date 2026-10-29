@@ -82,7 +82,7 @@ pwsh -NoProfile -File ..\bootstrap.ps1 -Help
 
 ## menu.ps1
 
-[`menu.ps1`][menu-ps1] sits beside [`menu.sh`][menu] at the top of [`host-setup/`][host-setup-readme] for the same reason `bootstrap.ps1` sits beside `bootstrap.sh`. That reason is that `menu.ps1` fronts this registry's scripts rather than joining it. [`host-setup/README.md`][host-setup-readme] "The Human Menu" carries `menu.ps1`'s full contract. It shares `bootstrap.ps1`'s PowerShell 5.1 to `pwsh` handoff, and it adds one entry with no Linux peer, `setup-wsl.ps1 -Status`, since WSL is a Windows-side concern.
+[`menu.ps1`][menu-ps1] sits beside [`menu.sh`][menu] at the top of [`host-setup/`][host-setup-readme] for the same reason `bootstrap.ps1` sits beside `bootstrap.sh`. That reason is that `menu.ps1` fronts this registry's scripts rather than joining it. [`host-setup/README.md`][host-setup-readme] "The Human Menu" carries `menu.ps1`'s full contract. `menu.ps1` shares `bootstrap.ps1`'s PowerShell 5.1 to `pwsh` handoff, and it adds one entry with no Linux peer, `setup-wsl.ps1 -Status`, since WSL is a Windows-side concern.
 
 ```powershell
 pwsh -NoProfile -File ..\menu.ps1 -Help
