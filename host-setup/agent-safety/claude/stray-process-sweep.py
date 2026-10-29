@@ -519,7 +519,8 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
     The tree is the inherited root's, or this session's own where it is the root. Stopping an ended
     session's scope can end an agent nested deeper.
     So the process table is read again after each stop and the judgment repeated, up to `_TREE_ROUNDS` times.
-    It repeats only while `deadline` allows, since the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
+    The re-read and judgment repeat only while `deadline` allows, since the hook's own timeout would otherwise cut the report off.
+    Only the root stops the slice itself,
     and only once nothing is left in it. `table` is None where the process table could not be read,
     which says nothing about which agents run, so no scope is stopped then.
     """

@@ -249,7 +249,8 @@ project_payload_ok() {
 # The declared owner therefore needs no kind field for this script to guess wrong from.
 # The declared title is asserted against the live one because a project number is unique only per owner and is reusable.
 # A deleted and recreated project can leave the declared number pointing at a project the fleet never chose.
-# That is also because project_node_id is the one place that resolves the number before every fleet repo is linked to what it names.
+# The title is also asserted because project_node_id is the one place that resolves the number.
+# It does so before every fleet repo is linked to what it names.
 project_node_id() { # owner number title
     local out id title
     # -f sends a string and -F sends a typed value, so the login goes through -f.

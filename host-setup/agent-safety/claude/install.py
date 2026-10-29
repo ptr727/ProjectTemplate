@@ -159,14 +159,14 @@ def names_hook(command, name):
     A quoted path is read to its closing quote rather than through the same boundary characters.
     That is because those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
     `runs_hook` accepts whole.
-    It is also because the bare-word boundary class below cannot cross the space or the parentheses inside it to reach the deployed name.
+    It is also because the bare-word boundary class below cannot cross the space or the parentheses inside that path to reach the deployed name.
 
     Known gap, not chased further here:
     - an unquoted path whose own directory holds one of the bare-word boundary characters.
     - a handful of shell compositions `runs_hook` itself only accepts because it is handed the exact
       literal path rather than discovering one.
     The compositions are a backtick, a no-space redirect, and a quote escaped inside an outer quote.
-    Closing those needs `runs_hook` widened too, which is a design change on its own rather than a local match.
+    Closing any of these gaps needs `runs_hook` widened too, which is a design change on its own rather than a local match.
     """
     text = str(command).replace("\\", "/")
     escaped = re.escape(name)
@@ -912,7 +912,7 @@ def build_stamp(claude_home, installed, instructions_digest=None):
     An install passes the digest of what it rendered rather than re-reading the file. A write by
     anything else between the install's write and this read would otherwise be stamped as the
     install's own.
-    The next run would also replace it with no backup.
+    The next run would otherwise also replace it with no backup.
     """
     return {
         "stampVersion": STAMP_VERSION,
