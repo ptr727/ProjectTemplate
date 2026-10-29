@@ -120,8 +120,7 @@ jobs:
           semver2: ${{ inputs.semver2 }}
 
       # Fails here with a named cause, rather than later inside fromJSON.
-      # This holds whichever path produced the matrix
-      # (the caller's matrix input, a caller's own docker-prepare hook, or the hub default).
+      # This holds whichever path produced the matrix (the caller's matrix input, a caller's own docker-prepare hook, or the hub default).
       - name: Validate Docker build matrix step
         env:
           MATRIX: ${{ inputs.matrix != '' && inputs.matrix || (steps.hook.outputs.matrix || steps.default.outputs.matrix) }}
