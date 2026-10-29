@@ -2447,7 +2447,8 @@ class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
     - the gate refuses every one of those plus a value that is only whitespace
 
     A schema pattern closing that last gap would refuse a value the gate accepts.
-    That is the direction an earlier attempt was reverted for on the registry schema, for this same reason.
+    That is the direction an earlier attempt was reverted for on the registry schema.
+    The reason here is the same one.
     U+FEFF is an ECMA-262 `\\s` character and `str.strip` does not remove it, so a `\\S` pattern would
     refuse a value this gate keeps.
     """

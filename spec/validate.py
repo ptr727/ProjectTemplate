@@ -1175,7 +1175,7 @@ def main(argv=()):
     # A repo declaring `groundTruthBanch` validates clean, and the audit reads main without ever saying that the declaration it was given went unread.
     # The key set is read out of the schema rather than restated here, so the rule has one statement.
     # A second list in this file would drift from the first in the direction nobody checks.
-    # The drift: a key added to the schema and not to the list would be reported as unknown on the entry that legitimately declares it.
+    # That is because a key added to the schema alone would be reported as unknown on the entry that legitimately declares it.
     # The two objects the registry's own consumers index are the ones checked.
     # A nested object is left to the schema, and to the per-field checks that already read it.
     # A schema this file cannot read is reported rather than skipped.
