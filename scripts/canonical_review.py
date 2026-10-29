@@ -36,12 +36,12 @@ evidence was to sweep the read rather than gate it. Nothing here refuses a push 
 request any more.
 `sweep` names the units whose text has moved past the pass that read them. Beside them it names a
 bounded slice of the never-read backlog, newest-committed first. A unit just authored here is
-therefore read without waiting behind every older one. Those units are the work one scheduled run files and
+therefore read without waiting behind every older one. The units `sweep` names are the work one scheduled run files and
 an agent session performs. `report` renders the whole backlog to standard output rather than into
 the tree, for the reason `scripts/README.md` gives.
 
 The verdict vocabulary is `scripts/local_review.py`'s. So a caller reading an exit code from
-either engine need not know which one answered. That is, 0 is covered, 1 is a finding, and 2 is the
+either engine need not know which one answered. The codes are: 0 is covered, 1 is a finding, and 2 is the
 check itself not having run.
 
 Usage, each command run as `uv run --no-project --script scripts/canonical_review.py <command>`:
@@ -452,7 +452,7 @@ def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit, so a concurrent branch touching a different unit merges cleanly.
-    This ordering also keeps the diff of a recorded pass reading as the pass rather than as a reordering. The
+    Both properties are also so the diff of a recorded pass reads as the pass rather than as a reordering. The
     caller holds `ledger_lock` across the read this replaces. That is because two overlapping
     records would otherwise each read a ledger without the other's pass, and the second write would
     drop it.
@@ -570,7 +570,7 @@ def code_span(text: str) -> str:
     spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
     longer than any run inside, padded with a space where the content touches a backtick.
 
-    Non-empty because empty text would render as two literal backticks rather than a span. Non-empty also because the pad reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
+    Non-empty because empty text would render as two literal backticks rather than a span. The pad also reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
     a heading or a tracked path, both single-line and stripped, so neither shape reaches here.
     """
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)

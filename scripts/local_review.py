@@ -4,8 +4,7 @@
 `AGENTS.md` and the `local-strict-review` skill hold the rule about when a local review is owed.
 This script is what makes that rule checkable rather than a second copy of it. A review pass
 records a receipt keyed on the content it reviewed. A capture point asks whether a receipt still
-covers what is about to be pushed. Examples are a git pre-push hook, a skill step, and a session
-about to claim done.
+covers what is about to be pushed. Capture points are a git pre-push hook, a skill step, and a session about to claim done.
 
 The key is over the content of the changed paths, plus the merge-base commit that fixes what
 "changed" means. It is deliberately not over the diff text. Which paths count is read from three
