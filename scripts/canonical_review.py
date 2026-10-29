@@ -32,16 +32,15 @@ reviewer's read of this one is still a read of these bytes.
 **The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
 measured the local passes a push owed as a large share of what a pull request spent. What they
 returned went unclassified, so the two were never weighed against each other. The call on that
-evidence was to sweep the read rather than gate it. Nothing here refuses a push or a pull
-request any more.
-`sweep` names the units whose text has moved past the pass that read them. Beside them it names a
-bounded slice of the never-read backlog, newest-committed first. A unit just authored here is
-therefore read without waiting behind every older one. The units `sweep` names are the work one scheduled run files and
-an agent session performs. `report` renders the whole backlog to standard output rather than into
-the tree, for the reason `scripts/README.md` gives.
+evidence was to sweep the read rather than gate it. Nothing here refuses a push or a pull request
+any more. `sweep` names the units whose text has moved past the pass that read them. Beside them it
+names a bounded slice of the never-read backlog, newest-committed first. A unit just authored here
+is therefore read without waiting behind every older one. The units `sweep` names are the work one
+scheduled run files and an agent session performs. `report` renders the whole backlog to standard
+output rather than into the tree, for the reason `scripts/README.md` gives.
 
-The verdict vocabulary is `scripts/local_review.py`'s. So a caller reading an exit code from
-either engine need not know which one answered. The codes are: 0 is covered, 1 is a finding, and 2 is the
+The verdict vocabulary is `scripts/local_review.py`'s. So a caller reading an exit code from either
+engine need not know which one answered. The codes are: 0 is covered, 1 is a finding, and 2 is the
 check itself not having run.
 
 Usage, each command run as `uv run --no-project --script scripts/canonical_review.py <command>`:
@@ -138,8 +137,8 @@ REVIEWERS = local_review.BACKENDS
 def normalize(text: str) -> str:
     """A unit's comparable form, which neutralizes line endings and nothing else.
 
-    Deliberately not `spec/fidelity_text.py`'s `normalize`, which also masks Dependabot-owned action pins
-    and per-repo `needs:` lists. Those are governed drift for a fidelity comparison, where the
+    Deliberately not `spec/fidelity_text.py`'s `normalize`, which also masks Dependabot-owned action
+    pins and per-repo `needs:` lists. Those are governed drift for a fidelity comparison, where the
     question is whether two copies say the same thing. The question here is whether a reviewer has
     read these bytes, and masking any of them would report a read of text nobody saw. Line endings
     are the one exception, because the reviewer's read is identical either way and `.gitattributes`
@@ -283,11 +282,14 @@ def select_carried(
 ) -> tuple[dict[str, list[str] | None], list[str]]:
     """What a manifest declares carried over `tracked`, and what it declares that is not there.
 
-    It is parameterized on the path set rather than reading the tree itself. That keeps the membership question and the manifest question separable, and a caller answering one of them differently does not have to reimplement the other.
+    It is parameterized on the path set rather than reading the tree itself. That keeps the
+    membership question and the manifest question separable, and a caller answering one of them
+    differently does not have to reimplement the other.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
-    carries. A declared path the tree does not hold is reported rather than skipped quietly. An absent path is the ordinary case for a file scoped to a project type this hub is not. It is also what a manifest
-    entry pointing at nothing looks like.
+    carries. A declared path the tree does not hold is reported rather than skipped quietly. An
+    absent path is the ordinary case for a file scoped to a project type this hub is not. It is also
+    what a manifest entry pointing at nothing looks like.
     """
     carried: dict[str, list[str] | None] = {}
     absent: list[str] = []
@@ -351,9 +353,9 @@ def build_units(
     """Unit key -> text for the carried paths `read` can supply, plus declared sections it lacks.
 
     A path the reader has nothing for contributes no units. A manifest entry scoped to a project
-    type this repository is not is the ordinary case of such a path. A declared section the file does not hold
-    is a different thing entirely. It is a manifest naming a heading that is not there, so it is
-    reported rather than passed over.
+    type this repository is not is the ordinary case of such a path. A declared section the file
+    does not hold is a different thing entirely. It is a manifest naming a heading that is not
+    there, so it is reported rather than passed over.
     """
     units: dict[str, str] = {}
     missing: list[str] = []
@@ -415,10 +417,11 @@ def units(root: Path) -> tuple[dict[str, str], list[str]]:
 def read_ledger(root: Path) -> dict[str, dict[str, Any]]:
     """The recorded passes, keyed by unit.
 
-    An absent ledger is an empty record rather than a boundary. That is because the first repository to run
-    this has nothing recorded yet, and refusing there would make the record impossible to adopt. An
-    unreadable or malformed one is a boundary. That is because it is a record that exists and cannot
-    be read. It is also because treating that as empty would report every unit as never reviewed.
+    An absent ledger is an empty record rather than a boundary. That is because the first repository
+    to run this has nothing recorded yet, and refusing there would make the record impossible to
+    adopt. An unreadable or malformed one is a boundary. That is because it is a record that exists
+    and cannot be read. It is also because treating that as empty would report every unit as never
+    reviewed.
     """
     path = root / LEDGER
     if not path.is_file():
@@ -452,10 +455,10 @@ def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit, so a concurrent branch touching a different unit merges cleanly.
-    Both properties are also so the diff of a recorded pass reads as the pass rather than as a reordering. The
-    caller holds `ledger_lock` across the read this replaces. That is because two overlapping
-    records would otherwise each read a ledger without the other's pass, and the second write would
-    drop it.
+    Together they also keep the diff of a recorded pass reading as the pass rather than as a
+    reordering. The caller holds `ledger_lock` across the read this replaces. That is because two
+    overlapping records would otherwise each read a ledger without the other's pass, and the second
+    write would drop it.
     """
     payload = {"note": LEDGER_NOTE, "passes": [entries[unit] for unit in sorted(entries)]}
     path = root / LEDGER
@@ -528,12 +531,13 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     So widening the manifest on its own lifts nothing. Declaring a section in the commit that
     writes it lifts that unit like any other.
 
-    Three answers rather than two. A commit dates the path. A path no commit holds, staged or
-    merely unignored, is a file this branch has created and not committed. `tracked_files` deliberately counts that as a unit. The path is the newest content there is rather than an undatable
-    one, so it sorts first. Anything else sorts last. In the ordinary case that is a git failure.
+    Three answers rather than two. A commit dates the path. A path no commit holds, staged or merely
+    unignored, is a file this branch has created and not committed. `tracked_files` deliberately
+    counts that as a unit. The path is the newest content there is rather than an undatable one, so
+    it sorts first. Anything else sorts last. Such a path is, in the ordinary case, a git failure.
     It is also every path in a repository with no commits at all, where git exits 128 rather than
-    answering. The order is a
-    priority rather than a claim about the content, so a uniform last is harmless there.
+    answering. The order is a priority rather than a claim about the content, so a uniform last is
+    harmless there.
     """
     times: dict[str, float] = {}
     for rel in rels:
@@ -570,7 +574,8 @@ def code_span(text: str) -> str:
     spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
     longer than any run inside, padded with a space where the content touches a backtick.
 
-    Non-empty because empty text would render as two literal backticks rather than a span. The pad also reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
+    Non-empty because empty text would render as two literal backticks rather than a span. The pad
+    also reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
     a heading or a tracked path, both single-line and stripped, so neither shape reaches here.
     """
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
@@ -696,8 +701,9 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
 
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
-    record time. So an edit between the review and the record would be attested to by a reviewer
-    who never saw it. A format-on-save and a hook autofix are two such edits. That attestation is the one claim this record makes.
+    record time. So an edit between the review and the record would be attested to by a reviewer who
+    never saw it. A format-on-save and a hook autofix are two such edits. That attestation is the
+    one claim this record makes.
     """
     out: dict[str, str] = {}
     for value in values:

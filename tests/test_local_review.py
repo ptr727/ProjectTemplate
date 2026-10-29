@@ -5,8 +5,9 @@ Every case builds a throwaway repository with real remote-tracking refs. That is
 mechanism rests on git's own merge-base, index, and attribute behavior rather than on anything
 this module could stub convincingly.
 
-The fixture isolates git's global and system configuration. Without that, a host with commit signing on cannot commit inside the fixture at all. Without it, a host with a different
-`core.autocrlf` answers the attribute cases differently than CI does.
+The fixture isolates git's global and system configuration. Without that, a host with commit signing
+on cannot commit inside the fixture at all. Without it, a host with a different `core.autocrlf`
+answers the attribute cases differently than CI does.
 
 Run as `python3 tests/test_local_review.py`, or under
 `python3 -m unittest discover -s tests`.
@@ -362,8 +363,8 @@ class ContentKeyCase(RepoCase):
     def test_the_digest_mixes_the_merge_base(self) -> None:
         """The other half: two different bases over one identical mark set differ.
 
-        Asserting only that two targets give different digests is weaker than it looks. That is because the
-        changed-path sets usually differ too, and the digest would move on that alone.
+        Asserting only that two targets give different digests is weaker than it looks. That is
+        because the changed-path sets usually differ too, and the digest would move on that alone.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         base, digest, _ = local_review.current_state(self.target, self.tmp)
@@ -445,8 +446,8 @@ class ContentKeyCase(RepoCase):
         """Reading the tree stages it, and staging writes blobs, so the writes are redirected.
 
         Without the redirection this read permanently deposits the content of every unignored
-        untracked file into the repository, a stray secret among them. It does so from a command whose whole
-        contract is that it only looks.
+        untracked file into the repository, a stray secret among them. It does so from a command
+        whose whole contract is that it only looks.
         """
         (self.tmp / ".env").write_text("TOKEN=constructed-not-real\n", encoding="utf-8")
         objects = local_review.git_dir(self.tmp) / "objects"
@@ -667,7 +668,8 @@ class ReftableDanglingRemoteTrackingCase(DanglingRemoteTrackingCase):
 class HeadContentCase(RepoCase):
     """Content the pushed commit carries that the index and working tree no longer show.
 
-    The index and the working tree describe what is about to be committed, never what is already committed. So a key built from those two alone stops seeing a path the moment the tree agrees
+    The index and the working tree describe what is about to be committed, never what is already
+    committed. So a key built from those two alone stops seeing a path the moment the tree agrees
     with the merge base again. The commit still carries it, and a push still delivers it.
     """
 
@@ -789,7 +791,8 @@ class ReceiptCase(RepoCase):
     def test_the_empty_change_set_exemption_is_the_only_reason_that_push_passes(self) -> None:
         """Proves the case above by the one byte that separates it from a gated branch.
 
-        Without this, a branch that happened to carry no content would pass for the same reason a reviewed one does. The exemption would then be untested where it actually fires.
+        Without this, a branch that happened to carry no content would pass for the same reason a
+        reviewed one does. The exemption would then be untested where it actually fires.
         """
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
@@ -940,8 +943,8 @@ class ReceiptCase(RepoCase):
     def test_the_check_failure_prints_a_command_that_actually_runs(self) -> None:
         """The remedy line is the one actionable thing the failure emits.
 
-        It has to carry every required flag and the real digest. Otherwise following it lands the reader
-        on a usage error instead of a recorded pass.
+        It has to carry every required flag and the real digest. Otherwise following it lands the
+        reader on a usage error instead of a recorded pass.
         """
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
         err = io.StringIO()
@@ -1304,8 +1307,8 @@ class BackendCase(RepoCase):
     def test_the_backend_is_given_the_merge_base_not_the_target_tip(self) -> None:
         """The two differ the moment the target moves, and only one is what the receipt claims.
 
-        The fake CLI records its own argv. That is because asserting on the exit code alone would let the
-        argument contract drift back to the tip with nothing objecting.
+        The fake CLI records its own argv. That is because asserting on the exit code alone would
+        let the argument contract drift back to the tip with nothing objecting.
         """
         argv_log = self.outside / "argv.txt"
         self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)
@@ -1339,8 +1342,8 @@ class BackendCase(RepoCase):
     def test_the_backend_is_asked_to_include_untracked_files(self) -> None:
         """The receipt scope includes them and the CLI excludes them by default.
 
-        Without the flag a pass would claim coverage of files the run never read. Without it a changed
-        set of only untracked files would record a clean review of nothing.
+        Without the flag a pass would claim coverage of files the run never read. Without it a
+        changed set of only untracked files would record a clean review of nothing.
         """
         argv_log = self.outside / "argv2.txt"
         self.fake_cli('{"type":"complete"}\n', argv_log=argv_log)

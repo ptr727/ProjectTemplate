@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Exercise canonical_review.py's unit model, ledger, and sweep against real manifests and git trees.
 
-Two kinds of case live here. The unit-model and ledger cases run against crafted inputs, because
-the properties they assert are about text and JSON rather than about git. The sweep and record
-cases build a throwaway repository with real remote-tracking refs, for `test_local_review.py`'s
-reason. The mechanism rests on git's own file listing and merge-base rather than on anything this
-module could stub convincingly. A third, smaller set reads this repository's own tree. That is
-because a unit table that silently stops covering a canonical reports exactly what a healthy one does.
+Two kinds of case live here. The unit-model and ledger cases run against crafted inputs, because the
+properties they assert are about text and JSON rather than about git. The sweep and record cases
+build a throwaway repository with real remote-tracking refs, for `test_local_review.py`'s reason.
+The mechanism rests on git's own file listing and merge-base rather than on anything this module
+could stub convincingly. A third, smaller set reads this repository's own tree. That is because a
+unit table that silently stops covering a canonical reports exactly what a healthy one does.
 
-Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py`,
-or under `-m unittest discover -s tests` the same way.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python
+tests/test_canonical_review.py`, or under `-m unittest discover -s tests` the same way.
 """
 
 import contextlib
