@@ -455,7 +455,7 @@ def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
     Sorted and one entry per unit, so a concurrent branch touching a different unit merges cleanly.
-    Together the two properties also keep the diff of a recorded pass reading as the pass rather
+    Sorted and one entry per unit also make the diff of a recorded pass read as the pass rather
     than as a reordering.
     The caller holds `ledger_lock` across the read this replaces. That is because two
     overlapping records would otherwise each read a ledger without the other's pass, and the second
@@ -570,8 +570,8 @@ def code_span(text: str) -> str:
     """A non-empty `text` as a Markdown code span, whatever backticks it holds.
 
     A unit key is a heading, and a heading may name a command. So a key holding a backtick is
-    ordinary rather than exotic. One in this tree does. Wrapped in single backticks it splits into
-    two spans with the middle rendered as prose. That puts the path and the digest in different
+    ordinary rather than exotic. One in this tree holds one. Wrapped in single backticks it splits
+    into two spans with the middle rendered as prose. That puts the path and the digest in different
     spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
     longer than any run inside, padded with a space where the content touches a backtick.
 
@@ -703,8 +703,8 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
     record time. So an edit between the review and the record would be attested to by a reviewer who
-    never saw it. That attestation is the
-    one claim this record makes. A format-on-save and a hook autofix are examples of such edits.
+    never saw it. That is the one claim
+    this record makes. A format-on-save and a hook autofix are examples of such edits.
     """
     out: dict[str, str] = {}
     for value in values:
@@ -944,8 +944,8 @@ def main(argv: list[str] | None = None) -> int:
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
     # A capture point folding that exit reports an execution boundary as a gate finding.
-    # A last resort rather than a path with a known caller, since every git call goes through local_review.git.
-    # That function reports an OSError or a timeout as CannotRun above.
+    # A last resort rather than a path with a known caller.
+    # Every git call goes through local_review.git, which reports an OSError or a timeout as CannotRun above.
     # Reached in the tests by raising through `units`, because a handler nothing exercises is one nobody knows still folds the code it promises.
     except Exception as exc:  # noqa: BLE001
         emit(f"canonical-review: unexpected failure ({type(exc).__name__}: {exc})", sys.stderr)

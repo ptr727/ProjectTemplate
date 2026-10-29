@@ -6,8 +6,8 @@ mechanism rests on git's own merge-base, index, and attribute behavior rather th
 this module could stub convincingly.
 
 The fixture isolates git's global and system configuration. Without that, a host with commit signing
-on cannot commit inside the fixture at all. Without it, a host with a different `core.autocrlf`
-answers the attribute cases differently than CI does.
+on cannot commit inside the fixture at all. Without that isolation, a host with a different
+`core.autocrlf` answers the attribute cases differently than CI does.
 
 Run as `python3 tests/test_local_review.py`, or under
 `python3 -m unittest discover -s tests`.
@@ -526,7 +526,7 @@ class ContentKeyCase(RepoCase):
         """A git hook runs with GIT_INDEX_FILE set, and a hook is the intended capture point.
 
         Inheriting it would make the real-index read answer for whatever index the caller pointed
-        at. During a partial commit that is a pending one holding different content.
+        at. During a partial commit, that index is a pending one holding different content.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
         expected = self.digest()
@@ -985,7 +985,7 @@ class ReceiptCase(RepoCase):
     def run_piped(self, args: list[str], shell: str) -> int:
         """Run the CLI for real with its output piped into a reader that exits first.
 
-        This case is driven through a shell rather than in process. That is because the failure
+        This helper runs the CLI through a shell rather than in process. That is because the failure
         being tested is a genuine EPIPE on a descriptor. It is also because the exit code being
         tested includes the one the interpreter produces during its own shutdown flush. No
         in-process case can reach that exit code. The suite's own interpreter is named rather than a

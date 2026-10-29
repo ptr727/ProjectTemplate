@@ -4,12 +4,13 @@
 Two kinds of case live here. The unit-model and ledger cases run against crafted inputs, because the
 properties they assert are about text and JSON rather than about git. The sweep and record cases
 build a throwaway repository with real remote-tracking refs, for `test_local_review.py`'s reason.
-The mechanism rests on git's own file listing and merge-base rather than on anything this module
-could stub convincingly. A third, smaller set reads this repository's own tree. That is because a
-unit table that silently stops covering a canonical reports exactly what a healthy one does.
+That reason is that the mechanism rests on git's own file listing and merge-base rather than on
+anything this module could stub convincingly. A third, smaller set reads this repository's own tree.
+That is because a unit table that silently stops covering a canonical reports exactly what a healthy
+one does.
 
-Run as `uv run --no-project --with-requirements tests/requirements.txt python
-tests/test_canonical_review.py`, or under `-m unittest discover -s tests` the same way.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py`,
+or under `-m unittest discover -s tests` the same way.
 """
 
 import contextlib
@@ -417,9 +418,8 @@ class SweepCase(RepoCase):
 
     def test_a_repository_with_no_commits_dates_nothing_and_still_sweeps(self) -> None:
         """The third answer `newest_commit_times` documents. With no commit at all `git log` exits
-        128 rather than answering, so every path is undatable. For the same reason the order has to
-        degrade to the
-        tie-break rather than raising out of a sweep that can otherwise run."""
+        128 rather than answering, so every path is undatable. Because of that the order has to
+        degrade to the tie-break rather than raising out of a sweep that can otherwise run."""
         fresh = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         run(fresh, "init", "--initial-branch=develop", ".")
         (fresh / "spec").mkdir()
