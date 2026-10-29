@@ -33,8 +33,9 @@ $PSNativeCommandUseErrorActionPreference = $false
 $KEY = Join-Path $HOME '.ssh\id_ed25519'
 $ALLOWED_SIGNERS = Join-Path $HOME '.config\git\allowed_signers'
 
-# Git expands a leading tilde in a path setting on Windows as well.
-# The hosts already configured by hand hold the tilde form, so writing that form leaves an already configured host untouched.
+# Writing the tilde form leaves an already configured host untouched, because of the following.
+#   - Git expands a leading tilde in a path setting on Windows as well.
+#   - The hosts already configured by hand hold the tilde form.
 # File operations use the expanded paths above, since only git expands the tilde.
 $KEY_SETTING = '~/.ssh/id_ed25519.pub'
 $ALLOWED_SIGNERS_SETTING = '~/.config/git/allowed_signers'
@@ -198,8 +199,9 @@ function New-KeyIfAbsent {
 }
 
 # The ACL is reported and never rewritten.
-# Creating the key with ssh-keygen already sets it correctly on Windows.
-# Rewriting an ACL is hard to undo and hard to preview under -DryRun, so a wrong one is named with the command that repairs it.
+# A wrong one is named with the command that repairs it, because of the following.
+#   - Creating the key with ssh-keygen already sets it correctly on Windows.
+#   - Rewriting an ACL is hard to undo and hard to preview under -DryRun.
 function Test-KeyAcl {
     if (-not (Test-Path $script:KEY)) { return $null }
     $acl = Get-Acl $script:KEY

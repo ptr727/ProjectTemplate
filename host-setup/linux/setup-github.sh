@@ -15,8 +15,9 @@ set -Eeuo pipefail
 readonly KEY="$HOME/.ssh/id_ed25519"
 readonly ALLOWED_SIGNERS="$HOME/.config/git/allowed_signers"
 
-# Git expands a leading tilde in a path setting.
-# The hosts already configured by hand hold the tilde form, so writing that form leaves an already configured host untouched.
+# Writing the tilde form leaves an already configured host untouched, because of the following.
+#   - Git expands a leading tilde in a path setting.
+#   - The hosts already configured by hand hold the tilde form.
 # File operations use the expanded paths above, since the shell does not expand a tilde inside a variable.
 # shellcheck disable=SC2088  # The tilde is meant to stay literal here, git is what expands it.
 readonly KEY_SETTING="~/.ssh/id_ed25519.pub"
@@ -702,8 +703,9 @@ configure() {
     fi
 
     # Signing is the second gate.
-    # The configuration above is what signs and verifies locally.
-    # The registration is what makes GitHub show the commit as verified, so only one of those two can be done from here.
+    # Only one of those two can be done from here, because of the following.
+    #   - The configuration above is what signs and verifies locally.
+    #   - The registration is what makes GitHub show the commit as verified.
     step "Checking the signing key registration"
     local signing_rc=0
     github_signing_key_registered || signing_rc=$?

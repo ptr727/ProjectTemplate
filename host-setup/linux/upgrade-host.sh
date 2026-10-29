@@ -186,8 +186,9 @@ refresh_snaps() {
 upgradable_count() {
     # A failed listing and a listing that genuinely found nothing upgradable both read as "no matches" through grep alone.
     # So the two are told apart here rather than both printing 0.
-    # This only ever backs a status report, so the answer here is "unknown" rather than a die.
-    # Nothing downstream mutates on the strength of this count.
+    # The answer here is "unknown" rather than a die, because of the following.
+    #   - This only ever backs a status report.
+    #   - Nothing downstream mutates on the strength of this count.
     local out status=0
     out=$(apt list --upgradable 2>/dev/null) || status=$?
     if [[ $status -ne 0 ]]; then

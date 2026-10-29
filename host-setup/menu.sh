@@ -484,7 +484,7 @@ hub_uv_script() {
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
     # 2, not 1, for every failure of this wrapper's own preconditions.
-    # The function check_skills_dist, the caller of this wrapper, reads 1 as scripts/build_dist.py --check's "stale" result.
+    # The function check_skills_dist, one caller of this wrapper, reads 1 as scripts/build_dist.py --check's "stale" result.
     # So a wrapper-level failure must not collide with the wrapped command's own exit code.
     # Invoke-CheckSkillsDist's own Confirm-HubRoot fix already applies the same reasoning on the PowerShell side.
     (($# > 0)) || {
