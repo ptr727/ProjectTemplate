@@ -13,14 +13,14 @@ directory, so this script materializes a plugin (.claude-plugin/fleet-skills/) t
 place a skill is ever hand-edited, its include regions excepted, since those are generated from
 the files they name.
 
-A skill reads whole in isolation and a rule has one home, so the text a skill needs from that
-home is generated into it rather than copied: a region between `<!-- include: <path> > <heading> -->`
-and `<!-- /include -->` is filled with the body under that heading, and --check fails when a region
+A skill reads whole in isolation, and a rule has one home. So the text a skill needs from that
+home is generated into it rather than copied. A region between `<!-- include: <path> > <heading> -->`
+and `<!-- /include -->` is filled with the body under that heading. --check fails when a region
 differs from what its source renders now. The key is the root-relative path, then ` > `, then the
 heading text, the delimiter canonical_review.py also keys a unit on. A region sits in a file this
-script walks, which is the Markdown under each .agents/skills/<name>/ directory carrying a SKILL.md,
-plus the files INCLUDE_DESTINATIONS declares, which is how a surface the walk would otherwise miss
-stops restating a rule by hand.
+script walks. That is the Markdown under each .agents/skills/<name>/ directory carrying a SKILL.md,
+plus the files INCLUDE_DESTINATIONS declares. The declared files are how a surface the walk would
+otherwise miss stops restating a rule by hand.
 
 Usage: uv run --no-project --script scripts/build_dist.py [--check]
 
@@ -66,11 +66,11 @@ def reject_symlinks(skill_dir):
 
     .agents/skills/ is the one hand-authored source, with no legitimate reason to hold a symlink.
     Path.is_file() and read_bytes() both dereference one, and so does shutil.copytree() by
-    default, so an unnoticed symlink there would let the digest and the generated plugin silently
+    default. So an unnoticed symlink there would let the digest and the generated plugin silently
     include content from outside this tree, tracked or not. `skill_dir` itself needs its own
-    check: rglob("*") only yields paths *inside* the directory it walks, so a skill directory that
-    is itself a symlink to another tree would walk straight into that tree without the walk ever
-    seeing (or flagging) the root symlink node.
+    check. rglob("*") only yields paths *inside* the directory it walks. So a skill directory that
+    is itself a symlink to another tree would walk straight into that tree. The walk would never
+    see (or flag) the root symlink node.
     """
     if skill_dir.is_symlink():
         raise ValueError(f"{skill_dir} is a symlink; .agents/skills/ must contain only real files")
@@ -82,12 +82,12 @@ def reject_symlinks(skill_dir):
 def tree_digest(root, names):
     """One digest over every file under `root/<name>` for each name, order-independent per skill.
 
-    Rooted at an arbitrary directory rather than hardcoding SKILLS_SRC, so the same function
-    hashes both the source tree and the generated tree, and is_stale() can compare the two
+    Rooted at an arbitrary directory rather than hardcoding SKILLS_SRC. So the same function
+    hashes both the source tree and the generated tree. That lets is_stale() compare the two
     directly instead of trusting a stored digest to still describe what was actually generated.
 
     Names are hashed in the fixed sorted order the caller already produced. Each skill's own files
-    are hashed in a second stable sort so an unrelated filesystem listing order never changes the
+    are hashed in a second stable sort. So an unrelated filesystem listing order never changes the
     digest on a machine where nothing changed.
     """
     h = hashlib.sha256()
@@ -97,7 +97,8 @@ def tree_digest(root, names):
         h.update(name.encode("utf-8"))
         # Sorted by the same .as_posix() key that gets hashed, not by raw Path comparison.
         # Path ordering follows the platform's native separator.
-        # Two OSes can sort an identical file set into a different order and hash it into a different digest, even though the bytes hashed per file already agree via .as_posix() below.
+        # Two OSes can sort an identical file set into a different order and hash it into a different digest.
+        # That holds even though the bytes hashed per file already agree via .as_posix() below.
         files = sorted(
             (f for f in skill_dir.rglob("*") if f.is_file()),
             key=lambda f: f.relative_to(root).as_posix(),
@@ -134,7 +135,7 @@ def has_exact_skill_directories(root, names):
 def expected_manifest(names):
     """The plugin.json content `names` should produce, entirely deterministic.
 
-    The one source is_stale() compares the actual manifest against, so a hand-edited field of
+    The one source is_stale() compares the actual manifest against. So a hand-edited field of
     any kind (not only "skills") is caught the same way a hand-edited "skills" list already was.
     """
     return {
@@ -151,17 +152,21 @@ def write_plugin_manifest(names):
     PLUGIN_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
     manifest = expected_manifest(names)
     # LF, matching this repo's JSON default (.editorconfig `[*] end_of_line = lf`).
-    # Explicit, not the platform default: a Windows host writing plain LF (newline=None) would translate it to CRLF on write, which disagrees with this repo's LF default.
+    # Explicit, not the platform default.
+    # A Windows host writing plain LF (newline=None) would translate it to CRLF on write, which disagrees with this repo's LF default.
     PLUGIN_MANIFEST.write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
 
 
 # --- Include regions -------------------------------------------------------------------------
-# A skill has to read whole in isolation, and a rule has one home, so the text a skill needs from that home is generated into it rather than copied.
-# The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly and a region left empty there would hand them a skill with a hole in it.
+# A skill has to read whole in isolation, and a rule has one home.
+# So the text a skill needs from that home is generated into it rather than copied.
+# The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly.
+# So a region left empty there would hand them a skill with a hole in it.
 # The generated trees then mirror the filled source.
-# A file the walk would otherwise miss holds a region only where INCLUDE_DESTINATIONS names it, which is the mechanism for a rule with one home that a hub surface outside the skills tree would otherwise restate.
+# A file the walk would otherwise miss holds a region only where INCLUDE_DESTINATIONS names it.
+# That is the mechanism for a rule with one home that a hub surface outside the skills tree would otherwise restate.
 # .agents/skills/README.md is such a file despite sitting in that tree, because the walk visits the skill directories rather than the tree containing them.
 
 # The same `<path> > <heading>` vocabulary canonical_review.py keys a unit on, defined here because that engine imports this module.
@@ -169,18 +174,33 @@ SECTION_DELIM = " > "
 # Sources resolve against the repository root, so a key reads the same in a skill, a finding, and the review ledger.
 INCLUDE_ROOT = ROOT
 # The files the walk would otherwise miss that may hold an include region, declared one at a time rather than discovered.
-# Only a walked file is written, so a region in a file on neither this tuple nor skill_documents() reads filled to whatever includes it while staying empty on disk, which is the refusal filled_lines() raises.
-# Discovery is wrong here even though it would spare the maintenance: whether a file may hold generated text is a judgment about where that text ends up, not a property of where the file sits.
+# Only a walked file is written.
+# So a region in a file on neither this tuple nor skill_documents() reads filled to whatever includes it while staying empty on disk.
+# That is the refusal filled_lines() raises.
+# Discovery is wrong here even though it would spare the maintenance.
+# Whether a file may hold generated text is a judgment about where that text ends up.
+# It is not a property of where the file sits.
 # Nothing spec/files.json carries hub content from belongs here, and manifest_carried_destination() refuses one rather than leaving the rule to a reader.
-# A carrier receives the filled text either way, since carriage copies this repository's committed bytes and a fill has already written them, so a region never arrives empty and markers reaching a carrier are not themselves the problem.
-# The generated mirrors already carry live markers to every repository, and are safe doing it because regenerate() rebuilds them wholesale from the authored tree on every run, so nothing in them can hold text its source no longer renders.
-# A carried authored file is copied rather than rebuilt, so a region in one would put generated text into a file its carrier holds as its own, which is what this refuses.
-# Empty today, deliberately: the surfaces that drift restate a rule in their own words for their own audience rather than copying it, and an include fills a region with a heading's whole body, so every one of them is a pointer instead.
-# Declared empty rather than left out, because the mechanism is what a restatement measured as copy-shaped needs, and the tuple is where that first one is named.
+# A carrier receives the filled text either way, since carriage copies this repository's committed bytes and a fill has already written them.
+# So a region never arrives empty, and markers reaching a carrier are not themselves the problem.
+# The generated mirrors already carry live markers to every repository, and are safe doing it.
+# That is because regenerate() rebuilds them wholesale from the authored tree on every run.
+# So nothing in them can hold text its source no longer renders.
+# A carried authored file is copied rather than rebuilt.
+# So a region in one would put generated text into a file its carrier holds as its own.
+# That is what this refuses.
+# Empty today, deliberately.
+# The surfaces that drift restate a rule in their own words for their own audience rather than copying it.
+# An include fills a region with a heading's whole body.
+# Given both, every one of those surfaces is a pointer instead.
+# Declared empty rather than left out.
+# That is because the mechanism is what a restatement measured as copy-shaped needs, and the tuple is where that first one is named.
 INCLUDE_DESTINATIONS: tuple[str, ...] = ()
 _INCLUDE_START = re.compile(r"^<!--\s*include:\s*(?P<key>\S.*?)\s*-->$")
 _INCLUDE_END = re.compile(r"^<!--\s*/include\s*-->$")
-# A near miss: a comment beginning like a marker that neither pattern above accepts, case-folded so a capitalized one is caught too, and on any run of dashes so the three-dash opener a hand types on both markers is caught rather than read as content.
+# A near miss: a comment beginning like a marker that neither pattern above accepts.
+# The near-miss pattern is case-folded, so a capitalized one is caught too.
+# It also matches on any run of dashes, so the three-dash opener a hand types on both markers is caught rather than read as content.
 _INCLUDE_LIKE = re.compile(r"^<!--+\s*/?\s*include\b", re.IGNORECASE)
 # CommonMark's three-space bound, held for a marker line in any container.
 # A marker indented past it is content, as it is in an indented code block.
@@ -189,7 +209,8 @@ _MAX_INDENT = 3
 
 # Deliberately lru_cache(maxsize=None) rather than functools.cache, which needs 3.9, and the noqa below is what stops ruff rewriting it back under this repo's own py313 target.
 # The module scripts/skills_install.py imports this one at module scope, and host-setup/*/install-skills.* and scripts/skills_install.sh each commit to Python 3.7+, because that path runs before the fleet's own toolchain exists to install a newer interpreter.
-# So functools.cache here would raise AttributeError at import on 3.7 and 3.8, breaking the one path that has to survive an old host, and spec/host-tools.json's python3 entry records that 3.7 floor and why it sits below the fleet's own.
+# So functools.cache here would raise AttributeError at import on 3.7 and 3.8, breaking the one path that has to survive an old host.
+# The python3 entry in spec/host-tools.json records that 3.7 floor and why it sits below the fleet's own.
 @functools.lru_cache(maxsize=None)  # noqa: UP033
 def _fidelity_text():
     """spec/fidelity_text.py, imported on first use rather than at module import, then held.
@@ -223,9 +244,9 @@ def _lf(text):
 def _read_lines(path):
     """`(lines, newline, mixed)` for a text file, with the newline the file uses kept for writing it back.
 
-    Detected from the bytes rather than assumed, because a generated rewrite that flattened a CRLF
-    file to LF would be the line-ending corruption GOVERNANCE.md "Verification Discipline" names.
-    A file mixing the two cannot be written back as it was, so `mixed` lets a caller refuse to
+    Detected from the bytes rather than assumed. That is because a generated rewrite that flattened
+    a CRLF file to LF would be the line-ending corruption GOVERNANCE.md "Verification Discipline"
+    names. A file mixing the two cannot be written back as it was. So `mixed` lets a caller refuse to
     render into one rather than rewrite it to one ending. UnicodeDecodeError is a ValueError,
     which is the exit-2 path a caller already reads as the check itself not having run.
     """
@@ -251,11 +272,11 @@ def _unindented(line):
 def _marker(line, in_code, where):
     """One line's marker match: `(start_match, end_match)`, both None for a line inside a code block.
 
-    A marker shown inside a code sample, which is how the skill-lifecycle skill documents the
-    syntax, is content rather than a region boundary, whether the sample is fenced or indented.
-    Outside one, a line that begins like a marker and matches neither form is refused rather
-    than read as content, since content is exactly what leaves a region unfilled while --check
-    exits 0, and `where` names the file and line the refusal reports.
+    A marker shown inside a code sample is content rather than a region boundary, whether the
+    sample is fenced or indented. Showing a marker in a code sample is how the skill-lifecycle skill documents the syntax.
+    Outside a code sample, a line that begins like a marker and matches neither form is refused rather
+    than read as content. That is because content is exactly what leaves a region unfilled while
+    --check exits 0. `where` names the file and line the refusal reports.
     """
     text = None if in_code else _unindented(line)
     if text is None:
@@ -272,7 +293,7 @@ def _marker(line, in_code, where):
 def _exact_case(rel, parts):
     """Refuse a key whose spelling differs from the tree's, so a key resolves alike on every host.
 
-    A case-insensitive filesystem would resolve `agents.md` to `AGENTS.md`, so a region keyed that
+    A case-insensitive filesystem would resolve `agents.md` to `AGENTS.md`. So a region keyed that
     way would fill on a macOS or Windows host and exit 2 on Linux CI.
     """
     current = INCLUDE_ROOT
@@ -285,10 +306,11 @@ def _exact_case(rel, parts):
 def include_source(rel):
     """The file an include key names, refused where it could name anything but authored text under the root.
 
-    A generated tree is never a source, because its text is this script's own output and a region
-    filled from one would round-trip through the mirror it exists to keep honest. A path that
-    resolves to anything but itself went through a symlink, and one on the way could reach outside
-    the root or into a generated tree under a name that looks fine lexically, so none is followed.
+    A generated tree is never a source. That is because its text is this script's own output. It is
+    also because a region filled from one would round-trip through the mirror it exists to keep honest. A path
+    that resolves to anything but itself went through a symlink. A symlink on the way could reach
+    outside the root or into a generated tree under a name that looks fine lexically. So none is
+    followed.
     """
     parts = PurePosixPath(rel)
     if not rel or parts.is_absolute() or ".." in parts.parts or parts.as_posix() != rel:
@@ -314,7 +336,7 @@ def include_source(rel):
 def heading_body(lines, heading, key):
     """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
 
-    Any level from two down, so a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
+    Any level from two down. So a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
     a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py,
     which the fidelity checks also use. Only a top-level `#` heading counts. One inside a code block,
     a blockquote, or a list item is content to both, and so is a setext heading.
@@ -326,7 +348,8 @@ def heading_body(lines, heading, key):
     want = heading.strip().lower()
     reader = _fidelity_text()
     text = "\n".join(lines)
-    # Every level, so a level-one heading ends a body, though a key names level two down, since a level-one heading is a document's title rather than a section a skill would carry.
+    # Every level, so a level-one heading ends a body, though a key names level two down.
+    # That is because a level-one heading is a document's title rather than a section a skill would carry.
     headings = [(h.line, h.level, h.text.lower()) for h in reader.headings(text)]
     matches = [(index, depth) for index, depth, name in headings if name == want and depth > 1]
     if not matches:
@@ -348,7 +371,8 @@ def heading_body(lines, heading, key):
     code = reader.code_lines(text)
     # The source's own region markers belong to its regions, not to the text they enclose.
     # A copied marker would open a region inside the one being filled on the next scan.
-    # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own, and two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.
+    # Dropping a marker leaves the blank line the fill put on each side of it beside the source's own.
+    # Two blanks in a row are what markdownlint refuses in a file nobody may hand-edit.
     # Inside a code block a doubled blank is the sample's own text, so it stays.
     body = []
     for index in range(start + 1, end):
@@ -384,9 +408,9 @@ def filled_lines(rel, stack=()):
 
     Recursive, so a region filled from a file that carries regions of its own reads the text that
     file renders rather than its markers. A cycle is refused by the path that would loop, compared
-    as files rather than as spellings, so an alias through a directory symlink cannot slip past.
-    A file with no region comes back exactly as read, so filling it never rewrites anything,
-    though it is still decoded to be scanned, so one that is not UTF-8 is refused either way.
+    as files rather than as spellings. So an alias through a directory symlink cannot slip past.
+    A file with no region comes back exactly as read, so filling it never rewrites anything.
+    It is still decoded to be scanned, so one that is not UTF-8 is refused either way.
     """
     path = include_source(rel)
     if any(path.samefile(seen) for seen in stack):
@@ -411,8 +435,10 @@ def filled_lines(rel, stack=()):
             )
         if rel not in INCLUDE_DESTINATIONS and rel not in skill_documents():
             # Only the files the walk visits are written, so a region anywhere else would read filled to an includer while staying empty on disk.
-            # The tuple is read directly rather than through include_documents(), because this test runs once per region while the validation behind that call answers the same question for every declared path each time.
-            # Nothing is lost by skipping it here, since include_drift() and fill_includes() both walk include_documents() before any region is read, so a stale declaration has already raised.
+            # The tuple is read directly rather than through include_documents().
+            # That is because this test runs once per region, while the validation behind that call answers the same question for every declared path each time.
+            # Nothing is lost by skipping it here, since include_drift() and fill_includes() both walk include_documents() before any region is read.
+            # So a stale declaration has already raised.
             raise ValueError(
                 f"{rel}:{index + 1}: an include region in a file the generator does not walk is never filled,"
                 f" so add {rel!r} to INCLUDE_DESTINATIONS or move the region under a skill's own directory"
@@ -430,7 +456,8 @@ def filled_lines(rel, stack=()):
                 break
         if end is None:
             raise ValueError(f"{rel}:{index + 1}: the include region for {key!r} has no end marker")
-        # One blank line on each side, so a body starting with a list or a heading satisfies the blank-line rules markdownlint holds the rest of the tree to.
+        # One blank line on each side.
+        # So a body starting with a list or a heading satisfies the blank-line rules markdownlint holds the rest of the tree to.
         out.extend([line, "", *include_body(key, (*stack, path)), "", lines[end]])
         has_regions = True
         index = end + 1
@@ -448,8 +475,8 @@ def filled_bytes(rel):
 def skill_documents():
     """Every Markdown file under the authored skills tree, as root-relative POSIX paths.
 
-    Symlinks are refused before the walk, since a fill writes through whatever the walk found and
-    a skill directory that is a symlink would put generated text into the tree it points at.
+    Symlinks are refused before the walk, since a fill writes through whatever the walk found.
+    Symlinks are also refused because a skill directory that is a symlink would put generated text into the tree it points at.
     """
     out = []
     for name in skill_names():
@@ -463,10 +490,13 @@ def skill_documents():
 
 
 # The baseline fidelities under which this repository hands a carrier any content of its own, which is that enum's every value but presence.
-# The interface level is in the set although spec/fidelity-model.md checks only its contract rather than its body, since a region inside a declared contract is content this repository still wrote.
+# The interface level is in the set although spec/fidelity-model.md checks only its contract rather than its body.
+# That is because a region inside a declared contract is content this repository still wrote.
 # Scoped to baseline deliberately: a trees entry declares verbatim-tree, which carries content too, and is matched on its source below rather than through this set.
-# Presence carries none and is also the default, so an entry declaring it and one naming a path alone are the same declaration spelled two ways.
-# Reading any fidelity as carrying would answer differently for the two, so a manifest edit respelling one entry would change what this function says about it.
+# Presence carries none and is also the default.
+# So an entry declaring it and one naming a path alone are the same declaration spelled two ways.
+# Reading any fidelity as carrying would answer differently for the two.
+# So a manifest edit respelling one entry would change what this function says about it.
 # README.md, which spec/fidelity-model.md names as a presence file, is spelled the bare way today.
 _CARRYING_FIDELITIES = frozenset({"intent", "verbatim", "interface"})
 
@@ -474,16 +504,16 @@ _CARRYING_FIDELITIES = frozenset({"intent", "verbatim", "interface"})
 def _manifest_entries(manifest, key):
     """The list under `key`, refused rather than coerced where the manifest is not the shape expected.
 
-    json.loads accepts any JSON, so a manifest that is a list, or one whose baseline holds a
-    string, would otherwise reach .get() and raise AttributeError, which main() does not catch and
-    which therefore surfaces as an uncaught traceback exiting 1, the code a caller reads as stale.
+    json.loads accepts any JSON. So a manifest that is a list, or one whose baseline holds a
+    string, would otherwise reach .get() and raise AttributeError. main() does not catch that, so
+    it surfaces as an uncaught traceback exiting 1, the code a caller reads as stale.
 
-    A key that is absent is refused rather than read as declaring nothing, because both are
+    A key that is absent is refused rather than read as declaring nothing. That is because both are
     required by spec/files.schema.json and spec/validate.py names each one it does not find. A
-    truncated manifest read as declaring nothing would report every carried file as uncarried,
-    which is the one answer this function must never give by accident. ValueError
-    rather than the TypeError ruff prefers, and the noqa below is what holds it: main() catches
-    ValueError and OSError, so a TypeError raised here would escape as the uncaught traceback this
+    truncated manifest read as declaring nothing would report every carried file as uncarried.
+    That is the one answer this function must never give by accident. ValueError
+    rather than the TypeError ruff prefers, and the noqa below is what holds it. main() catches
+    ValueError and OSError. So a TypeError raised here would escape as the uncaught traceback this
     function exists to prevent. A malformed data file is a bad value in it, not a caller's type
     error.
     """
@@ -508,28 +538,29 @@ def tree_source(source):
     """`source` reduced to the plain root-relative form the prefix test compares.
 
     The schema requires a source to be a non-empty string other than ".", and constrains its
-    spelling no further, so one tree is spellable "docs", "docs/", "./docs", "/docs", "//docs",
+    spelling no further. So one tree is spellable "docs", "docs/", "./docs", "/docs", "//docs",
     "docs//sub", and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
-    every spelling but the plainest, so splitting into path segments answers all of them at once.
+    every spelling but the plainest. So splitting into path segments answers all of them at once.
 
-    A reduction that comes back empty is refused, since it names the repository root and a tree
+    A reduction that comes back empty is refused, since it names the repository root. It is also refused because a tree
     carrying everything is not a thing the manifest can mean. The schema forbids the two plainest
-    spellings of it, "" and ".", and permits others that reduce the same way, "./" among them, so
+    spellings of it, "" and ".", and permits others that reduce the same way, "./" among them. So
     the reduction decides this rather than the spelling. Reading one as a tree instead would refuse
     every declared destination under it while blaming the destination, where the source is what
     needs fixing.
 
     A source that is absent or not a string is refused for the same reason a non-string fidelity
-    is, and a ".." segment is refused rather than resolved, since a source reaching outside the
-    tree it names is a manifest defect and resolving it here would decide silently what that source
-    meant. Skipping any of them would leave the tree unmatched, so every destination inside it
+    is. A ".." segment is refused rather than resolved, since a source reaching outside the
+    tree it names is a manifest defect. It is also refused because resolving it here would decide silently what that source
+    meant. Skipping any of them would leave the tree unmatched. So every destination inside it
     would read as uncarried, which is the answer this must never give by accident.
     """
     if not isinstance(source, str):
         raise ValueError(  # noqa: TRY004
             f"spec/files.json declares a tree whose source is {source!r} rather than a string"
         )
-    # An anchor is matched on its leading slash rather than by name, since POSIX keeps a doubled one as its own "//" part and dropping only "/" leaves that anchor in the join.
+    # An anchor is matched on its leading slash rather than by name.
+    # That is because POSIX keeps a doubled one as its own "//" part, and dropping only "/" leaves that anchor in the join.
     parts = [
         part
         for part in PurePosixPath(source.strip()).parts
@@ -547,15 +578,15 @@ def tree_source(source):
 def manifest_carried_destination(rel, manifest):
     """The `manifest` entry that would carry `rel`'s bytes to another repository, or None.
 
-    A destination is written by the fill and then committed, and carriage copies committed bytes,
-    so a carried destination hands every carrying repository generated text inside a file that
-    repository holds as its own and never rebuilds. The generated mirrors carry markers to every
-    repository already and are safe doing it for the opposite reason, that regenerate() rebuilds
-    them wholesale from the authored tree on every run, so the manifest decides this rather than
-    the author of the tuple. A baseline entry naming a path alone carries no content and is
+    A destination is written by the fill and then committed, and carriage copies committed bytes.
+    So a carried destination hands every carrying repository generated text. That text sits inside
+    a file the repository holds as its own and never rebuilds. The generated mirrors carry markers
+    to every repository already and are safe doing it for the opposite reason. The reason is that
+    regenerate() rebuilds them wholesale from the authored tree on every run. So the manifest
+    decides this rather than the author of the tuple. A baseline entry naming a path alone carries no content and is
     therefore not such an entry, which is what distinguishes README.md from GOVERNANCE.md here. An
     entry's reference is read as well as its path, since a reference names the hub file a carrier's
-    own copy is made from, so declaring one hands every carrier of that entry a region under
+    own copy is made from. So declaring one hands every carrier of that entry a region under
     whatever name it holds the copy under.
     """
     for entry in _manifest_entries(manifest, "baseline"):
@@ -583,19 +614,25 @@ def include_destinations():
     """The declared non-skill destinations, refused where writing generated text into one would be wrong.
 
     Each is held to the path rules include_source() holds a source to, because filling a region
-    rewrites the file it sits in, so a path that does not exist, is spelled differently from the
-    tree, is reached through a symlink, or lands in a generated tree is worse to write than to
-    read. Each is then held to the manifest, per manifest_carried_destination() above.
+    rewrites the file it sits in. So each of these is worse to write than to read:
+
+    - a path that does not exist
+    - a path spelled differently from the tree
+    - a path reached through a symlink
+    - a path that lands in a generated tree
+
+    Each is then held to the manifest, per manifest_carried_destination() above.
 
     What this proves is that every declared path is one a region may be written into, not that any
-    of them holds a region: a declaration left behind after its region was deleted names a real
+    of them holds a region. A declaration left behind after its region was deleted names a real
     file and passes here, and nothing detects it.
 
-    The manifest is read once, and only where the tuple has an entry, since include_documents()
-    reaches this on every walk and an ordinary build declares nothing for it to answer about.
-    Where the tuple does have an entry, a manifest that cannot be read, or that parses into
-    something other than the shape it declares, is refused rather than read as carrying nothing,
-    since a check that waves a declaration through because it could not run has stopped checking.
+    The manifest is read once, and only where the tuple has an entry. That is because
+    include_documents() reaches this on every walk, and an ordinary build declares nothing for it
+    to answer about. Where the tuple does have an entry, a manifest that cannot be read is refused
+    rather than read as carrying nothing. So is one that parses into something other than the
+    shape it declares. A check that waves a declaration through because it could not run has
+    stopped checking. That is the reason for the refusal.
     """
     if not INCLUDE_DESTINATIONS:
         return []
@@ -624,10 +661,11 @@ def include_documents():
     """Every file an include region may sit in: the authored skills tree, plus the declared destinations.
 
     The two halves are found differently on purpose. A skill document is discovered, since the walk
-    that copies it into both mirrors visits it anyway and every Markdown file under an authored
-    skill is already generated content downstream of this script. A destination outside that tree is
-    named in INCLUDE_DESTINATIONS instead, since nothing else would visit it and the choice to put
-    generated text there is a decision to review rather than a directory to scan.
+    that copies it into both mirrors visits it anyway. It is also discovered because every Markdown
+    file under an authored skill is already generated content downstream of this script. A
+    destination outside that tree is named in INCLUDE_DESTINATIONS instead, since nothing else
+    would visit it. It is also named there because the choice to put generated text there is a
+    decision to review rather than a directory to scan.
     """
     return sorted({*skill_documents(), *include_destinations()})
 
@@ -686,13 +724,19 @@ def regenerate():
 def is_stale(drift=None):
     """Whether a generated distribution needs regenerating: missing, corrupted, or built from
     different source bytes. Checks the manifest's own content and the generated tree's actual
-    bytes, not only the digest stamps, since a stamp surviving a partial deletion, a hand-edited
-    manifest, or an edited-in-place generated file would otherwise report current over a plugin
-    that no longer actually matches its source. Comparing the source and generated digests
-    directly, rather than trusting a stamp to still describe what is on disk, is what catches
-    the in-place edit: nothing else here re-reads the generated files at all.
+    bytes, not only the digest stamps. That is because a stamp surviving any of the following would
+    otherwise report current over a plugin that no longer actually matches its source:
+
+    - a partial deletion
+    - a hand-edited manifest
+    - an edited-in-place generated file
+
+    Comparing the source and generated digests directly is what catches the in-place edit, rather
+    than trusting a stamp to still describe what is on disk. Nothing else here re-reads the
+    generated files at all.
     """
-    # First, so a region behind its source reads stale however current the mirrors are, and a key that no longer resolves raises here whatever else is missing.
+    # First, so a region behind its source reads stale however current the mirrors are.
+    # It is also first so a key that no longer resolves raises here whatever else is missing.
     if include_drift() if drift is None else drift:
         return True
     if not DIGEST_DIR.is_dir() or not PLUGIN_MANIFEST.is_file():
@@ -703,7 +747,8 @@ def is_stale(drift=None):
     except json.JSONDecodeError:
         # A corrupted or hand-edited manifest is exactly the stale case this function exists to catch.
         return True
-    # OSError (an unreadable file, one removed between the is_file() check above and this read) is deliberately not caught here: --check's own caller needs it to propagate as the execution failure it is, not read as this function's ordinary stale result.
+    # OSError (an unreadable file, one removed between the is_file() check above and this read) is deliberately not caught here.
+    # --check's own caller needs it to propagate as the execution failure it is, not read as this function's ordinary stale result.
     # The full manifest, not only "skills".
     # A hand-edited description/author/version is exactly as much a corrupted-plugin case as a hand-edited skills list.
     # The manifest is entirely deterministic from `names`, so comparing all of it costs nothing extra to get right.
@@ -717,7 +762,8 @@ def is_stale(drift=None):
         return True
     if not has_exact_skill_directories(GITHUB_SKILLS, names):
         return True
-    # Exactly one stamp per skill, checked by name for the same reason the directories are: a stamp left behind by a retired skill is never read below and could not otherwise be noticed.
+    # Exactly one stamp per skill, checked by name for the same reason the directories are.
+    # A stamp left behind by a retired skill is never read below and could not otherwise be noticed.
     if not has_exact_entries(DIGEST_DIR, names, directories=False):
         return True
     for name in names:
@@ -745,8 +791,11 @@ def main():
             drift = include_drift()
             stale = is_stale(drift)
         except (ValueError, OSError) as exc:
-            # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below, which also exits 1 by this flag's own documented contract.
-            # OSError alongside ValueError: is_stale() reads several files beyond the one call already wrapped in its own try/except, and a permissions problem or a file removed out from under it raises that, not ValueError.
+            # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below.
+            # That result also exits 1 by this flag's own documented contract.
+            # OSError alongside ValueError.
+            # The is_stale() function reads several files beyond the one call already wrapped in its own try/except.
+            # A permissions problem or a file removed out from under it raises OSError, not ValueError.
             print(exc, file=sys.stderr)
             return 2
         if drift:

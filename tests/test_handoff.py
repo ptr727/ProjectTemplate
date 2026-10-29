@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Exercise handoff.py's chain model, refusals, and write ordering against a stubbed `gh`.
 
-Every case here drives the real subcommands through a fake `gh` holding an in-memory repository,
-because the properties under test are about what the script decides and in what order it writes,
-not about GitHub. The one thing a stub cannot prove is that `gh` accepts these argument lists, so
-each write case asserts the argv it produced rather than only its effect.
+Every case here drives the real subcommands through a fake `gh` holding an in-memory repository.
+That is because the properties under test are about what the script decides and in what order it
+writes, not about GitHub. The one thing a stub cannot prove is that `gh` accepts these argument lists.
+So each write case asserts the argv it produced rather than only its effect.
 
 Two refusals earn cases of their own because the chain exists to fix them. An ambiguous track is
-never resolved by picking, and a fleet repository missing the label refuses rather than reporting
+never resolved by picking. A fleet repository missing the label refuses rather than reporting
 an empty chain, which is the silent failure the `decision` label already demonstrated fleet-wide.
-A repository outside the fleet warns instead, and its cases prove the warning path never writes
+A repository outside the fleet warns instead. Its cases prove the warning path never writes
 anything but the one label `new --create-label` asks for.
 
 Run as `python3 tests/test_handoff.py`, or under
@@ -41,8 +41,8 @@ REAL_REGISTRY = handoff.registry
 def setUpModule() -> None:
     """Read `o/r` as a fleet repository unless a case says otherwise.
 
-    The write scope reads the registry before every write, and the real one lists no `o`, so
-    without this every write case would test the scope refusal instead of what it names.
+    The write scope reads the registry before every write, and the real one lists no `o`.
+    So without this every write case would test the scope refusal instead of what it names.
     """
     patcher = unittest.mock.patch.object(handoff, "registry", lambda: ("o", {"r"}))
     patcher.start()
@@ -71,9 +71,9 @@ def subcommands() -> dict[str, argparse.ArgumentParser]:
 def projected(row: dict, argv: list[str]) -> dict:
     """`row` cut down to the fields `--json` asked for, the way real `gh` answers.
 
-    A fake returning every field regardless is a fake that models a superset of the tool, and a
-    caller reading a field it never asked for then passes here and raises against `gh`. That is
-    exactly what happened: `open_handoffs` did not request `state`, `cmd_new` read it, and 65
+    A fake returning every field regardless is a fake that models a superset of the tool.
+    A caller reading a field it never asked for then passes here and raises against `gh`. That is
+    exactly what happened. `open_handoffs` did not request `state`, and `cmd_new` read it. 65
     green cases said nothing because this stub handed the field over anyway.
     """
     if "--json" not in argv:
@@ -108,8 +108,8 @@ class FakeGh:
     states, page size, cursor, and node selection. A stub looser than the tool it stands in for is
     a stub that green-lights a crash.
 
-    It also refuses any call carrying no `--repo`, apart from `repo view`, which names its
-    repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
+    It also refuses any call carrying no `--repo`, apart from `repo view`.
+    That call names its repository positionally and is refused instead where that name is no OWNER/NAME. Real `gh`
     would answer a call missing its repository by resolving it from the working directory's
     remote. That is the failure this whole script is built against. Without this the argument
     could be dropped from any call site with every case still green. The GraphQL list names its
@@ -1126,7 +1126,7 @@ class NewCase(unittest.TestCase):
         """The orphan case: no open handoff on a track is not the same as no handoff at all.
 
         Reading the second as the first files round 1 with `previous=none` beside a chain that
-        already exists, which is exactly the lost history the chain replaces a file to avoid.
+        already exists. That is exactly the lost history the chain replaces a file to avoid.
         """
         fake = FakeGh({30: link(30, "default", 4, 29, state="CLOSED")})
         code, out, _ = run(
@@ -1173,7 +1173,7 @@ class NewCase(unittest.TestCase):
     def test_new_refuses_an_open_head_that_already_has_a_successor(self) -> None:
         """The open head takes precedence over the closed side, and it can still be succeeded.
 
-        A closed link naming the open head as its predecessor is the reachable shape: filing onto
+        A closed link naming the open head as its predecessor is the reachable shape. Filing onto
         that head again would put two links at one round and leave the closed one unreachable.
         """
         fake = FakeGh(
@@ -1203,7 +1203,7 @@ class NewCase(unittest.TestCase):
 
         `on_track` takes precedence unconditionally, and the closed side is scanned only when it
         returns nothing. So the head check is the one read that meets a bare closed row on this
-        path, and reading it as "nothing succeeds the open head" is the guess that forks the lane.
+        path. Reading it as "nothing succeeds the open head" is the guess that forks the lane.
         """
         fake = FakeGh(
             {
@@ -1730,9 +1730,13 @@ class ResumeCase(unittest.TestCase):
 class HeadCheckCase(unittest.TestCase):
     """A read resolving a head the chain has moved past says so, rather than answering over it.
 
-    Each state is one `new` refuses over and the reads once answered silently: a successor closed
-    by hand while its predecessor stayed open, an open head below the closed side's round, and two
-    links at one round. The text a search is for sits in the link the head does not reach.
+    Each state is one `new` refuses over and the reads once answered silently:
+
+    - a successor closed by hand while its predecessor stayed open
+    - an open head below the closed side's round
+    - two links at one round
+
+    The text a search is for sits in the link the head does not reach.
     """
 
     def successor_closed_by_hand(self) -> FakeGh:
@@ -1981,7 +1985,7 @@ class TracksCase(unittest.TestCase):
 class GhBoundaryCase(unittest.TestCase):
     """`run_gh` and the write confirmations, which patching `run_gh` wholesale never executes.
 
-    Every other case here replaces `run_gh`, so its own body, and the confirmations the write
+    Every other case here replaces `run_gh`. So its own body, and the confirmations the write
     helpers make on top of it, ran in no test at all. Four guards could be deleted outright with
     the suite green, one of them the close read-back `GOVERNANCE.md` "Repository Boundaries and
     Write Safety" requires.
@@ -2145,8 +2149,8 @@ class GhBoundaryCase(unittest.TestCase):
     def test_a_body_file_is_written_with_lf_whatever_the_platform_does(self) -> None:
         """Text mode translates LF to CRLF on Windows, and the marker would stop parsing.
 
-        The newline argument is asserted rather than the bytes, because on Linux the two are
-        identical and the check would pass without the argument on the only platform CI runs.
+        The newline argument is asserted rather than the bytes. That is because on Linux the two are
+        identical, and the check would pass without the argument on the only platform CI runs.
         """
         with (
             unittest.mock.patch.object(Path, "write_text") as wrote,
@@ -2242,7 +2246,7 @@ class MalformedCase(unittest.TestCase):
     def test_a_marker_line_the_grammar_rejects_is_not_revived_by_the_strip(self) -> None:
         """`str.rstrip()` removes 25 whitespace characters where `MARKER` tolerates three.
 
-        Stripping wider turns a line the grammar counts as ordinary text back into a block, which
+        Stripping wider turns a line the grammar counts as ordinary text back into a block. That block
         then sits beside the one `with_marker` appends and leaves a body no command can read.
         """
         quoted = handoff.render_marker("lane", 4, 900) + "\u00a0"
