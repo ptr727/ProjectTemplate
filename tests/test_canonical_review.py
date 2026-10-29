@@ -90,7 +90,8 @@ class UnitModelCase(unittest.TestCase):
         self.assertIn("two level-two sections", str(caught.exception))
 
     def test_two_sections_differing_only_in_case_refuse(self) -> None:
-        """The declared-name lookup folds case and spec/audit.py's heading match folds. So a pair differing only in case is one name to every reader but this guard.
+        """The declared-name lookup folds case and spec/audit.py's heading match folds.
+        So a pair differing only in case is one name to every reader but this guard.
 
         Left unfolded, the pair passed here as two distinct keys. `build_units`' own folded
         lookup then resolved a manifest declaring either spelling to the last of them. In contrast,
@@ -365,7 +366,8 @@ class SweepCase(RepoCase):
 
     def test_a_never_read_unit_is_asked_for_within_the_bound(self) -> None:
         """The case the retired gate refused. A unit nothing here has read is one a carrier receives
-        unread. So leaving the whole backlog out left newly authored content with no reader at all."""
+        unread. So leaving the whole backlog out left newly authored content with no reader at all.
+        """
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
         self.assertIn(f"{cr.BACKLOG_SLICE} unit(s) from the never-read backlog", output)
@@ -393,7 +395,8 @@ class SweepCase(RepoCase):
     def test_a_carried_file_no_commit_holds_leads_the_slice(self) -> None:
         """`tracked_files` counts a carried file this branch created and has not committed, and it is
         the newest content there is. `git log` answers for it with a zero exit and no output.
-        Read as the undatable case, that would sort it last, the exact inverse of the documented order."""
+        Read as the undatable case, that would sort it last, the exact inverse of the documented order.
+        """
         self.write("BRAND.md", "## Brand\n\nbody\n")
         spec = self.manifest()
         spec["baseline"].append({"path": "BRAND.md", "fidelity": "verbatim", "whole": True})
