@@ -40,7 +40,7 @@ scheduled run files and an agent session performs. `report` renders the whole ba
 output rather than into the tree, for the reason `scripts/README.md` gives.
 
 The verdict vocabulary is `scripts/local_review.py`'s. So a caller reading an exit code from either
-engine need not know which one answered. The codes are: 0 is covered, 1 is a finding, and 2 is the
+engine need not know which one answered. The codes are 0 for covered, 1 for a finding, and 2 for the
 check itself not having run.
 
 Usage, each command run as `uv run --no-project --script scripts/canonical_review.py <command>`:
@@ -75,7 +75,7 @@ import local_review
 
 # Reused rather than restated.
 # When two engines under one rule disagree about which branch "develop" means, that is a defect in the pair rather than in either.
-# The same holds for what an exit code says.
+# The same holds when they disagree about what an exit code says.
 CannotRun = local_review.CannotRun
 DEFAULT_TARGET = local_review.DEFAULT_TARGET
 EXIT_COVERED = local_review.EXIT_COVERED
@@ -703,8 +703,8 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
     record time. So an edit between the review and the record would be attested to by a reviewer who
-    never saw it. A format-on-save and a hook autofix are two such edits. That attestation is the
-    one claim this record makes.
+    never saw it. That attestation is the
+    one claim this record makes. A format-on-save and a hook autofix are examples of such edits.
     """
     out: dict[str, str] = {}
     for value in values:

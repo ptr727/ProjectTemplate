@@ -918,7 +918,7 @@ class ReceiptCase(RepoCase):
         """The remedy is withheld precisely where following it would stamp unread content.
 
         A pass recorded against one branch and a check measuring another disagree about scope. The
-        ordinary remedy line records this check's scope. The line then runs, succeeds, replaces the
+        ordinary remedy line records this check's scope. The line runs, succeeds, replaces the
         correctly scoped receipt, and passes the next check over a diff no reviewer read.
         """
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
@@ -985,12 +985,11 @@ class ReceiptCase(RepoCase):
     def run_piped(self, args: list[str], shell: str) -> int:
         """Run the CLI for real with its output piped into a reader that exits first.
 
-        Driven through a shell rather than in process. That is because the failure being tested is a
-        genuine EPIPE on a descriptor. It is also because the exit code being tested includes the
-        one the interpreter produces during its own shutdown flush. No in-process case can reach
-        that.
-        The suite's own interpreter is named rather than a bare `python3`, which the shell could
-        resolve to a different one.
+        This case is driven through a shell rather than in process. That is because the failure
+        being tested is a genuine EPIPE on a descriptor. It is also because the exit code being
+        tested includes the one the interpreter produces during its own shutdown flush. No
+        in-process case can reach that exit code. The suite's own interpreter is named rather than a
+        bare `python3`, which the shell could resolve to a different one.
         """
         python = shlex.quote(Path(sys.executable).as_posix())
         script = f"{python} {shlex.quote(SCRIPT.as_posix())} {' '.join(args)} {shell}"

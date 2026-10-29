@@ -8,7 +8,8 @@ The mechanism rests on git's own file listing and merge-base rather than on anyt
 could stub convincingly. A third, smaller set reads this repository's own tree. That is because a
 unit table that silently stops covering a canonical reports exactly what a healthy one does.
 
-Run as `uv run --no-project --with-requirements tests/requirements.txt python tests/test_canonical_review.py`, or under `-m unittest discover -s tests` the same way.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python
+tests/test_canonical_review.py`, or under `-m unittest discover -s tests` the same way.
 """
 
 import contextlib
@@ -365,8 +366,9 @@ class SweepCase(RepoCase):
         self.assertNotIn("canonical_review.py record", output)
 
     def test_a_never_read_unit_is_asked_for_within_the_bound(self) -> None:
-        """The case the retired gate refused. A unit nothing here has read is one a carrier receives
-        unread. So leaving the whole backlog out left newly authored content with no reader at all.
+        """This is the case the retired gate refused.
+
+        A unit nothing here has read is one a carrier receives unread. So leaving the whole backlog out left newly authored content with no reader at all.
         """
         code, output = self.loud(["sweep"])
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
@@ -394,8 +396,8 @@ class SweepCase(RepoCase):
 
     def test_a_carried_file_no_commit_holds_leads_the_slice(self) -> None:
         """`tracked_files` counts a carried file this branch created and has not committed, and it is
-        the newest content there is. `git log` answers for it with a zero exit and no output.
-        Read as the undatable case, that would sort it last, the exact inverse of the documented order.
+        the newest content there is. `git log` answers for it with a zero exit and no output. Read
+        as the undatable case, that would sort it last, the exact inverse of the documented order.
         """
         self.write("BRAND.md", "## Brand\n\nbody\n")
         spec = self.manifest()
@@ -414,7 +416,8 @@ class SweepCase(RepoCase):
 
     def test_a_repository_with_no_commits_dates_nothing_and_still_sweeps(self) -> None:
         """The third answer `newest_commit_times` documents. With no commit at all `git log` exits
-        128 rather than answering, so every path is undatable. The order has to degrade to the
+        128 rather than answering, so every path is undatable. For the same reason the order has to
+        degrade to the
         tie-break rather than raising out of a sweep that can otherwise run."""
         fresh = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         run(fresh, "init", "--initial-branch=develop", ".")
@@ -434,8 +437,9 @@ class SweepCase(RepoCase):
         """The bound is on the backlog alone. Stale text is content a carrier is receiving right now
         that a pass here has been retired from. So none of it waits for a later round.
 
-        More stale units than `BACKLOG_SLICE`, deliberately. With fewer, applying the bound to this
-        list as well would leave the case green and the property it is named for unbound.
+        This case uses more stale units than `BACKLOG_SLICE`, deliberately. With fewer, applying the
+        bound to this list as well would leave the case green and the property it is named for
+        unbound.
         """
         self.cover_all()
         self.write("DOC.md", "edited\n\n## Alpha\n\nedited\n\n## Beta\n\nedited\n")

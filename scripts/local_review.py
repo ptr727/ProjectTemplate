@@ -15,14 +15,14 @@ the check runs at the push. Reviewing untracked work and then committing it unch
 identical. Changing one byte moves it.
 
 Every identity in the key is computed by git rather than reconstructed here. That is the point worth
-stating plainly, because reconstructing one is where this went wrong twice. A blob id read off the
-working tree by hashing its raw bytes does not equal the id git stores. That happens whenever a
-filter sits between them. This repository's own `.gitattributes` applies one to every text file, so
-`git add` moved the key on any CRLF file. A file mode derived from `stat` disagrees with git's on
-any checkout where `core.fileMode` is off. So the working tree's own state is read by staging it
-into a throwaway index that git builds. The result is compared against the real index that git
-already maintains. Both sides then carry git's own answer, filters, modes, renames, deletions,
-symlinks, and submodules included.
+stating plainly, because reconstructing one is where this went wrong twice. A blob id hashed from
+the working tree's raw bytes does not equal the id git stores whenever a filter sits between them.
+This repository's own `.gitattributes` applies one to every text file, so `git add` moved the key on
+any CRLF file. A file mode derived from `stat` disagrees with git's on any checkout where
+`core.fileMode` is off. So the working tree's own state is read by staging it into a throwaway index
+that git builds. The result is compared against the real index that git already maintains. Both
+sides then carry git's own answer, filters, modes, renames, deletions, symlinks, and submodules
+included.
 
 Each path contributes the set of distinct states it is in, the throwaway index's and the real
 one's. When they agree the set collapses to one member, which is what makes `git add` and
@@ -584,11 +584,11 @@ def fingerprints(base: str, root: Path) -> dict[str, str]:
     HEAD decides membership and contributes nothing to the mark, which is what callers can rely on
     in both directions. A path already differing from the base by its index and working-tree state
     keeps its mark once HEAD holds that state too. So `git commit` alone never moves the key. That
-    is `git commit` alone. `git add` on a modified tracked file does move it, by collapsing a mark
-    that named the index separately. So the invisible-commit property covers untracked work rather
-    than every edit. And a path in the set only because HEAD disagrees with the base leaves the set
-    when that undo is committed. So the key does move there. That is correct, since a push delivered
-    the change before that commit and delivers the undo after it.
+    holds for `git commit` alone. `git add` on a modified tracked file does move it, by collapsing a
+    mark that named the index separately. So the invisible-commit property covers untracked work
+    rather than every edit. And a path in the set only because HEAD disagrees with the base leaves
+    the set when that undo is committed. So the key does move there. That is correct, since a push
+    delivered the change before that commit and delivers the undo after it.
 
     What this is not is the content a push would deliver, which is HEAD's alone. It moves where a
     push would carry nothing new, staging a modified tracked file being the plainest example. It
