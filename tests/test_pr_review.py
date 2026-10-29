@@ -5596,18 +5596,36 @@ class TestReplyArguments(unittest.TestCase):
                         .endswith(f"error: {flag[0]} belongs to `wait`, not `{cmd}`")
                     )
 
+    def test_a_check_threshold_is_rejected_off_status_and_wait(self) -> None:
+        """`status` and `wait` read both thresholds, and every other subcommand ignored them."""
+        argv = {
+            "reply": ["reply", "7", "--match", "x", "--body", "b"],
+            "comment": ["comment", "7", "--body", "b"],
+            "claims": ["claims", "7"],
+            "attest": ["attest", "7"],
+        }
+        for flag in ("--check-grace", "--check-stall"):
+            for cmd, head in argv.items():
+                with self.subTest(flag=flag, cmd=cmd):
+                    self.assertTrue(
+                        self.err([*head, "--repo", "o/r", flag, "60"])
+                        .strip()
+                        .endswith(f"error: {flag} belongs to `status` or `wait`, not `{cmd}`")
+                    )
+
     def test_wait_still_reads_the_defaults_of_its_own_flags(self) -> None:
         """Unset until the ownership check has read them, they still reach `wait` as before."""
-        seen: list[tuple[int, int]] = []
+        seen: list[tuple[int, int, int, int]] = []
 
         def fake_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
-            seen.append((a.timeout, a.min_rounds))
+            seen.append((a.timeout, a.min_rounds, a.check_grace, a.check_stall))
             return 0
 
         with mock.patch.object(pr_review, "run_wait", fake_wait):
             pr_review.main(["wait", "7", "--repo", "o/r"])
             pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "5", "--min-rounds", "3"])
-        self.assertEqual([(2700, 0), (5, 3)], seen)
+        grace, stall = pr_review.CHECK_GRACE, pr_review.CHECK_STALL
+        self.assertEqual([(2700, 0, grace, stall), (5, 3, grace, stall)], seen)
 
     def test_every_owner_in_the_table_is_a_subcommand(self) -> None:
         """A misspelled owner would refuse its flag on the one command it belongs to."""

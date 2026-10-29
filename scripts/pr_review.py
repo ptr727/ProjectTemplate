@@ -1889,6 +1889,8 @@ FLAG_OWNERS = (
     ("--timeout", ("wait",), True),
     ("--min-rounds", ("wait",), True),
     ("--ignore-quota-signal", ("wait",), True),
+    ("--check-grace", ("status", "wait"), True),
+    ("--check-stall", ("status", "wait"), True),
 )
 
 
@@ -1927,14 +1929,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--check-grace",
         type=int,
-        default=CHECK_GRACE,
         help="seconds a check may sit queued, or a required status go unposted, "
         f"before either reads as unstarted (default {CHECK_GRACE // 60}m)",
     )
     ap.add_argument(
         "--check-stall",
         type=int,
-        default=CHECK_STALL,
         help="seconds a check may run before its duration is reported "
         f"(default {CHECK_STALL // 60}m)",
     )
@@ -2024,6 +2024,8 @@ def main(argv: list[str] | None = None) -> int:
     refuse_foreign(late=True)
     a.timeout = 2700 if a.timeout is None else a.timeout
     a.min_rounds = 0 if a.min_rounds is None else a.min_rounds
+    a.check_grace = CHECK_GRACE if a.check_grace is None else a.check_grace
+    a.check_stall = CHECK_STALL if a.check_stall is None else a.check_stall
     required = ["--body"] + (["--match"] if a.cmd == "reply" else [])
     if a.cmd in ("comment", "reply"):
         values = {"--body": a.body, "--match": a.match}
