@@ -307,8 +307,8 @@ function Test-WingetVersion {
 # The result is nothing where the rows do not describe one product, or one of them carries no version.
 # Rows sharing a major version are side by side builds of one product, and the newest is the answer.
 # That is what a dotnet SDK line looks like.
-# Rows whose majors differ are two products sharing an id, and there no single version compares.
-# Two products sharing an id is what the legacy WSL installer looks like beside WSL itself.
+# Rows whose majors differ are two products sharing an id, and no single version compares there.
+# Two products sharing an id are what the legacy WSL installer looks like beside WSL itself.
 function Resolve-InstalledVersion {
     param([string[]]$Version)
     if (-not $Version -or $Version.Count -eq 0) { return $null }
@@ -409,7 +409,7 @@ function Get-ExplicitUpgrade {
 # A version matching none of the family's ids does the same.
 # This is because a family search that cannot confirm anything is no worse than not asking.
 # A version matching more than one id falls back the same way rather than picking the first.
-# Two ids sharing a version happens right at a channel handoff.
+# Two ids sharing a version happen right at a channel handoff.
 # That is when a major that just left Current has not yet lost its old id from the search results.
 # Picking between them by list order would be a guess wearing the shape of an answer.
 function Resolve-ToolPackage {
@@ -888,7 +888,7 @@ $PYTHON_ALIAS_NAMES = @('python.exe', 'python3.exe')
 $PYTHON_ALIAS_PACKAGE = 'Microsoft.DesktopAppInstaller_'
 
 # Whether a file is one of Windows' app execution alias stubs rather than a real executable someone put there.
-# Four conditions together, for these reasons:
+# These conditions are required together, for these reasons:
 #   - the deletion this gates cannot be undone
 #   - the alias directory is one a person may legitimately have put a program in
 # The conditions are:
