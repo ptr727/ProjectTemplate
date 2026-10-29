@@ -23,13 +23,13 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 
 **Summary**:
 
-- Agent enablement for the fleet: shared rules, a machine-readable spec, a fleet registry, per-repo audit reports, and an audit-agent instruction set, so an agent works autonomously inside guardrails that prove the result. Ships no application code.
+- Agent enablement for the fleet: shared rules, a machine-readable spec, a fleet registry, per-repo audit reports, and an audit-agent instruction set. These let an agent work autonomously inside guardrails that prove the result. Ships no application code.
 
 See [Release History][history] for the full history.
 
 ## Getting Started <!-- omit from toc -->
 
-This repo has two kinds of reader, a human and an AI coding agent, and they enter at different doors. **An agent starts at [AGENTS.md][agents]**, which maps a task to the document that governs it and is written to be read one section at a time. **A human starts here**, and the table below is the fork: find the row that describes why you opened this page, and read the one it points at rather than the whole file.
+This repo has two kinds of reader, a human and an AI coding agent, and they enter at different doors. **An agent starts at [AGENTS.md][agents]**. It maps a task to the document that governs it and is written to be read one section at a time. **A human starts here**, and the table below is the fork. Find the row that describes why you opened this page, and read the one it points at rather than the whole file.
 
 | You are | Your question | Start at |
 | --- | --- | --- |
@@ -41,7 +41,7 @@ This repo has two kinds of reader, a human and an AI coding agent, and they ente
 | Reporting a defect or proposing a rule | Where does that go, and what does it need? | [Questions or Issues][questions-or-issues] |
 | An AI coding agent | Which document governs the task in front of me? | [`AGENTS.md`][agents] |
 
-Nothing here is installed as a dependency. The rules are read, the baseline is carried into a repository as files it then owns, and the one thing that is genuinely installed is the host guardrail kit, which lands in your home directory rather than in any repository.
+Nothing here is installed as a dependency. The rules are read, and the baseline is carried into a repository as files it then owns. The one thing that is genuinely installed is the host guardrail kit, which lands in your home directory rather than in any repository.
 
 ## Table of Contents <!-- omit from toc -->
 
@@ -73,22 +73,22 @@ Nothing here is installed as a dependency. The rules are read, the baseline is c
 
 ## What This Repo Is
 
-**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository, and the drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome: an agent stands a repository up, changes it, and releases it on its own, and lands in the same known-good shape every time. The guardrails are what make granting that autonomy sound rather than reckless.
+**The purpose is agent enablement.** An AI coding agent is fast and inconsistent, so a fleet built by one drifts a different way in every repository. The drift stays invisible until something breaks where it matters. What this repo makes repeatable is the outcome. An agent stands a repository up, changes it, and releases it on its own, and lands in the same known-good shape every time. The guardrails are what make granting that autonomy sound rather than reckless.
 
-**Guardrails here enable rather than restrain.** A rule earns its place by removing a decision an agent would otherwise make differently every time, or by making a failure loud that would otherwise pass green. Write safety bounds what an agent can reach outside the project in front of it, the review loop closes before anything merges, and the audit proves the result instead of accepting the agent's report of it. Autonomy extends exactly as far as the verification reaches.
+**Guardrails here enable rather than restrain.** A rule earns its place by removing a decision an agent would otherwise make differently every time. A rule can instead earn it by making a failure loud that would otherwise pass green. Write safety bounds what an agent can reach outside the project in front of it. The review loop closes before anything merges. The audit proves the result instead of accepting the agent's report of it. Autonomy extends exactly as far as the verification reaches.
 
-**Nothing here is finished.** Every rule traces to a specific failure, nearly all of them observed in this fleet rather than imagined, and a procedure that lets a new one through is corrected as part of the work that found it. The ground truth improves by being used.
+**Nothing here is finished.** Every rule traces to a specific failure, nearly all of them observed in this fleet rather than imagined. A procedure that lets a new one through is corrected as part of the work that found it. The ground truth improves by being used.
 
-This repo is the single home for those rules, a machine-readable spec they are checked against, a registry of the projects, and an audit-agent instruction set. It ships no application code. Each project owns its own implementation and is **audited** against the ground truth here, to the letter (exact file, section, or config) or to intent (an equivalent outcome).
+This repo is the single home for those rules and for a machine-readable spec they are checked against. It is likewise the single home for a registry of the projects and an audit-agent instruction set. It ships no application code. Each project owns its own implementation. It is **audited** against the ground truth here, to the letter (exact file, section, or config) or to intent (an equivalent outcome).
 
 - **[AGENTS.md][agents]** - the agent entry point: context and delegation rules, plus the map from a task to the section that governs it.
-- **[GOVERNANCE.md][governance]** - cross-cutting rules for AI coding agents: git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
+- **[GOVERNANCE.md][governance]** - cross-cutting rules for AI coding agents. They cover git, branching, release model, doc style, the recurring-violation rules (comments, ASCII charset, US spelling, line endings), PR review etiquette, and workflow YAML conventions.
 - **[CODESTYLE.md][codestyle]** - code style for .NET and Python.
 - **[WORKFLOW.md][workflow]** - the CI/CD workflow contract (behavioral guarantees D1-D9) and its audit methodology.
 - **[STANDUP.md][standup]** - how an agent stands a repository up and carries the baseline it is owed.
 - **[AUDIT.md][audit]** - how an agent audits a repository against the spec and reports drift.
 - **[RESYNC.md][resync]** - how an agent brings an already-stood-up repository back into line, in the order the remedies require.
-- **[spec/][spec]** - the machine-readable ground truth: project-type requirements, the file/section baseline, required/forbidden secrets, the host tool contract and its version floors, and the preferred README structure.
+- **[spec/][spec]** - the machine-readable ground truth. It covers project-type requirements, the file/section baseline, required/forbidden secrets, the host tool contract and its version floors, and the preferred README structure.
 - **[registry/repos.json][repos]** - the fleet registry: every project, its type(s), publish mechanism, and status (cataloged, standardization backlog, archived, or excluded). `spec/audit.py` checks the registry against the owner's actual GitHub repos, not just against itself, so a repo can't go missing from it unnoticed.
 - **[repo-config/][repo-config]** - hub-only branch rulesets, fleet settings, the apply script, and the GitHub setup reference (kept out of `.github/`, which is Actions-owned).
 - **[host-setup/][host-setup-dir]** - the host guardrail kit, which is per machine rather than per repository.
@@ -96,27 +96,27 @@ This repo is the single home for those rules, a machine-readable spec they are c
 - **[reports/][reports]** - per-repo audit output.
 - **[docs/][docs]** - the human setup and reference guides: host prerequisites, SSH signing, devcontainers, and the carry procedures.
 
-**The words a request is phrased in are defined here.** A repository is asked to audit itself against the hub, or to close the review loop on a pull request, and the phrasing carries the whole instruction, so each term below names the file that answers it and a request using one is a complete instruction rather than a starting point for interpretation.
+**The words a request is phrased in are defined here.** A repository is asked to audit itself against the hub, or to close the review loop on a pull request. The phrasing carries the whole instruction, so each term below names the file that answers it. A request using one is a complete instruction rather than a starting point for interpretation.
 
 - **The hub** - this repository. It is the single authority on what a fleet project is supposed to hold, and every rule naming the hub means this one.
 - **The fleet** - the projects listed in [registry/repos.json][repos], each audited downward against the ground truth here rather than negotiating its own.
 - **Stand a repository up** - carry the baseline a project is owed for its declared types and workflow model, per [STANDUP.md][standup]. An absent file is a baseline that never arrived rather than drift.
 - **Audit a repository** - read a live project against the spec and report its drift, per [AUDIT.md][audit]. The audit never edits what it measures, so a fix is a separate change.
 - **Resync a repository** - bring an already-stood-up project up to the current hub, per [RESYNC.md][resync]. It audits for the findings and then applies them in order, which includes deleting what the hub hosts rather than carries.
-- **Close the review loop** - request a review at the defined moments, confirm the head commit is covered, triage every finding, reply and resolve, and escalate when stuck, per [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
+- **Close the review loop** - request a review at the defined moments and confirm the head commit is covered. Triage every finding, reply and resolve, and escalate when stuck. The steps are set out in [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Carried against reached** - a project carries the content it is audited against and reaches the machinery that is identical everywhere, per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling].
 
 ## What It Achieves
 
-Keeping a fleet of repositories consistent has always been a tax paid in review attention, and it stops scaling at the point where one person can no longer hold every repo in their head. An agent changes that arithmetic in both directions at once. It can apply a convention across every repository in an afternoon, and it can spread a mistake exactly as fast. What makes the speed worth having is a ground truth an agent can read, a gate that proves the result rather than reporting it, and a boundary naming the decisions that are never the agent's to make. Each objective below is a standing capability, with the machinery that delivers it named so the claim is checkable.
+Keeping a fleet of repositories consistent has always been a tax paid in review attention. It stops scaling at the point where one person can no longer hold every repo in their head. An agent changes that arithmetic in both directions at once. It can apply a convention across every repository in an afternoon, and it can spread a mistake exactly as fast. What makes the speed worth having is a ground truth an agent can read and a gate that proves the result rather than reporting it. It is equally a boundary naming the decisions that are never the agent's to make. Each objective below is a standing capability, with the machinery that delivers it named so the claim is checkable.
 
-- **Workflow consistency, by contract rather than by copy.** Every repo satisfies one behavioral CI/CD contract ([WORKFLOW.md][workflow], guarantees D1 to D9) instead of inheriting one YAML file it then edits. The fixed part is the orchestration seam, meaning job names, the ruleset-bound required check, and the artifact handoff. What a repo builds inside that seam is its own, so a Hugo site and a NuGet package satisfy the same contract without pretending to be the same pipeline.
-- **Technical consistency that does not depend on anyone remembering it.** One line-ending policy, one comment shape, one character set, one US-English convention, and one config per linter shared by the editor, the CLI, and CI. A rule that holds in review therefore holds on a laptop and in the pipeline, because all three read the same file rather than three copies that drift apart.
+- **Workflow consistency, by contract rather than by copy.** Every repo satisfies one behavioral CI/CD contract ([WORKFLOW.md][workflow], guarantees D1 to D9) instead of inheriting one YAML file it then edits. The fixed part is the orchestration seam, meaning job names, the ruleset-bound required check, and the artifact handoff. What a repo builds inside that seam is its own. A Hugo site and a NuGet package therefore satisfy the same contract without pretending to be the same pipeline.
+- **Technical consistency that does not depend on anyone remembering it.** One line-ending policy, one comment shape, one character set, one US-English convention, and one config per linter shared by the editor, the CLI, and CI. A rule that holds in review therefore holds on a laptop and in the pipeline. This is because all three read the same file rather than three copies that drift apart.
 - **Best practices promoted once, not re-litigated per repo.** A practice that proves itself becomes fleet law in [GOVERNANCE.md][governance] or [CODESTYLE.md][codestyle] and is carried, rather than being rediscovered and re-argued in the next repository. Every rule here traces to a specific failure that actually happened, which is why the collection is opinionated and small rather than exhaustive.
-- **Feedback loops that close on the procedure, not the instance.** [AUDIT.md][audit] reads a live repo and reports drift, the per-repo reports in [reports/][reports] record it, and a repo that cannot be stood up from the docs alone is a documentation defect tracked in the [conformance matrix][matrix]. When a downstream agent hits something the procedure did not cover, the fix lands in the procedure so the next repo never meets it.
+- **Feedback loops that close on the procedure, not the instance.** [AUDIT.md][audit] reads a live repo and reports drift. The per-repo reports in [reports/][reports] record it. A repo that cannot be stood up from the docs alone is a documentation defect tracked in the [conformance matrix][matrix]. When a downstream agent hits something the procedure did not cover, the fix lands in the procedure so the next repo never meets it.
 - **Onboarding a new language or deployment target is a spec change.** Thirteen project types are declared today in [spec/project-types.json][project-types]. Adding one means declaring its detection, its checks, and the files it carries, then proving a context-free agent can stand it up cold. No fleet-wide rewrite, and no per-repo improvisation.
-- **Re-deployment that is measured and traceable.** Versions come from git history through NBGV rather than a hand-edited number, a release is always a deliberate act and never a side effect of a merge, and staleness is detected by **content hash against the hub's own past revisions**, so the audit can say whether a repo is behind the canonical or has forked it. A version stamp is a claim a repo can keep while editing the content underneath, so it is never trusted for that answer.
-- **Every carried unit declares how much freedom it grants.** This is the distinction that makes the whole thing tolerable to work in, and it is a field on each [spec/files.json][files] entry rather than something a reader infers from the file's shape. An entry that names no level takes `presence`, the most permissive one, so silence grants freedom rather than withholding it:
+- **Re-deployment that is measured and traceable.** Versions come from git history through NBGV rather than a hand-edited number. A release is always a deliberate act and never a side effect of a merge. Staleness is detected by **content hash against the hub's own past revisions**. The audit can therefore say whether a repo is behind the canonical or has forked it. A version stamp is a claim a repo can keep while editing the content underneath, so it is never trusted for that answer.
+- **Every carried unit declares how much freedom it grants.** This is the distinction that makes the whole thing tolerable to work in. It is a field on each [spec/files.json][files] entry rather than something a reader infers from the file's shape. An entry that names no level takes `presence`, the most permissive one, so silence grants freedom rather than withholding it:
 
   | Level | The obligation | Who owns the content |
   | --- | --- | --- |
@@ -125,11 +125,11 @@ Keeping a fleet of repositories consistent has always been a tax paid in review 
   | `intent` | Reach the same outcome, judged by meaning | The repo owns the wording and shape. |
   | `presence` | The unit exists | The repo owns all of it. |
 
-- **The human contributes where domain expertise is decisive, and only there.** The maintainer keeps what an agent cannot know or must not decide: creating a repository, granting a write outside the owner boundary, changing a ruleset, approving every merge, and every judgment about the domain a repo actually serves. The agent takes the mechanical scale-out, which is the part that does not benefit from human attention and degrades under it. A repo's own knowledge also has a declared destination rather than an improvised one, chosen by what the content is: `CODESTYLE.md` for conventions beyond the carried rules, `ARCHITECTURE.md` for how a code repo is built, `OPERATIONS.md` for how a live-service repo is run, and `TODO.md` for its backlog. Which of those a repo carries follows from what it is, so this hub holds the two that apply to it. Domain expertise therefore lands somewhere declared instead of being diluted into a carried file that the next re-vendor overwrites.
+- **The human contributes where domain expertise is decisive, and only there.** The maintainer keeps what an agent cannot know or must not decide. That is creating a repository, granting a write outside the owner boundary, and changing a ruleset. It is also approving every merge and every judgment about the domain a repo actually serves. The agent takes the mechanical scale-out, which is the part that does not benefit from human attention and degrades under it. A repo's own knowledge also has a declared destination rather than an improvised one, chosen by what the content is. The destinations are `CODESTYLE.md` for conventions beyond the carried rules and `ARCHITECTURE.md` for how a code repo is built. They are also `OPERATIONS.md` for how a live-service repo is run and `TODO.md` for its backlog. Which of those a repo carries follows from what it is, so this hub holds the two that apply to it. Domain expertise therefore lands somewhere declared instead of being diluted into a carried file that the next re-vendor overwrites.
 
 ## How This Repo Operates
 
-ProjectTemplate follows the same model it documents, and audits its own rules against itself (it classifies as the source-only, docs, and python project types in [WORKFLOW.md][workflow]).
+ProjectTemplate follows the same model it documents. It audits its own rules against itself (it classifies as the source-only, docs, and python project types in [WORKFLOW.md][workflow]).
 
 The doors a session enters through, and where each leads, matching the "Getting Started" table above:
 
@@ -150,14 +150,14 @@ The full entry-point map behind these doors, with the gap register and the roadm
 
 Within this repo, day-to-day development follows the same branching, CI, review, and release model it documents for the fleet:
 
-- **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, feature branch to `develop` is squash-merged, `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
-- **CI lints and tests, and builds nothing.** The PR gate calls the fleet's reusable validator, `.github/workflows/validate-task.yml`, whose header names every job it runs, among them the unit-test job that runs the Python suite under `tests/` with coverage uploaded to Codecov. The hub's own validate hook, `.github/actions/validate/action.yml`, adds the registry and spec checks and the self-tests outside that suite, and the ruleset-bound `Check pull request workflow status job` aggregator gates the merge. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
-- **Review loop.** Every PR enters the GitHub Copilot review loop and must reach a green review result before merging. The agent drives that loop and merges only with explicit maintainer permission. CodeRabbit and Qodo remain advisory candidates under the measured [pull request reviewer evaluation][pr-reviewer-evaluation], and the [reviewer reference][pr-reviewer-reference] records how each reviewer behaves and which repositories it covers. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
+- **Branching.** Persistent `main` and `develop`, each with its own ruleset. This repo uses the default `release` workflow model: commit on feature branches only, and a feature branch to `develop` is squash-merged. Promotion from `develop` to `main` is a merge commit, and `develop` is forward-only (no `main -> develop` back-merges). Live-service config repos instead use the `operational` model (registry `workflowModel`), with direct signed commits to `develop`, promoted to `main` by an occasional PR. See [GOVERNANCE.md "Branching Model"][governance-branching-model].
+- **CI lints and tests, and builds nothing.** The PR gate calls the fleet's reusable validator, `.github/workflows/validate-task.yml`, whose header names every job it runs. Among them is the unit-test job that runs the Python suite under `tests/` with coverage uploaded to Codecov. The hub's own validate hook, `.github/actions/validate/action.yml`, adds the registry and spec checks and the self-tests outside that suite. The ruleset-bound `Check pull request workflow status job` aggregator gates the merge. The same lint configs (`.markdownlint-cli2.jsonc`, `cspell.json`) drive the editor extensions, the CLI, and CI.
+- **Review loop.** Every PR enters the GitHub Copilot review loop and must reach a green review result before merging. The agent drives that loop and merges only with explicit maintainer permission. CodeRabbit and Qodo remain advisory candidates under the measured [pull request reviewer evaluation][pr-reviewer-evaluation]. The [reviewer reference][pr-reviewer-reference] records how each reviewer behaves and which repositories it covers. See [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette].
 - **Release.** A `develop -> main` merge is promoted through a GitHub release (tag plus a source zip, README, and LICENSE). Versioning is NBGV-driven from [version.json][version]. See [WORKFLOW.md][workflow].
 
 ## Using This Repo
 
-Four things are deployed from here, and they land in different places. The host guardrails install once per machine, the fleet skills install once per user on that machine, the baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine, because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
+Four things are deployed from here, and they land in different places. The host guardrails install once per machine, and the fleet skills install once per user on that machine. The baseline is carried once per repository, and the audit is run whenever a repository changes materially. Do them in that order on a new machine. This is because the guardrails bound every session that follows and retrofitting them means the sessions in between ran unguarded.
 
 ### Deploy the Host Guardrails
 
@@ -184,46 +184,46 @@ Restart Claude Code sessions on the machine afterward so the hook and the render
 
 ### Install the Fleet Skills
 
-The skills are the per-topic rules packaged so they surface in an agent session by trigger, instead of being re-read from the law docs each time. They install once per user per machine, from a hub checkout, and land beside the guardrails rather than in any repository:
+The skills are the per-topic rules packaged to surface in an agent session by trigger, instead of being re-read from the law docs each time. They install once per user per machine, from a hub checkout, and land beside the guardrails rather than in any repository:
 
 ```shell
 python3 scripts/skills_install.py            # or the scripts/skills_install.sh / .ps1 wrapper
 python3 scripts/skills_install.py --report   # read-only: what does each channel hold?
 ```
 
-A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode, so a fresh machine finishes with the tools, the identity, and the skills together. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
+A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode. A fresh machine therefore finishes with the tools, the identity, and the skills together. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
 
 ### Carry the Rules Into a Repository
 
-A repository that does not exist yet is stood up with [`STANDUP.md`][standup], which is ordered rather than a menu: verify commit identity and signing before the first commit, hand the maintainer what only they can supply, classify the repo and write its [registry][repos] entry, carry the instruction set before authoring anything of your own, then carry the remaining baseline, the workflows, and the settings. The two steps with a closing window are first, because signing has to be live before the first commit and the rules have to be loaded before the first authored file.
+A repository that does not exist yet is stood up with [`STANDUP.md`][standup], which is ordered rather than a menu. The order is to verify commit identity and signing before the first commit, and to hand the maintainer what only they can supply. Next come classifying the repo and writing its [registry][repos] entry, and carrying the instruction set before authoring anything of your own. Then comes the remaining baseline, the workflows, and the settings. The two steps with a closing window are first. This is because signing has to be live before the first commit, and the rules have to be loaded before the first authored file.
 
-A repository that already exists is measured with [`AUDIT.md`][audit] instead. The audit is read-only and ends in a report under [reports/][reports], so nothing is changed by measuring, and applying what it found is a separate reviewable change per its section 10. Onboarding is complete when the repo passes, or has a hub-committed report plus a tracking issue for the residual deltas, per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-repository-onboarding-and-conformance].
+A repository that already exists is measured with [`AUDIT.md`][audit] instead. The audit is read-only and ends in a report under [reports/][reports], so nothing is changed by measuring. Applying what it found is a separate reviewable change per its section 10. Onboarding is complete when the repo passes, or has a hub-committed report plus a tracking issue for the residual deltas, per [GOVERNANCE.md "Repository Onboarding and Conformance"][governance-repository-onboarding-and-conformance].
 
-A repository that is stood up already and has fallen behind is resynced with [`RESYNC.md`][resync], which is the third entry point and the one a request to sync a repository with the hub resolves to. It runs the audit for the findings and then applies them in an order that matters: the rules first, because they govern what comes after them, then the deletions, because a re-vendor would otherwise refresh a file that is about to go, then the re-vendors, the workflow contracts, and the repository configuration. It also states what the measurement cannot see, since a carried file at `intent` fidelity is checked for presence alone and a hub revision inside one raises no finding at all.
+A repository that is stood up already and has fallen behind is resynced with [`RESYNC.md`][resync]. That is the third entry point and the one a request to sync a repository with the hub resolves to. It runs the audit for the findings and then applies them in an order that matters. The rules come first, because they govern what comes after them. The deletions come next, because a re-vendor would otherwise refresh a file that is about to go. The re-vendors, the workflow contracts, and the repository configuration follow. A carried file at `intent` fidelity is checked for presence alone, and a hub revision inside one raises no finding at all. [`RESYNC.md`][resync] therefore also states what the measurement cannot see.
 
-The mechanical helpers that go with those procedures are documented beside them: [`docs/repo-config.md`][repo-config-doc] for branch rulesets and repository settings, and [`docs/content-import.md`][content-import] for importing existing content into a new repo.
+The mechanical helpers that go with those procedures are documented beside them. [`docs/repo-config.md`][repo-config-doc] covers branch rulesets and repository settings, and [`docs/content-import.md`][content-import] covers importing existing content into a new repo.
 
 ### Adopting Outside This Fleet
 
-The rules, the spec, and the procedures are readable and reusable by anyone, and the guardrail kit installs on any host. What does not transfer is the registry, since [registry/repos.json][repos] lists this fleet's projects, and standing a repository up writes an entry in it. Adopting outside this fleet therefore means running your own hub, forked or copied, holding your own registry and your own reports, with `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, and `spec/` adapted to what your projects actually are. There is no supported mode where an outside repository points at this hub's registry.
+The rules, the spec, and the procedures are readable and reusable by anyone, and the guardrail kit installs on any host. What does not transfer is the registry, since [registry/repos.json][repos] lists this fleet's projects, and standing a repository up writes an entry in it. Adopting outside this fleet therefore means running your own hub, forked or copied, holding your own registry and your own reports. It also means adapting `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, and `spec/` to what your projects actually are. There is no supported mode where an outside repository points at this hub's registry.
 
 ## Diverging From a Rule
 
-A rule that cannot be diverged from is a rule people work around silently, which is worse than the divergence, so both kinds of exception have a declared channel. The two kinds are genuinely different: one is a repository not matching a carried unit, and the other is a host guard denying a write. Neither is granted by editing the thing that blocked you.
+A rule that cannot be diverged from is a rule people work around silently, which is worse than the divergence. Both kinds of exception therefore have a declared channel. The two kinds are genuinely different: one is a repository not matching a carried unit, and the other is a host guard denying a write. Neither is granted by editing the thing that blocked you.
 
 ### A Repository Diverging From a Carried Unit
 
-**Check the unit's fidelity level first, because most apparent divergences are not divergences at all.** Each [spec/files.json][files] entry declares one of `verbatim`, `interface`, `intent`, or `presence`, defaulting to `presence`, and the two permissive levels already hand the repo its content outright. A repo rewriting a `presence` or `intent` file to suit itself is exercising the freedom the level grants rather than breaking a rule, and the audit asserts nothing beyond presence for it. See [spec/fidelity-model.md][fidelity-model] for which unit sits where and why.
+**Check the unit's fidelity level first, because most apparent divergences are not divergences at all.** Each [spec/files.json][files] entry declares one of `verbatim`, `interface`, `intent`, or `presence`, defaulting to `presence`. The two permissive levels already hand the repo its content outright. A repo rewriting a `presence` or `intent` file to suit itself is exercising the freedom the level grants rather than breaking a rule. The audit asserts nothing beyond presence for it. See [spec/fidelity-model.md][fidelity-model] for which unit sits where and why.
 
-**A divergence from a `verbatim` or `interface` unit is recorded, not hidden.** The ledger is [spec/divergences.json][divergences]. Every entry names a path, a disposition, and a reason. A `dispositions` entry also names the repos it covers. An `investigate` entry carries a `tracking` value naming where its pending decision is being made, and every other disposition may leave that value null. `uv run --no-project --script spec/fidelity_honesty.py --report` joins the ledger against live fleet reality to regenerate [reports/divergences.md][divergences-report]. A divergence recorded as `accepted` is a legitimate permanent one and no further action is owed. A live divergence with no entry renders as `UNTRIAGED`, which is the point: the audit does not care whether a difference is deliberate, only whether someone decided about it. Edit the ledger and regenerate the report, never the report.
+**A divergence from a `verbatim` or `interface` unit is recorded, not hidden.** The ledger is [spec/divergences.json][divergences]. Every entry names a path, a disposition, and a reason. A `dispositions` entry also names the repos it covers. An `investigate` entry carries a `tracking` value naming where its pending decision is being made, and every other disposition may leave that value null. `uv run --no-project --script spec/fidelity_honesty.py --report` joins the ledger against live fleet reality to regenerate [reports/divergences.md][divergences-report]. A divergence recorded as `accepted` is a legitimate permanent one and no further action is owed. A live divergence with no entry renders as `UNTRIAGED`, which is the point. The audit does not care whether a difference is deliberate, only whether someone decided about it. Edit the ledger and regenerate the report, never the report.
 
-**A rule that is wrong for many repositories is a hub defect rather than a per-repo exception.** [AUDIT.md][audit] section 9 says so directly, that a repeated letter miss many repos share is a signal the spec needs adjusting, so raise it here instead of accumulating one exception per repository.
+**A rule that is wrong for many repositories is a hub defect rather than a per-repo exception.** [AUDIT.md][audit] section 9 says so directly: a repeated letter miss many repos share is a signal the spec needs adjusting. Therefore raise it here instead of accumulating one exception per repository.
 
 ### A Write the Host Guard Denies
 
-The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner, which is the shape that once put a stray comment on a stranger's repository. Sibling repositories under the same owner are allowed, so the denial appears only on a write that leaves the owner, and the common case that raises it is a fork, where `origin` is yours and `upstream` is the project you forked from.
+The guard denies a `gh` write whose explicit target sits under an owner other than the checkout's `origin` owner. That is the shape that once put a stray comment on a stranger's repository. Sibling repositories under the same owner are allowed, so the denial appears only on a write that leaves the owner. The common case that raises it is a fork, where `origin` is yours and `upstream` is the project you forked from.
 
-The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked, so an inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`host-setup/agent-safety/claude/README.md` "Granting a Write That the Guard Denies"][agent-safety-claude-grant].
+The only way past it is a grant the maintainer makes **outside the session**, in `GH_WRITE_GUARD_ALLOW`. It is deliberately not something an agent can do for itself once blocked. An inline `GH_WRITE_GUARD_ALLOW=owner/repo gh ...` prefix and an `export` inside a shell call therefore both leave the write denied. The worked example, the file the grant goes in, and how to confirm one took effect are in [`host-setup/agent-safety/claude/README.md` "Granting a Write That the Guard Denies"][agent-safety-claude-grant].
 
 ## Rules
 
@@ -258,7 +258,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ### If a Python Project
 
-- Configure ruff and a type checker in `pyproject.toml`: pyright strict, mypy with its strict flags (run in CI and the editor, with pyright kept editor-only), or both. Every checker CI runs is a gate.
+- Configure ruff and a type checker in `pyproject.toml`. Use pyright strict, mypy with its strict flags (run in CI and the editor, with pyright kept editor-only), or both. Every checker CI runs is a gate.
 
 ### If Both C# and Python
 
@@ -267,8 +267,8 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 ### If Publishing a Package (NuGet or PyPI)
 
 - Publish via OIDC Trusted Publishing, never a stored API key.
-- Keep the push in a separate publish job in the repo's own publisher, never in a build leaf and never in a reusable workflow another repository hosts. Trusted publishing validates the OIDC token's `job_workflow_ref` claim against the repository owning the package, so a push from elsewhere is rejected at the token exchange, and the split is also what keeps `id-token: write` at one entry point.
-- Keep the registry's trusted-publishing policy pointed at that publisher's own workflow file, and confirm it before the first release after any change that moves the push. A smoke build never reaches the token exchange, so a stale policy surfaces only on a real release.
+- Keep the push in a separate publish job in the repo's own publisher. Never put it in a build leaf or in a reusable workflow another repository hosts. Trusted publishing validates the OIDC token's `job_workflow_ref` claim against the repository owning the package, so a push from elsewhere is rejected at the token exchange. The split is also what keeps `id-token: write` at one entry point.
+- Keep the registry's trusted-publishing policy pointed at that publisher's own workflow file. Confirm it before the first release after any change that moves the push. A smoke build never reaches the token exchange, so a stale policy surfaces only on a real release.
 
 ### If a Docker Image
 
@@ -284,22 +284,22 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ## Questions or Issues
 
-File everything at [Issues][issues-link], including a defect in a rule, a procedure that did not survive contact with a real repository, and a proposal for a new rule. Use [Discussions][discussions-link] for an open question that is not yet a defect. A question an agent parks for the maintainer is not an open question of that kind, and is filed here as an issue carrying the `decision` label, on the terms [GOVERNANCE.md "Communicating with the User"][governance-communicating-with-the-user] sets. This repo ships no application code, so an issue here is about the rules, the spec, the procedures, or the tooling under [`scripts/`][scripts] and [`spec/`][spec], never about a downstream project's behavior, which belongs on that project's own tracker.
+File everything at [Issues][issues-link]. That includes a defect in a rule, a procedure that did not survive contact with a real repository, and a proposal for a new rule. Use [Discussions][discussions-link] for an open question that is not yet a defect. A question an agent parks for the maintainer is not an open question of that kind. It is filed here as an issue carrying the `decision` label, on the terms [GOVERNANCE.md "Communicating with the User"][governance-communicating-with-the-user] sets. This repo ships no application code, so an issue here is about the rules, the spec, the procedures, or the tooling under [`scripts/`][scripts] and [`spec/`][spec]. It is never about a downstream project's behavior, which belongs on that project's own tracker.
 
-An issue is most useful when it names the ground truth it disagrees with, so include the file and section that states the rule, the repository and branch where the problem was observed, and what you expected instead. A finding measured against a specific commit is worth more than one measured against a memory of the docs, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline].
+An issue is most useful when it names the ground truth it disagrees with. So include the file and section that states the rule, the repository and branch where the problem was observed, and what you expected instead. A finding measured against a specific commit is worth more than one measured against a memory of the docs, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline].
 
 Two kinds of report are worth calling out because they are the ones that improve the procedures rather than one repository:
 
-- **A procedure that could not be followed cold.** The onboarding docs are sufficient only when a context-free agent can stand a repo shape up from them alone, so a step that needed knowledge the docs never gave is a documentation defect tracked in the [conformance matrix][matrix] and fixed here rather than worked around per repo.
+- **A procedure that could not be followed cold.** The onboarding docs are sufficient only when a context-free agent can stand a repo shape up from them alone. A step that needed knowledge the docs never gave is therefore a documentation defect tracked in the [conformance matrix][matrix]. It is fixed here rather than worked around per repo.
 - **A rule that many repositories miss the same way.** That is a signal the spec needs adjusting rather than a queue of per-repo exceptions, per [AUDIT.md][audit] section 9.
 
-Issues are also filed here **by agents working in downstream repositories**, which is the normal path rather than an exception, since the agent that hit the gap is the one holding the evidence for it.
+Issues are also filed here **by agents working in downstream repositories**. This is the normal path rather than an exception, since the agent that hit the gap is the one holding the evidence for it.
 
 ## Development Environment Setup
 
 Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [GOVERNANCE.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
 
-Changes land the same way every fleet change does: a feature branch, a squash merge into `develop`, a Copilot review loop driven to green, and a merge only with the maintainer's explicit approval. The backlog is [`TODO.md`][todo], which holds the work that is ready to pick up along with the reasoning behind each item, so read it before proposing something it already covers.
+Changes land the same way every fleet change does: a feature branch and a squash merge into `develop`. A Copilot review loop is driven to green, and the merge happens only with the maintainer's explicit approval. The backlog is [`TODO.md`][todo], which holds the work that is ready to pick up along with the reasoning behind each item. Therefore read it before proposing something it already covers.
 
 ## 3rd Party Tools
 
