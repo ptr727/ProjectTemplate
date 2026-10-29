@@ -6,7 +6,7 @@ The three rules below are measured rather than predicted, from a WordPress-to-Hu
 
 ## Capture While the Source Is Live
 
-**Capture first, and treat the capture as a deliverable rather than a step toward one.** The source is often paid for, rented, or already scheduled for shutdown, so the capture window closes on someone else's calendar. Hold the verified capture (the export, the localized external assets, a golden URL list, a manifest of content hashes) as the before-snapshot. Convert from that rather than from the live system, so every later check compares against a fixed reference instead of a moving one.
+**Capture first, and treat the capture as a deliverable rather than a step toward one.** The source is often paid for, rented, or already scheduled for shutdown, so the capture window closes on someone else's calendar. Hold the verified capture (the export, the localized external assets, a golden URL list, a manifest of content hashes) as the before-snapshot. Convert from that rather than from the live system. Together, these let every later check compare against a fixed reference instead of a moving one.
 
 Every failure below produces a capture that **reconciles cleanly and is wrong**. Each one is a case where the artifact the source hands you agrees with itself. That is exactly why it cannot be the thing that gates.
 

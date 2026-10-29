@@ -44,7 +44,7 @@ only trustworthy while that rule holds.
   skill boundary map change only on measured downstream evidence, never on hub-file size alone.
 - **O5, preserve the invariants.** Safety, authorization, verification, and merge gates keep their exact semantics. Decision-point duplication stays. Deterministic `WHEN / DO / UNLESS`
   phrasing never softens into suggestion wording.
-- **O6, agent-executable delivery.** Every work item is a checkbox sized for one task, with an execution protocol. This lets agents apply the changes and record the results in this doc.
+- **O6, agent-executable delivery.** Every work item is a checkbox sized for one task, with an execution protocol. Agents therefore apply the changes and record the results in this doc.
 
 ## Cost Model
 
