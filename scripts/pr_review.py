@@ -139,7 +139,7 @@ Subcommands
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
            open attested held head nothing holds exits 45 where its rollup was unreadable or, under
-           DIRTY, none posted. A DIRTY or BEHIND one also exits 45 where a required check is
+           DIRTY, none it can read posted. A DIRTY or BEHIND one also exits 45 where a required check is
            unregistered or from another app. Exit 0 can then leave a required check unregistered
            only under unread rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request
            not open.

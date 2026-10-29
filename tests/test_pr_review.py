@@ -3716,6 +3716,26 @@ class TestCli(GqlCase):
                         self.out.getvalue(),
                     )
 
+    def test_a_rollup_of_only_unreadable_nodes_holds_as_an_empty_one(self) -> None:
+        """A node this cannot parse is no check read, so it must not release what an empty rollup holds."""
+        for merge, code in (("BLOCKED", 30), ("BEHIND", 30), ("DRAFT", 30), ("DIRTY", 45)):
+            with self.subTest(merge=merge):
+                unread = [{"__typename": "UnknownContext"}]
+                pr = self.into(payload([review(oid=OLD)], merge=merge, checks=unread), attest=True)
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                self.out.seek(0)
+                self.out.truncate()
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
+                if code == 45:
+                    self.assertIn("status=CHECKS_MISSING", self.out.getvalue())
+                    self.assertIn(
+                        "no check has posted that this can read, the rollup holding only "
+                        "UnknownContext, so resolve the head's conflict",
+                        self.out.getvalue(),
+                    )
+
     def test_an_optional_check_does_not_hold_once_the_required_gate_concluded(self) -> None:
         """A merge BLOCKED on a thread is not waiting on a check nothing requires."""
         optional = {
@@ -6643,6 +6663,14 @@ class TestRequiredContexts(unittest.TestCase):
         self.assertIn("no check has posted", pr_review_checks.checks_never_ran(pr, [], frozenset()))
         nodes = pr_review_checks.check_nodes(payload([], merge="DIRTY", checks=[check()]))
         self.assertEqual("", pr_review_checks.checks_never_ran(pr, nodes, frozenset()))
+        unknown = {"__typename": "UnknownContext"}
+        mixed = pr_review_checks.check_nodes(payload([], checks=[check(), unknown]))
+        self.assertEqual("", pr_review_checks.checks_never_ran(pr, mixed, frozenset()))
+        unread = pr_review_checks.check_nodes(payload([], checks=[unknown]))
+        self.assertIn(
+            "no check has posted that this can read",
+            pr_review_checks.checks_never_ran(pr, unread, frozenset()),
+        )
         later = pr_review_checks.checks_never_ran(pr, nodes, frozenset({("Later", None)}))
         self.assertIn("has not registered or came from another app, Later", later)
         for ungated in ({**pr, "mergeStateStatus": "CLEAN"}, {**pr, "state": "MERGED"}):
