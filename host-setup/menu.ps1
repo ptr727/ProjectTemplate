@@ -262,7 +262,8 @@ function Invoke-WithHubLock {
     # That is also because a dry run must not create $DIR or a lock file where neither existed.
     # A lock that cannot be taken at all returns $Failed without running the scriptblock.
     # That is the value each caller already returns for its own task failing.
-    # That is the caller's own value rather than a fixed $false, since a $false would read as exit code 0 to a caller comparing it with -eq.
+    # That is the caller's own value rather than a fixed $false.
+    # The reason is that a $false would read as exit code 0 to a caller comparing it with -eq.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
     # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site.
     # A bare closure reads as an unused parameter to that rule instead.
