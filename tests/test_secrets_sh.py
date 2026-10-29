@@ -10,6 +10,7 @@ Run as `python3 tests/test_secrets_sh.py`, or under `python3 -m unittest discove
 
 from __future__ import annotations
 
+import configparser
 import os
 import subprocess
 import sys
@@ -317,6 +318,18 @@ class ReadEnvValue(Tree):
             'read_env_value "$1" APP_HOST', str(env), env={**os.environ, "BASH_ENV": str(hook)}
         )
         self.assertEqual((result.returncode, result.stdout), (0, ""))
+
+
+class CarriedIndent(unittest.TestCase):
+    def test_the_tree_pins_the_indent_a_carrier_cannot_reformat(self) -> None:
+        """A carrier's own `[*.sh]` must not reach the byte-locked copy `shfmt` checks.
+
+        Only the one section is set, and no `root = true`, so every other setting stays the carrier's.
+        """
+        config = configparser.ConfigParser()
+        config.read_string((LIBRARY.parent / ".editorconfig").read_text(encoding="utf-8"))
+        self.assertEqual(config.sections(), ["*.sh"])
+        self.assertEqual(dict(config["*.sh"]), {"indent_size": "4", "indent_style": "space"})
 
 
 if __name__ == "__main__":
