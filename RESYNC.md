@@ -28,7 +28,7 @@ Three states look similar from inside a repository and take different procedures
 
 **The distinction is measured, not assumed.** `uv run --no-project --script spec/audit.py <Repo>` reports an absent carried file as a `LETTER` and a present-but-stale one as a `DRIFT`. So the finding kinds themselves say which procedure the repository is owed. A run that is mostly letters is a repository that needs [`STANDUP.md`][standup].
 
-**A few letters are not that, and the ordinary cause is the baseline having grown.** When the manifest gains an entry, every repository in the fleet reports that one file absent on its next audit. All report it at once and through no fault of its own. That is a file to carry inside a resync, at the point in section 3 where its class belongs. It is not evidence the repository was never stood up. Read the letters before routing on their count. A handful naming files the hub added recently is a resync. A baseline's worth naming the instruction set is a standup.
+**A few letters are not that, and the ordinary cause is the baseline having grown.** When the manifest gains an entry, every repository in the fleet reports that one file absent on its next audit. Every repository reports it at once and through no fault of its own. That is a file to carry inside a resync, at the point in section 3 where its class belongs. It is not evidence the repository was never stood up. Read the letters before routing on their count. A handful naming files the hub added recently is a resync. A baseline's worth naming the instruction set is a standup.
 
 ## 1. Reach the Hub, and Verify the Host
 
