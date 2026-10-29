@@ -1,10 +1,10 @@
 """Fetch a ptr727/ProjectTemplate script fresh from `main` and run it through uv.
 
-Never pinned or vendored: a pin nothing keeps current goes stale by construction, and CI
-(this repo's own, and the hub's) is the backstop for a change that lands broken on `main`.
+Never pinned or vendored: a pin nothing keeps current goes stale by construction.
+CI (this repo's own, and the hub's) is the backstop for a change that lands broken on `main`.
 A fetch failure fails the caller loudly rather than silently skipping the gate it guards.
-The script runs as `uv run --no-project --script`, so the packages its PEP 723 block declares
-resolve, beside the data files it reads, which are fetched from the same ref.
+The script runs as `uv run --no-project --script`.
+The packages its PEP 723 block declares therefore resolve, beside the data files it reads, which are fetched from the same ref.
 Usage: hub_fetch_run.py <hub-relative-path> [script-args...]
 Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
 """
@@ -99,10 +99,14 @@ def head_is_unborn() -> bool:
     """Whether HEAD is confirmed unborn (a real branch, no commits yet), never guessed.
 
     `git rev-parse --verify -q HEAD` exits 1 with empty stderr for a confirmed unborn HEAD,
-    verified directly: a fresh `git init` with no commits gives exactly that signature. Any
-    other shape, a non-git directory (exit 128, a `fatal:` message even with `-q`), a missing
-    or broken git executable (raised as OSError), a hung probe (a timeout), a permission error,
-    or any other failure, is a probe failure to propagate, never a reason to guess at the scope.
+    verified directly: a fresh `git init` with no commits gives exactly that signature.
+    Any other shape is a probe failure to propagate, never a reason to guess at the scope.
+    Those shapes include:
+    - a non-git directory (exit 128, a `fatal:` message even with `-q`)
+    - a missing or broken git executable (raised as OSError)
+    - a hung probe (a timeout)
+    - a permission error
+    - any other failure
     """
     try:
         probe = subprocess.run(
@@ -129,10 +133,10 @@ def head_is_unborn() -> bool:
 def resolve_unborn_head(argv: list[str]) -> list[str]:
     """Replace a `--diff HEAD` pair with git's empty-tree hash when HEAD does not exist yet.
 
-    A brand-new repository's first commit has no HEAD to diff against, and the fetched gate
-    scripts refuse to widen to a whole-tree scan rather than report the backlog as new. The
-    empty tree diffs cleanly against everything staged, which is the correct scope for a first
-    commit. Any other `--diff` value passes through unchanged.
+    A brand-new repository's first commit has no HEAD to diff against.
+    The fetched gate scripts refuse to widen to a whole-tree scan rather than report the backlog as new.
+    The empty tree diffs cleanly against everything staged, which is the correct scope for a first commit.
+    Any other `--diff` value passes through unchanged.
     """
     out = list(argv)
     for i, token in enumerate(out[:-1]):

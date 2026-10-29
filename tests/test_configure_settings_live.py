@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's check_settings() against an unparseable live response.
 
-The shell is lifted out of the file rather than restated here, so an edit that removes the
-guard fails these tests instead of leaving a reimplementation to agree with itself. Only `gh`,
+The shell is lifted out of the file rather than restated here.
+An edit that removes the guard therefore fails these tests instead of leaving a reimplementation to agree with itself. Only `gh`,
 the boundary the function calls out to, is stubbed, and every case runs offline.
 """
 

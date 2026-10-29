@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Drive lib/sh/secrets.sh's verdicts and env read against constructed files.
 
-Each case builds its own tree under a temp root and asks the sourced library about it through a
-child bash, so a case proves the function's answer for that shape rather than the state of this
+Each case builds its own tree under a temp root and asks the sourced library about it through a child bash.
+A case therefore proves the function's answer for that shape rather than the state of this
 host. A consumer carries the library byte-for-byte, so these cases are the only place it is tested.
 
 Run as `python3 tests/test_secrets_sh.py`, or under `python3 -m unittest discover -s tests`.
@@ -56,7 +56,8 @@ class Tree(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        # A temp root can itself sit below a symlink, such as /tmp on some hosts, and the walk reports a component by the spelling it was given.
+        # A temp root can itself sit below a symlink, such as /tmp on some hosts.
+        # The walk reports a component by the spelling it was given.
         self.root = self.root.resolve()
 
     def tearDown(self) -> None:
