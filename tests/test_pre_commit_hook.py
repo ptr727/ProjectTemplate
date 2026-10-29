@@ -2,11 +2,11 @@
 """Drive the hub's own `.husky/pre-commit` through real commits, a merge commit among them.
 
 The hook chooses the base its prose gate diffs against, and only a real commit shows which base it
-chose. Each case copies the hook and the prose gate into a throwaway repository and commits there,
-with the language formatters and the eol check replaced by stubs, since what is under test is the
+chose. Each case copies the hook and the prose gate into a throwaway repository and commits there.
+The language formatters and the eol check are replaced by stubs, since what is under test is the
 prose gate's scope rather than those tools.
 
-The fixture isolates git's global and system configuration, so a host with commit signing on or a
+The fixture isolates git's global and system configuration. So a host with commit signing on or a
 hooks path of its own cannot change what a case measures.
 
 Run as `python3 tests/test_pre_commit_hook.py`, or under `python3 -m unittest discover -s tests`.
@@ -34,7 +34,7 @@ COMMENT = "# The value is read once, since the second read can disagree.\n"
 class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
     """A merge of develop brings in lines the branch never wrote, and the hook must not read them.
 
-    Measured against `HEAD`, every line develop gained since the fork reads as added, so a comment
+    Measured against `HEAD`, every line develop gained since the fork reads as added. So a comment
     another pull request already landed trips `comment-added` on a merge that adds none.
     """
 

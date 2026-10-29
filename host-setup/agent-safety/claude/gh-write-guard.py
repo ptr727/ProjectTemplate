@@ -2,8 +2,8 @@
 """PreToolUse guard: deny the plain shapes of the write, checkout, and wait incidents.
 
 Registered as a Claude Code PreToolUse hook on the Bash tool. It reads the tool-input JSON on
-stdin, classifies the command, and prints a deny decision with a reason when the command matches
-a requirement in host-setup/agent-safety/README.md. Everything else passes through.
+stdin and classifies the command.
+It prints a deny decision with a reason when the command matches a requirement in host-setup/agent-safety/README.md. Everything else passes through.
 
 It bounds a good-faith agent's mistake rather than an adversary, and it is not a sandbox. One
 simple lexer reads the command, and a requirement denies only the shape it names where that shape
@@ -14,13 +14,15 @@ threat model.
 
 The denied shapes, numbered as the README numbers them:
 
-  1. a GitHub write (a mutating gh call or a git push) whose output is discarded or forced to
-     success (>/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo)
+  1. a GitHub write (a mutating gh call or a git push) whose output is discarded or forced to success:
+     >/dev/null, 2>/dev/null, &>/dev/null, || true, || :, || echo
   2. a GraphQL mutation carrying a literal node id rather than a captured variable
   3. a gh write naming a target under another owner than the checkout origin's, unless the
      maintainer granted it in GH_WRITE_GUARD_ALLOW
-  4. a git operation that lands only by bypassing a branch rule: gh pr merge --admin, a commit or
-     push skipping hooks, or a push the branch's live rules forbid
+  4. a git operation that lands only by bypassing a branch rule:
+     - gh pr merge --admin
+     - a commit or push skipping hooks
+     - a push the branch's live rules forbid
   5. a hand-rolled review-thread reply or resolve, where scripts/pr_review.py reply --resolve is
      the one-call path
   6. a mutating git operation run directly in a primary checkout rather than a linked worktree,
@@ -1054,8 +1056,8 @@ def _gh_targets(g: _Gh, env: dict[str, str]) -> list[tuple[str, str | None]]:
 def _granted_targets(environ: dict[str, str]) -> set[tuple[str, str]]:
     """Maintainer-granted targets, {(owner, repo)}, with repo '*' for a whole owner.
 
-    Read from the environment the session was launched with, which an agent cannot set for itself,
-    since an inline prefix or an `export` in a Bash call never reaches the hook's own process.
+    Read from the environment the session was launched with, which an agent cannot set for itself.
+    That is because an inline prefix or an `export` in a Bash call never reaches the hook's own process.
     """
     out = set()
     for tok in re.split(r"[,\s]+", environ.get(_ALLOW_ENV, "")):
@@ -1167,10 +1169,13 @@ def classify(
     """Return (decision, reason), the decision 'allow' or 'deny'.
 
     Every argument after `cwd` is a seam the self-test fills for a deterministic offline run.
-    `origin` stands in for the checkout origin's (owner, repo), `current_branch` for the branch a
-    push naming no refspec writes, `rules_lookup(branch)` for the live branch-rules query,
-    `environ` for the environment the session was launched with, `primary_checkout_lookup(dir)`
-    for the primary-checkout test, and `ref_resolver(dir, ref)` for the live ref check.
+    The seams stand in for:
+    - `origin`: the checkout origin's (owner, repo)
+    - `current_branch`: the branch a push naming no refspec writes
+    - `rules_lookup(branch)`: the live branch-rules query
+    - `environ`: the environment the session was launched with
+    - `primary_checkout_lookup(dir)`: the primary-checkout test
+    - `ref_resolver(dir, ref)`: the live ref check
     """
     env_in: dict[str, str] = dict(os.environ) if environ is None else environ
     lookup = primary_checkout_lookup or _is_primary_checkout
@@ -1549,8 +1554,8 @@ def _build_selftest_repo(repo: str, steps: list[list[str]]) -> bool:
 def _is_primary_checkout_selftest() -> bool | str:
     """Tell a real primary checkout from its linked worktree, the primary's name not valid UTF-8.
 
-    "skip" where the case could not run, which is neither a pass nor a failure: Windows refuses
-    such a name, and a host can have no git.
+    "skip" where the case could not run, which is neither a pass nor a failure.
+    That happens because Windows refuses such a name, and a host can have no git.
     """
     with tempfile.TemporaryDirectory() as tmp:
         try:

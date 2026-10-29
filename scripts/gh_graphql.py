@@ -1,13 +1,13 @@
 """One GraphQL transport and one cursor walker, shared by the scripts that read through `gh`.
 
 This is a library module and has no command line. `pr_review.py`, `pr_cleanup.py`,
-`backlog_metrics.py`, and `handoff.py` import it as a sibling, which works from any working directory because Python puts
-the running script's own directory on `sys.path`.
+`backlog_metrics.py`, and `handoff.py` import it as a sibling.
+That works from any working directory because Python puts the running script's own directory on `sys.path`.
 
-A failure raises `GraphQLError` and never exits. Each caller maps it to its own exit contract,
-since `pr_review.py` and `backlog_metrics.py` report a failed read as exit 1 while
-`pr_cleanup.py` and `handoff.py` reserve 1 for a refusal and report a read that did not run as 2. A transport that exited on its own would pick one of
-those for both.
+A failure raises `GraphQLError` and never exits. Each caller maps it to its own exit contract, since the contracts differ.
+`pr_review.py` and `backlog_metrics.py` report a failed read as exit 1.
+`pr_cleanup.py` and `handoff.py` reserve 1 for a refusal and report a read that did not run as 2.
+A transport that exited on its own would pick one of those for both.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def run_subprocess(argv: list[str]) -> tuple[int, str, str]:
     """Run `argv` and return its exit code, stdout and stderr.
 
     Every read decodes as UTF-8 rather than as whatever the platform's locale is. `gh` emits UTF-8
-    on every platform, where a Windows console locale is cp1252, and one typographic quote in a
+    on every platform, where a Windows console locale is cp1252. One typographic quote in a
     review body crashed the decode and left the caller reading a null stdout.
     """
     try:
@@ -59,10 +59,11 @@ def run_subprocess(argv: list[str]) -> tuple[int, str, str]:
 def build_argv(query: str, variables: dict[str, object]) -> list[str]:
     """The `gh api graphql` argv for `query` carrying `variables`.
 
-    A string goes through `-f` and an int through `-F`, because `-F` infers a type from the text:
-    a reply body of `123` or `true` arrives as an Int or a Boolean and the mutation fails on a
-    type nobody passed it, and a body opening with `@` is read as a filename. A list is sent as
-    one `name[]` field per element, which is how `gh` spells a list variable.
+    A string goes through `-f` and an int through `-F`, because `-F` infers a type from the text.
+    Under `-F`, a reply body of `123` or `true` arrives as an Int or a Boolean.
+    The mutation then fails on a type nobody passed it.
+    Under `-F`, a body opening with `@` is read as a filename.
+    A list is sent as one `name[]` field per element, which is how `gh` spells a list variable.
     """
     argv = ["gh", "api", "graphql", "-f", f"query={query}"]
     for name, value in variables.items():
@@ -84,7 +85,7 @@ def request(
     """Run one GraphQL document and return its `data`, raising rather than reporting a blank.
 
     `errors` is checked rather than trusted to the exit code, since a GraphQL document can fail
-    per-field while the request itself succeeds, and the caller would read the null that leaves.
+    per-field while the request itself succeeds. The caller would otherwise read the null that leaves.
 
     `gh api graphql` exits non-zero with the JSON still on stdout when the response carries
     errors, so that stdout is read first. An error is tolerated only where `tolerate` accepts it,
@@ -125,13 +126,13 @@ def walk(
     """Each page of the connection at `path`, from the one past `after` to the last.
 
     `fetch` reads one page given the cursor to start after, or `None` for the first, and returns
-    that response's `data`. `path` is the keys from `data` down to the connection, and what is
+    that response's `data`. `path` is the keys from `data` down to the connection. What is
     yielded is the object holding the connection, the last key's parent, so a caller reads its
     siblings too. The connection is read for its `pageInfo`, so the walk is one place a fix to how
     a page is followed lands. A caller wanting fewer pages simply stops iterating.
 
     A page whose `pageInfo` or `hasNextPage` is absent reads as the last page, unless `strict_page`
-    is set, which raises instead for a caller that would otherwise answer from a cut short list.
+    is set. Setting it raises instead, for a caller that would otherwise answer from a cut short list.
 
     A page claiming another without a cursor that moves past the one just sent raises, since the
     same page would otherwise be read forever.

@@ -9,19 +9,19 @@ differently (see AGENTS.md "Fleet Bootstrap" for why):
     installer materializes so every repo on this machine benefits, not only this checkout.
   - Claude Code never scans .agents/skills/, only .claude/skills/ or a plugin's own skills/. This
     installer registers this repo's marketplace (built at .claude-plugin/fleet-skills/, see
-    build_dist.py) and installs its plugin via the `claude` CLI, so Claude Code loads the same
+    build_dist.py) and installs its plugin via the `claude` CLI. So Claude Code loads the same
     content the other two tools read directly.
 
 Both wrappers (skills_install.sh, skills_install.ps1) call this, so every OS runs one tested code path.
 
 The two channels hold different things. The Codex and opencode copy is a snapshot, so it keeps the
 revision it was taken from. The Claude Code marketplace is a directory source that loads the hub
-checkout in place, so it serves whatever that checkout holds at read time and holds no revision.
+checkout in place. So it serves whatever that checkout holds at read time and holds no revision.
 
 Every run records a stamp at ~/.agents/skills-install-stamp.json naming the machine, what was
 installed, and the hub commit it came from. `--report` answers each channel by name, without
 changing anything. For the snapshot, it says which commit the copy was taken from and whether that
-is the intended revision, the promoted `main` unless `--intended` names another. For the live
+is the intended revision. The intended revision is the promoted `main` unless `--intended` names another. For the live
 channel, it says which branch and commit the registered checkout is serving now. The exit code is
 the snapshot's verdict alone, since the live channel following its checkout is the design.
 
@@ -141,7 +141,7 @@ INSTALLED_MARKER = ".installed-by-projecttemplate-fleet"
 def skill_source_dirs():
     """Every .agents/skills/<name>/ directory that actually carries a SKILL.md.
 
-    Matches build_dist.skill_names()'s own definition of a skill, so a stray non-skill directory
+    Matches build_dist.skill_names()'s own definition of a skill. So a stray non-skill directory
     under .agents/skills/ (a cache folder, a scratch dir) is never treated as one here either.
     """
     if not SKILLS_SRC.is_dir():
@@ -154,20 +154,20 @@ def materialize_global_skills(target):
 
     Only this fleet's own skill names are touched under `target`. `~/.agents/skills/` is a shared
     convention, not this fleet's own directory, so a machine can have skills installed there from
-    other sources, and replacing the whole directory would delete those as a side effect of
-    installing this fleet's skills. A plain copy rather than a symlink per skill: a symlink to a
+    other sources. Replacing the whole directory would delete those as a side effect of
+    installing this fleet's skills. A plain copy rather than a symlink per skill. A symlink to a
     checkout that later moves or is deleted leaves every repo on the machine silently unable to
-    resolve that skill, where a copy just goes stale (caught by --report) instead of missing
+    resolve that skill. A copy just goes stale (caught by --report) instead of missing
     outright.
 
-    Raises ValueError (via build_dist.reject_symlinks) if a skill directory contains a symlink,
-    since shutil.copytree() follows one by default and would silently pull in content from
+    Raises ValueError (via build_dist.reject_symlinks) if a skill directory contains a symlink.
+    That is because shutil.copytree() follows one by default and would silently pull in content from
     outside the tracked source tree.
 
-    Each installed skill carries an INSTALLED_MARKER file, so a later run can tell "a fleet skill
+    Each installed skill carries an INSTALLED_MARKER file. So a later run can tell "a fleet skill
     that got retired" apart from "someone else's skill that happens to share this directory."
     Only a directory carrying the marker is ever removed for no longer being in the current
-    source set; a directory without one is never touched, retired-looking name or not.
+    source set. A directory without one is never touched, retired-looking name or not.
     """
     if target.is_symlink() or target.is_file():
         target.unlink()
@@ -233,8 +233,8 @@ def marketplace_entry():
 def plugin_state():
     """Whether the fleet plugin is installed and enabled at user scope, each None where unreadable.
 
-    A registered marketplace serves nothing until its plugin is installed, and a plugin the user
-    later disabled or uninstalled leaves the marketplace registered, so the listing alone proves neither.
+    A registered marketplace serves nothing until its plugin is installed. A plugin the user
+    later disabled or uninstalled leaves the marketplace registered. So the listing alone proves neither.
     The installer installs at user scope, so a project or local install of the same id says nothing here.
     """
     entries = claude_json("plugin", "list", "--json")
@@ -282,7 +282,7 @@ def existing_registration():
     """This marketplace's current registration, as (where it is, whether an add may move it).
 
     `claude plugin marketplace add` re-points an existing registration at the new directory
-    without failing, so running it from a worktree would leave Claude Code loading a tree that is
+    without failing. So running it from a worktree would leave Claude Code loading a tree that is
     about to be removed. Only a directory registration whose directory is gone may be moved, since
     it serves nothing. A directory that cannot be read is kept, as a present one is. Returns None
     where nothing is registered, and raises LookupError where the CLI gives no listing.
@@ -304,12 +304,13 @@ def register_claude_marketplace():
     """Add this repo's marketplace and install its plugin via the `claude` CLI.
 
     Shells out to `claude plugin marketplace add`/`install` rather than writing
-    ~/.claude/plugins/known_marketplaces.json directly: that file's shape is the CLI's own
-    internal state, not a documented contract, so writing it by hand risks silently drifting from
+    ~/.claude/plugins/known_marketplaces.json directly. That file's shape is the CLI's own
+    internal state, not a documented contract. So writing it by hand risks silently drifting from
     whatever the CLI actually expects on the next release.
 
     An existing registration the add would move is left in place, with a warning naming the command
-    that moves it, unless its directory is gone, where the move is made and announced.
+    that moves it. The exception is a registration whose directory is gone, where the move is made
+    and announced.
     """
     try:
         existing = existing_registration()
@@ -385,8 +386,8 @@ def build_stamp(claude_registered):
 def intended_commit(rev=None):
     """The commit the snapshot is meant to hold, and the ref that named it.
 
-    Step 7 of merge-and-release installs from the promoted `main`, so that is the default: the
-    remote-tracking ref first, as last fetched, since that step fetches it just before
+    Step 7 of merge-and-release installs from the promoted `main`, so that is the default.
+    The default is the remote-tracking ref first, as last fetched, since that step fetches it just before
     installing, then a local `main`. Nothing here fetches, so a caller whose `origin/main` may
     have moved fetches first. A fetched tarball has no git to ask, and the commit its loader
     resolved and handed in is the revision it was fetched to install.
@@ -424,8 +425,8 @@ def live_channel():
 def marketplace_channel():
     """What the registered marketplace serves now, read from the checkout the marketplace names.
 
-    The checkout running this report is not necessarily the one registered, a worktree or a fresh
-    clone being the ordinary cases, so the registered path is read back from the CLI.
+    The checkout running this report is not necessarily the one registered. A worktree or a fresh
+    clone is the ordinary case. So the registered path is read back from the CLI.
     """
     if not claude_available():
         return {"registered": None, "reason": "`claude` not found on PATH"}

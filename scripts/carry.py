@@ -6,7 +6,8 @@
 """Check or apply manifest-owned trees, and the verbatim sections inside a mixed file, from the hub to a fleet worktree."""
 
 # The repository gate's `carried-trees` check loads this whole file under plain `python3`, 3.12 on a CI runner, and calls its tree functions.
-# The file's top level and those functions therefore stay on the standard library and on 3.12, and the gate reports a failure to load or run them as a note.
+# The file's top level and those functions therefore stay on the standard library and on 3.12.
+# The gate reports a failure to load or run them as a note.
 
 import argparse
 import fnmatch
@@ -429,17 +430,20 @@ def fidelity_text_module() -> Any:
     return fidelity_text
 
 
-# A line and its own terminator, splitting on LF alone. `str.splitlines` also breaks on a form feed and on several Unicode separators, which are content in a carried document rather than line boundaries, so splitting on it would move bytes this tool was asked to leave alone.
+# A line and its own terminator, splitting on LF alone. `str.splitlines` also breaks on a form feed and on several Unicode separators.
+# Those are content in a carried document rather than line boundaries.
+# So splitting on `str.splitlines` would move bytes this tool was asked to leave alone.
 _LINE = re.compile(r"[^\n]*\n|[^\n]+$")
 
 
 def split_lines(text: str, rel: str | None = None) -> list[str]:
     """`text` as lines that keep their own terminators, so joining them returns the original bytes.
 
-    A lone CR is refused rather than read as content, because `spec/fidelity_text.py`'s `normalize` treats
-    one as a line break and this does not, so the two would read a CR-terminated document as
-    different line sets: the audit would report a section stale that this tool cannot even locate,
-    and the refusal it would otherwise raise names an absent section rather than the real problem.
+    A lone CR is refused rather than read as content.
+    That is because `spec/fidelity_text.py`'s `normalize` treats one as a line break and this does not.
+    The two would therefore read a CR-terminated document as different line sets.
+    The audit would report a section stale that this tool cannot even locate.
+    The refusal it would otherwise raise names an absent section rather than the real problem.
     """
     if rel is not None and "\r" in text.replace("\r\n", ""):
         raise CarryError(
@@ -459,10 +463,10 @@ def terminator(line: str) -> str:
 def file_ending(lines: list[str]) -> str:
     """The terminator this file uses, read from its first terminated line.
 
-    A replacement takes its ending from the section's own heading line, which carries none when
-    that heading is the last line of a file with no final newline. Falling back to LF there would
-    write LF into a CRLF file and leave it mixed, so the file answers for itself and LF is the
-    answer only for a file that has no terminated line at all.
+    A replacement takes its ending from the section's own heading line.
+    That line carries none when the heading is the last line of a file with no final newline.
+    Falling back to LF there would write LF into a CRLF file and leave it mixed.
+    So the file answers for itself, and LF is the answer only for a file that has no terminated line at all.
     """
     for line in lines:
         if terminator(line):
@@ -475,11 +479,11 @@ def normalize_eol(text: str) -> str:
 
     Deliberately not `spec/fidelity_text.py`'s `normalize`, which also masks a Dependabot-owned action pin
     and a per-repository `needs:` list. Those are governed drift for a comparison asking whether
-    two copies say the same thing, and this tool writes bytes, so masking either would let it
+    two copies say the same thing. This tool writes bytes, so masking either would let it
     overwrite a value the repository owns. Line endings are the one exception, because
     `.gitattributes` governs them separately and a re-vendor preserves whichever the target uses.
-    `scripts/canonical_review.py`'s own `normalize` is this same reduction for the same reason, and
-    it is not shared, since that module imports this one and importing it back would be a cycle.
+    `scripts/canonical_review.py`'s own `normalize` is this same reduction for the same reason.
+    It is not shared, since that module imports this one and importing it back would be a cycle.
     """
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -508,14 +512,18 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
 def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
     """The region rendered the way `spec/fidelity_text.py`'s `extract_section` renders it.
 
-    That function splits the whole document on LF and joins the region's lines back with LF, so a
-    file ending in a newline yields one final empty element and a region running to the end of the
-    file carries it. The consequence is worth stating, because it decides what this tool writes: a
-    section that ends the hub's file and the same section followed by a heading downstream, with
-    one blank line between, render to the identical string. The fidelity comparison therefore reads
-    them as the same content, and the raw bytes do not, so this is the form to compare. It is not
-    the form to write: `replace_sections` builds its own lines, because writing needs the target's
-    own terminators and this form has flattened them.
+    That function splits the whole document on LF and joins the region's lines back with LF.
+    So a file ending in a newline yields one final empty element, and a region running to the end
+    of the file carries it. The consequence is worth stating, because it decides what this tool
+    writes. The following render to the identical string:
+
+    - a section that ends the hub's file
+    - the same section followed by a heading downstream, with one blank line between
+
+    The fidelity
+    comparison therefore reads them as the same content, and the raw bytes do not. So this is the
+    form to compare. It is not the form to write. `replace_sections` builds its own lines, because
+    writing needs the target's own terminators and this form has flattened them.
     """
     bodies = [line[: len(line) - len(terminator(line))] for line in lines[span[0] : span[1]]]
     if span[1] == len(lines) and lines and terminator(lines[-1]):
@@ -526,8 +534,8 @@ def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
 def outside_sections(lines: list[str], sections: list[str], path: str) -> str:
     """Every line outside the named regions, joined, which is the text a re-vendor must not touch.
 
-    Includes the preamble, every intent section, and every verbatim section this run left alone,
-    so comparing it before and after is what proves the write stayed inside the regions it named.
+    Includes the preamble, every intent section, and every verbatim section this run left alone.
+    So comparing it before and after is what proves the write stayed inside the regions it named.
     """
     covered: set[int] = set()
     for section in sections:
@@ -544,9 +552,9 @@ def guard_governed_drift(path: str, section: str, region: str, side: str) -> Non
     """Refuse a section carrying content the fidelity comparison normalizes away.
 
     A `uses: <action>@<sha>` pin with its `# vN` comment, and a job's `needs:` list, are owned per
-    repository (`spec/fidelity-model.md` "Normalization"), so writing the hub's bytes over either
-    would revert a bump or a prune the repository owns and the audit would report nothing. No
-    section declared verbatim carries either today, and this refuses rather than discovering it
+    repository (`spec/fidelity-model.md` "Normalization"). So writing the hub's bytes over either
+    would revert a bump or a prune the repository owns, and the audit would report nothing. No
+    section declared verbatim carries either today. This refuses rather than discovering it
     silently the first time one does.
     """
     if fidelity_text_module().normalize(region) != normalize_eol(region):
@@ -576,7 +584,8 @@ def verbatim_section_names(item: dict[str, Any], selectors: set[str]) -> list[st
         name = element.get("name")
         if not isinstance(name, str) or not name.strip():
             raise CarryError("section declaration name must be a non-empty string")
-        # Folded and stripped, matching `section_span`'s own lookup key, since two spellings of one heading resolve to one region and replacing that region twice would splice its tail in again.
+        # Folded and stripped, matching `section_span`'s own lookup key.
+        # That is because two spellings of one heading resolve to one region, and replacing that region twice would splice its tail in again.
         if name.strip().lower() not in {seen.strip().lower() for seen in out}:
             out.append(name)
     return out
@@ -585,8 +594,8 @@ def verbatim_section_names(item: dict[str, Any], selectors: set[str]) -> list[st
 def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[str, list[str]]]:
     """`(path, [section])` for every baseline file this repository carries verbatim sections of.
 
-    One path declared by more than one baseline entry, which the manifest does for a file whose
-    applicability differs by repository type, merges into one unit, since the file is written once.
+    One path declared by more than one baseline entry merges into one unit, since the file is written once.
+    The manifest declares a path in more than one entry for a file whose applicability differs by repository type.
     """
     baseline = manifest.get("baseline")
     if not isinstance(baseline, list):
@@ -601,7 +610,8 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
         path = item.get("path")
         if not isinstance(path, str) or not path:
             raise CarryError("baseline declaration path must be a non-empty string")
-        # Collected for every applicable entry rather than only the ones carrying verbatim sections, since the two can be declared on separate entries for one path and a file is written once whichever entry named the substitution.
+        # Collected for every applicable entry rather than only the ones carrying verbatim sections.
+        # That is because the two can be declared on separate entries for one path, and a file is written once whichever entry named the substitution.
         if item.get("placeholders"):
             placeholder_paths.add(path)
         names = verbatim_section_names(item, selectors)
@@ -630,7 +640,7 @@ def replace_sections(
 
     Spliced from the last region to the first, so an earlier replacement cannot move a later
     region's indices. Each replacement carries the terminator the section's own heading line
-    carried, which is how a CRLF target keeps its endings without the file being rewritten to one
+    carried. That is how a CRLF target keeps its endings without the file being rewritten to one
     ending it may not use throughout.
     """
     spans = []
@@ -641,7 +651,8 @@ def replace_sections(
             raise CarryError(f"{path} section '{section}' could not be located to replace")
         spans.append((target_span, source_span))
     ordered = sorted(spans, reverse=True)
-    # Two names resolving to one region would splice that region's replacement in twice, the second time against indices the first splice already moved, so the file would gain a duplicated tail before any postcondition read it back.
+    # Two names resolving to one region would splice that region's replacement in twice, the second time against indices the first splice already moved.
+    # The file would then gain a duplicated tail before any postcondition read it back.
     for (later, _), (earlier, _) in itertools.pairwise(ordered):
         if earlier[1] > later[0]:
             raise CarryError(
@@ -659,8 +670,11 @@ def replace_sections(
         # A region spliced ahead of more of the file has to end terminated, or its last line would run into the heading that follows it.
         if region and not terminator(region[-1]):
             region[-1] += ending
-        # A region runs to the next level-two heading, so the blank line before that heading is inside it and a section ending its file has none.
-        # Where the two copies differ on that, `comparable_region` reads both as the same content, so the boundary is reconciled to what this document needs rather than copied from the other one: pad where a heading follows, and drop the trailing blank where nothing does.
+        # A region runs to the next level-two heading.
+        # So the blank line before that heading is inside it, and a section ending its file has none.
+        # Where the two copies differ on that, `comparable_region` reads both as the same content.
+        # So where they differ, the boundary is reconciled to what this document needs rather than copied from the other one.
+        # The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
         source_ends_file = source_span[1] == len(source_lines)
         target_ends_file = end == len(out)
         if source_ends_file and not target_ends_file:
@@ -682,9 +696,9 @@ def assert_sections(
     """Re-read the written file and prove the three things the re-vendor promised.
 
     Stated as an assertion the tool makes about its own output rather than as care taken while
-    writing it. The defect this exists for, a single blank line dropped between the preamble and
-    the first heading, is invisible in a review of the diff, breaks no renderer, and no linter in
-    the gate set flags it, so it would ship and the next audit would report drift nobody could
+    writing it. The defect this exists for is a single blank line dropped between the preamble and
+    the first heading. It is invisible in a review of the diff and breaks no renderer, and no linter in
+    the gate set flags it. So it would ship, and the next audit would report drift nobody could
     see. `apply` already re-compares tree digests after writing, and this is that discipline for a
     section.
     """
@@ -796,8 +810,8 @@ def plan_sections(
     """Every unit's plan, so each refusal is raised before the first file is written.
 
     A refusal reached partway through the writes would leave one file re-vendored and the next
-    not, reported by the same exit code as a refusal that touched nothing, and the operator would
-    have no way to tell the two apart from the output.
+    not. It would be reported by the same exit code as a refusal that touched nothing.
+    The operator would have no way to tell the two apart from the output.
     """
     return [plan_unit(hub, target, path, declared) for path, declared in units]
 
@@ -806,9 +820,9 @@ def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
     """Write each plan's stale regions and assert the result, one file at a time.
 
     Every refusal has already been raised by `plan_sections`, so nothing here can decline to
-    proceed. What can still fail is the write itself or the assertion after it, and each names the
-    file it was working on, because by then an earlier file may already hold its re-vendored
-    content and the operator has to know which.
+    proceed. What can still fail is the write itself or the assertion after it. Each names the
+    file it was working on. That is because by then an earlier file may already hold its
+    re-vendored content, and the operator has to know which.
     """
     for plan in plans:
         if not plan.stale:
@@ -834,13 +848,17 @@ def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
 def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) -> int:
     """Compare, and for `apply-sections` re-vendor, the verbatim sections inside a mixed file.
 
-    The gap between the two things that already exist: `carry.py`'s tree modes own a whole tree,
-    and the audit names a stale section precisely without writing anything. A file such as
-    `AGENTS.md` is neither, holding fleet law in some sections and the repository's own content in
-    others, and re-vendoring the whole file over it is the overwrite the
+    The gap between the two things that already exist:
+
+    - `carry.py`'s tree modes own a whole tree.
+    - The audit names a stale section precisely without writing anything.
+
+    A file such as `AGENTS.md` is neither, holding fleet law in some sections and the repository's
+    own content in others. Re-vendoring the whole file over it is the overwrite the
     `carried-instruction-file-guard` skill exists to stop.
     """
-    # Ahead of every other check, because which repository was named does not depend on the hub's state, and reporting a stale hub for an argument that could never be valid names the wrong problem.
+    # Ahead of every other check, because which repository was named does not depend on the hub's state.
+    # It is also ahead because reporting a stale hub for an argument that could never be valid names the wrong problem.
     if name == HUB_NAME:
         raise CarryError("the hub's own copy is the canonical, so it is never a re-vendor target")
     registry = load_json(hub / "registry/repos.json")
@@ -850,8 +868,11 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     selectors = selector_set(entry, registry.get("defaults", {}))
     units = section_units(manifest, selectors)
     # No owned root, unlike a tree carry.
-    # A tree's root holds nothing but hub-owned content, so exempting it from the unrelated-changes check gives up nothing, where these files hold the repository's own sections too and exempting one would let this tool's writes land on top of somebody's uncommitted edit to a section it never touches.
-    # The cost is that a second apply needs the first one committed, and RESYNC.md's step 1 runs these modes before anything else writes to the tree.
+    # A tree's root holds nothing but hub-owned content, so exempting it from the unrelated-changes check gives up nothing.
+    # In contrast, these files hold the repository's own sections too.
+    # Exempting one would let a write land on top of an uncommitted edit to a section the tool never touches.
+    # The cost is that a second apply needs the first one committed.
+    # RESYNC.md's step 1 runs these modes before anything else writes to the tree.
     verify_target(target, entry, [])
     plans = plan_sections(hub, target, units)
     print(f"hubCommit: {hub_commit}")
@@ -873,10 +894,11 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
 def refuse_hub_tree_target(name: str, declarations: list[dict[str, Any]]) -> None:
     """Refuse the hub as a tree-carry target unless every applicable declaration opts in.
 
-    A tree declaration owns its target root outright and prunes what it does not carry, so pointing
-    one at the hub aims a repository's own source tree at a copy of itself. `allowHubTarget` is the
-    per-declaration opt in, and its absence is the refusal. Lifted out of `run` so it can be
-    exercised without a hub checkout, which `verify_hub` would otherwise demand first.
+    A tree declaration owns its target root outright and prunes what it does not carry.
+    So pointing one at the hub aims a repository's own source tree at a copy of itself.
+    `allowHubTarget` is the per-declaration opt in, and its absence is the refusal.
+    Lifted out of `run` so it can be exercised without a hub checkout.
+    `verify_hub` would otherwise demand one first.
     """
     if name == HUB_NAME and any(not item.get("allowHubTarget", False) for item in declarations):
         raise CarryError(f"a declaration does not allow {HUB_NAME} as its target")
@@ -973,7 +995,8 @@ def main() -> int:
     parser.add_argument("repository")
     parser.add_argument("--target", required=True, type=pathlib.Path)
     args = parser.parse_args()
-    # The section modes are their own vocabulary rather than a scope flag on the tree modes, so an existing invocation keeps meaning exactly what it did and a caller names which of the two it wants.
+    # The section modes are their own vocabulary rather than a scope flag on the tree modes.
+    # So an existing invocation keeps meaning exactly what it did, and a caller names which of the two it wants.
     dispatch = run_sections if args.mode.endswith("-sections") else run
     try:
         return dispatch(args.mode, args.repository, args.target.resolve())

@@ -4,7 +4,8 @@
 #   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + labels + rulesets + the fleet project link (writes)
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
-# Both modes need admin on the repo, because the rulesets endpoints require it, and project access on the token, because the fleet project link is read and written through GraphQL.
+# Both modes need admin on the repo, because the rulesets endpoints require it.
+# Both modes also need project access on the token, because the fleet project link is read and written through GraphQL.
 # The command is required, so a write is never the default, and an argument the usage does not name is refused before any read.
 # The repo defaults to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
@@ -26,14 +27,21 @@
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
-# The project link is checked by resolving the declared project to a node id and asserting that id is among the ones the repository is linked to.
-# A label is checked on name, color, and description against labels.json, and a label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
-# What is unaudited is a static setting absent from settings.json and a label labels.json does not declare, since those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
+# The project link is checked by resolving the declared project to a node id.
+# The check then asserts that id is among the ones the repository is linked to.
+# A label is checked on name, color, and description against labels.json.
+# A label the payload never declared is reported without being asserted, since a repo may carry labels of its own.
+# What is unaudited is a static setting absent from settings.json and a label labels.json does not declare.
+# That is because those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
 # The check mode also asserts one group apply never writes, the existence and deployment-branch policy of every environment the registry declares for the repo.
-# It is check-only because an environment's secrets and variables are credentials that exist nowhere in this repository, so an apply would create an environment that cannot publish and report success.
-# Their names are enumerable through the API, and a variable's value too, so what this script does not check is a choice about what it owns rather than a limit the API imposes.
-# The policy is worth checking on its own because it decides which refs may deploy at all, and on an OIDC publish that is half the gate: a ref the policy excludes mints no token.
-# A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run, and an environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
+# It is check-only because an environment's secrets and variables are credentials that exist nowhere in this repository.
+# An apply would therefore create an environment that cannot publish and report success.
+# Their names are enumerable through the API, and a variable's value too.
+# What this script does not check is therefore a choice about what it owns rather than a limit the API imposes.
+# The policy is worth checking on its own because it decides which refs may deploy at all.
+# It is also worth checking because, on an OIDC publish, that is half the gate: a ref the policy excludes mints no token.
+# A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run.
+# An environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.
 # This script leaves them a manual-verify note for their values, which are never readable via the API.
 set -Eeuo pipefail
@@ -106,7 +114,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ----- Resolve the workflow model (selects the develop ruleset), shared by apply and check -----
 registry="$script_dir/../registry/repos.json"
 # The registry key is the entry name rather than the owner/repo identity parsed from its url.
-# Reviewers keep proposing the switch, and the answer is that a name resolves to at most one entry: spec/resolve_description.py raises on a duplicate or a case-only near-miss and exits this script below, and spec/validate.py refuses both when it is run.
+# Reviewers keep proposing the switch, and the answer is that a name resolves to at most one entry.
+# The script spec/resolve_description.py raises on a duplicate or a case-only near-miss and exits this script below.
+# The script spec/validate.py refuses both when it is run.
 name="${repo##*/}"
 
 if [ -f "$registry" ]; then
@@ -153,11 +163,15 @@ project_file="$script_dir/project.json"
 description=""
 if [ -f "$registry" ]; then
     # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
-    # The name python3 is not universal: native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run, so this runs it rather than just checking PATH (docs/host-setup.md).
-    # The probe checks 3.7+ (PEP 563, from __future__ import annotations) because that is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
+    # The name python3 is not universal.
+    # Native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run.
+    # So this runs it rather than just checking PATH (docs/host-setup.md).
+    # The probe checks 3.7+ (PEP 563, from __future__ import annotations).
+    # That is because 3.7 is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
     # The repository floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py).
     # A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
-    # The py launcher is probed first: it reaches a registered interpreter whatever is active, where a bare python3 goes through PATH and a virtual environment can answer there instead.
+    # The py launcher is probed first.
+    # It reaches a registered interpreter whatever is active, where a bare python3 goes through PATH and a virtual environment can answer there instead.
     if py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
         py_cmd=(py -3)
     elif python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
@@ -217,24 +231,34 @@ ruleset_id() {
 }
 
 # ----- Fleet project lookup (shared by apply and check) -----
-# Test with `project_payload_ok`, which is true only when project.json parses to an owner and title that are non-empty strings holding no tab or line break, and a number that is a positive integer.
+# Test with `project_payload_ok`, which is true only when project.json parses to all of these:
+#   - an owner that is a non-empty string holding no tab or line break
+#   - a title that is a non-empty string holding no tab or line break
+#   - a number that is a positive integer
 # The type tests keep a missing field from rendering as the literal string null in a message or a query variable.
 # The number is tested as the text jq will print rather than as the value jq parsed, because jq preserves the source literal.
-# 1.0 and 1e2 both equal their own floor, and both reach gh as 1.0 and 1E+2, which gh sends to the typed query variable as a string that the API then rejects.
+# 1.0 and 1e2 both equal their own floor, and both reach gh as 1.0 and 1E+2.
+# The gh CLI sends those to the typed query variable as a string that the API then rejects.
 # The nine-digit cap keeps a number GraphQL's own 32-bit Int cannot carry out of the query for the same reason.
 project_payload_ok() {
     jq -e '(.owner|type=="string") and (.title|type=="string") and (.number|type=="number") and (.owner|length) > 0 and (.title|length) > 0 and ((.owner+.title)|test("[\t\r\n]")|not) and ((.number|tostring)|test("^[1-9][0-9]{0,8}$"))' "$project_file" >/dev/null 2>&1
 }
 
 # Print the node id of the project declared in project.json, or fail with a message naming what could not be resolved.
-# The query goes through repositoryOwner rather than user or organization, since projectV2 is on the ProjectV2Owner interface both of those implement, so the declared owner needs no kind field for this script to guess wrong from.
-# The declared title is asserted against the live one because a project number is unique only per owner and is reusable: a deleted and recreated project can leave the declared number pointing at a project the fleet never chose, and this is the one place that resolves the number before every fleet repo is linked to what it names.
+# The query goes through repositoryOwner rather than user or organization, since projectV2 is on the ProjectV2Owner interface both of those implement.
+# The declared owner therefore needs no kind field for this script to guess wrong from.
+# The declared title is asserted against the live one because a project number is unique only per owner and is reusable.
+# A deleted and recreated project can leave the declared number pointing at a project the fleet never chose.
+# The title is also asserted because project_node_id is the one place that resolves the number.
+# It does so before every fleet repo is linked to what it names.
 project_node_id() { # owner number title
     local out id title
-    # -f sends a string and -F sends a typed value, so the login goes through -f: an all-digit login under -F would reach a string query variable as a number and fail the query.
+    # -f sends a string and -F sends a typed value, so the login goes through -f.
+    # An all-digit login under -F would reach a string query variable as a number and fail the query.
     # shellcheck disable=SC2016  # $owner and $number are GraphQL query variables, not shell expansions
     if ! out="$(gh api graphql -f query='query($owner: String!, $number: Int!) { repositoryOwner(login: $owner) { ... on ProjectV2Owner { projectV2(number: $number) { id title } } } }' -f owner="$1" -F number="$2")"; then
-        # The call fails on a number that resolves to nothing as well as on a token that cannot see projects, and gh exits 1 on both, so the message names both rather than asserting the one it cannot tell apart.
+        # The call fails on a number that resolves to nothing as well as on a token that cannot see projects.
+        # The gh call exits 1 on both, so the message names both rather than asserting the one it cannot tell apart.
         echo "Failed to read project number $2 owned by $1. Either no such project exists or the token cannot read projects (gh auth refresh -s project)." >&2
         return 1
     fi
@@ -252,8 +276,11 @@ project_node_id() { # owner number title
 }
 
 # Print the target repository's own node id and the ids of the projects it is linked to, as one JSON object.
-# One query answers both, since apply needs the repository id to write the link and both modes need the list to know whether the link is already there.
-# A null repository is its own failure: gh exits non-zero on a GraphQL error, but a response carrying data and no such repository would otherwise read as a repository linked to nothing.
+# One query answers both, because apply needs the repository id to write the link.
+# It is also because both modes need the list to know whether the link is already there.
+# A null repository is its own failure.
+# The gh CLI exits non-zero on a GraphQL error.
+# But a response carrying data and no such repository would otherwise read as a repository linked to nothing.
 repo_projects() {
     local out
     # shellcheck disable=SC2016  # $owner and $name are GraphQL query variables, not shell expansions
@@ -265,8 +292,10 @@ repo_projects() {
         echo "No repository $repo in the GraphQL response, so the projects linked to it could not be read." >&2
         return 1
     fi
-    # Fail loud on a truncated list rather than silently narrow: a page short of the whole set would read as the fleet link missing, and apply would then write a link that is already there.
-    # The comparison is jq's rather than a bash integer test on a captured string, which would read false on any non-numeric output and let the truncated list through.
+    # Fail loud on a truncated list rather than silently narrow.
+    # A page short of the whole set would read as the fleet link missing, and apply would then write a link that is already there.
+    # The comparison is jq's rather than a bash integer test on a captured string.
+    # Such a test would read false on any non-numeric output and let the truncated list through.
     if jq -e '.data.repository.projectsV2.totalCount > (.data.repository.projectsV2.nodes|length)' <<<"$out" >/dev/null 2>&1; then
         echo "Failed for $repo: more projects are linked than the single page read, so the lookup is unreliable. Add pagination before applying." >&2
         return 1
@@ -310,9 +339,17 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
 }
 
-# Test with `labels_payload_ok`, which succeeds only when labels.json parses to a non-empty array of labels, unique by name ignoring case, that each meet the API's field contract.
-# That is a non-empty name, a six-digit lowercase hex color, which is how GitHub stores it, and a description of at most 100 characters, each a string holding no tab or line break.
-# Each step runs its own jq and prints its own reason on a failure, so a payload that is malformed, empty, out of contract, or repeats a name is told apart from a jq that failed.
+# Test with `labels_payload_ok`, which succeeds only when labels.json parses to an array with all of these properties:
+#   - it is non-empty
+#   - its labels are unique by name ignoring case
+#   - each label meets the API's field contract
+# That field contract is:
+#   - a non-empty name
+#   - a six-digit lowercase hex color, which is how GitHub stores it
+#   - a description of at most 100 characters
+# Each is a string holding no tab or line break.
+# Each step runs its own jq and prints its own reason on a failure.
+# A payload that is malformed, empty, out of contract, or repeats a name is therefore told apart from a jq that failed.
 labels_payload_ok() {
     local err status step
     local -a steps=(
@@ -358,9 +395,12 @@ apply_labels() { # create-or-update every label labels.json declares, by name
     echo "Applied $(wc -l <<<"$rows" | tr -d ' ') labels from labels.json"
 }
 
-# Link the repository to the fleet project, which is an association between two objects rather than a repository setting, so it is written through its own API and depends on none of the writes above.
-# The live link list is read first and the mutation runs only when the declared project is absent from it, so a second apply is a read rather than a repeated write, and no write is ever fired to discover whether one was needed.
-# The project's node id is resolved by cmd_apply's pre-flight and passed in, because resolving it here would abort the run after the four earlier groups had already been written.
+# Link the repository to the fleet project, which is an association between two objects rather than a repository setting.
+# It is therefore written through its own API and depends on none of the writes above.
+# The live link list is read first and the mutation runs only when the declared project is absent from it.
+# A second apply is therefore a read rather than a repeated write, and no write is ever fired to discover whether one was needed.
+# The project's node id is resolved by cmd_apply's pre-flight and passed in.
+# That is because resolving it here would abort the run after the four earlier groups had already been written.
 apply_project() { # project-node-id
     local pid="$1" owner number title live rid out
     owner="$(jqr '.owner' "$project_file")"
@@ -372,9 +412,13 @@ apply_project() { # project-node-id
         return
     fi
     rid="$(jqr '.id' <<<"$live")"
-    # The call is guarded rather than left to abort on its own, since a bare command substitution ends the run with gh's error and nothing of this script's.
-    # The failure it was written for is a token that reads projects and cannot write a link, which the pre-flight's resolution cannot catch because that one is a read, and every other non-zero exit lands here too.
-    # The response is then read rather than discarded, and the repository it names is asserted against the one just linked, so a write that returned anything else stops the run instead of reporting a link that may not exist.
+    # The call is guarded rather than left to abort on its own.
+    # That is because a bare command substitution ends the run with gh's error and nothing of this script's.
+    # The failure it was written for is a token that reads projects and cannot write a link.
+    # The pre-flight's resolution cannot catch it, because that one is a read.
+    # Every other non-zero exit lands here too.
+    # The response is then read rather than discarded, and the repository it names is asserted against the one just linked.
+    # A write that returned anything else therefore stops the run instead of reporting a link that may not exist.
     # shellcheck disable=SC2016  # $project and $repository are GraphQL query variables, not shell expansions
     if ! out="$(gh api graphql -f query='mutation($project: ID!, $repository: ID!) { linkProjectV2ToRepository(input: { projectId: $project, repositoryId: $repository }) { repository { id } } }' -f project="$pid" -f repository="$rid")"; then
         echo "Failed to link $repo to project '$title' ($owner, number $number). The token may read projects and still not be able to write a link (gh auth refresh -s project)." >&2
@@ -401,12 +445,15 @@ cmd_apply() {
         echo "Label payload $labels_file $why. Aborting before any write." >&2
         exit 1
     fi
-    # The project payload is validated here for the same reason, since apply_project runs last of all and an abort inside it would leave every write before it applied.
+    # The project payload is validated here for the same reason.
+    # That is because apply_project runs last of all and an abort inside it would leave every write before it applied.
     if ! project_payload_ok; then
         echo "Project payload $project_file did not parse or declares a field outside the contract (a non-empty owner and title holding no tab or line break, and a number written as at most nine plain digits). Aborting before any write." >&2
         exit 1
     fi
-    # The project is resolved here rather than in apply_project, since it is a read and a number that resolves to nothing, or to a project titled otherwise, would otherwise abort the run with four groups of writes already applied.
+    # The project is resolved here rather than in apply_project.
+    # That is because it is a read.
+    # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with four groups of writes already applied.
     project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
@@ -475,7 +522,8 @@ jq_has() { jq -e "$@" >/dev/null 2>&1; }
 gh_ok() { gh api "$@" >/dev/null 2>&1; }
 
 # Call as `jqr FILTER...`: jq -r plus stripping a line's trailing \r that a native Windows jq (WinGet's jq-1.8.2) puts there.
-# The \r bash expands here, a literal byte rather than sed's own backslash-escape, since that escape is a GNU extension a BSD sed would not honor.
+# The \r bash expands here, a literal byte rather than sed's own backslash-escape.
+# That is because sed's own escape is a GNU extension a BSD sed would not honor.
 jqr() { jq -r "$@" | sed $'s/\r$//'; }
 
 check_ruleset() { # payload-file - the live ruleset must match the committed policy, driven by the payload
@@ -541,7 +589,8 @@ check_ruleset() { # payload-file - the live ruleset must match the committed pol
     # Dropping that would turn array order into false drift.
     # A scalar array sorts directly, and required_status_checks sorts by context, its identifying field.
     local ptypes norm
-    # The walk/1 builtin arrived in jq 1.6, which the declared floor makes available, and it is defined here rather than called so the filter also compiles below the floor.
+    # The walk/1 builtin arrived in jq 1.6, which the declared floor makes available.
+    # It is defined here rather than called so the filter also compiles below the floor.
     # A host on jq 1.5 would otherwise not degrade, it would fail to compile the filter.
     # The check_ruleset function would then report drift on every parameterized rule it never actually compared.
     # That is the inverse of the false clean this comparison was written to close, so the portable definition is worth its length.
@@ -577,7 +626,9 @@ check_settings() {
     fi
     # Static settings are driven from settings.json, so the check never drifts from the file.
     # Add a key there and it is audited here automatically.
-    # The payload is parsed into a variable before the loop rather than streamed from a process substitution, since a jq failure inside `done < <(...)` would leave the loop body unexecuted without tripping set -e and report every setting as checked and passing while nothing was compared, a false clean.
+    # The payload is parsed into a variable before the loop rather than streamed from a process substitution.
+    # That is because a jq failure inside `done < <(...)` would leave the loop body unexecuted without tripping set -e.
+    # It would report every setting as checked and passing while nothing was compared, a false clean.
     local pairs
     if ! pairs="$(jqr 'to_entries[] | "\(.key)\t\(.value)"' "$settings_file")"; then
         fail "settings payload $settings_file did not parse"
@@ -646,7 +697,8 @@ check_labels() {
         got="$(jqr --arg n "$lname" '[.[] | select(.name == $n)] | first // empty | "\(.color)\t\(.description // "")"' <<<"$live")"
         assert "label '$lname' = $color '$desc'" test "$got" = "$color"$'\t'"$desc"
     done <<<"$rows"
-    # A label the payload never declared is reported rather than asserted, matching the bypass list: the fleet set is a floor, and a repo may add its own.
+    # A label the payload never declared is reported rather than asserted, matching the bypass list.
+    # The fleet set is a floor, and a repo may add its own.
     # shellcheck disable=SC2016  # $want is a jq --slurpfile variable, not a shell expansion
     if ! extra="$(jqr --slurpfile want "$labels_file" '[.[].name] - [$want[0][].name] | join(", ")' <<<"$live")"; then
         fail "could not compute the undeclared label list"
@@ -668,7 +720,8 @@ check_project() {
     owner="$(jqr '.owner' "$project_file")"
     number="$(jqr '.number' "$project_file")"
     title="$(jqr '.title' "$project_file")"
-    # Each read reports its own failure and returns, so an unreadable project is a FAIL for this group rather than an abort leaving the groups after it unchecked.
+    # Each read reports its own failure and returns.
+    # An unreadable project is therefore a FAIL for this group rather than an abort leaving the groups after it unchecked.
     if ! pid="$(project_node_id "$owner" "$number" "$title")"; then
         fail "project '$title' ($owner, number $number) - could not resolve the declared project"
         return
@@ -679,7 +732,8 @@ check_project() {
     fi
     # shellcheck disable=SC2016  # $p is a jq --arg variable, not a shell expansion
     assert "linked to project '$title' ($owner, number $number)" jq_has --arg p "$pid" '.projects | index($p) != null' <<<"$live"
-    # A project the payload never declared is reported rather than asserted, matching the label group: the fleet link is a floor, and a repo may be linked to a project of its own.
+    # A project the payload never declared is reported rather than asserted, matching the label group.
+    # The fleet link is a floor, and a repo may be linked to a project of its own.
     # shellcheck disable=SC2016  # $p is a jq --arg variable, not a shell expansion
     if ! extra="$(jqr --arg p "$pid" '[.projects[] | select(. != $p)] | length' <<<"$live")"; then
         fail "project '$title' ($owner, number $number) - could not count the repository's other project links"
@@ -695,8 +749,11 @@ check_environments() {
         return
     fi
     # Registration is answered by its own read rather than by a sentinel value folded into the next one.
-    # No JSON scalar is free to serve as that sentinel: a declared null prints exactly as one would, so an entry declaring an invalid null would report as an unregistered repo and skip the shape test below that exists to catch it.
-    # Fail rather than default on a read error, matching the model lookup: a registry that will not parse is a broken run, not a repo with no environments.
+    # No JSON scalar is free to serve as that sentinel.
+    # A declared null prints exactly as one would.
+    # An entry declaring an invalid null would therefore report as an unregistered repo and skip the shape test below that exists to catch it.
+    # Fail rather than default on a read error, matching the model lookup.
+    # A registry that will not parse is a broken run, not a repo with no environments.
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
     if ! entry_count="$(jqr --arg n "$name" '[.repos[] | select(.name == $n)] | length' "$registry")"; then
         fail "could not read $registry to resolve the entry for $name"
@@ -714,15 +771,19 @@ check_environments() {
         return
     fi
     # One list read serves both the per-environment assertions and the undeclared-environment note, and it is the call that surfaces an API or permission failure.
-    # Reading each environment individually instead would let a 404 for a missing environment and a 403 for a token without admin arrive as the same result.
+    # Reading each environment individually instead would let a 404 and a 403 arrive as the same result.
+    # The 404 is for a missing environment and the 403 for a token without admin.
     if ! live_envs="$(gh api --paginate "repos/$repo/environments" --jq '.environments[]' | jq -s '.')"; then
         echo "Failed to list environments for $repo (check auth and repo access)." >&2
         fail "could not list the deployment environments on $repo"
         return
     fi
-    # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has, so every read below is preceded by one test rather than left bare.
-    # A bare read of a malformed entry aborts the whole run under set -e, mid-check, after the five groups above have printed their pass lines and before cmd_check reaches its drift summary.
-    # This test is narrower than spec/validate.py's, which refuses shapes this one admits, so a registry that never ran the validator can still report drift rather than the malformation causing it.
+    # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has.
+    # Every read below is therefore preceded by one test rather than left bare.
+    # A bare read of a malformed entry aborts the whole run under set -e, mid-check.
+    # That happens after the five groups above have printed their pass lines and before cmd_check reaches its drift summary.
+    # This test is narrower than spec/validate.py's, which refuses shapes this one admits.
+    # A registry that never ran the validator can therefore still report drift rather than the malformation causing it.
     if ! jq_has 'type == "array"' <<<"$entries"; then
         fail "registry environments for $name is not a list"
         return
@@ -730,7 +791,9 @@ check_environments() {
     count="$(jqr 'length' <<<"$entries")"
     for ((i = 0; i < count; i++)); do
         row="$(jq -c ".[$i]" <<<"$entries")"
-        # The branches test is by element type, not just by container: a non-string element renders through string interpolation without erroring, so [1, 2] would otherwise be asserted against the live set as the branch names "1" and "2".
+        # The branches test is by element type, not just by container.
+        # A non-string element renders through string interpolation without erroring.
+        # So [1, 2] would otherwise be asserted against the live set as the branch names "1" and "2".
         if ! jq_has '
             type == "object"
             and (.name | type == "string" and length > 0)
@@ -749,8 +812,10 @@ check_environments() {
             continue
         fi
         # Read the live shape as the one token the registry declares, rather than asserting two booleans a reader then has to recombine into a policy.
-        # "protected" is derived but not declarable, so a live environment set to protected-branches-only always fails here, which is the intent: it counts classic branch protection and the fleet configures rulesets instead.
-        # "unrecognized" is deliberate for the same reason, so a form GitHub adds later fails loudly instead of being folded into one of the three above it.
+        # "protected" is derived but not declarable, so a live environment set to protected-branches-only always fails here.
+        # That is the intent: it counts classic branch protection and the fleet configures rulesets instead.
+        # "unrecognized" is deliberate for the same reason.
+        # A form GitHub adds later therefore fails loudly instead of being folded into one of the three above it.
         got="$(jqr 'if .deployment_branch_policy == null then "none" elif .deployment_branch_policy.custom_branch_policies then "custom" elif .deployment_branch_policy.protected_branches then "protected" else "unrecognized" end' <<<"$env_live")"
         assert "environment '$ename' branch policy = $policy" test "$got" = "$policy"
         # The allowed set exists only under a custom policy, so a mismatch above skips it rather than reporting a second failure for the same cause.
@@ -763,16 +828,21 @@ check_environments() {
             fail "environment '$ename' - could not read its deployment branch policies"
             continue
         fi
-        # A tag policy shares this endpoint with a branch policy, so the type is compared rather than filtered out, and a tag added by hand reads as drift instead of vanishing from the set.
+        # A tag policy shares this endpoint with a branch policy, so the type is compared rather than filtered out.
+        # A tag added by hand therefore reads as drift instead of vanishing from the set.
         # Both sides are sorted, since the endpoint's order is not the registry's.
         want="$(jqr '[.branches[] | "branch:\(.)"] | sort | join(", ")' <<<"$row")"
         got="$(jqr '[.[] | "\(.type // "branch"):\(.name)"] | sort | join(", ")' <<<"$policies")"
         assert "environment '$ename' allows exactly [$want]" test "$got" = "$want"
     done
-    # An environment the registry does not declare is reported rather than asserted, matching the label list and the bypass actors: the fleet set is a floor.
-    # GitHub creates some without being asked, a Copilot coding-agent environment among them, so asserting the set both ways would report drift on every repo that has ever run one.
+    # An environment the registry does not declare is reported rather than asserted, matching the label list and the bypass actors.
+    # The fleet set is a floor.
+    # GitHub creates some without being asked, a Copilot coding-agent environment among them.
+    # Asserting the set both ways would therefore report drift on every repo that has ever run one.
     # shellcheck disable=SC2016  # $live is a jq --argjson variable, not a shell expansion
-    # Names are taken only from entries shaped like one, since a malformed entry the loop already refused would otherwise raise here, replacing this note with a second failure naming the wrong cause.
+    # Names are taken only from entries shaped like one.
+    # That is because a malformed entry the loop already refused would otherwise raise here.
+    # The raise would replace this note with a second failure naming the wrong cause.
     if ! extra="$(jqr --argjson live "$live_envs" '([$live[].name] - [.[] | objects | .name | strings]) | join(", ")' <<<"$entries")"; then
         fail "could not compute the undeclared deployment environment list"
         return

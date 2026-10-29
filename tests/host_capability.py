@@ -1,7 +1,7 @@
 """Host capabilities a test needs and some hosts lack.
 
-A test that needs one of these skips with the reason when the host lacks it, rather than
-erroring on a precondition that has nothing to do with the code under test.
+A test that needs one of these skips with the reason when the host lacks it. The skip replaces an
+error on a precondition that has nothing to do with the code under test.
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ def unprivileged_root_is_available() -> bool:
 
     A guard reading `$EUID` cannot be fooled by setting a variable, since bash makes it read-only.
     A sudo'd run therefore has to be a real EUID 0. A user namespace is the one way to
-    reach that without root, and it is unavailable on a host that restricts unprivileged user
-    namespaces, which is why this is probed rather than assumed.
+    reach that without root. A user namespace is unavailable on a host that restricts unprivileged
+    user namespaces, which is why this is probed rather than assumed.
     """
     if sys.platform != "linux" or not shutil.which("unshare"):
         return False
@@ -125,16 +125,16 @@ def bash_path() -> str | None:
 
     A bare "bash" passed to subprocess on Windows is resolved by CreateProcess, which searches
     System32 before PATH and so finds the WSL launcher. That launcher hands the script to a second
-    shell that re-parses it, which mangles any quoting or expansion the script relies on, so the
-    PATH entry is named instead, passing over the launcher wherever PATH lists it. There each
-    absolute directory is probed for bash.exe itself rather than through shutil.which, which on
-    Windows would also look in the current directory first and admit a bash.cmd shim that cmd.exe
-    re-parses. Elsewhere shutil.which answers, as it did for a bare "bash". PATH is read on every
+    shell that re-parses it, which mangles any quoting or expansion the script relies on. The
+    PATH entry is therefore named instead, passing over the launcher wherever PATH lists it. There
+    each absolute directory is probed for bash.exe itself rather than through shutil.which. On
+    Windows shutil.which would also look in the current directory first and admit a bash.cmd shim
+    that cmd.exe re-parses. Elsewhere shutil.which answers, as it did for a bare "bash". PATH is read on every
     call rather than cached, since a test may change it for the duration of its run.
 
     A script holding a doubled backslash is handed to this bash as a file rather than through
-    `-c`. subprocess writes the pair literally into the Windows command line, and Git Bash's own
-    parse of that line collapses it to one, which a jq filter's escaped class then fails to compile.
+    `-c`. subprocess writes the pair literally into the Windows command line. Git Bash's own
+    parse of that line collapses the pair to one, which a jq filter's escaped class then fails to compile.
     """
     if not _WINDOWS:
         return shutil.which("bash")

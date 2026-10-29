@@ -45,7 +45,7 @@ Task: adversarial review of this branch's diff against its merge-base with its t
   read full surrounding files where the diff hunks alone do not give enough context.
   Run `python3 <hub-checkout>/scripts/prose_lint.py --diff "$(git merge-base refs/remotes/origin/<target> HEAD)"`.
   Add `--allow-comments` where the change carries, or will open carrying, the `comments` label.
-  Then run the same command again with `--check sentence-length` added, and report each output as findings.
+  Report its output as findings.
 Worktree: <worktree>, the checkout holding the branch.
   Start every command with `cd <worktree> &&`, since a harness can reset the working directory between calls.
   Read each listed file at its path under `<worktree>`.

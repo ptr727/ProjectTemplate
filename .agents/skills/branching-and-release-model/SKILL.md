@@ -105,9 +105,8 @@ rather than guessing from the repo's contents.
   build height. That height is both wrong (the real height differs) and a maintenance trap.
   "Correcting" `1.0` to `1.0.0` is a defect.
 - **A no-op publish (unchanged NBGV `SemVer2`) on a schedule or push trigger re-pushes nothing to
-  any target keyed on the version string.** Docker is the exception: it always re-pushes (a dispatch
-  refreshes the release instead of skipping) to pick up upstream base-image
-  refreshes. Full guarantee and the `version.json` `pathFilters` boundary:
+  any target keyed on the version string.** Docker is the exception: it always re-pushes to pick up
+  upstream base-image refreshes. Full guarantee and the `version.json` `pathFilters` boundary:
   `references/release-publish-mechanics.md`.
 - **A package push can fail after the release is already cut**, since it runs after the release
   task and no gate covers it. A full re-run is always available inside its bounded

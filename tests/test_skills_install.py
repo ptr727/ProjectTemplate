@@ -37,7 +37,7 @@ class AgentsHomeCase(unittest.TestCase):
 
 class SourceRefCase(unittest.TestCase):
     """source_ref()'s dirty check must watch every path this installer actually reads from,
-    not only .agents/skills/, or a modified marketplace.json/generated plugin would report
+    not only .agents/skills/. Otherwise a modified marketplace.json/generated plugin would report
     dirty=False over bytes that were never installed."""
 
     def test_git_status_is_scoped_to_both_watched_paths(self) -> None:
@@ -64,7 +64,7 @@ class SourceRefCase(unittest.TestCase):
 
     def test_a_handed_in_commit_stands_in_where_git_cannot_answer(self) -> None:
         """A bootstrap runs the installer from a tarball tree with no .git, and hands in the commit
-        it resolved before downloading, so the stamp stays checkable rather than permanently stale."""
+        it resolved before downloading. So the stamp stays checkable rather than permanently stale."""
 
         def no_git(args, **kwargs):
             result = mock.Mock()
@@ -83,7 +83,7 @@ class SourceRefCase(unittest.TestCase):
 
     def test_a_bootstrap_tree_is_never_asked_of_git(self) -> None:
         """A kept tree inside a home directory kept in git would otherwise stamp that repository's
-        commit, and read dirty for every path it does not track."""
+        commit. It would also read dirty for every path it does not track."""
         tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
         (tree / skills_install.BOOTSTRAP_COMMIT_MARKER).write_text("cafe1234\n", encoding="utf-8")
@@ -98,8 +98,8 @@ class SourceRefCase(unittest.TestCase):
             )
 
     def test_a_bootstrap_tree_with_no_commit_is_an_archive_judged_by_nothing(self) -> None:
-        """A loader whose resolve failed writes no commit, and the tree is still no checkout, so
-        the intended revision must not be read from whatever repository encloses it."""
+        """A loader whose resolve failed writes no commit, and the tree is still no checkout.
+        So the intended revision must not be read from whatever repository encloses it."""
         tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (tree / skills_install.BOOTSTRAP_OWNED_MARKER).write_text("", encoding="utf-8")
         with (
@@ -221,8 +221,9 @@ class MaterializeCase(unittest.TestCase):
     @requires_symlink
     def test_a_symlinked_directory_in_the_cleanup_scan_is_skipped_not_crashed_on(self) -> None:
         """is_dir() alone follows a symlink, and shutil.rmtree() refuses a top-level symlink
-        with an uncaught OSError. A stray symlink under the shared target, even one whose real
-        target happens to carry the marker, must be skipped rather than blow up the install."""
+        with an uncaught OSError. A stray symlink under the shared target must be skipped rather
+        than blow up the install. That holds even for one whose real target happens to carry the
+        marker."""
         real = self.tmp / "elsewhere"
         real.mkdir()
         (real / skills_install.INSTALLED_MARKER).write_text("", encoding="utf-8")
@@ -238,8 +239,8 @@ class MaterializeCase(unittest.TestCase):
 
     def test_a_same_named_third_party_skill_is_never_removed_as_if_retired(self) -> None:
         """The marker, not the name, decides what this installer may remove. A third-party
-        skill happening to share a name with something the fleet once published must survive,
-        even though a name-only check would read it as "our old content, now gone"."""
+        skill happening to share a name with something the fleet once published must survive.
+        That holds even though a name-only check would read it as "our old content, now gone"."""
         target = self.tmp / "target"
         target.mkdir(parents=True)
         (target / "bar").mkdir()
@@ -281,8 +282,8 @@ class MaterializeCase(unittest.TestCase):
 
 
 class ReportCase(unittest.TestCase):
-    """--report answers the snapshot copy and the live checkout separately, and exits on the
-    snapshot's verdict alone, since the live channel following its checkout is the design."""
+    """--report answers the snapshot copy and the live checkout separately.
+    It exits on the snapshot's verdict alone, since the live channel following its checkout is the design."""
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -389,7 +390,7 @@ class ReportCase(unittest.TestCase):
         self.assertEqual(exit_code, 1)
 
     def test_every_cannot_read_path_emits_the_judged_snapshot_shape(self) -> None:
-        """A parser reads one shape, so a missing, unreadable, or unrecognized stamp carries every
+        """A parser reads one shape. So a missing, unreadable, or unrecognized stamp carries every
         key a judged snapshot does, null where the stamp would have said, and resolves intended."""
         keys = {"installedFrom", "installedDirty", "intended", "intendedRef", "current", "reason"}
         self.write_stamp({"commit": "abc"})
@@ -466,8 +467,8 @@ class IntendedCommitCase(unittest.TestCase):
 
     def test_a_fetched_tarball_is_judged_against_the_commit_its_loader_resolved(self) -> None:
         """A bootstrap reports from a tarball tree with no git to ask, handing in the commit it
-        resolved. Judging that host against a main it cannot resolve would fail every fresh host,
-        and one bootstrapped from another ref would be judged against the wrong revision."""
+        resolved. Judging that host against a main it cannot resolve would fail every fresh host.
+        And one bootstrapped from another ref would be judged against the wrong revision."""
         with (
             mock.patch(
                 "skills_install.source_ref",
@@ -646,7 +647,8 @@ class LiveChannelCase(unittest.TestCase):
 
     def test_the_dirty_check_counts_ignored_and_untracked_files(self) -> None:
         """Claude Code loads an ignored or untracked file under the plugin tree the same as a
-        tracked one, so a status that hides either would call that content clean."""
+        tracked one.
+        So a status that hides either would call that content clean."""
         self.listing(
             json.dumps(
                 [{"name": skills_install.MARKETPLACE_NAME, "installLocation": "/hub/checkout"}]
@@ -725,7 +727,7 @@ class LiveChannelCase(unittest.TestCase):
 
 class PluginStateCase(unittest.TestCase):
     """The marketplace listing proves the directory is registered, not that Claude Code loads
-    its plugin, so the plugin's install and enabled state is read from `claude plugin list`."""
+    its plugin. So the plugin's install and enabled state is read from `claude plugin list`."""
 
     def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
@@ -785,8 +787,8 @@ class PluginStateCase(unittest.TestCase):
 
 class MainExitCodeCase(unittest.TestCase):
     """A caller scripting this installer needs the exit code to distinguish a real failure
-    (claude present but registration failed) from an expected partial install (no claude on
-    this machine at all)."""
+    from an expected partial install. A real failure is claude present but registration failed.
+    An expected partial install is no claude on this machine at all."""
 
     def setUp(self) -> None:
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1012,7 +1014,7 @@ class RegisterCase(unittest.TestCase):
 
 class IntendedInBootstrapTreeCase(unittest.TestCase):
     """A named revision is resolved by git, which inside a bootstrap tree answers for whatever
-    repository encloses it, so the report would judge the copy against an unrelated commit."""
+    repository encloses it. So the report would judge the copy against an unrelated commit."""
 
     def test_intended_is_refused_in_a_bootstrap_tree(self) -> None:
         tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1067,7 +1069,7 @@ class LinuxWrapperSudoGuardCase(unittest.TestCase):
 
     def test_a_root_account_with_no_sudo_user_still_installs(self) -> None:
         """A container or a Proxmox node whose working account is root installs for root, which
-        is correct there, so the guard reads SUDO_USER rather than EUID alone."""
+        is correct there. So the guard reads SUDO_USER rather than EUID alone."""
         r = self.run_wrapper(root=True, sudo_user=None)
         self.assertEqual(r.returncode, 0)
         self.assertIn("[dry run]", r.stdout)

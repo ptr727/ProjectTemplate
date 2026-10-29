@@ -18,9 +18,9 @@ level up. It answers two questions the audit cannot:
   2. Which `verbatim` units have a downstream copy that diverges in a NON-stale way? That is either a
      mis-set label (the content legitimately varies -> should be intent) or real drift to chase.
 
-It also runs a manifest-gap pass over the whole fleet: a file the hub tracks, the manifest does not declare,
-and a repo carries anyway is hub-hosted content in a repo that should not hold it (exactly the configure.sh /
-settings.json bug). Each gap names its carriers, so a `retire` disposition reads as a deletion work list.
+It also runs a manifest-gap pass over the whole fleet. A gap is a file the hub tracks, the manifest does not
+declare, and a repo carries anyway. It is hub-hosted content in a repo that should not hold it (exactly the
+configure.sh / settings.json bug). Each gap names its carriers, so a `retire` disposition reads as a deletion work list.
 
 Usage: uv run --no-project --script spec/fidelity_honesty.py [--report]
 """
@@ -164,11 +164,11 @@ def manifest_gap_pass(spec):
     """Hub-tracked, manifest-undeclared files, mapped to every cataloged repo that carries one.
 
     Read fleet-wide rather than against a single reference adopter. A gap is a repo-by-repo fact, so one
-    adopter answers only for its own tree: a file five repos carry and that adopter does not was invisible,
-    which is the shape of the deletion this pass exists to find. Widening it also makes the result a work
+    adopter answers only for its own tree. A file five repos carry and that adopter does not was invisible.
+    That is the shape of the deletion this pass exists to find. Widening it also makes the result a work
     list rather than a hint, since the carriers are named.
-    A repo whose tree cannot be read in full is reported rather than skipped, because an unread tree
-    contributes no gaps and reads exactly like a repo that carries none.
+    A repo whose tree cannot be read in full is reported rather than skipped. The reason is that an unread
+    tree contributes no gaps and reads exactly like a repo that carries none.
     """
     hub_only = audit.hub_only_paths(spec)
     gaps, unreadable = {}, []
@@ -214,7 +214,7 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
 
     A recorded disposition still matching a live divergence is a burn-down row. A live divergence (a
     verbatim hand-modification, or a manifest gap) with no disposition reads UNTRIAGED. A disposition is
-    resolved only when every recorded repo now matches the canonical - a repo that went unavailable
+    resolved only when every recorded repo now matches the canonical. A repo that went unavailable
     (deleted, renamed, or too large to fetch inline) is unverified, not resolved, so it stays on the row.
     Verbatim stale copies are the mechanical re-vendor list (the audit already flags them), kept separate.
     """

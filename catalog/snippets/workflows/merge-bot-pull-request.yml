@@ -22,5 +22,6 @@ jobs:
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
-    # A repo with a tracker outside the built-in codegen and upstream-version pairs adds a with: block carrying a rules JSON array of head or head-prefix plus base.
+    # A repo with a tracker outside the built-in codegen and upstream-version pairs adds a with: block.
+    # The block carries a rules JSON array of head or head-prefix plus base.
     # A repo that keeps the repository-wide auto-delete off and still wants bot branches gone sets delete-branch true in the same block.

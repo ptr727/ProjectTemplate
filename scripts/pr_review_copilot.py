@@ -12,7 +12,7 @@ hold a finding also carries its own text as an unplaced part. `read` never raise
 trips on reads as no refusal, `unknown` coverage and verdict, and the whole body unplaced. A new
 shape reaches the gate as text, never a crash.
 
-The body is parsed with markdown-it-py, so a code span, a fence, or an indented block is a token
+The body is parsed with markdown-it-py. A code span, a fence, or an indented block is therefore a token
 of its own and never reads as markup. Only Copilot's current overview format, the one carrying the
 `ccr-overview-v2` marker, is read. A Copilot body in any other layout reads as one unplaced part.
 """
@@ -602,7 +602,7 @@ def entries_in(
     """The entries at a section's margin and the thread ids each one links.
 
     An entry is a list item at the shallowest level in the section, outside any `<details>`
-    nested in it, so a back-reference inside an entry or a collapsed list is not one.
+    nested in it. A back-reference inside an entry or a collapsed list is therefore not one.
     """
     nested = [(d.start, d.end or end) for d in found if start <= d.start < end]
     items = [

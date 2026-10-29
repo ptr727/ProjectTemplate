@@ -15,43 +15,50 @@ This file is the gate: the plumbing, the verdict, the wait loop, and the writes.
 are read by `pr_review_checks.py` and its review rounds by `pr_review_rounds.py`, both off a payload
 this file fetched. `pr_review_digest.py` renders the digest from those readings. What a reviewer's
 body says is read by `pr_review_copilot.py`, whose vocabulary lives in
-`reviewers/<name>.json`, so a change in the reviewer's wording is a data edit there and never
-an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
+`reviewers/<name>.json`. A change in the reviewer's wording is therefore a data edit there and
+never an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
 written outcomes acknowledge it, and on an earlier round it is a note.
 
 Subcommands
   attest   Publish that a recorded local pass covers the pull request's head, as a comment carrying
            `<!-- fleet-local-review: head=<sha> base=<branch> findings=<n> -->` that `status` and
-           `wait` read, an attestation counting only against the base it names. It reads the
-           receipt `local_review.py` keeps in the checkout's git directory and refuses unless the
-           checkout (--checkout, default the current directory) is at the pull request's head with
-           no change beyond it, its merge base with the base branch is the pull request's own, and
-           `local_review.py status` reports a covering pass against the base. Exit 0 = posted,
-           64 = the write scope could not be established or excludes the target, 65 = the pull
-           request could not be read, 66 = the response did not confirm the comment, 67 = the
-           checkout is not the head, holds changes, or measures another merge base, or that merge
-           base could not be read, 68 = no current local pass covers the content.
+           `wait` read. An attestation counts only against the base it names. It reads the
+           receipt `local_review.py` keeps in the checkout's git directory. It refuses unless all
+           of these hold:
+           - The checkout (--checkout, default the current directory) is at the pull request's
+             head with no change beyond it.
+           - The checkout's merge base with the base branch is the pull request's own.
+           - `local_review.py status` reports a covering pass against the base.
+           Exit 0 = posted. 64 = the write scope could not be established or excludes the target.
+           65 = the pull request could not be read. 66 = the response did not confirm the comment.
+           67 = the checkout is not the head, holds changes, or measures another merge base, or that
+           merge base could not be read. 68 = no current local pass covers the content.
   comment  Post one PR-conversation answer, including a suppressed-finding disposition. The PR
            node id is read in the same run, and the returned comment URL and body confirm the
-           write. Exit 0 = done, 64 = write scope could not be established or excludes the
-           target, 65 = the PR could not be read, 66 = the response did not confirm the comment.
+           write. Exit 0 = done. 64 = write scope could not be established or excludes the
+           target. 65 = the PR could not be read. 66 = the response did not confirm the comment.
            --fingerprint posts the body as the acknowledgment of the unplaced set `status` names,
            with `<!-- fleet-shape-ack: fingerprint=<fp> -->` beneath it.
   claims   Check the description against the branch it describes. A body claiming a commit or
-           quoting a `uses:` ref the head tree no longer carries is a silent failure caught by a
-           reviewer or not at all. Read-only. Exit 0 = every reference resolves, 70 = one does
-           not, 71 = there were references and none could be read, so nothing was decided.
-  cleanup  Forwarded to `pr_cleanup.py`, which holds the contract and the exit codes, so a command
-           line naming this script keeps working under the allow rule the host-safety installer
-           registers for it.
+           quoting a `uses:` ref the head tree no longer carries is a silent failure. It is caught
+           by a reviewer or not at all. Read-only. Exit 0 = every reference resolves. 70 = one does
+           not. 71 = there were references and none could be read, so nothing was decided.
+  cleanup  Forwarded to `pr_cleanup.py`, which holds the contract and the exit codes. A command
+           line naming this script therefore keeps working under the allow rule the host-safety
+           installer registers for it.
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
-           Exit 0 = no Copilot review covers the head yet, or the review covering it states no
-           partial coverage and its verdict counts what it flags. 42 = the round covering the
-           head states it read fewer files than the pull request changed, or states nothing it
-           can believe while an earlier round on record states partial coverage. 50 = that round
-           opens on a verdict other than the clean one while it counts no finding, opens no thread,
-           collapses no suppressed or previously-missed finding, and no thread is open, so what it
-           flags is named in its headline alone, printed under `VERDICT WITH NO COUNTED FINDING`. The code
+           Exit 0 = no Copilot review covers the head yet. 0 is also the exit where the review
+           covering the head states no partial coverage and its verdict counts what it flags. 42 = the
+           round covering the head states it read fewer files than the pull request changed. 42 is
+           also the exit where the round covering the head states nothing it can believe while an
+           earlier round on record states partial coverage. 50 = that round opens on a verdict
+           other than the clean one, while all of these hold:
+           - It counts no finding.
+           - It opens no thread.
+           - It collapses no suppressed or previously-missed finding.
+           - No thread is open.
+           What it flags is then named in its headline alone, printed under
+           `VERDICT WITH NO COUNTED FINDING`. The code
            repeats on that head after the headline is answered, since nothing here reads an
            answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
            HEADLINE`, which changes no exit code. 50 is also a head round's part the adapter
@@ -98,28 +105,31 @@ Subcommands
            names findings the round names that no thread on the pull request carries. Each of these is owed the triage a suppressed
            finding gets, and none decides an exit code.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
-           because the hand-run form keeps failing the same way: a node id typed into a
-           mutation, which resolves globally and so writes to a real thread somewhere
+           because the hand-run form keeps failing the same way. The failure is a node id typed
+           into a mutation. Such an id resolves globally and so writes to a real thread somewhere
            rather than failing. This takes a pull request number and words from the
            finding, queries the id itself, and offers no argument an id fits in. A finding
            posted twice on one file, threads whose opening comments read the same, is
-           answered as one under --all-identical. Exit 0 = done, 60 = no thread matched,
-           61 = more than one did and the flag did not apply, 62 = the reply returned
-           no comment url so nothing was resolved, 63 = the resolve did not report the
-           thread resolved, 64 = the write scope could not be established or excludes the target.
+           answered as one under --all-identical. Exit 0 = done. 60 = no thread matched.
+           61 = more than one did and the flag did not apply. 62 = the reply returned
+           no comment url so nothing was resolved. 63 = the resolve did not report the
+           thread resolved. 64 = the write scope could not be established or excludes the target.
   wait     Request a review where none is outstanding, then poll until Copilot's review lands on the
-           current head, then print the digest. The auto-request is skipped once a review past
-           --min-rounds covers the head, once Copilot has answered outside a formal review, once
-           one is pending, and under a refusal or quota reading below, since a request into a
-           reached limit spends quota and returns the same refusal. An error refusal whose run log
+           current head, then print the digest. The auto-request is skipped:
+           - Once a review past --min-rounds covers the head.
+           - Once Copilot has answered outside a formal review.
+           - Once one is pending.
+           - Under a refusal or quota reading below, since a request into a reached limit spends
+             quota and returns the same refusal.
+           An error refusal whose run log
            names a transient fetch failure is owed one re-request, unless the round before it was
            an error refusal too. A re-request already made after the refusal is never sent again.
-           A held head names it under COPILOT_ERROR_TRANSIENT instead. It is skipped on a pull
-           request into a branch other than the default too, whose every head an attested local
-           pass covers: an attested head has its checks polled instead while they can still move
-           its merge, and one with no attestation exits 49. --request asks for a round anyway.
+           A held head names it under COPILOT_ERROR_TRANSIENT instead. The auto-request is also skipped on a pull
+           request into a branch other than the default, whose every head an attested local
+           pass covers. There an attested head has its checks polled instead while they can still
+           move its merge, and one with no attestation exits 49. --request asks for a round anyway.
            The bot id is read from the repository's most recently updated pull requests, the last
-           HISTORY_PRS, widened once to HISTORY_PRS_WIDE, and nothing is requested where neither
+           HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
@@ -138,17 +148,20 @@ Subcommands
            open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
            says an unmet required check may sit in its unread part. It is also a round past
            --min-rounds not yet landed.
-           40 = no Copilot review covers the head: the reviewer
-           answered outside a formal review, the request returned success and recorded nothing on
-           the pull request, or the reviewer writes under a login no query filters on. 41 = the
-           newest round is a refusal or a quota state, the kind printed in its status line and, for
-           a refusal on this pull request, in the digest's `refusal=`: a refusal on the head, the
-           pull request's newest review being a quota or error refusal on any head, or the
-           reviewer's newest activity elsewhere in the repository being a quota refusal nothing
-           answered since while this head carries none of its own. Proceed on the other reviewers'
-           coverage rather than retrying, and pass --ignore-quota-signal once the quota is believed
-           to have reset. A transient error refusal whose one re-request is pending exits 30 instead. 42 and 50 = the review landed and `status`'s readings
-           apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
+           40 = no Copilot review covers the head, in any of these cases:
+           - The reviewer answered outside a formal review.
+           - The request returned success and recorded nothing on the pull request.
+           - The reviewer writes under a login no query filters on.
+           41 = the newest round is a refusal or a quota state. The kind is printed in its status
+           line and, for a refusal on this pull request, in the digest's `refusal=`. The cases are:
+           - A refusal on the head.
+           - The pull request's newest review being a quota or error refusal on any head.
+           - The reviewer's newest activity elsewhere in the repository being a quota refusal
+             nothing answered since while this head carries none of its own.
+           Proceed on the other reviewers' coverage rather than retrying, and pass
+           --ignore-quota-signal once the quota is believed to have reset. A transient error
+           refusal whose one re-request is pending exits 30 instead. 42 and 50 = the review landed
+           and `status`'s readings apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, or failed. On
            a held head a check running long or held by its environment polls to 30 instead.
@@ -163,14 +176,14 @@ Subcommands
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
            30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
            empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
-           49 = no Copilot round covers this head and none was requested, the pull request
-           merging into a branch other than the default with no attestation vouching for the
-           head. 64 = the write scope could not
+           49 = no Copilot round covers this head and none was requested. The situation is a
+           pull request merging into a branch other than the default with no attestation vouching
+           for the head. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
 mutation spelled as a `gh` command in a shell is read by the gh-write-guard PreToolUse hook, and
-one this script performs is not. The script removes the guarded failure at its source: every node
+one this script performs is not. The script removes the guarded failure at its source. Every node
 id comes from a live query in the same run, and the owner boundary is enforced in-process. See
 .github/copilot-instructions.md for the runbook, and GOVERNANCE.md "Repository Boundaries and
 Write Safety" for the rules these commands enforce.
@@ -530,8 +543,8 @@ def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
     """The reviewer's own reviews and comments across the most recently updated pull requests.
 
     Newest activity first, whichever connection it came from. Read at HISTORY_PRS and, where that
-    carries no usable bot id, read again at HISTORY_PRS_WIDE, so a long outage or a comment-only
-    window does not read as a repository that never saw a Copilot review.
+    carries no usable bot id, read again at HISTORY_PRS_WIDE. A long outage or a comment-only
+    window therefore does not read as a repository that never saw a Copilot review.
     """
     entries = _copilot_history_window(owner, repo, HISTORY_PRS)
     if entries and copilot_bot_id(entries) is not None:
@@ -1020,10 +1033,14 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """Publish that a recorded local pass covers this pull request's head. Returns an exit code.
 
     The `local_review.py` receipt lives in the checkout's git directory, which GitHub cannot read,
-    so this posts a comment the gate can read. It first checks that the checkout's HEAD is the pull
-    request's head, the checkout holds no change beyond that commit, its merge base is the pull
-    request's own, and `local_review.py status` reports a current pass against the base. The first
-    two are read again after the check returns.
+    so this posts a comment the gate can read. It first checks all of these:
+
+    - The checkout's HEAD is the pull request's head.
+    - The checkout holds no change beyond that commit.
+    - Its merge base is the pull request's own.
+    - `local_review.py status` reports a current pass against the base.
+
+    The first two are read again after the check returns.
     """
     if refused := scope_refusal(owner):
         return refused
@@ -1340,8 +1357,8 @@ def gh_rest(path: str, jq: str | None = None, raw: bool = False) -> subprocess.C
 
     Unlike `gh_graphql` this does not raise on a non-zero exit, since a 404 is an answer. Every
     path passed in is a GET. `raw` is for a job log, which `gh` 2.97 and later refuse to print
-    without `--allow-escape-sequences`, so the flag is passed only where `gh_takes_escape_flag`
-    says so.
+    without `--allow-escape-sequences`. The flag is therefore passed only where
+    `gh_takes_escape_flag` says so.
     """
     argv = ["gh", "api", path] + (["--jq", jq] if jq else [])
     if raw and gh_takes_escape_flag():

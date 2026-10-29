@@ -9,7 +9,7 @@ The problem this exists for is an ordering one. Hub-owned content under `.agents
 `GOVERNANCE.md`, `WORKFLOW.md`, `AGENTS.md` and `AUDIT.md` is written, reviewed and merged here
 against a diff that is usually a few lines. The whole tree only ever reaches a reviewer as new
 files, in full, when a downstream repository carries it for the first time. So the first real
-read of a rule happens in a repository that cannot act on the result: the tree is manifest-owned,
+read of a rule happens in a repository that cannot act on the result. The tree is manifest-owned,
 `scripts/carry.py check` compares source and target digests, and a local edit there becomes drift
 on the next fidelity check. Every carrier then re-discovers the same defect, and the finding
 arrives in a session with no hub checkout and no standing to test the claim.
@@ -20,8 +20,8 @@ of which content has had one.
 **A unit is what a reviewer reads whole.** For a Markdown canonical, that is one level-two
 section, which is also the fidelity unit `spec/section-model.md` declares and the unit key
 `spec/divergences.json` already uses (`<path> > <section>`). For anything else it is the file.
-Splitting by section is what keeps the read proportionate: a reviewer asked for the whole of
-`GOVERNANCE.md` on every edit reads none of it, where a reviewer asked for the one section an
+Splitting by section is what keeps the read proportionate. A reviewer asked for the whole of
+`GOVERNANCE.md` on every edit reads none of it. In contrast, a reviewer asked for the one section an
 edit lands in reads all of it.
 
 **Coverage is keyed on content, never on a commit.** A unit is covered when a recorded pass names
@@ -30,19 +30,18 @@ no longer the text a carrier will receive. Editing a neighbouring section does n
 reviewer's read of this one is still a read of these bytes.
 
 **The read is swept periodically rather than gated at a push.** Two weeks of fleet review rounds
-measured the local passes a push owed as a large share of what a pull request spent, while what they
-returned went unclassified, so the two were never weighed against each other and the call on that
-evidence was to sweep the read rather than gate it. Nothing here refuses a push or a pull
-request any more.
-`sweep` names the units whose text has moved past the pass that read them, and beside them a
-bounded slice of the never-read backlog, newest-committed first so a unit just authored here is
-read without waiting behind every older one. That is the work one scheduled run files and an agent
-session performs, and `report` renders the whole backlog, to standard output rather than into
-the tree, for the reason `scripts/README.md` gives.
+measured the local passes a push owed as a large share of what a pull request spent. What they
+returned went unclassified, so the two were never weighed against each other. The call on that
+evidence was to sweep the read rather than gate it. Nothing here refuses a push or a pull request
+any more. `sweep` names the units whose text has moved past the pass that read them. Beside them it
+names a bounded slice of the never-read backlog, newest-committed first. A unit just authored here
+is therefore read without waiting behind every older one. The units `sweep` names are the work one
+scheduled run files and an agent session performs. `report` renders the whole backlog to standard
+output rather than into the tree, for the reason `scripts/README.md` gives.
 
-The verdict vocabulary is `scripts/local_review.py`'s, so a caller reading an exit code from
-either engine need not know which one answered: 0 is covered, 1 is a finding, and 2 is the check
-itself not having run.
+The verdict vocabulary is `scripts/local_review.py`'s. So a caller reading an exit code from either
+engine need not know which one answered. The codes are 0 for covered, 1 for a finding, and 2 for the
+check itself not having run.
 
 Usage, each command run as `uv run --no-project --script scripts/canonical_review.py <command>`:
     list      every unit and its digest, as JSON
@@ -75,7 +74,8 @@ import fidelity_text
 import local_review
 
 # Reused rather than restated.
-# Two engines under one rule that disagree about which branch "develop" means, or about what an exit code says, are a defect in the pair rather than in either.
+# When two engines under one rule disagree about which branch "develop" means, that is a defect in the pair rather than in either.
+# The same holds when they disagree about what an exit code says.
 CannotRun = local_review.CannotRun
 DEFAULT_TARGET = local_review.DEFAULT_TARGET
 EXIT_COVERED = local_review.EXIT_COVERED
@@ -86,7 +86,9 @@ git = local_review.git
 
 MANIFEST = "spec/files.json"
 LEDGER = "reports/canonical-review.json"
-# The lock `record` holds around its read, merge, and write of the ledger, in this worktree's own git directory so a record killed mid-write leaves its lock where no add can stage it.
+# The lock `record` holds around its read, merge, and write of the ledger.
+# It lives in this worktree's own git directory.
+# So a record killed mid-write leaves its lock where no add can stage it.
 # `held_lock` appends `.lock` to the path it is given.
 LEDGER_LOCK_NAME = "canonical-review-ledger"
 LOCK_TIMEOUT = 10.0
@@ -99,15 +101,19 @@ LEDGER_NOTE = (
 )
 
 # The fidelity values that mean the hub authored the content and a downstream repository receives it.
-# `interface` is deliberately absent: that names a contract whose body is the repository's own, per RESYNC.md "Apply, in This Order", so there is no hub text for a carrier to re-read.
+# `interface` is deliberately absent.
+# That names a contract whose body is the repository's own, per RESYNC.md "Apply, in This Order".
+# So there is no hub text for a carrier to re-read.
 # An entry declaring no fidelity at all is a presence requirement over the repository's own content, which is likewise nothing this hub authored.
 AUTHORED_FIDELITY = frozenset({"verbatim", "intent"})
 TREE_FIDELITY = frozenset({"verbatim-tree"})
 
 # `spec/divergences.json`'s own unit key delimiter, so one vocabulary names a section across the fidelity ledger, this one, and any finding written against either.
 SECTION_DELIM = build_dist.SECTION_DELIM
-# The region before a document's first level-two heading is content a carrier reads like any other, so it is a unit rather than a gap between them.
-# A literal `## (preamble)` heading would collide with it, which file_units then refuses as a duplicate rather than resolving, since only one of the two is a section.
+# The region before a document's first level-two heading is content a carrier reads like any other.
+# So it is a unit rather than a gap between them.
+# A literal `## (preamble)` heading would collide with it.
+# The collision is then refused by file_units as a duplicate rather than resolved, since only one of the two is a section.
 PREAMBLE = "(preamble)"
 
 # The generator's own source-to-distribution mapping, read from it rather than restated here.
@@ -117,18 +123,22 @@ GENERATED_SKILLS = build_dist.GITHUB_SKILLS.relative_to(build_dist.ROOT).as_posi
 AUTHORED_SKILLS = build_dist.SKILLS_SRC.relative_to(build_dist.ROOT).as_posix()
 
 # How many never-read units one sweep asks for beside the stale ones.
-# A bound rather than the whole backlog, since filing every unread unit as one week's work files a list nobody starts, and nothing at all leaves a newly authored unit with no reader, which is the case the rule is written about.
+# A bound rather than the whole backlog, since filing every unread unit as one week's work files a list nobody starts.
+# A bound rather than nothing at all, since that leaves a newly authored unit with no reader.
+# That is the case the rule is written about.
 BACKLOG_SLICE = 5
 
-# What `record` accepts as a reviewer, which is `local_review.py`'s vocabulary for the same reason the exit codes are: a pass over a unit is performed by the same kinds of reviewer as a pass over a branch diff, and two spellings of one reviewer make the two records impossible to read together.
+# What `record` accepts as a reviewer is `local_review.py`'s vocabulary, for the same reason the exit codes are.
+# A pass over a unit is performed by the same kinds of reviewer as a pass over a branch diff.
+# Two spellings of one reviewer make the two records impossible to read together.
 REVIEWERS = local_review.BACKENDS
 
 
 def normalize(text: str) -> str:
     """A unit's comparable form, which neutralizes line endings and nothing else.
 
-    Deliberately not `spec/fidelity_text.py`'s `normalize`, which also masks Dependabot-owned action pins
-    and per-repo `needs:` lists. Those are governed drift for a fidelity comparison, where the
+    Deliberately not `spec/fidelity_text.py`'s `normalize`, which also masks Dependabot-owned action
+    pins and per-repo `needs:` lists. Those are governed drift for a fidelity comparison, where the
     question is whether two copies say the same thing. The question here is whether a reviewer has
     read these bytes, and masking any of them would report a read of text nobody saw. Line endings
     are the one exception, because the reviewer's read is identical either way and `.gitattributes`
@@ -162,7 +172,7 @@ def split_markdown(text: str) -> list[tuple[str | None, str]]:
     shown inside a code sample cannot split a unit here while those checks read the document the
     other way. A document read two ways by two tools is the failure that shared reading ends.
 
-    The heading line's exact bytes stay inside its region, so re-casing or re-spacing a heading
+    The heading line's exact bytes stay inside its region. So re-casing or re-spacing a heading
     surfaces as a changed unit rather than as an invisible edit.
     """
     base = normalize(text)
@@ -173,7 +183,8 @@ def split_markdown(text: str) -> list[tuple[str | None, str]]:
         (None, preamble),
         *((h.text, lines[h.line : end]) for h, end in found),
     ]
-    # A document whose first heading is its first line has an empty preamble, which is a region holding nothing rather than a unit a reviewer could read.
+    # A document whose first heading is its first line has an empty preamble.
+    # That is a region holding nothing rather than a unit a reviewer could read.
     if not regions[0][1] or not "\n".join(regions[0][1]).strip():
         regions.pop(0)
     return [(heading, "\n".join(lines)) for heading, lines in regions]
@@ -182,13 +193,14 @@ def split_markdown(text: str) -> list[tuple[str | None, str]]:
 def file_units(rel: str, text: str) -> dict[str, str]:
     """Every unit one carried file contributes, as key -> text.
 
-    A Markdown canonical splits into its sections, and anything else is one unit, because a section
+    A Markdown canonical splits into its sections. Anything else is one unit, because a section
     is a Markdown notion and a config file has no comparable seam to read whole.
     """
     if not rel.endswith(".md"):
         return {rel: text}
     regions = split_markdown(text)
-    # A Markdown file with no level-two heading at all is one region, and naming that region `<path> > (preamble)` would claim a structure the document does not have.
+    # A Markdown file with no level-two heading at all is one region.
+    # Naming that region `<path> > (preamble)` would claim a structure the document does not have.
     if len(regions) == 1 and regions[0][0] is None:
         return {rel: regions[0][1]}
     out: dict[str, str] = {}
@@ -196,8 +208,10 @@ def file_units(rel: str, text: str) -> dict[str, str]:
     for heading, region in regions:
         name = heading if heading is not None else PREAMBLE
         key = f"{rel}{SECTION_DELIM}{name}"
-        # Two sections of one name are two answers to one question, and keeping the last would record a read of one of them as covering both.
-        # Case-folded, because the declared-name lookup folds and spec/audit.py's heading match folds, so a pair differing only in case is one name to every reader but this one.
+        # Two sections of one name are two answers to one question.
+        # Keeping the last would record a read of one of them as covering both.
+        # Case-folded, because the declared-name lookup folds and spec/audit.py's heading match folds.
+        # So a pair differing only in case is one name to every reader but this one.
         earlier = seen.get(key.lower())
         if earlier is not None:
             shown = f"'{earlier}'" if earlier == name else f"'{earlier}' and '{name}'"
@@ -220,10 +234,10 @@ def declared_sections(entry: dict[str, Any]) -> list[str] | None:
     """The sections an entry restricts its carry to, or None where the whole file carries.
 
     A downstream copy carries the sections the manifest declares and no others, which
-    `spec/audit.py`'s undeclared-heading check is what enforces, so a section this hub keeps for
+    `spec/audit.py`'s undeclared-heading check is what enforces. So a section this hub keeps for
     itself is not content any carrier ever reads. Demanding a carrier's read of one would be this
-    tool inventing an obligation the manifest does not state, and the two hub-only sections of
-    `GOVERNANCE.md` are exactly that case. An entry marked `whole` carries the file entire, and its
+    tool inventing an obligation the manifest does not state. The two hub-only sections of
+    `GOVERNANCE.md` are exactly that case. An entry marked `whole` carries the file entire. Its
     `sections` list is then a presence requirement inside that carry rather than a narrowing of it.
     """
     if entry.get("whole"):
@@ -250,13 +264,14 @@ def tracked_files(root: Path) -> set[str]:
     """Every path git tracks in this working tree, plus every untracked one it does not ignore.
 
     Git's view rather than the filesystem's, because they disagree in ways that matter here. A
-    filesystem walk of a carried tree picks up whatever happens to be sitting in it, so a
-    gitignored `.DS_Store` or an editor backup becomes canonical content: the first fails the
-    UTF-8 decode and takes every subcommand to exit 2, and the second becomes a unit `sweep` names
+    filesystem walk of a carried tree picks up whatever happens to be sitting in it. So a
+    gitignored `.DS_Store` or an editor backup becomes canonical content. The first fails the
+    UTF-8 decode and takes every subcommand to exit 2. The second becomes a unit `sweep` names
     and `record` writes into the ledger forever. Neither is content any repository carries.
     """
     # Tracked plus untracked-and-not-ignored, rather than tracked alone.
-    # A carried file this branch has created but not staged is content a carrier will receive, and dropping it would narrow the unit set exactly where a new canonical is added.
+    # A carried file this branch has created but not staged is content a carrier will receive.
+    # Dropping it would narrow the unit set exactly where a new canonical is added.
     # Ignored paths stay out, which is what keeps a stray .DS_Store or build artifact from becoming canonical content.
     listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", root=root)
     return {path for path in listing.split("\0") if path}
@@ -267,14 +282,14 @@ def select_carried(
 ) -> tuple[dict[str, list[str] | None], list[str]]:
     """What a manifest declares carried over `tracked`, and what it declares that is not there.
 
-    Parameterized on the path set rather than reading the tree itself, so the membership question
-    and the manifest question stay separable and a caller answering one of them differently does
-    not have to reimplement the other.
+    It is parameterized on the path set rather than reading the tree itself. That keeps the
+    membership question and the manifest question separable, and a caller answering one of them
+    differently does not have to reimplement the other.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
-    carries. A declared path the tree does not hold is reported rather than skipped quietly, being
-    the ordinary case for a file scoped to a project type this hub is not, and also what a manifest
-    entry pointing at nothing looks like.
+    carries. A declared path the tree does not hold is reported rather than skipped quietly. An
+    absent path is the ordinary case for a file scoped to a project type this hub is not. It is also
+    what a manifest entry pointing at nothing looks like.
     """
     carried: dict[str, list[str] | None] = {}
     absent: list[str] = []
@@ -292,14 +307,17 @@ def select_carried(
         if rel not in carried:
             carried[rel] = sections
             continue
-        # Two entries naming one file are two parts of one carry rather than two carries, and a whole-file part subsumes a sectioned one rather than competing with it.
+        # Two entries naming one file are two parts of one carry rather than two carries.
+        # A whole-file part subsumes a sectioned one rather than competing with it.
         previous = carried[rel]
         carried[rel] = None if previous is None or sections is None else [*previous, *sections]
     for entry in manifest.get("trees", []):
         if entry.get("fidelity") not in TREE_FIDELITY:
             continue
         # Membership comes from the tree a repository actually receives, and the key from the tree a fix is allowed to edit.
-        # Taking both from the authored side would demand a carrier's read of a file no carrier ever gets, which `.agents/skills/README.md` is: it exists only on the authored side and `build_dist.py` copies nothing of it into the distribution.
+        # Taking both from the authored side would demand a carrier's read of a file no carrier ever gets.
+        # `.agents/skills/README.md` is such a file.
+        # It exists only on the authored side, and `build_dist.py` copies nothing of it into the distribution.
         declared = str(entry.get("source", ""))
         authored = authored_source(entry)
         patterns = list(entry.get("include", ["**/*"]))
@@ -334,10 +352,10 @@ def build_units(
 ) -> tuple[dict[str, str], list[str]]:
     """Unit key -> text for the carried paths `read` can supply, plus declared sections it lacks.
 
-    A path the reader has nothing for contributes no units, a manifest entry scoped to a project
-    type this repository is not being the ordinary case. A declared section the file does not hold
-    is a different thing entirely, a manifest naming a heading that is not there, so it is reported
-    rather than passed over.
+    A path the reader has nothing for contributes no units. A manifest entry scoped to a project
+    type this repository is not is the ordinary case of such a path. A declared section the file
+    does not hold is a different thing entirely. It is a manifest naming a heading that is not
+    there, so it is reported rather than passed over.
     """
     units: dict[str, str] = {}
     missing: list[str] = []
@@ -350,7 +368,8 @@ def build_units(
         if sections is None:
             units.update(found)
             continue
-        # Case-folded, matching spec/audit.py's own heading match, so one re-cased declaration cannot make a section silently stop being a unit while the fidelity check still hashes it.
+        # Case-folded, matching spec/audit.py's own heading match.
+        # So one re-cased declaration cannot make a section silently stop being a unit while the fidelity check still hashes it.
         # The key is the document's heading rather than the manifest's spelling, so what `sweep` prints is what the file holds.
         by_heading = {
             key.split(SECTION_DELIM, 1)[1].strip().lower(): key
@@ -369,8 +388,8 @@ def build_units(
 def disk_reader(root: Path) -> Callable[[str], bytes | None]:
     """Read a carried path out of the working tree, refusing rather than reporting it absent.
 
-    An unreadable file is a boundary and not an answer, since treating it as absent would drop its
-    units out of the set and read as a branch that never carried them.
+    An unreadable file is a boundary and not an answer. That is because treating it as absent would
+    drop its units out of the set and read as a branch that never carried them.
     """
 
     def read(rel: str) -> bytes | None:
@@ -398,10 +417,11 @@ def units(root: Path) -> tuple[dict[str, str], list[str]]:
 def read_ledger(root: Path) -> dict[str, dict[str, Any]]:
     """The recorded passes, keyed by unit.
 
-    An absent ledger is an empty record rather than a boundary, since the first repository to run
-    this has nothing recorded yet and refusing there would make the record impossible to adopt. An
-    unreadable or malformed one is a boundary, because it is a record that exists and cannot be
-    read, and treating that as empty would report every unit as never reviewed.
+    An absent ledger is an empty record rather than a boundary. That is because the first repository
+    to run this has nothing recorded yet, and refusing there would make the record impossible to
+    adopt. An unreadable or malformed one is a boundary. That is because it is a record that exists
+    and cannot be read. It is also because treating that as empty would report every unit as never
+    reviewed.
     """
     path = root / LEDGER
     if not path.is_file():
@@ -434,10 +454,12 @@ def ledger_lock(root: Path) -> Path:
 def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
-    Sorted and one entry per unit so a concurrent branch touching a different unit merges cleanly,
-    and so the diff of a recorded pass reads as the pass rather than as a reordering. The caller
-    holds `ledger_lock` across the read this replaces, since two overlapping records would
-    otherwise each read a ledger without the other's pass and the second write would drop it.
+    Sorted and one entry per unit, so a concurrent branch touching a different unit merges cleanly.
+    Sorting and keeping one entry per unit also make the diff of a recorded pass read as the pass
+    rather than as a reordering.
+    The caller holds `ledger_lock` across the read this replaces. That is because two
+    overlapping records would otherwise each read a ledger without the other's pass, and the second
+    write would drop it.
     """
     payload = {"note": LEDGER_NOTE, "passes": [entries[unit] for unit in sorted(entries)]}
     path = root / LEDGER
@@ -458,7 +480,7 @@ def resolve_base(target: str | None, root: Path) -> tuple[str, str]:
     """The target name and the merge-base commit a recorded pass is stamped with.
 
     A merge-base rather than this branch's own tip, since a squash merge discards that tip and an
-    amend moves it, so a stamp anchored there resolves nowhere once the branch is gone. The
+    amend moves it. So a stamp anchored there resolves nowhere once the branch is gone. The
     merge-base is ordinarily a commit the target's remote-tracking ref already holds.
     """
     name = local_review.resolve_target(target)
@@ -505,22 +527,24 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     """Each path's last commit time, which is what orders the never-read backlog.
 
     Newest first rather than oldest, because a unit this repository has just authored is the one a
-    carrier is about to receive unread, and that is the case the whole rule is written about. A unit
-    unread for months can wait. The date read is the unit's own file rather than `spec/files.json`,
-    so widening the manifest on its own lifts nothing, while declaring a section in the commit that
+    carrier is about to receive unread. That is the case the whole rule is written about. A unit
+    unread for months can wait. The date read is the unit's own file rather than `spec/files.json`.
+    So widening the manifest on its own lifts nothing. Declaring a section in the commit that
     writes it lifts that unit like any other.
 
-    Three answers rather than two. A commit dates the path. A path no commit holds, staged or
-    merely unignored, is a file this branch has created and not committed, which `tracked_files`
-    deliberately counts as a unit, and it is the newest content there is rather than an undatable
-    one, so it sorts first. Anything else sorts last, which is a git failure in the ordinary case and every path in
-    a repository with no commits at all, where git exits 128 rather than answering. The order is a
-    priority rather than a claim about the content, so a uniform last is harmless there.
+    Three answers rather than two. A commit dates the path. A path no commit holds, staged or merely
+    unignored, is a file this branch has created and not committed. `tracked_files` deliberately
+    counts that as a unit. The path is the newest content there is rather than an undatable one, so
+    it sorts first. Anything else sorts last. In the ordinary case that is a path `git log` failed
+    to date. In a repository with no commits at all it is every path, since git exits 128 rather
+    than answering. The order is a priority rather than a claim about the content, so a uniform
+    last is harmless there.
     """
     times: dict[str, float] = {}
     for rel in rels:
         try:
-            # --literal-pathspecs, since a path holding a glob character would otherwise be matched as a pattern and dated from another file, and one opening with a colon would parse as pathspec magic.
+            # --literal-pathspecs, since a path holding a glob character would otherwise be matched as a pattern and dated from another file.
+            # A path opening with a colon would otherwise parse as pathspec magic.
             stamp = git(
                 "--literal-pathspecs", "log", "-1", "--format=%ct", "--", rel, root=root
             ).strip()
@@ -545,14 +569,14 @@ def backlog_slice(root: Path, never: list[str]) -> list[str]:
 def code_span(text: str) -> str:
     """A non-empty `text` as a Markdown code span, whatever backticks it holds.
 
-    A unit key is a heading, and a heading may name a command, so a key holding a backtick is
-    ordinary rather than exotic: one in this tree does. Wrapped in single backticks it splits into
-    two spans with the middle rendered as prose, which puts the path and the digest in different
+    A unit key is a heading, and a heading may name a command. So a key holding a backtick is
+    ordinary rather than exotic. One in this tree holds one. Wrapped in single backticks it splits
+    into two spans with the middle rendered as prose. That puts the path and the digest in different
     spans and makes the `record` argument under it uncopyable. CommonMark's own rule is a fence
     longer than any run inside, padded with a space where the content touches a backtick.
 
-    Non-empty because empty text would render as two literal backticks rather than a span, and the
-    pad reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
+    Non-empty because empty text would render as two literal backticks rather than a span. The pad
+    also reads backticks alone, so text bounded by spaces would lose one at each end. A unit key is
     a heading or a tracked path, both single-line and stripped, so neither shape reaches here.
     """
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
@@ -568,8 +592,8 @@ def render_sweep(
 
     Two lists rather than one. A stale unit is text a carrier is receiving now that no pass here
     has read, and every one of those is asked for. A never-read unit is one nothing here has read
-    at all, and a bounded slice of that backlog is asked for as well, because
-    a unit nothing has ever read here includes the one this repository authored last week.
+    at all. A bounded slice of that backlog is asked for as well. That is because a unit nothing
+    has ever read here includes the one this repository authored last week.
     """
     states = {unit: state_of(unit, value, ledger) for unit, value in current.items()}
     stale = sorted(unit for unit, state in states.items() if state == "stale")
@@ -589,12 +613,16 @@ def render_sweep(
         f"## {len(stale)} unit(s) whose text moved past its pass",
         "",
     ]
-    # The key and the whole digest, in the shape `record` takes them, so working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
-    # A digest the tree has moved past since refuses the record, which is the content having moved rather than a fault in the list, and the answer is a read at the unit's current text.
+    # The key and the whole digest, in the shape `record` takes them.
+    # So working the issue is a copy rather than a second lookup against `list` over every unit in the tree.
+    # A digest the tree has moved past since refuses the record.
+    # That is the content having moved rather than a fault in the list.
+    # The answer is a read at the unit's current text.
     lines.extend("- " + code_span(f"{unit}={current[unit]}") for unit in stale)
     lines.extend(["", f"## {len(fresh)} unit(s) from the never-read backlog", ""])
     # The paragraph describes how a slice is chosen, so it is emitted only where there is one.
-    # Rendered unconditionally it outlives its own subject: once the backlog is worked off, every issue and every job summary would carry a description of units the document does not hold.
+    # Rendered unconditionally it outlives its own subject.
+    # Once the backlog is worked off, every issue and every job summary would carry a description of units the document does not hold.
     if fresh:
         lines.extend(
             [
@@ -637,7 +665,8 @@ def render_sweep(
         ]
     )
     # A pass recorded against a unit the tree no longer holds, which a renamed or deleted section produces.
-    # Reported here rather than left to `status` alone, because no pass closes an orphan: the new key is read under the backlog above, and the old one stays recorded against a unit the tree no longer holds.
+    # Reported here rather than left to `status` alone, because no pass closes an orphan.
+    # The new key is read under the backlog above, and the old one stays recorded against a unit the tree no longer holds.
     # Not counted as work, since deciding that a section is gone rather than moved is a reader's call and no pass closes it.
     orphans = sorted(set(ledger) - set(current))
     if orphans:
@@ -673,8 +702,9 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
 
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
-    record time, so an edit between the review and the record, a format-on-save or a hook autofix,
-    would be attested to by a reviewer who never saw it. That is the one claim this record makes.
+    record time. So an edit between the review and the record would be attested to by a reviewer
+    who never saw it. A format-on-save and a hook autofix are examples of such edits. That attestation
+    is the one claim this record makes.
     """
     out: dict[str, str] = {}
     for value in values:
@@ -730,7 +760,8 @@ def cmd_record(args: argparse.Namespace) -> int:
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
     _, base = resolve_base(args.target, root)
-    # The same lock as `local_review.write_pass`, for the same reason: a record is a read, a merge, and a write, and two of them interleaved lose the pass the second one never read.
+    # The same lock as `local_review.write_pass`, for the same reason.
+    # A record is a read, a merge, and a write, and two of them interleaved lose the pass the second one never read.
     lock = ledger_lock(root)
     fd_lock = local_review.held_lock(lock, LOCK_TIMEOUT)
     try:
@@ -911,8 +942,11 @@ def main(argv: list[str] | None = None) -> int:
         local_review.silence(sys.stderr)
         return code
     # A crash is the check not having run, so it reports the boundary code.
-    # Falling through to the interpreter's own exit 1 would read as the not-covered verdict, and a capture point folding that reports an execution boundary as a gate finding.
-    # A last resort rather than a path with a known caller, since every git call goes through local_review.git and reports an OSError or a timeout as CannotRun above.
+    # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
+    # A capture point folding that exit reports an execution boundary as a gate finding.
+    # A last resort rather than a path with a known caller.
+    # That is because every git call goes through local_review.git.
+    # That function reports an OSError or a timeout as CannotRun above.
     # Reached in the tests by raising through `units`, because a handler nothing exercises is one nobody knows still folds the code it promises.
     except Exception as exc:  # noqa: BLE001
         emit(f"canonical-review: unexpected failure ({type(exc).__name__}: {exc})", sys.stderr)

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Exercise two of repo-config/configure.sh's environment checks by running the script's own lines.
 
-The shell is lifted out of the file rather than restated here, so an edit that removes the
-behavior fails these tests instead of leaving a reimplementation to agree with itself. Each
-harness lifts the whole region under test, consumer included, since lifting a value's producer
-alone would leave a test that passes while the consumer ignores what it produced.
+The shell is lifted out of the file rather than restated here.
+An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. Each
+harness lifts the whole region under test, consumer included.
+That is because lifting a value's producer alone would leave a test that passes while the consumer ignores what it produced.
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ JQR = r"^(jqr\(\) \{.*?\}$)"
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     """The script under the same shell options configure.sh sets, with a bounded wait.
 
-    The options are lifted rather than typed, because a harness running without them is blind to
-    exactly the error handling the lines under test rely on.
+    The options are lifted rather than typed.
+    That is because a harness running without them is blind to exactly the error handling the lines under test rely on.
     """
     bash = require("bash", *tools)
     options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
@@ -93,11 +93,11 @@ class EnvironmentNameInAPathCase(unittest.TestCase):
     def request_paths(self, name: str, gh_status: int = 0) -> list[str]:
         """Every path `configure.sh` asks `gh` for, with `gh` stubbed to report its argument.
 
-        The loop runs the name under test and then a plain `second`, so an arm that ended the run
-        rather than reporting shows up as a missing second path rather than as nothing.
+        The loop runs the name under test and then a plain `second`.
+        An arm that ended the run rather than reporting therefore shows up as a missing second path rather than as nothing.
 
-        The encoding line and the call that consumes it are lifted together on purpose: lifting
-        the encoder alone would pass against a call that still interpolated the raw name.
+        The encoding line and the call that consumes it are lifted together on purpose.
+        Lifting the encoder alone would pass against a call that still interpolated the raw name.
         """
         region = lift(
             r'(        ename_uri="\$\(jqr -n --arg s "\$ename" \'\$s\|@uri\'\)"\n'
@@ -116,9 +116,8 @@ class EnvironmentNameInAPathCase(unittest.TestCase):
     def test_a_name_becomes_exactly_one_path_segment(self) -> None:
         """Each name carries a character that breaks a raw path, and each expectation spells out its escape.
 
-        Asserting the whole segment rather than the absence of the raw character is what catches a
-        stray `%`, which is the byte that makes an invalid escape and cannot be tested for by
-        absence, since every encoded segment contains one.
+        Asserting the whole segment rather than the absence of the raw character is what catches a stray `%`.
+        That byte makes an invalid escape and cannot be tested for by absence, since every encoded segment contains one.
         """
         for name, segment in (
             ("prod/west", "prod%2Fwest"),

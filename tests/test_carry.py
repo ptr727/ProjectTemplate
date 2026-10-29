@@ -554,8 +554,8 @@ class CarrySectionTests(unittest.TestCase):
         self.assertIn("The hub's current wording.\r\n", result)
 
     def test_replace_sections_reads_the_ending_from_a_file_whose_heading_ends_it(self) -> None:
-        """A heading that is the last line of a file with no final newline carries no terminator, so
-        the ending has to come from the file rather than defaulting to LF and leaving it mixed."""
+        """A heading that is the last line of a file with no final newline carries no terminator.
+        So the ending has to come from the file rather than defaulting to LF and leaving it mixed."""
         hub = carry.split_lines("# T\n\n## X\n\nhub body\n")
         target = carry.split_lines("# T\r\n\r\n## X")
 
@@ -613,8 +613,8 @@ class CarrySectionTests(unittest.TestCase):
 
     def test_a_section_ending_the_hub_file_keeps_a_blank_line_before_what_follows(self) -> None:
         """The hub's last section carries no blank line before a following heading, because it has
-        none. `spec/audit.py` reads that and one blank line as the same content, so the boundary is
-        reconciled to what the target document needs rather than copied byte-for-byte."""
+        none. `spec/audit.py` reads that and one blank line as the same content.
+        So the boundary is reconciled to what the target document needs rather than copied byte-for-byte."""
         hub = carry.split_lines(HUB_DOC)
         target = carry.split_lines(
             TARGET_DOC + "\n## Repository Local Rule\n\nWritten after a local fault.\n"
@@ -647,7 +647,8 @@ class CarrySectionTests(unittest.TestCase):
 
     def test_comparable_region_matches_the_fidelity_check_across_the_file_boundary(self) -> None:
         """A region's raw bytes and `extract_section` differ by one newline exactly when one copy's
-        section ends its file and the other's does not, which is what this form reconciles."""
+        section ends its file and the other's does not.
+        This form reconciles that difference."""
         hub = "# T\n\n## X\n\nbody\n"
         padded = "# T\n\n## X\n\nbody\n\n## Y\n\nlocal\n"
 

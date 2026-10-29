@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's command-line refusals by running the whole script.
 
-The script is copied into a scratch tree beside a `gh` stub that records every call, so each case
-asserts both the exit and that a refused or help invocation never reached the API. A run whose
+The script is copied into a scratch tree beside a `gh` stub that records every call.
+Each case therefore asserts both the exit and that a refused or help invocation never reached the API. A run whose
 arguments are valid is the control, proving the stub would have recorded a call had one been made.
 """
 

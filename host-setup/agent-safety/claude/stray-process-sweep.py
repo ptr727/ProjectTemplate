@@ -1,45 +1,54 @@
 #!/usr/bin/env python3
 """SessionEnd sweep: stop the session's contained commands, then report whatever else outlived it.
 
-The first phase stops every command scope `tool-containment.py` started for this session's Bash tool
-calls. Each is known to be this session's own by its unit name, so stopping it needs no judgment about
-what the process is, and a backgrounded runaway ends with the session that started it. What was stopped
-is reported. See host-setup/agent-safety/README.md requirement 9.
+The first phase stops every command scope `tool-containment.py` started for this session's Bash tool calls.
+Each is known to be this session's own by its unit name, so stopping it needs no judgment about what the process is.
+A backgrounded runaway ends with the session that started it.
+What was stopped is reported.
+See host-setup/agent-safety/README.md requirement 9.
 
-Between the two, the sweep stops what this session's tree left behind. A `claude` started from a tool
-call runs its own commands in scopes named for itself, all in one slice named for the root session.
-Stopping this session's scopes kills such a nested `claude` before its own SessionEnd hook runs, so
-its scopes would keep running, named for a session nothing will sweep. Each scope records the pid of
-the agent that ran it, and a scope in this session's tree whose agent is no longer running is stopped
-and reported with the nested session's id. A scope whose agent still runs is left alone. The root
-session then stops its tree's slice and reverts the ceiling put on it, once nothing is left in it.
+Between the two, the sweep stops what this session's tree left behind.
+A `claude` started from a tool call runs its own commands in scopes named for itself, all in one slice named for the root session.
+Stopping this session's scopes kills such a nested `claude` before its own SessionEnd hook runs.
+Its scopes would therefore keep running, named for a session nothing will sweep.
+Each scope records the pid of the agent that ran it.
+A scope in this session's tree whose agent is no longer running is stopped and reported with the nested session's id.
+A scope whose agent still runs is left alone.
+The root session then stops its tree's slice and reverts the ceiling put on it, once nothing is left in it.
 
 The second phase is the report-only sweep below, for everything outside those scopes.
 
-`stray-process-sweep.py --orphans` runs the same test across every tree on the machine and reports
-each command scope whose agent is gone, without stopping anything, for a session that ended with no
-sweep at all, such as one whose terminal was closed.
+`stray-process-sweep.py --orphans` runs the same test across every tree on the machine.
+It reports each command scope whose agent is gone, without stopping anything.
+It is for a session that ended with no sweep at all, such as one whose terminal was closed.
 
-Registered as a Claude Code SessionEnd hook. It reads the hook payload on stdin, walks the process
-table for the agent process this hook is a child of, and reports every descendant running in its own
-session, since a shell started by a tool call is put in a session of its own and therefore survives
-the agent that started it. This phase never kills anything: the maintainer decides what on the machine
-is still wanted, and a long build backgrounded on purpose looks exactly like a leaked wait from here.
+Registered as a Claude Code SessionEnd hook.
+It reads the hook payload on stdin and walks the process table for the agent process this hook is a child of.
+It reports every descendant running in its own session.
+That is because a shell started by a tool call is put in a session of its own.
+That shell therefore survives the agent that started it.
+This phase never kills anything.
+That is because the maintainer decides what on the machine is still wanted.
+It is also because a long build backgrounded on purpose looks exactly like a leaked wait from here.
 
-Reporting at all is what needs saying. A SessionEnd hook cannot block, and Claude Code discards its
-JSON output, so stderr on exit 2 is the one channel that reaches the maintainer. Exit 2 is inert on
-this event (the session is already ending), which is why the sweep uses it for a report rather than
-for a refusal. A clean sweep exits 0 and prints nothing.
+Reporting at all is what needs saying.
+A SessionEnd hook cannot block, and Claude Code discards its JSON output.
+So stderr on exit 2 is the one channel that reaches the maintainer.
+Exit 2 is inert on this event (the session is already ending).
+That is why the sweep uses it for a report rather than for a refusal.
+A clean sweep exits 0 and prints nothing.
 
-What it does not see: a process whose own tool-call shell has already exited is reparented to init,
-so it is no longer a descendant of the agent and no descendant walk reaches it. The leak this exists
-for is the backgrounded tool-call shell itself, which stays a child of the agent for the session's
-whole life, and that one it does see.
+What it does not see: a process whose own tool-call shell has already exited is reparented to init.
+So that process is no longer a descendant of the agent, and no descendant walk reaches it.
+The leak this exists for is the backgrounded tool-call shell itself, which stays a child of the agent for the session's whole life.
+That one it does see.
 
-Linux and WSL only. `etimes` and a decimal `sess` are procps format keywords, which a BSD `ps` does
-not carry, and Windows has no session test at all, so on macOS and on Windows this exits silently
-without sweeping rather than failing at the end of every session. The kit does not ship a branch for
-either that nobody has run. See host-setup/agent-safety/README.md requirement 8.
+Linux and WSL only.
+`etimes` and a decimal `sess` are procps format keywords, which a BSD `ps` does not carry.
+Windows has no session test at all.
+So on macOS and on Windows this exits silently without sweeping rather than failing at the end of every session.
+The kit does not ship a branch for either that nobody has run.
+See host-setup/agent-safety/README.md requirement 8.
 
 Run `stray-process-sweep.py --selftest` to verify the reporting matrix without Claude Code.
 """
@@ -84,8 +93,9 @@ def _read_process_table(runner=None):
     """{pid: (ppid, session, age_seconds, command)} for every process, or None when ps cannot run.
 
     A failed `ps` is None rather than an empty table. Reading `.stdout` alone turned an unsupported
-    format keyword into "no processes", which reads as a clean sweep and reaches the caller as the
-    wrong diagnosis, so the exit status and an empty table are both failures here.
+    format keyword into "no processes".
+    That reads as a clean sweep and reaches the caller as the wrong diagnosis.
+    So the exit status and an empty table are both failures here.
     """
 
     def _run():
@@ -198,8 +208,8 @@ def survivors(table, agent, self_pid):
     """The roots of the detached subtrees under `agent` that this sweep is not itself part of.
 
     A descendant sharing the agent's own session goes when the agent goes, so it is not a survivor.
-    A descendant in a session of its own does not, and only the top of each such subtree is reported,
-    since ending that shell is what ends the loop under it. The sweep's own subtree is excluded: this
+    A descendant in a session of its own does not, and only the top of each such subtree is reported.
+    That is because ending that shell is what ends the loop under it. The sweep's own subtree is excluded: this
     hook runs in a detached session exactly like the shells it is looking for.
     """
     if agent not in table:
@@ -281,8 +291,8 @@ def _systemctl(*args, runtime=None, timeout=5):
 def manager_runtime(env, which=shutil.which, exists=os.path.exists, uid=None):
     """The runtime directory holding the user manager socket, found as `tool-containment.py` finds it.
 
-    A host without one never ran a contained command, and asking `systemctl --user` there fails, which
-    would report a failure to list at every session end on a host the installer never contained.
+    A host without one never ran a contained command, and asking `systemctl --user` there fails.
+    That would report a failure to list at every session end on a host the installer never contained.
     """
     if not which("systemctl"):
         return None
@@ -296,8 +306,8 @@ def manager_runtime(env, which=shutil.which, exists=os.path.exists, uid=None):
 def should_reap(runtime, env):
     """Whether the stop phase runs: where a manager was found, or where the session ran under the prefix.
 
-    The second covers a session under the prefix with no manager found at its end, which is reported as
-    an unknown, since the manager may never have run, rather than skipped in silence.
+    The second covers a session under the prefix with no manager found at its end.
+    That is reported as an unknown, since the manager may never have run, rather than skipped in silence.
     """
     return bool(runtime) or prefix_registered(env)
 
@@ -448,8 +458,8 @@ def orphaned(units, props, table):
     """(gone, unrecorded): the scopes whose recorded agent no longer runs, and those recording none.
 
     The agent is the process that ran the tool call, so a scope it no longer outlives belongs to a
-    session that has ended. This is a test on the agent rather than on each process's ancestry, since a
-    command detached on purpose loses its agent ancestor while its session is still running.
+    session that has ended. This is a test on the agent rather than on each process's ancestry.
+    That is because a command detached on purpose loses its agent ancestor while its session is still running.
     """
     gone, unrecorded = [], []
     for u in units:
@@ -486,8 +496,8 @@ def _tree_members(name, runner):
     """(members, slice props, scope props) for a tree's slice, or None where it cannot be listed.
 
     A slice names no property listing the scopes in it, so membership is read from each scope's own
-    `Slice`. The tree's slice is stopped only when this finds it empty, and stopping a slice ends
-    everything in it, so a failure to list is never read as empty.
+    `Slice`. The tree's slice is stopped only when this finds it empty.
+    Stopping a slice ends everything in it, so a failure to list is never read as empty.
     """
     scopes = _tool_scopes(runner)
     code, out = runner("show", "--property=ActiveState", "--property=DropInPaths", "--", name)
@@ -507,9 +517,10 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
     """Stop the scopes this session's tree holds for sessions that have ended, returning the report.
 
     The tree is the inherited root's, or this session's own where it is the root. Stopping an ended
-    session's scope can end an agent nested deeper, so the process table is read again after each
-    stop and the judgment repeated, up to `_TREE_ROUNDS` times and only while `deadline` allows, since
-    the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
+    session's scope can end an agent nested deeper.
+    So the process table is read again after each stop and the judgment repeated, up to `_TREE_ROUNDS` times.
+    The re-read and judgment repeat only while `deadline` allows, since the hook's own timeout would otherwise cut the report off.
+    Only the root stops the slice itself,
     and only once nothing is left in it. `table` is None where the process table could not be read,
     which says nothing about which agents run, so no scope is stopped then.
     """
@@ -613,8 +624,8 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
 def orphan_report(table, runner=_systemctl):
     """(exit code, report) for `--orphans`: every tool-call scope on the machine whose agent is gone.
 
-    Read-only, for a session that ended with no sweep. 0 is a clean machine, 1 a finding, 2 a failure
-    to ask, kept apart so a report that could not be made never reads as a clean one.
+    Read-only, for a session that ended with no sweep. 0 is a clean machine, 1 a finding, 2 a failure to ask.
+    These are kept apart so a report that could not be made never reads as a clean one.
     """
     if table is None:
         return 2, "agent-safety: could not read the process table, so no command scope was checked."
@@ -656,8 +667,8 @@ def main():
         payload = json.loads(sys.stdin.read() or "{}")
     except (ValueError, OSError):
         payload = {}
-    # Windows has no session test at all, and a BSD `ps` carries neither `etimes` nor a decimal
-    # `sess`, so on both the hook is inert rather than printing a failure at every session end.
+    # Windows has no session test at all, and a BSD `ps` carries neither `etimes` nor a decimal `sess`.
+    # So on both the hook is inert rather than printing a failure at every session end.
     if os.name != "posix" or sys.platform == "darwin":
         return 0
     held = payload.get("session_id") if isinstance(payload, dict) else None

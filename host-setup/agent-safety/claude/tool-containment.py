@@ -3,47 +3,56 @@
 
 Registered as `CLAUDE_CODE_SHELL_PREFIX` in the user settings.json `env`. Claude Code then runs each
 Bash tool call, each hook command, and each stdio MCP server launch as `<this file> '<command string>'`,
-one argument holding the whole string. For a tool call this file starts a transient systemd user scope
-carrying `TasksMax`, `MemoryMax`, and `MemorySwapMax=0`, the last so a runaway at the memory ceiling is
-killed rather than spilled into the host's swap, and runs the string under a shell inside it.
+one argument holding the whole string. For a tool call this file starts a transient systemd user scope carrying `TasksMax`, `MemoryMax`, and `MemorySwapMax=0`.
+The last is there so a runaway at the memory ceiling is killed rather than spilled into the host's swap.
+The file then runs the string under a shell inside the scope.
 
-Everything else runs under its shell directly, with no scope. The write guard is a hook, and a
-PreToolUse hook that exits 1 is a non-blocking error, so a scope that failed to start would let the very
-command the guard denies go ahead. An MCP server is long-lived and started outside any session, so a
-scope would bound it for its whole life and outlive the session that named it. A tool call is told
-apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last,
-either one enough. Where a later Claude Code drops both, tool calls run bare too, and the SessionEnd
+Everything else runs under its shell directly, with no scope.
+The write guard is a hook, and a PreToolUse hook that exits 1 is a non-blocking error.
+A scope that failed to start would therefore let the very command the guard denies go ahead.
+An MCP server is long-lived and started outside any session.
+A scope would therefore bound it for its whole life and outlive the session that named it.
+A tool call is told apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last, either one enough.
+Where a later Claude Code drops both, tool calls run bare too, and the SessionEnd
 sweep's report of surviving processes is what remains.
 
-A `claude` session started from a tool call runs its own tool calls in scopes of its own, named for it,
-each under its own ceiling, since sharing the parent's one ceiling would let a heavy build make the
-kernel kill the nested `claude` instead. Every scope of the tree also joins one slice named for the
-root session, which carries a total ceiling for the whole tree, so a chain of agents calling agents
-meets that ceiling however few processes each level adds. The root's id travels to nested sessions in
+A `claude` session started from a tool call runs its own tool calls in scopes of its own.
+Those scopes are named for it.
+Each is under its own ceiling.
+That is because sharing the parent's one ceiling would let a heavy build make the kernel kill the nested `claude` instead.
+Every scope of the tree also joins one slice named for the root session, which carries a total ceiling for the whole tree.
+A chain of agents calling agents therefore meets that ceiling however few processes each level adds.
+The root's id travels to nested sessions in
 `AGENT_CONTAINMENT_ROOT`, which the command inherits and a nested `claude` passes to its own tool calls.
-Each scope also records the pid of the agent that ran it, so the sweep can tell a scope whose session
-has ended from one whose session still runs.
+Each scope also records the pid of the agent that ran it.
+The sweep can therefore tell a scope whose session has ended from one whose session still runs.
 
 A runaway fan-out then meets the ceiling and fails with a visible error, instead of growing until the
-host has to be reset. The ceiling belongs to the scope's cgroup rather than to the foreground wait, so
-it still holds after the tool moves a timed-out command to the background, and after the command's
-own shell has exited and its children were reparented to init. See
-host-setup/agent-safety/README.md requirement 9.
+host has to be reset.
+The ceiling belongs to the scope's cgroup rather than to the foreground wait.
+It therefore still holds after the tool moves a timed-out command to the background.
+It therefore also holds after the command's own shell has exited and its children were reparented to init.
+See host-setup/agent-safety/README.md requirement 9.
 
 The ceilings default to `DEFAULT_TASKS_MAX` and `DEFAULT_MEMORY_MAX` per scope, and to
-`DEFAULT_TREE_TASKS_MAX` and `DEFAULT_TREE_MEMORY_MAX` for the tree. The maintainer raises them with
+`DEFAULT_TREE_TASKS_MAX` and `DEFAULT_TREE_MEMORY_MAX` for the tree.
+The maintainer raises them with
 `AGENT_CONTAINMENT_TASKS_MAX`, `AGENT_CONTAINMENT_MEMORY_MAX`, `AGENT_CONTAINMENT_TREE_TASKS_MAX`, and
-`AGENT_CONTAINMENT_TREE_MEMORY_MAX` in the same `env` block, which an inline `VAR=x` in the command
-cannot change, since this process reads them before the command runs. The tree's ceiling is applied
-when its slice is first created, so a changed tree override reaches the next root session. The
-ceilings bound an accident rather than an adversary: a command can still raise its own scope's
+`AGENT_CONTAINMENT_TREE_MEMORY_MAX` in the same `env` block.
+An inline `VAR=x` in the command cannot change them, since this process reads them before the command runs.
+The tree's ceiling is applied
+when its slice is first created, so a changed tree override reaches the next root session.
+The ceilings bound an accident rather than an adversary.
+A command can still raise its own scope's
 properties through `systemctl --user set-property`, or start a scope of its own outside this one.
 
-Each scope is named for its session plus a random suffix, so the SessionEnd hook stops what a session's
-tool calls left running and nothing else, and a reused pid never collides with a scope still loaded.
+Each scope is named for its session plus a random suffix.
+The SessionEnd hook therefore stops what a session's tool calls left running and nothing else.
+A reused pid therefore never collides with a scope still loaded.
 
-Where no systemd user manager is reachable, a tool call runs without a ceiling and one line on stderr
-says so, since a silent fallback would read as a contained command. Linux only: the installer does not
+Where no systemd user manager is reachable, a tool call runs without a ceiling and one line on stderr says so.
+That is because a silent fallback would read as a contained command.
+Linux only: the installer does not
 register this prefix on a host without a user manager.
 
 Run `tool-containment.py --selftest` to verify the decision matrix without Claude Code.
@@ -160,8 +169,8 @@ def tree_root(env):
 def tree_slice(root):
     """The slice holding every scope of the tree rooted at `root`, or None where there is no root to name.
 
-    A dash in a slice name is a level of the slice hierarchy, so the id's own dashes are dropped, or each
-    root would leave a chain of empty parent slices behind.
+    A dash in a slice name is a level of the slice hierarchy, so the id's own dashes are dropped.
+    Otherwise each root would leave a chain of empty parent slices behind.
     """
     name = (root or "").replace("-", "")
     return f"{TREE_UNIT}-{name}.slice" if name else None
@@ -229,8 +238,8 @@ def valid_tasks(value):
 def valid_memory(value):
     """Whether `value` is `infinity`, a whole `1%` to `99%` of RAM, or a whole count of M, G, or T.
 
-    A unitless count is bytes to systemd, and one written meaning megabytes kills every command at its
-    start, so a unit is required, and the size floor is `MIN_MEMORY`.
+    A unitless count is bytes to systemd, and one written meaning megabytes kills every command at its start.
+    So a unit is required, and the size floor is `MIN_MEMORY`.
     """
     if value == "infinity":
         return True
@@ -246,8 +255,8 @@ def valid_memory(value):
 def ceilings(env, tree=False):
     """(tasks, memory, notices): the scope's ceilings, or the tree's, and a line for each override refused.
 
-    A malformed override falls back to the default rather than to no ceiling, and says so, since
-    systemd would otherwise reject it and the command would not run at all.
+    A malformed override falls back to the default rather than to no ceiling, and says so.
+    That is because systemd would otherwise reject it and the command would not run at all.
     """
     prefix = "AGENT_CONTAINMENT_TREE_" if tree else "AGENT_CONTAINMENT_"
     tasks_default = DEFAULT_TREE_TASKS_MAX if tree else DEFAULT_TASKS_MAX
@@ -267,7 +276,8 @@ def ceilings(env, tree=False):
 def manager_runtime(env, platform=sys.platform, which=which, exists=os.path.exists, uid=None):
     """The runtime directory holding this account's systemd user manager socket, or None where there is none.
 
-    `XDG_RUNTIME_DIR` is read first and `/run/user/<uid>` second, since WSLg points the variable at a
+    `XDG_RUNTIME_DIR` is read first and `/run/user/<uid>` second.
+    That is because WSLg points the variable at a
     directory of its own while the user manager listens in the standard one.
     """
     if not platform.startswith("linux") or not which("systemd-run"):
@@ -310,7 +320,8 @@ def ensure_tree(
 
     The ceiling goes on before the first scope joins, as a runtime drop-in the sweep reverts when the
     root session ends. A slice whose cgroup already exists was set up by an earlier command, since a
-    scope joins it only after this succeeds, so the common case costs one `stat` and no process.
+    scope joins it only after this succeeds.
+    So the common case costs one `stat` and no process.
     """
     uid = os.getuid() if uid is None else uid
     if exists(
@@ -339,9 +350,10 @@ def ensure_tree(
 def plan(command, env, suffix, runtime, which=which, why=UNREACHABLE, tree=None, agent=None):
     """(argv, extra_env, notices) for the outer stage, which the caller execs.
 
-    For a tool call with a manager, argv starts the scope and re-enters this file as the inner stage,
-    the command and its shell carried in `extra_env`. A hook command, or a tool call with no manager,
-    gets the shell itself, and only the tool call is told it runs with no ceiling. `tree` is the slice
+    For a tool call with a manager, argv starts the scope and re-enters this file as the inner stage.
+    The command and its shell are carried in `extra_env`.
+    A hook command, or a tool call with no manager, gets the shell itself.
+    Only the tool call is told it runs with no ceiling. `tree` is the slice
     the scope joins, already carrying its ceiling, and `agent` the pid recorded as the scope's agent.
     """
     shell = pick_shell(command, which)

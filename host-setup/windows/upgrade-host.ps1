@@ -1,11 +1,16 @@
 # Upgrades this host, on native Windows.
-# Two things are brought current: the packages winget manages, which is routine, and the WSL platform itself, which is the Windows peer of a kernel and moves on its own release schedule.
+# Two things are brought current:
+#   - The packages winget manages, which is routine.
+#   - The WSL platform itself, which is the Windows peer of a kernel and moves on its own release schedule.
 #
-# A WSL platform update is refused while Docker Desktop is running, because Docker holds the WSL service open and the update then fails part way rather than declining.
+# A WSL platform update is refused while Docker Desktop is running.
+# The reason is that Docker holds the WSL service open, so the update then fails part way rather than declining.
 # Refusing is the point of running this rather than the two commands by hand: each is one line, and the guard between them is not.
 #
 # There is no action for a Windows feature update, where the Linux peer moves a host to the next release.
-# Windows Update owns that upgrade, it is not driven the way an apt sources rewrite is, and an action that pretended otherwise would be the one thing this script must not carry.
+# Windows Update owns that upgrade.
+# It is not driven the way an apt sources rewrite is.
+# An action that pretended otherwise would be the one thing this script must not carry.
 
 [CmdletBinding()]
 param(
@@ -34,7 +39,8 @@ $SELF_UPDATE_NOTE = @{
 }
 
 # Every parameter is read into a variable here rather than from inside a function.
-# A script parameter reached only from a nested scope reads as declared and never used, which is a finding on each one and hides a parameter that genuinely is unused.
+# A script parameter reached only from a nested scope reads as declared and never used.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     status   = [bool]$Status
     packages = [bool]$Packages
@@ -122,7 +128,9 @@ function run {
         return 0
     }
     # The command's own output goes to the console rather than down the pipeline.
-    # A native command writes to this function's output stream, so without this the caller receives every line the command printed with the exit code appended, and a check against 0 then compares against the first line of output.
+    # A native command writes to this function's output stream.
+    # So without this the caller receives every line the command printed with the exit code appended.
+    # A check against 0 then compares against the first line of output.
     & $Command @Arguments | Out-Host
     return $LASTEXITCODE
 }
@@ -140,7 +148,8 @@ function confirm {
 # --- winget ---
 
 # What winget would upgrade, split into the packages it will move and the ones it will not.
-# The two halves are counted here rather than read off winget's own closing count, which sums both and so reports a number that matches neither list.
+# The two halves are counted here rather than read off winget's own closing count.
+# That count sums both and so reports a number that matches neither list.
 # Each row is parsed by header offset, since a package name carries spaces and splitting on them moves the version into the name.
 function Get-Upgradable {
     $result = @{ Ready = @(); Explicit = @() }
@@ -186,7 +195,8 @@ function Read-UpgradeTable {
 # --- WSL ---
 
 # Every wsl.exe call goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
-# WSL_UTF8 changes what wsl.exe emits, where setting the console encoding would only change how this process decodes it and would corrupt in-distribution output that is already UTF-8.
+# WSL_UTF8 changes what wsl.exe emits, where setting the console encoding would only change how this process decodes it.
+# Setting the console encoding would also corrupt in-distribution output that is already UTF-8.
 # A host whose WSL predates WSL_UTF8 still answers in UTF-16, so a result carrying a NUL is stripped rather than reported as unreadable.
 function Invoke-Wsl {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
@@ -217,14 +227,17 @@ function Get-WslVersion {
 # --- Docker ---
 
 # Whether Docker Desktop is running, which is what blocks a WSL platform update.
-# The service is not the probe: com.docker.service reads Stopped on a host with Docker Desktop plainly running, since it is the elevated helper rather than the engine.
+# The service is not the probe.
+# The com.docker.service entry reads Stopped on a host with Docker Desktop plainly running, since it is the elevated helper rather than the engine.
 # Neither wslservice nor vmmemWSL is the probe either, since both run for any distribution and would report Docker on a host that has none.
 function Get-DockerProcess {
     return , @(Get-Process -Name $script:DOCKER_PROCESSES -ErrorAction SilentlyContinue)
 }
 
 # A WSL platform update stops and restarts the WSL service, and Docker Desktop holds it open, so the update fails part way rather than declining.
-# The guard runs under -DryRun too, since it is a read that decides what to do rather than a change to the host, and a dry run that printed the command would say the update was available when it is not.
+# The guard runs under -DryRun too, because of the following.
+#   - It is a read that decides what to do rather than a change to the host.
+#   - A dry run that printed the command would say the update was available when it is not.
 function Assert-DockerStopped {
     $running = Get-DockerProcess
     if ($running.Count -eq 0) { return }
@@ -264,7 +277,9 @@ function Show-Status {
     log 'Self-updating, so winget reports the version it was installed at rather than the version it runs:'
     foreach ($row in $upgradable.Explicit) {
         info "$($row.Id)  installed at $($row.Version), source carries $($row.Available)"
-        # No command is printed for these, deliberately: winget cannot move them, and offering one invites a full reinstall over a working copy in pursuit of a number that does not change.
+        # No command is printed for these, deliberately, because of the following.
+        #   - winget cannot move them.
+        #   - Offering one invites a full reinstall over a working copy in pursuit of a number that does not change.
         if ($script:SELF_UPDATE_NOTE.ContainsKey($row.Id)) {
             info "  $($script:SELF_UPDATE_NOTE[$row.Id])"
         } else {

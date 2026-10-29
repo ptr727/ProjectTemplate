@@ -5,15 +5,25 @@
 # ///
 """Enforce the GOVERNANCE.md "Documentation Style Conventions" rules no other linter checks.
 
-Three layers: extract text units through Pygments and markdown-it-py, normalize them per language
-from the `prose-gate.json` beside this script, and evaluate each rule in `RULE_TABLE` on a unit. The
-JSON holds the language data, each rule's message and default, and the vocabulary and exemptions.
+Three layers:
+
+- Extract text units through Pygments and markdown-it-py.
+- Normalize them per language from the `prose-gate.json` beside this script.
+- Evaluate each rule in `RULE_TABLE` on a unit.
+
+The JSON holds the language data, each rule's message and default, and the vocabulary and
+exemptions.
 
 A repository may carry `.prose-gate.json` at its root with additions to the carried exemptions and
-nothing else, each a list merged over the carried one: `hub_hosted` and `home_path_exempt` take
-paths, `generated_trees` directory names, `service_accounts` account names, `dupword_allow` and
-`spelling_allow` phrases and words, and `tool_directives` directive names matched literally. Any
-other key is refused, since an override that silently does nothing reads as one that works.
+nothing else. Each is a list merged over the carried one:
+
+- `hub_hosted` and `home_path_exempt` take paths.
+- `generated_trees` takes directory names.
+- `service_accounts` takes account names.
+- `dupword_allow` and `spelling_allow` take phrases and words.
+- `tool_directives` takes directive names matched literally.
+
+Any other key is refused, since an override that silently does nothing reads as one that works.
 
 Exit 1 on a finding, 2 when the run cannot be scoped. Read-only. Every git read names its encoding,
 with surrogateescape, so a byte the locale cannot map neither ends the read nor changes a name.
@@ -610,8 +620,8 @@ def comment_lines(
 ) -> list[tuple[Line, bool]]:
     """Every comment line in `text`, and whether it is a documentation comment.
 
-    A comment opening on no marker the language declares belongs to a language embedded in it,
-    such as a script in HTML, and is left out. `shift` is the line `text` starts after.
+    A comment opening on no marker the language declares belongs to a language embedded in it, such
+    as a script in HTML. Such a comment is left out. `shift` is the line `text` starts after.
     """
     starts = Starts(text)
     out: list[tuple[Line, bool]] = []
@@ -707,7 +717,7 @@ def split_heredocs(text: str) -> list[tuple[int, str]]:
 
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
     next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
-    script without its YAML indent, and each is lexed alone so that string ends with the body.
+    script without its YAML indent. Each is lexed alone so that string ends with the body.
     """
     rows = text.splitlines(keepends=True)
     indent = min((len(r) - len(r.lstrip()) for r in rows if r.strip()), default=0)

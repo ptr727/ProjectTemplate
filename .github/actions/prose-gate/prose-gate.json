@@ -10,7 +10,7 @@
     "comment-added": { "default": true, "summary": "a comment line this change adds or edits, opening its own line" },
     "dupword": { "default": true, "summary": "a duplicated consecutive word" },
     "sentence-split": { "default": false, "summary": "a sentence wrapping across lines" },
-    "sentence-length": { "default": false, "summary": "a sentence over the word cap" },
+    "sentence-length": { "default": true, "summary": "a sentence over the word cap" },
     "spelling": { "default": true, "summary": "a British spelling where the repo convention is US English" },
     "home-path": { "default": true, "summary": "an absolute home path naming a real account" },
     "dead-path": { "default": true, "summary": "a mention of a path git once tracked and the tree no longer holds" },

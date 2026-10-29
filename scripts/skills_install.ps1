@@ -10,7 +10,8 @@ $script = Join-Path $here "skills_install.py"
 # Try each candidate in order, version-checking it before committing to it.
 # None of these launchers guarantees 3.7+ by construction.
 # `py -3` and `python3` can both resolve to an old 3.6 interpreter on some systems.
-# Picking the first *available* launcher and checking only that one would fail the whole install on a machine where an earlier candidate is stale but a later one is fine.
+# Picking the first *available* launcher and checking only that one would fail the whole install.
+# That happens on a machine where an earlier candidate is stale but a later one is fine.
 $candidates = @(
     @{ Exe = "py"; Args = @("-3") },
     @{ Exe = "python3"; Args = @() },
