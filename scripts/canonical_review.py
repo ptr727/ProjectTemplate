@@ -36,7 +36,7 @@ evidence was to sweep the read rather than gate it. Nothing here refuses a push 
 request any more.
 `sweep` names the units whose text has moved past the pass that read them. Beside them it names a
 bounded slice of the never-read backlog, newest-committed first. A unit just authored here is
-therefore read without waiting behind every older one. That is the work one scheduled run files and
+therefore read without waiting behind every older one. Those units are the work one scheduled run files and
 an agent session performs. `report` renders the whole backlog to standard output rather than into
 the tree, for the reason `scripts/README.md` gives.
 
@@ -288,8 +288,7 @@ def select_carried(
     not have to reimplement the other.
 
     Each value is the section list that path's carry is restricted to, or None where the whole file
-    carries. A declared path the tree does not hold is reported rather than skipped quietly. That is
-    the ordinary case for a file scoped to a project type this hub is not. It is also what a manifest
+    carries. A declared path the tree does not hold is reported rather than skipped quietly. An absent path is the ordinary case for a file scoped to a project type this hub is not. It is also what a manifest
     entry pointing at nothing looks like.
     """
     carried: dict[str, list[str] | None] = {}
@@ -354,7 +353,7 @@ def build_units(
     """Unit key -> text for the carried paths `read` can supply, plus declared sections it lacks.
 
     A path the reader has nothing for contributes no units. A manifest entry scoped to a project
-    type this repository is not is the ordinary case. A declared section the file does not hold
+    type this repository is not is the ordinary case of such a path. A declared section the file does not hold
     is a different thing entirely. It is a manifest naming a heading that is not there, so it is
     reported rather than passed over.
     """
@@ -532,8 +531,7 @@ def newest_commit_times(root: Path, rels: list[str]) -> dict[str, float]:
     writes it lifts that unit like any other.
 
     Three answers rather than two. A commit dates the path. A path no commit holds, staged or
-    merely unignored, is a file this branch has created and not committed. `tracked_files`
-    deliberately counts that as a unit. It is the newest content there is rather than an undatable
+    merely unignored, is a file this branch has created and not committed. `tracked_files` deliberately counts that as a unit. The path is the newest content there is rather than an undatable
     one, so it sorts first. Anything else sorts last. In the ordinary case that is a git failure.
     It is also every path in a repository with no commits at all, where git exits 128 rather than
     answering. The order is a
@@ -702,7 +700,7 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
     The digest is required rather than optional, and it is the caller passing back what it read
     before the review ran. Recording a unit by name alone would stamp whatever the file holds at
     record time. So an edit between the review and the record would be attested to by a reviewer
-    who never saw it. A format-on-save and a hook autofix are two such edits. That is the one claim this record makes.
+    who never saw it. That is the one claim this record makes. A format-on-save and a hook autofix are two such edits.
     """
     out: dict[str, str] = {}
     for value in values:
@@ -941,7 +939,7 @@ def main(argv: list[str] | None = None) -> int:
         return code
     # A crash is the check not having run, so it reports the boundary code.
     # Falling through to the interpreter's own exit 1 would read as the not-covered verdict.
-    # A capture point folding that reports an execution boundary as a gate finding.
+    # A capture point folding that exit reports an execution boundary as a gate finding.
     # A last resort rather than a path with a known caller, since every git call goes through local_review.git.
     # That function reports an OSError or a timeout as CannotRun above.
     # Reached in the tests by raising through `units`, because a handler nothing exercises is one nobody knows still folds the code it promises.

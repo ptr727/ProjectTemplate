@@ -900,7 +900,7 @@ class ReceiptCase(RepoCase):
         """The load-bearing path: a pass must attest to what a reviewer actually saw.
 
         Nothing binds the moment the review finished to the moment it is recorded.
-        A format-on-save or a hook autofix in between would otherwise be stamped as reviewed.
+        So a format-on-save or a hook autofix in between would otherwise be stamped as reviewed.
         """
         (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
         reviewed = self.digest()
@@ -1304,7 +1304,7 @@ class BackendCase(RepoCase):
     def test_the_backend_is_given_the_merge_base_not_the_target_tip(self) -> None:
         """The two differ the moment the target moves, and only one is what the receipt claims.
 
-        The fake CLI records its own argv. Asserting on the exit code alone would let the
+        The fake CLI records its own argv. That is because asserting on the exit code alone would let the
         argument contract drift back to the tip with nothing objecting.
         """
         argv_log = self.outside / "argv.txt"

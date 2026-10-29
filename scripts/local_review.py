@@ -38,9 +38,7 @@ changed. The consequence for a caller is an ordering one. Record a pass over wha
 staging can no longer move the key underneath it.
 
 HEAD is read for membership only, and never for a path's state. Without it, content already
-committed and then undone in the tree leaves the changed set entirely. That is because the index,
-the working tree, and the merge base then all agree the path is absent or unchanged. The commit a
-push delivers still carries it. `git rm` a file the branch added is the shortest way there, and where it
+committed and then undone in the tree leaves the changed set entirely. That is because the index, the working tree, and the merge base then all agree the path is absent or unchanged. Yet the commit a push delivers still carries it. `git rm` a file the branch added is the shortest way there, and where it
 was the only changed path the whole set empties. Keeping HEAD out of the state is what leaves the
 ordinary commit invisible. A path already in the set through its index and working-tree state keeps
 the same recorded state once HEAD holds that state too.
@@ -65,8 +63,7 @@ holds the real content. A new untracked file that `.gitignore` does not cover en
 set. That is because a file not yet added is exactly what a review has to read. And staging a modified tracked
 file moves the key for the reason the paragraph above gives.
 
-What this key does not do is tie the content it describes to the commit a push delivers. A
-push-time caller has to add that for itself. It reads the index and the working tree, and a push
+What this key does not do is tie the content it describes to the commit a push delivers. A push-time caller has to add that for itself. The key reads the index and the working tree, and a push
 carries HEAD. So the two describe the same content only while the working tree agrees with HEAD. Where they
 disagree, HEAD can hold content the tree has since replaced, which a pass over the tree never read.
 Membership puts that path in the digest and stops there. A pass recorded in that state is
@@ -97,7 +94,7 @@ Usage: python3 scripts/local_review.py status [--target '<branch>']
 
 Exit codes are three-valued on purpose, per AGENTS.md "Report an execution boundary separately
 from a check finding". 0 and 1 are findings the caller acts on. 2 means the check itself did not
-run, which a gate must not silently read as either answer. The cases are:
+run, which a gate must not silently read as either answer. These include:
   - no git repository
   - an unresolvable target ref
   - a receipt that cannot be read off disk
@@ -157,8 +154,7 @@ def silence(stream: object) -> None:
     """Point a stream's descriptor at the null device, so a later flush cannot raise.
 
     Guarded because a stream is not always backed by a descriptor. Embedded in another process, or
-    under a test that replaces it, there is nothing to redirect. The guard against a second
-    failure would raise one itself. The descriptor is closed once the duplicate is installed,
+    under a test that replaces it, there is nothing to redirect. In those cases the guard against a second failure would raise one itself. The descriptor is closed once the duplicate is installed,
     since dup2 leaves the original open and this module is importable into a long-lived process.
     """
     try:
@@ -214,7 +210,7 @@ def emit(text: str, stream: object = None) -> None:
 class CannotRun(Exception):
     """The check could not be performed, as distinct from being performed and failing.
 
-    Raised for an execution boundary the caller must not read as a verdict. The cases are:
+    Raised for an execution boundary the caller must not read as a verdict. These include:
     - no git repository
     - a target ref that does not resolve
     - a receipt that cannot be read off disk
@@ -441,7 +437,7 @@ def _ls_files_states(out: str) -> dict[str, set[str]]:
     The stage number is part of the state whenever it is not the ordinary zero. This is defense
     rather than a fix for a demonstrated case. A review argued that two stages of one conflict can
     carry an identical mode and object. Dropping the stage would collapse them into a state
-    reading as no conflict. But no construction produced it. Where our side's content equals the
+    reading as no conflict. But no construction produced such a case. Where our side's content equals the
     base, git records no modification and applies the other side's delete cleanly rather than
     conflicting. That was checked against a delete opposite an untouched file, an identical
     rewrite, and a mode-only change. The stage costs nothing to carry, so it stays.
@@ -500,7 +496,7 @@ def worktree_states(root: Path) -> dict[str, set[str]]:
     Staging writes objects, and those writes are redirected into a throwaway object directory with
     the real store attached as an alternate. So git can still read every existing object, and
     every alternate that store itself chains to, while writing none of its own. Without that redirection this read would permanently deposit the content of every
-    untracked file into the repository. An unignored `.env` or key file would be among them. That
+    untracked file into the repository. An unignored `.env` or key file would be among that content. That
     content would be recoverable long afterwards from a command the caller had every reason to believe only looked.
 
     Both throwaway paths carry a unique name and live in the git directory. A fixed name would let
@@ -738,10 +734,10 @@ def break_stale_lock(lock: Path) -> bool:
     """Remove `lock` if it is abandoned, reporting whether anything was removed.
 
     Breaking is done under a second lock of its own, and the staleness is re-read after that
-    exclusive claim rather than before it. A plain check-then-unlink races. The following can occur:
-    - the observing process can be descheduled between the two
-    - the holder can release
-    - another process can take a fresh lock
+    exclusive claim rather than before it. A plain check-then-unlink races, in this sequence:
+    - the observing process is descheduled between the two
+    - the holder releases
+    - another process takes a fresh lock
     - the unlink then removes a lock that is legitimately held
 
     Re-reading under the breaker means the file being removed is still the same abandoned one that
