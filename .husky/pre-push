@@ -64,7 +64,8 @@ elif [ "$tree_status" -ne 0 ]; then
 fi
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
-# The py launcher answers first because it reaches a registered interpreter whatever is active, where a bare python3 is reached through PATH and a virtual environment can answer there instead.
+# The py launcher answers first because it reaches a registered interpreter whatever is active.
+# A bare python3 is reached through PATH, and a virtual environment can answer there instead.
 if py -3 --version >/dev/null 2>&1; then
     run_py() { py -3 "$@"; }
     py_name="py -3"
@@ -77,8 +78,10 @@ else
     exit 1
 fi
 
-# The engine imports datetime.UTC at module level, so an interpreter below the floor fails at import and exits 1, which reads as a refusal rather than as the gate never running.
-# The interpreter answers about its own version, which needs no text comparison and so no sort -V, a GNU spelling this repository uses only in Linux-only scripts.
+# The engine imports datetime.UTC at module level.
+# So an interpreter below the floor fails at import and exits 1, which reads as a refusal rather than as the gate never running.
+# The interpreter answers about its own version, which needs no text comparison and so no sort -V.
+# That is a GNU spelling this repository uses only in Linux-only scripts.
 # The floor is read out of the spec rather than repeated here, since a copy drifts the way the probe order above already did.
 py_floor=$(run_py -c "import json; print(next(t['minimum'] for t in json.load(open('spec/host-tools.json'))['tools'] if t['name'] == 'python3'))" 2>/dev/null) || py_floor=""
 if [ -z "$py_floor" ]; then

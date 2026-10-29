@@ -26,12 +26,17 @@ runs:
       id: gate
       shell: bash
       env:
-        # A caller reaches this gate at whatever hub commit its workflow pins, and only the action knows which one that is, since a checked-out action carries no history to read it from.
+        # A caller reaches this gate at whatever hub commit its workflow pins.
+        # Only the action knows which commit that is, since a checked-out action carries no history to read it from.
         # Unnamed, a finding from a stale pin reproduces against no local run and reads as a gate defect rather than as a version gap.
-        # Both the context and the default environment variable are read, because the context's value for a repository-relative reference is undocumented and the two are populated by different paths.
-        # Either being empty leaves the script to fall back to its own checkout, which is the correct answer whenever the action was not fetched from a pin.
-        # This repository calls the reusable workflow by a workspace-relative path, so its own runs may well take that fallback, and a downstream repository calling it at a pin is the case these exist for.
-        # What each form populates is read off a real run rather than predicted here, since predicting it is what a verdict naming its own copy exists to stop anyone having to do.
+        # Both the context and the default environment variable are read.
+        # The reasons are that the context's value for a repository-relative reference is undocumented, and that the two are populated by different paths.
+        # Either being empty leaves the script to fall back to its own checkout.
+        # That is the correct answer whenever the action was not fetched from a pin.
+        # This repository calls the reusable workflow by a workspace-relative path, so its own runs may well take that fallback.
+        # A downstream repository calling it at a pin is the case these exist for.
+        # What each form populates is read off a real run rather than predicted here.
+        # This is because predicting it is what a verdict naming its own copy exists to stop anyone having to do.
         ACTION_REPOSITORY: ${{ github.action_repository }}
         ACTION_REF: ${{ github.action_ref }}
       run: |
@@ -62,7 +67,8 @@ runs:
         # Check the base resolves before scanning, so an empty or absent ref fails naming itself.
         # Unresolvable, the run would report the repository's whole backlog against this change.
         # A shallow checkout is the usual cause, so the caller fetches full history.
-        # A base that is a freshly created merge commit can still lag GitHub's own replication, so retry with backoff before failing rather than treat that lag as a gate failure.
+        # A base that is a freshly created merge commit can still lag GitHub's own replication.
+        # So retry with backoff before failing, rather than treat that lag as a gate failure.
         resolved=false
         for delay in 0 2 4 8 15 30; do
           if [ "$delay" -gt 0 ]; then
@@ -109,7 +115,8 @@ runs:
           inert_excludes="${inert_excludes//$'\r'/'\x0d'}"
           echo "Excluding ${#excluded_paths[@]} path(s) from $exclude_file: ${inert_excludes//'##['/'##\x5b'}"
         fi
-        # Naming a repository with no ref, or a ref with no repository, would be worse than naming nothing, since the value exists to identify one commit.
+        # Naming a repository with no ref, or a ref with no repository, would be worse than naming nothing.
+        # That is because the value exists to identify one commit.
         # Defaulted rather than read bare, since `set -u` makes an unset variable fatal and a harness that runs this block outside Actions sets neither.
         action_repository="${ACTION_REPOSITORY:-}"
         action_ref="${ACTION_REF:-}"
@@ -129,6 +136,6 @@ runs:
           provenance_args=(--provenance "${action_repository}@${action_ref}")
         fi
         # Options first, then `--`, so every remaining token is read as a literal path.
-        # A path-shaped token beginning with a dash would otherwise parse as an option, and
-        # `--list-files` in that position turns the gate into a file listing that exits 0.
+        # A path-shaped token beginning with a dash would otherwise parse as an option.
+        # In that position, `--list-files` turns the gate into a file listing that exits 0.
         uv run --no-project --script "$GATE_PATH/prose_lint.py" --diff "$BASE" "${exclude_args[@]}" "${allow_args[@]}" "${provenance_args[@]}" -- "${scan[@]}"

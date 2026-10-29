@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drive every repo_gate check against a tree it must reject.
 
-Each check runs on a crafted temp root rather than on this repo, so a case proves the check
+Each check runs on a crafted temp root rather than on this repo. So a case proves the check
 objects to the fault instead of proving the repo is currently clean. The coverage floors are the
 other half: a check whose scan matches nothing reports zero issues and reads exactly like a pass.
 
@@ -160,7 +160,7 @@ class TestShaPin(TreeCase):
 class ResolveCase(TreeCase):
     """Base for the resolvability pass, with the owner fixed and the network replaced.
 
-    No case here reaches GitHub. The point is what each answer is read as, and a case that made a
+    No case here reaches GitHub. The point is what each answer is read as. A case that made a
     live call would report the fleet's current state rather than this script's reading of it.
     """
 
@@ -237,7 +237,7 @@ class TestShaPinResolves(ResolveCase):
         """The two are different states, and this note exists to describe the narrowing exactly.
 
         A pin under this owner skipped because the origin is unreadable is not a pin belonging to
-        somebody else, and saying so in the one line that reports coverage is the same false clean
+        somebody else. Saying so in the one line that reports coverage is the same false clean
         the note was added to prevent.
         """
         self.answers({})
@@ -263,7 +263,7 @@ class TestShaPinResolves(ResolveCase):
         """The all-zero run is the one the note exists for, and it was the one it skipped.
 
         Guarded on a non-zero counter, the note went silent on a repository carrying no workflow
-        at all, which is exactly the clean line the docstring says nobody should have to infer
+        at all. That is exactly the clean line the docstring says nobody should have to infer
         the check's narrowness from.
         """
         repo_gate.check_sha_pin(self.tmp, [])
@@ -517,7 +517,7 @@ class TestEolCoverage(GitTreeCase):
 class TestQuotedNames(GitTreeCase):
     """A tracked name git quotes reaches every check as the name on disk.
 
-    The constructed name holds a byte that is not valid UTF-8, the case that both crashed the
+    The constructed name holds a byte that is not valid UTF-8. That is the case that both crashed the
     listing under `core.quotePath=false` and, at the default, left an escaped spelling no file
     answers to.
     """
@@ -1644,7 +1644,7 @@ class TestGateHubRoot(TreeCase):
 class TestExcludeGlobs(unittest.TestCase):
     """A caller vendoring a subtree it does not author needs `tracked()` narrowed, not re-derived.
 
-    Own git repo rather than REPO, so a case proves the exclude reaches a real subtree it built
+    Own git repo rather than REPO. So a case proves the exclude reaches a real subtree it built
     rather than one this repo happens to carry today.
     """
 

@@ -4,28 +4,28 @@
 Each check maps to a recurring review-finding category. A count beside one is that
 category's share of a 1,047-finding audit of this repo's Copilot reviews:
 
-  sha-pin       Action SHA-pinning gaps                        25 findings  (GOVERNANCE.md rule)
-  eol           .editorconfig <-> .gitattributes disagreement  40 findings
-  eol-coverage  Git attribute resolution differs from policy   count not recorded
-  composite-actions  shellcheck and schema coverage of action.yml  count not recorded
-  carried-trees  a manifest-owned tree differing from the hub's  count not recorded
+- `sha-pin`: Action SHA-pinning gaps, 25 findings (GOVERNANCE.md rule).
+- `eol`: .editorconfig <-> .gitattributes disagreement, 40 findings.
+- `eol-coverage`: Git attribute resolution differs from policy, count not recorded.
+- `composite-actions`: shellcheck and schema coverage of action.yml, count not recorded.
+- `carried-trees`: a manifest-owned tree differing from the hub's, count not recorded.
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining
 one pin per path. It also proves the two Windows command-script exceptions stay CRLF.
 
-`sha-pin` reads the shape and then resolves it, because forty hex characters is a format any
-fabricated string satisfies, and an agent hand-writing a plausible SHA into a workflow is a
-failure this repo has seen rather than a hypothetical one. Resolving also catches the
-neighboring case, a pin whose commit was reachable only from a branch since squashed and
-deleted, which breaks a downstream gate long after the change that caused it. The
-`gh-write-guard` hook cannot cover either, since it watches Bash and an editor tool writing
-the same string into a file never reaches it.
+`sha-pin` reads the shape and then resolves it. That is because forty hex characters is a format
+any fabricated string satisfies. That is also because an agent hand-writing a plausible SHA into a
+workflow is a failure this repo has seen rather than a hypothetical one. Resolving also catches the
+neighboring case, a pin whose commit was reachable only from a branch since squashed and deleted.
+That case breaks a downstream gate long after the change that caused it. The `gh-write-guard` hook
+cannot cover either, since it watches Bash and an editor tool writing the same string into a file
+never reaches it.
 
-A stale-backticked-path check was built and REJECTED: in a template repo, docs
+A stale-backticked-path check was built and REJECTED. It produced 34 false positives on a clean
+tree, with no way to separate those from real drift. That is because, in a template repo, docs
 legitimately reference paths that live in downstream repos (`.vscode/tasks.json`,
-`Docker/README.md`, `reports/*/audit.md` targets), so it produced 34 false positives
-on a clean tree with no way to separate those from real drift. Doc-to-doc drift is
+`Docker/README.md`, `reports/*/audit.md` targets). Doc-to-doc drift is
 the job of the fresh-context self-review, not a regex.
 
 Read-only. Exit 1 if any check fails. Pair with prose_lint.py, which covers the
@@ -95,9 +95,9 @@ def origin_owner(root: Path) -> str | None:
 def gh_exists(path: str) -> bool | None:
     """True where GitHub returned the object, False where it answered absent, None where neither.
 
-    None covers an absent `gh`, no credentials, a rate limit, and an offline host, which are one
-    thing here: nothing was learned. The caller reports those as skipped rather than as findings,
-    so the gate stays usable on a machine with no network instead of failing a correct tree.
+    None covers an absent `gh`, no credentials, a rate limit, and an offline host. Those are one
+    thing here: nothing was learned. The caller reports those as skipped rather than as findings.
+    So the gate stays usable on a machine with no network instead of failing a correct tree.
     """
     try:
         r = subprocess.run(
@@ -119,8 +119,8 @@ def gh_exists(path: str) -> bool | None:
 def pin_resolves(nwo: str, sha: str, cache: dict[tuple[str, str], bool | None]) -> bool | None:
     """Whether `sha` is a commit in `nwo`, cached, with an unreadable repository read as unknown.
 
-    An absent commit and a repository the credentials cannot see are the same 404 from here, and
-    reading the second as the first fails a correct pin whenever the token is narrower than the
+    An absent commit and a repository the credentials cannot see are the same 404 from here.
+    Reading the second as the first fails a correct pin whenever the token is narrower than the
     fleet, which a repository-scoped CI token is. So a miss is confirmed against the repository
     itself before it becomes a finding, and that second read runs only on the failing path.
     """
@@ -141,7 +141,7 @@ def tracked(root: Path, exclude: list[str] | None = None) -> list[str]:
     can scope every check out of that subtree this way. No check itself needs to change.
     Additive only: an empty or absent `exclude` scans exactly what it always has.
 
-    Git's quoting is pinned on, so the listing is ASCII whatever a config inherits and each quoted
+    Git's quoting is pinned on. So the listing is ASCII whatever a config inherits and each quoted
     name reaches `unquote_path` in the one form it decodes. Git's stderr carries no such quoting, and
     a failure naming a root that is not UTF-8 echoes that name raw, so the decode tolerates it.
     """
@@ -169,12 +169,12 @@ def unquote_path(name: str) -> str:
     """The real name behind one `git ls-files` line, which git quotes when the name needs it.
 
     Git quotes a name holding any byte at or above 0x80, and one holding a quote, a backslash,
-    or a control character, escaping it the way C does. Read as a literal path, the quoted form
-    names no file on disk, so a check reading the file would pass over it and report clean.
+    or a control character. It escapes such a name the way C does. Read as a literal path, the quoted form
+    names no file on disk. So a check reading the file would pass over it and report clean.
 
     The caller pins `core.quotePath=true`, which is what makes a quoted line ASCII and so what
-    this decode assumes. Turning the setting off instead would not do: it stops git quoting the
-    first of those three routes and leaves the other two quoting a name whose non-ASCII bytes sit
+    this decode assumes. Turning the setting off instead would not do, because it stops git quoting the
+    first of those three routes. It also leaves the other two quoting a name whose non-ASCII bytes sit
     raw inside the quotes, which this decode cannot carry.
 
     A byte that is not valid UTF-8 comes back as a surrogate escape, the form `Path` and
@@ -228,13 +228,14 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     """Every external `uses:` is a 40-hex SHA, and one under this owner resolves.
 
     A local (`./`) or self-repository (`$/`) ref names no ref to pin and is skipped, once any
-    surrounding YAML quotes are stripped. A ref starting with a bare `.github/` is reported,
-    because GitHub reads it as `owner/repo` rather than as a path and it fails at run time.
+    surrounding YAML quotes are stripped. A ref starting with a bare `.github/` is reported.
+    That is because GitHub reads it as `owner/repo` rather than as a path, and it fails at run time.
     References under another owner are shape-checked but not resolved.
 
-    Resolution is scoped to the scanned repository's own owner, because that is where the fleet's
-    own actions live and where the decay this catches comes from: a squash merge deletes the
-    branch a pin was taken from, and the pin outlives the commit. A third-party action's tag is
+    Resolution is scoped to the scanned repository's own owner.
+    That is because the owner is where the fleet's own actions live and where the decay this
+    catches comes from. The decay comes from there because a squash merge deletes the branch a pin
+    was taken from, and the pin outlives the commit. A third-party action's tag is
     stable by comparison, and reading one would make every local run of this gate depend on a
     stranger's repository answering. The cost is stated rather than left to be found, and it is
     real: a fabricated pin on a third-party action is still only shape-checked here. The counts
@@ -777,7 +778,7 @@ def gate_hub_root() -> Path | None:
     """The hub tree this gate file sits in, or None where it was lifted out of one.
 
     The pinned action runs from the whole hub tree at its pin, and so does a run from a hub
-    checkout. A single-file fetch has no tree around it, and whatever happens to sit three levels
+    checkout. A single-file fetch has no tree around it. Whatever happens to sit three levels
     above the file is not the hub, so the path is trusted only where its own parents name it.
     """
     here = Path(__file__).resolve()
@@ -810,11 +811,11 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
 
     `spec/files.json` declares the trees a repository carries byte-for-byte, and a carried copy
     goes stale silently at the next hub fix. Comparing against the hub tree this gate runs from
-    makes the answer reproducible at the action's pin, so a Dependabot bump of that pin is what
+    makes the answer reproducible at the action's pin. So a Dependabot bump of that pin is what
     surfaces a refresh the resync then applies.
 
     A difference is a note rather than a finding, so it never fails the gate. Failing would break
-    every downstream pull request on each hub fix, and a byte difference cannot tell a stale copy
+    every downstream pull request on each hub fix. A byte difference also cannot tell a stale copy
     from an edited one, which the audit tells apart. Which trees a repository owes is the audit's
     too, read from its declared types, so a tree absent here is not compared. The copy is read
     from its tracked files alone, so an untracked file is not a difference.
@@ -849,7 +850,8 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
         target = tree["target"]
         prefix = target + "/"
         # Git tracks a link to a directory as one path, so a target or an ancestor tracked that way hides every file beneath it.
-        # A top-level ancestor such as `lib` is generic, so one tracked that way says nothing about a carry and is passed over like an uncarried tree.
+        # A top-level ancestor such as `lib` is generic.
+        # So one tracked that way says nothing about a carry and is passed over like an uncarried tree.
         blocking = next(
             (
                 path
@@ -874,7 +876,8 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
             # A tree that does not prune shares its target with the repository's own files, so those alone do not make it carried.
             if not owned:
                 continue
-            # A carry refuses a link anywhere under a tree's target, so the gate refuses one too rather than judging it by a rule of its own.
+            # A carry refuses a link anywhere under a tree's target.
+            # So the gate refuses one too, rather than judging it by a rule of its own.
             link = next((p for p in sorted(tracked_here) if (root / target / p).is_symlink()), None)
             if link is not None:
                 warn_carried_tree(f"{target} holds a link, which a carry refuses")
@@ -921,9 +924,9 @@ def printable(line: str) -> str:
 
     `unquote_path` hands back a tracked name exactly as it is on disk, and a name may hold a
     newline or an escape sequence. Printed raw, such a name forges a line of the gate's own output
-    or drives the reader's terminal, so each C0 or C1 control and DEL is escaped here, where it is
+    or drives the reader's terminal. So each C0 or C1 control and DEL is escaped here, where it is
     shown. A byte that is not UTF-8 arrives as a lone surrogate, which a strict stream refuses to
-    encode, so it is spelled as an escape too, leaving the result safe on any stream.
+    encode. So it is spelled as an escape too, leaving the result safe on any stream.
 
     The Actions runner executes a line opening on `::` once leading whitespace is trimmed. It also
     executes a line holding `##[` anywhere. A name shaped like either forges a workflow command.
@@ -938,10 +941,10 @@ def printable(line: str) -> str:
 def report_paths_that_are_not_utf8() -> None:
     """Let a path holding a byte that is not UTF-8 print rather than ending the run.
 
-    `unquote_path` decodes such a name with surrogateescape so it opens on disk, which leaves the
+    `unquote_path` decodes such a name with surrogateescape so it opens on disk. That leaves the
     lone surrogate in the name to reach this program's own output. Encoding it strictly raises at
-    the line printing that name, so every check after it is lost along with the run's verdict, and
-    the exit code becomes a traceback's rather than the gate's. Escaping it costs the reader one
+    the line printing that name. So every check after it is lost along with the run's verdict.
+    The exit code also becomes a traceback's rather than the gate's. Escaping it costs the reader one
     unreadable byte in one name.
     """
     for stream in (sys.stdout, sys.stderr):
