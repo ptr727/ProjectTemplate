@@ -39,7 +39,7 @@
 # Their names are enumerable through the API, and a variable's value too.
 # What this script does not check is therefore a choice about what it owns rather than a limit the API imposes.
 # The policy is worth checking on its own because it decides which refs may deploy at all.
-# It is also because, on an OIDC publish, that is half the gate: a ref the policy excludes mints no token.
+# It is also worth checking because, on an OIDC publish, that is half the gate: a ref the policy excludes mints no token.
 # A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run.
 # An environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
 # Secret names are checked separately, by spec/audit.py from a hub checkout.

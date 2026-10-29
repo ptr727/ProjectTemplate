@@ -1734,8 +1734,7 @@ class TestRegistration(StampCase):
                 self.assertIn(wrapper, hooks, "the wrapper was removed by a re-run")
 
     def test_names_hook_agrees_with_runs_hook_on_every_shape_it_accepts(self):
-        """A command `runs_hook` already treats as running the deployed hook must count as
-        named too.
+        """A command `runs_hook` already treats as running the deployed hook must count as named too.
         Otherwise a re-run leaves a duplicate registration in place while `--report` calls
         the hook absent."""
         plain = pathlib.Path("/home/vscode/.claude/hooks/gh-write-guard.py")

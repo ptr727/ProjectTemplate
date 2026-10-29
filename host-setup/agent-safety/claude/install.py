@@ -910,8 +910,7 @@ def build_stamp(claude_home, installed, instructions_digest=None):
     """The record written to the machine after an install, or computed live for a report.
 
     An install passes the digest of what it rendered rather than re-reading the file. A write by
-    anything else between the install's write and this read would otherwise be stamped as the
-    install's own.
+    anything else between the install's write and this read would otherwise be stamped as the install's own.
     The next run would otherwise also replace it with no backup.
     """
     return {

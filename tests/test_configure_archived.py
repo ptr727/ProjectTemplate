@@ -3,8 +3,7 @@
 
 The shell is lifted out of the file rather than restated here.
 An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. The
-region under test makes no `gh` call of its own, and the harness assigns every variable the
-region reads.
+region under test makes no `gh` call of its own, and the harness assigns every variable the region reads.
 So the cases running the lifted region need no `gh` stub.
 A cataloged or absent registry falls through to a marker printed just after that region.
 An archived one exits before reaching it.

@@ -116,8 +116,7 @@ class EnvironmentNameInAPathCase(unittest.TestCase):
     def test_a_name_becomes_exactly_one_path_segment(self) -> None:
         """Each name carries a character that breaks a raw path, and each expectation spells out its escape.
 
-        Asserting the whole segment rather than the absence of the raw character is what catches a
-        stray `%`.
+        Asserting the whole segment rather than the absence of the raw character is what catches a stray `%`.
         That byte makes an invalid escape and cannot be tested for by absence, since every encoded segment contains one.
         """
         for name, segment in (
