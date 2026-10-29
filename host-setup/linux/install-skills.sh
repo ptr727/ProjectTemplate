@@ -77,7 +77,7 @@ parse_args() {
 # A later --report as the actual user then calls the same tree uninstalled.
 # The test is SUDO_USER rather than a bare EUID.
 # This is because a host whose working account is root (a container, a Proxmox node) carries no SUDO_USER and installs for root correctly.
-# Refusing there would break an install that was right.
+# It is also because refusing there would break an install that was right.
 # --report is refused with the rest: run under sudo it reads root's stamp and answers for a machine state nobody installed.
 refuse_sudo() {
     [[ $EUID -eq 0 && -n ${SUDO_USER:-} && $SUDO_USER != "root" ]] || return 0

@@ -1,7 +1,7 @@
 # Installs the WSL distributions this host runs, and reports how Docker Desktop is integrated with them.
 # It is a fourth script rather than part of upgrade-host.ps1.
 # This is because installing a distribution stands a new environment up, where a platform update brings this one current.
-# Those are different actions on different subjects.
+# It is also because those are different actions on different subjects.
 #
 # The Docker integration is reported and never written.
 # Docker Desktop holds these settings in memory and rewrites its settings file from that copy while it runs.

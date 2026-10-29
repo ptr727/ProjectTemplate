@@ -10,8 +10,8 @@
 # Nothing here elevates, and no scope is passed unless the caller names one.
 # An installer that needs administrator raises its own prompt.
 # That is the path with the fewest failures.
-# Forcing user scope installs a second copy beside a machine wide one.
-# Some installers fail outright when launched from an already elevated process.
+# This is because forcing user scope installs a second copy beside a machine wide one.
+# It is also because some installers fail outright when launched from an already elevated process.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
 # Without it a stray word binds to the first parameter that takes a value, and a mistyped tool name is reported against -Scope instead.
@@ -308,7 +308,7 @@ function Test-WingetVersion {
 # Rows sharing a major version are side by side builds of one product, and the newest is the answer.
 # That is what a dotnet SDK line looks like.
 # Rows whose majors differ are two products sharing an id, and there no single version compares.
-# That is what the legacy WSL installer looks like beside WSL itself.
+# Two products sharing an id is what the legacy WSL installer looks like beside WSL itself.
 function Resolve-InstalledVersion {
     param([string[]]$Version)
     if (-not $Version -or $Version.Count -eq 0) { return $null }
@@ -402,7 +402,7 @@ function Get-ExplicitUpgrade {
 # The package id winget's own catalog says produced the version this tool reports as installed.
 # `winget list --id X --exact` answers yes for a package sharing this tool's family even where X itself is not what is installed.
 # For example, a host running OpenJS.NodeJS, the Current channel, reads as OpenJS.NodeJS.LTS, because the two share a publisher and a name.
-# The version it reports still comes straight from the installed entry, regardless of which id was asked about.
+# The version that command reports still comes straight from the installed entry, regardless of which id was asked about.
 # So the version is matched against every id in the family, read from a plain source search rather than an id scoped one.
 # That is what tells the ids apart without trusting the id column winget answered with at all.
 # A tool naming no family resolves to its own package unchanged and costs nothing extra.
@@ -575,8 +575,8 @@ function Get-ToolHolder {
 #   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
 # Anything else names nobody.
 # This is because a Git upgrade that failed on a download leaves no log.
-# It still finds every open Git Bash running from Git's own tree.
-# Blaming those would send the reader after the wrong thing.
+# Such an upgrade also still finds every open Git Bash running from Git's own tree.
+# It is also because blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
     warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
@@ -609,7 +609,7 @@ function Write-InstallFailure {
 # Probe names the executable that proves the tool is present when winget knows no package for it.
 # It is py for python rather than python3.
 # This is because py is registered by the interpreter's own installer, while python3 is created by Repair-PythonName below.
-# A probe that answers only because this script wrote it proves nothing about the package.
+# It is also because a probe that answers only because this script wrote it proves nothing about the package.
 # Family names the id prefix winget's catalog shares across every channel and pinned major a tool ships under.
 # It is empty everywhere but node.
 # Only node ships as more than one id (Current, LTS, and one per pinned major back to 4).
@@ -792,7 +792,7 @@ function Add-ToolNote {
         }
         # Compared against the managed interpreter where one could be resolved, and against the weaker shape test otherwise.
         # The fallback matters because the registry lookup failing is exactly the state where a reader most needs to be told what python reaches.
-        # A check that goes quiet there would be silent on the worst host rather than on the best one.
+        # It also matters because a check that goes quiet there would be silent on the worst host rather than on the best one.
         # Every read of the resolved command sits inside this guard rather than beside it.
         # This is because Set-StrictMode turns a property read on a host where python answers nothing into a terminating error.
         # That error would crash the report on exactly the host that most needs one.
@@ -889,7 +889,7 @@ $PYTHON_ALIAS_NAMES = @('python.exe', 'python3.exe')
 $PYTHON_ALIAS_PACKAGE = 'Microsoft.DesktopAppInstaller_'
 
 # Whether a file is one of Windows' app execution alias stubs rather than a real executable someone put there.
-# Four conditions together, because both of these hold:
+# Four conditions together, for these reasons:
 #   - the deletion this gates cannot be undone
 #   - the alias directory is one a person may legitimately have put a program in
 # The conditions are:
@@ -952,7 +952,7 @@ function Get-PythonLine {
 
 # The registry roots PEP 514 interpreters register under, in the order a lookup should prefer them.
 # The 32 bit view is listed because a 32 bit interpreter on a 64 bit host registers there and nowhere else.
-# An ARM64 host reaches an emulated x64 install through this view the same way.
+# An ARM64 host reaches an emulated x64 install the same way.
 $PYTHON_REGISTRY_ROOTS = @(
     'HKCU:\SOFTWARE\Python\PythonCore'
     'HKLM:\SOFTWARE\Python\PythonCore'
@@ -1042,7 +1042,7 @@ function Get-Python3OnPath {
 # Whether an interpreter is a virtual environment's rather than a host one.
 # A report distinguishes the two because an activated environment legitimately puts its own interpreter first.
 # That is right for running project code and is not drift worth naming.
-# Every other interpreter answering ahead of the managed one is drift worth naming.
+# Every other interpreter answering ahead of the managed one, by contrast, is drift worth naming.
 # The marker is the environment's own pyvenv.cfg, which sits one directory above the Scripts directory the interpreter is in.
 function Test-PythonVirtualEnv {
     param([string]$Path)
@@ -1064,8 +1064,8 @@ function Test-PythonVirtualEnv {
 # The toggle keeps reading On afterwards.
 # This is because whatever store it reads is not this file, and no documented interface writes that store.
 # So the alias can return when App Installer is next serviced.
-# This removal runs again on the next apply rather than assuming a host stays fixed.
-# Turning the toggle off in Settings is what stops it coming back at all.
+# So this removal runs again on the next apply rather than assuming a host stays fixed.
+# Turning the toggle off in Settings is what stops the alias coming back at all.
 # The package's own copy under the App Installer subdirectory is deliberately untouched.
 # This is because winget.exe and the package manager server sit beside it, and removing one would break winget itself.
 # And the interpreter winget installs registers python.exe but no python3.exe of its own.
@@ -1073,7 +1073,7 @@ function Test-PythonVirtualEnv {
 # Both halves therefore run together.
 # The stub goes, and a real python3.exe is put beside the interpreter this script manages.
 # That is what makes python3 the one interpreter name the fleet uses on every platform.
-# It is not a name that means something different here.
+# That is what makes it that name rather than a name that means something different here.
 # Nothing below names a version.
 # The line comes from whatever winget reports installed for the managed id.
 # So this keeps working unchanged when that id moves to a later line.
@@ -1083,7 +1083,7 @@ function Repair-PythonName {
     # The replacement is resolved before anything is removed, and a failure to resolve one ends the run here with both aliases still in place.
     # The other order frees the name and then discovers it has nothing to put there.
     # That is worse than either half alone.
-    # An unmanaged or unreadable python leaves a host with:
+    # In the other order, an unmanaged or unreadable python leaves a host with:
     #   - the Store alias deleted
     #   - no python3 created
     #   - not even the Store offer it started with
@@ -1159,9 +1159,8 @@ function Repair-PythonName {
             }
             # Warned and failed rather than noted, because this is the half of the contract that did not hold.
             # Python is installed and python3 still does not reach it.
-            # A note would be the wrong instrument twice over.
-            # It reads as an aside.
-            # On an apply it is also printed under a heading a reader scanning for failures does not look at.
+            # A note would be the wrong instrument twice over, since it reads as an aside.
+            # It is also, on an apply, printed under a heading a reader scanning for failures does not look at.
             warn "python could not write python3 beside the $line interpreter at $(Hide-Home $shim): $($_.Exception.Message). $remedy"
             $script:FAILED += 'python'
             return
@@ -1259,7 +1258,7 @@ $DOCKER_PROCESSES = @('Docker Desktop', 'com.docker.backend', 'com.docker.build'
 
 # Whether Docker Desktop answers as running right now, preferring its own CLI over a process probe.
 # This is because the CLI is what agrees with what the tray icon shows.
-# A vmmem process surviving a crash is not the same as the backend actually being up.
+# It is also because a vmmem process surviving a crash is not the same as the backend actually being up.
 # Falls back to the process probe where the CLI itself cannot answer (missing from PATH, or the status call failing).
 # Neither case is read as "not running" outright.
 # That reading is what let Enter-DockerMaintenance run wsl --update against a Docker Desktop this function wrongly reported as already down.
@@ -1321,8 +1320,8 @@ function Start-DockerDesktop {
 # A run that finds Docker Desktop already stopped has nothing to restore, and none of that runs.
 # Boundary note: this script used to be read-only on WSL by design, naming upgrade-host.ps1 -Wsl as a person's own step rather than running it.
 # The maintainer moved that boundary once a docker version bump on its own already needed this same stop, then restart, window.
-# That window is what its own integration needs to recover.
-# The boundary moved there since a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
+# The docker version bump's own integration needs that window to recover.
+# The maintainer moved it because a platform update asks for nothing more than that same window with Docker Desktop already stopped inside it.
 # Returns whether docker is clear to proceed, and whether this stopped Docker Desktop, which is what Exit-DockerMaintenance needs to know whether it owes a restart.
 function Enter-DockerMaintenance {
     param([Parameter(Mandatory)][bool]$WasRunning, [string]$WslProblem)
@@ -1371,7 +1370,7 @@ function Enter-DockerMaintenance {
         if (-not $script:ELEVATED -and (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected)) {
             # Built rather than a fixed string.
             # This is because whether this refusal itself restarts Docker Desktop depends on whether $result.Stopped is set.
-            # A run that found it already stopped restarts nothing for the remedy below to run into.
+            # It is also because a run that found it already stopped restarts nothing for the remedy below to run into.
             $restartNote = if ($result.Stopped) { ' This refusal also restarts Docker Desktop, to leave the host as it found it, so it may already be running again by the time this is read.' } else { '' }
             warn "wsl --update needs administrator and raises its own prompt, which nothing can answer unattended; it would hang rather than fail, so this refuses to start it. Run interactively once so the prompt has someone to answer, or quit Docker Desktop yourself and run host-setup\windows\upgrade-host.ps1 -Wsl, which refuses on its own while Docker Desktop is running.$restartNote"
             if ($result.Stopped) { Start-DockerDesktop | Out-Null; $result.Stopped = $false }

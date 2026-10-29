@@ -6,7 +6,7 @@
 # No version is written into this script, and each upstream is asked what it carries now, so the script does not go stale between releases.
 #
 # Every step is idempotent.
-# Each step acts only on a change:
+# The following happen only on a change:
 #   - a keyring or sources file is written only when its content differs
 #   - a binary is fetched only when the installed version differs
 #   - apt is refreshed only when a sources file changed
@@ -321,7 +321,7 @@ apt_install() {
 # Packages from a set that are not installed, one per line.
 # Whether a package is installed is asked of dpkg rather than of apt, here and in the sibling scripts.
 # This is because dpkg answers about the installed state while apt-cache also carries a candidate.
-# The installed state and the candidate disagree on a host whose lists are stale.
+# It is also because the installed state and the candidate disagree on a host whose lists are stale.
 # The candidate is still what apt_candidate_version reports, since that is the question the report asks.
 package_installed() {
     dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
@@ -751,7 +751,7 @@ docker_source() {
 # This also matches exactly what scripts/host_gate.py's own probes and pattern read, in the same order, so the two never disagree about one host.
 # The daemon is asked first and its own banner is the fallback.
 # This is because the docker on PATH inside a WSL distribution can be a separately packaged client talking to Docker Desktop's engine.
-# The two carry different versions (a 29.1.3 client against a 29.7.2 engine was measured).
+# It is also because the two carry different versions (a 29.1.3 client against a 29.7.2 engine was measured).
 # A stopped or unreachable daemon makes the first reading exit non-zero, which is what the banner answers.
 # So this reports the weaker number rather than nothing.
 docker_version() {
