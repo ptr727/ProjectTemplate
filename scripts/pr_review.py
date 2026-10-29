@@ -121,12 +121,11 @@ Subcommands
            - Once one is pending.
            - Under a refusal or quota reading below, since a request into a reached limit spends
              quota and returns the same refusal.
-
            An error refusal whose run log
            names a transient fetch failure is owed one re-request, unless the round before it was
            an error refusal too. A re-request already made after the refusal is never sent again.
-           A held head names it under COPILOT_ERROR_TRANSIENT instead. It is skipped on a pull
-           request into a branch other than the default too, whose every head an attested local
+           A held head names it under COPILOT_ERROR_TRANSIENT instead. The auto-request is also skipped on a pull
+           request into a branch other than the default, whose every head an attested local
            pass covers. There an attested head has its checks polled instead while they can still
            move its merge, and one with no attestation exits 49. --request asks for a round anyway.
            The bot id is read from the repository's most recently updated pull requests, the last
