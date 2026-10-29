@@ -308,7 +308,7 @@ def checks_never_ran(
     if checks_unreadable(pr):
         return "the payload carries no commit matching the head, so read the check runs on the head commit"
     if not checks_tally(nodes)[1]:
-        only = ", ".join(sorted(set(checks_unread(nodes))))
+        only = ", ".join(checks_unread(nodes))
         held = f" that this can read, the rollup holding only {only}" if only else ""
         return (
             f"no check has posted{held}, so resolve the head's conflict with its base, since a "
@@ -379,8 +379,8 @@ def checks_truncated(pr: dict) -> bool:
 
 
 def checks_unread(nodes: list[dict]) -> list[str]:
-    """The rollup typenames this could not read, in the order they appeared."""
-    return [n["unreadable"] for n in nodes if n.get("unreadable")]
+    """The rollup typenames this could not read, each named once and sorted."""
+    return sorted({n["unreadable"] for n in nodes if n.get("unreadable")})
 
 
 def checks_unreadable(pr: dict) -> bool:
@@ -422,7 +422,7 @@ def check_lines(
     unread = checks_unread(checks)
     if unread:
         lines.append(
-            f"  CHECKS PARTIALLY UNREAD ({', '.join(sorted(set(unread)))}): the rollup "
+            f"  CHECKS PARTIALLY UNREAD ({', '.join(unread)}): the rollup "
             "carries a context type this cannot normalize, so it is absent from the "
             "tally and the stuck reading alike and neither speaks for it"
         )
