@@ -373,6 +373,7 @@ A skill has to read whole in isolation, and a rule has one home. So the text a s
   - an empty body or one leaving a code fence open
   - a malformed or cyclic region
   - a line that begins like a marker and matches neither form
+  - a marker outside a code block indented past three spaces
   - a region in a file the walk does not visit
   - a refused source path
   - a file mixing line endings or not UTF-8
