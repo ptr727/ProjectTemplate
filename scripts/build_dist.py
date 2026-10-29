@@ -163,7 +163,7 @@ def write_plugin_manifest(names):
 # A skill has to read whole in isolation, and a rule has one home.
 # So the text a skill needs from that home is generated into it rather than copied.
 # The region is filled in the authored tree itself, because Codex and opencode read .agents/skills/ directly.
-# That is also because a region left empty there would hand them a skill with a hole in it.
+# So a region left empty there would hand them a skill with a hole in it.
 # The generated trees then mirror the filled source.
 # A file the walk would otherwise miss holds a region only where INCLUDE_DESTINATIONS names it.
 # That is the mechanism for a rule with one home that a hub surface outside the skills tree would otherwise restate.
@@ -273,7 +273,7 @@ def _marker(line, in_code, where):
     """One line's marker match: `(start_match, end_match)`, both None for a line inside a code block.
 
     A marker shown inside a code sample is content rather than a region boundary, whether the
-    sample is fenced or indented. That is how the skill-lifecycle skill documents the syntax.
+    sample is fenced or indented. Showing a marker in a code sample is how the skill-lifecycle skill documents the syntax.
     Outside one, a line that begins like a marker and matches neither form is refused rather
     than read as content. That is because content is exactly what leaves a region unfilled while
     --check exits 0. `where` names the file and line the refusal reports.
@@ -306,8 +306,8 @@ def _exact_case(rel, parts):
 def include_source(rel):
     """The file an include key names, refused where it could name anything but authored text under the root.
 
-    A generated tree is never a source. That is because its text is this script's own output. A
-    region filled from one would round-trip through the mirror it exists to keep honest. A path
+    A generated tree is never a source. That is because its text is this script's own output. It is
+    also because a region filled from one would round-trip through the mirror it exists to keep honest. A path
     that resolves to anything but itself went through a symlink. A symlink on the way could reach
     outside the root or into a generated tree under a name that looks fine lexically. So none is
     followed.
@@ -476,7 +476,7 @@ def skill_documents():
     """Every Markdown file under the authored skills tree, as root-relative POSIX paths.
 
     Symlinks are refused before the walk, since a fill writes through whatever the walk found.
-    A skill directory that is a symlink would put generated text into the tree it points at.
+    It is also because a skill directory that is a symlink would put generated text into the tree it points at.
     """
     out = []
     for name in skill_names():
@@ -542,7 +542,7 @@ def tree_source(source):
     "docs//sub", and "docs/./sub" among others. A prefix test over the raw string admits a destination inside
     every spelling but the plainest. So splitting into path segments answers all of them at once.
 
-    A reduction that comes back empty is refused, since it names the repository root. A tree
+    A reduction that comes back empty is refused, since it names the repository root. It is also refused because a tree
     carrying everything is not a thing the manifest can mean. The schema forbids the two plainest
     spellings of it, "" and ".", and permits others that reduce the same way, "./" among them. So
     the reduction decides this rather than the spelling. Reading one as a tree instead would refuse
@@ -551,7 +551,7 @@ def tree_source(source):
 
     A source that is absent or not a string is refused for the same reason a non-string fidelity
     is. A ".." segment is refused rather than resolved, since a source reaching outside the
-    tree it names is a manifest defect. Resolving it here would decide silently what that source
+    tree it names is a manifest defect. It is also refused because resolving it here would decide silently what that source
     meant. Skipping any of them would leave the tree unmatched. So every destination inside it
     would read as uncarried, which is the answer this must never give by accident.
     """
@@ -631,7 +631,7 @@ def include_destinations():
     include_documents() reaches this on every walk, and an ordinary build declares nothing for it
     to answer about. Where the tuple does have an entry, a manifest that cannot be read is refused
     rather than read as carrying nothing. So is one that parses into something other than the
-    shape it declares. A check that waves a declaration through because it could not run has
+    shape it declares. That is because a check that waves a declaration through when it could not run has
     stopped checking.
     """
     if not INCLUDE_DESTINATIONS:

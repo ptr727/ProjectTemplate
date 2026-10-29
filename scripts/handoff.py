@@ -21,7 +21,7 @@ hand-edited issue still reads:
   <!-- handoff: v1 track=<slug> round=<n> previous=<issue number or none> -->
 
 `previous=` names the closed issue the track continues from, and `none` otherwise.
-That issue is either an issue filed per session before the track's issue became a standing one,
+That issue can be an issue filed per session before the track's issue became a standing one,
 or a closed-out lane the track reopens. `previous=` stays fixed while the round moves. Each archived round carries its own line:
 
   <!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->
@@ -46,7 +46,7 @@ issue:
   - holds the same round
 
 `new` and `close` refuse onto such a head. `current`, `resume`, and `chain` answer from it with a
-notice naming each such issue. Both exist because answering from it silently is how a search
+notice naming each such issue. That notice exists because answering from it silently is how a search
 reads "no match" over text in the lane.
 
 Subcommands
@@ -98,9 +98,9 @@ one is well formed.
 Add `--dry-run` to any writing subcommand to print the calls it would make and write nothing.
 
 A repository missing the label is drift on a fleet repository, one `registry/repos.json` lists, and
-every subcommand refuses there. The exception is a fork under the registry's owner that the registry
-does not list, such as one kept for an upstream contribution. It can still use a chain to hold state, and the
-fleet label set does not belong on it. There the reads warn and answer as an empty chain does.
+every subcommand refuses there. A fork under the registry's owner that the registry
+does not list can still use a chain to hold state. An example is one kept for an upstream
+contribution. The fleet label set does not belong on it. There the reads warn and answer as an empty chain does.
 `new --create-label` creates the one `handoff` label and nothing else. Every other repository
 missing the label refuses. That includes a repository under another owner and an unregistered
 repository of the owner's that is not a fork.
@@ -1083,8 +1083,8 @@ def newest_closed(repo: str, track: str, closed: list[dict] | None = None) -> di
     That is the failure the chain exists to prevent.
 
     The head is the highest round rather than the highest issue number. That is because a chain is
-    ordered by round everywhere else. An issue number only agrees with that where the links
-    were filed in order. They disagree wherever a lower-numbered issue joined the lane later.
+    ordered by round everywhere else. It is also because an issue number only agrees with that
+    where the links were filed in order. They disagree wherever a lower-numbered issue joined the lane later.
     Picking by number there hands `new` a predecessor that is not the head. So it files a second
     link at a round already taken, and the real chain goes unreachable while every step exits 0. The number
     breaks a tie between two links claiming one round, which is itself a defect the reader should
