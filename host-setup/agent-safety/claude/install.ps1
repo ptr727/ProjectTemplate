@@ -15,7 +15,7 @@ if (Get-Command "py" -ErrorAction SilentlyContinue) {
     & python3 $script @args
 } elseif (Get-Command "python" -ErrorAction SilentlyContinue) {
     # Verify a bare `python` is Python 3 before handing it Python 3 syntax.
-    # A bare `python` is Python 2 on some setups and would fail to parse install.py.
+    # That is because it is Python 2 on some setups and would fail to parse install.py.
     # The two branches above are Python 3 by construction, so only this one needs the check.
     & python -c "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)" 2>$null
     if ($LASTEXITCODE -ne 0) {

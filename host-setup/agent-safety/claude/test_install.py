@@ -194,7 +194,7 @@ class TestSourceRef(unittest.TestCase):
     the git status read this class alone still calls. Skips rather than fails when this
     checkout cannot supply a clean baseline itself.
     That is the same case TestDegradedEnvironments covers by removing PATH.
-    Those cases are a tarball with no git, or a real edit already sitting in a
+    Such a checkout is a tarball with no git, or one with a real edit already sitting in a
     payload file while the suite runs.
     """
 
@@ -1408,8 +1408,7 @@ class TestRegistration(StampCase):
         """Matching any command containing the sweep's name let a decoy report a machine current.
 
         Each shape asserts the problem it should raise rather than that it raised one.
-        That is because a
-        second and false "not registered" line satisfied a bare truthiness check by itself.
+        That is because a second and false "not registered" line satisfied a bare truthiness check by itself.
         """
         self.install()
         good = self._settings()["hooks"]["SessionEnd"][0]["hooks"][0]
@@ -2134,9 +2133,9 @@ class TestStampContent(StampCase):
     def test_every_deployed_file_is_in_the_digest(self):
         """Every file a real install writes is covered by the digest that decides CURRENT.
 
-        Two earlier versions of this test each compared one declared list against another.
-        That is a tautology `PAYLOAD_FILES`'s own definition satisfies.
-        A source scrape also went silent the moment the copy became a loop.
+        Two earlier versions of this test each compared one declared list against something.
+        One compared it against another declared list, which is a tautology `PAYLOAD_FILES`'s own definition satisfies.
+        The other compared it against a source scrape, which went silent the moment the copy became a loop.
         The independent source is the installed home itself.
         A file the installer actually wrote and the digest does not read is the gap.
         Reading the disk is the only way to see it without trusting the lists under test.

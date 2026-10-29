@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """SessionEnd sweep: stop the session's contained commands, then report whatever else outlived it.
 
-The first phase stops every command scope `tool-containment.py` started for this session's Bash tool
-calls.
+The first phase stops every command scope `tool-containment.py` started for this session's Bash tool calls.
 Each is known to be this session's own by its unit name, so stopping it needs no judgment about what the process is.
-A backgrounded runaway therefore ends with the session that started it.
+A backgrounded runaway ends with the session that started it.
 What was stopped is reported.
 See host-setup/agent-safety/README.md requirement 9.
 
@@ -27,10 +26,10 @@ Registered as a Claude Code SessionEnd hook.
 It reads the hook payload on stdin and walks the process table for the agent process this hook is a child of.
 It reports every descendant running in its own session.
 That is because a shell started by a tool call is put in a session of its own.
-It therefore survives the agent that started it.
+That shell therefore survives the agent that started it.
 This phase never kills anything.
 That is because the maintainer decides what on the machine is still wanted.
-A long build backgrounded on purpose looks exactly like a leaked wait from here.
+It is also because a long build backgrounded on purpose looks exactly like a leaked wait from here.
 
 Reporting at all is what needs saying.
 A SessionEnd hook cannot block, and Claude Code discards its JSON output.
@@ -95,8 +94,7 @@ def _read_process_table(runner=None):
 
     A failed `ps` is None rather than an empty table. Reading `.stdout` alone turned an unsupported
     format keyword into "no processes".
-    That reads as a clean sweep and reaches the caller as the
-    wrong diagnosis.
+    That reads as a clean sweep and reaches the caller as the wrong diagnosis.
     So the exit status and an empty table are both failures here.
     """
 
@@ -309,8 +307,7 @@ def should_reap(runtime, env):
     """Whether the stop phase runs: where a manager was found, or where the session ran under the prefix.
 
     The second covers a session under the prefix with no manager found at its end.
-    That is reported as
-    an unknown, since the manager may never have run, rather than skipped in silence.
+    That is reported as an unknown, since the manager may never have run, rather than skipped in silence.
     """
     return bool(runtime) or prefix_registered(env)
 
@@ -462,8 +459,7 @@ def orphaned(units, props, table):
 
     The agent is the process that ran the tool call, so a scope it no longer outlives belongs to a
     session that has ended. This is a test on the agent rather than on each process's ancestry.
-    That is because a
-    command detached on purpose loses its agent ancestor while its session is still running.
+    That is because a command detached on purpose loses its agent ancestor while its session is still running.
     """
     gone, unrecorded = [], []
     for u in units:
@@ -501,8 +497,7 @@ def _tree_members(name, runner):
 
     A slice names no property listing the scopes in it, so membership is read from each scope's own
     `Slice`. The tree's slice is stopped only when this finds it empty.
-    Stopping a slice ends
-    everything in it, so a failure to list is never read as empty.
+    Stopping a slice ends everything in it, so a failure to list is never read as empty.
     """
     scopes = _tool_scopes(runner)
     code, out = runner("show", "--property=ActiveState", "--property=DropInPaths", "--", name)
@@ -523,10 +518,8 @@ def reap_tree(session_ids, env, table, runner=_systemctl, read=None, reader=None
 
     The tree is the inherited root's, or this session's own where it is the root. Stopping an ended
     session's scope can end an agent nested deeper.
-    So the process table is read again after each
-    stop and the judgment repeated, up to `_TREE_ROUNDS` times and only while `deadline` allows.
-    That is because
-    the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
+    So the process table is read again after each stop and the judgment repeated, up to `_TREE_ROUNDS` times and only while `deadline` allows.
+    That is because the hook's own timeout would otherwise cut the report off. Only the root stops the slice itself,
     and only once nothing is left in it. `table` is None where the process table could not be read,
     which says nothing about which agents run, so no scope is stopped then.
     """

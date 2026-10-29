@@ -19,7 +19,7 @@ sweep's report of surviving processes is what remains.
 
 A `claude` session started from a tool call runs its own tool calls in scopes of its own.
 Those scopes are named for it, each under its own ceiling.
-Sharing the parent's one ceiling would let a heavy build make the kernel kill the nested `claude` instead.
+That is because sharing the parent's one ceiling would let a heavy build make the kernel kill the nested `claude` instead.
 Every scope of the tree also joins one slice named for the root session, which carries a total ceiling for the whole tree.
 A chain of agents calling agents therefore meets that ceiling however few processes each level adds.
 The root's id travels to nested sessions in
@@ -30,9 +30,8 @@ The sweep can therefore tell a scope whose session has ended from one whose sess
 A runaway fan-out then meets the ceiling and fails with a visible error, instead of growing until the
 host has to be reset.
 The ceiling belongs to the scope's cgroup rather than to the foreground wait.
-It therefore still holds in two cases:
-- after the tool moves a timed-out command to the background
-- after the command's own shell has exited and its children were reparented to init
+It therefore still holds after the tool moves a timed-out command to the background.
+It also holds after the command's own shell has exited and its children were reparented to init.
 See host-setup/agent-safety/README.md requirement 9.
 
 The ceilings default to `DEFAULT_TASKS_MAX` and `DEFAULT_MEMORY_MAX` per scope, and to
@@ -172,8 +171,7 @@ def tree_slice(root):
     """The slice holding every scope of the tree rooted at `root`, or None where there is no root to name.
 
     A dash in a slice name is a level of the slice hierarchy, so the id's own dashes are dropped.
-    Otherwise each
-    root would leave a chain of empty parent slices behind.
+    Otherwise each root would leave a chain of empty parent slices behind.
     """
     name = (root or "").replace("-", "")
     return f"{TREE_UNIT}-{name}.slice" if name else None
@@ -260,8 +258,7 @@ def ceilings(env, tree=False):
     """(tasks, memory, notices): the scope's ceilings, or the tree's, and a line for each override refused.
 
     A malformed override falls back to the default rather than to no ceiling, and says so.
-    That is because
-    systemd would otherwise reject it and the command would not run at all.
+    That is because systemd would otherwise reject it and the command would not run at all.
     """
     prefix = "AGENT_CONTAINMENT_TREE_" if tree else "AGENT_CONTAINMENT_"
     tasks_default = DEFAULT_TREE_TASKS_MAX if tree else DEFAULT_TASKS_MAX

@@ -14,12 +14,12 @@ installed, and the hub commit it came from.
 A fleet rollout can therefore be tracked from the hosts rather than from memory. `--report` reads that stamp against this checkout and answers whether
 the machine is current, without changing anything.
 
-Usage: python3 install.py            (installs to ~/.claude)
-       python3 install.py --report   (read-only: is this machine current?)
+Usage: python3 install.py            (installs to ~/.claude).
+       python3 install.py --report   (read-only: is this machine current?).
        CLAUDE_HOME=/x python3 install.py   (override target, for testing).
        AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing).
        AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing).
-       AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing)
+       AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing).
 """
 
 import argparse
@@ -114,8 +114,7 @@ def runs_hook(command, path):
     The path is compared and the launcher is not.
     Matching the name alone let an unrelated `echo stray-process-sweep` count as a registration.
     Matching the whole command string reported a working machine stale.
-    That is because `hook_launcher()`
-    resolves at check time and a machine installed under a different PATH carries the other spelling.
+    That is because `hook_launcher()` resolves at check time and a machine installed under a different PATH carries the other spelling.
     The path is what the installer writes and never drifts, so it is the half worth comparing.
 
     The quoting around it is not compared either.
@@ -162,11 +161,11 @@ def names_hook(command, name):
     `runs_hook` accepts whole.
     The bare-word boundary class below cannot cross the space or the parentheses inside it to reach the deployed name.
 
-    Known gap, not chased further here, in two parts:
+    Known gap, not chased further here:
     - an unquoted path whose own directory holds one of the bare-word boundary characters.
     - a handful of shell compositions `runs_hook` itself only accepts because it is handed the exact
       literal path rather than discovering one.
-    The compositions include a backtick, a no-space redirect, and a quote escaped inside an outer quote.
+    The compositions are a backtick, a no-space redirect, and a quote escaped inside an outer quote.
     Closing those needs `runs_hook` widened too, which is a design change on its own rather than a local match.
     """
     text = str(command).replace("\\", "/")
@@ -311,7 +310,7 @@ def prefix_runs_directly(prefix):
     Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
     write guard included. A PreToolUse hook that fails is a non-blocking error.
     So a prefix that cannot run that way fails the guard open.
-    The causes include a missing `python3`, a lost execute bit, and a `noexec` mount.
+    The causes are a missing `python3`, a lost execute bit, and a `noexec` mount.
     """
     try:
         done = subprocess.run(
@@ -520,8 +519,7 @@ def write_regular_file(path, data, prior=None, before=None):
     The open is the check: a file that cannot be opened for writing raises before anything changes.
     So `before`, which backs the file up, runs only once the write is known to be possible.
     Opened without blocking and judged on the descriptor, as `read_regular_file` reads.
-    So a FIFO
-    or a device is refused rather than hanging or swallowing the write. Written in place rather than
+    So a FIFO or a device is refused rather than hanging or swallowing the write. Written in place rather than
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
     The open is tried exclusively first, so a file this call created is told from one it found.
@@ -781,8 +779,7 @@ def write_backup(claude_md, raw):
     """Write `raw` to a new backup beside CLAUDE.md and return its path, never replacing an earlier one.
 
     Created exclusively rather than checked and then written.
-    So two runs in one second cannot
-    both pick the same free name and have the second overwrite the first.
+    So two runs in one second cannot both pick the same free name and have the second overwrite the first.
     """
     when = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
     n = 0
@@ -806,7 +803,7 @@ def payload_digest():
     Line endings normalize for the same reason.
 
     Fixed order because a set of files has none.
-    A digest that depends on directory listing
+    It is also fixed because a digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
     `installed_digest` reads, so the two are directly comparable: each deployed hook, then each data
     file, then each block.
@@ -880,8 +877,7 @@ def installed_digest(claude_home):
     """A digest over the bytes actually on this machine, or None where the kit is not fully there.
 
     Markers and versions answer whether a block is present, and nothing about its content.
-    So a
-    block edited between its own markers reports current under a presence check. The hook is not
+    So a block edited between its own markers reports current under a presence check. The hook is not
     marker-delimited at all, so a modified or deleted one is invisible the same way.
 
     Line endings are normalized first: CLAUDE.md keeps whatever endings it had, and a machine that
@@ -918,7 +914,7 @@ def build_stamp(claude_home, installed, instructions_digest=None):
     An install passes the digest of what it rendered rather than re-reading the file. A write by
     anything else between the install's write and this read would otherwise be stamped as the
     install's own.
-    The next run would replace it with no backup.
+    Otherwise the next run would replace it with no backup.
     """
     return {
         "stampVersion": STAMP_VERSION,

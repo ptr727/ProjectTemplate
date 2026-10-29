@@ -276,7 +276,7 @@ project_node_id() { # owner number title
 
 # Print the target repository's own node id and the ids of the projects it is linked to, as one JSON object.
 # One query answers both, because apply needs the repository id to write the link.
-# Both modes also need the list to know whether the link is already there.
+# It is also because both modes need the list to know whether the link is already there.
 # A null repository is its own failure.
 # The gh CLI exits non-zero on a GraphQL error.
 # But a response carrying data and no such repository would otherwise read as a repository linked to nothing.
