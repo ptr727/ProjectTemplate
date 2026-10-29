@@ -3,8 +3,8 @@
 #   - The packages winget manages, which is routine.
 #   - The WSL platform itself, which is the Windows peer of a kernel and moves on its own release schedule.
 #
-# A WSL platform update is refused while Docker Desktop is running, because Docker holds the WSL service open.
-# The update then fails part way rather than declining.
+# A WSL platform update is refused while Docker Desktop is running.
+# The reason is that Docker holds the WSL service open, so the update then fails part way rather than declining.
 # Refusing is the point of running this rather than the two commands by hand: each is one line, and the guard between them is not.
 #
 # There is no action for a Windows feature update, where the Linux peer moves a host to the next release.

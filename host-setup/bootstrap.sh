@@ -149,7 +149,7 @@ archive_path() { printf '%s\n' "$DIR/$(tree_name).tar.gz"; }
 lock_path() { printf '%s\n' "$DIR/$(tree_name).lock"; }
 
 # Two runs sharing a --dir use the same fixed names.
-# So without this lock, one run's removal of its staging tree or its exit cleanup can delete a tree the other is still extracting into.
+# So without this lock, one run's removal of its staging tree, or its exit cleanup, can delete a tree the other is still extracting into.
 # The lock is the kernel's rather than a file whose presence is the lock, so a run that dies releases it.
 # The bootstrap.ps1 script opens the same file with FileShare.None, which .NET implements as a flock on Linux.
 # The file is left in place.

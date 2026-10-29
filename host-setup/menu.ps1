@@ -225,7 +225,7 @@ function Lock-Hub {
             return [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
         } catch [System.Management.Automation.MethodInvocationException] {
             # A held lock is a sharing or lock violation on Windows and the flock's EWOULDBLOCK on Linux, each carried in the HResult.
-            # By contrast, a full disk or a read-only mount is a plain IOException too and would otherwise be waited on forever.
+            # A full disk or a read-only mount is instead a plain IOException, which would otherwise be waited on forever.
             # The open does not block on either platform, so a held lock is waited out by retrying it.
             $reason = $_.Exception.InnerException
             $code = $reason.HResult -band 0xFFFF
@@ -250,18 +250,19 @@ function Invoke-WithHubLock {
     # That trade is not always brief.
     # Invoke-HostTool holds this lock for its entire spawned tool run, which can be a long OS package upgrade.
     # So a second session waiting here can wait as long as that run takes, not just for a quick read.
-    # It still closes the actual TOCTOU.
+    # This locking scheme still closes the actual TOCTOU.
     # A concurrent Invoke-FetchHub's Remove-Item can no longer land between a reader confirming $HUB_ROOT is fresh and that reader actually using it.
     # That is because both the reader and the fetch now hold this same lock for that whole span.
     # The lock is not held just around the read's own final call.
     # A span already holding the lock runs the scriptblock as it is.
-    # That is because Invoke-FetchHub is reached from inside such a span through Confirm-HubRoot.
-    # A second open of the file would wait on this session's own lock forever.
+    # That is because of the following.
+    #   - Invoke-FetchHub is reached from inside such a span through Confirm-HubRoot.
+    #   - A second open of the file would wait on this session's own lock forever.
     # -DryRun runs it unlocked too, matching menu.sh, since a dry run never fetches or reads $DIR\hub.
-    # Likewise, a dry run must not create $DIR or a lock file where neither existed.
+    # That is also because a dry run must not create $DIR or a lock file where neither existed.
     # A lock that cannot be taken at all returns $Failed without running the scriptblock.
     # That is the value each caller already returns for its own task failing.
-    # A $false is avoided since it would read as exit code 0 to a caller comparing it with -eq.
+    # That value is the caller's own rather than $false, since $false would read as exit code 0 to a caller comparing it with -eq.
     # ArgumentList is forwarded to the scriptblock positionally (its own param() block names them), rather than relying on the scriptblock closing over the caller's variables directly.
     # Passed this way, PSScriptAnalyzer's PSReviewUnusedParameter sees the caller's own parameters referenced at the call site.
     # A bare closure reads as an unused parameter to that rule instead.

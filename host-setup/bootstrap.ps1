@@ -297,7 +297,7 @@ function Test-Ownership {
 }
 
 # Two runs sharing a -Dir use the same fixed names.
-# So without this lock, one run's removal of its staging tree or its cleanup can delete a tree the other is still extracting into.
+# So without this lock, one run's removal of its staging tree, or its cleanup, can delete a tree the other is still extracting into.
 # The lock is the file system's rather than a file whose presence is the lock, so a run that dies releases it.
 # FileShare.None is the share mode .NET implements as a flock on Linux.
 # That flock is the lock bootstrap.sh takes on the same file.
