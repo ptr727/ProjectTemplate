@@ -263,7 +263,8 @@ def _unindented(line):
     """The line's text when it sits within CommonMark's three-space bound, else None, which reads the line as content.
 
     The bound is held on the line's own indentation in every container. So a marker indented past it
-    inside a list item is content here, although CommonMark can read it as HTML there.
+    inside a list item is not read as one here, although CommonMark can read it as HTML there.
+    A tab opens no line within the bound, since CommonMark expands one to the next four-column stop.
     """
     stripped = line.lstrip(" ")
     return stripped.rstrip() if len(line) - len(stripped) <= _MAX_INDENT else None
@@ -275,11 +276,22 @@ def _marker(line, in_code, where):
     A marker shown inside a code sample is content rather than a region boundary, whether the
     sample is fenced or indented. Showing a marker in a code sample is how the skill-lifecycle skill documents the syntax.
     Outside a code sample, a line that begins like a marker and matches neither form is refused rather
-    than read as content. That is because content is exactly what leaves a region unfilled while
-    --check exits 0. `where` names the file and line the refusal reports.
+    than read as content. So is a marker indented past the three-space bound. One in a list item whose
+    content column is four is an example, which GitHub renders as a region nothing fills. That is because
+    content is exactly what leaves a region unfilled while --check exits 0. `where` names the file and
+    line the refusal reports.
     """
-    text = None if in_code else _unindented(line)
-    if text is None:
+    if in_code:
+        return None, None
+    text = _unindented(line)
+    bare = line.lstrip(" \t").rstrip()
+    if text != bare:
+        if _INCLUDE_LIKE.match(bare):
+            width = len(line[: len(line) - len(line.lstrip(" \t"))].expandtabs(4))
+            raise ValueError(
+                f"{where}: {bare!r} is indented {width} columns, past the three-space bound,"
+                " so it would be read as content and leave a region unfilled"
+            )
         return None, None
     opens, closes = _INCLUDE_START.match(text), _INCLUDE_END.match(text)
     if opens is None and closes is None and _INCLUDE_LIKE.match(text):

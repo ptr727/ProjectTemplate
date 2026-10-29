@@ -711,6 +711,28 @@ class IncludeCase(TreeCase):
         self.assertEqual(self.skill_text(), body)
         self.assertFalse(build_dist.is_stale())
 
+    def test_a_marker_indented_past_the_bound_outside_a_code_block_is_refused(self) -> None:
+        """GitHub renders a list item's deep marker as a region, so leaving it unfilled must not pass --check."""
+        for indent, width in (("    ", 4), ("\t", 4), ("  \t", 4), ("      ", 6)):
+            with self.subTest(indent=indent):
+                body = (
+                    f"1.  Step one.\n\n{indent}<!-- include: RULES.md > Alpha -->\n"
+                    f"{indent}<!-- /include -->\n"
+                )
+                self.make_skill("foo", body)
+                with self.assertRaisesRegex(ValueError, f"SKILL.md:3: .* indented {width} columns"):
+                    build_dist.regenerate()
+                self.assertEqual(self.skill_text(), body)
+
+    def test_a_deep_marker_in_a_source_body_is_refused(self) -> None:
+        """The source scan reads markers the same way, so a deep one there cannot be copied in as text."""
+        (self.tmp / "RULES.md").write_text(
+            "## Alpha\n\n1.  Step.\n\n    <!-- /include -->\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Alpha"))
+        with self.assertRaisesRegex(ValueError, "RULES.md:5: .* indented 4 columns"):
+            build_dist.regenerate()
+
     @requires_symlink
     def test_a_symlinked_skill_directory_is_refused_before_any_fill(self) -> None:
         """The fill writes through whatever the walk found, so the symlink check has to run before it."""
