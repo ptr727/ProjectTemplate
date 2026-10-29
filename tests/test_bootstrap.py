@@ -5,17 +5,17 @@ Two properties, both of which fail silently rather than loudly if nobody checks 
 
 The loader invariant is what keeps `host-setup/bootstrap.sh` and `host-setup/bootstrap.ps1` outside
 the reach of the `Hub-Hosted Tooling` rule rather than exempt from it. A loader obtains a tree and
-hands control to one entry point inside it. The moment it reads a second path in that tree it has
-become a tool that reads hub content, and the rule applies to it in full. That boundary is a property
+hands control to one entry point inside it. The moment a loader reads a second path in that tree, it has
+become a tool that reads hub content. The rule then applies to that loader in full. That boundary is a property
 of each file, so it is asserted here rather than promised in prose.
 
 The coverage assertion is the only connection between the floors in `spec/host-tools.json` and the
 tooling that installs them. Nothing joins the two at runtime, deliberately: the gate measures a host
 and the tooling changes one, and neither calls the other. Without a check at this level a tool could
-be declared required and be one nothing here can install, which a host would discover as a gate it
-cannot satisfy.
+be declared required and be one nothing here can install. A host would discover that tool as a gate
+it cannot satisfy.
 
-That assertion runs once per platform, because the two installers do not manage the same set and the
+That assertion runs once per platform. The reason is that the two installers do not manage the same set and the
 difference is a decision rather than an accident. `git-restore-mtime` serves a Linux deploy path and
 the spec declares it not applicable on Windows.
 
@@ -54,7 +54,8 @@ HOST_TOOLS = ROOT / "spec" / "host-tools.json"
 TOOLS_DECLARATION = re.compile(r"^readonly TOOLS=\(([^)]*)\)", re.MULTILINE)
 
 # The same, for the windows tooling, whose registry is a list of records rather than a flat array.
-# The names are read out of the records themselves rather than from a second list beside them, so there is one declaration to keep true rather than two that can agree wrongly.
+# The names are read out of the records themselves rather than from a second list beside them.
+# That leaves one declaration to keep true rather than two that can agree wrongly.
 PS_TOOLS_OPEN = re.compile(r"^\$TOOLS\s*=\s*@\(", re.MULTILINE)
 PS_TOOLS_CLOSE = re.compile(r"^\)", re.MULTILINE)
 PS_TOOL_NAME = re.compile(r"^\s*@\{\s*Name\s*=\s*'([^']+)'", re.MULTILINE)
@@ -80,8 +81,12 @@ RUNS_LINUX_INSTALLER = unittest.skipUnless(
     sys.platform == "linux", "executes install-tools.sh, which only a Linux host can run"
 )
 
-# A spec tool an installer deliberately does not manage, and the reason, recorded so an omission is a decision somebody made rather than one nobody noticed.
-# Both sets are empty, which is itself the assertion: docker installs the same way on a hypervisor and a workstation on both platforms now, and the one case that differs, a WSL distribution, is handled inside install-tools.sh itself (it skips the native install and points at Docker Desktop's own WSL integration) rather than by leaving docker unmanaged on Linux entirely.
+# A spec tool an installer deliberately does not manage is recorded here with its reason.
+# The record makes an omission a decision somebody made rather than one nobody noticed.
+# Both sets are empty, which is itself the assertion.
+# Docker installs the same way on a hypervisor and a workstation on both platforms now.
+# The one case that differs, a WSL distribution, is handled inside install-tools.sh itself rather than by leaving docker unmanaged on Linux entirely.
+# That handling skips the native install and points at Docker Desktop's own WSL integration.
 NOT_MANAGED: dict[str, dict[str, str]] = {
     "linux": {},
     "windows": {},
@@ -103,8 +108,8 @@ class TestLoaderInvariant(unittest.TestCase):
     """`bootstrap.sh` and `bootstrap.ps1` each read exactly one path into the fetched tree.
 
     Both loaders write that one reference as a single interpolated, forward-slashed string
-    (`$TREE/host-setup/<platform>/$tool` in each), rather than building it from parts, which is
-    what lets one pattern check either file unmodified.
+    (`$TREE/host-setup/<platform>/$tool` in each), rather than building it from parts.
+    Writing it that way is what lets one pattern check either file unmodified.
     """
 
     def _assert_reads_one_path(self, path: Path, expected: str) -> None:
@@ -177,7 +182,8 @@ class TestSpecCoverage(unittest.TestCase):
             )
 
         # A missing close marker is a failure rather than a scan to end of file.
-        # Reading on past the registry collects every later `Name = '...'` in the script, so a broken registry answers with a larger tool set than it declares and the coverage check below passes on it.
+        # Reading on past the registry collects every later `Name = '...'` in the script.
+        # A broken registry therefore answers with a larger tool set than it declares, and the coverage check below passes on it.
         closed = PS_TOOLS_CLOSE.search(text, opened.end())
         if closed is None:
             self.fail(
@@ -194,7 +200,8 @@ class TestSpecCoverage(unittest.TestCase):
 
     def spec_tools(self) -> list[dict]:
         """The tools the spec declares."""
-        # A malformed or unreadable spec is a finding this reports beside the others, rather than a traceback that ends the run and takes the checks after it with it.
+        # A malformed or unreadable spec is a finding this reports beside the others, rather than a traceback that ends the run.
+        # Such a traceback would also take the checks after it with it.
         try:
             return json.loads(HOST_TOOLS.read_text(encoding="utf-8"))["tools"]
         except (OSError, ValueError, KeyError) as error:
@@ -212,7 +219,8 @@ class TestSpecCoverage(unittest.TestCase):
 
             # Every required tool is checked, including one whose declaration names no source for this platform.
             # A tool is in scope because the spec requires it, never because its declaration happens to describe where this platform gets it.
-            # Reading a missing `source.linux` as "not a Linux tool" skipped docker, git and uv, which is half the required set and the whole of what NOT_MANAGED exists to record.
+            # Reading a missing `source.linux` as "not a Linux tool" skipped docker, git and uv.
+            # Those tools are half the required set and the whole of what NOT_MANAGED exists to record.
             expected = ALIASES[platform].get(name, name)
             with self.subTest(tool=name):
                 if name in NOT_MANAGED[platform]:
@@ -415,11 +423,12 @@ class TestSpecCoverage(unittest.TestCase):
         """Windows has no `python3` of its own, so the installer both clears the lie and supplies the name.
 
         Two halves, and neither is sufficient alone. Windows ships app-execution alias stubs that
-        answer to `python` and `python3` and only offer to open the Microsoft Store. They fail
-        loudly, on stderr with exit 9009, so the harm is not a false pass but an occupied name: the
-        alias directory is on `PATH` by default, so the stub answers wherever it sits ahead of the
-        install directory. Removing them alone would leave `python3` simply absent on a host that
-        does have Python, so the installer also puts a real one beside the interpreter it manages.
+        answer to `python` and `python3` and only offer to open the Microsoft Store. The stubs fail
+        loudly, on stderr with exit 9009, so the harm is not a false pass but an occupied name. The
+        alias directory is on `PATH` by default, so a stub answers wherever it sits ahead of the
+        install directory. Removing the stubs alone would leave `python3` simply absent on a host
+        that does have Python. The installer therefore also puts a real one beside the interpreter
+        it manages.
         The reparse-tag guard is what keeps the removal from deleting a real executable someone put
         in that directory.
         """
@@ -434,13 +443,13 @@ class TestSpecCoverage(unittest.TestCase):
         """The shim follows whatever line the managed package installs, so its code hardcodes none.
 
         The package ID in `$TOOLS` is the one place a Python version is written down. A literal
-        anywhere in the repair path would silently keep targeting the old line the day that ID moves,
-        which is the failure mode this asserts against rather than merely documents.
+        anywhere in the repair path would silently keep targeting the old line the day that ID moves.
+        That outcome is the failure mode this asserts against rather than merely documents.
 
-        Comments are stripped before the match, because the invariant is about what the code
-        resolves and not about what the prose may use as an example. The architecture-qualified tag
-        rule is far clearer written as `3.13` beside `3.13-arm64` than described in the abstract, and
-        a version named there cannot make a lookup target the wrong line.
+        Comments are stripped before the match. The reason is that the invariant is about what the code
+        resolves and not about what the prose may use as an example. The
+        architecture-qualified tag rule is far clearer written as `3.13` beside `3.13-arm64` than
+        described in the abstract. A version named there cannot make a lookup target the wrong line.
         """
         text = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
         section = text.split("# --- Python ---", 1)
@@ -453,10 +462,10 @@ class TestSpecCoverage(unittest.TestCase):
     def test_every_declared_floor_carries_a_total_remedy_mapping(self) -> None:
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 
-        The gate prints the remedy under a below-floor failure, so a missing platform key is a
+        The gate prints the remedy under a below-floor failure. A missing platform key is therefore a
         failure that tells the operator to upgrade and not how. A remedy that hands back into an
-        installer here is also checked to name a tool that installer manages, so the command it
-        prints can actually run.
+        installer here is also checked to name a tool that installer manages. The check makes sure
+        the command the remedy prints can actually run.
         """
         linux_managed = self.declared_tools()
         windows_managed = self.declared_windows_tools()
@@ -554,10 +563,10 @@ class TestScriptPresence(unittest.TestCase):
     def test_every_windows_script_is_present(self) -> None:
         """Each Windows script is present, and none opens with a shebang.
 
-        The exec bit is the Linux form of "this will run", and on Windows the equivalent property
-        is the absence of a shebang: `scripts/repo_gate.py --check eol-coverage` requires git to
-        resolve any tracked file opening `#!` to `eol=lf` via a `.gitattributes` pin, and these
-        files carry none of their own. A shebang added later would fail that gate from a file
+        The exec bit is the Linux form of "this will run". On Windows the equivalent property
+        is the absence of a shebang. The check `scripts/repo_gate.py --check eol-coverage` requires
+        git to resolve any tracked file opening `#!` to `eol=lf` via a `.gitattributes` pin. These
+        files carry no pin of their own. A shebang added later would fail that gate from a file
         nobody would think to look at.
         """
         scripts = (
@@ -586,8 +595,8 @@ class TestScriptPresence(unittest.TestCase):
     def test_bootstrap_ps1_is_present_and_unmarked(self) -> None:
         """`bootstrap.ps1` is present, and does not open with a shebang.
 
-        Kept apart from `test_every_windows_script_is_present` rather than folded into it, because
-        `bootstrap.ps1` deliberately sits beside `bootstrap.sh` at `host-setup/`, not inside
+        Kept apart from `test_every_windows_script_is_present` rather than folded into it. The reason
+        is that `bootstrap.ps1` deliberately sits beside `bootstrap.sh` at `host-setup/`, not inside
         `host-setup/windows/` with the four scripts that test checks. Same reasoning as that test:
         the `eol-coverage` gate requires a `.gitattributes` pin for any tracked file opening `#!`,
         and this file carries none of its own.
@@ -603,13 +612,13 @@ class TestScriptPresence(unittest.TestCase):
     def test_bootstrap_ps1_names_the_system32_tar(self) -> None:
         """`bootstrap.ps1` reaches tar only through `Get-TarPath`, which names the System32 copy.
 
-        A pwsh launched from Git Bash finds MSYS tar first on `PATH`, and that tar reads the drive
-        prefix of a Windows archive path as a remote host, so a bare `tar` makes the extraction
-        depend on the shell the loader was started from. A path to any other tar, Git's own
+        A pwsh launched from Git Bash finds MSYS tar first on `PATH`. That tar reads the drive
+        prefix of a Windows archive path as a remote host. A bare `tar` therefore makes the
+        extraction depend on the shell the loader was started from. A path to any other tar, Git's own
         included, reaches the same MSYS tar without `PATH`. The check is an allow-list over every
         code line that names tar, so it holds whatever form the invocation on such a line takes.
         A `tar.gz` is not tar named only as an archive extension (`name.tar.gz`) or as a URL path
-        segment (`/tar.gz/`), neither of which can name an executable.
+        segment (`/tar.gz/`). Neither of those can name an executable.
         """
         text = BOOTSTRAP_PS.read_text(encoding="utf-8")
         definition = "function Get-TarPath { Join-Path $env:SystemRoot 'System32\\tar.exe' }"
@@ -659,7 +668,7 @@ def installer_tree(root: Path, platform: str, wrapper: str) -> Path:
 class TestDirectoryLockOrder(unittest.TestCase):
     """A run refused the directory lock stops before anything that removes a tree.
 
-    Each loader's cleanup removes trees by their fixed names, so a refused run that reached it would
+    Each loader's cleanup removes trees by their fixed names. So a refused run that reached that cleanup would
     delete the trees of the very run holding the lock.
     """
 
@@ -1015,8 +1024,8 @@ class TestPowerShellKeptTreeHandling(unittest.TestCase):
     """The Windows loader's removal and swap of the trees it owns, driven through its own functions.
 
     Each case runs `bootstrap.ps1`'s own functions, extracted by AST, against a scratch directory.
-    An entry a case locks is held for real, by an open handle on Windows, so the rename and delete
-    failures the loader is shaped around are the host's own rather than a stub's.
+    An entry a case locks is held for real, by an open handle on Windows. The rename and delete
+    failures the loader is shaped around are therefore the host's own rather than a stub's.
     """
 
     def setUp(self) -> None:
@@ -2063,8 +2072,9 @@ class TestMenuSkillsInstall(unittest.TestCase):
 class HubCleanupCases:
     """Which hub cache a menu's exit removes, the same cases for both menus.
 
-    A session removes only the tree whose marker still records its own fetch's token, since another
-    session sharing the directory may have fetched again since, and the tree is then that session's.
+    A session removes only the tree whose marker still records its own fetch's token. The restriction
+    exists because another session sharing the directory may have fetched again since, and the tree
+    is then that session's.
     """
 
     TOKEN = "0123456789abcdef0123456789abcdef"
@@ -2480,7 +2490,7 @@ class HubRefFreshnessCases:
     """Whether a menu reuses the cached hub tree for its session's own ref, the same cases for both menus.
 
     Each run is one session sharing the cache directory, cloning from a local origin whose `main`
-    and `develop` sit on different commits, reached through `insteadOf` so the menus' own hub URL
+    and `develop` sit on different commits. The origin is reached through `insteadOf` so the menus' own hub URL
     resolves to it.
     """
 

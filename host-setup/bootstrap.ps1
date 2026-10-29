@@ -2,19 +2,30 @@
 # It is the one file fetched on its own, because a host with no git and no checkout is what it exists to fix.
 # It reads no payload, no table, and no sibling module: it obtains a tree and runs one entry point inside that tree.
 #
-# A tarball rather than a clone, because a clone needs git on a host that may not have it, and because a tarball of a resolved commit cannot be stale.
+# It fetches a tarball rather than a clone, for these reasons:
+#   - A clone needs git on a host that may not have it.
+#   - A tarball of a resolved commit cannot be stale.
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
 # A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
-# That tree is replaced whole by the next such run and is never a git checkout, so the bootstrap still needs no git and modifies no checkout of anyone's.
+# The bootstrap still needs no git and modifies no checkout of anyone's, because of the following.
+#   - That tree is replaced whole by the next such run.
+#   - That tree is never a git checkout.
 #
 # An unverified loader is worse than none, which is why this one does more than its Linux peer before it trusts anything.
-# It pins TLS 1.2 itself rather than assume a fresh host's default reaches GitHub, it checks a fetched tree for the marker it wrote before removing anything under -Dir, and it hands off to PowerShell 7 explicitly rather than assume the console it started in already carries it.
+# It does the following:
+#   - It pins TLS 1.2 itself rather than assume a fresh host's default reaches GitHub.
+#   - It checks a fetched tree for the marker it wrote before removing anything under -Dir.
+#   - It hands off to PowerShell 7 explicitly rather than assume the console it started in already carries it.
 #
-# Windows PowerShell 5.1 is the one shell a fresh Windows host guarantees, the way bash is guaranteed on a fresh Debian host, so everything up to and including finding or installing PowerShell 7 is written to run under it.
-# Once pwsh is confirmed, this file hands the rest of the run to itself under pwsh, and every script under host-setup/windows it goes on to drive requires that version too.
+# Windows PowerShell 5.1 is the one shell a fresh Windows host guarantees, the way bash is guaranteed on a fresh Debian host.
+# Everything up to and including finding or installing PowerShell 7 is therefore written to run under it.
+# Once pwsh is confirmed, this file hands the rest of the run to itself under pwsh.
+# Every script under host-setup/windows that this file goes on to drive requires PowerShell 7 too.
 
-# The Host action binds to StandUpHost rather than Host, because Host is PowerShell's own automatic variable for the host program ($Host.Name, $Host.UI), and a parameter named Host would shadow it and fail PSAvoidAssignmentToAutomaticVariable.
+# The Host action binds to StandUpHost rather than Host, because:
+#   - Host is PowerShell's own automatic variable for the host program ($Host.Name, $Host.UI).
+#   - A parameter named Host would shadow that variable and fail PSAvoidAssignmentToAutomaticVariable.
 # The alias keeps -Host as the spelling a caller types, while leaving the automatic variable free for the console-detection checks below.
 [CmdletBinding()]
 param(
@@ -36,7 +47,9 @@ param(
     [Alias('h')][switch]$Help
 )
 
-# Captured before anything else touches scope, so the pwsh handoff below can rebuild the argument list this process was bound with, rather than reaching for an automatic variable from inside a nested function.
+# Captured before anything else touches scope.
+# The pwsh handoff below can therefore rebuild the argument list this process was bound with.
+# It does so rather than reaching for an automatic variable from inside a nested function.
 $SCRIPT_BOUND_PARAMETERS = $PSBoundParameters
 
 Set-StrictMode -Version Latest
@@ -61,7 +74,8 @@ function warn { param([string]$Message) [Console]::Error.WriteLine("WARNING: $Me
 function die { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Message"); exit 1 }
 
 # Every parameter is read into a variable here rather than from inside a function.
-# A script parameter reached only from a nested scope reads as declared and never used, which is a finding on each one and hides a parameter that genuinely is unused.
+# A script parameter reached only from a nested scope reads as declared and never used.
+# That reading is a finding on each such parameter, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     report  = [bool]$Report
     upgrade = [bool]$Upgrade
@@ -82,7 +96,9 @@ $KEEP = [bool]$Keep
 $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
 
 $MODE = ''
-# No placeholder for $DIR here, unlike the four lines around it: PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable, and resetting it here would silently discard whatever -Dir the caller passed before Resolve-Directory ever reads it.
+# No placeholder for $DIR here, unlike the four lines around it.
+# PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable.
+# Resetting $DIR here would silently discard whatever -Dir the caller passed before Resolve-Directory ever reads it.
 $RESOLVED = ''
 $TREE = ''
 $PWSH_PATH = ''
@@ -141,13 +157,17 @@ Examples:
 
 # --- pwsh handoff ---
 #
-# Everything above this point, and the four functions below, run under Windows PowerShell 5.1: no ternary or null-coalescing operator, no multi-argument Join-Path, nothing newer than that runtime parses.
+# Everything above this point, and the four functions below, run under Windows PowerShell 5.1, which means:
+#   - No ternary or null-coalescing operator.
+#   - No multi-argument Join-Path.
+#   - Nothing newer than that runtime parses.
 # Everything past the handoff may use whatever pwsh 7 accepts, though it mostly does not need to.
 
 function Resolve-Pwsh {
     $command = Get-Command pwsh -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
-    # ProgramFiles(x86) carries no value on a host with no WOW64 layer, and Join-Path on a null path is a terminating error under Set-StrictMode, not an empty match to fall through.
+    # ProgramFiles(x86) carries no value on a host with no WOW64 layer.
+    # Join-Path on a null path is a terminating error under Set-StrictMode, not an empty match to fall through.
     $candidates = @((Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'))
     if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'PowerShell\7\pwsh.exe') }
     foreach ($candidate in $candidates) {
@@ -156,7 +176,8 @@ function Resolve-Pwsh {
     return $null
 }
 
-# This is the one place that install-tools.ps1's own rule does not hold: pwsh is deliberately not part of any tool registry, because a host that cannot run these scripts cannot be repaired by them.
+# This is the one place that install-tools.ps1's own rule does not hold.
+# The pwsh runtime is deliberately not part of any tool registry, because a host that cannot run these scripts cannot be repaired by them.
 # Standing up pwsh is the whole reason this file exists rather than starting from a checkout.
 function Install-Pwsh {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
@@ -167,13 +188,16 @@ function Install-Pwsh {
     $wingetExit = $LASTEXITCODE
     $found = Resolve-Pwsh
     if (-not $found) {
-        # This names winget's own exit code even though pwsh's absence, not the code, is what decides this die: a non-zero code explains why, where "reported installing" alone does not, and winget answering 0 while pwsh is still missing is worth saying too.
+        # This names winget's own exit code even though pwsh's absence, not the code, is what decides this die.
+        # A non-zero code explains why, where "reported installing" alone does not.
+        # That winget answers 0 while pwsh is still missing is worth saying too.
         die "winget exited $wingetExit installing PowerShell 7, and pwsh could still not be found. Close this console and paste the setup lines again, or install it from https://aka.ms/PSWindows."
     }
     return $found
 }
 
-# Rebuilds the arguments this process was bound with, since a param() bound script has no raw $args left to forward: -Report arrives as $Report = $true, not as a string in a list.
+# Rebuilds the arguments this process was bound with, since a param() bound script has no raw $args left to forward.
+# -Report arrives as $Report = $true, not as a string in a list.
 function Get-ForwardedArgument {
     $forward = @()
     foreach ($key in $script:SCRIPT_BOUND_PARAMETERS.Keys) {
@@ -189,7 +213,9 @@ function Get-ForwardedArgument {
 }
 
 # The same parameters Get-ForwardedArgument forwards, rendered as one pasteable command-line string rather than split into argv elements.
-# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape: a value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted, which is exactly the bug guessing from shape produced here before.
+# Classified by SCRIPT_BOUND_PARAMETERS's own type rather than by a value's shape.
+# A value that happens to look like a flag (-Ref '-Yes') would otherwise print unquoted and bind as its own switch when pasted.
+# That is exactly the bug guessing from shape produced here before.
 function Format-ForwardedArgumentForDisplay {
     $parts = foreach ($key in $script:SCRIPT_BOUND_PARAMETERS.Keys) {
         $value = $script:SCRIPT_BOUND_PARAMETERS[$key]
@@ -239,7 +265,8 @@ function Test-KeepsTree {
 
 # The paths this loader creates under DIR, named in one place so the cleanup and the download agree.
 # DIR itself is never removed, since -Dir may name a directory the caller owns and put other things in.
-# A kept tree and a transient one take different names, so a report run sharing a -Dir with a host run never removes the tree Claude Code loads.
+# A kept tree and a transient one take different names.
+# A report run sharing a -Dir with a host run therefore never removes the tree Claude Code loads.
 function Get-TreeName { if (Test-KeepsTree) { 'skills-tree' } else { 'tree' } }
 function Get-TreePath { Join-Path $script:DIR (Get-TreeName) }
 function Get-StagingPath { Join-Path $script:DIR "$(Get-TreeName).new" }
@@ -249,15 +276,19 @@ function Get-LockPath { Join-Path $script:DIR "$(Get-TreeName).lock" }
 function Get-TarPath { Join-Path $env:SystemRoot 'System32\tar.exe' }
 
 # A tree carries a marker this loader wrote, and a tree without one is somebody else's.
-# DIR is a caller-supplied path, so a tree under it is not necessarily ours: pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
+# DIR is a caller-supplied path, so a tree under it is not necessarily ours.
+# Pointing -Dir at a directory that already holds one would otherwise have this remove it, both before extracting and again on exit.
 function Test-Ownership {
     param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
     if (-not ($item -and $item.PSIsContainer)) { return $false }
-    # An empty directory counts as ours, since it holds nothing to lose and no live run can be filling it while this one holds the lock.
+    # An empty directory counts as ours for two reasons.
+    #   - It holds nothing to lose.
+    #   - No live run can be filling it while this one holds the lock.
     # It is what a removal leaves where clearing the tree worked and removing the directory itself did not, the marker having gone with the contents.
-    # A directory that cannot be read is not known to be either, so it stays somebody else's, which on Linux includes the marker check itself throwing.
+    # A directory that cannot be read is not known to be either, so it stays somebody else's.
+    # On Linux, that case includes the marker check itself throwing.
     try {
         if (Test-Path -LiteralPath (Join-Path $Path '.bootstrap-owned')) { return $true }
         return -not (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1)
@@ -266,17 +297,23 @@ function Test-Ownership {
     }
 }
 
-# Two runs sharing a -Dir use the same fixed names, so without this one run's removal of its staging tree, or its cleanup, can delete a tree the other is still extracting into.
-# The lock is the file system's rather than a file whose presence is the lock, so a run that dies releases it, and FileShare.None is the share mode .NET implements as a flock on Linux, which is the lock bootstrap.sh takes on the same file.
-# The file is left in place, since removing it while another run holds it open would let a third run lock a new file under the same name.
+# Two runs sharing a -Dir use the same fixed names.
+# So without this lock, one run's removal of its staging tree, or its cleanup, can delete a tree the other is still extracting into.
+# The lock is the file system's rather than a file whose presence is the lock, so a run that dies releases it.
+# FileShare.None is the share mode .NET implements as a flock on Linux.
+# That flock is the lock bootstrap.sh takes on the same file.
+# The file is left in place.
+# That is because removing it while another run holds it open would let a third run lock a new file under the same name.
 function Lock-Directory {
     $lock = Get-LockPath
     New-Item -ItemType Directory -Path $script:DIR -Force | Out-Null
     try {
         $script:LOCK = [IO.File]::Open($lock, 'OpenOrCreate', 'ReadWrite', 'None')
     } catch [System.Management.Automation.MethodInvocationException] {
-        # A sharing violation, and its Linux flock equivalent, is a plain IOException, where a path or permission failure is one of its subclasses or another type.
-        # A file system error .NET maps to no subclass, a read-only mount or a full disk, is a plain IOException too, so the message names the reason rather than asserting the cause.
+        # A sharing violation, and its Linux flock equivalent, is a plain IOException.
+        # By contrast, a path or permission failure is one of its subclasses or another type.
+        # A file system error .NET maps to no subclass, a read-only mount or a full disk, is a plain IOException too.
+        # The message therefore names the reason rather than asserting the cause.
         $reason = $_.Exception.InnerException
         if ($reason.GetType() -eq [IO.IOException]) {
             die "Could not lock ${lock}: $($reason.Message) Another bootstrap run using $script:DIR is the usual cause, so let it finish, then run this again."
@@ -316,7 +353,8 @@ function Get-Tree {
     }
 
     # The archive holds one top-level directory named for the repository and the revision.
-    # It is extracted beside the tree rather than over it, so a failed download or extract leaves a kept tree, and the plugin loading it, as they were.
+    # It is extracted beside the tree rather than over it.
+    # A failed download or extract therefore leaves a kept tree, and the plugin loading it, as they were.
     $staging = Get-StagingPath
     Remove-Owned -Path $staging
     New-Item -ItemType Directory -Path $staging -Force | Out-Null
@@ -332,14 +370,16 @@ function Get-Tree {
     if (-not (Test-KeepsTree)) { Invoke-SwapIn }
 }
 
-# Removes the ownership marker last, so a removal that stops part way, on a file another process holds open, leaves a directory the next run still recognizes as its own.
+# Removes the ownership marker last.
+# A removal that stops part way, on a file another process holds open, therefore leaves a directory the next run still recognizes as its own.
 function Remove-Tree {
     param([string]$Path)
     Get-ChildItem -LiteralPath $Path -Force | Where-Object { $_.Name -ne '.bootstrap-owned' } | Remove-Item -Recurse -Force
     Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
-# Renames a tree whole or not at all, which Move-Item does not: where a held file stops the rename, it moves the tree entry by entry instead, marker included.
+# Renames a tree whole or not at all, which Move-Item does not.
+# Where a held file stops the rename, Move-Item moves the tree entry by entry instead, marker included.
 function Move-Tree {
     param([string]$Path, [string]$Destination)
     try {
@@ -349,8 +389,10 @@ function Move-Tree {
     }
 }
 
-# Moves the old tree aside before the new one takes its name, and removes it only after, so no failure part way leaves the name empty or half-deleted.
-# A rename of a directory in use fails whole on Windows, where a delete fails part way, which is why the old tree is renamed rather than deleted in place.
+# Moves the old tree aside before the new one takes its name, and removes it only after.
+# No failure part way therefore leaves the name empty or half-deleted.
+# A rename of a directory in use fails whole on Windows, where a delete fails part way.
+# That is why the old tree is renamed rather than deleted in place.
 function Invoke-SwapIn {
     $staging = Get-StagingPath
     $tree = Get-TreePath
@@ -399,13 +441,15 @@ function Invoke-SwapIn {
     info "Extracted to $script:TREE"
 }
 
-# Removes each path this run can create by its fixed name rather than through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
+# Removes each path this run can create by its fixed name.
+# It does not go through TREE, since a failed extract leaves an archive and a part-written staging tree before TREE names anything.
 # A path that is not ours was already refused where it mattered, at the download.
 # Refusing again from here would print the same error a second time, after the one that actually stopped the run.
 # The old tree is restored before the staging tree is removed, since the lock that failed the swap's rename can fail that removal too.
 function Invoke-Cleanup {
     Remove-Item -LiteralPath (Get-ArchivePath) -Force -ErrorAction SilentlyContinue
-    # A swap stopped between its two renames leaves the old tree aside and nothing at the name, so the old tree goes back rather than away.
+    # A swap stopped between its two renames leaves the old tree aside and nothing at the name.
+    # The old tree therefore goes back rather than away.
     $retired = Get-RetiredPath
     if (Test-Ownership -Path $retired) {
         if (-not (Test-Path -LiteralPath (Get-TreePath))) {
@@ -432,8 +476,11 @@ function Invoke-Cleanup {
 # --- Handoff ---
 
 # Every tool runs from inside the fetched tree, and this is the only place a path inside it is named.
-# Written as one interpolated, forward-slashed string against the bare $TREE rather than $script:TREE or Join-Path, so this loader's one entry point into the tree reads as the literal pattern the Linux loader is checked by, and stays checkable by that same pattern.
-# A read resolves $TREE up to script scope on its own, and only a write needs the script: prefix, which is why the assignment in Get-Tree still carries it.
+# Written as one interpolated, forward-slashed string against the bare $TREE rather than $script:TREE or Join-Path.
+# That form makes this loader's one entry point into the tree read as the literal pattern the Linux loader is checked by.
+# That form also keeps the entry point checkable by that same pattern.
+# A read resolves $TREE up to script scope on its own, and only a write needs the script: prefix.
+# That is why the assignment in Get-Tree still carries it.
 function Invoke-Tool {
     param([Parameter(Mandatory)][string]$Tool, [switch]$ToleratesFailure, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
 
@@ -467,7 +514,8 @@ function Test-Elevated {
     $IsWindows -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# The agent tools live in a user's profile, and an administrator's holds none on a host where a person uses them, so an elevated run skips them and says so.
+# The agent tools live in a user's profile, and an administrator's holds none on a host where a person uses them.
+# An elevated run therefore skips them and says so.
 function Test-AgentsUser {
     if (Test-Elevated) {
         info "Running elevated, so no user's coding-agent tools are read, run this as that user to include them"
@@ -500,7 +548,8 @@ function Invoke-AgentsInstall {
 }
 
 # The order is fixed rather than chosen.
-# Packages come first so install-tools.ps1 and setup-github.ps1 act on a host winget has just brought current, and GitHub comes last because it is the only step that waits on a person in a browser.
+# Packages come first so install-tools.ps1 and setup-github.ps1 act on a host winget has just brought current.
+# GitHub comes last because it is the only step that waits on a person in a browser.
 # The skills step runs after the tools, because install-tools.ps1 provides the interpreter it needs.
 function Invoke-StandUp {
     # Named Kind rather than Profile, which is PowerShell's own automatic variable for the current user's profile script.
@@ -589,7 +638,8 @@ function Resolve-Directory {
 }
 
 # PowerShell records which switches were given and not the order they came in, so two actions is a refusal rather than the last one winning.
-# Unlike the four scripts this loader drives, zero given is not this loader's own default: main tells the menu and the piped-in report apart, the way bootstrap.sh's own entry point does.
+# Unlike the four scripts this loader drives, zero given is not this loader's own default.
+# The main function tells the menu and the piped-in report apart, the way bootstrap.sh's own entry point does.
 function Resolve-Mode {
     $given = @($script:ACTIONS.Keys | Where-Object { $script:ACTIONS[$_] })
     if ($given.Count -gt 1) { die "More than one action given ($($given -join ', ')), name one" }
@@ -597,11 +647,15 @@ function Resolve-Mode {
     return $given[0]
 }
 
-# The lines a piped-in run is told to paste instead, shared by both places that print them: the handoff below needs a real file to hand off to pwsh, and Test-Interactive needs a real console to ask on, and a run with neither reaches this the same way.
+# The lines a piped-in run is told to paste instead, shared by both places that print them.
+# The handoff below needs a real file to hand off to pwsh.
+# Test-Interactive needs a real console to ask on.
+# A run with neither reaches these lines the same way.
 function Show-DownloadAndRunRemedy {
     info '  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12'
     info "  Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/$script:REPO/$script:DEFAULT_REF/host-setup/bootstrap.ps1 -OutFile bootstrap.ps1"
-    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation: the original invocation's own action and flags belong on the re-run this remedy is telling the caller to make.
+    # Reuses Format-ForwardedArgumentForDisplay rather than a second implementation.
+    # The original invocation's own action and flags belong on the re-run this remedy is telling the caller to make.
     $forwarded = Format-ForwardedArgumentForDisplay
     $suffix = if ($forwarded) { " $forwarded" } else { '' }
     info "  powershell -ExecutionPolicy Bypass -File bootstrap.ps1$suffix"
@@ -611,7 +665,9 @@ function main {
     if ($script:WANT_HELP) { usage; exit 0 }
 
     if ($PSVersionTable.PSVersion.Major -lt 7) {
-        # $PSCommandPath is empty for a script read through Invoke-Expression or a similar pipe, and the handoff below needs a real path to re-invoke under pwsh, so this cannot wait for Test-Interactive to say the same thing for a different reason.
+        # $PSCommandPath is empty for a script read through Invoke-Expression or a similar pipe.
+        # The handoff below needs a real path to re-invoke under pwsh.
+        # This check therefore cannot wait for Test-Interactive to say the same thing for a different reason.
         if (-not $PSCommandPath) {
             warn 'This needs a real file to hand off to PowerShell 7, and a piped-in script has none.'
             info 'Download the file and run it, rather than piping it:'
@@ -654,7 +710,9 @@ function main {
             'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
             'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
             'skills' { Invoke-SkillsInstall }
-            # Only setup-wsl.ps1's -Status runs here: its -Install needs a distribution name, which no flag here collects, so choosing a default distro nobody asked for is exactly what -Wsl staying out of -Host and -Dev already exists to avoid.
+            # Only setup-wsl.ps1's -Status runs here.
+            # Its -Install needs a distribution name, which no flag here collects.
+            # Choosing a default distro nobody asked for is therefore exactly what -Wsl staying out of -Host and -Dev already exists to avoid.
             # Installing one by name is a checkout away, once this run has fetched it.
             'wsl' { Invoke-Tool -Tool 'setup-wsl.ps1' -Arguments '-Status' }
             'host' { Invoke-StandUp -Kind 'host' }
