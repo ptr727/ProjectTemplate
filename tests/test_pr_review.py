@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Drive pr_review's digest and wait loop against responses they must read correctly.
 
-The script exists to collapse a poll cycle into one invocation, so its failure mode is a wrong
-answer rather than a crash: a review attributed to the wrong login, a review counted against a
-stale head, or a wait that returns success while nothing landed. Each case below feeds a crafted
+The script exists to collapse a poll cycle into one invocation. Its failure mode is therefore a wrong
+answer rather than a crash:
+
+- a review attributed to the wrong login
+- a review counted against a stale head
+- a wait that returns success while nothing landed
+
+Each case below feeds a crafted
 GraphQL payload and asserts the reading, with `gql` replaced so no case reaches the network.
 
 Run under `uv run --no-project --with-requirements tests/requirements.txt`, as
@@ -72,8 +77,8 @@ REVIEWER_REFERENCE = REPO / "docs" / "pr-reviewer-reference.md"
 def flowed_text(text: str) -> str:
     """Collapse every whitespace run in `text` to one space, stripping the ends.
 
-    A hard-wrapped body rewraps when a word is added earlier in the paragraph, so a sentence
-    pinned against its raw text fails on an edit making no claim about it. Collapsing pins the
+    A hard-wrapped body rewraps when a word is added earlier in the paragraph. A sentence
+    pinned against its raw text therefore fails on an edit making no claim about it. Collapsing pins the
     words rather than the line breaks. An assertion whose subject is the layout itself reads
     raw instead, since collapsing would let a differently wrapped or indented line match.
     """
@@ -83,8 +88,8 @@ def flowed_text(text: str) -> str:
 def comment_flowed_text(text: str) -> str:
     """Strip each line's leading `#` marker, then collapse as `flowed_text` does.
 
-    A `#` comment that rewraps gains a marker on its new line as well as a newline, so
-    collapsing whitespace alone leaves the marker between two words of a pinned phrase.
+    A `#` comment that rewraps gains a marker on its new line as well as a newline.
+    Collapsing whitespace alone therefore leaves the marker between two words of a pinned phrase.
     """
     return flowed_text(" ".join(line.lstrip().removeprefix("#") for line in text.splitlines()))
 
@@ -156,7 +161,7 @@ def hist_review(number: int, body: str, at: str = LATE) -> dict:
     number paired with one reviewer review, for the repo-wide reading `wire_history` drives.
 
     `body` has no default, unlike `review()`'s, since every caller of this one cares which
-    wording it carries: the whole point of the repo-wide reading is telling a quota refusal
+    wording it carries. The whole point of the repo-wide reading is telling a quota refusal
     from a genuine round.
     """
     return {
@@ -313,10 +318,10 @@ def thread(
     """One `reviewThreads` node. `rid` is the review that opened it, which the manifest counts.
 
     `cid` is its first comment's database id, which an overview entry's `#discussion_r` anchor
-    links, and None leaves the thread carrying none, as every case not reading those entries wants.
+    links. A `cid` of None leaves the thread carrying none, as every case not reading those entries wants.
 
-    None leaves the thread naming no round, which is the shape the reader has to survive rather
-    than a claim about when GitHub returns it, and it is what every case not exercising the
+    None leaves the thread naming no round. That is the shape the reader has to survive rather
+    than a claim about when GitHub returns it. It is also what every case not exercising the
     manifest wants. A thread belonging to a different round is the realistic exclusion, and a case
     covers that one separately.
     """
@@ -346,8 +351,8 @@ def ago(seconds: int) -> str:
     """A timestamp `seconds` before NOW, in the spelling GraphQL returns.
 
     For the cases that pass NOW in as the clock. A `wait` case cannot use this, since `main` reads
-    the real clock, and an age measured from a fixed point against a moving one is not the age the
-    case means: it grows on every later run and goes negative on any machine whose clock sits
+    the real clock. An age measured from a fixed point against a moving one is also not the age the
+    case means. That age grows on every later run and goes negative on any machine whose clock sits
     before NOW. Those cases take `real_ago` instead.
     """
     return (NOW - timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -374,9 +379,9 @@ def check(
 
     The run's `databaseId` is carried only where a case names one.
 
-    The starved case this exists for was read off run 31118675530 in this repository: an aggregator
-    job dispatched the instant its dependency finished, left `QUEUED` with an empty runner name and
-    a `startedAt` stamped equal to its creation, which sat fifteen minutes and never ran. Its
+    The starved case this exists for was read off run 31118675530 in this repository. An aggregator
+    job was dispatched the instant its dependency finished. It was left `QUEUED` with an empty runner name and
+    a `startedAt` stamped equal to its creation, and it sat fifteen minutes and never ran. Its
     healthy sibling on the next run wore `IN_PROGRESS` with a runner inside two minutes.
     """
     workflow_run: dict | None = None
@@ -476,8 +481,8 @@ class GqlCase(unittest.TestCase):
         """Patch `gh_rest` to a read that did not happen, for every case rather than every caller.
 
         Patched inside `answer` instead, a case building its own payload and never calling it
-        could spawn a real `gh` against a pull request that does not exist, which is what this
-        suite exists not to do.
+        could spawn a real `gh`. That `gh` would run against a pull request that does not exist.
+        That is what this suite exists not to do.
 
         The re-read schedule is emptied too, so a case answering a failed read is not slept on or
         asked again. A case about the re-read sets its own schedule.
@@ -501,14 +506,14 @@ class GqlCase(unittest.TestCase):
         """Patch `gql` to return each response in turn, repeating the last one.
 
         Also patches `gh_graphql` directly with a default reporting no Copilot review anywhere
-        to read a bot id from, so `wait`'s auto-request finds nothing to request and falls
+        to read a bot id from. `wait`'s auto-request therefore finds nothing to request and falls
         straight through to polling, same as a repository with no Copilot history. `gql` itself
-        never reaches the real `gh_graphql` since the mock above replaces it wholesale, so the
-        two patches govern disjoint call sites and neither can shadow the other. A case
+        never reaches the real `gh_graphql`, since the mock above replaces it wholesale. The
+        two patches therefore govern disjoint call sites, and neither can shadow the other. A case
         exercising the auto-request itself re-patches `gh_graphql` after calling this.
 
         `origin_owner` is patched to this suite's own "o" too, since `wait` now runs the same
-        in-scope check `comment` and `reply` already did, and this suite's cases run against a
+        in-scope check `comment` and `reply` already did. It is needed too because the cases run against a
         real checkout whose actual origin has nothing to do with the "o/r" they exercise.
 
         `gh_rest` is patched in `setUp` rather than here, so a case that never calls this still
@@ -626,7 +631,7 @@ class TestAnsweredOutsideReview(unittest.TestCase):
     def test_reviews_behind_the_window_report_nothing_rather_than_a_false_answer(self) -> None:
         """No reviewer review in view dates every comment as newer, so each reads as an answer.
 
-        Reporting nothing keeps the wait polling, where a wrong answer ends it outright on a
+        Reporting nothing keeps the wait polling. In contrast, a wrong answer ends it outright on a
         pull request whose review landed and simply sits behind a busier review history.
         """
         pr = payload(
@@ -659,7 +664,7 @@ class TestAnsweredOutsideReview(unittest.TestCase):
 
     def test_threads_truncated_reads_the_review_threads_page_info(self) -> None:
         """Unlike `window_blind`'s `last`-windowed connections, `reviewThreads` reads forward
-        from the first page, so `hasNextPage` alone says a page was cut, with nothing in view
+        from the first page. `hasNextPage` alone therefore says a page was cut, with nothing in view
         to settle which end."""
         self.assertTrue(pr_review_rounds.threads_truncated(payload([review()], more_threads=True)))
         self.assertFalse(
@@ -846,9 +851,9 @@ class TestOtherReviewers(GqlCase):
     in `TestCodeRabbitOutsideDiff` and `TestQodoOpenFindings` below, not here.
 
     `status`'s `unresolved=0` used to hide a CodeRabbit/qodo thread that still blocked a
-    ruleset-gated merge, first since only Copilot's own threads counted and then since only known
-    reviewer logins did, so every open thread now counts and a login only attributes it. Coverage
-    and refusal reading stay Copilot-only: `review_on_head` above names Copilot's own coverage
+    ruleset-gated merge. That held first since only Copilot's own threads counted and then since
+    only known reviewer logins did. So every open thread now counts, and a login only attributes it.
+    Coverage and refusal reading stay Copilot-only. `review_on_head` above names Copilot's own coverage
     specifically, the reviewer this script requests and waits for, not "no review of any kind
     covers this head".
     """
@@ -884,7 +889,7 @@ class TestOtherReviewers(GqlCase):
     def test_a_thread_from_an_unknown_login_counts_and_is_named_other(self) -> None:
         """A reviewer posting under a login missing from the known set once read `unresolved=0`.
 
-        The known logins attribute a thread and never decide whether it counts, and `other` is
+        The known logins attribute a thread and never decide whether it counts. `other` is
         named even where it is the only contributor, since it is the count a reader cannot assume.
         """
         self.answer(payload([review()], [thread("T1", login="example-review-bot")]))
@@ -1067,7 +1072,8 @@ def cr_outside_diff_body(count: int = 1, path: str = "a.py", finding: str = "Off
 
 # Trimmed from Qodo's own "Code Review by Qodo" comment, one numbered finding rather than the two the live comment carried.
 # Its nested Description/Code/Relevance/Evidence/Agent-prompt sub-summaries are kept, since those are exactly what a naive `<summary>` scan would miscount as findings of their own.
-# The badge's check mark is escaped (U+2713) rather than typed literally, keeping this file's own literal source inside the ASCII charset rule that governs the repository.
+# The badge's check mark is escaped (U+2713) rather than typed literally.
+# That keeps this file's own literal source inside the ASCII charset rule that governs the repository.
 def qodo_review_body(resolved: bool = False, heading: str = "Bad naming") -> str:
     badge = " <code>\u2713 Resolved</code>" if resolved else ""
     label = f"<s>{heading}</s>" if resolved else heading
@@ -1091,9 +1097,9 @@ class TestRefusal(GqlCase):
     """The review that says it did not review, which carries the head and covers nothing.
 
     It is a formal review with the correct commit and no threads, so every check a clean pass
-    satisfies it satisfies too, and the digest it renders is the clean pass byte for byte. The
-    pull request it was observed on had 301 changed files, one over the reviewer's limit, and was
-    one command from merging on a round that never ran.
+    satisfies it satisfies too. The digest it renders is therefore the clean pass byte for byte. The
+    pull request it was observed on had 301 changed files, one over the reviewer's limit. That pull
+    request was one command from merging on a round that never ran.
     """
 
     def test_a_refusal_on_the_head_is_not_coverage(self) -> None:
@@ -1169,8 +1175,8 @@ class TestRefusal(GqlCase):
 
         The digest has to agree with the exit codes here, which return 0 on that coverage and
         never reach 41. Reported unconditionally the field read `review_on_head=yes refusal=YES`
-        on one line, which tells a reader to split a pull request that has just been reviewed,
-        and tells an automated one that a state it treats as actionable is outstanding.
+        on one line. That line tells a reader to split a pull request that has just been reviewed.
+        It also tells an automated one that a state it treats as actionable is outstanding.
         """
         pr = payload([review(body=REFUSED, at=EARLY), review(at=LATE)])
         self.assertTrue(pr_review_rounds.reviewed_head(pr))
@@ -1203,7 +1209,7 @@ class TestQuotaRefusal(GqlCase):
     A file-count refusal is cleared by splitting the pull request. A quota one is an
     account-level state that neither a re-request nor a further wait touches. Folding the two
     into one field or one exit code sends a reader at a remedy that does nothing for the quota
-    case, which is why each gets its own reading below.
+    case. That is why each gets its own reading below.
     """
 
     def test_the_field_and_exit_code_are_distinct_from_a_generic_refusal(self) -> None:
@@ -1300,11 +1306,11 @@ class TestEveryGqlCaseKeepsItsBaseSetUp(unittest.TestCase):
 
     `GqlCase.setUp` patches `gh_rest` for every case rather than every caller, and clears the
     `changed_at` memo so one case does not inherit another's compares. A subclass that overrides
-    `setUp` and does not chain gets neither, so it can spawn a real `gh` against a pull request
-    that does not exist, which is the thing this suite exists not to do.
+    `setUp` and does not chain gets neither. It can therefore spawn a real `gh` against a pull request
+    that does not exist. That is the thing this suite exists not to do.
 
-    Asserted over the class tree rather than fixed in the two that had drifted, since the next
-    subclass to override `setUp` is the one that would reintroduce it.
+    Asserted over the class tree rather than fixed in the two that had drifted.
+    This is because the next subclass to override `setUp` is the one that would reintroduce it.
     """
 
     def test_a_subclass_that_overrides_setup_chains_to_it(self) -> None:
@@ -1349,8 +1355,8 @@ class TestDigestReportsTheAnswer(GqlCase):
 class TestCheckShapes(unittest.TestCase):
     """`mergeStateStatus` folds every one of these into `BLOCKED`, and each wants its own answer.
 
-    The run this exists for polled `BLOCKED` for twenty-five minutes on a pull request whose only
-    unfinished check was a rollup job no runner ever took, and learned the cause from the
+    The run this exists for polled `BLOCKED` for twenty-five minutes on a pull request. That pull request's only
+    unfinished check was a rollup job no runner ever took. The run learned the cause from the
     maintainer rather than from the digest.
     """
 
@@ -1358,7 +1364,7 @@ class TestCheckShapes(unittest.TestCase):
         """Judged through the normalizer, since that is the only shape the digest ever feeds it.
 
         Handing `check_shape` a raw rollup node instead reads every field as absent, which scores
-        a queued job as a failure. That was this helper's first version, and it failed eight cases
+        a queued job as a failure. That was this helper's first version. It failed eight cases
         at once rather than one, which is what said the fault was in the helper.
         """
         (normalized,) = pr_review_checks.check_nodes(payload([review()], checks=[node]))
@@ -1392,9 +1398,12 @@ class TestCheckShapes(unittest.TestCase):
 
         Left out of every set it reaches the conclusion branch, matches no pass, and reports a
         required status nobody has reported as a red check. Folded in with the queued states it
-        gets the starved remedy instead, which is wrong in both directions: no runner is owed a
-        status nothing has posted, so re-running a workflow clears nothing, and a reader is sent
-        at the runner pool over a missing poster. Both readings were raised in review here, the
+        gets the starved remedy instead, which is wrong in both directions:
+
+        - no runner is owed a status nothing has posted, so re-running a workflow clears nothing
+        - a reader is sent at the runner pool over a missing poster
+
+        Both readings were raised in review here, the
         second on the fix for the first.
         """
         self.assertEqual(
@@ -1423,9 +1432,9 @@ class TestCheckShapes(unittest.TestCase):
     def test_an_unknown_rollup_member_is_neither_forced_nor_dropped_quietly(self) -> None:
         """Forcing a third union member into the StatusContext shape invents a verdict for it.
 
-        It would render nameless, since the node spells its label something else, and report as a
+        It would render nameless, since the node spells its label something else. It would also report as a
         red check, since the state read off it is not there. So skipping is the right half of the
-        answer, and skipping *quietly* is the wrong half: an unread check absent from the tally
+        answer, and skipping *quietly* is the wrong half. An unread check absent from the tally
         renders as a clean pass over something never seen, which is this script's core failure.
         Both halves were raised in review here, the second against the fix for the first.
 
@@ -1489,8 +1498,8 @@ class TestCheckShapes(unittest.TestCase):
     def test_a_skipped_or_neutral_check_is_a_pass_not_a_blocker(self) -> None:
         """This fleet's aggregator pattern skips the conditional jobs on every green run.
 
-        Four of the six checks on a passing pull request here are skips, so scoring a skip as
-        unfinished reports four blockers on a pull request with none.
+        Four of the six checks on a passing pull request here are skips. Scoring a skip as
+        unfinished therefore reports four blockers on a pull request with none.
         """
         for conclusion in ("SUCCESS", "SKIPPED", "NEUTRAL"):
             with self.subTest(conclusion=conclusion):
@@ -1501,7 +1510,7 @@ class TestCheckShapes(unittest.TestCase):
     ) -> None:
         """An unrecognized conclusion is reported rather than passed over.
 
-        A new enum member read as a pass is a red check rendering as a green digest, which is the
+        A new enum member read as a pass is a red check rendering as a green digest. That is the
         false clean this whole script exists to prevent, one level down in the reading.
         """
         for conclusion in (
@@ -1520,8 +1529,8 @@ class TestCheckShapes(unittest.TestCase):
         """Zero would read as a check that just started, which is how one stuck for hours passes.
 
         The zone-less stamp is the one that has to be listed separately, since it *parses*. It
-        yields a naive datetime that will not subtract from an aware `now`, so catching only
-        `ValueError` lets a `TypeError` out of a reporting call and takes the whole digest with it.
+        yields a naive datetime that will not subtract from an aware `now`. Catching only
+        `ValueError` therefore lets a `TypeError` out of a reporting call and takes the whole digest with it.
         A crash is the worst outcome here, because saying what the state is is the entire job.
         Raised in review on this change.
         """
@@ -1535,8 +1544,8 @@ class TestCheckShapes(unittest.TestCase):
         """`queued -3m` reads as nonsense and hides how long the thing has actually waited.
 
         Raised in review here, and the reachability is worth stating rather than assuming. Through
-        the CLI it is unreachable: a negative age cannot exceed a non-negative threshold, and the
-        parser rejects a negative one, so no shape is ever judged and `mins` never renders. The
+        the CLI it is unreachable. A negative age cannot exceed a non-negative threshold, and the
+        parser rejects a negative one. So no shape is ever judged and `mins` never renders. The
         library API takes the thresholds directly, which is the path this drives and the reason
         the clamp is worth having. Display only, so the comparison still reads the raw value.
         """
@@ -1574,7 +1583,7 @@ class TestCheckShapes(unittest.TestCase):
     def test_a_finished_check_carrying_no_conclusion_yet_is_settling_not_failing(self) -> None:
         """Reading an absent verdict as a failure invents a red check out of a race in the API.
 
-        Caught by this suite rather than in review: the first implementation fell straight through
+        Caught by this suite rather than in review. The first implementation fell straight through
         to the unknown-conclusion branch, so a completed check whose conclusion had not been
         written yet reported as FAILED.
         """
@@ -1583,7 +1592,7 @@ class TestCheckShapes(unittest.TestCase):
     def test_both_rollup_node_shapes_normalize_rather_than_one_reading_as_stateless(self) -> None:
         """A StatusContext folds status and conclusion into one field and renames the label.
 
-        Reading a CheckRun's keys off it yields None for every one, which scores an external
+        Reading a CheckRun's keys off it yields None for every one. That scores an external
         status as a check in no state at all, so neither pending nor failed.
         """
         pr = payload([review()], checks=[check(name="job"), status_context(state="FAILURE")])
@@ -1598,7 +1607,7 @@ class TestCheckShapes(unittest.TestCase):
 
         A CheckRun's PENDING means dispatched and not begun, while a StatusContext's means the
         posting system reported the run as under way. Read as unstarted, a long external build
-        reports as queued with no runner assigned, which names a cause it does not have on a
+        reports as queued with no runner assigned. That names a cause it does not have on a
         system that did pick it up. Raised in review on this change.
         """
         self.assertEqual("", self.shape(status_context(state="PENDING", created=ago(900))))
@@ -1940,8 +1949,8 @@ class TestDigestReportsChecks(GqlCase):
         """A rollup off any other commit describes a push ago and renders every field.
 
         The first version of this case asserted the *fixture's* commit equalled the head, which
-        tests the payload rather than the code, and the code was reading `commits[0]` regardless.
-        Raised in review on this change, and it is the sharper reading: position is not identity,
+        tests the payload rather than the code. The code was reading `commits[0]` regardless.
+        Raised in review on this change, and it is the sharper reading. Position is not identity,
         and trusting it is the same false-clean shape as counting a review without reading it.
         This asserts the selection by giving the connection a rollup on a commit that is not the
         head, which must be ignored rather than reported.
@@ -1968,7 +1977,7 @@ class TestDigestReportsChecks(GqlCase):
         """With no workflow keys, a failing `build` must not hide behind another workflow's.
 
         Keying Actions runs by app slug would keep only the highest suite id of two unrelated
-        `build` jobs and read a failure as green, so each run keys by its own suite instead.
+        `build` jobs and read a failure as green. Each run therefore keys by its own suite instead.
         """
         failed = check(name="build", conclusion="FAILURE", suite=10, workflow=None)
         passed = check(name="build", conclusion="SUCCESS", suite=20, workflow=None)
@@ -1992,8 +2001,8 @@ class TestDigestReportsChecks(GqlCase):
     def test_a_rollup_past_the_window_says_so_rather_than_reporting_what_it_saw(self) -> None:
         """The `window_blind` guard one connection along, and the same false clean it prevents.
 
-        A rollup past a hundred contexts drops the rest silently, so a required check among them
-        is missing from the tally and the stuck reading alike and the digest renders a clean pass
+        A rollup past a hundred contexts drops the rest silently. A required check among them
+        is therefore missing from the tally and the stuck reading alike. The digest then renders a clean pass
         over a check it never saw. A fleet repository with a matrix build reaches a hundred long
         before this one does. Raised in review here.
         """
@@ -2022,7 +2031,7 @@ class TestDigestReportsChecks(GqlCase):
         """Two calls parsed the same rollup twice a digest, and the parse is what this script pays.
 
         Raised in review here. Held by counting the calls rather than by reading the output, since
-        the output is identical either way, which is what let the second call go unnoticed.
+        the output is identical either way. That is what let the second call go unnoticed.
         """
         pr = payload([review()], merge="BLOCKED", checks=[check(name="lint"), check(name="gate")])
         with self.parse_spies() as spies:
@@ -2041,8 +2050,8 @@ class TestDigestReportsChecks(GqlCase):
     def test_the_truncation_line_quotes_the_window_the_query_actually_asks_for(self) -> None:
         """The message borrowed WINDOW, which is the reviews and comments window and not this one.
 
-        It read correctly only while the two numbers happened to agree, so a change to either
-        would have made the line state a limit the query does not use. Raised in review here.
+        It read correctly only while the two numbers happened to agree. A change to either
+        would therefore have made the line state a limit the query does not use. Raised in review here.
         """
         self.assertIn(f"contexts(first:{pr_review_checks.CHECKS_WINDOW})", pr_review.Q_FULL)
         pr = payload([review()], merge="BLOCKED", checks=[check()])
@@ -2055,7 +2064,7 @@ class TestDigestReportsChecks(GqlCase):
         """Three traversals of one shape drift apart, and a payload change must be caught once.
 
         Raised in review here. Each caller is held to the shared reader by giving the payload a
-        head that matches nothing, where all three must agree that there is no rollup to read.
+        head that matches nothing. In that case all three must agree that there is no rollup to read.
         """
         pr = payload([review()], checks=[check()], rollup_oid=OLD)
         self.assertEqual({}, pr_review_checks.head_commit(pr))
@@ -2467,7 +2476,7 @@ class TestCli(GqlCase):
 
         `main` reads the real clock, so the timestamp comes from that clock rather than from the
         suite's fixed NOW. Measured from NOW instead, the age grows on every later run and turns
-        negative on a machine whose clock sits before it, so the case would stop meaning what it
+        negative on a machine whose clock sits before it. The case would then stop meaning what it
         says. Raised in review on this change.
         """
         self.answer(
@@ -2569,8 +2578,8 @@ class TestCli(GqlCase):
     def test_only_a_required_stuck_check_on_a_blocked_merge_takes_forty_four(self) -> None:
         """`BLOCKED` is also worn by an open thread, so it cannot say a stuck check is required.
 
-        The rollup's `isRequired` can, so a failed check it marks optional exits 0 on a merge
-        blocked for another reason, and the same check marked required still exits 44.
+        The rollup's `isRequired` can. Hence a failed check it marks optional exits 0 on a merge
+        blocked for another reason. The same check marked required still exits 44.
         """
         for required, code in ((False, 0), (True, 44)):
             with self.subTest(required=required):
@@ -2606,7 +2615,7 @@ class TestCli(GqlCase):
         """A code that fires on every pull request mid-CI carries nothing, so this must be 0.
 
         The wait returns the moment coverage lands, which on almost every pull request is while
-        the checks are still going, so a pending check taking 44 would make 44 the usual outcome.
+        the checks are still going. A pending check taking 44 would therefore make 44 the usual outcome.
         Inside the default grace on the real clock, which is what this reads, so no flag is needed.
         """
         self.answer(
@@ -2644,11 +2653,11 @@ class TestCli(GqlCase):
         self.assertEqual(1, slept.call_count)
 
     def test_min_rounds_holds_out_past_a_round_status_already_reported(self) -> None:
-        """`status`'s guidance for unstated coverage is to re-request on the same head, which
+        """`status`'s guidance for unstated coverage is to re-request on the same head. That
         leaves an earlier round covering it while the fresh one this wait was called to watch
         for is still outstanding. Naming that earlier `rounds=` count on `--min-rounds` is what
-        `wait` needs to hold out for one beyond it, rather than reading `reviewed_head` alone and
-        reporting the earlier round as done at once without ever waiting for the fresh one the
+        `wait` needs to hold out for one beyond it. Otherwise `wait` reads `reviewed_head` alone and
+        reports the earlier round as done at once, never waiting for the fresh one the
         re-request was for. The first poll here carries that shape: one review already on the
         head, a request still pending. Without the flag,
         `wait` returns on it unpolled, per `test_wait_returns_zero_once_the_review_lands_on_the_head`.
@@ -2662,8 +2671,8 @@ class TestCli(GqlCase):
         slept.assert_called_once()
 
     def test_min_rounds_times_out_rather_than_crediting_the_round_it_was_told_to_skip(self) -> None:
-        """A round no higher than `--min-rounds` must not report success at the timeout either,
-        or the exit code repeats the bug the polling half of this fix already closes."""
+        """A round no higher than `--min-rounds` must not report success at the timeout either.
+        Otherwise the exit code repeats the bug the polling half of this fix already closes."""
         self.answer(payload([review()], pending=True))
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(30, self.cli(["wait", "7", "--min-rounds", "1", "--timeout", "0"]))
@@ -2732,8 +2741,8 @@ class TestCli(GqlCase):
     def test_min_rounds_counts_a_stale_off_head_round_the_way_status_does(self) -> None:
         """`min_rounds` must be the same count `status` prints as `rounds=`: every one of the
         reviewer's own reviews on this pull request, on any head. A count narrowed to the
-        current head disagrees with that whenever a stale, off-head round sits in the history,
-        and undercounts every round after it forever, since the off-head round it excludes never
+        current head disagrees with that whenever a stale, off-head round sits in the history.
+        It also undercounts every round after it forever, since the off-head round it excludes never
         ages out. Two rounds already exist here, one off the current head, matching a `status`
         read of `rounds=2` before the re-request. The one that lands after it is the third, on
         the head, and is what `--min-rounds 2` was asked to hold out for.
@@ -2754,12 +2763,13 @@ class TestCli(GqlCase):
 
     def test_min_rounds_counts_a_head_refusal_the_way_status_does(self) -> None:
         """A refusal sits in `status`'s `rounds=` but not in a head-scoped count, since a refusal
-        covers nothing and `reviewed_head` excludes it. A caller reading `rounds=1` off one
-        refusal and reaching `--min-rounds 1` once a genuine round then lands beside it must see
-        that genuine round as the fresh one it asked for, not read the head-scoped count, still 1
-        because it never counted the refusal to begin with, as still short of the baseline.
+        covers nothing and `reviewed_head` excludes it. A caller reads `rounds=1` off one
+        refusal and reaches `--min-rounds 1`. A genuine round then lands beside it. The caller must see
+        that genuine round as the fresh one it asked for. It must not read the head-scoped count as
+        still short of the baseline. That count is still 1, because it never counted the refusal to
+        begin with.
 
-        The first poll is bodyless, the shape the liveness query itself carries: `refusal_of`
+        The first poll is bodyless, the shape the liveness query itself carries. `refusal_of`
         reads nothing there and counts the refusal as ordinary coverage, same as
         `test_the_liveness_reading_ends_the_wait_and_the_full_read_refuses_it` above. The full
         read that follows carries the body and is where the refusal is actually read as one,
@@ -2776,15 +2786,15 @@ class TestCli(GqlCase):
 
     def test_min_rounds_does_not_credit_a_refusal_as_the_fresh_round(self) -> None:
         """The round satisfying `min_rounds` and the round satisfying coverage must be the same
-        round, or a refusal answering the re-request reads as done off an untouched, older
+        round. Otherwise a refusal answering the re-request reads as done off an untouched, older
         genuine round instead. One genuine round already sits on the head, matching a `status`
         read of `rounds=1`. The caller re-requests and runs `wait --min-rounds 1`, and the round
         that comes back is a refusal, not the fresh genuine round the re-request was for.
         Checking `reviewed_head` and the count as two independent clauses would read this as
-        done, since the untouched round0 still satisfies `reviewed_head` and the refusal at
-        round1 still pushes the count past 1, returning 0 on a round that declined. Walking one
+        done, since the untouched round0 still satisfies `reviewed_head`. The refusal at
+        round1 also still pushes the count past 1, returning 0 on a round that declined. Walking one
         list for a single round satisfying both instead falls through to the refusal this newest
-        round actually is, which is the correct, narrower failure `refusing_review` names.
+        round actually is. That is the correct, narrower failure `refusing_review` names.
         """
         self.answer(payload([review(rid="PRR_one"), review(body=REFUSED, rid="PRR_ref", at=LATE)]))
         with mock.patch.object(pr_review.time, "sleep"):
@@ -2792,10 +2802,10 @@ class TestCli(GqlCase):
         self.assertIn("status=REVIEW_IS_A_REFUSAL", self.out.getvalue())
 
     def test_min_rounds_survives_a_push_moving_the_head(self) -> None:
-        """A head-scoped count resets to zero the moment a push moves the head, so it reads a
-        brand new head's first genuine round as still short of a baseline that was measured
-        against a head that no longer exists. The unscoped count `status` prints never resets:
-        one round already sits on the old head, matching a `status` read of `rounds=1`, and the
+        """A head-scoped count resets to zero the moment a push moves the head. It therefore reads a
+        brand new head's first genuine round as still short of a baseline. That baseline was measured
+        against a head that no longer exists. The unscoped count `status` prints never resets.
+        One round already sits on the old head, matching a `status` read of `rounds=1`. The
         round that lands on the head after the push is the second, which is what
         `--min-rounds 1` was asked to hold out for.
         """
@@ -2828,7 +2838,7 @@ class TestCli(GqlCase):
     def test_wait_ends_on_an_answer_outside_a_review_instead_of_waiting_it_out(self) -> None:
         """A refusal covers no head, so polling on for the timeout waits for nothing.
 
-        The zero timeout is what this case fails on rather than hangs on: an answer read as
+        The zero timeout is what this case fails on rather than hangs on. An answer read as
         pending spins the loop for the whole default wait, and a case that hangs gates nothing.
         """
         self.answer(payload([review(oid=OLD)], comments=[comment()]))
@@ -2854,7 +2864,7 @@ class TestCli(GqlCase):
     def test_the_liveness_reading_ends_the_wait_and_the_full_read_refuses_it(self) -> None:
         """The liveness query carries no bodies, so a refusal reads there as ordinary coverage.
 
-        That is what ends the loop, and nothing decides on it: the full read that follows every
+        That is what ends the loop, and nothing decides on it. The full read that follows every
         wait carries the body and is where the exit code comes from.
         """
         bodyless = {k: v for k, v in review().items() if k != "body"}
@@ -2925,7 +2935,7 @@ class TestCli(GqlCase):
     def test_a_run_naming_no_repo_is_rejected_rather_than_sent_somewhere(self) -> None:
         """A default would send it to one repository, and every number resolves there.
 
-        That is the failure this had twice: the digest rendered, nothing in it disagreed, and
+        That is the failure this had twice. The digest rendered, nothing in it disagreed, and
         the run was reading a pull request in a repository nobody had named.
         """
         self.answer(payload([review()]))
@@ -2956,10 +2966,10 @@ class TestCli(GqlCase):
         """Route `gh_graphql` calls after `self.answer(...)`, answering the bot-id/history query
         with `prs` verbatim as `pullRequests.nodes`, and recording every call made.
 
-        `self.answer(...)` already installs a default returning no history at all, which is what
-        every other wait test relies on to skip the auto-request and the repo-wide quota
+        `self.answer(...)` already installs a default returning no history at all. Every
+        other wait test relies on that default to skip the auto-request and the repo-wide quota
         reading both, untouched. This overrides that default for the tests below that exercise
-        either. `wire_bot` is the narrower case, an id and nothing else, and the tests further
+        either. `wire_bot` is the narrower case, an id and nothing else. The tests further
         down need a review's own body and `submittedAt` too, which `hist_review` builds.
         """
         calls: list[tuple[str, dict]] = []
@@ -3022,7 +3032,7 @@ class TestCli(GqlCase):
         self.assertIn("no Copilot review found", self.out.getvalue())
 
     def test_wait_widens_the_lookback_when_the_narrow_window_is_empty(self) -> None:
-        """The end-to-end path for a widened lookback: `wait`'s own auto-request still finds a
+        """The end-to-end path for a widened lookback. `wait`'s own auto-request still finds a
         bot id once the narrow window has aged out, rather than falling back to polling only."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
         calls: list[tuple[str, dict]] = []
@@ -3236,9 +3246,12 @@ class TestCli(GqlCase):
         self.assertIn("reviewRequests(first:100)", pr_review.REQUEST_STATE)
 
     def test_a_silent_head_short_circuits_on_the_repo_wide_quota_signal(self) -> None:
-        """The shape observed live on two consecutive pull requests: no Copilot activity at all on
-        this pull request, while the reviewer's own most recent word anywhere in the repository
-        is the account quota. Polling this pull request's silence for the full timeout would
+        """The shape observed live on two consecutive pull requests:
+
+        - no Copilot activity at all on this pull request
+        - the reviewer's own most recent word anywhere in the repository is the account quota
+
+        Polling this pull request's silence for the full timeout would
         only relearn that same account state a call late, so the wait stops here instead."""
         self.answer(payload([]))
         calls = self.wire_history([hist_review(962, QUOTA_REFUSED)])
@@ -3271,10 +3284,10 @@ class TestCli(GqlCase):
         """A pull request number is not what makes an entry irrelevant to the repo-wide signal.
 
         An earlier round posted before this pull request's current head is real evidence about
-        the account, not a self-reference to discard, and it correctly outranks a strictly
-        older refusal elsewhere: excluding this pull request's own history entirely, as an
-        earlier fix here did, would have hidden that evidence and let the older refusal read
-        as the newest activity instead.
+        the account, not a self-reference to discard. It correctly outranks a strictly
+        older refusal elsewhere. Excluding this pull request's own history entirely, as an
+        earlier fix here did, would have hidden that evidence. It would also have let the older
+        refusal read as the newest activity instead.
         """
         self.answer(payload([review(oid=OLD)]))
         calls = self.wire_history(
@@ -3961,7 +3974,7 @@ class TestCli(GqlCase):
     def test_a_held_poll_stops_only_on_a_full_read_that_agrees(self) -> None:
         """A narrow read ending the poll is confirmed by the full read the verdict grades.
 
-        A merge reading UNKNOWN on that full read keeps the poll going, rather than returning 30
+        A merge reading UNKNOWN on that full read keeps the poll going. It does not return 30
         with time left on a payload the poll never judged.
         """
         empty = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[]), attest=True)
@@ -4071,7 +4084,7 @@ class TestCli(GqlCase):
     def test_a_round_on_the_head_outranks_the_repo_wide_quota_reading(self) -> None:
         """The repo-wide quota line says the head carries no Copilot review of its own, so it cannot fire
         where the final read shows one. Three rounds sit on the pull request with a re-request
-        pending, the reviewer's newest word elsewhere is a quota refusal, and a fourth genuine
+        pending. The reviewer's newest word elsewhere is a quota refusal. A fourth genuine
         round lands on the head mid-wait at a position `--min-rounds 4` does not credit. The
         three sit on the head in the issue's example, and on a superseded head in the case only
         the final read can catch. Each clock read advances 100 seconds, so one poll lands it and
@@ -4102,8 +4115,8 @@ class TestCli(GqlCase):
                 self.assertIn("now has 4 rounds, up from 3", out)
 
     def test_a_round_already_on_the_head_still_requests_and_polls(self) -> None:
-        """The reading assumes a head with no Copilot activity of its own, so a genuine round
-        there when the wait begins must not skip the request and the poll on it either. Skipped,
+        """The reading assumes a head with no Copilot activity of its own. A genuine round
+        there when the wait begins must therefore not skip the request and the poll on it either. Skipped,
         the wait ended at once on a bare pending line that no later wait would ever change.
         """
         self.answer(payload([review(at="2026-08-02T10:00:00Z")]))
@@ -4116,10 +4129,10 @@ class TestCli(GqlCase):
         self.assertIn("auto-request:", out)
 
     def test_a_push_off_the_reviewed_head_keeps_the_repo_wide_quota_reading(self) -> None:
-        """A round on the head when the wait begins lets the request and poll run, but the
+        """A round on the head when the wait begins lets the request and poll run. Even so, the
         reading itself stands, since a push during the wait can leave the final head with no
-        Copilot activity of its own, which is exactly what the repo-wide reading reports. The opening shape is
-        answered twice, since the wait's liveness read and its snapshot each take one.
+        Copilot activity of its own. That is exactly what the repo-wide reading reports. The opening
+        shape is answered twice, since the wait's liveness read and its snapshot each take one.
         """
         start = payload([review(at="2026-08-02T10:00:00Z")], pending=True)
         moved = payload([review(oid=OLD, at="2026-08-02T10:00:00Z")], pending=True)
@@ -4131,7 +4144,7 @@ class TestCli(GqlCase):
 
     def test_a_round_newer_than_the_refusal_answers_the_repo_wide_quota_reading(self) -> None:
         """A review on this pull request newer than the refusal elsewhere answers it, the way
-        `quota_signal` reads one anywhere, even where a push left that review off the head. That
+        `quota_signal` reads one anywhere. It does so even where a push left that review off the head. That
         holds for a refusal other than the quota's too, since the reviewer ran to post it.
         """
         for label, body in (("genuine", None), ("file-count refusal", REFUSED)):
@@ -4152,7 +4165,7 @@ class TestCli(GqlCase):
 
     def test_an_off_head_round_newer_than_the_refusal_opens_no_quota_stop(self) -> None:
         """The opening read answers the refusal the way the final one does, from this pull
-        request's own reviews, since the history window can leave them out. Read only from the
+        request's own reviews. It does so since the history window can leave them out. Read only from the
         history, the wait skipped the request and the poll, then ended at once on a bare 30.
         """
         self.answer(payload([review(oid=OLD, at=LATE)]))
@@ -4759,12 +4772,16 @@ class TestCopilotHistoryReadings(GqlCase):
 
     def test_history_sorts_by_timestamp_regardless_of_pull_request_order(self) -> None:
         """The query orders pull requests by their own update time, not by when each round
-        landed, and the sort key is that timestamp specifically rather than the pull request
+        landed. The sort key is that timestamp specifically rather than the pull request
         number or the query's own order.
 
         Three pull requests whose number order, timestamp order, and mocked query order are
-        each different from the other two: ascending by number is 900, 950, 962, the query
-        lists them 950, 962, 900, and only descending by `_at` gives the expected 962, 900, 950.
+        each different from the other two:
+
+        - ascending by number is 900, 950, 962
+        - the query lists them 950, 962, 900
+        - only descending by `_at` gives the expected 962, 900, 950
+
         A reader trusting the query's own order, or sorting by number in either direction,
         produces a different sequence than the one this asserts.
         """
@@ -4837,9 +4854,9 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertIsNone(pr_review_rounds.quota_signal(history))
 
     def test_copilot_history_carries_the_callers_own_pull_request_too(self) -> None:
-        """No pull request is special-cased out of the fetch, the caller's own included: an
+        """No pull request is special-cased out of the fetch, the caller's own included. An
         earlier round on it is a valid id for `copilot_bot_id` and real evidence for
-        `quota_signal` alike, neither of which this function decides on its own."""
+        `quota_signal` alike. This function decides on neither of them on its own."""
         self.answer(payload([]))
         self.enterContext(
             mock.patch.object(
@@ -4861,7 +4878,7 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertEqual([969, 962], [number for number, _ in history])
 
     def test_an_empty_narrow_window_widens_before_giving_up(self) -> None:
-        """The gap the wider window fixes: an outage outlasting HISTORY_PRS pull requests must
+        """The gap the wider window fixes. An outage outlasting HISTORY_PRS pull requests must
         not silently revert every caller to blind polling for the rest of the outage."""
         self.answer(payload([]))
         seen: list[object] = []
@@ -4891,8 +4908,8 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertEqual([pr_review.HISTORY_PRS], seen)
 
     def test_a_comment_only_narrow_window_still_widens(self) -> None:
-        """A narrow window carrying activity is not itself a usable bot id: a comment carries
-        none, per `copilot_bot_id`, so this must widen the same as an empty window would rather
+        """A narrow window carrying activity is not itself a usable bot id. A comment carries
+        none, per `copilot_bot_id`. This must therefore widen the same as an empty window would, rather
         than returning a history no caller can read a bot id from."""
         self.answer(payload([]))
         seen: list[object] = []
@@ -4914,7 +4931,7 @@ class TestCopilotHistoryReadings(GqlCase):
         self.assertEqual("BOT_1", pr_review_rounds.copilot_bot_id(history))
 
     def test_both_windows_empty_still_carries_no_signal_and_no_bot_id(self) -> None:
-        """An outage wide enough to empty HISTORY_PRS_WIDE too is a real, if rarer, case: still
+        """An outage wide enough to empty HISTORY_PRS_WIDE too is a real, if rarer, case. It has still
         no id to request with and no fabricated one, rather than a crash on the second call."""
         self.answer(payload([]))
         self.enterContext(
@@ -4955,7 +4972,7 @@ class TestCopilotHistoryReadings(GqlCase):
 
     def test_a_comment_sourced_signal_names_the_same_way(self) -> None:
         """`_at` is normalized from `createdAt` for a comment, the same as `submittedAt` for a
-        review, so the caller printing it needs no branch on which connection it came from."""
+        review. The caller printing it therefore needs no branch on which connection it came from."""
         history = [(962, {"_kind": "comment", "_at": LATE, "body": QUOTA_REFUSED})]
         signal = pr_review_rounds.quota_signal(history)
         self.assertIsNotNone(signal)
@@ -5356,9 +5373,9 @@ class TestReplySelectsWithoutAnId(ReplyCase):
         self.assertIn("REPLIED_AND_RESOLVED", self.out.getvalue())
 
     def test_a_pattern_copied_from_the_printed_unresolved_line_selects_its_own_thread(self) -> None:
-        """`describe()` collapses whitespace before printing an `unresolved:` line, so a pattern
-        copied verbatim from that line must still select the thread it was copied from, through
-        the line break and the run of spaces the raw body still carries."""
+        """`describe()` collapses whitespace before printing an `unresolved:` line. A pattern
+        copied verbatim from that line must therefore still select the thread it was copied from.
+        That holds through the line break and the run of spaces the raw body still carries."""
         body = "The helper\nneeds to fold   whitespace before comparing bodies."
         copied = pr_review_rounds.describe(rthread("t1", body=body)).split(": ", 1)[1]
         self.wire(page([rthread("t1", body=body)]))
@@ -5869,7 +5886,7 @@ class TestContract(unittest.TestCase):
         """A verify step reading `commit.oid` alone is what let five partial rounds merge.
 
         The absent case is named as a head nothing covers rather than as a statement absent from
-        the round covering it, since a file table or an attested local pass stands in for one.
+        the round covering it. That is because a file table or an attested local pass stands in for one.
         """
         text = " ".join(RUNBOOK.read_text(encoding="utf-8").split())
         # Pinned as whole sentences rather than as the fragment `partial coverage`.
@@ -5882,8 +5899,8 @@ class TestContract(unittest.TestCase):
     def test_the_only_writes_are_the_five_named_here(self) -> None:
         """Every write these scripts make is one of five, and each arrived as a reviewed change.
 
-        The read subcommands are the bulk of it and a mutation reaching them is a digest that
-        writes, so the whole-source guard stays and is narrowed to the documents the script
+        The read subcommands are the bulk of it, and a mutation reaching them is a digest that
+        writes. The whole-source guard therefore stays, and is narrowed to the documents the script
         actually needs rather than dropped when the first of them arrived. `requestReviews`
         closes the gap where `wait` only polled and never asked. `addComment` owns body-only
         finding responses. The reply and resolve pair owns inline threads. `deleteRef` is
@@ -5932,9 +5949,9 @@ class TestContract(unittest.TestCase):
         """The three surfaces routing a stalled driver there are pinned to something that exists.
 
         The guard above proves only that this script does not issue the replacing form. Nothing
-        proved the file the same docstring names still holds it, so deleting that code block left
-        the skill, the runbook, and the README each pointing at a recovery nobody could run, with
-        every gate green. Whitespace is collapsed because the document writes the argument with a
+        proved the file the same docstring names still holds it. Deleting that code block therefore left
+        the skill, the runbook, and the README each pointing at a recovery nobody could run.
+        Every gate stayed green. Whitespace is collapsed because the document writes the argument with a
         space where the guard above writes the token without one.
         """
         text = flowed_text(REVIEWER_REFERENCE.read_text(encoding="utf-8"))
@@ -5966,7 +5983,7 @@ class TestContract(unittest.TestCase):
         """The failure is an id typed into a mutation, so the fix is having nowhere to type one.
 
         A parser that takes an id restores the failing shape however plainly the docs discourage
-        it, which is the lesson the two prior instances taught: the rule was known and read.
+        it. That is the lesson the two prior instances taught. The rule was known and read.
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         # A node id literal anywhere in the source is an example a hand copies out of it.
@@ -6044,7 +6061,7 @@ class TestContract(unittest.TestCase):
         """Below zero, every check in that state reports stuck from the first read.
 
         A field that fires always is one a reader learns to skip, which costs the case it exists
-        for, so the parser refuses it by name rather than rendering a digest nobody trusts.
+        for. The parser therefore refuses it by name rather than rendering a digest nobody trusts.
         """
         for flag in ("--check-grace", "--check-stall"):
             with self.subTest(flag=flag):
@@ -6059,7 +6076,7 @@ class TestContract(unittest.TestCase):
         """The 44 docstring claimed a failed check without naming the BLOCKED the code requires.
 
         A failed *required* check does read BLOCKED, so the code was right and the doc was short
-        of it, which is the direction that costs a reader trust in the field. Raised in review
+        of it. That is the direction that costs a reader trust in the field. Raised in review
         here. This holds the docstring to naming the condition rather than only the shapes.
         """
         doc = flowed_text(pr_review.__doc__ or "")
@@ -6073,8 +6090,8 @@ class TestContract(unittest.TestCase):
     def test_the_check_thresholds_are_ordered_so_a_queue_reads_before_a_run(self) -> None:
         """A stall threshold under the grace would report a running job before a starved one.
 
-        The two measure different things, and the grace is short because a pickup is fast while
-        the stall is long because a build is not, so an inversion here inverts both readings.
+        The two measure different things. The grace is short because a pickup is fast, while
+        the stall is long because a build is not. An inversion here therefore inverts both readings.
         """
         self.assertLess(pr_review_checks.CHECK_GRACE, pr_review_checks.CHECK_STALL)
 
@@ -6195,7 +6212,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
 
     `GIT_DIR` and `GIT_COMMON_DIR` each override repository discovery on their own. `GIT_WORK_TREE`
     and `GIT_OBJECT_DIRECTORY` are stripped as part of the same discovery set but demonstrate no
-    redirect of their own here, and `GIT_OBJECT_DIRECTORY` overrides the object store rather than
+    redirect of their own here. `GIT_OBJECT_DIRECTORY` overrides the object store rather than
     discovery. A `GIT_CONFIG*` name injects config into the call instead, so both mechanisms are
     covered here.
     """
@@ -6204,7 +6221,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         """The caller's environment minus every channel the probe itself drops.
 
         A fixture that left them in place would build its repositories under the same influence
-        the cases exist to rule out, so it drops at least what the probe drops, and every other
+        the cases exist to rule out. It therefore drops at least what the probe drops, and every other
         repository-local variable git names besides.
         """
         return {k: v for k, v in without_git_location().items() if not k.startswith("GIT_CONFIG")}
@@ -6213,8 +6230,9 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
         """Build one throwaway repo under `parent`, immune to the caller's own git environment.
 
         `git init` and `git remote add` both honor an inherited GIT_DIR the same way the probe
-        does, so without this strip an ambient one sends `git remote add` writing into whatever
-        repository that variable names instead of the throwaway repo this helper just created.
+        does. Without this strip an ambient one sends `git remote add` writing into whatever
+        repository that variable names. It writes there instead of into the throwaway repo this
+        helper just created.
         """
         env = self._clean_env()
         repo = parent / name
@@ -6252,7 +6270,7 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     def test_a_git_common_dir_inherited_from_the_caller_does_not_redirect_the_probe(self) -> None:
         """An inherited GIT_COMMON_DIR redirects the probe on its own, the same way GIT_DIR does.
 
-        Config is read from the common dir, so this one needs no other inherited name alongside
+        Config is read from the common dir. This one therefore needs no other inherited name alongside
         it to make the probe answer for the wrong repository.
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -6292,8 +6310,8 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
 
         The injected config rewrites this checkout's real `acme` origin to read as
         `unrelated-owner`. The `GIT_CONFIG` prefix strip removes `GIT_CONFIG_COUNT`,
-        `GIT_CONFIG_KEY_0`, and `GIT_CONFIG_VALUE_0` before the call runs, so the real config
-        governs and the probe still answers for the real owner.
+        `GIT_CONFIG_KEY_0`, and `GIT_CONFIG_VALUE_0` before the call runs. The real config
+        therefore governs, and the probe still answers for the real owner.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -6335,11 +6353,12 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     ) -> None:
         """A `remote.origin.url` override injected the same count/key/value way as the rewrite above.
 
-        Not a regression guard for the current probe: measured directly, `git remote get-url`
+        Not a regression guard for the current probe. Measured directly, `git remote get-url`
         ignores a config-injected `remote.origin.url` value regardless of whether the
-        `GIT_CONFIG` prefix is stripped, so this case passes with or without that strip. It stays
-        in place for a future change that switches the probe to a command that does honor this
-        vector, such as `git config --get remote.origin.url`, which the strip does guard against.
+        `GIT_CONFIG` prefix is stripped. This case therefore passes with or without that strip. It
+        stays in place for a future change that switches the probe to a command that does honor
+        this vector. An example is `git config --get remote.origin.url`, which the strip does
+        guard against.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -6356,9 +6375,9 @@ class TestOriginOwnerIgnoresInheritedEnvironment(unittest.TestCase):
     def test_two_origin_urls_resolve_to_the_first_one(self) -> None:
         """`remote.origin.url` may carry more than one value; `remote get-url` returns the first.
 
-        `git config --get` instead returns the last: with two urls, that command names a
-        different owner than the one a write should stay within, the opposite of what this probe
-        needs. Both commands are run against the same repository here so the difference is
+        `git config --get` instead returns the last. With two urls, that command names a
+        different owner than the one a write should stay within. That is the opposite of what this
+        probe needs. Both commands are run against the same repository here so the difference is
         the proof, rather than reverting and restoring the production probe.
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -6445,7 +6464,7 @@ class TestWaitStaysInScope(unittest.TestCase):
     """`wait` mutates via the auto-request, so it must refuse cross-owner outright too."""
 
     def test_a_cross_owner_target_is_refused_before_the_wait_reads_or_writes_anything(self) -> None:
-        """Both transports raise on any call, so a reverted check fails fast rather than
+        """Both transports raise on any call. A reverted check therefore fails fast rather than
         falling into the real, minutes-long backoff loop with a mocked GraphQL response."""
         out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="acme"))
@@ -6488,12 +6507,12 @@ READ_ONLY_COMMANDS = ["claims", "status"]
 class TestEveryWriteCommandRefusesCrossOwner(unittest.TestCase):
     """`requestReviews` once sat outside `in_scope` for its whole life with a green suite.
 
-    The whole-source check in TestContract counts which mutation documents exist, which held
-    that regression invisible since a document can exist and still be reachable without the
+    The whole-source check in TestContract counts which mutation documents exist. That held
+    the regression invisible since a document can exist and still be reachable without the
     owner check running first. This pins the command-level invariant instead: every write
     subcommand refuses a cross-owner target before either transport is touched. It does not
     pin the static property TestContract's count implied, that every mutation document in the
-    source sits behind `in_scope`; a write reachable by some path this table does not drive
+    source sits behind `in_scope`. A write reachable by some path this table does not drive
     would still slip past it.
     """
 
@@ -7081,8 +7100,8 @@ class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
 
     `wait` became a write without a subcommand being added, so nothing prompted the table to be
     checked. This ties the two hand-maintained sets to the parser's own `cmd` choices instead of
-    trusting them to stay in step: a subcommand added to the parser and left out of both sets
-    fails this test until someone classifies it as a write or a read.
+    trusting them to stay in step. A subcommand added to the parser and left out of both sets
+    fails this test. It keeps failing until someone classifies it as a write or a read.
     """
 
     def test_write_and_read_only_commands_together_equal_the_parsers_cmd_choices(self) -> None:

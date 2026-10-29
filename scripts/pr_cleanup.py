@@ -11,12 +11,17 @@ Usage: pr_cleanup.py NUMBER --repo OWNER/NAME [--checkout DIR]
 `pr_review.py cleanup` forwards here, so a command line naming either script runs the same code.
 
 The verify-then-delete `drive-pr` and `merge-and-release` prescribe. Call it through
-`pr_review.py cleanup`, the spelling the host-safety installer's allow rule names, and since that
-rule approves any arguments, every check lives here. It takes the pull
-request number, never a branch name. It refuses unless the pull request is merged into `develop`
-from a head in `--repo` itself, the head is not `develop`, `main`, or the default branch, the
-owner and repository pass `handoff.py`'s write-scope check, no ruleset or protection covers the
-branch, and no open pull request has it as head or base. The tip is checked against the pull
+`pr_review.py cleanup`, the spelling the host-safety installer's allow rule names. That
+rule approves any arguments, so every check lives here. It takes the pull
+request number, never a branch name. It refuses unless all of these hold:
+
+- The pull request is merged into `develop` from a head in `--repo` itself.
+- The head is not `develop`, `main`, or the default branch.
+- The owner and repository pass `handoff.py`'s write-scope check.
+- No ruleset or protection covers the branch.
+- No open pull request has it as head or base.
+
+The tip is checked against the pull
 request's `headRefOid` before the delete and the delete is confirmed by reading the ref back.
 
 With `--checkout <primary clone>`, a local half follows a remote half that exited 0. Every refusal
@@ -28,8 +33,8 @@ reset, stash, or force. A clone left behind is reported and does not fail the ru
 `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is provably
 finished, one `would-remove` or `keep <reason>` line per worktree or branch, and removes it only
 with `--apply`. An item must sit untouched for `--min-age-hours` (default 24) and be clean. A
-branch is finished when a pull request from `--repo` merged it at its exact tip or past it, or
-`origin/develop` or `origin/main` contains it. For a merged develop pull request the sweep also
+branch is finished when a pull request from `--repo` merged it at its exact tip or past it. It is
+also finished when `origin/develop` or `origin/main` contains it. For a merged develop pull request the sweep also
 deletes the remote head branch through the same checks as `cleanup <n>`. Permanent branches,
 locked worktrees, and worktrees mid-operation are never touched.
 
