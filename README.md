@@ -205,7 +205,7 @@ The mechanical helpers that go with those procedures are documented beside them.
 
 ### Adopting Outside This Fleet
 
-The rules, the spec, and the procedures are readable and reusable by anyone, and the guardrail kit installs on any host. What does not transfer is the registry, since [registry/repos.json][repos] lists this fleet's projects, and standing a repository up writes an entry in it. Adopting outside this fleet therefore means running your own hub, forked or copied, holding your own registry and your own reports. It also means adapting `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, and `spec/` to what your projects actually are. There is no supported mode where an outside repository points at this hub's registry.
+The rules, the spec, and the procedures are readable and reusable by anyone, and the guardrail kit installs on any host. What does not transfer is the registry, since [registry/repos.json][repos] lists this fleet's projects, and standing a repository up writes an entry in it. Adopting outside this fleet therefore means running your own hub, forked or copied, holding your own registry and your own reports. For the same reason it also means adapting `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md`, and `spec/` to what your projects actually are. There is no supported mode where an outside repository points at this hub's registry.
 
 ## Diverging From a Rule
 
