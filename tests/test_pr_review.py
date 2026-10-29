@@ -6666,9 +6666,9 @@ class TestRequiredContexts(unittest.TestCase):
         unknown = {"__typename": "UnknownContext"}
         mixed = pr_review_checks.check_nodes(payload([], checks=[check(), unknown]))
         self.assertEqual("", pr_review_checks.checks_never_ran(pr, mixed, frozenset()))
-        unread = pr_review_checks.check_nodes(payload([], checks=[unknown]))
+        unread = pr_review_checks.check_nodes(payload([], checks=[unknown, unknown]))
         self.assertIn(
-            "no check has posted that this can read",
+            "no check has posted that this can read, the rollup holding only UnknownContext, so",
             pr_review_checks.checks_never_ran(pr, unread, frozenset()),
         )
         later = pr_review_checks.checks_never_ran(pr, nodes, frozenset({("Later", None)}))

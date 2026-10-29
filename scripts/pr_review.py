@@ -138,11 +138,11 @@ Subcommands
            every workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
-           open attested held head nothing holds exits 45 where its rollup was unreadable or, under
-           DIRTY, none it can read posted. A DIRTY or BEHIND one also exits 45 where a required check is
-           unregistered or from another app. Exit 0 can then leave a required check unregistered
-           only under unread rules, a `CHECKS TRUNCATED` rollup, a DRAFT merge, or a pull request
-           not open.
+           open attested held head nothing holds exits 45 where its rollup was unreadable. So does
+           a DIRTY one where no check it can read had posted. A DIRTY or BEHIND one also exits 45
+           where a required check is unregistered or from another app. Exit 0 can then leave a
+           required check unregistered only under unread rules, a `CHECKS TRUNCATED` rollup, a
+           DRAFT merge, or a pull request not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
            open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
@@ -167,15 +167,16 @@ Subcommands
            a held head a check running long or held by its environment polls to 30 instead.
            45 = an open attested held head that nothing holds, its merge other than CLEAN,
            UNSTABLE, or HAS_HOOKS. Either the payload carries no commit matching the head, named
-           `CHECKS UNREADABLE` in the digest, or a DIRTY merge has no check posted. Or the merge
-           reads DIRTY or BEHIND and a check the base branch's rules require has not registered,
-           or came from another app. That last needs the rules read and a rollup not
-           `CHECKS TRUNCATED`. Where the rollup holds a type this cannot read, named
+           `CHECKS UNREADABLE` in the digest, or a DIRTY merge has no check posted that this can
+           read. Or the merge reads DIRTY or BEHIND and a check the base branch's rules require
+           has not registered, or came from another app. That last needs the rules read and a
+           rollup not `CHECKS TRUNCATED`. Where the rollup holds a type this cannot read, named
            `CHECKS PARTIALLY UNREAD` in the digest, the status says the check may sit there.
            `status=CHECKS_MISSING` names which. A DIRTY merge runs no pull_request workflow until
            its conflict is resolved. A required check not yet registered holds a BLOCKED merge to
            30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
-           empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one.
+           empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one, as does one
+           holding only types this cannot read.
            49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
            for the head. 64 = the write scope could not
@@ -1716,7 +1717,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
         ):
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, none had posted, a workflow run on the head "
+                "timeout a check had not concluded, none it can read had posted, a workflow run on the head "
                 "had not completed, a check the base branch requires had not registered or came "
                 "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
                 "wait again, or read the checks above"

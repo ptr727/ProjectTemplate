@@ -308,7 +308,7 @@ def checks_never_ran(
     if checks_unreadable(pr):
         return "the payload carries no commit matching the head, so read the check runs on the head commit"
     if not checks_tally(nodes)[1]:
-        only = ", ".join(checks_unread(nodes))
+        only = ", ".join(sorted(set(checks_unread(nodes))))
         held = f" that this can read, the rollup holding only {only}" if only else ""
         return (
             f"no check has posted{held}, so resolve the head's conflict with its base, since a "
