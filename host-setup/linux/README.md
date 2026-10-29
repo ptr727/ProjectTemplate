@@ -7,7 +7,7 @@ The tooling that makes a Debian or Ubuntu based host satisfy the contract in [`d
 - [`install-tools.sh`][install-tools] installs and upgrades the host tools. It reports what each is installed at, what upstream carries, where it comes from, and its status. Its `--sudo-timestamp` action is the one thing it does that is about the host rather than a tool.
 - [`upgrade-host.sh`][upgrade-host] upgrades the packages of the current release. Moving to the next release is a separate action behind its own flag.
 - [`setup-github.sh`][setup-github] configures the SSH key, git, and commit signing. It checks both key registrations against what GitHub publishes.
-- [`install-agents.sh`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed, and installs one only when it is named.
+- [`install-agents.sh`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed. The script installs a tool only when that tool is named.
 - [`install-skills.sh`][install-skills] drives the hub's skills installer at [`scripts/skills_install.py`][skills-install] from this tree.
 
 Each runs on its own, and each takes `--help`.
@@ -71,7 +71,7 @@ An install or upgrade collects a tool whose install fails and carries on, so one
 
 **For `dotnet`, the distro feed is the default and Microsoft's feed is the fallback.** The fallback is added only where the distro carries no SDK at all, because mixing the two feeds is what breaks a host. Microsoft's feed carries amd64 only, so any other architecture without a distro SDK is a named skip. The default set is the newest SDK line the feed carries. `--optional` adds every other line, for a host that builds against more than one.
 
-**`powershell` is optional and comes from Microsoft's feed, the same one `dotnet` falls back to.** The distro never carries a package, so there is no distro version to prefer and no mixing concern to weigh. It joins the default selection only under `--optional`, and naming it on the command line selects it either way. Like `dotnet`, the feed carries amd64 only, so any other architecture is a named skip. It is not part of the fleet contract, which is why it stays optional: a repository that needs `pwsh` opts in rather than every host carrying it.
+**`powershell` is optional and comes from Microsoft's feed, the same one `dotnet` falls back to.** The distro never carries a package, so there is no distro version to prefer and no mixing concern to weigh. It joins the default selection only under `--optional`, and naming it on the command line selects it either way. Like `dotnet`, the feed carries amd64 only, so any other architecture is a named skip. It is not part of the fleet contract, which is why it stays optional. A repository that needs `pwsh` opts in rather than every host carrying it.
 
 ## The Sudo Credential Cache
 
@@ -127,7 +127,7 @@ Two steps cannot be automated, because they happen in a browser. The public key 
 
 The agent tools install into the user's home, so this script refuses root rather than reporting root's empty home as every tool absent. A scheduled run that starts as root reaches it through `runuser -u <user> --`. It appends `~/.local/bin` and `~/.opencode/bin` to `PATH`, since such a run carries none of the per-user directories these installers write to.
 
-`--upgrade` runs each installed tool's own updater with standard input closed and a time bound, so an updater that stops to ask fails rather than hanging the run. `--install` takes tool names or `--all`, and with neither it refuses, so nothing is installed by default. herdr refuses to update from inside one of its own panes, so a run there skips that one step and still refreshes the integrations. [`docs/host-setup.md`][host-setup] "Agent Tool Updates" states why the set is opt-in.
+`--upgrade` runs each installed tool's own updater with standard input closed and a time bound. An updater that stops to ask therefore fails rather than hanging the run. `--install` takes tool names or `--all`, and with neither it refuses, so nothing is installed by default. herdr refuses to update from inside one of its own panes, so a run there skips that one step and still refreshes the integrations. [`docs/host-setup.md`][host-setup] "Agent Tool Updates" states why the set is opt-in.
 
 ## install-skills.sh Is the Exception
 
