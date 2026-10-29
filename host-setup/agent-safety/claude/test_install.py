@@ -37,11 +37,13 @@ def run(home, *args, dirty=False, contain=True, timeout=None):
     """Invoke the installer as a subprocess, the way a host actually runs it.
 
     dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
-    live from this checkout, via AGENT_SAFETY_DIRTY_OVERRIDE, so a verdict this suite asserts
+    live from this checkout, via AGENT_SAFETY_DIRTY_OVERRIDE.
+    A verdict this suite asserts therefore
     depends on the fixture rather than on whether host-setup happens to be mid-edit while the
     suite runs. The default is clean, since that is what every case but one below needs.
 
-    contain forces the containment-capable signal the same way, so a verdict does not depend on
+    contain forces the containment-capable signal the same way.
+    So a verdict does not depend on
     whether the machine running the suite has a systemd user manager.
 
     The host-local instruction file is pointed beside the throwaway home, so no case reads the
@@ -190,8 +192,9 @@ class TestSourceRef(unittest.TestCase):
 
     Every StampCase test above forces that override through run(), so none of them exercises
     the git status read this class alone still calls. Skips rather than fails when this
-    checkout cannot supply a clean baseline itself, the same case TestDegradedEnvironments
-    covers by removing PATH: a tarball with no git, or a real edit already sitting in a
+    checkout cannot supply a clean baseline itself.
+    That is the same case TestDegradedEnvironments covers by removing PATH.
+    Those cases are a tarball with no git, or a real edit already sitting in a
     payload file while the suite runs.
     """
 
@@ -1355,7 +1358,8 @@ class TestRegistration(StampCase):
         self.assertEqual(len(entries), 1)
 
     def test_reinstalling_reuses_a_sweep_group_covering_every_reason(self):
-        """`*` and `""` cover every reason the same as absent, so reinstalling must reuse that group
+        """`*` and `""` cover every reason the same as absent.
+        So reinstalling must reuse that group
         rather than read only the matcherless shape and leave a second, empty one behind."""
         self.install()
         for matcher in ("*", ""):
@@ -1374,7 +1378,8 @@ class TestRegistration(StampCase):
                 self.assertEqual(owning[0].get("matcher"), matcher)
 
     def test_a_wrong_hooks_shape_is_reported_as_itself(self):
-        """Iterating a dict yields keys and a string yields characters, so a wrong shape read as
+        """Iterating a dict yields keys and a string yields characters.
+        So a wrong shape read as
         zero registrations and sent a reader to the wrong fix."""
         self.install()
         for shape, expected in (
@@ -1402,7 +1407,8 @@ class TestRegistration(StampCase):
     def test_a_decoy_command_naming_the_sweep_is_not_a_registration(self):
         """Matching any command containing the sweep's name let a decoy report a machine current.
 
-        Each shape asserts the problem it should raise rather than that it raised one, since a
+        Each shape asserts the problem it should raise rather than that it raised one.
+        That is because a
         second and false "not registered" line satisfied a bare truthiness check by itself.
         """
         self.install()
@@ -1710,8 +1716,8 @@ class TestRegistration(StampCase):
 
     def test_a_wrapper_merely_containing_a_stem_is_not_the_kits_registration(self):
         """A maintainer's own hook whose command merely contains a stem, such as
-        `my-gh-write-guard-audit.sh`, is neither counted by `--report` as this kit's registration
-        nor removed by a re-run. A substring test on the whole command claimed both; judging
+        `my-gh-write-guard-audit.sh`, is not counted by `--report` as this kit's registration.
+        It is not removed by a re-run either. A substring test on the whole command claimed both; judging
         ownership by the file name a token names does neither."""
         for event, wrapper_name in (
             ("PreToolUse", "my-gh-write-guard-audit.sh"),
@@ -1730,7 +1736,8 @@ class TestRegistration(StampCase):
 
     def test_names_hook_agrees_with_runs_hook_on_every_shape_it_accepts(self):
         """A command `runs_hook` already treats as running the deployed hook must count as
-        named too, or a re-run leaves a duplicate registration in place while `--report` calls
+        named too.
+        Otherwise a re-run leaves a duplicate registration in place while `--report` calls
         the hook absent."""
         plain = pathlib.Path("/home/vscode/.claude/hooks/gh-write-guard.py")
         metachars = pathlib.Path("/opt/Program Files (x86)/a&b;c|d/gh-write-guard.py")
@@ -2110,7 +2117,8 @@ class TestStampContent(StampCase):
     def test_the_digest_reads_every_deployed_hook(self):
         """Naming the hooks in `installed_digest` was the drift `DEPLOYED_HOOKS` exists to close.
 
-        Parametrised over the constant rather than over two literals, so a hook added to the deploy
+        Parametrised over the constant rather than over two literals.
+        So a hook added to the deploy
         list is covered here without anyone remembering to add it.
         """
         for name in install.DEPLOYED_HOOKS:
@@ -2126,11 +2134,12 @@ class TestStampContent(StampCase):
     def test_every_deployed_file_is_in_the_digest(self):
         """Every file a real install writes is covered by the digest that decides CURRENT.
 
-        Two earlier versions of this test each compared one declared list against another, which
-        is a tautology `PAYLOAD_FILES`'s own definition satisfies, and a source scrape, which went
-        silent the moment the copy became a loop. The independent source is the installed home
-        itself: a file the installer actually wrote and the digest does not read is the gap, and
-        reading the disk is the only way to see it without trusting the lists under test.
+        Two earlier versions of this test each compared one declared list against another.
+        That is a tautology `PAYLOAD_FILES`'s own definition satisfies.
+        A source scrape also went silent the moment the copy became a loop.
+        The independent source is the installed home itself.
+        A file the installer actually wrote and the digest does not read is the gap.
+        Reading the disk is the only way to see it without trusting the lists under test.
         """
         self.install()
         written = {f.name for f in (self.home / "hooks").iterdir() if f.is_file()}
@@ -2187,7 +2196,8 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
     Only the guard's own `os` takes Windows path semantics, since patching the shared module breaks
     `tempfile` for the rest of the suite. USERPROFILE is the home `ntpath.expanduser` reads, set to
     the one the fixture table expanded `~` against at import. The one case that spawns git creates
-    a real checkout, so this test skips it, and only `--selftest` run with the host's own paths
+    a real checkout, so this test skips it.
+    Only `--selftest` run with the host's own paths
     covers it.
     """
 
@@ -2317,7 +2327,8 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
 class TestContainmentHookSelftests(unittest.TestCase):
     """The prefix's and the sweep's own matrices, the session tree's cases included, run in this suite.
 
-    Both run every systemd and process-table answer from a synthetic fixture, so neither starts a
+    Both run every systemd and process-table answer from a synthetic fixture.
+    So neither starts a
     scope, sets a slice's ceiling, or stops anything on the machine running the suite.
     """
 

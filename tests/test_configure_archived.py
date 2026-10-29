@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's archived-repository exemption by running its own lines.
 
-The shell is lifted out of the file rather than restated here, so an edit that removes the
-behavior fails these tests instead of leaving a reimplementation to agree with itself. The
+The shell is lifted out of the file rather than restated here.
+An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. The
 region under test makes no `gh` call of its own, and the harness assigns every variable the
-region reads. So the cases running the lifted region need no `gh` stub: a cataloged or absent
-registry falls through to a marker printed just after that region, and an archived one exits
-before reaching it.
+region reads.
+So the cases running the lifted region need no `gh` stub.
+A cataloged or absent registry falls through to a marker printed just after that region.
+An archived one exits before reaching it.
 """
 
 from __future__ import annotations
@@ -48,8 +49,8 @@ def require(*tools: str) -> str:
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     """The script under the same shell options configure.sh sets, with a bounded wait.
 
-    The options are lifted rather than typed, because a harness running without them is blind to
-    exactly the error handling the lines under test rely on.
+    The options are lifted rather than typed.
+    That is because a harness running without them is blind to exactly the error handling the lines under test rely on.
     """
     bash = require("bash", *tools)
     options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")

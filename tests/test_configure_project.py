@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's fleet-project payload, lookups, and link write by running its own lines.
 
-The shell is lifted out of the file rather than restated here, so an edit that removes the
-behavior fails these tests instead of leaving a reimplementation to agree with itself. Each
-harness lifts the whole region under test and stubs what surrounds it, never the region
-itself, so the lines under test are always the file's own.
+The shell is lifted out of the file rather than restated here.
+An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. Each
+harness lifts the whole region under test and stubs what surrounds it, never the region itself.
+The lines under test are therefore always the file's own.
 
-Every case runs offline: `gh` is a shell function the harness defines, which is what lets the
-link write be exercised at all without firing a real mutation at GitHub.
+Every case runs offline.
+`gh` is a shell function the harness defines.
+That is what lets the link write be exercised at all without firing a real mutation at GitHub.
 """
 
 from __future__ import annotations
@@ -53,8 +54,8 @@ def require(*tools: str) -> str:
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     """The script under the same shell options configure.sh sets, with a bounded wait.
 
-    The options are lifted rather than typed, because a harness running without them is blind to
-    exactly the error handling the lines under test rely on.
+    The options are lifted rather than typed.
+    That is because a harness running without them is blind to exactly the error handling the lines under test rely on.
     """
     bash = require("bash", *tools)
     options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
@@ -346,8 +347,8 @@ class RepoProjectsCase(unittest.TestCase):
     def test_a_repository_that_is_not_there_fails_rather_than_reporting_no_links(self) -> None:
         """A null repository beside a 200 would read as a repository linked to nothing.
 
-        Today an unreadable repository comes back as a GraphQL error that gh exits non-zero on,
-        so this guard is defensive rather than a shape the API is known to return.
+        Today an unreadable repository comes back as a GraphQL error that gh exits non-zero on.
+        So this guard is defensive rather than a shape the API is known to return.
         """
         result = self.projects({"data": {"repository": None}})
         self.assertNotEqual(result.returncode, 0)
@@ -368,9 +369,9 @@ class ApplyLinkCase(unittest.TestCase):
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         """apply_project against a stubbed link list, recording every `gh` call it makes.
 
-        The project id is passed in, as cmd_apply's pre-flight passes it, and `repo_projects` is
-        stubbed because it is exercised whole by its own case above, which leaves this case
-        measuring the one thing it is about: whether the mutation runs, and what the function
+        The project id is passed in, as cmd_apply's pre-flight passes it.
+        `repo_projects` is stubbed because it is exercised whole by its own case above.
+        That leaves this case measuring the one thing it is about: whether the mutation runs, and what the function
         does with what comes back.
         """
         with tempfile.TemporaryDirectory() as tmp:
@@ -414,7 +415,8 @@ class ApplyLinkCase(unittest.TestCase):
         """A bare substitution would end the run with gh's error and nothing of the script's.
 
         The pre-flight's resolution cannot catch this one, since that is a read and this is the
-        write, so a token holding project read alone reaches here with four groups applied.
+        write.
+        A token holding project read alone therefore reaches here with four groups applied.
         """
         result, calls = self.apply([], gh_status=1)
         self.assertNotEqual(result.returncode, 0)
@@ -435,13 +437,14 @@ class WiringCase(unittest.TestCase):
     """The call sites that decide whether any of the above runs at all.
 
     A diff that deletes one leaves every helper passing its own tests while the group it
-    belongs to never runs, which is what these pin. A test of cmd_apply's pre-flight lifts
-    that region and calls it from a synthesized body, so an arm reached before the writes
-    is tested without stubbing them, and a test of a whole function lifts it and stubs
-    everything it calls, so what is under test is the call site rather than any group it
-    names. No count is given here,
-    because a count goes stale as a case is added and the class itself is what says how
-    many there are.
+    belongs to never runs.
+    That is what these pin.
+    A test of cmd_apply's pre-flight lifts that region and calls it from a synthesized body.
+    An arm reached before the writes is therefore tested without stubbing them.
+    A test of a whole function lifts it and stubs everything it calls.
+    What is under test is therefore the call site rather than any group it names.
+    No count is given here.
+    That is because a count goes stale as a case is added and the class itself is what says how many there are.
     """
 
     def test_apply_preflights_the_project_payload_before_any_write(self) -> None:
@@ -611,8 +614,8 @@ class CheckGroupCase(unittest.TestCase):
         """An unguarded count aborts the group, so the run skips every group after it.
 
         Under the options configure.sh sets, an unguarded substitution that fails ends the
-        function where it stands, so the groups after it never run and the run reports no
-        verdict of its own.
+        function where it stands.
+        The groups after it therefore never run, and the run reports no verdict of its own.
         """
         result = self.harness([PROJECT_ID], live="not json at all")
         self.assertIn("could not count the repository's other project links", result.stdout)

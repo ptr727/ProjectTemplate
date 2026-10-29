@@ -10,15 +10,15 @@ before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
 
 Every run records a stamp at ~/.claude/agent-safety-stamp.json naming the machine, what was
-installed, and the hub commit it came from, so a fleet rollout can be tracked from the hosts
-rather than from memory. `--report` reads that stamp against this checkout and answers whether
+installed, and the hub commit it came from.
+A fleet rollout can therefore be tracked from the hosts rather than from memory. `--report` reads that stamp against this checkout and answers whether
 the machine is current, without changing anything.
 
 Usage: python3 install.py            (installs to ~/.claude)
        python3 install.py --report   (read-only: is this machine current?)
-       CLAUDE_HOME=/x python3 install.py   (override target, for testing)
-       AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing)
-       AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing)
+       CLAUDE_HOME=/x python3 install.py   (override target, for testing).
+       AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing).
+       AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing).
        AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing)
 """
 
@@ -111,15 +111,17 @@ def hook_command(launcher, path):
 def runs_hook(command, path):
     """Whether `command` names the hook deployed at `path`, as its own argument.
 
-    The path is compared and the launcher is not. Matching the name alone let an unrelated
-    `echo stray-process-sweep` count as a registration, while matching the whole command string
-    reported a working machine stale, since `hook_launcher()` resolves at check time and a machine
-    installed under a different PATH carries the other spelling. The path is what the installer
-    writes and never drifts, so it is the half worth comparing.
+    The path is compared and the launcher is not.
+    Matching the name alone let an unrelated `echo stray-process-sweep` count as a registration.
+    Matching the whole command string reported a working machine stale.
+    That is because `hook_launcher()`
+    resolves at check time and a machine installed under a different PATH carries the other spelling.
+    The path is what the installer writes and never drifts, so it is the half worth comparing.
 
-    The quoting around it is not compared either. This installer writes the path in double quotes,
-    and a registration written by hand or through the `/hooks` UI runs the same file bare or in
-    single quotes, so requiring one spelling reported those as naming a hook they do not run.
+    The quoting around it is not compared either.
+    This installer writes the path in double quotes.
+    A registration written by hand or through the `/hooks` UI runs the same file bare or in single quotes.
+    So requiring one spelling reported those as naming a hook they do not run.
 
     Whether the command then runs it is not decidable from the string: `echo "<path>"` names the
     deployed hook and executes nothing. What this rules out is the decoy that names the hook and
@@ -143,27 +145,29 @@ def names_hook(command, name):
     """Whether `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME), at any path.
 
     Matched with `runs_hook`'s own boundary characters rather than by tokenizing the command.
-    A command `runs_hook` already treats as running the deployed hook, such as one wrapped in
-    `bash -c "..."`, in `(...)`, or followed by `; true`, carries those wrapping characters
-    attached to the path with no separating space, which `shlex.split` folds into the token and
-    a plain whitespace split (its own fallback on an unbalanced quote) leaves attached to a quote
-    character, so neither reads the trailing path segment as `name` alone.
+    A command `runs_hook` already treats as running the deployed hook carries wrapping characters
+    attached to the path with no separating space.
+    Such a command is, for example, one wrapped in `bash -c "..."`, in `(...)`, or followed by `; true`.
+    `shlex.split` folds those characters into the token.
+    A plain whitespace split (its own fallback on an unbalanced quote) leaves them attached to a quote character.
+    So neither reads the trailing path segment as `name` alone.
 
-    Matched as a trailing path segment rather than a bare substring, so a maintainer's own hook
-    whose file name merely contains this kit's stem, such as `my-gh-write-guard-audit.sh`
-    containing `gh-write-guard`, is not claimed: the character right after the stem there is
-    `-`, not one of the boundary characters this match requires.
+    Matched as a trailing path segment rather than a bare substring.
+    So a maintainer's own hook whose file name merely contains this kit's stem, such as
+    `my-gh-write-guard-audit.sh` containing `gh-write-guard`, is not claimed.
+    The character right after the stem there is `-`, not one of the boundary characters this match requires.
 
-    A quoted path is read to its closing quote rather than through the same boundary characters,
-    since those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
-    `runs_hook` accepts whole, and the bare-word boundary class below cannot cross the space or
-    the parentheses inside it to reach the deployed name.
+    A quoted path is read to its closing quote rather than through the same boundary characters.
+    That is because those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
+    `runs_hook` accepts whole.
+    The bare-word boundary class below cannot cross the space or the parentheses inside it to reach the deployed name.
 
-    Known gap, not chased further here: an unquoted path whose own directory holds one of the
-    bare-word boundary characters, and a handful of shell compositions `runs_hook` itself only
-    accepts because it is handed the exact literal path rather than discovering one (a backtick,
-    a no-space redirect, a quote escaped inside an outer quote). Closing those needs `runs_hook`
-    widened too, which is a design change on its own rather than a local match.
+    Known gap, not chased further here, in two parts:
+    - an unquoted path whose own directory holds one of the bare-word boundary characters.
+    - a handful of shell compositions `runs_hook` itself only accepts because it is handed the exact
+      literal path rather than discovering one.
+    The compositions include a backtick, a no-space redirect, and a quote escaped inside an outer quote.
+    Closing those needs `runs_hook` widened too, which is a design change on its own rather than a local match.
     """
     text = str(command).replace("\\", "/")
     escaped = re.escape(name)
@@ -192,11 +196,12 @@ def matcher_sees_tool(matcher, tool):
 def matcher_covers_every_exit_reason(matcher):
     """Whether a SessionEnd matcher has a shape known to run on every exit reason, absent, empty, or `*`.
 
-    A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool: an
-    absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
-    the three is a defect. Unlike `matcher_sees_tool`, there is no single reason to test regex
-    membership against, since the sweep must fire on every exit reason rather than one particular
-    one, so this classifies the shape rather than evaluating a pattern.
+    A SessionEnd matcher filters by exit reason the way a PreToolUse matcher filters by tool.
+    An absent or empty matcher runs on every reason and `*` is the all-reasons spelling, so none of
+    the three is a defect.
+    Unlike `matcher_sees_tool`, there is no single reason to test regex membership against.
+    That is because the sweep must fire on every exit reason rather than one particular one.
+    So this classifies the shape rather than evaluating a pattern.
     """
     return matcher is None or matcher in ("", "*")
 
@@ -222,10 +227,11 @@ def register_hook(groups, name, entry, selects, matcher=None):
 def owns(entry, prefix):
     """Whether an allow rule names the script the prefix identifies, rather than a longer path.
 
-    The prefix ends at the script name, so a bare `startswith` also claims `pr_review.py-custom`,
-    and dropping that would delete a hand-written rule for a different script. What separates the
-    two is the character after the name: a rule that invokes this script continues with a rule-syntax
-    delimiter, where a different script continues with more of its own path.
+    The prefix ends at the script name, so a bare `startswith` also claims `pr_review.py-custom`.
+    Dropping that would delete a hand-written rule for a different script.
+    What separates the two is the character after the name.
+    A rule that invokes this script continues with a rule-syntax delimiter, where a different script
+    continues with more of its own path.
     """
     return entry.startswith(prefix) and entry[len(prefix) : len(prefix) + 1] in (":", " ", ")")
 
@@ -260,9 +266,11 @@ MANAGED_PERMISSIONS = [
 def containment_capable(prefix, env=None, system=None, uid=None, controllers=None):
     """(capable, reason): whether this host can run the deployed `prefix` and start a scope for a command.
 
-    Judged at install and at report time alike, so a host that gains or loses its user manager is
+    Judged at install and at report time alike.
+    A host that gains or loses its user manager is therefore
     reported against what it can do now. AGENT_SAFETY_CONTAINMENT_OVERRIDE, read as exactly "0" or
-    "1", replaces the judgment for a test, the way AGENT_SAFETY_DIRTY_OVERRIDE does for the dirty signal.
+    "1", replaces the judgment for a test.
+    AGENT_SAFETY_DIRTY_OVERRIDE does the same for the dirty signal.
     """
     env = os.environ if env is None else env
     system = sys.platform if system is None else system
@@ -301,8 +309,9 @@ def prefix_runs_directly(prefix):
     """Why `prefix --selftest` fails when executed the way Claude Code executes it, or "" where it passes.
 
     Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
-    write guard included. A PreToolUse hook that fails is a non-blocking error, so a prefix that cannot
-    run that way, from a missing `python3`, a lost execute bit, or a `noexec` mount, fails the guard open.
+    write guard included. A PreToolUse hook that fails is a non-blocking error.
+    So a prefix that cannot run that way fails the guard open.
+    The causes include a missing `python3`, a lost execute bit, and a `noexec` mount.
     """
     try:
         done = subprocess.run(
@@ -325,8 +334,8 @@ def prefix_runs_directly(prefix):
 def prefix_value(path):
     """The `CLAUDE_CODE_SHELL_PREFIX` value naming the deployed prefix, spelled once for writer and reader.
 
-    A bare path, since Claude Code quotes the whole value as one word, so an interpreter named in front
-    of it is read as part of the file name.
+    A bare path, since Claude Code quotes the whole value as one word.
+    An interpreter named in front of it is therefore read as part of the file name.
     """
     return str(path)
 
@@ -391,9 +400,9 @@ def host_facts():
 def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty.
 
-    A dirty tree is reported rather than hidden: the SHA still names a commit, but the bytes
-    installed are not that commit's, and a stamp that claims otherwise is the thing this exists
-    to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
+    A dirty tree is reported rather than hidden.
+    The SHA still names a commit, but the bytes installed are not that commit's.
+    A stamp that claims otherwise is the thing this exists to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
 
     AGENT_SAFETY_DIRTY_OVERRIDE, read as exactly "0" or "1", replaces the git-derived dirty
     signal with a fixed one, and honoring it prints a warning below. Any other value, unset
@@ -445,9 +454,10 @@ def normalized(data):
     """Line endings reduced to newlines, covering CRLF and a bare CR.
 
     One helper rather than a replace at each site. Both digests have to normalize identically or a
-    machine drifts on nothing, and a site that handled CRLF while missing CR did exactly that: the
-    installer reads a snippet in text mode, so a bare CR arrives as a newline and installs as one,
-    while a digest that left it alone reported the machine STALE against its own content.
+    machine drifts on nothing.
+    A site that handled CRLF while missing CR did exactly that.
+    The installer reads a snippet in text mode, so a bare CR arrives as a newline and installs as one.
+    But a digest that left it alone reported the machine STALE against its own content.
     """
     if isinstance(data, bytes):
         return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
@@ -470,7 +480,8 @@ def read_regular_file(path):
     """The bytes of `path` where it is a regular file, or None where it is anything else.
 
     Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
-    rather than hanging the read, and nothing can swap the path between the check and the read.
+    rather than hanging the read.
+    Nothing can therefore swap the path between the check and the read.
     Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
     """
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
@@ -506,21 +517,24 @@ class IncompleteWrite(OSError):
 def write_regular_file(path, data, prior=None, before=None):
     """Replace the contents of `path`, a regular file or absent, with `data`.
 
-    The open is the check: a file that cannot be opened for writing raises before anything changes,
-    so `before`, which backs the file up, runs only once the write is known to be possible.
-    Opened without blocking and judged on the descriptor, as `read_regular_file` reads, so a FIFO
+    The open is the check: a file that cannot be opened for writing raises before anything changes.
+    So `before`, which backs the file up, runs only once the write is known to be possible.
+    Opened without blocking and judged on the descriptor, as `read_regular_file` reads.
+    So a FIFO
     or a device is refused rather than hanging or swallowing the write. Written in place rather than
     replaced, so a dotfiles symlink stays a link and its target takes the content.
 
-    The open is tried exclusively first, so a file this call created is told from one it found, and
-    a path that is a link always counts as found, so its target is kept. A created file is removed
+    The open is tried exclusively first, so a file this call created is told from one it found.
+    A path that is a link always counts as found, so its target is kept. A created file is removed
     again when the write fails, where the path still holds that same file, leaving it absent as it
     was found.
 
-    Raises OSError where the file is unchanged or the created file was removed. Raises
-    IncompleteWrite where a write failed after the truncate and `prior` could not be put back,
-    where the close after the truncate failed, or where a created file could not be removed, any
-    of which can leave the file holding neither version.
+    Raises OSError where the file is unchanged or the created file was removed.
+    Raises IncompleteWrite in any of these cases:
+    - a write failed after the truncate and `prior` could not be put back.
+    - the close after the truncate failed.
+    - a created file could not be removed.
+    Any of these can leave the file holding neither version.
     """
     flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
@@ -629,8 +643,8 @@ def read_local_instructions(local_path):
     """The host-local text, stripped, and why it cannot be used, or None where it can.
 
     Checked before anything is installed, so an unusable file stops the run with nothing changed.
-    A file carrying this kit's own markers is refused, since appending it would duplicate a block,
-    and copying an old backup into the local file is exactly how that happens.
+    A file carrying this kit's own markers is refused, since appending it would duplicate a block.
+    Copying an old backup into the local file is exactly how that happens.
     """
     # The probe is lstat rather than exists(), which reads a dangling symlink as absent.
     # From Python 3.14, exists() also reads a parent directory that cannot be entered as absent rather than raising.
@@ -681,7 +695,8 @@ def render_instructions(local_path, local_text):
 
     Rendered whole rather than merged into whatever the file held. Hand-written sections outside the
     blocks were never written or checked, so they restated rules in wording the fleet had since
-    changed, and every session on the host read them anyway.
+    changed.
+    Every session on the host read them anyway.
     """
     header = (
         "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
@@ -724,14 +739,15 @@ def stamped_instructions_digest(claude_home):
 def record_leftover_instructions(claude_home, claude_md, written):
     """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where that failed.
 
-    `written` holds each byte string the run wrote to the file, so a leftover that is a prefix of
-    one of them is the run's own output, and replacing it loses nothing, since the prior content is
-    a render, a backup, or absent. Anything else read back is a write by something other than this
-    run, so it is not stamped, no note is returned, and the next run backs it up. Without this
-    record the next run backs the run's own leftover up as a hand edit and the report calls it
-    one, so the note says so where the stamp read back does not hold the leftover's digest. A
-    leftover that cannot be read back is not known to be the run's own, so it gets no note. Only a
-    stamp passing its shape check is updated, since one failing it vouches for nothing either way.
+    `written` holds each byte string the run wrote to the file.
+    So a leftover that is a prefix of one of them is the run's own output.
+    Replacing it loses nothing, since the prior content is a render, a backup, or absent.
+    Anything else read back is a write by something other than this run.
+    So it is not stamped, no note is returned, and the next run backs it up.
+    Without this record the next run backs the run's own leftover up as a hand edit and the report calls it one.
+    So the note says so where the stamp read back does not hold the leftover's digest.
+    A leftover that cannot be read back is not known to be the run's own, so it gets no note.
+    Only a stamp passing its shape check is updated, since one failing it vouches for nothing either way.
     """
     try:
         left = read_regular_file(claude_md)
@@ -764,7 +780,8 @@ def record_leftover_instructions(claude_home, claude_md, written):
 def write_backup(claude_md, raw):
     """Write `raw` to a new backup beside CLAUDE.md and return its path, never replacing an earlier one.
 
-    Created exclusively rather than checked and then written, so two runs in one second cannot
+    Created exclusively rather than checked and then written.
+    So two runs in one second cannot
     both pick the same free name and have the second overwrite the first.
     """
     when = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -783,12 +800,13 @@ def write_backup(claude_md, raw):
 def payload_digest():
     """One digest over the content this kit installs, normalized the way the installer writes it.
 
-    Over raw bytes this reported drift a reinstall could not clear: the snippets are embedded with
-    `.strip()`, so a trailing newline moved the digest while the installed block stayed identical,
-    and the machine was told to re-run something that would write the same file. Line endings
-    normalize for the same reason.
+    Over raw bytes this reported drift a reinstall could not clear.
+    The snippets are embedded with `.strip()`, so a trailing newline moved the digest while the installed block stayed identical.
+    The machine was therefore told to re-run something that would write the same file.
+    Line endings normalize for the same reason.
 
-    Fixed order because a set of files has none, and a digest that depends on directory listing
+    Fixed order because a set of files has none.
+    A digest that depends on directory listing
     order reports drift on a machine where nothing changed. The order matches the one
     `installed_digest` reads, so the two are directly comparable: each deployed hook, then each data
     file, then each block.
@@ -807,7 +825,8 @@ def payload_digest():
 def read_claude_md(claude_md):
     """CLAUDE.md's text, or None where it is absent, not a regular file, or unreadable.
 
-    One reader for every caller, so a file none of them can read gives each the same answer rather
+    One reader for every caller.
+    So a file none of them can read gives each the same answer rather
     than a traceback in whichever reads it first.
     """
     try:
@@ -842,7 +861,8 @@ def marker_corruption(claude_md):
     """Markers present in the file that yield no valid block, meaning duplicated or half-written.
 
     Judged against the file alone, never against the stamp. An install onto an already-corrupted
-    CLAUDE.md records the same empty block set it reads, so the stamp and the file agree and the
+    CLAUDE.md records the same empty block set it reads.
+    So the stamp and the file agree and the
     corruption reads as a match. Two wrong answers agreeing is the failure this exists to catch.
     """
     text = read_claude_md(claude_md)
@@ -859,7 +879,8 @@ def marker_corruption(claude_md):
 def installed_digest(claude_home):
     """A digest over the bytes actually on this machine, or None where the kit is not fully there.
 
-    Markers and versions answer whether a block is present, and nothing about its content, so a
+    Markers and versions answer whether a block is present, and nothing about its content.
+    So a
     block edited between its own markers reports current under a presence check. The hook is not
     marker-delimited at all, so a modified or deleted one is invisible the same way.
 
@@ -896,7 +917,8 @@ def build_stamp(claude_home, installed, instructions_digest=None):
 
     An install passes the digest of what it rendered rather than re-reading the file. A write by
     anything else between the install's write and this read would otherwise be stamped as the
-    install's own, and the next run would replace it with no backup.
+    install's own.
+    The next run would replace it with no backup.
     """
     return {
         "stampVersion": STAMP_VERSION,
@@ -984,7 +1006,8 @@ def registration_problems(claude_home):
         """The matcher groups under `event`, or None when the settings shape cannot be read.
 
         A wrong shape is reported as itself rather than counted as zero. Iterating a dict yields
-        its keys and a string yields its characters, so the loops below would find no registration
+        its keys and a string yields its characters.
+        So the loops below would find no registration
         and report the hook as absent, which sends a reader to the wrong fix.
         """
         hooks = data.get("hooks")
@@ -1149,8 +1172,8 @@ def registration_problems(claude_home):
 def stamp_line(stamp):
     """One line naming the machine and what it carries, short enough to paste into a checklist.
 
-    Every read is total. The caller validates the shape first, and this stays printable anyway,
-    since a formatter that raises turns a verdict about a broken stamp into a traceback.
+    Every read is total. The caller validates the shape first, and this stays printable anyway.
+    That is because a formatter that raises turns a verdict about a broken stamp into a traceback.
     """
     host = stamp.get("host") or {}
     src = stamp.get("source") or {}
@@ -1176,8 +1199,10 @@ def stamp_line(stamp):
 def report(claude_home):
     """Answer whether this machine matches this checkout, reading only.
 
-    Compared on the payload digest rather than on the commit, because a machine installed from an
-    older commit whose kit bytes never changed is current, and reporting it as stale sends someone
+    Compared on the payload digest rather than on the commit.
+    That is because a machine installed from an
+    older commit whose kit bytes never changed is current.
+    Reporting it as stale sends someone
     to re-run an installer that would write the same file.
     """
     path = claude_home / "agent-safety-stamp.json"

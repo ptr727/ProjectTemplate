@@ -8,7 +8,8 @@ set -Eeuo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Pick the first candidate that is actually Python 3.
-# The installer and the hook use Python 3 syntax, so a bare `python` that is Python 2 is rejected rather than handed the script, which would fail on import.
+# The installer and the hook use Python 3 syntax.
+# A bare `python` that is Python 2 is therefore rejected rather than handed the script, which would fail on import.
 py=""
 for c in python3 python; do
     if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then

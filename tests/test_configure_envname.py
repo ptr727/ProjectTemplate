@@ -2,8 +2,8 @@
 """Exercise repo-config/configure.sh's environment-name encoding by running its own lines.
 
 A native Windows jq ends each raw output line with a carriage return. The shell is lifted out
-of the file, and a stand-in jq appends that carriage return, so an edit that stops stripping it
-fails here with a CR in the encoded name instead of passing on a reimplementation.
+of the file, and a stand-in jq appends that carriage return.
+An edit that stops stripping it therefore fails here with a CR in the encoded name instead of passing on a reimplementation.
 """
 
 from __future__ import annotations

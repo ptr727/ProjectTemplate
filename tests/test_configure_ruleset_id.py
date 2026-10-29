@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's ruleset_id() by running its own lines.
 
-The shell is lifted out of the file rather than restated here, so an edit that removes the
-behavior fails these tests instead of leaving a reimplementation to agree with itself. Each
+The shell is lifted out of the file rather than restated here.
+An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. Each
 harness lifts the whole function under test and stubs only `gh`, the boundary it calls out to.
 
-Every case runs offline: `gh` is a shell function the harness defines, which is what lets a
-2xx-but-unreadable response be exercised at all without firing a real call to GitHub.
+Every case runs offline.
+`gh` is a shell function the harness defines.
+That is what lets a 2xx-but-unreadable response be exercised at all without firing a real call to GitHub.
 """
 
 from __future__ import annotations
@@ -47,8 +48,8 @@ def require(*tools: str) -> str:
 def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     """The script under the same shell options configure.sh sets, with a bounded wait.
 
-    The options are lifted rather than typed, because a harness running without them is blind to
-    exactly the error handling the lines under test rely on.
+    The options are lifted rather than typed.
+    That is because a harness running without them is blind to exactly the error handling the lines under test rely on.
     """
     bash = require("bash", *tools)
     options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
