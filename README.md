@@ -299,7 +299,7 @@ Issues are also filed here **by agents working in downstream repositories**. Thi
 
 Contributors sign every commit. See [docs/ssh-signing.md][ssh-signing] for SSH commit-signing setup, [docs/host-setup.md][host-setup] for host prerequisites, and [docs/devcontainer.md][devcontainer] for devcontainer SSH-agent forwarding. Run the linters before pushing (see [GOVERNANCE.md "Running the Linters Locally"][governance-running-the-linters-locally-known-working-invocations]).
 
-Changes land the same way every fleet change does: a feature branch and a squash merge into `develop`. That way includes a Copilot review loop driven to green, and a merge only with the maintainer's explicit approval. The backlog is [`TODO.md`][todo], which holds the work that is ready to pick up along with the reasoning behind each item. Therefore read it before proposing something it already covers.
+Changes land the same way every fleet change does: a feature branch and a squash merge into `develop`. The process also has a Copilot review loop driven to green and a merge only with the maintainer's explicit approval. The backlog is [`TODO.md`][todo], which holds the work that is ready to pick up along with the reasoning behind each item. Therefore read it before proposing something it already covers.
 
 ## 3rd Party Tools
 
