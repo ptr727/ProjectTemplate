@@ -2539,8 +2539,9 @@ class TestCommentAddedRule(BaitCase):
     def test_the_stand_down_step_reads_the_caller_s_declared_model(self) -> None:
         """The harness feeds the variables, so nothing else reads the step's own wiring.
 
-        The default is pinned too, since a caller declaring nothing is a release repository by the
-        registry's own default. Flipping it would run the rule on every such promotion.
+        The default is pinned too, because flipping it would run the rule on every such promotion.
+        That holds since a caller declaring nothing is a release repository by the registry's own
+        default.
         """
         self.label_setup()
         text = VALIDATE_TASK_WORKFLOW.read_text(encoding="utf-8")
@@ -4412,7 +4413,7 @@ class TestYamlLanguage(BaitCase):
         """A plain scalar's apostrophe is text, so reading it as an opener hides a real comment.
 
         The masked span would run from the apostrophe to the end of the line, taking the trailing
-        `#` with it. This repo's own workflow YAML also carries the pattern (`the merge-bot's ...`).
+        `#` with it. This repo's own workflow YAML carries the pattern (`the merge-bot's ...`).
         A quote that does open one is preceded by the `:`, the sequence dash, or a flow indicator.
         """
         for code in (
@@ -4431,7 +4432,7 @@ class TestYamlLanguage(BaitCase):
         r"""A trailing backslash would otherwise consume the closing quote and hide the comment.
 
         Both languages spell the escape as a doubled quote in the single-quoted form. Both keep the
-        backslash escape in the double-quoted one, so the two forms are read differently in the same
+        backslash escape in the double-quoted one. So the two forms are read differently in the same
         file. The bait is a trailing comment, which only survives a correct read.
         """
         for name, code in (
@@ -6698,8 +6699,8 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
 
     So the property under test is that every verdict carries an attribution and that the attribution
     is never guessed. The second half is the harder one, and it is where the cases concentrate. That
-    is because a checkout containing the script is not a commit describing it. Both ways those come
-    apart produce a well-formed value naming content that was never run.
+    is because a checkout containing the script is not a commit describing it. It is also because
+    both ways those come apart produce a well-formed value naming content that was never run.
     """
 
     def repo_with_script(self, tracked: bool = True) -> tuple[Path, Path, str]:

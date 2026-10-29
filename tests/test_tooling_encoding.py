@@ -139,7 +139,7 @@ def in_text_mode(call: ast.Call) -> bool:
 
     Per the subprocess docs, naming `encoding` or `errors` puts a call into text mode on its own,
     not only `text=True`. Both spellings have to arrive here, since a call this returns False for is
-    never judged at all. The calls in question include:
+    never judged at all. Each spelling matters for its own reason:
 
     - `errors="replace"` alone takes the locale and hits the exact bug this file exists to catch.
     - `encoding="cp1252"` is text mode in an encoding git does not emit.
