@@ -196,7 +196,7 @@ function Read-UpgradeTable {
 
 # Every wsl.exe call goes through here, because wsl.exe emits UTF-16 by default and its output then reads as NUL separated characters.
 # WSL_UTF8 changes what wsl.exe emits, where setting the console encoding would only change how this process decodes it.
-# That setting would also corrupt in-distribution output that is already UTF-8.
+# Setting the console encoding would also corrupt in-distribution output that is already UTF-8.
 # A host whose WSL predates WSL_UTF8 still answers in UTF-16, so a result carrying a NUL is stripped rather than reported as unreadable.
 function Invoke-Wsl {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
