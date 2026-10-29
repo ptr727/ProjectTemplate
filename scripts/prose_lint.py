@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the action-owned prose gate locally, through uv so its script block's packages resolve.
 
-The command line is read here first, from the data file the gate builds its own from, so `--help`
+The command line is read here first, from the data file the gate builds its own from. So `--help`
 and an unknown argument are answered without starting uv.
 """
 
