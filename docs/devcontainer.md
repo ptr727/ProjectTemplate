@@ -25,7 +25,7 @@ Each devcontainer's extension list is the workspace catalog's `base.jsonc` set p
 
 ## Bind Mounts (Both Containers)
 
-The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly. The mount also makes `gh` pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead. See [`gh` credential store][gh-credential-store] below for the full picture.
+The host SSH key, allowed-signers file, and `gh` config directory are mounted into the container so commits sign correctly. The mounts also make `gh` pre-authenticated **when the host stores its `gh` token in a file** (`~/.config/gh/hosts.yml`). Hosts that store the token in macOS Keychain or Linux libsecret will need an in-container `gh auth login` instead. See [`gh` credential store][gh-credential-store] below for the full picture.
 
 | Host path | Container path | Mode | Purpose |
 | --------- | -------------- | ---- | ------- |
