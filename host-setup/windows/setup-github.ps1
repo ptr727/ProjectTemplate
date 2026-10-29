@@ -622,8 +622,9 @@ function Show-Status {
         if ($value) { ok "$key = $value" } else { missing $key }
     }
 
-    # The shared checkout settings are reported apart, because absent is the right state for a host one account uses.
-    # Listing them as missing would read as two gaps to close.
+    # The shared checkout settings are reported apart, because of the following.
+    #   - Absent is the right state for a host one account uses.
+    #   - Listing them as missing would read as two gaps to close.
     $shared = @(& git config --global --get-all safe.directory 2>$null)
     if ($shared.Count -gt 0) {
         $unique = @($shared | Sort-Object -Unique)

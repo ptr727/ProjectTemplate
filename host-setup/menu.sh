@@ -230,8 +230,9 @@ fetch_hub_locked() {
     fi
     HUB_FETCH_TOKEN="$token"
     # A full clone of the default branch first, whatever $REF names.
-    # That is because spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from.
-    # A shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
+    # That is because of the following.
+    #   - spec/audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from.
+    #   - A shallow clone would read every file as changed at the truncation boundary and misreport every repo as stale.
     git clone --quiet --branch "$DEFAULT_REF" --single-branch "$HUB_URL" "$DIR/hub" ||
         {
             fail "Could not clone $HUB_REPO. Check that this host reaches github.com."
@@ -483,7 +484,7 @@ hub_uv_script() {
 # No current caller nests, and this guard is what keeps it that way rather than a rule to remember.
 with_hub_read_lock() {
     # 2, not 1, for every failure of this wrapper's own preconditions.
-    # The caller of check_skills_dist reads 1 as scripts/build_dist.py --check's "stale" result.
+    # The function check_skills_dist, the caller of this wrapper, reads 1 as scripts/build_dist.py --check's "stale" result.
     # So a wrapper-level failure must not collide with the wrapped command's own exit code.
     # Invoke-CheckSkillsDist's own Confirm-HubRoot fix already applies the same reasoning on the PowerShell side.
     (($# > 0)) || {

@@ -235,8 +235,9 @@ function Get-DockerProcess {
 }
 
 # A WSL platform update stops and restarts the WSL service, and Docker Desktop holds it open, so the update fails part way rather than declining.
-# The guard runs under -DryRun too, since it is a read that decides what to do rather than a change to the host.
-# A dry run that printed the command would say the update was available when it is not.
+# The guard runs under -DryRun too, because of the following.
+#   - It is a read that decides what to do rather than a change to the host.
+#   - A dry run that printed the command would say the update was available when it is not.
 function Assert-DockerStopped {
     $running = Get-DockerProcess
     if ($running.Count -eq 0) { return }

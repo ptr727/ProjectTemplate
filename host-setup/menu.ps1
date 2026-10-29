@@ -318,8 +318,9 @@ function Invoke-FetchHubLocked {
     }
     $script:HUB_FETCH_TOKEN = $token
     # A full clone of the default branch first, whatever -Ref names.
-    # That is because spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from.
-    # A shallow clone would read every file as changed at the truncation boundary.
+    # That is because of the following.
+    #   - spec\audit.py walks the hub's own history to judge whether a carried copy is trailing the file it was copied from.
+    #   - A shallow clone would read every file as changed at the truncation boundary.
     # Piped to Out-Host rather than left bare.
     # An unassigned native call's stdout otherwise joins this function's own return value.
     # The return $true/$false below would then be appended to that value instead of replacing it.
