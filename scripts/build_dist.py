@@ -274,7 +274,7 @@ def _marker(line, in_code, where):
 
     A marker shown inside a code sample is content rather than a region boundary, whether the
     sample is fenced or indented. Showing a marker in a code sample is how the skill-lifecycle skill documents the syntax.
-    Outside one, a line that begins like a marker and matches neither form is refused rather
+    Outside a code sample, a line that begins like a marker and matches neither form is refused rather
     than read as content. That is because content is exactly what leaves a region unfilled while
     --check exits 0. `where` names the file and line the refusal reports.
     """

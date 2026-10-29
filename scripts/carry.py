@@ -432,7 +432,7 @@ def fidelity_text_module() -> Any:
 
 # A line and its own terminator, splitting on LF alone. `str.splitlines` also breaks on a form feed and on several Unicode separators.
 # Those are content in a carried document rather than line boundaries.
-# So splitting on it would move bytes this tool was asked to leave alone.
+# So splitting on `str.splitlines` would move bytes this tool was asked to leave alone.
 _LINE = re.compile(r"[^\n]*\n|[^\n]+$")
 
 
