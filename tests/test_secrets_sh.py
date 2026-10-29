@@ -320,7 +320,7 @@ class ReadEnvValue(Tree):
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
 
-class CarriedIndent(unittest.TestCase):
+class CarriedShfmtSettings(unittest.TestCase):
     def test_the_tree_pins_every_shfmt_setting_a_carrier_cannot_reformat_for(self) -> None:
         """A carrier's own `[*.sh]` must not reach the byte-locked copy `shfmt` checks.
 
