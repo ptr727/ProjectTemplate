@@ -476,13 +476,17 @@ def discover(
 
 
 class Line(NamedTuple):
-    """One source line of a unit, a comment's text without its marker and `raw` with it."""
+    """One source line of a unit, a comment's text without its marker and `raw` with it.
+
+    `trailed` marks a line where code follows the comment's closer, so deleting it deletes code.
+    """
 
     number: int
     text: str
     leading: bool = True
     raw: str = ""
     help: bool = False
+    trailed: bool = False
 
 
 class Unit(NamedTuple):
@@ -615,6 +619,17 @@ def comment_tokens(text: str, lexer: str) -> list[tuple[int, str]]:
     return out
 
 
+def code_follows(text: str, found: list[tuple[int, str]], k: int) -> bool:
+    """Whether code follows comment `k` of `found` on the line it ends on, a later comment aside."""
+    at = found[k][0] + len(found[k][1])
+    stop = len(text) if (eol := text.find("\n", at)) < 0 else eol
+    for offset, value in found[k + 1 :]:
+        if offset >= stop or text[at:offset].strip():
+            break
+        at = offset + len(value)
+    return bool(text[at:stop].strip())
+
+
 def comment_lines(
     text: str, lexer: str, spec: dict[str, Any], shift: int = 0
 ) -> list[tuple[Line, bool]]:
@@ -627,7 +642,8 @@ def comment_lines(
     out: list[tuple[Line, bool]] = []
     blocks = sorted(spec.get("block", ()), key=lambda b: -len(b[0]))
     markers = sorted(spec.get("line", ()), key=len, reverse=True)
-    for offset, value in comment_tokens(text, lexer):
+    found = comment_tokens(text, lexer)
+    for k, (offset, value) in enumerate(found):
         value = value.rstrip("\r\n")
         number, col = starts.at(offset)
         leading = not starts.line(number)[:col].strip()
@@ -643,7 +659,9 @@ def comment_lines(
             out.append((Line(number + shift, body.strip(), leading, value, help_form), doc))
             continue
         opener, closer, *cont = block or ("", "")
-        for i, part in enumerate(value[len(opener) :].removesuffix(closer).split("\n")):
+        parts = value[len(opener) :].removesuffix(closer).split("\n")
+        trailed = code_follows(text, found, k)
+        for i, part in enumerate(parts):
             body = part.strip()
             if i and cont and body.startswith(cont[0]) and body[1:2].isspace():
                 body = body[1:].strip()
@@ -651,7 +669,10 @@ def comment_lines(
                 body = ""
             row = starts.line(number + i)
             raw = row[min(col, len(row) - len(row.lstrip())) :] if i else value.split("\n")[0]
-            out.append((Line(number + i + shift, body, leading or i > 0, raw, help_form), doc))
+            last = trailed and i == len(parts) - 1
+            out.append(
+                (Line(number + i + shift, body, leading or i > 0, raw, help_form, last), doc)
+            )
     return out
 
 
@@ -849,6 +870,7 @@ def front_matter_end(lines: list[str]) -> int:
 MARKDOWN = MarkdownIt("commonmark").enable("table")
 HTML = BASE["languages"]["markup"]
 TAG = re.compile(r"<[^<>]*>")
+BLOCK_PARENTS = (["paragraph_open"], ["th_open"], ["td_open"])
 
 
 def extract_markdown(lines: list[str]) -> Extracted:
@@ -880,7 +902,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
-            if parents[-1:] == ["paragraph_open"] and "blockquote_open" not in parents:
+            if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
                     Unit("paragraph", tuple(Line(first + i, s.strip()) for i, s in spans))
@@ -995,6 +1017,8 @@ LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inn
 LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
 LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+CELL_BREAK = re.compile(r"(?<!\\)\|")
+TABLE_ROW = re.compile(r"^\s*(?:>\s*)*\|")
 # A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
 DUPWORD = re.compile(r"(?<![\w/-])(\w+)\s+\1\b", re.IGNORECASE)
 # A step marker is a label on the sentence that follows, so its dot terminates nothing.
@@ -1037,12 +1061,29 @@ def strip_list_marker(text: str) -> str:
     return LIST_MARKER.sub("", text, count=1).strip()
 
 
+def row_cells(text: str) -> list[str]:
+    """A table row opening with a pipe split into its cells, and any other line left whole.
+
+    A cell ends at a pipe no backslash escapes, inside a code span too, which is how markdown-it-py
+    splits a row. So no code span or quotation read from a cell reaches into the next one.
+    """
+    return CELL_BREAK.split(text) if TABLE_ROW.match(text) else [text]
+
+
+def by_cell(text: str, blank: Callable[[str], str]) -> str:
+    """Blank a line a cell at a time, keeping every pipe that ends a cell where it was.
+
+    An unpaired quote mark in one cell would otherwise hide every cell up to the next quote.
+    """
+    return "|".join(blank(cell) for cell in row_cells(text))
+
+
 def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
     """Each line's number, its text without code spans, and that text without quotations either."""
     for line in unit.lines:
-        txt = strip_inline_code(line.text)
-        prose = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), strip_quoted(txt), count=1)
-        yield line.number, txt, prose
+        txt = by_cell(line.text, strip_inline_code)
+        prose = by_cell(txt, strip_quoted)
+        yield line.number, txt, QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
 
 
 def in_numeric_context(line: str, pos: int) -> bool:
@@ -1096,11 +1137,16 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
-    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one."""
+    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
+
+    A table row opening with a pipe is read a cell at a time, split where `row_cells` splits it.
+    `prose_lines` blanks each cell on its own and leaves every pipe ending one where it was.
+    """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
-        cells = line.strip().strip("|").split("|") if line.lstrip().startswith("|") else [line]
-        pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
+        pieces = (
+            s for cell in row_cells(line) for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell))
+        )
         for sentence in (s for s in pieces if s.strip()):
             head, _, tail = sentence.partition(";")
             listish = sentence.count(";") > 1 or (
@@ -1127,8 +1173,11 @@ def unit_texts(unit: Unit, ctx: Context) -> Iterable[tuple[int, str]]:
     for line in unit.lines:
         if line.number in ctx.fenced:
             continue
-        text = strip_quoted(strip_inline_code(line.text)) if unit.kind == "prose" else line.text
-        yield line.number, strip_inline_code(text)
+        if unit.kind != "prose":
+            yield line.number, strip_inline_code(line.text)
+            continue
+        text = by_cell(by_cell(line.text, strip_inline_code), strip_quoted)
+        yield line.number, by_cell(text, strip_inline_code)
 
 
 def rule_dupword(unit: Unit, ctx: Context) -> list[Finding]:
@@ -1245,11 +1294,12 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
         tokens = (
             [(m.group(1), False)]
             if m
-            else [(s.group(1), True) for s in INLINE_SPAN.finditer(line.text)]
+            else [(s.group(1), True) for c in row_cells(line.text) for s in INLINE_SPAN.finditer(c)]
         )
         if not m:
             tokens += [
-                (t.group(1), False) for t in LINK_TARGET.finditer(strip_inline_code(line.text))
+                (t.group(1), False)
+                for t in LINK_TARGET.finditer(by_cell(line.text, strip_inline_code))
             ]
         for token, in_span in tokens:
             rel_path = path_candidate(token, in_span)
@@ -1424,12 +1474,13 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     """Every prose comment line opening its own line, which the diff scope narrows to a change.
 
     A modified line counts as added, the label being the answer. A help block, a documentation
-    comment, and a trailing comment are out of scope.
+    comment, and a comment sharing its line with code, before or after it, are out of scope.
     """
     lines = {
         line.number
         for line in unit.lines
         if line.leading
+        and not line.trailed
         and not line.help
         and is_comment_prose(without_trailing_directive(ctx, line.text), ctx.config)
     }

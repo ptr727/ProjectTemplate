@@ -47,10 +47,18 @@
     "review findings:",
     "findings:",
     "open findings remain:",
-    "unresolved findings:"
+    "unresolved findings:",
+    "review findings remain unresolved:"
   ],
-  "finding_lists": ["review findings:", "open findings remain:", "unresolved findings:"],
+  "finding_lists": [
+    "review findings:",
+    "open findings remain:",
+    "unresolved findings:",
+    "review findings remain unresolved:"
+  ],
   "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
   "table_header": "file",
+  "table_findings": "findings",
+  "table_finding_marker": "\\[P\\d\\]",
   "discussion_link": "#discussion_r(?P<id>\\d+)$"
 }

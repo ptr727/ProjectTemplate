@@ -707,27 +707,46 @@ def function_body(text: str, opener: str) -> str:
 class TestPackageInstalled(unittest.TestCase):
     """`setup-github.sh`'s installed-package check, with a stub `dpkg-query` first on PATH."""
 
-    def check(self, status: str, exit_code: int = 0) -> int:
-        """The exit status of `package_installed git` when dpkg-query prints `status`."""
+    def check(self, want: str, status: str) -> int:
+        """The exit status of `package_installed git` when dpkg holds git at `want` and `status`.
+
+        The stub answers each status field the format names, so the definition reading the wrong one fails here.
+        An empty `want` stands for a package dpkg does not know, which dpkg-query answers with exit 1.
+        """
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         functions = directory / "functions.sh"
         functions.write_text(linux_functions(), encoding="utf-8")
+        answer = (
+            "exit 1"
+            if not want
+            else (
+                f"case $2 in *Status-Want*) printf '{want}' ;; *Status-Status*) printf '{status}' ;;"
+                f" *) printf '{want} ok {status}' ;; esac"
+            )
+        )
         stub = directory / "dpkg-query"
-        stub.write_text(f"#!/bin/sh\nprintf '%s' '{status}'\nexit {exit_code}\n", encoding="ascii")
+        stub.write_text(f"#!/bin/sh\n{answer}\n", encoding="ascii")
         stub.chmod(0o755)
         return run_sourced(functions, directory, "package_installed git").returncode
 
     def test_an_installed_package_reads_as_installed(self) -> None:
-        self.assertEqual(self.check("install ok installed"), 0)
+        self.assertEqual(self.check("install", "installed"), 0)
 
     def test_a_held_package_reads_as_installed(self) -> None:
-        self.assertEqual(self.check("hold ok installed"), 0)
+        self.assertEqual(self.check("hold", "installed"), 0)
 
     def test_a_removed_package_reads_as_missing(self) -> None:
-        self.assertNotEqual(self.check("deinstall ok config-files"), 0)
+        self.assertNotEqual(self.check("deinstall", "config-files"), 0)
 
     def test_an_unknown_package_reads_as_missing(self) -> None:
-        self.assertNotEqual(self.check("", 1), 0)
+        self.assertNotEqual(self.check("", ""), 0)
+
+    def test_install_tools_carries_the_same_definition(self) -> None:
+        installer = LINUX_SCRIPT.with_name("install-tools.sh").read_text(encoding="utf-8")
+        self.assertEqual(
+            function_body(installer, "\npackage_installed() {"),
+            function_body(LINUX_SCRIPT.read_text(encoding="utf-8"), "\npackage_installed() {"),
+        )
 
 
 class TestCallSites(unittest.TestCase):

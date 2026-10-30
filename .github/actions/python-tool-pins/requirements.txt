@@ -1,0 +1,3 @@
+# The ruff version the validator's uvx calls run, read by action.yml beside this file.
+# It is a manifest rather than a literal in a run: line, since Dependabot's pip ecosystem bumps it.
+ruff==0.17.3

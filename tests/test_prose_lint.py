@@ -641,9 +641,32 @@ class TestSemicolonRule(BaitCase):
 
     def test_a_table_row_judges_each_cell_alone(self) -> None:
         """A row is a record of fields, so one column's comma cannot excuse another's semicolon."""
+        table = "| A | B | C |\n| --- | --- | --- |\n| S1 | it runs; it gates | D1, D2 |\n"
+        self.assertEqual(["semicolon"], self.kinds(table, {"semicolon"}))
+
+    def test_an_escaped_pipe_stays_inside_its_cell(self) -> None:
+        """An escaped pipe ends no cell, as in the parser, so the comma still excuses the list."""
+        table = "| A | B |\n| --- | --- |\n| x | red, green \\| blue; cyan; teal |\n"
+        self.assertEqual([], self.kinds(table, {"semicolon"}))
+
+    def test_an_escaped_pipe_in_a_blockquoted_row_stays_inside_its_cell(self) -> None:
         self.assertEqual(
-            ["semicolon"], self.kinds("| S1 | it runs; it gates | D1, D2 |\n", {"semicolon"})
+            [], self.kinds("> | x | red, green \\| blue; cyan; teal |\n", {"semicolon"})
         )
+
+    def test_a_pipe_inside_a_code_span_still_ends_its_cell(self) -> None:
+        """The parser ends a cell at a pipe inside a code span, so the comma before it excuses nothing."""
+        table = "| A | B | C |\n| --- | --- | --- |\n| x | a, b `c|d` e; f; g | z |\n"
+        self.assertEqual(["semicolon"] * 2, self.kinds(table, {"semicolon"}))
+
+    def test_an_unpaired_quote_does_not_pair_with_a_later_cell(self) -> None:
+        """An inch mark in one cell would blank every cell up to the next quote mark."""
+        table = '| A | B | C |\n| --- | --- | --- |\n| 2" pipe | a; b; c | "x" |\n'
+        self.assertEqual(["semicolon"] * 2, self.kinds(table, {"semicolon"}))
+
+    def test_a_quotation_inside_one_cell_is_still_blanked(self) -> None:
+        table = '| A | B |\n| --- | --- |\n| x | say "a; b" now |\n'
+        self.assertEqual([], self.kinds(table, {"semicolon"}))
 
     def test_a_bullet_label_colon_does_not_announce_a_list(self) -> None:
         """`- **Label**:` opens the bullet, the same construct the label dash is exempted for."""
@@ -2064,6 +2087,32 @@ class TestCommentAddedRule(BaitCase):
             with self.subTest(name=name):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
 
+    def test_a_line_closing_a_comment_before_code_is_not_reported(self) -> None:
+        """Deleting it deletes the code after the closer and leaves the comment unterminated.
+
+        A later comment on that line is not code, and a comment on a line of its own is still reported.
+        """
+        for name, code, opener, closer in (
+            ("a.css", "a { color: red; }", "/*", "*/"),
+            ("a.ts", "const y = 2;", "/*", "*/"),
+            ("a.cs", "int y = 2;", "/*", "*/"),
+            ("a.jsonc", '"b": 2', "/*", "*/"),
+            ("a.html", "<p>y</p>", "<!--", "-->"),
+            ("a.xml", "<b/>", "<!--", "-->"),
+            ("a.csproj", "<b/>", "<!--", "-->"),
+        ):
+            with self.subTest(name=name):
+                text = (
+                    f"{code} {opener} A comment here.\nThe rest of it. {closer} {code}\n"
+                    f"{opener} A real comment. {closer}\n"
+                    f"{opener} A later one. {closer} {opener} And one more. {closer}\n"
+                    f"{opener} A closer then code. {closer} {code}\n"
+                    f"{opener} A. {closer} {opener} B. {closer} {code}\n"
+                )
+                path = self._write(text, name)
+                found = prose_lint.check_file(path, {"comment-added"})
+                self.assertEqual([3, 4], [n for n, _, _ in found])
+
     def test_config_carries_the_rule_as_code_does(self) -> None:
         for name, text in (
             (
@@ -2762,6 +2811,20 @@ class TestSentenceLengthRule(BaitCase):
     def test_a_sentence_starting_mid_line_is_reported_on_that_line(self) -> None:
         tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
         self.assertEqual([(2, "sentence-length")], self.found_md("Intro line.\n" + tail))
+
+    def test_a_table_cell_over_the_cap_is_flagged_on_its_row(self) -> None:
+        """A cell holds prose as a paragraph does, so its sentences meet the same cap."""
+        over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
+        table = f"| Name | Effect |\n| --- | --- |\n| `X` | {over} |\n"
+        self.assertEqual([(3, "sentence-length")], self.found_md(table))
+        header = f"| {over} | Effect |\n| --- | --- |\n| `X` | short |\n"
+        self.assertEqual([(1, "sentence-length")], self.found_md(header))
+
+    def test_each_table_cell_is_judged_alone(self) -> None:
+        """Cells on one row are separate blocks, so two short cells never join into one sentence."""
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        table = f"| A | B |\n| --- | --- |\n| {half} | {half} |\n"
+        self.assertEqual([], self.found_md(table))
 
     def test_a_source_line_that_is_not_a_comment_is_not_judged(self) -> None:
         """A source file's long code lines are code, which no sentence rule judges."""
@@ -3522,6 +3585,17 @@ class TestDeadPathRule(unittest.TestCase):
     def test_a_deleted_path_in_a_span_is_flagged(self) -> None:
         root = self.repo()
         self.assertIn("dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
+
+    def test_a_link_between_two_cells_backticks_is_still_read(self) -> None:
+        """markdown-it-py ends a cell inside a code span, so the backticks pair across no cell."""
+        root = self.repo()
+        table = "| A | B | C |\n| --- | --- | --- |\n| x `a | [d](scripts/gone.py) | b` |\n"
+        self.assertIn("dead-path", self.kinds(root, table))
+
+    def test_a_lone_backtick_in_an_earlier_cell_hides_no_later_span(self) -> None:
+        root = self.repo()
+        table = "| A | B |\n| --- | --- |\n| 2` x | `scripts/gone.py` |\n"
+        self.assertIn("dead-path", self.kinds(root, table))
 
     def test_a_living_path_is_not_a_finding(self) -> None:
         root = self.repo()
@@ -4787,14 +4861,24 @@ class TestIniLanguage(BaitCase):
 class TestMarkdown(BaitCase):
     """Markdown extraction through markdown-it-py: code, blocks, HTML, and front matter."""
 
-    def test_structure_is_not_a_sentence(self) -> None:
-        """A table row, a heading, a link definition, and a blockquote hold no prose sentence.
+    def test_an_unpaired_quote_hides_no_later_cell_from_any_rule(self) -> None:
+        """Each rule blanks quotations a cell at a time, so an inch mark pairs with nothing later."""
+        for rule, cell in (("dash", "a - b"), ("dupword", "the the"), ("spelling", "colour")):
+            table = f'| A | B | C |\n| --- | --- | --- |\n| 2" pipe | {cell} | "x" |\n'
+            with self.subTest(rule=rule):
+                self.assertEqual([rule], self.kinds(table, {rule}))
 
-        A table needs its delimiter row, as GitHub's does, and a definition's title is no prose.
+    def test_a_code_span_reaches_across_no_cell(self) -> None:
+        table = "| A | B | C |\n| --- | --- | --- |\n| x `a | p - q | b` |\n"
+        self.assertEqual(["dash"], self.kinds(table, {"dash"}))
+
+    def test_structure_is_not_a_sentence(self) -> None:
+        """A heading, a link definition, and a blockquote hold no prose sentence.
+
+        A definition's title is no prose. A table cell is, which `TestSentenceLengthRule` covers.
         """
         run = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
-        table = f"| a |\n| - |\n| {run} |\n"
-        for text in (table, f"# {run}\n", f'[ref]: ./x.md "{run}"\n', f"> {run}\n"):
+        for text in (f"# {run}\n", f'[ref]: ./x.md "{run}"\n', f"> {run}\n"):
             with self.subTest(text=text[:20]):
                 self.assertEqual([], self.kinds(text, {"sentence-length"}))
 

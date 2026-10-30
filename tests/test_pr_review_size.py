@@ -10,6 +10,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 CEILINGS = {
     "pr_review.py": 2200,
     "pr_review_checks.py": 450,
+    "pr_review_check_lines.py": 200,
     "pr_review_rounds.py": 700,
     "pr_review_digest.py": 350,
     "pr_review_copilot.py": 1500,

@@ -33,35 +33,6 @@ CHECK_STALL = 1800
 # How many rollup contexts the full query asks for, built into the query so the two cannot drift.
 CHECKS_WINDOW = 100
 
-# What each stuck shape tells a reader to do, since one word for all of them would send a reader the wrong way.
-# A shape this does not name reads as FAILED, the verdict no wait and no re-run clears.
-STUCK_LINES = {
-    "NOT_PICKED_UP": (
-        "  CHECK NOT PICKED UP ({name!r}, queued {mins} with no runner assigned): nothing here "
-        "starts it, because the runner pool is GitHub-hosted, so re-run the workflow or wait on "
-        "that capacity"
-    ),
-    "NOT_POSTED": (
-        "  CHECK NEVER POSTED ({name!r}, expected {mins} and not reported): a required status "
-        "whose poster has not spoken, so no runner is owed it and re-running a workflow here "
-        "clears nothing"
-    ),
-    "GATED": (
-        "  CHECK WAITING ON ITS ENVIRONMENT ({name!r}, waiting {mins}): a protection rule holds "
-        "it, a reviewer or a timer, so approve it in the run or let the timer pass, since a re-run "
-        "meets the same rule"
-    ),
-    "RUNNING_LONG": (
-        "  CHECK RUNNING LONG ({name!r}, running {mins}): it has a runner, so it is not starved, "
-        "and whether this is hung or merely slow is a judgment against what this job normally "
-        "costs"
-    ),
-    "FAILED": (
-        "  CHECK FAILED ({name!r}, {state}/{conclusion}): a verdict rather than a stuck check, so "
-        "read the run and fix what failed, since no wait and no re-run clears a real failure"
-    ),
-}
-
 
 def age(stamp: str, now: datetime) -> float | None:
     """Seconds from `stamp` to `now`, or None where the stamp is absent or unparseable."""
@@ -105,6 +76,9 @@ def check_nodes(pr: dict) -> list[dict]:
     A finished check only an older suite carries is marked `superseded`, with `newer_run`, while
     the workflow's newest suite has not completed. The reason is that a cancelled run's
     aggregator fails over jobs nobody waits on. The head commit's own suites count toward the newest one as well.
+
+    Every CheckRun carries `run`, its workflow run's id. One still `IN_PROGRESS` whose suite has
+    completed is marked `stale`, and counts as finished for superseding, since its run is over.
     """
     # No match reports nothing rather than another commit's rollup, and `checks_unreadable` says so.
     commit = head_commit(pr)
@@ -146,6 +120,9 @@ def check_nodes(pr: dict) -> list[dict]:
                     "since": n.get("startedAt") or "",
                     "required": n.get("isRequired") is not False,
                     "app_id": (suite.get("app") or {}).get("databaseId"),
+                    "stale": n.get("status") == "IN_PROGRESS"
+                    and suite.get("status") == "COMPLETED",
+                    "run": (suite.get("workflowRun") or {}).get("databaseId"),
                 }
             )
         elif n.get("__typename") == "StatusContext":
@@ -177,7 +154,7 @@ def check_nodes(pr: dict) -> list[dict]:
     stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
     for i, (group, sid) in suites.items():
         suite_id, status, run = newest_run.get(group[0], (0, "", None))
-        finished = out[i]["state"] == "COMPLETED"
+        finished = out[i]["state"] == "COMPLETED" or out[i].get("stale")
         if finished and sid < suite_id and status != "COMPLETED":
             out[i]["superseded"] = True
             out[i]["newer_run"] = run
@@ -202,6 +179,9 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
     RUNNING_LONG is deliberately weaker, since duration alone cannot separate a stalled job from a
     slow one. The elapsed time is printed for the reader to judge and no fault is asserted.
 
+    STALE_RECORD is a job still in progress inside a run that has completed. Its run will post
+    nothing more, so no wait ends it, and only a re-run of the job or a new head replaces it.
+
     FAILED is any finished check that did not pass. A check marked superseded is none of these.
     """
     if node.get("superseded"):
@@ -215,6 +195,8 @@ def check_shape(node: dict, now: datetime, grace: float, stall: float) -> str:
         return "GATED" if elapsed is not None and elapsed > grace else ""
     if state in NOT_STARTED:
         return "NOT_PICKED_UP" if elapsed is not None and elapsed > grace else ""
+    if node.get("stale"):
+        return "STALE_RECORD"
     if state == "IN_PROGRESS":
         return "RUNNING_LONG" if elapsed is not None and elapsed > stall else ""
     # A finished check with no conclusion yet is still settling, not a failure.
@@ -392,56 +374,3 @@ def checks_tally(nodes: list[dict]) -> tuple[int, int]:
     """(checks that have passed, checks there are), so a bare count says how far the head is."""
     read = [n for n in nodes if not n.get("unreadable")]
     return sum(1 for n in read if (n.get("conclusion") or "") in CHECK_OK), len(read)
-
-
-def check_lines(
-    pr: dict, checks: list[dict], stuck: list[tuple[dict, str]], now: datetime
-) -> list[str]:
-    """The digest's lines about the head's checks, each naming what a reader should do about it."""
-    lines = []
-    for node, shape in stuck:
-        elapsed = age(node.get("since") or "", now)
-        lines.append(
-            STUCK_LINES.get(shape, STUCK_LINES["FAILED"]).format(
-                # Read with `.get`, since an odd node shape should cost a field and never the digest.
-                name=node.get("name") or "unnamed",
-                # Clamped for display only, since a skewed clock renders a negative age.
-                mins="age unknown" if elapsed is None else f"{int(max(elapsed, 0) // 60)}m",
-                state=node.get("state"),
-                conclusion=node.get("conclusion"),
-            )
-        )
-    for node in checks:
-        if node.get("superseded") and (node.get("conclusion") or "") not in CHECK_OK:
-            lines.append(
-                f"  CHECK SUPERSEDED ({node.get('name') or 'unnamed'!r}, {node.get('state')}/"
-                f"{node.get('conclusion')} in an older run): run {node.get('newer_run')} of the "
-                "same workflow on this head has not finished, so this is not a verdict on the "
-                "head, and that run's own check replaces it once it posts"
-            )
-    unread = checks_unread(checks)
-    if unread:
-        lines.append(
-            f"  CHECKS PARTIALLY UNREAD ({', '.join(unread)}): the rollup "
-            "carries a context type this cannot normalize, so it is absent from the "
-            "tally and the stuck reading alike and neither speaks for it"
-        )
-    if checks_truncated(pr):
-        lines.append(
-            f"  CHECKS TRUNCATED: the head carries more than the {CHECKS_WINDOW} contexts "
-            "this query asks for, so a check past the window is missing from the tally "
-            "and from the stuck reading alike, and neither reports what it did not see"
-        )
-    if checks_unreadable(pr):
-        lines.append(
-            "  CHECKS UNREADABLE: the payload carries commits and none of them is the "
-            "head, so no rollup here describes this head and `checks=0/0` is this "
-            "reading failing rather than a pull request with no checks"
-        )
-    if pr.get(WORKFLOW_KEYS_UNAVAILABLE):
-        lines.append(
-            "  CHECKS DEDUPED WITHOUT WORKFLOW KEYS: `workflowRun` was unreadable, "
-            "so each Actions run is kept per suite and a superseded failure may still "
-            "show, which reads red rather than hiding a failing check"
-        )
-    return lines

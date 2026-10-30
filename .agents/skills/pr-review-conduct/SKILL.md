@@ -136,20 +136,23 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A Copilot round states its own count of open findings, which the digest reads as
    `overview=T/M` beside the number of review threads that round opened. The digest's
    `FINDINGS WITH NO THREAD` block counts the findings the round names that no open entry links
-   to a thread on the pull request. The round can name them in that count or in its findings
-   list. What the block counts is usually
+   to a thread on the pull request. The round can name them in that count, in its findings
+   list, or in its file table's findings column. What the block counts is usually
    findings the round withheld, the same blind spot under a different name, and sometimes the
    digest undercounting instead. Reading the review body is what tells the two apart, and nothing
    else does. So read it and dispose of what it holds as this section's outcomes require. `T`
    reads `?` where no count was found, which is a round stating none and equally one the digest
    could not locate. So a `?` leaves this item unsatisfied and sends you to the body exactly as a
-   shortfall does. A round with a verdict other than the
-   clean one that counts no finding prints its headline under `VERDICT WITH NO COUNTED FINDING`,
-   and `status` and `wait` exit `50`. The
-   headline is the one place that round names what it flags, so answer it as a suppressed finding.
+   shortfall does. A round with a verdict other than the clean one stating no open finding
+   prints its headline under `VERDICT WITH NO COUNTED FINDING`, and `status` and `wait` exit
+   `50`. The headline is where that round names what it
+   flags, beside any findings list or file table it carries. So answer each as a suppressed
+   finding.
    The exit code repeats on that head after the answer. A clean verdict on the same terms prints
    its headline under `CLEAN VERDICT HEADLINE`, which changes no exit code. Read that headline,
-   since it can name a nit no thread carries, and answer any such nit with `comment`.
+   since it can name a nit no thread carries, and answer any such nit with `comment`. A clean
+   round whose findings list or file table names a finding prints none, since `FINDINGS WITH NO
+   THREAD` names those.
    A finding `suppressed=` counts may be counted in the shortfall too. So answer what the body
    holds rather than what the two numbers add up to.
    What closing a finding owes turns on whether it is `pre-existing`, under the classes

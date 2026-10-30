@@ -6,7 +6,9 @@
             "type": "process",
             "command": "uvx",
             "args": [
-                "ruff@latest",
+                "--with-requirements",
+                ".github/actions/python-tool-pins/requirements.txt",
+                "ruff",
                 "format"
             ],
             "problemMatcher": [],
@@ -20,7 +22,9 @@
             "type": "process",
             "command": "uvx",
             "args": [
-                "ruff@latest",
+                "--with-requirements",
+                ".github/actions/python-tool-pins/requirements.txt",
+                "ruff",
                 "check"
             ],
             "problemMatcher": [],

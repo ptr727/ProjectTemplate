@@ -129,7 +129,7 @@ fetch() {
 # --- Prerequisites ---
 
 package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -Eq "^(install|hold) ok installed"
+    [[ $(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null) == installed ]]
 }
 
 prerequisites_missing() {
