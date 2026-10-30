@@ -741,25 +741,31 @@ def step_shell(starts: Starts, key: int) -> str:
 
 
 HEREDOC_LABEL = re.compile(r"<<-?[ \t]*(['\"]?)\\?[\w-]+\1")
-SEPARATOR = re.compile(r"&&|\|\||;|(?<![<>&])&(?![>&])")
+SEPARATOR = re.compile(r"&&|\|\||;|(?<![<>&|])&(?![>&])")
+SHELL_QUOTE = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
 
 
 def runs_body(starts: Starts, row: int, col: int, programs: frozenset[str]) -> bool:
-    """Whether the command holding the heredoc opened at `col` of `row` names one of `programs`.
+    """Whether the command holding the heredoc opened at `col` of `row` runs its body.
 
-    The command is the opener's own list element, a pipe joining it, after any lines a trailing
-    backslash continues onto it. Its heredoc labels are not words. Any other command reads the body
-    as the data it writes.
+    The command is the opener's own list element, a pipe joining it, after any code lines a trailing
+    backslash continues onto it. A separator inside quotes splits nothing, and the heredoc labels are
+    not words. It runs the body where a word names one of `programs`, or where the command is an
+    expansion naming its program only at run time. Any other command writes the body as data.
     """
     top = row
-    while top > 1 and starts.line(top - 1).rstrip().endswith("\\"):
+    while top > 1 and (above := starts.line(top - 1)).rstrip().endswith("\\"):
+        if above.lstrip().startswith("#"):
+            break
         top -= 1
     rows = [starts.line(n) for n in range(top, row + 1)]
     at, command = sum(len(r) + 1 for r in rows[:-1]) + col, " ".join(rows)
-    left = max((m.end() for m in SEPARATOR.finditer(command, 0, at)), default=0)
-    right = next((m.start() for m in SEPARATOR.finditer(command, at)), len(command))
+    bare = SHELL_QUOTE.sub(lambda m: " " * len(m.group()), command)
+    left = max((m.end() for m in SEPARATOR.finditer(bare, 0, at)), default=0)
+    right = next((m.start() for m in SEPARATOR.finditer(bare, at)), len(bare))
     words = re.split(r"[\s|()`\"'{}<>\\]+", HEREDOC_LABEL.sub(" ", command[left:right]))
-    return any(program_name(w) in programs for w in words)
+    first = next((w for w in words if w and "=" not in w), "")
+    return first.startswith("$") or any(program_name(w) in programs for w in words)
 
 
 def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]:
@@ -785,7 +791,7 @@ def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]
             run = [m.end(8) < 0 or runs_body(starts, first, starts.at(offset)[1], programs)]
             if first < mid < end:
                 col = starts.at(offset + m.start(7))[1]
-                run.append(m.end(8) < 0 or runs_body(starts, first, col, programs))
+                run.append(runs_body(starts, first, col, programs))
             pieces = [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
             spans += [(a, b, r) for (a, b), r in zip(pieces, run, strict=True)]
     code = list(rows)

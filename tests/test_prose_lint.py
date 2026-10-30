@@ -4550,7 +4550,8 @@ class TestYamlLanguage(BaitCase):
     def test_a_heredoc_body_no_program_runs_is_data(self) -> None:
         """A `#` line a step writes into a file is that file's text, and deleting it changes the file.
 
-        A program the opener names runs its body, a backslash-continued opener and a pipe included.
+        A program the heredoc's own command names runs its body, and so does a command that is an
+        expansion. A backslash-continued opener and a pipe count, a quoted separator does not.
         """
         written = "    # The template writes this line into the file.\n"
         for opener, label, ran in (
@@ -4563,6 +4564,15 @@ class TestYamlLanguage(BaitCase):
             ("gh api repos/o/r -f shell=sh --input - <<'JSON'", "JSON", []),
             ("cat <<EOF | bash", "EOF", [3]),
             ("ssh deploy@host <<'EOF'", "EOF", [3]),
+            (
+                "docker exec -i app python3 -c \"import sys; exec(sys.stdin.read())\" <<'PY'",
+                "PY",
+                [3],
+            ),
+            ("cat <<'PY' |& python3 -", "PY", [3]),
+            ("\"$PY\" - <<'PY'", "PY", [3]),
+            ("${{ steps.py.outputs.path }} - <<'PY'", "PY", [3]),
+            ("# Run it with sh from C:\\\n    cat > f <<'EOF'", "EOF", [2]),
             ("/usr/bin/python3.13 - <<'PY'", "PY", [3]),
             ("docker run --rm -i image \\\n      python3 - <<'PY'", "PY", [4]),
         ):
