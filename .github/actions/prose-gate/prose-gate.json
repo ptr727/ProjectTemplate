@@ -142,6 +142,7 @@
       "repeat_marker": true,
       "docstrings": true,
       "trailing_directives": ["#\\s*(?:(?i:noqa|nopep8)|type:\\s*ignore)\\b", "\\bpylint:"],
+      "metadata_block": ["# /// script", "#(?: .*)?", "# ///"],
       "numpy_sections": ["attributes", "methods", "other parameters", "parameters", "raises", "receives", "returns", "warns", "yields"],
       "google_sections": [
         "Args", "Arguments", "Attributes", "Keyword Args", "Keyword Arguments", "Methods", "Other Parameters", "Parameters", "Raise",
