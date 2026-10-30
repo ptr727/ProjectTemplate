@@ -48,8 +48,8 @@ One worker runs at a time, so no two rounds claim the same file and no round nee
 `backlog-burndown` does.
 
 Every command below that runs the chain's script writes it as `python3 "$handoff" ...`, with
-`handoff="<hub-checkout>/scripts/handoff.py"` (in the hub itself, `scripts/handoff.py`), as
-`session-handoff` "Running the Chain" sets it. Each seat sets it for itself, since the picker and
+`handoff="<hub-checkout>/scripts/handoff.py"`, as `session-handoff` "Running the Chain" sets it.
+`<hub-checkout>` is a hub checkout of the seat's own on `main`. Each seat sets it for itself, since the picker and
 the worker are separate subagents and share no shell.
 
 ## Invocation and What It Authorizes

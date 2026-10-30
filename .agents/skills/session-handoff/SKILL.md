@@ -211,16 +211,19 @@ A maintainer resuming work says little, often only "resume the handoff", and tha
 the whole procedure below. Run every step without being reminded of any of them.
 
 0. **Clone a hub checkout of the session's own, as the first command.** Clone the hub's `main`
-   into the fleet worktree directory `repo-worktree` names, before any `git` or `$handoff` command:
+   into a new directory before any `git` or `$handoff` command. `<unique>` is a name no directory
+   there already holds, so the clone never takes a path a task worktree wants:
 
    ```sh
-   git clone --branch main https://github.com/ptr727/ProjectTemplate.git <worktrees>/ProjectTemplate-<slug>
+   git clone --branch main https://github.com/ptr727/ProjectTemplate.git <worktrees>/ProjectTemplate-hub-<unique>
    ```
 
    That clone is the hub checkout "Running the Chain" sets `$handoff` from, so every later step
-   runs the chain's script there. The Skill tool's base directory is the maintainer's own hub
-   checkout, and never the one this procedure runs in. So no step runs `git status`, `git fetch`,
-   or `git worktree add` there, and none reads it as the hub checkout.
+   runs the chain's script there. Bring it up to date with `git -C <clone> pull --ff-only` before
+   step 6 writes, since a clone is whatever it last fetched. Wherever this skill was loaded from is
+   never this session's hub checkout, whatever checkout or snapshot holds it. So no step reads that
+   location as the hub checkout or runs `$handoff` from it. A task worktree `repo-worktree` creates
+   off a base clone is a separate act, and that skill governs it.
 1. **Pick the link.** Where the maintainer names an issue, take it. Where none is named, read
    `python3 "$handoff" tracks --repo OWNER/NAME --json`. It prints each open handoff's number,
    title, track, labels, and updatedAt. It reads them from the repository's issue connection
