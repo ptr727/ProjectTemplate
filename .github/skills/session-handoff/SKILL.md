@@ -210,11 +210,22 @@ returns fewer.
 A maintainer resuming work says little, often only "resume the handoff", and that phrase stands for
 the whole procedure below. Run every step without being reminded of any of them.
 
+0. **Clone a hub checkout of the session's own, as the first command.** Clone the hub's `main`
+   into the fleet worktree directory `repo-worktree` names, before any `git` or `$handoff` command:
+
+   ```sh
+   git clone --branch main https://github.com/ptr727/ProjectTemplate.git <worktrees>/ProjectTemplate-<slug>
+   ```
+
+   That clone is the hub checkout "Running the Chain" sets `$handoff` from, so every later step
+   runs the chain's script there. The Skill tool's base directory is the maintainer's own hub
+   checkout, and never the one this procedure runs in. So no step runs `git status`, `git fetch`,
+   or `git worktree add` there, and none reads it as the hub checkout.
 1. **Pick the link.** Where the maintainer names an issue, take it. Where none is named, read
    `python3 "$handoff" tracks --repo OWNER/NAME --json`. It prints each open handoff's number,
    title, track, labels, and updatedAt. It reads them from the repository's issue connection
    rather than the search index, so a link written moments ago is already read correctly.
-   `$handoff` is the hub checkout path "Running the Chain" sets. A nonzero exit, including the
+   `$handoff` is the script in the clone step 0 made. A nonzero exit, including the
    refusal over a read window that filled, means the list is not whole. So say so and ask rather
    than picking from it. Take a link carrying `blocked` first, newest update first among them.
    That is because its blocker is a decision only the maintainer can make, and the maintainer is
@@ -338,8 +349,12 @@ chain, since `new` then archives and rewrites whatever `default` holds, and `clo
 - **`close`** is the one way a track ends. It comments the outcome given in `--body-file` on the
   track's issue, then closes it, and a rerun after the comment landed only closes.
 
+`<hub-checkout>` below is a hub checkout of the session's own, never the maintainer's. In an
+attended session it is the clone "The Attended Session" step 0 makes, in the hub itself as in any
+other repository.
+
 ```sh
-handoff="<hub-checkout>/scripts/handoff.py"   # in the hub itself, scripts/handoff.py
+handoff="<hub-checkout>/scripts/handoff.py"   # a hub checkout of the session's own
 python3 "$handoff" current --repo OWNER/NAME --track "<slug>"
 python3 "$handoff" resume  --repo OWNER/NAME --track "<slug>" --history 5
 python3 "$handoff" chain   --repo OWNER/NAME --track "<slug>" --grep "an escaped regex"
