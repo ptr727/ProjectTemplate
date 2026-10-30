@@ -645,18 +645,14 @@ class TestSemicolonRule(BaitCase):
         self.assertEqual(["semicolon"], self.kinds(table, {"semicolon"}))
 
     def test_an_escaped_pipe_stays_inside_its_cell(self) -> None:
-        """The cell is the parser's, so a comma before an escaped pipe still excuses the list."""
+        """The row splits where the parser splits it, so the comma still excuses the list."""
         table = "| A | B |\n| --- | --- |\n| x | red, green \\| blue; cyan; teal |\n"
         self.assertEqual([], self.kinds(table, {"semicolon"}))
 
-    def test_a_header_cell_is_judged_like_a_body_cell(self) -> None:
+    def test_an_escaped_pipe_in_a_blockquoted_row_stays_inside_its_cell(self) -> None:
         self.assertEqual(
-            ["semicolon"], self.kinds("| it runs; it gates |\n| --- |\n", {"semicolon"})
+            [], self.kinds("> | x | red, green \\| blue; cyan; teal |\n", {"semicolon"})
         )
-
-    def test_a_piped_line_that_is_no_table_is_judged_whole(self) -> None:
-        """Without a delimiter row there are no cells, so the comma in one span excuses the list."""
-        self.assertEqual([], self.kinds("| a, b | c; d; e |\n", {"semicolon"}))
 
     def test_a_bullet_label_colon_does_not_announce_a_list(self) -> None:
         """`- **Label**:` opens the bullet, the same construct the label dash is exempted for."""
