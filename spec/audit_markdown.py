@@ -359,7 +359,7 @@ def readme_link_findings(text, model, slug):
 
     all_defs = [p for v in in_group.values() for p in v]
     # A reference the document renders as an image is a shield whatever host serves it, so resolve those first.
-    unfenced = "\n".join(ln for i, ln in enumerate(base.split("\n")) if i not in fenced)
+    unfenced = unfenced_text(text)
     images = {fidelity_text.reference_key(m.group(1)) for m in _MD_IMAGE_REF.finditer(unfenced)}
     rendered = {ref for ref, _ in all_defs if fidelity_text.reference_key(ref) in images}
     described = {"shield": "a badge", "anchor": "an in-page anchor", "local": "a path in this repo"}

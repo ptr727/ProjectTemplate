@@ -18,7 +18,6 @@ whatever plain python3 repo-config/configure.sh finds.
 import argparse
 import collections
 import fnmatch
-import functools
 import json
 import pathlib
 import posixpath
@@ -662,9 +661,8 @@ def github_identity(url):
     return f"{owner}/{repo}"
 
 
-@functools.cache
 def fidelity_text_module():
-    """`spec/fidelity_text.py`, imported on first use rather than at module import, then held.
+    """`spec/fidelity_text.py`, imported on first use rather than at module import.
 
     Lazily, because it imports markdown-it-py and spec/resolve_description.py imports this module
     under a plain `python3` for description_errors alone.

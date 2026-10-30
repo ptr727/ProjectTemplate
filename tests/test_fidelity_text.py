@@ -92,6 +92,17 @@ class LinkCase(unittest.TestCase):
             [("spaced", "a b.md", 7), ("split", "s.md", 8), ("quoted", "q.md", 11)],
         )
 
+    def test_an_empty_or_wrapped_definition_is_read_as_written(self) -> None:
+        text = "[empty]: <>\n\n[two\nlines]: t.md\n"
+        self.assertEqual(
+            [(d.label, d.url) for d in fidelity_text.link_definitions(text)],
+            [("empty", ""), ("two\nlines", "t.md")],
+        )
+
+    def test_a_link_and_its_definition_read_as_one_target(self) -> None:
+        text = "Read [n][n].\n\n[n]: ./docs/a%20b.md\n"
+        self.assertEqual(fidelity_text.link_targets(text), ["./docs/a b.md"])
+
     def test_link_targets_read_every_link_form_and_skip_code(self) -> None:
         text = (
             "See [r][ref], [u](../\u00fc.md), <https://auto.example>, `[c](code.md)`, ![i](i.png).\n\n"

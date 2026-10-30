@@ -28,7 +28,7 @@ _BLOCKS = markdown_it.MarkdownIt("commonmark").enable("table").disable("inline")
 
 _LINKS = markdown_it.MarkdownIt("commonmark").enable("table")
 
-_DEFINITION = re.compile(r"\[((?:[^\]\\\n]|\\.)+)\]:[ \t]*\n?[ \t>]*(?:<([^>\n]*)>|(\S+))")
+_DEFINITION = re.compile(r"\[((?:[^\]\\]|\\.)+)\]:[ \t]*\n?[ \t>]*(?:<([^>\n]*)>|(\S+))")
 
 
 @functools.lru_cache(maxsize=16)
@@ -134,7 +134,8 @@ def link_definitions(text):
         start, end = ref["map"]
         m = _DEFINITION.search("\n".join(lines[start:end]))
         if m:
-            found.append(LinkDefinition(m.group(1), m.group(2) or m.group(3), start))
+            url = m.group(3) if m.group(2) is None else m.group(2)
+            found.append(LinkDefinition(m.group(1), url, start))
     return sorted(found, key=lambda d: d.line)
 
 
@@ -143,18 +144,20 @@ def link_targets(text):
 
     That is every link and image the parser reads, autolinks included, and then every reference
     definition, used or not. A carried definition carries its destination either way. Markup
-    in a code span or a code block is content rather than a link. A destination the parser
-    percent-encoded is read back decoded, so it compares against a path as written.
+    in a code span or a code block is content rather than a link. Every destination is read back
+    from the parser's form decoded, so a link and its definition compare as one target.
     """
     targets = []
-    stack = list(reversed(_LINKS.parse(text)))
+    env = {}
+    stack = list(reversed(_LINKS.parse(text, env)))
     while stack:
         token = stack.pop()
         attr = {"link_open": "href", "image": "src"}.get(token.type)
         if attr:
             targets.append(_LINKS.normalizeLinkText(str(token.attrs[attr])))
         stack.extend(reversed(token.children or []))
-    targets += [d.url for d in link_definitions(text)]
+    refs = sorted(env.get("references", {}).values(), key=lambda r: r["map"][0])
+    targets += [_LINKS.normalizeLinkText(r["href"]) for r in refs]
     return list(dict.fromkeys(targets))
 
 
