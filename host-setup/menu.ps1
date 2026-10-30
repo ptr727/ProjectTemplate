@@ -38,7 +38,8 @@ $HUB_URL = "https://github.com/$HUB_REPO"
 $DEFAULT_REF = 'main'
 
 # Every parameter is read into a variable here rather than from inside a function, matching bootstrap.ps1.
-# A parameter reached only from a nested scope reads as declared and never used.
+# A script parameter reached only from a nested scope reads as declared and never used.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $DRY_RUN = [bool]$DryRun
 $ASSUME_YES = [bool]$Yes
 $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
