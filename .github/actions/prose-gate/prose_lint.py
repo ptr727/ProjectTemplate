@@ -476,13 +476,17 @@ def discover(
 
 
 class Line(NamedTuple):
-    """One source line of a unit, a comment's text without its marker and `raw` with it."""
+    """One source line of a unit, a comment's text without its marker and `raw` with it.
+
+    `trailed` is a line where code follows the comment's closer, so deleting it deletes code.
+    """
 
     number: int
     text: str
     leading: bool = True
     raw: str = ""
     help: bool = False
+    trailed: bool = False
 
 
 class Unit(NamedTuple):
@@ -615,6 +619,19 @@ def comment_tokens(text: str, lexer: str) -> list[tuple[int, str]]:
     return out
 
 
+def code_follows(text: str, found: list[tuple[int, str]], k: int) -> bool:
+    """Whether code follows comment `k` of `found` on the line it ends on, a later comment aside."""
+    at = found[k][0] + len(found[k][1])
+    stop = len(text) if (eol := text.find("\n", at)) < 0 else eol
+    for offset, value in found[k + 1 :]:
+        if offset >= stop or text[at:offset].strip():
+            break
+        at = offset + len(value)
+        if "\n" in value:
+            return False
+    return bool(text[at:stop].strip())
+
+
 def comment_lines(
     text: str, lexer: str, spec: dict[str, Any], shift: int = 0
 ) -> list[tuple[Line, bool]]:
@@ -627,7 +644,8 @@ def comment_lines(
     out: list[tuple[Line, bool]] = []
     blocks = sorted(spec.get("block", ()), key=lambda b: -len(b[0]))
     markers = sorted(spec.get("line", ()), key=len, reverse=True)
-    for offset, value in comment_tokens(text, lexer):
+    found = comment_tokens(text, lexer)
+    for k, (offset, value) in enumerate(found):
         value = value.rstrip("\r\n")
         number, col = starts.at(offset)
         leading = not starts.line(number)[:col].strip()
@@ -643,7 +661,9 @@ def comment_lines(
             out.append((Line(number + shift, body.strip(), leading, value, help_form), doc))
             continue
         opener, closer, *cont = block or ("", "")
-        for i, part in enumerate(value[len(opener) :].removesuffix(closer).split("\n")):
+        parts = value[len(opener) :].removesuffix(closer).split("\n")
+        trailed = code_follows(text, found, k)
+        for i, part in enumerate(parts):
             body = part.strip()
             if i and cont and body.startswith(cont[0]) and body[1:2].isspace():
                 body = body[1:].strip()
@@ -651,7 +671,10 @@ def comment_lines(
                 body = ""
             row = starts.line(number + i)
             raw = row[min(col, len(row) - len(row.lstrip())) :] if i else value.split("\n")[0]
-            out.append((Line(number + i + shift, body, leading or i > 0, raw, help_form), doc))
+            last = trailed and i == len(parts) - 1
+            out.append(
+                (Line(number + i + shift, body, leading or i > 0, raw, help_form, last), doc)
+            )
     return out
 
 
@@ -712,12 +735,30 @@ def step_shell(starts: Starts, key: int) -> str:
     return next((m[1] for n in range(top, end) if (m := sibling.match(starts.line(n)))), "")
 
 
-def split_heredocs(text: str) -> list[tuple[int, str]]:
+HEREDOC_LABEL = re.compile(r"<<-?[ \t]*(['\"]?)\\?[\w-]+\1")
+
+
+def runs_body(starts: Starts, row: int, programs: frozenset[str]) -> bool:
+    """Whether the command opening a heredoc on `row` names one of `programs`, which runs the body.
+
+    The command is the opener line without its heredoc labels, after any lines a trailing backslash
+    continues onto it. Any other command reads the body as the data it writes.
+    """
+    top = row
+    while top > 1 and starts.line(top - 1).rstrip().endswith("\\"):
+        top -= 1
+    command = HEREDOC_LABEL.sub(" ", " ".join(starts.line(n) for n in range(top, row + 1)))
+    words = re.split(r"[\s|;&()`\"'{}<>=\\]+", command)
+    return any(w.rsplit("/", 1)[-1].rstrip("0123456789.") in programs for w in words)
+
+
+def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]:
     """A script as its code with heredoc bodies blanked, then each body, as (line offset, text).
 
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
     next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
-    script without its YAML indent. Each is lexed alone so that string ends with the body.
+    script without its YAML indent. Each is lexed alone so that string ends with the body. Only a
+    body a program in `programs` runs is returned, since any other is data rather than code.
     """
     rows = text.splitlines(keepends=True)
     indent = min((len(r) - len(r.lstrip()) for r in rows if r.strip()), default=0)
@@ -729,11 +770,13 @@ def split_heredocs(text: str) -> list[tuple[int, str]]:
             # The opener's own line stays code, so a body is the lines after it.
             first, end = starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]
             mid = starts.at(offset + max(next(re.finditer(HEREDOC, value)).end(8), 1) - 1)[0]
-            spans += [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
+            run = runs_body(starts, first, programs)
+            pieces = [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
+            spans += [(a, b, run) for a, b in pieces]
     code = list(rows)
-    for first, end in spans:
+    for first, end, _run in spans:
         code[first:end] = ["\n"] * (end - first)
-    return [(0, "".join(code)), *((a, "".join(rows[a:b])) for a, b in spans)]
+    return [(0, "".join(code)), *((a, "".join(rows[a:b])) for a, b, run in spans if run)]
 
 
 def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
@@ -747,7 +790,7 @@ def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
         body = text[start:end]
         if lexer == "bash-heredoc-as-code" and step_shell(starts, key) in ("", "bash", "sh"):
             # Each body starts on a line of its own, so only the code piece takes the column pad.
-            for skip, piece in split_heredocs(body):
+            for skip, piece in split_heredocs(body, frozenset(spec.get("heredoc_programs", ()))):
                 pad = "x" * col if skip == 0 else ""
                 out += comment_lines(pad + piece + "\n", lexer, inner, number - 1 + skip)
             continue
@@ -1453,12 +1496,13 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     """Every prose comment line opening its own line, which the diff scope narrows to a change.
 
     A modified line counts as added, the label being the answer. A help block, a documentation
-    comment, and a trailing comment are out of scope.
+    comment, and a comment sharing its line with code, before or after it, are out of scope.
     """
     lines = {
         line.number
         for line in unit.lines
         if line.leading
+        and not line.trailed
         and not line.help
         and is_comment_prose(without_trailing_directive(ctx, line.text), ctx.config)
     }

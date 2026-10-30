@@ -1312,7 +1312,10 @@ class TestCommentWrapRule(BaitCase):
         self.assertEqual([6], [c[0] for c in self.comments("a.sh", text)])
 
     def test_a_non_shell_run_step_takes_no_heredoc_split(self) -> None:
-        """A Python shift by a name read as an opener cut a triple-quoted string in two."""
+        """A Python shift by a name read as an opener cut a triple-quoted string in two.
+
+        A shell step still splits, and bash reads the unclosed `<< n` body as data written to `m`.
+        """
         script = '    m = 1 << n; s = """\n    # not a comment\n    """\n    # real\n'
         for step in (
             "- shell: python\n  run: |\n" + script,
@@ -1326,8 +1329,7 @@ class TestCommentWrapRule(BaitCase):
                 self.assertEqual(["real"], got)
         for step in ("- shell: bash -e {0}\n  run: |\n", "- shell: python\n- run: |\n"):
             with self.subTest(step=step):
-                got = [c[1] for c in self.comments("x.yml", step + script)]
-                self.assertEqual(["not a comment"], got)
+                self.assertEqual([], [c[1] for c in self.comments("x.yml", step + script)])
 
     def test_a_code_span_sharing_words_with_earlier_prose_does_not_move_the_comment(self) -> None:
         text = "I see this, `see <!-- check this. --> this`\n    <!-- check this. -->\n"
@@ -2086,6 +2088,31 @@ class TestCommentAddedRule(BaitCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
+
+    def test_a_line_closing_a_comment_before_code_is_not_reported(self) -> None:
+        """Deleting it deletes the code after the closer and leaves the comment unterminated.
+
+        A later comment on that line is not code, and a comment on its own line beside it still is.
+        """
+        for name, code, opener, closer in (
+            ("a.css", "a { color: red; }", "/*", "*/"),
+            ("a.ts", "const y = 2;", "/*", "*/"),
+            ("a.cs", "int y = 2;", "/*", "*/"),
+            ("a.jsonc", '"b": 2', "/*", "*/"),
+            ("a.html", "<p>y</p>", "<!--", "-->"),
+            ("a.xml", "<b/>", "<!--", "-->"),
+            ("a.csproj", "<b/>", "<!--", "-->"),
+        ):
+            with self.subTest(name=name):
+                text = (
+                    f"{code} {opener} A comment here.\nThe rest of it. {closer} {code}\n"
+                    f"{opener} A real comment. {closer}\n"
+                    f"{opener} A later one. {closer} {opener} And one more. {closer}\n"
+                    f"{opener} A closer then code. {closer} {code}\n"
+                )
+                path = self._write(text, name)
+                found = prose_lint.check_file(path, {"comment-added"})
+                self.assertEqual([3, 4], [n for n, _, _ in found])
 
     def test_config_carries_the_rule_as_code_does(self) -> None:
         for name, text in (
@@ -4521,6 +4548,28 @@ class TestYamlLanguage(BaitCase):
         """A workflow's inline script is read whole, as the YAML reading of it always was."""
         text = "run: |\n  python3 - <<'PY'\n  # Two things. Here.\n  PY\n"
         self.assertEqual(["comment-wrap"], self.flag("x.yml", text))
+
+    def test_a_heredoc_body_no_program_runs_is_data(self) -> None:
+        """A `#` line a step writes into a file is that file's text, and deleting it changes the file.
+
+        A program the opener names runs its body, a backslash-continued opener and a pipe included.
+        """
+        written = "    # The template writes this line into the file.\n"
+        for opener, label, ran in (
+            ("cat > f <<EOF", "EOF", []),
+            ('cat <<EOF >> "$GITHUB_STEP_SUMMARY"', "EOF", []),
+            ("gh api --input - <<'JSON'", "JSON", []),
+            ("cat > run.sh <<'SH'", "SH", []),
+            ("cat <<EOF | bash", "EOF", [3]),
+            ("/usr/bin/python3.13 - <<'PY'", "PY", [3]),
+            ("docker run --rm -i image \\\n      python3 - <<'PY'", "PY", [4]),
+        ):
+            with self.subTest(opener=opener):
+                text = f"- run: |\n    {opener}\n{written}    {label}\n    # A real comment.\n"
+                lines = [c[0] for c in self.comments("x.yml", text)]
+                self.assertEqual([*ran, text.count("\n")], lines)
+                added = self.kinds(text, {"comment-added"}, name="x.yml")
+                self.assertEqual(["comment-added"] * len(lines), added)
 
     def test_a_lambda_block_is_read_as_cpp(self) -> None:
         """A C++ comment inside a lambda is judged where it is written, on its file line."""

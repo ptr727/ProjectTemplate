@@ -166,7 +166,8 @@
     "yaml": {
       "lexers": ["yaml"],
       "line": ["#"],
-      "nested": [{ "key": "run", "lexer": "bash-heredoc-as-code" }, { "key": "lambda", "lexer": "cpp" }, { "tag": "!lambda", "lexer": "cpp" }]
+      "nested": [{ "key": "run", "lexer": "bash-heredoc-as-code" }, { "key": "lambda", "lexer": "cpp" }, { "tag": "!lambda", "lexer": "cpp" }],
+      "heredoc_programs": ["bash", "dash", "ksh", "perl", "pwsh", "python", "ruby", "sh", "zsh"]
     }
   }
 }
