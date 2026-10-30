@@ -1470,18 +1470,43 @@ def is_comment_prose(body: str, config: Config) -> bool:
     )
 
 
+def metadata_block_lines(unit: Unit, ctx: Context) -> set[int]:
+    """The lines of each closed metadata block the language declares, opener through closer.
+
+    A line off the block's form, or a gap, abandons the block, so an unclosed one exempts nothing.
+    """
+    form = ctx.language.get("metadata_block")
+    if not form:
+        return set()
+    opener, body, closer = (re.compile(pattern) for pattern in form)
+    out: set[int] = set()
+    run: list[int] = []
+    for line in unit.lines:
+        adjacent = bool(run) and line.leading and line.number == run[-1] + 1
+        if adjacent and closer.fullmatch(line.raw):
+            out.update((*run, line.number))
+            run = []
+        elif adjacent and body.fullmatch(line.raw):
+            run.append(line.number)
+        else:
+            run = [line.number] if line.leading and opener.fullmatch(line.raw) else []
+    return out
+
+
 def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     """Every prose comment line opening its own line, which the diff scope narrows to a change.
 
     A modified line counts as added, the label being the answer. A help block, a documentation
-    comment, and a comment sharing its line with code, before or after it, are out of scope.
+    comment, and a tool's metadata block are out of scope, as is a comment sharing its line with code.
     """
+    metadata = metadata_block_lines(unit, ctx)
     lines = {
         line.number
         for line in unit.lines
         if line.leading
         and not line.trailed
         and not line.help
+        and line.number not in metadata
         and is_comment_prose(without_trailing_directive(ctx, line.text), ctx.config)
     }
     return [finding(n, "comment-added") for n in sorted(lines)]

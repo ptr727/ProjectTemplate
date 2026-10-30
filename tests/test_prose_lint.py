@@ -2167,6 +2167,33 @@ class TestCommentAddedRule(BaitCase):
             with self.subTest(line=line.strip()):
                 self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
 
+    def test_a_python_metadata_block_is_an_instruction_to_a_tool(self) -> None:
+        """A PEP 723 block, opener through closer, which `uv` reads rather than a person.
+
+        The exemption is the closed block alone. A prose line after the closer still reports, and
+        so does each line under an opener nothing closes, or one the block's line form breaks.
+        """
+        block = '# /// script\n# requires-python = ">=3.13"\n# dependencies = ["bleak"]\n# ///\n'
+        after = "# The value is read once here.\nvalue = 1\n"
+        self.assertEqual([], self.kinds(block + "value = 1\n", {"comment-added"}, name="tool.py"))
+        self.assertEqual(
+            [(5, "comment-added")],
+            [
+                (n, kind)
+                for n, kind, _ in prose_lint.check_file(
+                    self._write(block + after, "tool.py"), {"comment-added"}
+                )
+            ],
+        )
+        for label, text in (
+            ("unclosed", '# /// script\n# requires-python = ">=3.13"\nvalue = 1\n'),
+            ("off form", '# /// script\n#requires-python = ">=3.13"\n# ///\n'),
+            ("not python", '# /// script\n# requires-python = ">=3.13"\n# ///\n'),
+        ):
+            with self.subTest(case=label):
+                name = "tool.sh" if label == "not python" else "tool.py"
+                self.assertIn("comment-added", self.kinds(text, {"comment-added"}, name=name))
+
     def test_a_reference_and_a_key_are_not_prose(self) -> None:
         for line in ("# https://example.invalid/spec\n", "# ignore:\n"):
             with self.subTest(line=line.strip()):
