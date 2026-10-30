@@ -32,7 +32,9 @@ _BLOCKS = (
 
 _LINKS = markdown_it.MarkdownIt("commonmark").enable("table")
 
-_DESTINATION = re.compile(r"(?<!\\)\]:[ \t]*\n?[ \t>]*(?:<([^>\n]*)>|(\S+))")
+_DESTINATION = re.compile(
+    r"\[(?:[^\[\]\\]|\\[\s\S])*\]:[ \t]*\n?[ \t>]*(?:<((?:[^<>\n\\]|\\.)*)>|(\S+))"
+)
 
 
 @functools.lru_cache(maxsize=16)

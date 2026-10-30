@@ -93,6 +93,13 @@ class LinkCase(unittest.TestCase):
             [("spaced", "a b.md", 7), ("split", "s.md", 8), ("quoted", "q.md", 11)],
         )
 
+    def test_an_escape_in_a_label_or_an_angle_destination_is_read_through(self) -> None:
+        text = "[a\\\\]: one.md\n\n[b]: <https://example.test/a\\>b>\n\n[c\\\nd]: two.md\n"
+        self.assertEqual(
+            [(d.label, d.url) for d in fidelity_text.link_definitions(text)],
+            [("a\\\\", "one.md"), ("b", "https://example.test/a\\>b"), ("c\\\nd", "two.md")],
+        )
+
     def test_an_empty_or_wrapped_definition_is_read_as_written(self) -> None:
         text = "[empty]: <>\n\n> [two\n> lines]: t.md\n"
         found = fidelity_text.link_definitions(text)
