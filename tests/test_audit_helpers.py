@@ -2251,13 +2251,13 @@ TOOL_CASES = [
         0,
     ),
     # A definition inside a code sample is markup being shown, so it must not resolve a tool link.
-    # The sample sits after the real definition deliberately, so reading across fences would override it.
+    # The sample sits before the real definition deliberately, since the first definition of a label wins.
     (
         "a fenced sample does not supply a tool link",
         TOOLS_HEAD
         + "| Tool | Role |\n| --- | --- |\n| [cspell][cspell-link] | Spell checker. |\n"
-        + TOOLS_DEFS
-        + "\n```md\n[cspell-link]: https://wrong.example/\n```\n",
+        + "\n```md\n[cspell-link]: https://wrong.example/\n```\n"
+        + TOOLS_DEFS,
         0,
     ),
     # A tool table shown as a sample inside the section is markup, not entries.

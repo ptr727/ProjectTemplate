@@ -150,10 +150,10 @@ def link_targets(text):
     """Each distinct destination `text` links to.
 
     That is every link and image the parser reads, autolinks included, in the order they appear.
-    After them comes every reference definition in its own order, used or not, since a carried
-    definition carries its destination either way. Markup
-    in a code span or a code block is content rather than a link. Every destination is read back
-    from the parser's form decoded, so a link and its definition compare as one target.
+    After them comes every reference definition in its own order, used or not, and so does each
+    duplicate the parser resolves nothing to. A carried definition carries its destination either
+    way. Markup in a code span or a code block is content rather than a link. Every destination is
+    read back from the parser's form decoded, so a link and its definition compare as one target.
     """
     targets = []
     env = {}
@@ -164,7 +164,8 @@ def link_targets(text):
         if attr:
             targets.append(_LINKS.normalizeLinkText(str(token.attrs[attr])))
         stack.extend(reversed(token.children or []))
-    refs = sorted(env.get("references", {}).values(), key=lambda r: r["map"][0])
+    refs = [*env.get("references", {}).values(), *env.get("duplicate_refs", [])]
+    refs.sort(key=lambda r: r["map"][0])
     targets += [_LINKS.normalizeLinkText(r["href"]) for r in refs]
     return list(dict.fromkeys(targets))
 

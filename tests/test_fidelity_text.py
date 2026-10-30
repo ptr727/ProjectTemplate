@@ -98,6 +98,10 @@ class LinkCase(unittest.TestCase):
         self.assertEqual([(d.label, d.url) for d in found], [("empty", ""), ("two\nlines", "t.md")])
         self.assertEqual(fidelity_text.reference_key(found[1].label), "TWO LINES")
 
+    def test_a_duplicate_definition_is_still_a_target(self) -> None:
+        text = "[notes]: ./ok.md\n[Notes]: ./hub-only.md\n"
+        self.assertEqual(fidelity_text.link_targets(text), ["./ok.md", "./hub-only.md"])
+
     def test_a_link_and_its_definition_read_as_one_target(self) -> None:
         text = "Read [n][n].\n\n[n]: ./docs/a%20b.md\n"
         self.assertEqual(fidelity_text.link_targets(text), ["./docs/a b.md"])
