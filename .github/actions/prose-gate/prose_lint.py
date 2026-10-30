@@ -760,26 +760,42 @@ def shell_bare(text: str) -> str:
     return text[: m.start()] if (m := SHELL_COMMENT.search(text)) else text
 
 
-def command_word(tokens: list[str], skip: frozenset[str], wrappers: frozenset[str]) -> str:
+def command_word(tokens: list[str], wrappers: frozenset[str]) -> str:
     """The program one pipeline stage runs, past its assignments, a wrapper, and the wrapper's flags.
 
-    An assignment's command substitution, a group, and a reserved word open onto the command after
-    them. Where none is found the result is empty, which names no program at all.
+    An assignment opens onto the command inside a substitution it leaves open, and a substitution
+    run as the command names no program until it runs. Where none is found the result is empty.
     """
-    wrapped = False
-    for token in tokens:
+    wrapped, rest = False, iter(tokens)
+    for token in rest:
         if ASSIGNMENT.match(token):
-            if not (inner := re.split(r"\$\(|`", token)[1:]):
+            value = token
+            while (value.count("(") > value.count(")") or value.count("`") % 2) and (
+                more := next(rest, None)
+            ):
+                value += " " + more
+            if value.count("(") <= value.count(")") and not value.count("`") % 2:
                 continue
-            token = inner[-1]
-        name = program_name(token.lstrip("$(`{&").strip("\"'"))
-        if not name or name in skip or (wrapped and token[:1] in "-0123456789"):
+            token = re.split(r"\$\(|`", token)[-1]
+        elif token.startswith(("$(", "`")):
+            return token
+        name = program_name(token.strip("\"'"))
+        if not name or (wrapped and token[:1] in "-0123456789"):
             continue
         if name in wrappers:
             wrapped = True
             continue
         return name
     return ""
+
+
+def compound(bare: str, words: frozenset[str]) -> bool:
+    """Whether a command line holds a group, a subshell, or a compound command's keyword.
+
+    Its output can then reach a later pipe the opener's own list element does not show.
+    """
+    tokens = re.findall(r"[^\s|;&]+", bare)
+    return any(t in words or ")" in t or "(" in t.replace("$(", "") for t in tokens)
 
 
 def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
@@ -789,7 +805,8 @@ def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
     continues onto it. Quoted text, a comment, and the heredoc labels separate nothing. The body is
     data only where every pipeline stage runs a program in `heredoc_data`, which treats its input
     as data. No stage may hold a process substitution, which could run it instead. Any other
-    command, an unknown one included, may run it, so it stays code.
+    command, an unknown one included, may run it, so it stays code. So does a compound command,
+    and an opener whose own line a backslash continues past the label.
     """
     top = row
     while top > 1 and shell_bare(starts.line(top - 1)).rstrip().endswith("\\"):
@@ -798,17 +815,19 @@ def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
     at = sum(len(r) + 1 for r in rows[:-1]) + col
     lines = [re.sub(r"\\(\s*)$", r" \1", shell_bare(r)).ljust(len(r)) for r in rows]
     command, bare = " ".join(rows), " ".join(lines)
+    keys = ("heredoc_compound", "heredoc_wrappers", "heredoc_data")
+    words, wrappers, data = (frozenset(spec.get(k, ())) for k in keys)
+    if shell_bare(rows[-1]).rstrip().endswith("\\") or compound(bare, words):
+        return True
     left = max((m.end() for m in SEPARATOR.finditer(bare, 0, at)), default=0)
     right = next((m.start() for m in SEPARATOR.finditer(bare, at)), len(bare))
     cuts = [left, *(m.end() for m in PIPE.finditer(bare, left, right)), right]
-    keys = ("heredoc_reserved", "heredoc_wrappers", "heredoc_data")
-    reserved, wrappers, data = (frozenset(spec.get(k, ())) for k in keys)
     for a, b in itertools.pairwise(cuts):
         tokens = [
             command[a + x : a + y]
             for x, y in (m.span() for m in re.finditer(r"[^\s|]+", bare[a:b]))
         ]
-        if command_word(tokens, reserved, wrappers) not in data or PROCESS.search(bare, a, b):
+        if command_word(tokens, wrappers) not in data or PROCESS.search(bare, a, b):
             return True
     return False
 
