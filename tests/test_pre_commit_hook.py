@@ -25,7 +25,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / ".husky" / "pre-commit"
 GATE = REPO / ".github" / "actions" / "prose-gate" / "prose_lint.py"
-PINS = REPO / ".github" / "actions" / "python-tool-pins" / "requirements.txt"
 
 COMMENT = "# The value is read once, since the second read can disagree.\n"
 
@@ -64,7 +63,6 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
             (HOOK, ".husky/pre-commit"),
             (GATE, ".github/actions/prose-gate/prose_lint.py"),
             (GATE.with_name("prose-gate.json"), ".github/actions/prose-gate/prose-gate.json"),
-            (PINS, ".github/actions/python-tool-pins/requirements.txt"),
         ):
             target = self.root / dest
             target.parent.mkdir(parents=True, exist_ok=True)

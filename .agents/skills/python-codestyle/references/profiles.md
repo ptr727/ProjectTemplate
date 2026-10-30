@@ -63,7 +63,8 @@ Tool configuration alone marks the lint-only one:
   `python-tool-pins` action reads from the `requirements.txt` beside it, which the hub's
   Dependabot pip ecosystem bumps. A caller reaches that version at the hub commit its workflow
   pins, so a ruff release reaches its lint only through a hub release. CI runs `uvx mypy@latest`,
-  and the VS Code tasks and README run the unpinned latest of every tool. `.py` files follow the
+  and a carrier's VS Code tasks and README run the unpinned latest of every tool. The hub's own
+  tasks and hook take that `requirements.txt` as a requirement instead. `.py` files follow the
   repo's LF line-ending default (per GOVERNANCE.md's "Line Endings" section). There is no pytest suite, and `unittest` is
   the runner instead. The directory still owes tests, written with the standard
   library's `unittest` so they need no test runner installed. Each is a `test_<script>.py`

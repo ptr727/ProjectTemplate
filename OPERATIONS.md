@@ -18,9 +18,8 @@ export COVERAGE_FILE="$PROJECTTEMPLATE_TOOL_CACHE/coverage"
 export MYPY_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/mypy"
 export UV_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/uv"
 export RUFF_CACHE_DIR="$PROJECTTEMPLATE_TOOL_CACHE/ruff"
-RUFF_VERSION="$(sed -n 's/^ruff==//p' .github/actions/python-tool-pins/requirements.txt)"
-uvx "ruff@$RUFF_VERSION" check .
-uvx "ruff@$RUFF_VERSION" format --check .
+uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff check .
+uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff format --check .
 uvx mypy@latest
 uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup -m unittest discover -s tests
 uvx --with-requirements tests/requirements.txt coverage@latest run --source=scripts,spec,host-setup --append -m unittest discover -s tests -p test_audit_helpers.py
