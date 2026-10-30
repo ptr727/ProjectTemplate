@@ -489,9 +489,8 @@ class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
     `source` is every line, and `prose` and `code` the unfenced ones. `paragraph` is a Markdown
-    sentence block, a paragraph or a table cell. `comment`, `doc`, and `markup` are runs of
-    adjacent comment lines, `doc` a documentation comment and `markup` a Markdown HTML one.
-    `docstring` opens at `column`.
+    sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
+    documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
     """
 
     kind: str
