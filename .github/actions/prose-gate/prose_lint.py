@@ -519,6 +519,7 @@ def lexer_name(path: Path, first: str) -> str | None:
     """The lexer a file reads through, `markdown`, or None for a format holding no comments.
 
     The data file's own mapping wins, then Pygments by file name, then the shebang.
+    A shebang naming a runner, such as `uv run`, selects the interpreter that runner runs.
     """
     files = BASE["files"]
     name, suffix = path.name.lower(), path.suffix.lower()
@@ -533,6 +534,7 @@ def lexer_name(path: Path, first: str) -> str | None:
             return get_lexer_for_filename(candidate).aliases[0]
     if m := SHEBANG.match(first):
         program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
+        program = files["runner"].get(program, program)
         with contextlib.suppress(ClassNotFound):
             return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
     return None if suffix else files["extensionless"]
