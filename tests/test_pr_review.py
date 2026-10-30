@@ -1808,6 +1808,8 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(200, gate.get("newer_run"))
         self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
         self.assertTrue(pr_review_checks.held_checks_open(pr, nodes, NOW, 300, 1800))
+        (line,) = pr_review_check_lines.check_lines(pr, nodes, [], NOW)
+        self.assertIn("CHECK SUPERSEDED ('gate', IN_PROGRESS in an older run): run 200", line)
 
     def test_an_unfinished_check_in_an_older_run_keeps_its_stuck_reading(self) -> None:
         """A newer run queued behind the older one cannot start, so the older one's shape stands."""
