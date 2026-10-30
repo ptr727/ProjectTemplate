@@ -6671,6 +6671,15 @@ class TestRequiredContexts(unittest.TestCase):
             "no check has posted that this can read, the rollup holding only UnknownContext, so",
             pr_review_checks.checks_never_ran(pr, unread, frozenset()),
         )
+        zeta, alpha = {"__typename": "ZetaContext"}, {"__typename": "AlphaContext"}
+        mixed_types = pr_review_checks.check_nodes(payload([], checks=[zeta, alpha, zeta]))
+        self.assertEqual(
+            ["AlphaContext", "ZetaContext"], pr_review_checks.checks_unread(mixed_types)
+        )
+        self.assertIn(
+            "the rollup holding only AlphaContext, ZetaContext, so",
+            pr_review_checks.checks_never_ran(pr, mixed_types, frozenset()),
+        )
         later = pr_review_checks.checks_never_ran(pr, nodes, frozenset({("Later", None)}))
         self.assertIn("has not registered or came from another app, Later", later)
         for ungated in ({**pr, "mergeStateStatus": "CLEAN"}, {**pr, "state": "MERGED"}):
