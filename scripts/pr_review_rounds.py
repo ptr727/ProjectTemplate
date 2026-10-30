@@ -460,9 +460,10 @@ def uncounted_verdict(pr: dict, kind: str = "flagging") -> tuple[str, str] | Non
     """The head round's verdict of `kind` and its headline, where that round counts no finding.
 
     A flagging round that states no finding and opens no entry or thread names what it flags in
-    its headline. It also names it in any findings list beside it. An open thread defers the reading. Passed
-    `clean`, it reads a clean round the same way, except one whose findings list or file table
-    names a finding. A flagging one still holds, since what it flags may be more than its list.
+    its headline. It also names it in any findings list beside it. An open thread defers the
+    reading. Passed `clean`, it reads a clean round the same way, except one whose findings list
+    or file table names a finding. A flagging one still holds, since what it flags may be more
+    than its list.
     """
     node = newest_of(head_reviews(pr))
     if node is None:

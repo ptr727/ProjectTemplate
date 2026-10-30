@@ -266,6 +266,7 @@ def render(
             f"`{flagged[0]}` and counts no finding, so its headline is the one place what it "
             "flags is named. Give the headline the triage a suppressed finding gets"
         )
+    if flagged:
         lines.append(f"    {flagged[1] or '(the headline carries no prose)'}")
     if advisory and advisory[1]:
         lines.append(
