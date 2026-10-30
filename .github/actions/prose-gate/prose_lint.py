@@ -34,7 +34,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import functools
-import itertools
 import json
 import os
 import re
@@ -516,11 +515,6 @@ def language_of(lexer: str | None) -> dict[str, Any] | None:
     return next((s for s in BASE["languages"].values() if lexer in s["lexers"]), None)
 
 
-def program_name(word: str) -> str:
-    """A program word as its bare name, any path and version suffix dropped."""
-    return word.rsplit("/", 1)[-1].rstrip("0123456789.")
-
-
 def lexer_name(path: Path, first: str) -> str | None:
     """The lexer a file reads through, `markdown`, or None for a format holding no comments.
 
@@ -540,7 +534,7 @@ def lexer_name(path: Path, first: str) -> str | None:
     if m := SHEBANG.match(first):
         program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
         with contextlib.suppress(ClassNotFound):
-            return get_lexer_by_name(program_name(program)).aliases[0]
+            return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
     return None if suffix else files["extensionless"]
 
 
@@ -741,148 +735,28 @@ def step_shell(starts: Starts, key: int) -> str:
     return next((m[1] for n in range(top, end) if (m := sibling.match(starts.line(n)))), "")
 
 
-HEREDOC_LABEL = re.compile(r"<<-?[ \t]*(['\"]?)\\?[\w-]+\1")
-SEPARATOR = re.compile(r"&&|\|\||;|(?<![<>&|])&(?![>&])")
-SHELL_QUOTE = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
-SHELL_COMMENT = re.compile(r"(?:^|(?<=\s))#")
-ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
-PIPE = re.compile(r"\|")
-PROCESS = re.compile(r"[<>]\(")
-
-
-def shell_bare(text: str) -> str:
-    """`text` with its heredoc labels blanked, lengths kept, quotes filled, and any comment cut.
-
-    A quote's contents become one word, so its separators split nothing and its spaces no word.
-    """
-    text = HEREDOC_LABEL.sub(lambda m: " " * len(m.group()), text)
-    text = SHELL_QUOTE.sub(lambda m: "_" * len(m.group()), text)
-    return text[: m.start()] if (m := SHELL_COMMENT.search(text)) else text
-
-
-def command_word(tokens: list[str], wrappers: frozenset[str]) -> str:
-    """The program one pipeline stage runs, past its assignments, a wrapper, and the wrapper's flags.
-
-    An assignment opens onto the command inside a substitution it leaves open, and a substitution
-    run as the command names no program until it runs. Where none is found the result is empty.
-    """
-    wrapped, rest = False, iter(tokens)
-    for token in rest:
-        if ASSIGNMENT.match(token):
-            value = token
-            while (value.count("(") > value.count(")") or value.count("`") % 2) and (
-                more := next(rest, None)
-            ):
-                value += " " + more
-            if value.count("(") <= value.count(")") and not value.count("`") % 2:
-                continue
-            token = re.split(r"\$\(|`", token)[-1]
-        elif token.startswith(("$(", "`")):
-            return token
-        name = program_name(token.strip("\"'"))
-        if not name or (wrapped and token[:1] in "-0123456789"):
-            continue
-        if name in wrappers:
-            wrapped = True
-            continue
-        return name
-    return ""
-
-
-def compound(bare: str, words: frozenset[str]) -> bool:
-    """Whether a command line holds a group, a subshell, or a compound command's keyword.
-
-    Its output can then reach a later pipe the opener's own list element does not show.
-    """
-    tokens = re.findall(r"[^\s|;&]+", bare)
-    return any(t in words or ")" in t or "(" in t.replace("$(", "") for t in tokens)
-
-
-def left_open(prior: str, blocks: list[list[str]]) -> bool:
-    """Whether code before an opener's line leaves a quote, a substitution, or a block open.
-
-    The opener then sits inside a construct that can send its output on to a later command.
-    """
-    filled = SHELL_QUOTE.sub(lambda m: "_" * len(m.group()), prior)
-    bare = "\n".join(
-        r[: m.start()] if (m := SHELL_COMMENT.search(r)) else r for r in filled.split("\n")
-    )
-    tokens = re.findall(r"[^\s|;&]+", bare)
-    depth = sum(tokens.count(a) - tokens.count(b) for a, b in blocks)
-    return bool(
-        depth > 0
-        or re.search(r"[\"']", bare)
-        or bare.count("(") > bare.count(")")
-        or bare.count("`") % 2
-    )
-
-
-def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
-    """Whether the command holding the heredoc opened at `col` of `row` may run its body.
-
-    The command is the opener's own list element, after any code lines a trailing backslash
-    continues onto it. Quoted text, a comment, and the heredoc labels separate nothing. The body is
-    data only where every pipeline stage runs a program in `heredoc_data`, which treats its input
-    as data. No stage may hold a process substitution, which could run it instead. Any other
-    command, an unknown one included, may run it, so it stays code. So does a compound command on
-    the opener's line, and an opener whose own line a backslash continues past the label.
-    """
-    top = row
-    while top > 1 and shell_bare(starts.line(top - 1)).rstrip().endswith("\\"):
-        top -= 1
-    rows = [starts.line(n) for n in range(top, row + 1)]
-    at = sum(len(r) + 1 for r in rows[:-1]) + col
-    lines = [re.sub(r"\\(\s*)$", r" \1", shell_bare(r)).ljust(len(r)) for r in rows]
-    bare = " ".join(lines)
-    keys = ("heredoc_compound", "heredoc_wrappers", "heredoc_data")
-    words, wrappers, data = (frozenset(spec.get(k, ())) for k in keys)
-    if shell_bare(rows[-1]).rstrip().endswith("\\") or compound(bare, words):
-        return True
-    left = max((m.end() for m in SEPARATOR.finditer(bare, 0, at)), default=0)
-    right = next((m.start() for m in SEPARATOR.finditer(bare, at)), len(bare))
-    cuts = [left, *(m.end() for m in PIPE.finditer(bare, left, right)), right]
-    for a, b in itertools.pairwise(cuts):
-        tokens = re.findall(r"[^\s|]+", bare[a:b])
-        if command_word(tokens, wrappers) not in data or PROCESS.search(bare, a, b):
-            return True
-    return False
-
-
-def split_heredocs(text: str, spec: dict[str, Any]) -> list[tuple[int, str]]:
+def split_heredocs(text: str) -> list[tuple[int, str]]:
     """A script as its code with heredoc bodies blanked, then each body, as (line offset, text).
 
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
     next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
-    script without its YAML indent. Each is lexed alone so that string ends with the body. Only a
-    body `runs_body` finds a command may run is returned, since any other is data rather than code.
-    So is a body whose opener code before it leaves inside an open construct. An opener closing
-    nowhere is more often a shift, so the rest of the script stays code.
+    script without its YAML indent. Each is lexed alone so that string ends with the body.
     """
     rows = text.splitlines(keepends=True)
     indent = min((len(r) - len(r.lstrip()) for r in rows if r.strip()), default=0)
     plain = "".join(r[indent:] if r.strip() else r for r in rows)
     starts = Starts(plain)
-    spans: list[tuple[int, int, bool]] = []
+    spans = []
     for offset, kind, value in lexer_for("bash").get_tokens_unprocessed(plain):
         if kind in String.Heredoc:
             # The opener's own line stays code, so a body is the lines after it.
             first, end = starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]
-            m = next(re.finditer(HEREDOC, value))
-            mid = starts.at(offset + max(m.end(8), 1) - 1)[0]
-            prior = rows[: first - 1]
-            for a, b, _run in spans:
-                prior[a:b] = ["\n"] * len(prior[a:b])
-            nested = left_open("".join(prior), spec.get("heredoc_blocks", []))
-            run = [m.end(8) < 0 or nested or runs_body(starts, first, starts.at(offset)[1], spec)]
-            if first < mid < end:
-                col = starts.at(offset + m.start(7))[1]
-                run.append(nested or runs_body(starts, first, col, spec))
-            pieces = [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
-            spans += [(a, b, r) for (a, b), r in zip(pieces, run, strict=True)]
+            mid = starts.at(offset + max(next(re.finditer(HEREDOC, value)).end(8), 1) - 1)[0]
+            spans += [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
     code = list(rows)
-    for first, end, _run in spans:
+    for first, end in spans:
         code[first:end] = ["\n"] * (end - first)
-    return [(0, "".join(code)), *((a, "".join(rows[a:b])) for a, b, run in spans if run)]
+    return [(0, "".join(code)), *((a, "".join(rows[a:b])) for a, b in spans)]
 
 
 def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
@@ -896,7 +770,7 @@ def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
         body = text[start:end]
         if lexer == "bash-heredoc-as-code" and step_shell(starts, key) in ("", "bash", "sh"):
             # Each body starts on a line of its own, so only the code piece takes the column pad.
-            for skip, piece in split_heredocs(body, spec):
+            for skip, piece in split_heredocs(body):
                 pad = "x" * col if skip == 0 else ""
                 out += comment_lines(pad + piece + "\n", lexer, inner, number - 1 + skip)
             continue

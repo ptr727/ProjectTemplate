@@ -166,11 +166,7 @@
     "yaml": {
       "lexers": ["yaml"],
       "line": ["#"],
-      "nested": [{ "key": "run", "lexer": "bash-heredoc-as-code" }, { "key": "lambda", "lexer": "cpp" }, { "tag": "!lambda", "lexer": "cpp" }],
-      "heredoc_data": ["cat", "curl", "envsubst", "grep", "tee"],
-      "heredoc_compound": ["!", "case", "do", "done", "elif", "else", "esac", "fi", "for", "if", "then", "until", "while", "{", "}"],
-      "heredoc_blocks": [["{", "}"], ["do", "done"], ["then", "fi"], ["case", "esac"]],
-      "heredoc_wrappers": ["command", "env", "exec", "nice", "nohup", "sudo", "time", "timeout"]
+      "nested": [{ "key": "run", "lexer": "bash-heredoc-as-code" }, { "key": "lambda", "lexer": "cpp" }, { "tag": "!lambda", "lexer": "cpp" }]
     }
   }
 }
