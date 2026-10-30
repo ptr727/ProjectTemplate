@@ -387,6 +387,7 @@ class TestOpenFindings(unittest.TestCase):
             (narrative(cells=("", " ")), 2),
             (narrative(listed=()), 2),
             (narrative(listed=("one.",), cells=("One.", "", "Two.")), 2),
+            (narrative(listed=(), cells=("Moderate ([P1]): one. Nit ([P2]): two.", "Three.")), 3),
             (what_changed(), 0),
         ):
             with self.subTest(sections=sections[-60:]):

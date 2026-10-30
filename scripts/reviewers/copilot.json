@@ -59,5 +59,6 @@
   "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
   "table_header": "file",
   "table_findings": "findings",
+  "table_finding_marker": "\\[P\\d\\]",
   "discussion_link": "#discussion_r(?P<id>\\d+)$"
 }
