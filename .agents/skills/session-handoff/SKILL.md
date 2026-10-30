@@ -211,8 +211,9 @@ A maintainer resuming work says little, often only "resume the handoff", and tha
 the whole procedure below. Run every step without being reminded of any of them.
 
 0. **Clone a hub checkout of the session's own, as the first command.** Clone the hub's `main`
-   into a new directory before any `git` or `$handoff` command. `<unique>` is a name no directory
-   there already holds, so the clone never takes a path a task worktree wants:
+   into a new directory under `<worktrees>`, the fleet worktree directory `repo-worktree` names,
+   before any `git` or `$handoff` command. `<unique>` is a name no directory under `<worktrees>`
+   already holds, so the clone never takes a path a task worktree wants:
 
    ```sh
    git clone --branch main https://github.com/ptr727/ProjectTemplate.git <worktrees>/ProjectTemplate-hub-<unique>

@@ -49,7 +49,9 @@ One worker runs at a time, so no two rounds claim the same file and no round nee
 
 Every command below that runs the chain's script writes it as `python3 "$handoff" ...`, with
 `handoff="<hub-checkout>/scripts/handoff.py"`, as `session-handoff` "Running the Chain" sets it.
-`<hub-checkout>` is a hub checkout of the seat's own on `main`. Each seat sets it for itself, since the picker and
+`<hub-checkout>` is a hub checkout of the seat's own on `main`. So each seat first clones one, as
+`session-handoff` "The Attended Session" step 0 does. A worktree on a feature branch is not one,
+and neither is the checkout the run was launched in. Each seat sets it for itself, since the picker and
 the worker are separate subagents and share no shell.
 
 ## Invocation and What It Authorizes
