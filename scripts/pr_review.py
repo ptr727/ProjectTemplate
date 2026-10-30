@@ -53,17 +53,20 @@ Subcommands
            also the exit where the round covering the head states nothing it can believe while an
            earlier round on record states partial coverage. 50 = that round opens on a verdict
            other than the clean one, while all of these hold:
-           - It counts no finding.
+           - It states no open finding and has no open entry.
            - It opens no thread.
            - It collapses no suppressed or previously-missed finding.
            - No thread is open.
-           What it flags is then named in its headline alone, printed under
-           `VERDICT WITH NO COUNTED FINDING`. The code
+           What it flags is then named in its headline, printed under
+           `VERDICT WITH NO COUNTED FINDING`, and in any findings list or file table the body
+           carries. The code
            repeats on that head after the headline is answered, since nothing here reads an
            answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
-           HEADLINE`, which changes no exit code. 50 is also a head round's part the adapter
-           cannot place, `shapes=HELD` with an excerpt under `UNPLACED ON THE HEAD`. A trusted
-           comment acknowledging its fingerprint clears it, `shapes=ACKNOWLEDGED`.
+           HEADLINE`, which changes no exit code. A clean round whose findings list or file
+           table names a finding prints none, since `FINDINGS WITH NO THREAD` names those.
+           50 is also a head round's part the adapter cannot place, `shapes=HELD` with an
+           excerpt under `UNPLACED ON THE HEAD`. A trusted comment acknowledging its
+           fingerprint clears it, `shapes=ACKNOWLEDGED`.
            `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
            on (`PARTIAL` instead where an earlier round states partial coverage), `table` where a
@@ -900,10 +903,11 @@ def report_verdict(pr: dict) -> int:
     if flagged := uncounted_verdict(pr):
         print(
             f"status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on "
-            f"`{flagged[0]}`, a verdict that is not the clean one, while it counts no finding, so "
-            "what it flags is named in its headline alone, printed above under VERDICT WITH NO "
-            "COUNTED FINDING. Fix what it names and push, or answer it with `comment`. This code "
-            "repeats on this head after the answer, since nothing here reads one"
+            f"`{flagged[0]}`, a verdict that is not the clean one, while it states no open "
+            "finding, so what it flags is named in its headline, printed above under VERDICT "
+            "WITH NO COUNTED FINDING, and in any findings list or file table in the review body. "
+            "Fix what it names and push, or answer it with `comment`. This code repeats on this "
+            "head after the answer, since nothing here reads one"
         )
     if (hold := shape_hold(pr)) and not hold[2]:
         print(

@@ -254,12 +254,20 @@ def render(
             "finding gets. A thread past the hundred read here counts too, and `threads=` "
             "carries a trailing `+` where that page was cut"
         )
-    if flagged:
+    if flagged and found is not None and found.listed:
+        lines.append(
+            f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
+            f"`{flagged[0]}` and states no open finding, so its headline and its findings list "
+            "or file table are where what it flags is named. Give both the triage a suppressed "
+            "finding gets"
+        )
+    elif flagged:
         lines.append(
             f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
             f"`{flagged[0]}` and counts no finding, so its headline is the one place what it "
             "flags is named. Give the headline the triage a suppressed finding gets"
         )
+    if flagged:
         lines.append(f"    {flagged[1] or '(the headline carries no prose)'}")
     if advisory and advisory[1]:
         lines.append(

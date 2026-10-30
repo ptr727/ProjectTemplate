@@ -459,8 +459,11 @@ def coverage(pr: dict) -> tuple[str, str]:
 def uncounted_verdict(pr: dict, kind: str = "flagging") -> tuple[str, str] | None:
     """The head round's verdict of `kind` and its headline, where that round counts no finding.
 
-    A flagging round that states, lists, and opens no finding names what it flags in its headline
-    alone. An open thread defers the reading. Passed `clean`, it reads a clean round the same way.
+    A flagging round that states no finding and opens no entry or thread names what it flags in
+    its headline. It also names it in any findings list or file table beside it. An open thread
+    defers the reading. Passed `clean`, it reads a clean round the same way, except one whose
+    findings list or file table names a finding. A flagging one still holds, since what it
+    flags may be more than its list.
     """
     node = newest_of(head_reviews(pr))
     if node is None:
@@ -468,6 +471,8 @@ def uncounted_verdict(pr: dict, kind: str = "flagging") -> tuple[str, str] | Non
     found = reading(node, pr=pr)
     counts = found.counts
     if found.verdict != kind or found.entries or any(counts.values()) or opened_by(pr, node):
+        return None
+    if kind == "clean" and found.listed:
         return None
     if open_threads((pr.get("reviewThreads") or {}).get("nodes") or []):
         return None
