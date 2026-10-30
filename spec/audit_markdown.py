@@ -113,12 +113,16 @@ _MD_IMAGE_INLINE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
 _URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.IGNORECASE)
 
 
+def fenced_lines(base):
+    """The zero-based lines of the normalized `base` that sit inside a fenced code block."""
+    return {i for b in fidelity_text.code_blocks(base) if b.fenced for i in range(b.start, b.end)}
+
+
 def unfenced_text(text):
     """`text` normalized with every fenced code block's lines removed, since markup in a sample is shown rather than used."""
     base = normalize(text)
-    lines = base.split("\n")
-    fenced = {i for b in fidelity_text.code_blocks(base) if b.fenced for i in range(b.start, b.end)}
-    return "\n".join(ln for i, ln in enumerate(lines) if i not in fenced)
+    fenced = fenced_lines(base)
+    return "\n".join(ln for i, ln in enumerate(base.split("\n")) if i not in fenced)
 
 
 def definitions(text):
@@ -337,7 +341,7 @@ def readme_link_findings(text, model, slug):
     holds = {g["name"].lower(): g["holds"] for g in groups}
 
     base = normalize(text)
-    fenced = {i for b in fidelity_text.code_blocks(base) if b.fenced for i in range(b.start, b.end)}
+    fenced = fenced_lines(base)
     starts = {d.line: d for d in fidelity_text.link_definitions(base)}
     seen_headers, current, in_group = [], None, {}
     for i, ln in enumerate(base.split("\n")):

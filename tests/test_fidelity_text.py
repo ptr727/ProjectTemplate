@@ -109,7 +109,8 @@ class LinkCase(unittest.TestCase):
     def test_link_targets_read_every_link_form_and_skip_code(self) -> None:
         text = (
             "See [r][ref], [u](../\u00fc.md), <https://auto.example>, `[c](code.md)`, ![i](i.png).\n\n"
-            "    [indented](no.md)\n\n[ref]: ../x.md\n[unused]: other.md\n"
+            "    [indented](no.md)\n\n```md\n[fenced](no.md)\n[f]: no.md\n```\n\n"
+            "[ref]: ../x.md\n[unused]: other.md\n"
         )
         self.assertEqual(
             fidelity_text.link_targets(text),
