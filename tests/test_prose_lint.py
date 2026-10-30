@@ -2184,10 +2184,26 @@ class TestCommentAddedRule(BaitCase):
             ("unclosed", '# /// script\n# requires-python = ">=3.13"\nvalue = 1\n', "tool.py"),
             ("off form", '# /// script\n#requires-python = ">=3.13"\n# ///\n', "tool.py"),
             ("not python", '# /// script\n# requires-python = ">=3.13"\n# ///\n', "tool.sh"),
+            ("not script", '# /// notes\n# requires-python = ">=3.13"\n# ///\n', "tool.py"),
         ):
             with self.subTest(case=label):
                 found = prose_lint.check_file(self._write(text, name), {"comment-added"})
                 self.assertEqual([1, 2], [n for n, _, _ in found])
+
+    def test_no_comment_rule_reads_a_python_metadata_block(self) -> None:
+        """The block leaves the comment unit before any rule runs, so no rule needs its own skip.
+
+        A long dependency list read as one sentence, and a package spelled the British way, each
+        reported. The same text in a shell file still does, which is what makes the empty list mean
+        something.
+        """
+        deps = "".join(f'#   "package-{n}",\n' for n in range(30))
+        text = f'# /// script\n# dependencies = [\n#   "colour",\n{deps}# ]\n# ///\nvalue = 1\n'
+        rules = {name for name, (_, kinds) in prose_lint.RULE_TABLE.items() if "comment" in kinds}
+        self.assertEqual([], self.kinds(text, rules, name="tool.py"))
+        self.assertLessEqual(
+            {"sentence-length", "spelling"}, set(self.kinds(text, rules, name="tool.sh"))
+        )
 
     def test_a_reference_and_a_key_are_not_prose(self) -> None:
         for line in ("# https://example.invalid/spec\n", "# ignore:\n"):

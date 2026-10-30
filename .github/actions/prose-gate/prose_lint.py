@@ -1435,15 +1435,12 @@ def rule_comment_wrap(unit: Unit, ctx: Context) -> list[Finding]:
     continuing nothing is a case finding. An unpunctuated Markdown HTML comment is a marker.
     """
     comments, kept, configured = prose_comments(unit, ctx)
-    metadata = metadata_block_lines(unit, ctx)
     out: list[Finding] = []
     prev_body = prev_whole = ""
     prev_no = 0
     for line, whole in zip(comments, kept, strict=True):
-        if (
-            line.number in metadata
-            or is_non_prose_comment(line, configured, ctx.config)
-            or (unit.kind == "markup" and not SENT_END.search(line.text))
+        if is_non_prose_comment(line, configured, ctx.config) or (
+            unit.kind == "markup" and not SENT_END.search(line.text)
         ):
             prev_body = ""
             continue
@@ -1473,14 +1470,15 @@ def is_comment_prose(body: str, config: Config) -> bool:
     )
 
 
-def metadata_block_lines(unit: Unit, ctx: Context) -> set[int]:
-    """The lines of each closed metadata block the language declares, opener through closer.
+def without_metadata_blocks(unit: Unit, ctx: Context) -> Unit:
+    """The comment unit without the lines of each closed metadata block the language declares.
 
-    A line off the block's form, or a gap, abandons the block, so an unclosed one exempts nothing.
+    A tool reads such a block rather than a person, so no comment rule reads it. A line off the
+    block's form, or a gap, abandons the block, so an unclosed one is left whole.
     """
     form = ctx.language.get("metadata_block")
-    if not form:
-        return set()
+    if unit.kind != "comment" or not form:
+        return unit
     opener, body, closer = (re.compile(pattern) for pattern in form)
     out: set[int] = set()
     run: list[int] = []
@@ -1493,23 +1491,21 @@ def metadata_block_lines(unit: Unit, ctx: Context) -> set[int]:
             run.append(line.number)
         else:
             run = [line.number] if line.leading and opener.fullmatch(line.raw) else []
-    return out
+    return unit._replace(lines=tuple(line for line in unit.lines if line.number not in out))
 
 
 def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     """Every prose comment line opening its own line, which the diff scope narrows to a change.
 
     A modified line counts as added, the label being the answer. A help block, a documentation
-    comment, and a tool's metadata block are out of scope, as is a comment sharing its line with code.
+    comment, and a comment sharing its line with code, before or after it, are out of scope.
     """
-    metadata = metadata_block_lines(unit, ctx)
     lines = {
         line.number
         for line in unit.lines
         if line.leading
         and not line.trailed
         and not line.help
-        and line.number not in metadata
         and is_comment_prose(without_trailing_directive(ctx, line.text), ctx.config)
     }
     return [finding(n, "comment-added") for n in sorted(lines)]
@@ -1821,6 +1817,7 @@ def check_file(
     lexer = lexer_name(path, text.split("\n", 1)[0].rstrip("\r"))
     config = config_for(str(root) if root else None)
     ctx = Context(path, root, fenced, language_of(lexer) or {}, config, allowed)
+    units = [without_metadata_blocks(unit, ctx) for unit in units]
     passes: dict[Rule, set[str]] = {}
     for name in RULE_TABLE:
         if name in rules:
