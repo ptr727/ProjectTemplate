@@ -3811,6 +3811,63 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
+    def test_an_open_thread_ends_the_held_poll_at_once_over_a_running_check(self) -> None:
+        """No check clears a thread, so the poll stops on it and names who opened it."""
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        opened = [
+            thread("PRRT_a", login="qodo-code-review[bot]"),
+            thread("PRRT_b", login="coderabbitai[bot]"),
+            thread("PRRT_c", resolved=True, login="someone"),
+        ]
+        pr = self.into(
+            payload([review(oid=OLD)], threads=opened, merge="BLOCKED", checks=[gate]), attest=True
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_not_called()
+        self.assertIn(
+            "status=THREADS_UNRESOLVED an attested local pass covers this head, and 2 unresolved "
+            "thread(s) opened by coderabbitai[bot], qodo-code-review[bot] hold the merge",
+            self.out.getvalue(),
+        )
+
+    def test_a_thread_landing_mid_poll_ends_it_on_the_next_read(self) -> None:
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        quiet = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[gate]), attest=True)
+        landed = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", login="qodo-code-review[bot]")],
+                merge="BLOCKED",
+                checks=[gate],
+            ),
+            attest=True,
+        )
+        self.answer(quiet, quiet, landed)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_called_once()
+        self.assertIn("status=THREADS_UNRESOLVED", self.out.getvalue())
+
+    def test_only_resolved_threads_leave_a_settled_held_head_at_0(self) -> None:
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", resolved=True)],
+                merge="CLEAN",
+                checks=[check(name="gate")],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertNotIn("status=THREADS_UNRESOLVED", self.out.getvalue())
+
     def test_an_empty_rollup_holds_any_merge_but_a_conflicted_one(self) -> None:
         """A conflicted pull request runs no `pull_request` workflow, so none is coming.
 
@@ -6352,11 +6409,20 @@ class TestContract(unittest.TestCase):
         self.assertEqual("done", last)
         self.assertEqual([mock.call(15), mock.call(20)], slept.call_args_list)
 
-    def test_the_held_poll_reads_neither_threads_nor_files(self) -> None:
-        """The poll re-reads every iteration, and only the final digest read needs the two."""
+    def test_the_held_poll_reads_no_files_and_only_each_thread_s_state_and_author(self) -> None:
+        """The poll re-reads every iteration, and only the final digest read needs the rest.
+
+        It is the poll's own read that sees a thread land, so each thread's state and author ride it.
+        """
         poll = " ".join(pr_review.Q_HELD.split())
-        self.assertNotIn("reviewThreads", poll)
         self.assertNotIn("files(", poll)
+        threads = poll.split("reviewThreads(first:100)", 1)[1].split("pageInfo", 1)[0]
+        for field in ("isResolved", "author{login}"):
+            with self.subTest(field=field):
+                self.assertIn(field, threads)
+        for field in ("body", "path", "fullDatabaseId"):
+            with self.subTest(field=field):
+                self.assertNotIn(field, threads)
         self.assertIn("headRefOid baseRefName state mergeable mergeStateStatus", poll)
         self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", poll)
         self.assertIn("authorAssociation createdAt body", poll)

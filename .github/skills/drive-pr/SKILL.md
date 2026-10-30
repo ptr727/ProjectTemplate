@@ -102,7 +102,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    "Disposing of Every Finding" below. Request no Copilot round on this feature PR. Its `wait` reads
    step 2's attestation as `coverage=local` and requests none, unless a partial round or a truncated
    review history is on record. Exit `49` means the head carries no attestation, so run and record a
-   pass over it, push, and attest. A promotion re-reviews content its feature PRs already carried,
+   pass over it, push, and attest. Exit `46` means a thread is open on the head, so dispose of each
+   one per "Disposing of Every Finding" and wait again. A promotion re-reviews content its feature PRs already carried,
    so the hosted review runs once per change, at the promotion in step 6.
 4. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
