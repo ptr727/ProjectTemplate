@@ -2090,7 +2090,7 @@ class TestCommentAddedRule(BaitCase):
     def test_a_line_closing_a_comment_before_code_is_not_reported(self) -> None:
         """Deleting it deletes the code after the closer and leaves the comment unterminated.
 
-        A later comment on that line is not code, and a comment on its own line beside it still is.
+        A later comment on that line is not code, and a comment on a line of its own is still reported.
         """
         for name, code, opener, closer in (
             ("a.css", "a { color: red; }", "/*", "*/"),
@@ -2107,6 +2107,7 @@ class TestCommentAddedRule(BaitCase):
                     f"{opener} A real comment. {closer}\n"
                     f"{opener} A later one. {closer} {opener} And one more. {closer}\n"
                     f"{opener} A closer then code. {closer} {code}\n"
+                    f"{opener} A. {closer} {opener} B. {closer} {code}\n"
                 )
                 path = self._write(text, name)
                 found = prose_lint.check_file(path, {"comment-added"})

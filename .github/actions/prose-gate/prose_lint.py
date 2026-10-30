@@ -478,7 +478,7 @@ def discover(
 class Line(NamedTuple):
     """One source line of a unit, a comment's text without its marker and `raw` with it.
 
-    `trailed` is a line where code follows the comment's closer, so deleting it deletes code.
+    `trailed` marks a line where code follows the comment's closer, so deleting it deletes code.
     """
 
     number: int
@@ -627,8 +627,6 @@ def code_follows(text: str, found: list[tuple[int, str]], k: int) -> bool:
         if offset >= stop or text[at:offset].strip():
             break
         at = offset + len(value)
-        if "\n" in value:
-            return False
     return bool(text[at:stop].strip())
 
 
