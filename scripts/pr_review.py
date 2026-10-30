@@ -182,7 +182,8 @@ Subcommands
            empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one, as does a
            rollup holding only types this cannot read.
            46 = an open attested held head with an unresolved thread, whoever opened it, which ends
-           the poll at once and outranks 30, 44, and 45, since no check clears it. `status=THREADS_UNRESOLVED` names the authors.
+           the poll at once and outranks 30, 44, and 45, since no check clears it. A thread page cut
+           at 100 counts as holding one, since an open thread may sit past it. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
            for the head. 64 = the write scope could not
@@ -1628,6 +1629,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
                 holds(polled)
                 and local_cover(polled)
                 and not open_threads(polled["reviewThreads"]["nodes"])
+                and not threads_truncated(polled)
                 and held_checks_open(
                     polled,
                     check_nodes(polled),
@@ -1719,13 +1721,17 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
         if verdict:
             return verdict
         opened = open_threads(final["reviewThreads"]["nodes"])
-        if covered and opened and final.get("state", "OPEN") == "OPEN":
+        cut = threads_truncated(final)
+        if covered and (opened or cut) and final.get("state", "OPEN") == "OPEN":
             who = ", ".join(sorted({thread_author(t) or "an unnamed author" for t in opened}))
-            mark = "+" if threads_truncated(final) else ""
+            held_by = (
+                f"{len(opened)}{'+' if cut else ''} unresolved thread(s) opened by {who} hold"
+                if opened
+                else "the thread read was cut at 100 with none open in it, so one past it may hold"
+            )
             print(
                 f"status=THREADS_UNRESOLVED an attested local pass covers this head, and "
-                f"{len(opened)}{mark} unresolved thread(s) opened by {who} hold the merge, which "
-                "no check clears: dispose of each one, then wait again"
+                f"{held_by} the merge, which no check clears: dispose of each one, then wait again"
             )
             return 46
         runs = runs_open(final)

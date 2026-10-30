@@ -3887,6 +3887,29 @@ class TestCli(GqlCase):
             self.assertEqual(46, self.cli(["wait", "7"]))
         self.assertIn("1+ unresolved thread(s) opened by an unnamed author", self.out.getvalue())
 
+    def test_a_cut_thread_page_with_none_open_in_it_still_ends_the_poll(self) -> None:
+        """An open thread may sit past the page, so the poll fails closed rather than releasing to 0."""
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", resolved=True)],
+                more_threads=True,
+                merge="BLOCKED",
+                checks=[gate],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_not_called()
+        self.assertIn(
+            "the thread read was cut at 100 with none open in it, so one past it may hold the merge",
+            self.out.getvalue(),
+        )
+
     def test_an_open_thread_on_a_pull_request_no_longer_open_is_not_46(self) -> None:
         """Nothing is left to dispose of before a merge that already happened, so no rerun clears it."""
         for state in ("MERGED", "CLOSED"):
@@ -6468,7 +6491,7 @@ class TestContract(unittest.TestCase):
         self.assertEqual("done", last)
         self.assertEqual([mock.call(15), mock.call(20)], slept.call_args_list)
 
-    def test_the_held_poll_reads_no_files_and_only_each_thread_s_state_and_author(self) -> None:
+    def test_the_held_poll_reads_no_files_and_only_each_threads_state_and_author(self) -> None:
         """The poll re-reads every iteration, and only the final digest read needs the rest.
 
         It is the poll's own read that sees a thread land, so each thread's state and author ride it.
