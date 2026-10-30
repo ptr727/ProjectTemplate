@@ -262,7 +262,7 @@ def held_checks_open(
     only as their `needs:` finish, so a green rollup proves nothing while one is open. A CLEAN,
     UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
     hold it. Otherwise a required check still settling holds, as does any settling check while no
-    required check has posted. A rollup with no check holds while the merge
+    required check has posted. A rollup with no check it can read holds while the merge
     reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the rollup carries, and a pull
     request no longer open holds nothing.
 
@@ -290,7 +290,8 @@ def held_checks_open(
         return True
     if merge == "BLOCKED" and required_unregistered(pr, nodes, required):
         return True
-    return not nodes and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
+    unposted = not checks_tally(nodes)[1]
+    return unposted and merge in ("BLOCKED", "BEHIND", "DRAFT") and not checks_unreadable(pr)
 
 
 def checks_never_ran(
@@ -300,16 +301,18 @@ def checks_never_ran(
 
     A CLEAN, UNSTABLE, or HAS_HOOKS merge is owed nothing. The caller passes `required` only for a
     merge whose release judges registration, and a context is judged only on the head's own
-    rollup, not cut.
+    rollup, not cut. A rollup holding only types this cannot read is judged as one with no check.
     """
     if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") in MERGE_UNGATED:
         return ""
     if checks_unreadable(pr):
         return "the payload carries no commit matching the head, so read the check runs on the head commit"
-    if not nodes:
+    if not checks_tally(nodes)[1]:
+        only = ", ".join(checks_unread(nodes))
+        held = f" that this can read, the rollup holding only {only}" if only else ""
         return (
-            "no check has posted, so resolve the head's conflict with its base, since a DIRTY "
-            "merge runs no pull_request workflow until then"
+            f"no check has posted{held}, so resolve the head's conflict with its base, since a "
+            "DIRTY merge runs no pull_request workflow until then"
         )
     unmet = ", ".join(required_unregistered(pr, nodes, required))
     unread = checks_unread(nodes)
@@ -376,8 +379,8 @@ def checks_truncated(pr: dict) -> bool:
 
 
 def checks_unread(nodes: list[dict]) -> list[str]:
-    """The rollup typenames this could not read, in the order they appeared."""
-    return [n["unreadable"] for n in nodes if n.get("unreadable")]
+    """The rollup typenames this could not read, each named once and sorted."""
+    return sorted({n["unreadable"] for n in nodes if n.get("unreadable")})
 
 
 def checks_unreadable(pr: dict) -> bool:
@@ -419,7 +422,7 @@ def check_lines(
     unread = checks_unread(checks)
     if unread:
         lines.append(
-            f"  CHECKS PARTIALLY UNREAD ({', '.join(sorted(set(unread)))}): the rollup "
+            f"  CHECKS PARTIALLY UNREAD ({', '.join(unread)}): the rollup "
             "carries a context type this cannot normalize, so it is absent from the "
             "tally and the stuck reading alike and neither speaks for it"
         )
