@@ -1621,17 +1621,6 @@ class TestCommentWrapRule(BaitCase):
             with self.subTest(shape=label):
                 self.assertEqual([], self.flag("a.yml", text))
 
-    def test_a_metadata_block_opener_rides_on_the_lines_under_it(self) -> None:
-        """A PEP 723 block, which `uv` parses verbatim, so no reformatting is available.
-
-        The opener is not key-value and joins no run. It drew a finding only because the line
-        under it read as a continuation of it, so exempting that line is what clears the opener.
-        """
-        block = (
-            '# /// script\n# requires-python = ">=3.9"\n# dependencies = ["bleak"]\n# ///\nx = 1\n'
-        )
-        self.assertEqual([], self.flag("a.py", block))
-
     def test_a_metadata_block_is_skipped_whole_whatever_it_declares(self) -> None:
         """One key is not a run, and `uv` parses the block verbatim, so no reformatting is available.
 
@@ -1643,6 +1632,7 @@ class TestCommentWrapRule(BaitCase):
         )
         for label, block in (
             ("one key", '# /// script\n# requires-python = ">=3.9"\n# ///\nx = 1\n'),
+            ("two keys", '# /// script\n# requires-python = ">=3.9"\n# dependencies = []\n# ///\n'),
             ("tool table", table),
         ):
             with self.subTest(case=label):
