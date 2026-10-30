@@ -298,9 +298,16 @@ jobs:
           directories: ${{ inputs.python-directories }}
           report-uncovered: 'true'
 
-      # @latest rather than a version pin, since a `uvx <tool>@<ver>` pin is nothing Dependabot tracks and would silently go stale.
-      # The action SHA above is Dependabot-tracked.
-      # This is the one place the fleet's uvx tools are pinned or floated, decided here.
+      # The ruff version is the one the requirements.txt beside this action pins, which Dependabot's pip ecosystem bumps.
+      # The action resolves at this workflow's own commit, so a caller at a hub pin runs that pin's ruff rather than its own tree's.
+      - name: Read Python tool pins step
+        id: pins
+        if: steps.python.outputs.any == 'true'
+        uses: $/.github/actions/python-tool-pins
+
+      # The other uvx tools run @latest, since a `uvx <tool>@<ver>` literal in a run: line is nothing Dependabot tracks and would silently go stale.
+      # The setup-uv SHA here is Dependabot-tracked.
+      # This step and the one above are the one place the fleet's uvx tools are pinned or floated, decided here.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -356,6 +363,7 @@ jobs:
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
+          RUFF_VERSION: ${{ steps.pins.outputs.ruff }}
         run: |
           set -Eeuo pipefail
           while IFS=$'\t' read -r kind dir; do
@@ -366,7 +374,7 @@ jobs:
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && "$dir/.venv/bin/python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("ruff") is None)' < /dev/null; then
               (cd "$dir" && .venv/bin/python -m ruff check .) < /dev/null
             else
-              (cd "$dir" && uvx ruff@latest check .) < /dev/null
+              (cd "$dir" && uvx "ruff@$RUFF_VERSION" check .) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -375,6 +383,7 @@ jobs:
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
+          RUFF_VERSION: ${{ steps.pins.outputs.ruff }}
         run: |
           set -Eeuo pipefail
           while IFS=$'\t' read -r kind dir; do
@@ -385,7 +394,7 @@ jobs:
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && "$dir/.venv/bin/python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("ruff") is None)' < /dev/null; then
               (cd "$dir" && .venv/bin/python -m ruff format --check .) < /dev/null
             else
-              (cd "$dir" && uvx ruff@latest format --check .) < /dev/null
+              (cd "$dir" && uvx "ruff@$RUFF_VERSION" format --check .) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
