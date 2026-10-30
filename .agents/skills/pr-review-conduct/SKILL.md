@@ -136,8 +136,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A Copilot round states its own count of open findings, which the digest reads as
    `overview=T/M` beside the number of review threads that round opened. The digest's
    `FINDINGS WITH NO THREAD` block counts the findings the round names that no open entry links
-   to a thread on the pull request. The round can name them in that count or in its findings
-   list. What the block counts is usually
+   to a thread on the pull request. The round can name them in that count, in its findings
+   list, or in its file table's findings column. What the block counts is usually
    findings the round withheld, the same blind spot under a different name, and sometimes the
    digest undercounting instead. Reading the review body is what tells the two apart, and nothing
    else does. So read it and dispose of what it holds as this section's outcomes require. `T`

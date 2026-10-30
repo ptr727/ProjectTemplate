@@ -372,12 +372,12 @@ class TestOpenFindings(unittest.TestCase):
                 self.assertEqual((), found.notes)
                 self.assertEqual((), found.unplaced)
 
-    def test_a_narrative_naming_findings_wins_over_a_clean_headline(self) -> None:
+    def test_a_narrative_naming_findings_is_counted_beside_a_clean_headline(self) -> None:
         found = adapter.read(unresolved())
         self.assertEqual("clean", found.verdict)
-        self.assertEqual(2, found.open)
+        self.assertEqual(0, found.open)
+        self.assertEqual(2, found.listed)
         self.assertEqual(2, found.unthreaded)
-        self.assertEqual(2, found.counts["threaded"])
         self.assertEqual(("src/f0.sh", "src/f1.sh"), found.table)
         self.assertEqual((), found.notes)
         self.assertEqual((), found.unplaced)
@@ -387,18 +387,20 @@ class TestOpenFindings(unittest.TestCase):
             (narrative(cells=("", " ")), 2),
             (narrative(listed=()), 2),
             (narrative(listed=("one.",), cells=("One.", "", "Two.")), 2),
-            (what_changed(), None),
+            (what_changed(), 0),
         ):
             with self.subTest(sections=sections[-60:]):
                 found = adapter.read(body(sections=sections))
-                self.assertEqual(want, found.open)
-                self.assertEqual(want or 0, found.unthreaded)
+                self.assertIsNone(found.open)
+                self.assertEqual(want, found.listed)
+                self.assertEqual(want, found.unthreaded)
                 self.assertEqual((), found.notes)
 
-    def test_a_larger_or_unbelievable_stated_count_stands_beside_the_lists(self) -> None:
+    def test_a_stated_count_stands_beside_the_lists_that_name_findings(self) -> None:
         stated = adapter.read(unresolved(open_section("3 open findings", ("101", "102", "103"))))
-        self.assertEqual(3, stated.open)
-        self.assertEqual(3, stated.entries)
+        self.assertEqual(
+            (3, 3, 2, 0), (stated.open, stated.entries, stated.listed, stated.unthreaded)
+        )
         unbelievable = adapter.read(unresolved("**99999 open findings**\n\n"))
         self.assertIsNone(unbelievable.open)
         self.assertEqual(2, unbelievable.unthreaded)

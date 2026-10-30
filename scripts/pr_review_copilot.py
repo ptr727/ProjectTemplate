@@ -107,8 +107,8 @@ class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
     `open` is the count of open findings the body states, None where it states none or one this
-    reader cannot believe. A findings list or the file table's findings column naming more raises
-    it to their count. Both name the same findings, so the larger of the two is that count.
+    reader cannot believe. `listed` is the findings its findings lists or its file table's
+    findings column name, the larger of the two, since both name the same findings.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
     `table` is the paths the body's file table names, None where it carries no table. `unplaced`
     is each part the reader cannot place, with its text, the subset of `notes` that can hold a
@@ -125,6 +125,7 @@ class Reading(NamedTuple):
     effort_source: str = "unknown"
     open: int | None = None
     entries: int = 0
+    listed: int = 0
     unthreaded: int = 0
     sections: tuple[Section, ...] = ()
     table: tuple[str, ...] | None = None
@@ -458,7 +459,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             return False
         if t.type == "table_open":
             return bool(vocab["table_header"]) and (
-                table_paths(tokens, n, vocab["table_header"]) is not None
+                table_cells(tokens, n, vocab["table_header"]) is not None
             )
         if t.type == "html_block":
             return bool(FLEET_REVIEW.search(t.content))
@@ -525,9 +526,16 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             and not token.level
             and not any(a <= (token.map or [0])[0] < b for a, b in counted)
         ):
-            if (rows := table_paths(tokens, i, vocab["table_header"])) is not None:
-                table = (table or []) + rows
-                tabled += table_findings(tokens, i, vocab["table_findings"])
+            if (cells := table_cells(tokens, i, vocab["table_header"])) is not None:
+                heads, rows = cells
+                table = (table or []) + [p for row in rows if row for p in paths(row[0])]
+                if vocab["table_findings"] in heads:
+                    column = heads.index(vocab["table_findings"])
+                    tabled += sum(
+                        any(c.isalnum() for c in inline_text(row[column]))
+                        for row in rows
+                        if len(row) > column
+                    )
         i += 1
 
     # A count stated in a top-level paragraph opening on it, never a list item, outside counted sections.
@@ -554,10 +562,9 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         if coverage == "none" or rank[state] > rank[coverage]:
             coverage, coverage_line = state, said
 
-    named = max(listed, tabled)
-    open_count = total(opens) if opens else (named or None)
-    if open_count is not None:
-        named = open_count = max(open_count, named)
+    open_count = total(opens) if opens else None
+    listed = max(listed, tabled)
+    named = max(open_count or 0, listed)
     return Reading(
         coverage=coverage,
         coverage_line=coverage_line,
@@ -569,6 +576,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         effort_source=effort_source,
         open=open_count,
         entries=entries,
+        listed=listed,
         unthreaded=max(named - linked, 0),
         sections=tuple(sections),
         table=tuple(table) if table is not None else None,
@@ -677,47 +685,28 @@ def items_after(tokens: list[Token], start: int) -> int:
     return count
 
 
-def table_paths(tokens: list[Token], start: int, header: str) -> list[str] | None:
-    """The paths in the first column of the table opening at `start`, where its header names one."""
-    named: list[str] = []
-    column = -1
+def table_cells(
+    tokens: list[Token], start: int, header: str
+) -> tuple[list[str], list[list[Token]]] | None:
+    """The header labels and each body row's cells of the table opening at `start`.
+
+    None where its first header is not `header`, since only the file table is read.
+    """
+    heads: list[str] = []
+    rows: list[list[Token]] = []
     head = True
     for token in tokens[start + 1 :]:
         if token.type == "table_close":
             break
-        if token.type == "tr_open":
-            column = -1
-        elif token.type in ("th_open", "td_open"):
-            column += 1
-        elif token.type == "tbody_open":
+        if token.type == "tbody_open":
             head = False
-        elif token.type == "inline" and column == 0:
-            if head and label(inline_text(token)) != header:
-                return None
-            if not head:
-                named.extend(paths(token))
-    return named
-
-
-def table_findings(tokens: list[Token], start: int, header: str) -> int:
-    """The rows of the table opening at `start` whose cell under the `header` column names text."""
-    if not header:
-        return 0
-    column, wanted, head, count = -1, -1, True, 0
-    for token in tokens[start + 1 :]:
-        if token.type == "table_close":
-            break
-        if token.type == "tr_open":
-            column = -1
-        elif token.type in ("th_open", "td_open"):
-            column += 1
-        elif token.type == "tbody_open":
-            head = False
-        elif token.type == "inline" and head and label(inline_text(token)) == header:
-            wanted = column
-        elif token.type == "inline" and not head and column == wanted >= 0:
-            count += any(c.isalnum() for c in inline_text(token))
-    return count
+        elif token.type == "tr_open" and not head:
+            rows.append([])
+        elif token.type == "inline" and head:
+            heads.append(label(inline_text(token)))
+        elif token.type == "inline" and rows:
+            rows[-1].append(token)
+    return (heads, rows) if heads and heads[0] == header else None
 
 
 def html_lines(body: str) -> list[str]:

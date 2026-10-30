@@ -2255,21 +2255,26 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual(0, self.status(payload([review(body=text)], files=["a.py"])))
         self.assertIn("CLEAN VERDICT HEADLINE", self.out.getvalue())
 
-    def test_a_clean_verdict_whose_narrative_lists_findings_is_not_read_clean(self) -> None:
-        text = overview_v2(
-            open_count="0 open findings", entries=0, verdict="### Approval recommended"
-        ).replace(
-            "- Narrow the reader.\n",
-            "- Narrow the reader.\n- Review findings remain unresolved:\n"
-            "  - `a.py`: moderate ([P1]) keep the old path.\n  - `a.py`: nit ([P2]) name it.\n",
-            1,
-        )
-        self.assertEqual(0, self.status(payload([review(body=text)], files=["a.py"])))
-        out = self.out.getvalue()
-        self.assertIn("overview=2/0 ", out)
-        self.assertIn("FINDINGS WITH NO THREAD (2)", out)
-        self.assertNotIn("CLEAN VERDICT HEADLINE", out)
-        self.assertNotIn("REVIEWER OUTPUT NOTED", out)
+    def test_a_narrative_listing_findings_is_printed_and_holds_a_flagging_verdict(self) -> None:
+        for verdict, code in (("### Approval recommended", 0), ("### Needs a closer look", 50)):
+            with self.subTest(verdict=verdict):
+                self.out.seek(0)
+                self.out.truncate()
+                text = overview_v2(
+                    open_count="0 open findings", entries=0, verdict=verdict
+                ).replace(
+                    "- Narrow the reader.\n",
+                    "- Narrow the reader.\n- Review findings remain unresolved:\n"
+                    "  - `a.py`: moderate ([P1]) keep the old path.\n"
+                    "  - `a.py`: nit ([P2]) name it.\n",
+                    1,
+                )
+                self.assertEqual(code, self.status(payload([review(body=text)], files=["a.py"])))
+                out = self.out.getvalue()
+                self.assertIn("overview=0/0 ", out)
+                self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+                self.assertNotIn("CLEAN VERDICT HEADLINE", out)
+                self.assertNotIn("REVIEWER OUTPUT NOTED", out)
 
     def test_a_stated_count_beyond_the_round_s_threads_is_printed(self) -> None:
         threads = [thread("T1", rid="PRR_one", cid="4000000001")]
