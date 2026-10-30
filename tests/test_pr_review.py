@@ -3870,12 +3870,11 @@ class TestCli(GqlCase):
                     with mock.patch.object(pr_review.time, "sleep"):
                         self.assertEqual(expected, self.cli(["wait", "7", "--timeout", "0"]))
 
-    def test_a_cut_thread_page_and_an_unnamed_author_are_both_named(self) -> None:
+    def test_an_unnamed_author_is_named_as_one(self) -> None:
         pr = self.into(
             payload(
                 [review(oid=OLD)],
                 threads=[thread("PRRT_a", login="")],
-                more_threads=True,
                 merge="CLEAN",
                 checks=[check(name="gate")],
             ),
@@ -3885,30 +3884,37 @@ class TestCli(GqlCase):
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
             self.assertEqual(46, self.cli(["wait", "7"]))
-        self.assertIn("1+ unresolved thread(s) opened by an unnamed author", self.out.getvalue())
+        self.assertIn("1 unresolved thread(s) opened by an unnamed author", self.out.getvalue())
 
-    def test_a_cut_thread_page_with_none_open_in_it_still_ends_the_poll(self) -> None:
-        """An open thread may sit past the page, so the poll fails closed rather than releasing to 0."""
-        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
-        pr = self.into(
-            payload(
-                [review(oid=OLD)],
-                threads=[thread("PRRT_a", resolved=True)],
-                more_threads=True,
-                merge="BLOCKED",
-                checks=[gate],
-            ),
-            attest=True,
-        )
-        self.answer(pr)
-        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
-        with mock.patch.object(pr_review.time, "sleep") as slept:
-            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "60"]))
-        slept.assert_not_called()
-        self.assertIn(
-            "the thread read was cut at 100 with none open in it, so one past it may hold the merge",
-            self.out.getvalue(),
-        )
+    def test_a_cut_thread_page_is_walked_to_its_end_before_it_decides(self) -> None:
+        """A page of resolved threads proves nothing past it, so every page is read first."""
+        past = [thread("PRRT_z", login="coderabbitai[bot]")]
+        for walked, code in (([], 0), (past, 46)):
+            with self.subTest(walked=len(walked)):
+                pr = self.into(
+                    payload(
+                        [review(oid=OLD)],
+                        threads=[thread("PRRT_a", resolved=True)],
+                        more_threads=True,
+                        merge="CLEAN",
+                        checks=[check(name="gate")],
+                    ),
+                    attest=True,
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                self.out.seek(0)
+                self.out.truncate()
+                with (
+                    mock.patch.object(pr_review, "unresolved_threads", return_value=walked) as walk,
+                    mock.patch.object(pr_review.time, "sleep"),
+                ):
+                    self.assertEqual(code, self.cli(["wait", "7"]))
+                walk.assert_called_with("o", "r", 7)
+                if code == 46:
+                    self.assertIn(
+                        "1 unresolved thread(s) opened by coderabbitai[bot]", self.out.getvalue()
+                    )
 
     def test_an_open_thread_on_a_pull_request_no_longer_open_is_not_46(self) -> None:
         """Nothing is left to dispose of before a merge that already happened, so no rerun clears it."""

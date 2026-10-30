@@ -183,7 +183,7 @@ Subcommands
            rollup holding only types this cannot read.
            46 = an open attested held head with an unresolved thread, whoever opened it, which ends
            the poll at once and outranks 30, 44, and 45, since no check clears it. A thread page cut
-           at 100 counts as holding one, since an open thread may sit past it. `status=THREADS_UNRESOLVED` names the authors.
+           at 100 is read to its end first. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
            for the head. 64 = the write scope could not
@@ -1011,6 +1011,13 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     return out
 
 
+def open_on_head(owner: str, repo: str, num: int, pr: dict) -> list[dict]:
+    """Every unresolved thread in `pr`, walking every page where its thread read was cut."""
+    if threads_truncated(pr):
+        return unresolved_threads(owner, repo, num)
+    return open_threads(pr["reviewThreads"]["nodes"])
+
+
 def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     """Post one PR conversation comment and confirm the returned comment. Returns an exit code."""
     if refused := scope_refusal(owner):
@@ -1628,8 +1635,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             return (
                 holds(polled)
                 and local_cover(polled)
-                and not open_threads(polled["reviewThreads"]["nodes"])
-                and not threads_truncated(polled)
+                and not open_on_head(owner, repo, a.number, polled)
                 and held_checks_open(
                     polled,
                     check_nodes(polled),
@@ -1720,18 +1726,13 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             )
         if verdict:
             return verdict
-        opened = open_threads(final["reviewThreads"]["nodes"])
-        cut = threads_truncated(final)
-        if covered and (opened or cut) and final.get("state", "OPEN") == "OPEN":
+        opened = covered and open_on_head(owner, repo, a.number, final)
+        if opened and final.get("state", "OPEN") == "OPEN":
             who = ", ".join(sorted({thread_author(t) or "an unnamed author" for t in opened}))
-            held_by = (
-                f"{len(opened)}{'+' if cut else ''} unresolved thread(s) opened by {who} hold"
-                if opened
-                else "the thread read was cut at 100 with none open in it, so one past it may hold"
-            )
             print(
                 f"status=THREADS_UNRESOLVED an attested local pass covers this head, and "
-                f"{held_by} the merge, which no check clears: dispose of each one, then wait again"
+                f"{len(opened)} unresolved thread(s) opened by {who} hold the merge, which no "
+                "check clears: dispose of each one, then wait again"
             )
             return 46
         runs = runs_open(final)
