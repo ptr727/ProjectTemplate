@@ -35,7 +35,7 @@ python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path --check issue-ref --check sentence-length
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
-python3 spec/validate.py
+uv run --no-project --script spec/validate.py
 python3 scripts/docker_lint.py
 ```
 
@@ -141,5 +141,5 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 - [catalog/](./catalog/) holds reference snippets the audit compares implementations against.
 - [reports/](./reports/) holds per-repo audit output.
 - [scripts/](./scripts/) holds the gates that run in CI and locally, and that every fleet repository reaches rather than carries.
-- [spec/fidelity_text.py](./spec/fidelity_text.py) reads headings and code blocks with markdown-it-py for the audit's region extraction, the carry, the skill build, and the review ledger alike. Its `extract_section()` and `strip_sections()` are the audit's region reading, and its `normalize()` is the comparable form the audit and the carry share.
+- [spec/fidelity_text.py](./spec/fidelity_text.py) reads headings and code blocks with markdown-it-py for the audit's region extraction, the carry, the skill build, the review ledger, and the validator. It also reads reference definitions for the audit's README link checks, and link targets for the validator's carried-link check. Its `extract_section()` and `strip_sections()` are the audit's region reading, and its `normalize()` is the comparable form the audit and the carry share.
 - `read_regular_file()` and `write_regular_file()` in [host-setup/agent-safety/claude/install.py](./host-setup/agent-safety/claude/install.py) are the shared primitives for reading and replacing a file that must be regular. Each opens without blocking and judges the open descriptor, so a FIFO or a device is refused rather than hanging the call.
