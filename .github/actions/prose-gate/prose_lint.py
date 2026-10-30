@@ -489,7 +489,7 @@ class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
     `source` is every line, and `prose` and `code` the unfenced ones. `paragraph` is a Markdown
-    sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
+    sentence block, and `cell` one table cell as the parser splits its row. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
     documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
     """
 
@@ -849,7 +849,7 @@ def front_matter_end(lines: list[str]) -> int:
 MARKDOWN = MarkdownIt("commonmark").enable("table")
 HTML = BASE["languages"]["markup"]
 TAG = re.compile(r"<[^<>]*>")
-BLOCK_PARENTS = (["paragraph_open"], ["th_open"], ["td_open"])
+BLOCK_PARENTS = {"paragraph_open": "paragraph", "th_open": "cell", "td_open": "cell"}
 
 
 def extract_markdown(lines: list[str]) -> Extracted:
@@ -881,11 +881,10 @@ def extract_markdown(lines: list[str]) -> Extracted:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
-            if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
+            kind = BLOCK_PARENTS.get(parents[-1] if parents else "")
+            if kind and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
-                paragraphs.append(
-                    Unit("paragraph", tuple(Line(first + i, s.strip()) for i, s in spans))
-                )
+                paragraphs.append(Unit(kind, tuple(Line(first + i, s.strip()) for i, s in spans)))
     skip = frozenset(code)
     units = [
         Unit("source", tuple(Line(n, t) for n, t in enumerate(lines, 1))),
@@ -966,6 +965,7 @@ class Context(NamedTuple):
     language: dict[str, Any]
     config: Config
     allowed: set[int] | None = None
+    rows: frozenset[int] = frozenset()
 
 
 # The one sentence boundary every reader shares, a terminator that no initial or abbreviation ends.
@@ -1097,12 +1097,15 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
-    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one."""
+    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
+
+    A table row is judged a parsed cell at a time, so an escaped pipe stays inside its cell.
+    """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
-        cells = line.strip().strip("|").split("|") if line.lstrip().startswith("|") else [line]
-        pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
-        for sentence in (s for s in pieces if s.strip()):
+        if unit.kind == "prose" and n in ctx.rows:
+            continue
+        for sentence in (s for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", line)) if s.strip()):
             head, _, tail = sentence.partition(";")
             listish = sentence.count(";") > 1 or (
                 LABELED_ITEM.match(LIST_MARKER.sub("", head, count=1)) is not None
@@ -1682,7 +1685,7 @@ def docstring_sentences(unit: Unit, ctx: Context) -> list[Finding]:
 
 def rule_sentence_length(unit: Unit, ctx: Context) -> list[Finding]:
     """A sentence over the word cap, in a Markdown block, a comment run, or a docstring."""
-    if unit.kind == "paragraph":
+    if unit.kind in ("paragraph", "cell"):
         return over_cap(
             [(line.number, strip_list_marker(line.text)) for line in unit.lines], ctx.allowed
         )
@@ -1700,12 +1703,15 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "comment-case": (rule_comment_wrap, frozenset({"comment", "markup"})),
     "comment-added": (rule_comment_added, frozenset({"comment"})),
     "issue-ref": (rule_issue_ref, frozenset({"prose", "comment", "doc", "docstring"})),
-    "sentence-length": (rule_sentence_length, frozenset({"paragraph", "comment", "docstring"})),
+    "sentence-length": (
+        rule_sentence_length,
+        frozenset({"paragraph", "cell", "comment", "docstring"}),
+    ),
     "home-path": (rule_home_path, frozenset({"source"})),
     "charset": (rule_charset, frozenset({"prose", "code"})),
     "charset-unknown": (rule_charset, frozenset({"prose", "code"})),
     "dead-path": (rule_dead_path, frozenset({"prose"})),
-    "semicolon": (rule_semicolon, frozenset({"prose"})),
+    "semicolon": (rule_semicolon, frozenset({"prose", "cell"})),
     "dash": (rule_dash, frozenset({"prose"})),
     "dupword": (rule_dupword, frozenset({"prose", "comment"})),
     "spelling": (rule_spelling, frozenset({"prose", "comment"})),
@@ -1736,13 +1742,14 @@ def check_file(
     bom = chr(0xFEFF)
     text = decoded.removeprefix(bom)
     out = [f for f in charset_findings(1, bom) if f[1] in rules] if text != decoded else []
-    lex = any(RULE_TABLE[r][1] - {"source", "prose", "code"} for r in rules)
+    lex = any(RULE_TABLE[r][1] - {"source", "prose", "code", "cell"} for r in rules)
     units, fenced, read_plain = extract(path, text, lex)
     if read_plain and plain is not None:
         plain.append(path)
     lexer = lexer_name(path, text.split("\n", 1)[0].rstrip("\r"))
     config = config_for(str(root) if root else None)
-    ctx = Context(path, root, fenced, language_of(lexer) or {}, config, allowed)
+    rows = frozenset(line.number for u in units if u.kind == "cell" for line in u.lines)
+    ctx = Context(path, root, fenced, language_of(lexer) or {}, config, allowed, rows)
     passes: dict[Rule, set[str]] = {}
     for name in RULE_TABLE:
         if name in rules:
