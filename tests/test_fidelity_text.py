@@ -93,11 +93,10 @@ class LinkCase(unittest.TestCase):
         )
 
     def test_an_empty_or_wrapped_definition_is_read_as_written(self) -> None:
-        text = "[empty]: <>\n\n[two\nlines]: t.md\n"
-        self.assertEqual(
-            [(d.label, d.url) for d in fidelity_text.link_definitions(text)],
-            [("empty", ""), ("two\nlines", "t.md")],
-        )
+        text = "[empty]: <>\n\n> [two\n> lines]: t.md\n"
+        found = fidelity_text.link_definitions(text)
+        self.assertEqual([(d.label, d.url) for d in found], [("empty", ""), ("two\nlines", "t.md")])
+        self.assertEqual(fidelity_text.reference_key(found[1].label), "TWO LINES")
 
     def test_a_link_and_its_definition_read_as_one_target(self) -> None:
         text = "Read [n][n].\n\n[n]: ./docs/a%20b.md\n"

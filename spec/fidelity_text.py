@@ -26,9 +26,15 @@ _JOB_NEEDS = re.compile(
 # Tables are on because GitHub renders them, and a table changes where a block ends.
 _BLOCKS = markdown_it.MarkdownIt("commonmark").enable("table").disable("inline")
 
+_DEFINITIONS = (
+    markdown_it.MarkdownIt("commonmark", {"inline_definitions": True})
+    .enable("table")
+    .disable("inline")
+)
+
 _LINKS = markdown_it.MarkdownIt("commonmark").enable("table")
 
-_DEFINITION = re.compile(r"\[((?:[^\]\\]|\\.)+)\]:[ \t]*\n?[ \t>]*(?:<([^>\n]*)>|(\S+))")
+_DESTINATION = re.compile(r"(?<!\\)\]:[ \t]*\n?[ \t>]*(?:<([^>\n]*)>|(\S+))")
 
 
 @functools.lru_cache(maxsize=16)
@@ -122,28 +128,30 @@ def link_definitions(text):
 
     The parser decides which lines are definitions. So one inside a code block is content, and so is
     one that would interrupt a paragraph. Of two whose labels fold together the first wins, as it
-    does when GitHub renders the document. The label and destination are read from the lines the
-    parser placed the definition on, since it stores both normalized. `text` is expected with its
-    line endings normalized, so a definition's line indexes `text.split("\\n")`.
+    does when GitHub renders the document. The parser keeps each label as written. Its destination
+    is stored normalized, so that is read from the lines the parser placed the definition on.
+    `text` is expected with its line endings normalized, so a definition's line indexes
+    `text.split("\\n")`.
     """
-    env = {}
-    _BLOCKS.parse(text, env)
     lines = text.split("\n")
-    found = []
-    for ref in env.get("references", {}).values():
-        start, end = ref["map"]
-        m = _DEFINITION.search("\n".join(lines[start:end]))
-        if m:
-            url = m.group(3) if m.group(2) is None else m.group(2)
-            found.append(LinkDefinition(m.group(1), url, start))
-    return sorted(found, key=lambda d: d.line)
+    found, seen = [], set()
+    for t in _DEFINITIONS.parse(text):
+        if t.type != "definition" or t.meta["id"] in seen:
+            continue
+        seen.add(t.meta["id"])
+        start, end = t.map
+        m = _DESTINATION.search("\n".join(lines[start:end]))
+        url = m.group(2) if m.group(1) is None else m.group(1)
+        found.append(LinkDefinition(t.meta["label"], url, start))
+    return found
 
 
 def link_targets(text):
-    """Each distinct destination `text` links to, in order of first appearance.
+    """Each distinct destination `text` links to.
 
-    That is every link and image the parser reads, autolinks included, and then every reference
-    definition, used or not. A carried definition carries its destination either way. Markup
+    That is every link and image the parser reads, autolinks included, in the order they appear.
+    After them comes every reference definition in its own order, used or not, since a carried
+    definition carries its destination either way. Markup
     in a code span or a code block is content rather than a link. Every destination is read back
     from the parser's form decoded, so a link and its definition compare as one target.
     """
