@@ -1435,12 +1435,15 @@ def rule_comment_wrap(unit: Unit, ctx: Context) -> list[Finding]:
     continuing nothing is a case finding. An unpunctuated Markdown HTML comment is a marker.
     """
     comments, kept, configured = prose_comments(unit, ctx)
+    metadata = metadata_block_lines(unit, ctx)
     out: list[Finding] = []
     prev_body = prev_whole = ""
     prev_no = 0
     for line, whole in zip(comments, kept, strict=True):
-        if is_non_prose_comment(line, configured, ctx.config) or (
-            unit.kind == "markup" and not SENT_END.search(line.text)
+        if (
+            line.number in metadata
+            or is_non_prose_comment(line, configured, ctx.config)
+            or (unit.kind == "markup" and not SENT_END.search(line.text))
         ):
             prev_body = ""
             continue

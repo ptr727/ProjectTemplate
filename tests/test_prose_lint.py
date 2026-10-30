@@ -1632,16 +1632,21 @@ class TestCommentWrapRule(BaitCase):
         )
         self.assertEqual([], self.flag("a.py", block))
 
-    def test_a_metadata_block_declaring_one_key_is_not_a_run(self) -> None:
-        """The count's own cost, reached by a block rather than by a marker comment.
+    def test_a_metadata_block_is_skipped_whole_whatever_it_declares(self) -> None:
+        """One key is not a run, and `uv` parses the block verbatim, so no reformatting is available.
 
-        One key-value line is not a run, so nothing carries the opener and it reports. `uv` parses
-        the block verbatim, so no reformatting is available either, and the `comments` label reaches
-        `comment-added` rather than this rule. The finding therefore stands with no remedy at all,
-        which is what the count costs on a block rather than on a marker comment.
+        The language data declares the block's form, so the rules skip it whole rather than by run.
         """
-        block = '# /// script\n# requires-python = ">=3.9"\n# ///\nx = 1\n'
-        self.assertEqual(["comment-wrap"], self.flag("a.py", block))
+        table = (
+            '# /// script\n# dependencies = [\n#   "bleak",\n# ]\n#\n# [tool.uv]\n'
+            '# exclude-newer = "2026-01-01T00:00:00Z"\n# ///\nx = 1\n'
+        )
+        for label, block in (
+            ("one key", '# /// script\n# requires-python = ">=3.9"\n# ///\nx = 1\n'),
+            ("tool table", table),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual([], self.flag("a.py", block))
 
     def test_a_sentence_wrapping_into_a_run_loses_its_wrap(self) -> None:
         """The third cost, pinned so a later change meets it rather than finds it.
@@ -2185,14 +2190,14 @@ class TestCommentAddedRule(BaitCase):
                 )
             ],
         )
-        for label, text in (
-            ("unclosed", '# /// script\n# requires-python = ">=3.13"\nvalue = 1\n'),
-            ("off form", '# /// script\n#requires-python = ">=3.13"\n# ///\n'),
-            ("not python", '# /// script\n# requires-python = ">=3.13"\n# ///\n'),
+        for label, text, name in (
+            ("unclosed", '# /// script\n# requires-python = ">=3.13"\nvalue = 1\n', "tool.py"),
+            ("off form", '# /// script\n#requires-python = ">=3.13"\n# ///\n', "tool.py"),
+            ("not python", '# /// script\n# requires-python = ">=3.13"\n# ///\n', "tool.sh"),
         ):
             with self.subTest(case=label):
-                name = "tool.sh" if label == "not python" else "tool.py"
-                self.assertIn("comment-added", self.kinds(text, {"comment-added"}, name=name))
+                found = prose_lint.check_file(self._write(text, name), {"comment-added"})
+                self.assertEqual([1, 2], [n for n, _, _ in found])
 
     def test_a_reference_and_a_key_are_not_prose(self) -> None:
         for line in ("# https://example.invalid/spec\n", "# ignore:\n"):
