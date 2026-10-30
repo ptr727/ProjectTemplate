@@ -1784,6 +1784,31 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(200, gate.get("newer_run"))
         self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
 
+    def test_a_stale_record_in_an_older_run_is_superseded_by_a_newer_run(self) -> None:
+        """The newer run will post its own record, so the older one's stale reading is no verdict."""
+        stale = check(
+            name="gate",
+            status="IN_PROGRESS",
+            conclusion="",
+            suite=10,
+            workflow=7,
+            suite_status="COMPLETED",
+            run=100,
+        )
+        pr = payload([review()], merge="BLOCKED", checks=[stale])
+        running = {
+            "databaseId": 20,
+            "status": "IN_PROGRESS",
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [running]}
+        nodes = pr_review_checks.check_nodes(pr)
+        (gate,) = nodes
+        self.assertTrue(gate.get("superseded"))
+        self.assertEqual(200, gate.get("newer_run"))
+        self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
+        self.assertTrue(pr_review_checks.held_checks_open(pr, nodes, NOW, 300, 1800))
+
     def test_an_unfinished_check_in_an_older_run_keeps_its_stuck_reading(self) -> None:
         """A newer run queued behind the older one cannot start, so the older one's shape stands."""
         starved = check(

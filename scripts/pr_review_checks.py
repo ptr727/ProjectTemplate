@@ -77,7 +77,8 @@ def check_nodes(pr: dict) -> list[dict]:
     the workflow's newest suite has not completed. The reason is that a cancelled run's
     aggregator fails over jobs nobody waits on. The head commit's own suites count toward the newest one as well.
 
-    A CheckRun still `IN_PROGRESS` whose suite has completed is marked `stale`, with `run`.
+    Every CheckRun carries `run`, its workflow run's id. One still `IN_PROGRESS` whose suite has
+    completed is marked `stale`, and counts as finished for superseding, since its run is over.
     """
     # No match reports nothing rather than another commit's rollup, and `checks_unreadable` says so.
     commit = head_commit(pr)
@@ -153,7 +154,7 @@ def check_nodes(pr: dict) -> list[dict]:
     stale = {i for i, (group, sid) in suites.items() if sid < newest_suite[group]}
     for i, (group, sid) in suites.items():
         suite_id, status, run = newest_run.get(group[0], (0, "", None))
-        finished = out[i]["state"] == "COMPLETED"
+        finished = out[i]["state"] == "COMPLETED" or out[i].get("stale")
         if finished and sid < suite_id and status != "COMPLETED":
             out[i]["superseded"] = True
             out[i]["newer_run"] = run
