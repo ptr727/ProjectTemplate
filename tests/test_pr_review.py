@@ -38,6 +38,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_review
+import pr_review_check_lines
 import pr_review_checks
 import pr_review_rounds
 
@@ -47,7 +48,13 @@ from import_probe import import_delta
 
 REPO = Path(__file__).resolve().parent.parent
 # The gate and the reader modules it imports, which every whole-source guard below reads together.
-GATE_SOURCES = ("pr_review.py", "pr_review_checks.py", "pr_review_rounds.py", "pr_review_digest.py")
+GATE_SOURCES = (
+    "pr_review.py",
+    "pr_review_checks.py",
+    "pr_review_check_lines.py",
+    "pr_review_rounds.py",
+    "pr_review_digest.py",
+)
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
 READER_IMPORTS = frozenset(
     {
@@ -57,12 +64,14 @@ READER_IMPORTS = frozenset(
         "re",
         "pr_review_copilot",
         "pr_review_checks",
+        "pr_review_check_lines",
         "pr_review_rounds",
     }
 )
 # One import each reader module is known to make, the floor under the allowlist above.
 READER_FLOORS = {
     "pr_review_checks": "datetime",
+    "pr_review_check_lines": "pr_review_checks",
     "pr_review_rounds": "pr_review_copilot",
     "pr_review_digest": "pr_review_rounds",
 }
@@ -372,18 +381,22 @@ def check(
     workflow: int | None = None,
     slug: str = "github-actions",
     app_id: int = 15368,
-    suite_status: str = "COMPLETED",
+    suite_status: str | None = None,
     run: int | None = None,
 ) -> dict:
     """One CheckRun rollup node, in the shape the live rollup returns.
 
-    The run's `databaseId` is carried only where a case names one.
+    The run's `databaseId` is carried only where a case names one. A case may name the suite's
+    status. Otherwise the suite is in progress beside a running job and completed beside any other.
+    That is because a running job in a completed suite is the stale record `STALE_RECORD` names.
 
     The starved case this exists for was read off run 31118675530 in this repository. An aggregator
     job was dispatched the instant its dependency finished. It was left `QUEUED` with an empty runner name and
     a `startedAt` stamped equal to its creation, and it sat fifteen minutes and never ran. Its
     healthy sibling on the next run wore `IN_PROGRESS` with a runner inside two minutes.
     """
+    if suite_status is None:
+        suite_status = "IN_PROGRESS" if status == "IN_PROGRESS" else "COMPLETED"
     workflow_run: dict | None = None
     if workflow is not None:
         workflow_run = {"workflow": {"databaseId": workflow}}
@@ -1495,6 +1508,26 @@ class TestCheckShapes(unittest.TestCase):
             self.shape(check(status="IN_PROGRESS", conclusion="", started=ago(40 * 60))),
         )
 
+    def test_a_job_in_progress_inside_a_completed_run_is_a_stale_record(self) -> None:
+        """The run has finished, so the job's record will not move and waiting cannot end it.
+
+        It reads stale at any age, since no stall threshold separates a record nothing updates
+        from a job still working. The same job inside a run still going is an ordinary one.
+        """
+        for minutes in (2, 40):
+            with self.subTest(minutes=minutes):
+                stale = check(
+                    status="IN_PROGRESS",
+                    conclusion="",
+                    started=ago(minutes * 60),
+                    suite_status="COMPLETED",
+                )
+                self.assertEqual("STALE_RECORD", self.shape(stale))
+                nodes = pr_review_checks.check_nodes(payload([review()], checks=[stale]))
+                self.assertEqual([], pr_review_checks.checks_settling(nodes, NOW, 300, 1800))
+        running = check(status="IN_PROGRESS", conclusion="", started=ago(120))
+        self.assertEqual("", self.shape(running))
+
     def test_a_skipped_or_neutral_check_is_a_pass_not_a_blocker(self) -> None:
         """This fleet's aggregator pattern skips the conditional jobs on every green run.
 
@@ -1751,6 +1784,33 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(200, gate.get("newer_run"))
         self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
 
+    def test_a_stale_record_in_an_older_run_is_superseded_by_a_newer_run(self) -> None:
+        """The newer run will post its own record, so the older one's stale reading is no verdict."""
+        stale = check(
+            name="gate",
+            status="IN_PROGRESS",
+            conclusion="",
+            suite=10,
+            workflow=7,
+            suite_status="COMPLETED",
+            run=100,
+        )
+        pr = payload([review()], merge="BLOCKED", checks=[stale])
+        running = {
+            "databaseId": 20,
+            "status": "IN_PROGRESS",
+            "workflowRun": {"databaseId": 200, "workflow": {"databaseId": 7}},
+        }
+        pr["commits"]["nodes"][0]["commit"]["checkSuites"] = {"nodes": [running]}
+        nodes = pr_review_checks.check_nodes(pr)
+        (gate,) = nodes
+        self.assertTrue(gate.get("superseded"))
+        self.assertEqual(200, gate.get("newer_run"))
+        self.assertEqual([], pr_review_checks.checks_stuck(nodes, NOW, 300, 1800))
+        self.assertTrue(pr_review_checks.held_checks_open(pr, nodes, NOW, 300, 1800))
+        (line,) = pr_review_check_lines.check_lines(pr, nodes, [], NOW)
+        self.assertIn("CHECK SUPERSEDED ('gate', IN_PROGRESS in an older run): run 200", line)
+
     def test_an_unfinished_check_in_an_older_run_keeps_its_stuck_reading(self) -> None:
         """A newer run queued behind the older one cannot start, so the older one's shape stands."""
         starved = check(
@@ -1917,6 +1977,26 @@ class TestDigestReportsChecks(GqlCase):
         self.assertIn("stuck=RUNNING_LONG", out)
         self.assertIn("it has a runner, so it is not starved", out)
         self.assertIn("judgment against what this job normally costs", out)
+
+    def test_a_stale_job_record_is_named_with_its_run_and_its_remedies(self) -> None:
+        """Read as running, it sends a driver into a wait that cannot end, so the line says so."""
+        stale = check(
+            name="gate",
+            status="IN_PROGRESS",
+            conclusion="",
+            started=ago(20 * 60),
+            workflow=7,
+            run=200,
+            suite_status="COMPLETED",
+        )
+        out = self.digest(payload([review()], merge="BLOCKED", checks=[check(name="lint"), stale]))
+        self.assertIn("merge=BLOCKED checks=1/2", out)
+        self.assertIn("stuck=STALE_RECORD", out)
+        self.assertIn(
+            "CHECK RECORD STALE ('gate', in progress 20m in run 200, which has completed)", out
+        )
+        self.assertIn("waiting longer cannot end it", out)
+        self.assertIn("re-running that job or pushing a new head", out)
 
     def test_a_failed_check_is_named_as_a_verdict_rather_than_left_to_be_deduced(self) -> None:
         out = self.digest(
@@ -2514,6 +2594,25 @@ class TestCli(GqlCase):
         out = self.out.getvalue()
         self.assertIn("status=CHECKS_NOT_MERGEABLE", out)
         self.assertIn("CHECK NOT PICKED UP", out)
+
+    def test_wait_exits_forty_four_where_a_required_check_is_a_stale_record(self) -> None:
+        """A completed run posts nothing more, so a required job left in progress ends the wait."""
+        stale = check(
+            name="gate",
+            status="IN_PROGRESS",
+            conclusion="",
+            started=real_ago(120),
+            workflow=7,
+            run=200,
+            suite_status="COMPLETED",
+        )
+        self.answer(payload([review()], merge="BLOCKED", checks=[stale]))
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(44, self.cli(["wait", "7"]))
+        out = self.out.getvalue()
+        self.assertIn("status=CHECKS_NOT_MERGEABLE", out)
+        self.assertIn("CHECK RECORD STALE ('gate'", out)
+        self.assertIn("a stale record a re-run of its job or a new head", out)
 
     def test_wait_does_not_take_forty_four_on_a_superseded_runs_failed_aggregator(self) -> None:
         """A closed and reopened pull request cancels its first run, whose aggregator then fails.
@@ -6833,6 +6932,13 @@ class TestRunsOpen(unittest.TestCase):
                 self.assertEqual(["run 200"], pr_review_checks.runs_open(pr))
                 self.assertTrue(self.is_open(pr))
 
+    def test_a_stale_record_in_a_completed_run_does_not_hold_a_blocked_poll(self) -> None:
+        """Holding on it polls to the timeout for a record no run will ever update."""
+        stale = check(status="IN_PROGRESS", conclusion="", workflow=7, suite_status="COMPLETED")
+        pr = self.held("BLOCKED", [stale], self.suite("COMPLETED"))
+        self.assertEqual([], pr_review_checks.runs_open(pr))
+        self.assertFalse(self.is_open(pr))
+
     def test_a_completed_run_releases_a_clean_merge(self) -> None:
         pr = self.held("CLEAN", [check()], self.suite("COMPLETED"))
         self.assertEqual([], pr_review_checks.runs_open(pr))
@@ -6897,7 +7003,7 @@ class TestRunsOpen(unittest.TestCase):
         """The starved line's re-run is the wrong remedy for a job a protection rule holds."""
         node = {"name": "deploy", "state": "WAITING", "conclusion": "", "since": ago(900)}
         self.assertEqual("GATED", pr_review_checks.check_shape(node, NOW, 300, 1800))
-        line = pr_review_checks.check_lines({}, [node], [(node, "GATED")], NOW)[0]
+        line = pr_review_check_lines.check_lines({}, [node], [(node, "GATED")], NOW)[0]
         self.assertIn("CHECK WAITING ON ITS ENVIRONMENT ('deploy', waiting 15m)", line)
         inside = {**node, "since": ago(60)}
         self.assertEqual("", pr_review_checks.check_shape(inside, NOW, 300, 1800))

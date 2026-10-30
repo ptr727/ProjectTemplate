@@ -166,8 +166,9 @@ Subcommands
            refusal whose one re-request is pending exits 30 instead. 42 and 50 = the review landed
            and `status`'s readings apply to it. 44 = the review loop closed, the merge reads BLOCKED, and a required check
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
-           never posted, running far past the job's cost, held by its environment, or failed. On
-           a held head a check running long or held by its environment polls to 30 instead.
+           never posted, running far past the job's cost, held by its environment, still in
+           progress inside a run that has completed, or failed. On a held head a check running
+           long or held by its environment polls to 30 instead.
            45 = an open attested held head that nothing holds, its merge other than CLEAN,
            UNSTABLE, or HAS_HOOKS. One case is a payload with no commit matching the head, named
            `CHECKS UNREADABLE` in the digest. Another is a DIRTY merge with no check posted that
@@ -1737,7 +1738,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
                 "BLOCKED, and a required check is in a shape waiting does not clear, "
                 f"required stuck {', '.join(repr(g) for g in gates)}: read their lines in the "
                 "block above, since a starved check wants a re-run, an unposted one its poster, "
-                "a gated one its approval or its timer, a long one a judgment, and a failed one a fix. It need "
+                "a gated one its approval or its timer, a long one a judgment, a stale record a "
+                "re-run of its job or a new head, and a failed one a fix. It need "
                 "not be all that blocks "
                 "the merge, because BLOCKED is also worn by a thread or a missing approval"
             )

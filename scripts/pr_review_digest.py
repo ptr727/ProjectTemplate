@@ -12,7 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 
 import pr_review_copilot as adapter
-from pr_review_checks import check_lines, checks_stuck, checks_tally
+from pr_review_check_lines import check_lines
+from pr_review_checks import checks_stuck, checks_tally
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     KNOWN_REVIEWERS,
