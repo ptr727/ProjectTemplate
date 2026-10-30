@@ -36,6 +36,7 @@ $READ_TIMEOUT = 30
 
 # Every parameter is read into a variable here rather than from inside a function.
 # A script parameter reached only from a nested scope reads as declared and never used.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     report  = [bool]$Report
     upgrade = [bool]$Upgrade

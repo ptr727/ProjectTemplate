@@ -97,7 +97,7 @@ redirected run is not a place to answer a menu.
 
 # --- pwsh handoff ---
 #
-# Everything above this point, and the four functions below, run under Windows PowerShell 5.1.
+# Everything above this point, and the functions below, run under Windows PowerShell 5.1.
 # That means no ternary or null-coalescing operator, no multi-argument Join-Path, nothing newer than that runtime parses.
 # Everything past the handoff may use whatever pwsh 7 accepts, though it mostly does not need to.
 # Identical in shape to bootstrap.ps1's own handoff, kept as a separate copy rather than a shared module.

@@ -597,7 +597,7 @@ class TestScriptPresence(unittest.TestCase):
 
         Kept apart from `test_every_windows_script_is_present` rather than folded into it. The reason
         is that `bootstrap.ps1` deliberately sits beside `bootstrap.sh` at `host-setup/`, not inside
-        `host-setup/windows/` with the four scripts that test checks. Same reasoning as that test:
+        `host-setup/windows/` with the scripts that test checks. Same reasoning as that test:
         the `eol-coverage` gate requires a `.gitattributes` pin for any tracked file opening `#!`,
         and this file carries none of its own.
         """

@@ -75,7 +75,7 @@ function die { param([string]$Message) [Console]::Error.WriteLine("ERROR: $Messa
 
 # Every parameter is read into a variable here rather than from inside a function.
 # A script parameter reached only from a nested scope reads as declared and never used.
-# That reading is a finding on each such parameter, and it hides a parameter that genuinely is unused.
+# That is a finding on each one, and it hides a parameter that genuinely is unused.
 $ACTIONS = [ordered]@{
     report  = [bool]$Report
     upgrade = [bool]$Upgrade
@@ -96,7 +96,7 @@ $KEEP = [bool]$Keep
 $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
 
 $MODE = ''
-# No placeholder for $DIR here, unlike the four lines around it.
+# No placeholder for $DIR here, unlike the lines around it.
 # PowerShell variable names are case-insensitive, so $DIR and the -Dir parameter $Dir are the same variable.
 # Resetting $DIR here would silently discard whatever -Dir the caller passed before Resolve-Directory ever reads it.
 $RESOLVED = ''
@@ -157,7 +157,7 @@ Examples:
 
 # --- pwsh handoff ---
 #
-# Everything above this point, and the four functions below, run under Windows PowerShell 5.1, which means:
+# Everything above this point, and the functions below, run under Windows PowerShell 5.1, which means:
 #   - No ternary or null-coalescing operator.
 #   - No multi-argument Join-Path.
 #   - Nothing newer than that runtime parses.
@@ -638,7 +638,7 @@ function Resolve-Directory {
 }
 
 # PowerShell records which switches were given and not the order they came in, so two actions is a refusal rather than the last one winning.
-# Unlike the four scripts this loader drives, zero given is not this loader's own default.
+# Unlike the scripts this loader drives, zero given is not this loader's own default.
 # The main function tells the menu and the piped-in report apart, the way bootstrap.sh's own entry point does.
 function Resolve-Mode {
     $given = @($script:ACTIONS.Keys | Where-Object { $script:ACTIONS[$_] })
