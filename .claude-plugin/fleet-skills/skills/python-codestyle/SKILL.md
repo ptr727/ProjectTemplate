@@ -163,7 +163,9 @@ form that the fleet baseline expects. Its header names the pip-form and lint-onl
 `dependsOn`-only. Neither chains with `&&`, so the mirror runs the same on any task shell.
 
 CI runs these same commands as the authoritative backstop in every directory the hub validator's
-`python-directories` input declares. A repo declaring none has its root gated only where it tracks
+`python-directories` input declares. Its `uvx` ruff runs at the version the hub's `python-tool-pins`
+action pins rather than at `@latest`. So a ruff release can make a local run and CI disagree until
+a hub release takes the new version. A repo declaring none has its root gated only where it tracks
 a root `pyproject.toml`, per `WORKFLOW.md` D1.2. That undeclared root is gated more loosely. CI
 reads its type-checker configuration only from the `[tool.mypy]` or `[tool.pyright]` section of its
 `pyproject.toml`. It skips the type check where neither is there,
