@@ -1621,27 +1621,22 @@ class TestCommentWrapRule(BaitCase):
             with self.subTest(shape=label):
                 self.assertEqual([], self.flag("a.yml", text))
 
-    def test_a_metadata_block_opener_rides_on_the_lines_under_it(self) -> None:
-        """A PEP 723 block, which `uv` parses verbatim, so no reformatting is available.
+    def test_a_metadata_block_is_skipped_whole_whatever_it_declares(self) -> None:
+        """One key is not a run, and `uv` parses the block verbatim, so no reformatting is available.
 
-        The opener is not key-value and joins no run. It drew a finding only because the line
-        under it read as a continuation of it, so exempting that line is what clears the opener.
+        The language data declares the block's form, so the rules skip it whole rather than by run.
         """
-        block = (
-            '# /// script\n# requires-python = ">=3.9"\n# dependencies = ["bleak"]\n# ///\nx = 1\n'
+        table = (
+            '# /// script\n# dependencies = [\n#   "bleak",\n# ]\n#\n# [tool.uv]\n'
+            '# exclude-newer = "2026-01-01T00:00:00Z"\n# ///\nx = 1\n'
         )
-        self.assertEqual([], self.flag("a.py", block))
-
-    def test_a_metadata_block_declaring_one_key_is_not_a_run(self) -> None:
-        """The count's own cost, reached by a block rather than by a marker comment.
-
-        One key-value line is not a run, so nothing carries the opener and it reports. `uv` parses
-        the block verbatim, so no reformatting is available either, and the `comments` label reaches
-        `comment-added` rather than this rule. The finding therefore stands with no remedy at all,
-        which is what the count costs on a block rather than on a marker comment.
-        """
-        block = '# /// script\n# requires-python = ">=3.9"\n# ///\nx = 1\n'
-        self.assertEqual(["comment-wrap"], self.flag("a.py", block))
+        for label, block in (
+            ("one key", '# /// script\n# requires-python = ">=3.9"\n# ///\nx = 1\n'),
+            ("two keys", '# /// script\n# requires-python = ">=3.9"\n# dependencies = []\n# ///\n'),
+            ("tool table", table),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual([], self.flag("a.py", block))
 
     def test_a_sentence_wrapping_into_a_run_loses_its_wrap(self) -> None:
         """The third cost, pinned so a later change meets it rather than finds it.
@@ -2166,6 +2161,49 @@ class TestCommentAddedRule(BaitCase):
         ):
             with self.subTest(line=line.strip()):
                 self.assertEqual(expected, self.kinds(line, {"comment-added"}, name="tool.py"))
+
+    def test_a_python_metadata_block_is_an_instruction_to_a_tool(self) -> None:
+        """A PEP 723 block, opener through closer, which `uv` reads rather than a person.
+
+        The exemption is the closed block alone. A prose line after the closer still reports, and
+        so does each line under an opener nothing closes, or one the block's line form breaks.
+        """
+        block = '# /// script\n# requires-python = ">=3.13"\n# dependencies = ["bleak"]\n# ///\n'
+        after = "# The value is read once here.\nvalue = 1\n"
+        self.assertEqual([], self.kinds(block + "value = 1\n", {"comment-added"}, name="tool.py"))
+        self.assertEqual(
+            [(5, "comment-added")],
+            [
+                (n, kind)
+                for n, kind, _ in prose_lint.check_file(
+                    self._write(block + after, "tool.py"), {"comment-added"}
+                )
+            ],
+        )
+        for label, text, name in (
+            ("unclosed", '# /// script\n# requires-python = ">=3.13"\nvalue = 1\n', "tool.py"),
+            ("off form", '# /// script\n#requires-python = ">=3.13"\n# ///\n', "tool.py"),
+            ("not python", '# /// script\n# requires-python = ">=3.13"\n# ///\n', "tool.sh"),
+            ("not script", '# /// notes\n# requires-python = ">=3.13"\n# ///\n', "tool.py"),
+        ):
+            with self.subTest(case=label):
+                found = prose_lint.check_file(self._write(text, name), {"comment-added"})
+                self.assertEqual([1, 2], [n for n, _, _ in found])
+
+    def test_no_comment_rule_reads_a_python_metadata_block(self) -> None:
+        """The block leaves the comment unit before any rule runs, so no rule needs its own skip.
+
+        A long dependency list read as one sentence, and a package spelled the British way, each
+        reported. The same text in a shell file still does, which is what makes the empty list mean
+        something.
+        """
+        deps = "".join(f'#   "package-{n}",\n' for n in range(30))
+        text = f'# /// script\n# dependencies = [\n#   "colour",\n{deps}# ]\n# ///\nvalue = 1\n'
+        rules = {name for name, (_, kinds) in prose_lint.RULE_TABLE.items() if "comment" in kinds}
+        self.assertEqual([], self.kinds(text, rules, name="tool.py"))
+        self.assertLessEqual(
+            {"sentence-length", "spelling"}, set(self.kinds(text, rules, name="tool.sh"))
+        )
 
     def test_a_reference_and_a_key_are_not_prose(self) -> None:
         for line in ("# https://example.invalid/spec\n", "# ignore:\n"):

@@ -1470,6 +1470,30 @@ def is_comment_prose(body: str, config: Config) -> bool:
     )
 
 
+def without_metadata_blocks(unit: Unit, ctx: Context) -> Unit:
+    """The comment unit without the lines of each closed metadata block the language declares.
+
+    A tool reads such a block rather than a person, so no comment rule reads it. A line off the
+    block's form, or a gap, abandons the block, so an unclosed one is left whole.
+    """
+    form = ctx.language.get("metadata_block")
+    if unit.kind != "comment" or not form:
+        return unit
+    opener, body, closer = (re.compile(pattern) for pattern in form)
+    out: set[int] = set()
+    run: list[int] = []
+    for line in unit.lines:
+        adjacent = bool(run) and line.leading and line.number == run[-1] + 1
+        if adjacent and closer.fullmatch(line.raw):
+            out.update((*run, line.number))
+            run = []
+        elif adjacent and body.fullmatch(line.raw):
+            run.append(line.number)
+        else:
+            run = [line.number] if line.leading and opener.fullmatch(line.raw) else []
+    return unit._replace(lines=tuple(line for line in unit.lines if line.number not in out))
+
+
 def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     """Every prose comment line opening its own line, which the diff scope narrows to a change.
 
@@ -1793,6 +1817,7 @@ def check_file(
     lexer = lexer_name(path, text.split("\n", 1)[0].rstrip("\r"))
     config = config_for(str(root) if root else None)
     ctx = Context(path, root, fenced, language_of(lexer) or {}, config, allowed)
+    units = [without_metadata_blocks(unit, ctx) for unit in units]
     passes: dict[Rule, set[str]] = {}
     for name in RULE_TABLE:
         if name in rules:
