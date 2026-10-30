@@ -55,6 +55,7 @@ class CodeBlockCase(unittest.TestCase):
     def test_code_lines_cover_fenced_and_indented_blocks(self) -> None:
         text = "text\n\n```\na\n```\n\n    code\n\nmore\n"
         self.assertEqual(fidelity_text.code_lines(text), frozenset({2, 3, 4, 6}))
+        self.assertEqual(fidelity_text.code_lines(text, fenced_only=True), frozenset({2, 3, 4}))
 
 
 class SectionCase(unittest.TestCase):

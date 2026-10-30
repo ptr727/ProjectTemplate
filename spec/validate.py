@@ -8,7 +8,7 @@
 Checks that every cataloged repo classifies against the spec: its types resolve,
 its publish mechanisms are recognized, and its secrets are consistent with
 spec/secrets.json. Exits non-zero on any failure. This is the classification
-dry-run the CI lint job runs, under `uv run --no-project --script`.
+dry-run the hub's validate hook runs in CI, under `uv run --no-project --script`.
 
 The Markdown checks read through spec/fidelity_text.py, which imports markdown-it-py. They import
 it only on the path main() reaches, so spec/resolve_description.py still imports this module under

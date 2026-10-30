@@ -1,7 +1,7 @@
 """The text reading the fidelity tools share, so each one splits a document at the same boundaries.
 
-Fences, headings, and links come from markdown-it-py. So every tool that imports this module runs under
-`uv run --no-project --script`, or imports it only on the path that reads a region.
+Fences, headings, and links come from markdown-it-py. So every tool that imports this module runs
+under `uv run --no-project --script`, or imports it only on the path that reads a document.
 """
 
 import functools
@@ -24,9 +24,7 @@ _JOB_NEEDS = re.compile(
 
 # Block rules only, since a region boundary is a block fact, and skipping the inline pass keeps a parse per file cheap.
 # Tables are on because GitHub renders them, and a table changes where a block ends.
-_BLOCKS = markdown_it.MarkdownIt("commonmark").enable("table").disable("inline")
-
-_DEFINITIONS = (
+_BLOCKS = (
     markdown_it.MarkdownIt("commonmark", {"inline_definitions": True})
     .enable("table")
     .disable("inline")
@@ -113,9 +111,18 @@ def code_blocks(text):
     return out
 
 
-def code_lines(text):
-    """The zero-based lines of `text` that sit inside a code block, where a marker is content."""
-    return frozenset(line for block in code_blocks(text) for line in range(block.start, block.end))
+def code_lines(text, fenced_only=False):
+    """The zero-based lines of `text` that sit inside a code block, where a marker is content.
+
+    `fenced_only` leaves an indented block's lines out, for a reader that treats only a fenced
+    sample as shown rather than used.
+    """
+    return frozenset(
+        line
+        for block in code_blocks(text)
+        if block.fenced or not fenced_only
+        for line in range(block.start, block.end)
+    )
 
 
 def reference_key(label):
@@ -135,7 +142,7 @@ def link_definitions(text):
     """
     lines = text.split("\n")
     found, seen = [], set()
-    for t in _DEFINITIONS.parse(text):
+    for t in _tokens(text):
         if t.type != "definition" or t.meta["id"] in seen:
             continue
         seen.add(t.meta["id"])
