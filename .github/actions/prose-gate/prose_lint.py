@@ -997,6 +997,7 @@ LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
 LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
 CELL_BREAK = re.compile(r"(?<!\\)\|")
+TABLE_ROW = re.compile(r"^\s*(?:>\s*)*\|")
 # A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
 DUPWORD = re.compile(r"(?<![\w/-])(\w+)\s+\1\b", re.IGNORECASE)
 # A step marker is a label on the sentence that follows, so its dot terminates nothing.
@@ -1039,12 +1040,29 @@ def strip_list_marker(text: str) -> str:
     return LIST_MARKER.sub("", text, count=1).strip()
 
 
+def row_cells(text: str) -> list[str]:
+    """A table row opening with a pipe split into its cells, and any other line left whole.
+
+    A cell ends at a pipe no backslash escapes, inside a code span too, which is how markdown-it-py
+    splits a row. So no code span or quotation read from a cell reaches into the next one.
+    """
+    return CELL_BREAK.split(text) if TABLE_ROW.match(text) else [text]
+
+
+def by_cell(text: str, blank: Callable[[str], str]) -> str:
+    """Blank a line a cell at a time, keeping every pipe that ends a cell where it was.
+
+    An unpaired quote mark in one cell would otherwise hide every cell up to the next quote.
+    """
+    return "|".join(blank(cell) for cell in row_cells(text))
+
+
 def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
     """Each line's number, its text without code spans, and that text without quotations either."""
     for line in unit.lines:
-        txt = strip_inline_code(line.text)
-        prose = QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), strip_quoted(txt), count=1)
-        yield line.number, txt, prose
+        txt = by_cell(line.text, strip_inline_code)
+        prose = by_cell(txt, strip_quoted)
+        yield line.number, txt, QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
 
 
 def in_numeric_context(line: str, pos: int) -> bool:
@@ -1100,14 +1118,14 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
 
-    A table row is read a cell at a time. A cell ends at a pipe no backslash escapes, which is how
-    markdown-it-py reads an escaped pipe.
+    A table row opening with a pipe is read a cell at a time, split where `row_cells` splits it.
+    `prose_lines` blanks each cell on its own and leaves every pipe ending one where it was.
     """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
-        row = line.lstrip().startswith("|")
-        cells = CELL_BREAK.split(line.strip().strip("|")) if row else [line]
-        pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
+        pieces = (
+            s for cell in row_cells(line) for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell))
+        )
         for sentence in (s for s in pieces if s.strip()):
             head, _, tail = sentence.partition(";")
             listish = sentence.count(";") > 1 or (
@@ -1134,8 +1152,11 @@ def unit_texts(unit: Unit, ctx: Context) -> Iterable[tuple[int, str]]:
     for line in unit.lines:
         if line.number in ctx.fenced:
             continue
-        text = strip_quoted(strip_inline_code(line.text)) if unit.kind == "prose" else line.text
-        yield line.number, strip_inline_code(text)
+        if unit.kind != "prose":
+            yield line.number, strip_inline_code(line.text)
+            continue
+        text = by_cell(by_cell(line.text, strip_inline_code), strip_quoted)
+        yield line.number, by_cell(text, strip_inline_code)
 
 
 def rule_dupword(unit: Unit, ctx: Context) -> list[Finding]:
@@ -1252,11 +1273,12 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
         tokens = (
             [(m.group(1), False)]
             if m
-            else [(s.group(1), True) for s in INLINE_SPAN.finditer(line.text)]
+            else [(s.group(1), True) for c in row_cells(line.text) for s in INLINE_SPAN.finditer(c)]
         )
         if not m:
             tokens += [
-                (t.group(1), False) for t in LINK_TARGET.finditer(strip_inline_code(line.text))
+                (t.group(1), False)
+                for t in LINK_TARGET.finditer(by_cell(line.text, strip_inline_code))
             ]
         for token, in_span in tokens:
             rel_path = path_candidate(token, in_span)
