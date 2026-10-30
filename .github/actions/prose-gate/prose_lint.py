@@ -1123,8 +1123,9 @@ def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
-        cells = CELL_BREAK.split(line.strip().strip("|")) if TABLE_ROW.match(line) else [line]
-        pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
+        pieces = (
+            s for cell in row_cells(line) for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell))
+        )
         for sentence in (s for s in pieces if s.strip()):
             head, _, tail = sentence.partition(";")
             listish = sentence.count(";") > 1 or (
