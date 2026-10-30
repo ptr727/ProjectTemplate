@@ -274,6 +274,98 @@ report
                 self.assertEqual(result.stdout, "")
 
 
+SETUP_GITHUB = ROOT / "host-setup" / "linux" / "setup-github.sh"
+
+DPKG_QUERY_STUB = r"""#!/bin/sh
+format=$2
+line=$(grep "^$3 " "$DPKG_TABLE") || exit 1
+set -- $line
+case $format in
+*Status-Want*) printf '%s' "$2" ;;
+*Status-Status*) printf '%s' "$3" ;;
+*) printf '%s ok %s' "$2" "$3" ;;
+esac
+"""
+
+
+def shell_function(path: Path, name: str) -> str:
+    """The text of the shell function `name` in `path`, from its opening line to the brace closing it."""
+    text = path.read_text(encoding="utf-8")
+    start = text.index(f"\n{name}() {{\n") + 1
+    return text[start : text.index("\n}\n", start) + 2]
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxHeldPackages(unittest.TestCase):
+    """A held package reads as installed, and a held Docker conflict is reported rather than removed.
+
+    The stub dpkg-query answers each status field a format names from a table of `package want status` lines.
+    A definition reading the wrong field therefore reads the wrong answer.
+    """
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.functions = self.dir / "functions.sh"
+        self.functions.write_text(linux_functions(), encoding="utf-8")
+        self.bin = self.dir / "bin"
+        self.bin.mkdir()
+        stub = self.bin / "dpkg-query"
+        stub.write_text(DPKG_QUERY_STUB, encoding="ascii")
+        stub.chmod(0o755)
+        self.table = self.dir / "dpkg-table"
+
+    def run_bash(self, rows: str, body: str) -> subprocess.CompletedProcess[str]:
+        self.table.write_text(rows, encoding="ascii")
+        script = f'source "{self.functions}"\nPATH="{self.bin}:$PATH"\n{body}\n'
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+            env={**os.environ, "DPKG_TABLE": str(self.table)},
+        )
+
+    def docker_conflicts(self, rows: str) -> subprocess.CompletedProcess[str]:
+        """Run docker_install up to the point past its conflict removal, recording each root command."""
+        body = """IS_WSL=false
+CODENAME=trixie
+run_root() { printf 'ROOT %s\\n' "$*"; }
+ensure_prerequisites() { printf 'PAST REMOVAL\\n'; exit 0; }
+if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
+        return self.run_bash(rows, body)
+
+    def test_both_linux_scripts_carry_one_definition(self) -> None:
+        self.assertEqual(
+            shell_function(LINUX_INSTALLER, "package_installed"),
+            shell_function(SETUP_GITHUB, "package_installed"),
+        )
+
+    def test_a_held_package_reads_as_installed_and_is_not_planned(self) -> None:
+        rows = "less hold installed\njq install installed\ngone deinstall config-files\n"
+        result = self.run_bash(rows, "apt_missing less jq gone absent")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["gone", "absent"])
+
+    def test_a_held_conflict_is_reported_and_nothing_is_removed(self) -> None:
+        result = self.docker_conflicts("runc hold installed\ndocker.io install installed\n")
+        self.assertEqual(result.stdout.splitlines(), ["RC 1"])
+        self.assertIn("runc are held", result.stderr)
+        self.assertIn("apt-mark unhold runc", result.stderr)
+
+    def test_an_unheld_conflict_is_removed(self) -> None:
+        result = self.docker_conflicts("docker.io install installed\nrunc install installed\n")
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "  Removing 2 conflicting package(s): docker.io runc",
+                "ROOT apt-get remove -y docker.io runc",
+                "PAST REMOVAL",
+            ],
+        )
+
+
 WINDOWS_HARNESS = r"""
 param([string]$Installer, [string]$Awkward, [string]$Mode)
 $ErrorActionPreference = 'Stop'

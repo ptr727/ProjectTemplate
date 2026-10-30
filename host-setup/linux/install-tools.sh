@@ -324,7 +324,7 @@ apt_install() {
 # It is also because dpkg and apt-cache disagree on a host whose lists are stale.
 # The candidate is still what apt_candidate_version reports, since that is the question the report asks.
 package_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "^install ok installed"
+    [[ $(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null) == installed ]]
 }
 
 apt_missing() {
@@ -797,11 +797,20 @@ docker_install() {
         die "/etc/os-release names no VERSION_CODENAME, so the Docker apt repository's suite cannot be worked out"
 
     local -a conflicts=(docker.io docker-doc docker-compose docker-compose-v2 docker-buildx podman-docker containerd runc)
-    local -a present=()
+    local -a present=() held=()
     local pkg
     for pkg in "${conflicts[@]}"; do
-        package_installed "$pkg" && present+=("$pkg")
+        package_installed "$pkg" || continue
+        if [[ $(dpkg-query -W -f='${db:Status-Want}' "$pkg" 2>/dev/null) == hold ]]; then
+            held+=("$pkg")
+        else
+            present+=("$pkg")
+        fi
     done
+    if [[ ${#held[@]} -gt 0 ]]; then
+        warn "Conflicting package(s) ${held[*]} are held, so nothing is removed and docker is not installed. Release the hold with apt-mark unhold ${held[*]}, or remove them by hand, then run this again."
+        return 1
+    fi
     if [[ ${#present[@]} -gt 0 ]]; then
         log "  Removing ${#present[@]} conflicting package(s): ${present[*]}"
         run_root apt-get remove -y "${present[@]}"
