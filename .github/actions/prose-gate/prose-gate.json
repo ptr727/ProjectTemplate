@@ -129,6 +129,7 @@
     "markdown": [".md"],
     "plain": [".csv", ".lock", ".min", ".svg", ".tsv", ".txt"],
     "extensionless": "bash",
+    "runner": { "uv": "python" },
     "suffix": {
       ".code-workspace": "json", ".conf": "ini", ".csproj": "xml", ".gitattributes": "bash", ".gitignore": "bash",
       ".jsonc": "json", ".props": "xml", ".resx": "xml", ".scss": "css", ".slnx": "xml", ".targets": "xml"
