@@ -4613,6 +4613,31 @@ class TestYamlLanguage(BaitCase):
                 added = self.kinds(text, {"comment-added"}, name="x.yml")
                 self.assertEqual(["comment-added"] * len(leading), added)
 
+    def test_a_heredoc_inside_an_open_construct_stays_code(self) -> None:
+        """Code before the opener's line can leave it inside a block whose output a shell runs."""
+        for above, below, *opener in (
+            ("{", "} | bash"),
+            ("for i in 1; do", "done | bash"),
+            ("if true; then", "fi | bash"),
+            ("gen() {", "}"),
+            ("bash <(", ")"),
+            ('eval "$(', ')"'),
+            ('bash -s "first', "", "cat\" <<'EOF'"),
+            ('out=$(bash -s ")"', ")"),
+        ):
+            with self.subTest(above=above):
+                rows = (
+                    above,
+                    *(opener or ["cat <<'EOF'"]),
+                    "# Run by the shell.",
+                    "EOF",
+                    below,
+                    "# A real comment.",
+                )
+                text = "- run: |\n" + "".join(f"    {r}\n" for r in rows if r)
+                got = [c[0] for c in self.comments("x.yml", text) if c[1] == "Run by the shell."]
+                self.assertEqual([4], got)
+
     def test_a_heredoc_captured_into_a_variable_is_data(self) -> None:
         for opener in ("body=\"$(cat <<'EOF'", "body=$(cat <<'EOF'"):
             with self.subTest(opener=opener):
