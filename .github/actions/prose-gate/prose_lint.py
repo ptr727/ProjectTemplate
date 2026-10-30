@@ -996,6 +996,7 @@ LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inn
 LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
 LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+CELL_BREAK = re.compile(r"(?<!\\)\|")
 # A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
 DUPWORD = re.compile(r"(?<![\w/-])(\w+)\s+\1\b", re.IGNORECASE)
 # A step marker is a label on the sentence that follows, so its dot terminates nothing.
@@ -1097,10 +1098,15 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
-    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one."""
+    """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
+
+    A table row is read a cell at a time. A cell ends at a pipe no backslash escapes, which is how
+    markdown-it-py reads an escaped pipe.
+    """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
-        cells = line.strip().strip("|").split("|") if line.lstrip().startswith("|") else [line]
+        row = line.lstrip().startswith("|")
+        cells = CELL_BREAK.split(line.strip().strip("|")) if row else [line]
         pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
         for sentence in (s for s in pieces if s.strip()):
             head, _, tail = sentence.partition(";")

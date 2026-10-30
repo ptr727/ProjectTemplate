@@ -641,8 +641,17 @@ class TestSemicolonRule(BaitCase):
 
     def test_a_table_row_judges_each_cell_alone(self) -> None:
         """A row is a record of fields, so one column's comma cannot excuse another's semicolon."""
+        table = "| A | B | C |\n| --- | --- | --- |\n| S1 | it runs; it gates | D1, D2 |\n"
+        self.assertEqual(["semicolon"], self.kinds(table, {"semicolon"}))
+
+    def test_an_escaped_pipe_stays_inside_its_cell(self) -> None:
+        """An escaped pipe ends no cell, as in the parser, so the comma still excuses the list."""
+        table = "| A | B |\n| --- | --- |\n| x | red, green \\| blue; cyan; teal |\n"
+        self.assertEqual([], self.kinds(table, {"semicolon"}))
+
+    def test_an_escaped_pipe_in_a_blockquoted_row_stays_inside_its_cell(self) -> None:
         self.assertEqual(
-            ["semicolon"], self.kinds("| S1 | it runs; it gates | D1, D2 |\n", {"semicolon"})
+            [], self.kinds("> | x | red, green \\| blue; cyan; teal |\n", {"semicolon"})
         )
 
     def test_a_bullet_label_colon_does_not_announce_a_list(self) -> None:
