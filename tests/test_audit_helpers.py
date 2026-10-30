@@ -1805,7 +1805,8 @@ README_CASES = [
     ("a ToC-omit comment on every heading changes nothing", OMIT_TOC, set(), True, 0),
 ]
 
-DOCKER_SHIELD = "[![Docker Latest][e]][x]\n[e]: https://img.shields.io/docker/v/o/r/latest\n"
+DOCKER_SHIELD = "[![Docker Latest][e]][x]\n"
+DOCKER_DEFINITION = "[e]: https://img.shields.io/docker/v/o/r/latest\n"
 
 INLINE_ALL = re.sub(
     r"!\[([^\]]*)\]\[([a-z-]+)\]",
@@ -1822,7 +1823,7 @@ SHIELD_CASES = [
         CONFORMANT.replace(
             "[![GitHub Pre-Release][d]][x]\n",
             "[![GitHub Pre-Release][d]][x]\\\n" + DOCKER_SHIELD,
-        ),
+        ).replace("[license-shield]:", DOCKER_DEFINITION + "[license-shield]:"),
         {"publish": [{"target": "docker"}]},
         0,
     ),
@@ -2045,6 +2046,12 @@ SWAPPED = LINKS_OK.replace(
 
 LINK_CASES = [
     ("a conformant reference block", LINKS_OK, 0, 0),
+    (
+        "a definition-shaped line inside a paragraph is text rather than a reference",
+        LINKS_OK.replace("A fixture.\n", "A fixture.\n[upstream]: https://example.com/x\n"),
+        0,
+        0,
+    ),
     (
         "a shield reference not ending -shield",
         LINKS_OK.replace("[license-shield]", "[licence]"),
@@ -2585,6 +2592,16 @@ class ReadmeCase(unittest.TestCase):
         self.assertTrue(
             "readme-sections.json" in message and "orphan-link" in message,
             f"canonicalLinks entry error does not name the file and entry -> {ctx.exception}",
+        )
+
+    def test_a_reference_resolves_to_the_definition_github_renders(self) -> None:
+        text = (
+            "# X\n\n![x][Docs]\n\n[docs]: https://example.com/a\n"
+            "[docs]: https://example.com/b\n[Docs]: https://example.com/c\n"
+        )
+        defs = audit_markdown.reference_table(text)
+        self.assertEqual(
+            audit_markdown.shield_endpoints("![x][Docs]", defs), ["https://example.com/a"]
         )
 
     def test_tagline_is_the_first_line_of_the_intro_region(self) -> None:

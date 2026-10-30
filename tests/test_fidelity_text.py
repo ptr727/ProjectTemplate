@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise spec/fidelity_text.py's heading, code-block, and region reading on constructed documents."""
+"""Exercise spec/fidelity_text.py's heading, code-block, region, and link reading on constructed documents."""
 
 from __future__ import annotations
 
@@ -67,6 +67,40 @@ class SectionCase(unittest.TestCase):
     def test_strip_sections_keeps_an_identical_passage_elsewhere(self) -> None:
         text = "## Keep\n\nsame\n\n## Drop\n\nsame\n"
         self.assertEqual(fidelity_text.strip_sections(text, ["drop"]), "## Keep\n\nsame\n")
+
+
+class LinkCase(unittest.TestCase):
+    def test_the_first_of_definitions_folding_together_wins(self) -> None:
+        text = (
+            "[docs]: https://example.com/a\n"
+            "[docs]: https://example.com/b\n"
+            "[Docs]: https://example.com/c\n"
+        )
+        self.assertEqual(
+            fidelity_text.link_definitions(text),
+            [fidelity_text.LinkDefinition("docs", "https://example.com/a", 0)],
+        )
+        self.assertEqual(fidelity_text.reference_key("Docs"), fidelity_text.reference_key("docs"))
+
+    def test_a_definition_is_read_only_where_the_parser_reads_one(self) -> None:
+        text = (
+            "Para text\n[para]: p.md\n\n```md\n[fenced]: f.md\n```\n\n"
+            "[spaced]: <a b.md>\n[split]:\n  s.md\n\n> [quoted]: q.md\n"
+        )
+        self.assertEqual(
+            [(d.label, d.url, d.line) for d in fidelity_text.link_definitions(text)],
+            [("spaced", "a b.md", 7), ("split", "s.md", 8), ("quoted", "q.md", 11)],
+        )
+
+    def test_link_targets_read_every_link_form_and_skip_code(self) -> None:
+        text = (
+            "See [r][ref], [u](../\u00fc.md), <https://auto.example>, `[c](code.md)`, ![i](i.png).\n\n"
+            "    [indented](no.md)\n\n[ref]: ../x.md\n[unused]: other.md\n"
+        )
+        self.assertEqual(
+            fidelity_text.link_targets(text),
+            ["../x.md", "../\u00fc.md", "https://auto.example", "i.png", "other.md"],
+        )
 
 
 if __name__ == "__main__":

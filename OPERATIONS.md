@@ -35,7 +35,7 @@ python3 scripts/repo_gate.py
 python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path --check issue-ref --check sentence-length
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
-python3 spec/validate.py
+uv run --no-project --script spec/validate.py
 python3 scripts/docker_lint.py
 ```
 

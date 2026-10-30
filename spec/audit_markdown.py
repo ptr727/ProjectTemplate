@@ -109,8 +109,6 @@ _MD_IMAGE_REF = re.compile(r"!\[[^\]]*\]\[([^\]]+)\]")
 
 _MD_IMAGE_INLINE = re.compile(r"!\[[^\]]*\]\((\S+?)\)")
 
-_LINK_DEF = re.compile(r"^\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
-
 # A URI scheme needs more than one character so a `C:` drive letter is not read as one.
 _URI_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]+:", re.IGNORECASE)
 
@@ -123,15 +121,29 @@ def unfenced_text(text):
     return "\n".join(ln for i, ln in enumerate(lines) if i not in fenced)
 
 
+def definitions(text):
+    """The reference definitions the document renders, as written and in order, read by the parser rather than by a line scan."""
+    return fidelity_text.link_definitions(normalize(text))
+
+
+def reference_table(text):
+    """Each definition's destination keyed the way a reference finds it, so `![x][Docs]` resolves to `[docs]`."""
+    return {fidelity_text.reference_key(d.label): d.url for d in definitions(text)}
+
+
 def readme_region(text, heading):
     """extract_section against a comment-stripped, unfenced copy of the document, or None where the heading is absent."""
     return extract_section(_HTML_COMMENT.sub("", unfenced_text(text)), heading)
 
 
 def shield_endpoints(region, defs):
-    """The image URLs a Markdown region renders, from its `![alt][ref]` and `![alt](url)` uses."""
+    """The image URLs a Markdown region renders, from its `![alt][ref]` and `![alt](url)` uses.
+
+    `defs` is the document's reference_table.
+    """
     region = region or ""
-    urls = [defs[m.group(1)] for m in _MD_IMAGE_REF.finditer(region) if m.group(1) in defs]
+    keys = (fidelity_text.reference_key(m.group(1)) for m in _MD_IMAGE_REF.finditer(region))
+    urls = [defs[k] for k in keys if k in defs]
     return urls + [m.group(1) for m in _MD_IMAGE_INLINE.finditer(region)]
 
 
@@ -324,9 +336,13 @@ def readme_link_findings(text, model, slug):
     declared = [g["name"] for g in groups]
     holds = {g["name"].lower(): g["holds"] for g in groups}
 
-    unfenced = unfenced_text(text)
+    base = normalize(text)
+    fenced = {i for b in fidelity_text.code_blocks(base) if b.fenced for i in range(b.start, b.end)}
+    starts = {d.line: d for d in fidelity_text.link_definitions(base)}
     seen_headers, current, in_group = [], None, {}
-    for ln in unfenced.split("\n"):
+    for i, ln in enumerate(base.split("\n")):
+        if i in fenced:
+            continue
         s = ln.strip()
         h = re.fullmatch(r"<!--\s*(.*?)\s*-->", s)
         if h and "omit from toc" not in h.group(1):
@@ -335,16 +351,17 @@ def readme_link_findings(text, model, slug):
             ):
                 current = h.group(1)
             continue
-        d = _LINK_DEF.match(s)
+        d = starts.get(i)
         if d:
             if current is not None and current not in in_group:
                 seen_headers.append(current)
-            in_group.setdefault(current, []).append((d.group(1), d.group(2)))
+            in_group.setdefault(current, []).append((d.label, d.url))
 
     all_defs = [p for v in in_group.values() for p in v]
     # A reference the document renders as an image is a shield whatever host serves it, so resolve those first.
-    by_ref = dict(all_defs)
-    rendered = {m.group(1) for m in _MD_IMAGE_REF.finditer(unfenced) if m.group(1) in by_ref}
+    unfenced = "\n".join(ln for i, ln in enumerate(base.split("\n")) if i not in fenced)
+    images = {fidelity_text.reference_key(m.group(1)) for m in _MD_IMAGE_REF.finditer(unfenced)}
+    rendered = {ref for ref, _ in all_defs if fidelity_text.reference_key(ref) in images}
     described = {"shield": "a badge", "anchor": "an in-page anchor", "local": "a path in this repo"}
     for ref, url in all_defs:
         kind = link_kind(url, slug, ref in rendered, prefixes)
@@ -430,8 +447,7 @@ def third_party_tool_findings(text, catalog):
     if body is None:
         return []  # the absent section is already one finding from readme_section_findings
     declared = {t["name"].lower(): t for t in catalog["tools"]}
-    # Read over the unfenced text, as readme_link_findings does: a sample footnote is not a definition.
-    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced_text(text))}
+    defs = reference_table(text)
     findings = []
     listed = []
     in_head = False
@@ -454,7 +470,7 @@ def third_party_tool_findings(text, catalog):
         want = declared.get(name.lower())
         if want is None:
             continue
-        url = defs.get(ref)
+        url = defs.get(fidelity_text.reference_key(ref))
         if url is not None and url.rstrip("/") != want["link"].rstrip("/"):
             findings.append(
                 (
@@ -488,16 +504,16 @@ def readme_shield_findings(text, model, entry):
     """Shield presence, by the additive classes in spec/readme-sections.json."""
     findings = []
     unfenced = unfenced_text(text)
-    defs = {m.group(1): m.group(2) for m in _LINK_DEF.finditer(unfenced)}
+    defs = reference_table(text)
     # A retired badge service is scanned across the whole document rather than per section, since a dead badge is wrong wherever it sits.
     rendered_urls = set(shield_endpoints(unfenced, defs))
-    used_refs = {m.group(1) for m in _MD_IMAGE_REF.finditer(unfenced)}
+    used_refs = {fidelity_text.reference_key(m.group(1)) for m in _MD_IMAGE_REF.finditer(unfenced)}
     for dep in model.get("deprecatedShields", []):
         defined_urls = set()
-        for ref, url in sorted(defs.items()):
+        for ref, url in sorted((d.label, d.url) for d in definitions(text)):
             if dep["match"] in url:
                 defined_urls.add(url)
-                if ref in used_refs:
+                if fidelity_text.reference_key(ref) in used_refs:
                     verb = f"renders {dep['label']}"
                 elif url in rendered_urls:
                     verb = f"defines {dep['label']} and it is rendered elsewhere"

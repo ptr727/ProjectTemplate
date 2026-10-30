@@ -17,6 +17,8 @@ import unittest.mock
 from pathlib import Path
 from typing import ClassVar
 
+from import_probe import import_delta
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 import audit
 import validate
@@ -229,6 +231,45 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         ]
 
         self.assertEqual(1, len(validate.carried_link_errors(self.root, baseline)))
+
+    def test_rejects_an_autolink_to_the_template_repository(self) -> None:
+        (self.root / "GOVERNANCE.md").write_text(
+            "# Governance\n\n## Rule\n\nSee <https://github.com/ptr727/ProjectTemplate/issues>.\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(1, len(validate.carried_link_errors(self.root, self.baseline)))
+
+    def test_reports_a_reference_link_and_its_definition_once(self) -> None:
+        (self.root / "docs").mkdir()
+        (self.root / "GOVERNANCE.md").write_text(
+            "# Governance\n\n## Rule\n\nRead [the notes][notes].\n\n[notes]: ./docs/notes.md\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(1, len(validate.carried_link_errors(self.root, self.baseline)))
+
+    def test_a_fenced_heading_opens_no_section(self) -> None:
+        text = (
+            "## Other\n\n```md\n## Rule\n[hub only](./docs/hub-only.md)\n```\n\n## Rule\n\nkept\n"
+        )
+
+        self.assertEqual(validate.markdown_section(text, "Rule"), "\nkept\n")
+
+
+class PlainImportCase(unittest.TestCase):
+    """configure.sh runs spec/resolve_description.py, which imports validate, under whatever python3 it finds."""
+
+    def test_importing_validate_loads_no_markdown_reader(self) -> None:
+        """A name the interpreter already holds at startup is a boundary rather than a finding."""
+        for module in ("validate", "resolve_description"):
+            with self.subTest(module=module):
+                before, after = import_delta(Path(validate.__file__).parent, module)
+                if before:
+                    self.skipTest(
+                        f"this interpreter imports {', '.join(before)} at startup, so the import delta cannot be read here"
+                    )
+                self.assertEqual(after, [], f"importing {module} pulled in a Markdown reader")
 
 
 class BaselineAlternativesCase(unittest.TestCase):

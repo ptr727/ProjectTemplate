@@ -1,6 +1,6 @@
 """The text reading the fidelity tools share, so each one splits a document at the same boundaries.
 
-Fences and headings come from markdown-it-py. So every tool that imports this module runs under
+Fences, headings, and links come from markdown-it-py. So every tool that imports this module runs under
 `uv run --no-project --script`, or imports it only on the path that reads a region.
 """
 
@@ -9,6 +9,7 @@ import re
 from typing import NamedTuple
 
 import markdown_it
+from markdown_it.common.utils import normalizeReference
 
 # A `uses: <action>@<40-hex sha>` pin plus an optional version-shaped comment, which Dependabot bumps per repo.
 _ACTION_PIN = re.compile(r"(\buses:[ \t]*[^\s@]+)@[0-9a-fA-F]{40}(?:[ \t]+#[ \t]*v?[0-9][\w.\-]*)?")
@@ -24,6 +25,10 @@ _JOB_NEEDS = re.compile(
 # Block rules only, since a region boundary is a block fact, and skipping the inline pass keeps a parse per file cheap.
 # Tables are on because GitHub renders them, and a table changes where a block ends.
 _BLOCKS = markdown_it.MarkdownIt("commonmark").enable("table").disable("inline")
+
+_LINKS = markdown_it.MarkdownIt("commonmark").enable("table")
+
+_DEFINITION = re.compile(r"\[((?:[^\]\\\n]|\\.)+)\]:[ \t]*\n?[ \t>]*(?:<([^>\n]*)>|(\S+))")
 
 
 @functools.lru_cache(maxsize=16)
@@ -47,6 +52,14 @@ class CodeBlock(NamedTuple):
     end: int
     fenced: bool
     closed: bool
+
+
+class LinkDefinition(NamedTuple):
+    """A reference definition: its label and destination as written, and its zero-based line."""
+
+    label: str
+    url: str
+    line: int
 
 
 def normalize(text):
@@ -97,6 +110,52 @@ def code_blocks(text):
 def code_lines(text):
     """The zero-based lines of `text` that sit inside a code block, where a marker is content."""
     return frozenset(line for block in code_blocks(text) for line in range(block.start, block.end))
+
+
+def reference_key(label):
+    """`label` folded the way the parser matches a reference to its definition, so `[Docs]` finds `[docs]`."""
+    return normalizeReference(label)
+
+
+def link_definitions(text):
+    """The reference definitions `text` renders, in document order, one per folded label.
+
+    The parser decides which lines are definitions. So one inside a code block is content, and so is
+    one that would interrupt a paragraph. Of two whose labels fold together the first wins, as it
+    does when GitHub renders the document. The label and destination are read from the lines the
+    parser placed the definition on, since it stores both normalized. `text` is expected with its
+    line endings normalized, so a definition's line indexes `text.split("\\n")`.
+    """
+    env = {}
+    _BLOCKS.parse(text, env)
+    lines = text.split("\n")
+    found = []
+    for ref in env.get("references", {}).values():
+        start, end = ref["map"]
+        m = _DEFINITION.search("\n".join(lines[start:end]))
+        if m:
+            found.append(LinkDefinition(m.group(1), m.group(2) or m.group(3), start))
+    return sorted(found, key=lambda d: d.line)
+
+
+def link_targets(text):
+    """Each distinct destination `text` links to, in order of first appearance.
+
+    That is every link and image the parser reads, autolinks included, and then every reference
+    definition, used or not. A carried definition carries its destination either way. Markup
+    in a code span or a code block is content rather than a link. A destination the parser
+    percent-encoded is read back decoded, so it compares against a path as written.
+    """
+    targets = []
+    stack = list(reversed(_LINKS.parse(text)))
+    while stack:
+        token = stack.pop()
+        attr = {"link_open": "href", "image": "src"}.get(token.type)
+        if attr:
+            targets.append(_LINKS.normalizeLinkText(str(token.attrs[attr])))
+        stack.extend(reversed(token.children or []))
+    targets += [d.url for d in link_definitions(text)]
+    return list(dict.fromkeys(targets))
 
 
 def sections(text):
