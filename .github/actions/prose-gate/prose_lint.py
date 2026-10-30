@@ -489,8 +489,9 @@ class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
     `source` is every line, and `prose` and `code` the unfenced ones. `paragraph` is a Markdown
-    sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
-    documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
+    sentence block, a paragraph or a table cell. `comment`, `doc`, and `markup` are runs of
+    adjacent comment lines, `doc` a documentation comment and `markup` a Markdown HTML one.
+    `docstring` opens at `column`.
     """
 
     kind: str
@@ -849,6 +850,7 @@ def front_matter_end(lines: list[str]) -> int:
 MARKDOWN = MarkdownIt("commonmark").enable("table")
 HTML = BASE["languages"]["markup"]
 TAG = re.compile(r"<[^<>]*>")
+BLOCK_PARENTS = (["paragraph_open"], ["th_open"], ["td_open"])
 
 
 def extract_markdown(lines: list[str]) -> Extracted:
@@ -880,7 +882,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
-            if parents[-1:] == ["paragraph_open"] and "blockquote_open" not in parents:
+            if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
                     Unit("paragraph", tuple(Line(first + i, s.strip()) for i, s in spans))

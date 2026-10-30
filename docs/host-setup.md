@@ -22,7 +22,7 @@ This section is the **contract**: which tools a host needs and which repo proced
 | `jq` | the ruleset normalizer in `repo-config/configure.sh`, the ruleset diff in [`AUDIT.md`][audit] section 6, and payload regeneration | `jq --version` | **1.7**, target |
 | Ripgrep | repository searches and file discovery by coding agents | `rg --version` | **13.0.0**, target |
 | `docker` | the four linters, which run as pinned images rather than local installs | `docker --version` | **29.6.2**, target |
-| `uv` / `uvx` | coverage runs, the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo, and the hub scripts run as `uv run --no-project --script`, the prose gate, the audit, and the review loop among them | `uv --version` | **0.12.2**, target |
+| `uv` / `uvx` | coverage runs, and the Python toolchain (`ruff`, `pyright` or `mypy`) in a Python repo. Also the hub scripts, run as `uv run --no-project --script`, the prose gate, the audit, and the review loop among them | `uv --version` | **0.12.2**, target |
 
 The **Floor** column exists because presence and sufficiency are different questions and the first's answer was being read as the second's. A tool below its floor still answers `--version`, so every other column reports it as fine while `scripts/host_gate.py` fails it. The kind is named beside the number, since the two kinds differ. A **measured** floor sits above a version known to break a documented procedure and gives a failing host a defect to point at. A **target** floor names the version the repo's toolchain is configured for and gives no such defect to point at. The next section carries the reasoning behind each one.
 
