@@ -515,6 +515,11 @@ def language_of(lexer: str | None) -> dict[str, Any] | None:
     return next((s for s in BASE["languages"].values() if lexer in s["lexers"]), None)
 
 
+def program_name(word: str) -> str:
+    """A program word as its bare name, any path and version suffix dropped."""
+    return word.rsplit("/", 1)[-1].rstrip("0123456789.")
+
+
 def lexer_name(path: Path, first: str) -> str | None:
     """The lexer a file reads through, `markdown`, or None for a format holding no comments.
 
@@ -534,7 +539,7 @@ def lexer_name(path: Path, first: str) -> str | None:
     if m := SHEBANG.match(first):
         program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
         with contextlib.suppress(ClassNotFound):
-            return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
+            return get_lexer_by_name(program_name(program)).aliases[0]
     return None if suffix else files["extensionless"]
 
 
@@ -736,20 +741,25 @@ def step_shell(starts: Starts, key: int) -> str:
 
 
 HEREDOC_LABEL = re.compile(r"<<-?[ \t]*(['\"]?)\\?[\w-]+\1")
+SEPARATOR = re.compile(r"&&|\|\||;|(?<![<>&])&(?![>&])")
 
 
-def runs_body(starts: Starts, row: int, programs: frozenset[str]) -> bool:
-    """Whether the command opening a heredoc on `row` names one of `programs`, which runs the body.
+def runs_body(starts: Starts, row: int, col: int, programs: frozenset[str]) -> bool:
+    """Whether the command holding the heredoc opened at `col` of `row` names one of `programs`.
 
-    The command is the opener line without its heredoc labels, after any lines a trailing backslash
-    continues onto it. Any other command reads the body as the data it writes.
+    The command is the opener's own list element, a pipe joining it, after any lines a trailing
+    backslash continues onto it. Its heredoc labels are not words. Any other command reads the body
+    as the data it writes.
     """
     top = row
     while top > 1 and starts.line(top - 1).rstrip().endswith("\\"):
         top -= 1
-    command = HEREDOC_LABEL.sub(" ", " ".join(starts.line(n) for n in range(top, row + 1)))
-    words = re.split(r"[\s|;&()`\"'{}<>=\\]+", command)
-    return any(w.rsplit("/", 1)[-1].rstrip("0123456789.") in programs for w in words)
+    rows = [starts.line(n) for n in range(top, row + 1)]
+    at, command = sum(len(r) + 1 for r in rows[:-1]) + col, " ".join(rows)
+    left = max((m.end() for m in SEPARATOR.finditer(command, 0, at)), default=0)
+    right = next((m.start() for m in SEPARATOR.finditer(command, at)), len(command))
+    words = re.split(r"[\s|()`\"'{}<>\\]+", HEREDOC_LABEL.sub(" ", command[left:right]))
+    return any(program_name(w) in programs for w in words)
 
 
 def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]:
@@ -758,7 +768,8 @@ def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
     next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
     script without its YAML indent. Each is lexed alone so that string ends with the body. Only a
-    body a program in `programs` runs is returned, since any other is data rather than code.
+    body a program in `programs` runs is returned, since any other is data rather than code. An
+    opener closing nowhere is more often a shift, so the rest of the script stays code.
     """
     rows = text.splitlines(keepends=True)
     indent = min((len(r) - len(r.lstrip()) for r in rows if r.strip()), default=0)
@@ -769,10 +780,14 @@ def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]
         if kind in String.Heredoc:
             # The opener's own line stays code, so a body is the lines after it.
             first, end = starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]
-            mid = starts.at(offset + max(next(re.finditer(HEREDOC, value)).end(8), 1) - 1)[0]
-            run = runs_body(starts, first, programs)
+            m = next(re.finditer(HEREDOC, value))
+            mid = starts.at(offset + max(m.end(8), 1) - 1)[0]
+            run = [m.end(8) < 0 or runs_body(starts, first, starts.at(offset)[1], programs)]
+            if first < mid < end:
+                col = starts.at(offset + m.start(7))[1]
+                run.append(m.end(8) < 0 or runs_body(starts, first, col, programs))
             pieces = [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
-            spans += [(a, b, run) for a, b in pieces]
+            spans += [(a, b, r) for (a, b), r in zip(pieces, run, strict=True)]
     code = list(rows)
     for first, end, _run in spans:
         code[first:end] = ["\n"] * (end - first)

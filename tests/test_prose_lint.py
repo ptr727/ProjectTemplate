@@ -1312,10 +1312,7 @@ class TestCommentWrapRule(BaitCase):
         self.assertEqual([6], [c[0] for c in self.comments("a.sh", text)])
 
     def test_a_non_shell_run_step_takes_no_heredoc_split(self) -> None:
-        """A Python shift by a name read as an opener cut a triple-quoted string in two.
-
-        A shell step still splits, and bash reads the unclosed `<< n` body as data written to `m`.
-        """
+        """A Python shift by a name read as an opener cut a triple-quoted string in two."""
         script = '    m = 1 << n; s = """\n    # not a comment\n    """\n    # real\n'
         for step in (
             "- shell: python\n  run: |\n" + script,
@@ -1329,7 +1326,8 @@ class TestCommentWrapRule(BaitCase):
                 self.assertEqual(["real"], got)
         for step in ("- shell: bash -e {0}\n  run: |\n", "- shell: python\n- run: |\n"):
             with self.subTest(step=step):
-                self.assertEqual([], [c[1] for c in self.comments("x.yml", step + script)])
+                got = [c[1] for c in self.comments("x.yml", step + script)]
+                self.assertEqual(["not a comment"], got)
 
     def test_a_code_span_sharing_words_with_earlier_prose_does_not_move_the_comment(self) -> None:
         text = "I see this, `see <!-- check this. --> this`\n    <!-- check this. -->\n"
@@ -4560,7 +4558,11 @@ class TestYamlLanguage(BaitCase):
             ('cat <<EOF >> "$GITHUB_STEP_SUMMARY"', "EOF", []),
             ("gh api --input - <<'JSON'", "JSON", []),
             ("cat > run.sh <<'SH'", "SH", []),
+            ("cat > f <<sh", "sh", []),
+            ("cat > notes.txt <<EOF && bash build", "EOF", []),
+            ("gh api repos/o/r -f shell=sh --input - <<'JSON'", "JSON", []),
             ("cat <<EOF | bash", "EOF", [3]),
+            ("ssh deploy@host <<'EOF'", "EOF", [3]),
             ("/usr/bin/python3.13 - <<'PY'", "PY", [3]),
             ("docker run --rm -i image \\\n      python3 - <<'PY'", "PY", [4]),
         ):
@@ -4570,6 +4572,18 @@ class TestYamlLanguage(BaitCase):
                 self.assertEqual([*ran, text.count("\n")], lines)
                 added = self.kinds(text, {"comment-added"}, name="x.yml")
                 self.assertEqual(["comment-added"] * len(lines), added)
+
+    def test_each_heredoc_on_one_line_is_judged_by_its_own_command(self) -> None:
+        rows = ("cat <<'A' > notes.txt; python3 - <<'B'", "# Written.", "A", "# Run.", "B")
+        text = "- run: |\n" + "".join(f"    {r}\n" for r in rows)
+        self.assertEqual([(5, "Run.")], [c[:2] for c in self.comments("x.yml", text)])
+
+    def test_a_shift_by_a_name_in_a_run_block_hides_no_later_comment(self) -> None:
+        """An opener closing nowhere is a shift, so the rest of the script is still read as code."""
+        for shift in ("(( y = x << n ))", "(( mask |= 1 << bit ))"):
+            with self.subTest(shift=shift):
+                text = f"- run: |\n    {shift}\n    echo done\n    # A real comment.\n"
+                self.assertEqual([4], [c[0] for c in self.comments("x.yml", text)])
 
     def test_a_lambda_block_is_read_as_cpp(self) -> None:
         """A C++ comment inside a lambda is judged where it is written, on its file line."""
