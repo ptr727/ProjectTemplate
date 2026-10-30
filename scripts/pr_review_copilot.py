@@ -107,8 +107,9 @@ class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
     `open` is the count of open findings the body states, None where it states none or one this
-    reader cannot believe. `listed` is the findings its findings lists or its file table's
-    findings column name, the larger of the two, since both name the same findings.
+    reader cannot believe. `listed` is the larger of the items its findings lists hold and the
+    file table's filled findings cells, since both name the same findings. A cell counts once
+    however many findings it names, so the table alone can undercount.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
     `table` is the paths the body's file table names, None where it carries no table. `unplaced`
     is each part the reader cannot place, with its text, the subset of `notes` that can hold a
