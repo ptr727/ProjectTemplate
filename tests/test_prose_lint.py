@@ -2087,6 +2087,32 @@ class TestCommentAddedRule(BaitCase):
             with self.subTest(name=name):
                 self.assertEqual(["comment-added"], self.kinds(text, {"comment-added"}, name=name))
 
+    def test_a_line_closing_a_comment_before_code_is_not_reported(self) -> None:
+        """Deleting it deletes the code after the closer and leaves the comment unterminated.
+
+        A later comment on that line is not code, and a comment on a line of its own is still reported.
+        """
+        for name, code, opener, closer in (
+            ("a.css", "a { color: red; }", "/*", "*/"),
+            ("a.ts", "const y = 2;", "/*", "*/"),
+            ("a.cs", "int y = 2;", "/*", "*/"),
+            ("a.jsonc", '"b": 2', "/*", "*/"),
+            ("a.html", "<p>y</p>", "<!--", "-->"),
+            ("a.xml", "<b/>", "<!--", "-->"),
+            ("a.csproj", "<b/>", "<!--", "-->"),
+        ):
+            with self.subTest(name=name):
+                text = (
+                    f"{code} {opener} A comment here.\nThe rest of it. {closer} {code}\n"
+                    f"{opener} A real comment. {closer}\n"
+                    f"{opener} A later one. {closer} {opener} And one more. {closer}\n"
+                    f"{opener} A closer then code. {closer} {code}\n"
+                    f"{opener} A. {closer} {opener} B. {closer} {code}\n"
+                )
+                path = self._write(text, name)
+                found = prose_lint.check_file(path, {"comment-added"})
+                self.assertEqual([3, 4], [n for n, _, _ in found])
+
     def test_config_carries_the_rule_as_code_does(self) -> None:
         for name, text in (
             (

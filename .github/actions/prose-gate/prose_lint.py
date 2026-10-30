@@ -476,13 +476,17 @@ def discover(
 
 
 class Line(NamedTuple):
-    """One source line of a unit, a comment's text without its marker and `raw` with it."""
+    """One source line of a unit, a comment's text without its marker and `raw` with it.
+
+    `trailed` marks a line where code follows the comment's closer, so deleting it deletes code.
+    """
 
     number: int
     text: str
     leading: bool = True
     raw: str = ""
     help: bool = False
+    trailed: bool = False
 
 
 class Unit(NamedTuple):
@@ -615,6 +619,17 @@ def comment_tokens(text: str, lexer: str) -> list[tuple[int, str]]:
     return out
 
 
+def code_follows(text: str, found: list[tuple[int, str]], k: int) -> bool:
+    """Whether code follows comment `k` of `found` on the line it ends on, a later comment aside."""
+    at = found[k][0] + len(found[k][1])
+    stop = len(text) if (eol := text.find("\n", at)) < 0 else eol
+    for offset, value in found[k + 1 :]:
+        if offset >= stop or text[at:offset].strip():
+            break
+        at = offset + len(value)
+    return bool(text[at:stop].strip())
+
+
 def comment_lines(
     text: str, lexer: str, spec: dict[str, Any], shift: int = 0
 ) -> list[tuple[Line, bool]]:
@@ -627,7 +642,8 @@ def comment_lines(
     out: list[tuple[Line, bool]] = []
     blocks = sorted(spec.get("block", ()), key=lambda b: -len(b[0]))
     markers = sorted(spec.get("line", ()), key=len, reverse=True)
-    for offset, value in comment_tokens(text, lexer):
+    found = comment_tokens(text, lexer)
+    for k, (offset, value) in enumerate(found):
         value = value.rstrip("\r\n")
         number, col = starts.at(offset)
         leading = not starts.line(number)[:col].strip()
@@ -643,7 +659,9 @@ def comment_lines(
             out.append((Line(number + shift, body.strip(), leading, value, help_form), doc))
             continue
         opener, closer, *cont = block or ("", "")
-        for i, part in enumerate(value[len(opener) :].removesuffix(closer).split("\n")):
+        parts = value[len(opener) :].removesuffix(closer).split("\n")
+        trailed = code_follows(text, found, k)
+        for i, part in enumerate(parts):
             body = part.strip()
             if i and cont and body.startswith(cont[0]) and body[1:2].isspace():
                 body = body[1:].strip()
@@ -651,7 +669,10 @@ def comment_lines(
                 body = ""
             row = starts.line(number + i)
             raw = row[min(col, len(row) - len(row.lstrip())) :] if i else value.split("\n")[0]
-            out.append((Line(number + i + shift, body, leading or i > 0, raw, help_form), doc))
+            last = trailed and i == len(parts) - 1
+            out.append(
+                (Line(number + i + shift, body, leading or i > 0, raw, help_form, last), doc)
+            )
     return out
 
 
@@ -1453,12 +1474,13 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
     """Every prose comment line opening its own line, which the diff scope narrows to a change.
 
     A modified line counts as added, the label being the answer. A help block, a documentation
-    comment, and a trailing comment are out of scope.
+    comment, and a comment sharing its line with code, before or after it, are out of scope.
     """
     lines = {
         line.number
         for line in unit.lines
         if line.leading
+        and not line.trailed
         and not line.help
         and is_comment_prose(without_trailing_directive(ctx, line.text), ctx.config)
     }
