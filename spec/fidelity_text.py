@@ -33,7 +33,7 @@ _BLOCKS = (
 _LINKS = markdown_it.MarkdownIt("commonmark").enable("table")
 
 _DESTINATION = re.compile(
-    r"\[(?:[^\[\]\\]|\\.)*\]:[ \t]*\n?[ \t>]*(?:<((?:[^<>\n\\]|\\.)*)>|(\S+))"
+    r"\[(?:[^\[\]\\]|\\[\s\S])*\]:[ \t]*\n?[ \t>]*(?:<((?:[^<>\n\\]|\\.)*)>|(\S+))"
 )
 
 
