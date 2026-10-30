@@ -20,8 +20,10 @@ set -eu
 cd "$(git rev-parse --show-toplevel)"
 
 # Ruff and mypy, via uvx per this repo's own CI invocation for a repo with no `uv.lock`.
-uvx ruff@latest format --check .
-uvx ruff@latest check .
+# Ruff runs the version CI pins, read from the manifest the validator reads.
+ruff_version=$(sed -n 's/^ruff==//p' .github/actions/python-tool-pins/requirements.txt)
+uvx "ruff@$ruff_version" format --check .
+uvx "ruff@$ruff_version" check .
 uvx mypy@latest
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.

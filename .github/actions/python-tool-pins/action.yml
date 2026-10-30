@@ -17,9 +17,9 @@ runs:
       run: |
         set -Eeuo pipefail
         manifest="$GITHUB_ACTION_PATH/requirements.txt"
-        mapfile -t versions < <(sed -n 's/^ruff==\([0-9][0-9A-Za-z.]*\)[[:space:]]*$/\1/p' "$manifest")
-        if [ "${#versions[@]}" -ne 1 ]; then
-          echo "::error::$manifest must pin ruff on exactly one 'ruff==<version>' line, found ${#versions[@]}."
+        version=$(sed -n 's/^ruff==\([0-9][0-9A-Za-z.]*\)[[:space:]]*$/\1/p' "$manifest")
+        if [ -z "$version" ] || [ "$version" != "${version%%$'\n'*}" ]; then
+          echo "::error::$manifest must pin ruff on exactly one 'ruff==<version>' line."
           exit 1
         fi
-        echo "ruff=${versions[0]}" >> "$GITHUB_OUTPUT"
+        echo "ruff=$version" >> "$GITHUB_OUTPUT"

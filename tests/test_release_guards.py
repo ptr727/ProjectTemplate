@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 from host_capability import bash_or_skip
 from runner_commands import forged_lines
-from workflow_steps import step_script_text
+from workflow_steps import step_script, step_script_text
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -1491,9 +1491,7 @@ gh() {
     def run_tool_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
         """Run the python-tool-pins action's step over a constructed manifest, or the hub's own where None."""
         action = REPO / ".github/actions/python-tool-pins"
-        script = step_script_text(
-            (action / "action.yml").read_text(encoding="utf-8"), "Read tool pins step"
-        )
+        script = step_script(action / "action.yml", "Read tool pins step")
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if manifest is not None:
             action = root / "action"
