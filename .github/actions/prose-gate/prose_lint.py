@@ -1040,15 +1040,21 @@ def strip_list_marker(text: str) -> str:
     return LIST_MARKER.sub("", text, count=1).strip()
 
 
-def by_cell(text: str, blank: Callable[[str], str]) -> str:
-    """Blank a table row a cell at a time, so no code span or quotation reaches across a cell.
+def row_cells(text: str) -> list[str]:
+    """A table row opening with a pipe split into its cells, and any other line left whole.
 
     A cell ends at a pipe no backslash escapes, inside a code span too, which is how markdown-it-py
-    splits a row. An unpaired quote mark in one cell would otherwise hide every cell up to the next.
+    splits a row. So no code span or quotation read from a cell reaches into the next one.
     """
-    if TABLE_ROW.match(text) is None:
-        return blank(text)
-    return "|".join(blank(cell) for cell in CELL_BREAK.split(text))
+    return CELL_BREAK.split(text) if TABLE_ROW.match(text) else [text]
+
+
+def by_cell(text: str, blank: Callable[[str], str]) -> str:
+    """Blank a line a cell at a time, keeping every pipe that ends a cell where it was.
+
+    An unpaired quote mark in one cell would otherwise hide every cell up to the next quote.
+    """
+    return "|".join(blank(cell) for cell in row_cells(text))
 
 
 def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
@@ -1112,14 +1118,12 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
 
-    A table row is read a cell at a time. A cell ends at a pipe no backslash escapes, which is how
-    markdown-it-py reads an escaped pipe. `prose_lines` blanks each cell on its own, and leaves
-    every such pipe where it was.
+    A table row opening with a pipe is read a cell at a time, split where `row_cells` splits it.
+    `prose_lines` blanks each cell on its own and leaves every pipe ending one where it was.
     """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
-        row = line.lstrip().startswith("|")
-        cells = CELL_BREAK.split(line.strip().strip("|")) if row else [line]
+        cells = CELL_BREAK.split(line.strip().strip("|")) if TABLE_ROW.match(line) else [line]
         pieces = (s for cell in cells for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell)))
         for sentence in (s for s in pieces if s.strip()):
             head, _, tail = sentence.partition(";")
@@ -1268,7 +1272,7 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
         tokens = (
             [(m.group(1), False)]
             if m
-            else [(s.group(1), True) for s in INLINE_SPAN.finditer(line.text)]
+            else [(s.group(1), True) for c in row_cells(line.text) for s in INLINE_SPAN.finditer(c)]
         )
         if not m:
             tokens += [

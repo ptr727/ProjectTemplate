@@ -3566,6 +3566,11 @@ class TestDeadPathRule(unittest.TestCase):
         table = "| A | B | C |\n| --- | --- | --- |\n| x `a | [d](scripts/gone.py) | b` |\n"
         self.assertIn("dead-path", self.kinds(root, table))
 
+    def test_a_lone_backtick_in_an_earlier_cell_hides_no_later_span(self) -> None:
+        root = self.repo()
+        table = "| A | B |\n| --- | --- |\n| 2` x | `scripts/gone.py` |\n"
+        self.assertIn("dead-path", self.kinds(root, table))
+
     def test_a_living_path_is_not_a_finding(self) -> None:
         root = self.repo()
         self.assertEqual([], self.kinds(root, "Run `scripts/kept.py` to apply.\n"))
