@@ -808,7 +808,8 @@ docker_install() {
         fi
     done
     if [[ ${#held[@]} -gt 0 ]]; then
-        warn "Conflicting package(s) ${held[*]} are held, so they are left installed. Release the hold with apt-mark unhold ${held[*]} and run this again, or remove them by hand."
+        warn "Conflicting package(s) ${held[*]} are held, so nothing is removed and docker is not installed. Release the hold with apt-mark unhold ${held[*]}, or remove them by hand, then run this again."
+        return 1
     fi
     if [[ ${#present[@]} -gt 0 ]]; then
         log "  Removing ${#present[@]} conflicting package(s): ${present[*]}"

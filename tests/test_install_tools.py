@@ -288,7 +288,7 @@ esac
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
 class TestLinuxHeldPackages(unittest.TestCase):
-    """A held package reads as installed, and a held Docker conflict is reported and left installed.
+    """A held package reads as installed, and a held Docker conflict is reported rather than removed.
 
     The stub dpkg-query answers each status field a format names from a table of `package want status` lines.
     A definition reading the wrong field therefore reads the wrong answer.
@@ -333,16 +333,9 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["gone", "absent"])
 
-    def test_a_held_conflict_is_reported_and_left_installed(self) -> None:
+    def test_a_held_conflict_is_reported_and_nothing_is_removed(self) -> None:
         result = self.docker_conflicts("runc hold installed\ndocker.io install installed\n")
-        self.assertEqual(
-            result.stdout.splitlines(),
-            [
-                "  Removing 1 conflicting package(s): docker.io",
-                "ROOT apt-get remove -y docker.io",
-                "PAST REMOVAL",
-            ],
-        )
+        self.assertEqual(result.stdout.splitlines(), ["RC 1"])
         self.assertIn("runc are held", result.stderr)
         self.assertIn("apt-mark unhold runc", result.stderr)
 
