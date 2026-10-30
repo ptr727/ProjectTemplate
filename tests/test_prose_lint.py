@@ -4240,7 +4240,12 @@ class TestLexerDispatch(BaitCase):
     def test_every_file_mapping_names_a_declared_language(self) -> None:
         """A mapping to a lexer with no language would read its files as plain text."""
         files = prose_lint.BASE["files"]
-        named = [*files["suffix"].values(), *files["name"].values(), files["extensionless"]]
+        named = [
+            *files["suffix"].values(),
+            *files["name"].values(),
+            *files["runner"].values(),
+            files["extensionless"],
+        ]
         for lexer in named:
             with self.subTest(lexer=lexer):
                 self.assertIsNotNone(prose_lint.language_of(lexer))
