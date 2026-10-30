@@ -149,7 +149,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    headline is the one place that round names what it flags, so answer it as a suppressed finding.
    The exit code repeats on that head after the answer. A clean verdict on the same terms prints
    its headline under `CLEAN VERDICT HEADLINE`, which changes no exit code. Read that headline,
-   since it can name a nit no thread carries, and answer any such nit with `comment`.
+   since it can name a nit no thread carries, and answer any such nit with `comment`. A clean
+   round whose findings list or file table names a finding prints none, since `FINDINGS WITH NO
+   THREAD` names those.
    A finding `suppressed=` counts may be counted in the shortfall too. So answer what the body
    holds rather than what the two numbers add up to.
    What closing a finding owes turns on whether it is `pre-existing`, under the classes

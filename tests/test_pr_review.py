@@ -2275,6 +2275,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn("FINDINGS WITH NO THREAD (2)", out)
                 self.assertNotIn("CLEAN VERDICT HEADLINE", out)
                 self.assertNotIn("REVIEWER OUTPUT NOTED", out)
+                self.assertNotIn("counts no finding", out)
 
     def test_a_stated_count_beyond_the_round_s_threads_is_printed(self) -> None:
         threads = [thread("T1", rid="PRR_one", cid="4000000001")]
