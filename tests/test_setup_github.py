@@ -741,6 +741,13 @@ class TestPackageInstalled(unittest.TestCase):
     def test_an_unknown_package_reads_as_missing(self) -> None:
         self.assertNotEqual(self.check("", ""), 0)
 
+    def test_install_tools_carries_the_same_definition(self) -> None:
+        installer = LINUX_SCRIPT.with_name("install-tools.sh").read_text(encoding="utf-8")
+        self.assertEqual(
+            function_body(installer, "\npackage_installed() {"),
+            function_body(LINUX_SCRIPT.read_text(encoding="utf-8"), "\npackage_installed() {"),
+        )
+
 
 class TestCallSites(unittest.TestCase):
     """Each script's status and configure actions reach the GitHub CLI functions the tests drive."""

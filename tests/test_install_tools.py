@@ -274,8 +274,6 @@ report
                 self.assertEqual(result.stdout, "")
 
 
-SETUP_GITHUB = ROOT / "host-setup" / "linux" / "setup-github.sh"
-
 DPKG_QUERY_STUB = r"""#!/bin/sh
 format=$2
 line=$(grep "^$3 " "$DPKG_TABLE") || exit 1
@@ -288,16 +286,9 @@ esac
 """
 
 
-def shell_function(path: Path, name: str) -> str:
-    """The text of the shell function `name` in `path`, from its opening line to the brace closing it."""
-    text = path.read_text(encoding="utf-8")
-    start = text.index(f"\n{name}() {{\n") + 1
-    return text[start : text.index("\n}\n", start) + 2]
-
-
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
 class TestLinuxHeldPackages(unittest.TestCase):
-    """A held package reads as installed, and a held Docker conflict is reported rather than removed.
+    """A held package reads as installed, and a held Docker conflict is reported and left installed.
 
     The stub dpkg-query answers each status field a format names from a table of `package want status` lines.
     A definition reading the wrong field therefore reads the wrong answer.
@@ -336,21 +327,22 @@ ensure_prerequisites() { printf 'PAST REMOVAL\\n'; exit 0; }
 if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
         return self.run_bash(rows, body)
 
-    def test_both_linux_scripts_carry_one_definition(self) -> None:
-        self.assertEqual(
-            shell_function(LINUX_INSTALLER, "package_installed"),
-            shell_function(SETUP_GITHUB, "package_installed"),
-        )
-
     def test_a_held_package_reads_as_installed_and_is_not_planned(self) -> None:
         rows = "less hold installed\njq install installed\ngone deinstall config-files\n"
         result = self.run_bash(rows, "apt_missing less jq gone absent")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["gone", "absent"])
 
-    def test_a_held_conflict_is_reported_and_nothing_is_removed(self) -> None:
+    def test_a_held_conflict_is_reported_and_left_installed(self) -> None:
         result = self.docker_conflicts("runc hold installed\ndocker.io install installed\n")
-        self.assertEqual(result.stdout.splitlines(), ["RC 1"])
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "  Removing 1 conflicting package(s): docker.io",
+                "ROOT apt-get remove -y docker.io",
+                "PAST REMOVAL",
+            ],
+        )
         self.assertIn("runc are held", result.stderr)
         self.assertIn("apt-mark unhold runc", result.stderr)
 
