@@ -48,9 +48,11 @@ One worker runs at a time, so no two rounds claim the same file and no round nee
 `backlog-burndown` does.
 
 Every command below that runs the chain's script writes it as `python3 "$handoff" ...`, with
-`handoff="<hub-checkout>/scripts/handoff.py"` (in the hub itself, `scripts/handoff.py`), as
-`session-handoff` "Running the Chain" sets it. Each seat sets it for itself, since the picker and
-the worker are separate subagents and share no shell.
+`handoff="<hub-checkout>/scripts/handoff.py"`, as `session-handoff` "Running the Chain" sets it.
+`<hub-checkout>` is a hub checkout of the seat's own on `main`. So the picker and the worker each
+first clone one, as `session-handoff` "The Attended Session" step 0 does. A worktree on a feature
+branch is not one, and neither is the checkout the run was launched in. Each sets `$handoff` for
+itself, since the picker and the worker are separate subagents and share no shell.
 
 ## Invocation and What It Authorizes
 
@@ -272,8 +274,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    That skill's rules on the body bind it.
 5. **Choose the worker's tier** by `backlog-burndown`'s "Choosing the Worker's Model Tier", naming
    `frontier` or `standard` and never a model.
-6. **Reply with one line.** A picker writes nothing but the handoff it creates, and returns `STOP`
-   where a read it needs cannot run.
+6. **Reply with one line.** A picker writes nothing but the handoff it creates and its own hub
+   clone, and returns `STOP` where a read it needs cannot run.
 
 ## The Worker
 
