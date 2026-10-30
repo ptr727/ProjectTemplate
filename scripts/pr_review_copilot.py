@@ -60,6 +60,7 @@ KEYS = {
     "effort": str,
     "table_header": str,
     "table_findings": str,
+    "table_finding_marker": str,
     "discussion_link": str,
 }
 
@@ -175,6 +176,7 @@ def compiled(vocabulary: dict) -> dict:
         "comment_heading": re.compile(vocabulary["comment_heading"] or r"(?!)", re.IGNORECASE),
         "effort": re.compile(vocabulary["effort"] or r"(?!)", re.IGNORECASE),
         "discussion_link": re.compile(vocabulary["discussion_link"] or r"(?!)"),
+        "table_finding_marker": re.compile(vocabulary["table_finding_marker"] or r"(?!)"),
     }
 
 
@@ -532,10 +534,12 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 table = (table or []) + [p for row in rows if row for p in paths(row[0])]
                 if vocab["table_findings"] in heads:
                     column = heads.index(vocab["table_findings"])
+                    marker = vocab["table_finding_marker"]
+                    texts = [inline_text(row[column]) for row in rows if len(row) > column]
                     tabled += sum(
-                        any(c.isalnum() for c in inline_text(row[column]))
-                        for row in rows
-                        if len(row) > column
+                        max(1, len(marker.findall(text)))
+                        for text in texts
+                        if any(c.isalnum() for c in text)
                     )
         i += 1
 
