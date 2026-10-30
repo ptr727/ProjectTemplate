@@ -204,8 +204,8 @@ uv run --no-project --script scripts/pr_review.py cleanup 452 --repo ptr727/Proj
 | --- | --- | --- |
 | `0` | `status`, `wait` | No Copilot review covers the head yet (`status`), or the review covering it states no partial coverage and its verdict counts what it flags. On a held head, an attested local pass whose checks no longer hold the poll, short of `45`. Exit `0` on that review does not poll the checks, so it does not prove the required checks ran. |
 | `30` | `wait` | Still pending at the timeout, which is pending rather than failed. On a held head, `status=CHECKS_PENDING`. A round past `--min-rounds` not yet landed. |
-| `40` | `wait` | No Copilot review covers the head: the reviewer answered outside a formal review, the request returned success and recorded nothing, or the reviewer writes under a login no query filters on. |
-| `41` | `wait` | The newest round is a refusal or a quota state, its kind printed in the status line, and in `refusal=` for a refusal on this pull request. |
+| `40` | `wait` | No Copilot review covers the head. The reviewer answered outside a formal review or under a login no query filters on, or the request returned success and recorded nothing. |
+| `41` | `wait` | The newest round is a refusal or a quota state. Its kind is printed in the status line, and in `refusal=` for a refusal on this pull request. |
 | `42` | `status`, `wait` | The round covering the head states partial coverage. Or a non-refusal head round exists while an earlier round states partial, and one reads `UNKNOWN` or none states coverage. |
 | `44` | `wait` | The review loop closed, the merge reads `BLOCKED`, and a required check is in a shape no wait clears. |
 | `45` | `wait` | An open attested held head that nothing holds, its merge other than `CLEAN`, `UNSTABLE`, or `HAS_HOOKS`. Its rollup was unreadable, or a `DIRTY` merge has no check posted that the reader can parse. Or a `DIRTY` or `BEHIND` merge lacks a required check or has it from another app, judged on rules read and a whole rollup. |
@@ -213,7 +213,7 @@ uv run --no-project --script scripts/pr_review.py cleanup 452 --repo ptr727/Proj
 | `50` | `status`, `wait` | The round covering the head opens on a verdict other than the clean one while it counts no finding. Or a head round carries a part the reader cannot place, and nothing acknowledges its fingerprint. |
 | `60` to `63` | `reply` | No thread matched, more than one did, the reply returned no comment url, or the resolve did not report the thread resolved. |
 | `64` | every write, `wait` | The write scope could not be established or excludes the target. |
-| `65` to `68` | `comment`, `attest` | The pull request could not be read, the response did not confirm the comment, the checkout is not the head, or no current local pass covers it. |
+| `65` to `68` | `comment`, `attest` | The pull request could not be read, or the response did not confirm the comment. Or the checkout is not the head, or no current local pass covers it. |
 | `70`, `71` | `claims` | A reference does not resolve, or none could be read. |
 
 `1` is a GraphQL read that failed and ended the run, and `2` is argparse's own usage error.

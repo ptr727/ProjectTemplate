@@ -2763,6 +2763,20 @@ class TestSentenceLengthRule(BaitCase):
         tail = f"Done. {' '.join(['word'] * 20)}\n{' '.join(['word'] * 10)}.\n"
         self.assertEqual([(2, "sentence-length")], self.found_md("Intro line.\n" + tail))
 
+    def test_a_table_cell_over_the_cap_is_flagged_on_its_row(self) -> None:
+        """A cell holds prose as a paragraph does, so its sentences meet the same cap."""
+        over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 1)
+        table = f"| Name | Effect |\n| --- | --- |\n| `X` | {over} |\n"
+        self.assertEqual([(3, "sentence-length")], self.found_md(table))
+        header = f"| {over} | Effect |\n| --- | --- |\n| `X` | short |\n"
+        self.assertEqual([(1, "sentence-length")], self.found_md(header))
+
+    def test_each_table_cell_is_judged_alone(self) -> None:
+        """Cells on one row are separate blocks, so two short cells never join into one sentence."""
+        half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
+        table = f"| A | B |\n| --- | --- |\n| {half} | {half} |\n"
+        self.assertEqual([], self.found_md(table))
+
     def test_a_source_line_that_is_not_a_comment_is_not_judged(self) -> None:
         """A source file's long code lines are code, which no sentence rule judges."""
         over = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
@@ -4788,13 +4802,12 @@ class TestMarkdown(BaitCase):
     """Markdown extraction through markdown-it-py: code, blocks, HTML, and front matter."""
 
     def test_structure_is_not_a_sentence(self) -> None:
-        """A table row, a heading, a link definition, and a blockquote hold no prose sentence.
+        """A heading, a link definition, and a blockquote hold no prose sentence.
 
-        A table needs its delimiter row, as GitHub's does, and a definition's title is no prose.
+        A definition's title is no prose. A table cell is, which `TestSentenceLengthRule` covers.
         """
         run = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP + 1))
-        table = f"| a |\n| - |\n| {run} |\n"
-        for text in (table, f"# {run}\n", f'[ref]: ./x.md "{run}"\n', f"> {run}\n"):
+        for text in (f"# {run}\n", f'[ref]: ./x.md "{run}"\n', f"> {run}\n"):
             with self.subTest(text=text[:20]):
                 self.assertEqual([], self.kinds(text, {"sentence-length"}))
 
