@@ -101,7 +101,8 @@ Subcommands
            counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
            where that comment can sit behind the window. `overview=T/M` is the open findings the
            round covering the head states beside the threads that round opened, `?` where it
-           states no count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
+           states no count. A findings list or a file table's findings column naming more
+           raises T to their count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
            names findings the round names that no thread on the pull request carries. Each of these is owed the triage a suppressed
            finding gets, and none decides an exit code.
   reply    Answer one thread selected by its text, and resolve it on request. Exists

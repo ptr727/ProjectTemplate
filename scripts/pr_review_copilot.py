@@ -59,6 +59,7 @@ KEYS = {
     "finding_lists": list,
     "effort": str,
     "table_header": str,
+    "table_findings": str,
     "discussion_link": str,
 }
 
@@ -106,10 +107,12 @@ class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
     `open` is the count of open findings the body states, None where it states none or one this
-    reader cannot believe. `unthreaded` is how many findings it names that no thread on the pull
-    request carries. `table` is the
-    paths the body's file table names, None where it carries no table. `unplaced` is each part
-    the reader cannot place, with its text, the subset of `notes` that can hold a finding.
+    reader cannot believe. A findings list or the file table's findings column naming more raises
+    it to their count. Both name the same findings, so the larger of the two is that count.
+    `unthreaded` is how many findings it names that no thread on the pull request carries.
+    `table` is the paths the body's file table names, None where it carries no table. `unplaced`
+    is each part the reader cannot place, with its text, the subset of `notes` that can hold a
+    finding.
     """
 
     coverage: str = "unknown"
@@ -443,7 +446,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     verdict, verdict_heading, headline = "unknown", "", ""
     effort, effort_source = "unknown", "unknown"
     table: list[str] | None = None
-    listed = 0
+    listed = tabled = 0
 
     def inside(token: Token, ranges: list[tuple[int, int]] = claimed) -> bool:
         return any(a <= (token.map or [0])[0] < b for a, b in ranges)
@@ -524,6 +527,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         ):
             if (rows := table_paths(tokens, i, vocab["table_header"])) is not None:
                 table = (table or []) + rows
+                tabled += table_findings(tokens, i, vocab["table_findings"])
         i += 1
 
     # A count stated in a top-level paragraph opening on it, never a list item, outside counted sections.
@@ -550,8 +554,10 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         if coverage == "none" or rank[state] > rank[coverage]:
             coverage, coverage_line = state, said
 
-    open_count = total(opens) if opens else None
-    named = max(open_count or 0, listed)
+    named = max(listed, tabled)
+    open_count = total(opens) if opens else (named or None)
+    if open_count is not None:
+        named = open_count = max(open_count, named)
     return Reading(
         coverage=coverage,
         coverage_line=coverage_line,
@@ -691,6 +697,27 @@ def table_paths(tokens: list[Token], start: int, header: str) -> list[str] | Non
             if not head:
                 named.extend(paths(token))
     return named
+
+
+def table_findings(tokens: list[Token], start: int, header: str) -> int:
+    """The rows of the table opening at `start` whose cell under the `header` column names text."""
+    if not header:
+        return 0
+    column, wanted, head, count = -1, -1, True, 0
+    for token in tokens[start + 1 :]:
+        if token.type == "table_close":
+            break
+        if token.type == "tr_open":
+            column = -1
+        elif token.type in ("th_open", "td_open"):
+            column += 1
+        elif token.type == "tbody_open":
+            head = False
+        elif token.type == "inline" and head and label(inline_text(token)) == header:
+            wanted = column
+        elif token.type == "inline" and not head and column == wanted >= 0:
+            count += any(c.isalnum() for c in inline_text(token))
+    return count
 
 
 def html_lines(body: str) -> list[str]:

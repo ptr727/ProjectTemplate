@@ -273,6 +273,36 @@ class TestVerdictAndHeadline(unittest.TestCase):
         self.assertEqual("unknown", adapter.read(f"{MARKER}\n\nProse only.\n").verdict)
 
 
+def narrative(
+    listed: tuple[str, ...] = (
+        "moderate ([P1], 1 vote) keep the old path.",
+        "nit ([P2]) document `-x`.",
+    ),
+    cells: tuple[str, ...] = (
+        "Moderate ([P1], 1 vote): keep the old path.",
+        "Nit ([P2]): document it.",
+    ),
+) -> str:
+    """The narrative section naming findings in a nested change list and a Findings column."""
+    items = "".join(f"\n  - `src/f{n}.sh`: {text}" for n, text in enumerate(listed))
+    nested = f"- Review findings remain unresolved:{items}" if listed else ""
+    rows = "\n".join(f"| `src/f{n}.sh` | Changes the flags. | {c} |" for n, c in enumerate(cells))
+    return (
+        "<details>\n<summary><strong>What changed in this PR</strong></summary>\n\n"
+        f"**Changes:**\n- Adds a test case.\n{nested}\n\n"
+        f"| File | Summary | Findings |\n|---|---|---|\n{rows}\n</details>"
+    )
+
+
+def unresolved(sections: str = "**No open issues** \U0001f389\n\n") -> str:
+    """A clean-verdict round stating no open finding while its narrative names some."""
+    return body(
+        verdict="### \U0001f7e2 Approval recommended",
+        headline="The recorded no_active_issues status supports approval.",
+        sections=sections + narrative(),
+    )
+
+
 class TestOpenFindings(unittest.TestCase):
     def test_each_open_spelling_states_its_count(self) -> None:
         for label, ids, count in (
@@ -341,6 +371,37 @@ class TestOpenFindings(unittest.TestCase):
                 self.assertEqual(1, found.unthreaded)
                 self.assertEqual((), found.notes)
                 self.assertEqual((), found.unplaced)
+
+    def test_a_narrative_naming_findings_wins_over_a_clean_headline(self) -> None:
+        found = adapter.read(unresolved())
+        self.assertEqual("clean", found.verdict)
+        self.assertEqual(2, found.open)
+        self.assertEqual(2, found.unthreaded)
+        self.assertEqual(2, found.counts["threaded"])
+        self.assertEqual(("src/f0.sh", "src/f1.sh"), found.table)
+        self.assertEqual((), found.notes)
+        self.assertEqual((), found.unplaced)
+
+    def test_the_nested_list_and_the_findings_column_each_count_alone(self) -> None:
+        for sections, want in (
+            (narrative(cells=("", " ")), 2),
+            (narrative(listed=()), 2),
+            (narrative(listed=("one.",), cells=("One.", "", "Two.")), 2),
+            (what_changed(), None),
+        ):
+            with self.subTest(sections=sections[-60:]):
+                found = adapter.read(body(sections=sections))
+                self.assertEqual(want, found.open)
+                self.assertEqual(want or 0, found.unthreaded)
+                self.assertEqual((), found.notes)
+
+    def test_a_larger_or_unbelievable_stated_count_stands_beside_the_lists(self) -> None:
+        stated = adapter.read(unresolved(open_section("3 open findings", ("101", "102", "103"))))
+        self.assertEqual(3, stated.open)
+        self.assertEqual(3, stated.entries)
+        unbelievable = adapter.read(unresolved("**99999 open findings**\n\n"))
+        self.assertIsNone(unbelievable.open)
+        self.assertEqual(2, unbelievable.unthreaded)
 
     def test_a_nested_back_reference_is_not_an_entry(self) -> None:
         nested = open_section().replace(
