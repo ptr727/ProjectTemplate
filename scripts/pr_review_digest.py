@@ -258,7 +258,8 @@ def render(
         lines.append(
             f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
             f"`{flagged[0]}` and states no open finding, so its headline and its findings list "
-            "are where what it flags is named. Give both the triage a suppressed finding gets"
+            "or file table are where what it flags is named. Give both the triage a suppressed "
+            "finding gets"
         )
     elif flagged:
         lines.append(

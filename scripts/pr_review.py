@@ -58,7 +58,8 @@ Subcommands
            - It collapses no suppressed or previously-missed finding.
            - No thread is open.
            What it flags is then named in its headline, printed under
-           `VERDICT WITH NO COUNTED FINDING`, and in any findings list the body carries. The code
+           `VERDICT WITH NO COUNTED FINDING`, and in any findings list or file table the body
+           carries. The code
            repeats on that head after the headline is answered, since nothing here reads an
            answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
            HEADLINE`, which changes no exit code. A clean round whose findings list or file
@@ -904,9 +905,9 @@ def report_verdict(pr: dict) -> int:
             f"status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on "
             f"`{flagged[0]}`, a verdict that is not the clean one, while it states no open "
             "finding, so what it flags is named in its headline, printed above under VERDICT "
-            "WITH NO COUNTED FINDING, and in any findings list in the review body. Fix what it "
-            "names and push, or answer it with `comment`. This code repeats on this head after "
-            "the answer, since nothing here reads one"
+            "WITH NO COUNTED FINDING, and in any findings list or file table in the review body. "
+            "Fix what it names and push, or answer it with `comment`. This code repeats on this "
+            "head after the answer, since nothing here reads one"
         )
     if (hold := shape_hold(pr)) and not hold[2]:
         print(
