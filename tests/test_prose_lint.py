@@ -654,6 +654,20 @@ class TestSemicolonRule(BaitCase):
             [], self.kinds("> | x | red, green \\| blue; cyan; teal |\n", {"semicolon"})
         )
 
+    def test_a_pipe_inside_a_code_span_still_ends_its_cell(self) -> None:
+        """The parser ends a cell at a pipe inside a code span, so the comma before it excuses nothing."""
+        table = "| A | B | C |\n| --- | --- | --- |\n| x | a, b `c|d` e; f; g | z |\n"
+        self.assertEqual(["semicolon"] * 2, self.kinds(table, {"semicolon"}))
+
+    def test_an_unpaired_quote_does_not_pair_with_a_later_cell(self) -> None:
+        """An inch mark in one cell would blank every cell up to the next quote mark."""
+        table = '| A | B | C |\n| --- | --- | --- |\n| 2" pipe | a; b; c | "x" |\n'
+        self.assertEqual(["semicolon"] * 2, self.kinds(table, {"semicolon"}))
+
+    def test_a_quotation_inside_one_cell_is_still_blanked(self) -> None:
+        table = '| A | B |\n| --- | --- |\n| x | say "a; b" now |\n'
+        self.assertEqual([], self.kinds(table, {"semicolon"}))
+
     def test_a_bullet_label_colon_does_not_announce_a_list(self) -> None:
         """`- **Label**:` opens the bullet, the same construct the label dash is exempted for."""
         self.assertEqual(
