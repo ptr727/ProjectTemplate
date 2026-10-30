@@ -1,0 +1,25 @@
+name: Python tool pins
+description: Read the Python tool versions the validator runs through uvx from the requirements.txt beside this action.
+
+outputs:
+  ruff:
+    description: The ruff version requirements.txt pins, for example '0.17.3'.
+    value: ${{ steps.read.outputs.ruff }}
+
+runs:
+  using: composite
+  steps:
+    # The manifest is read from the action's own path, so a caller reaching this action at a hub pin runs that pin's version.
+    # A version read from the caller's checkout would be whatever the caller carries, or nothing.
+    - name: Read tool pins step
+      id: read
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        manifest="$GITHUB_ACTION_PATH/requirements.txt"
+        mapfile -t versions < <(sed -n 's/^ruff==\([0-9][0-9A-Za-z.]*\)[[:space:]]*$/\1/p' "$manifest")
+        if [ "${#versions[@]}" -ne 1 ]; then
+          echo "::error::$manifest must pin ruff on exactly one 'ruff==<version>' line, found ${#versions[@]}."
+          exit 1
+        fi
+        echo "ruff=${versions[0]}" >> "$GITHUB_OUTPUT"

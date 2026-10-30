@@ -1426,7 +1426,7 @@ gh() {
         "runs stand-in tools only a POSIX host can execute",
     )
     def test_ruff_prefers_a_declared_pip_directory_venv(self) -> None:
-        """A declared pip directory's ruff is the one its requirements pin, and uvx floats only where the venv lacks one."""
+        """A declared pip directory's ruff is the one its requirements pin, and uvx runs the hub's pin only where the venv lacks one."""
         pip_tree = {"pyproject.toml": "", "requirements.txt": "", ".venv/bin/python": ""}
         venv_ruff = {"VENV_RUFF": "1"}
         for step, args in (
@@ -1441,26 +1441,26 @@ gh() {
                     venv_ruff,
                     f"python -m ruff {args}\n",
                 ),
-                "declared pip with no venv ruff floats": (
+                "declared pip with no venv ruff runs the pin": (
                     "pip",
                     pip_tree,
                     True,
                     None,
-                    f"uvx ruff@latest {args}\n",
+                    f"uvx ruff@9.9.9 {args}\n",
                 ),
                 "undeclared pip keeps the old call": (
                     "pip",
                     pip_tree,
                     False,
                     venv_ruff,
-                    f"uvx ruff@latest {args}\n",
+                    f"uvx ruff@9.9.9 {args}\n",
                 ),
-                "lint-only floats": (
+                "lint-only runs the pin": (
                     "lint-only",
                     pip_tree,
                     True,
                     venv_ruff,
-                    f"uvx ruff@latest {args}\n",
+                    f"uvx ruff@9.9.9 {args}\n",
                 ),
                 "a declared pip subdirectory reads its own venv": (
                     "pip",
@@ -1480,9 +1480,75 @@ gh() {
             for label, (kind, tree, declared, env, call) in cases.items():
                 with self.subTest(step=step, case=label):
                     code, _, written = self.run_python_tests_step(
-                        kind, tree, declared, step_name=step, extra_env=env
+                        kind,
+                        tree,
+                        declared,
+                        step_name=step,
+                        extra_env={"RUFF_VERSION": "9.9.9", **(env or {})},
                     )
                     self.assertEqual((0, call), (code, written))
+
+    def run_tool_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
+        """Run the python-tool-pins action's step over a constructed manifest, or the hub's own where None."""
+        action = REPO / ".github/actions/python-tool-pins"
+        script = step_script_text(
+            (action / "action.yml").read_text(encoding="utf-8"), "Read tool pins step"
+        )
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        if manifest is not None:
+            action = root / "action"
+            action.mkdir()
+            (action / "requirements.txt").write_text(manifest, encoding="utf-8")
+        output = root / "output"
+        output.write_text("", encoding="utf-8")
+        result = run(
+            [bash_or_skip(), "-c", script],
+            cwd=root,
+            env={**os.environ, "GITHUB_ACTION_PATH": str(action), "GITHUB_OUTPUT": str(output)},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+
+    @unittest.skipUnless(shutil.which("bash"), "runs the action's bash step")
+    def test_tool_pins_read_exactly_one_ruff_pin(self) -> None:
+        """The validator's uvx ruff runs the version the hub's Dependabot-tracked manifest pins."""
+        manifest = (REPO / ".github/actions/python-tool-pins/requirements.txt").read_text(
+            encoding="utf-8"
+        )
+        pinned = re.findall(r"(?m)^ruff==([0-9][0-9A-Za-z.]*)$", manifest)
+        self.assertEqual(1, len(pinned), manifest)
+        self.assertEqual((0, f"ruff={pinned[0]}\n"), self.run_tool_pins_step(None)[::2])
+        self.assertEqual(
+            (0, "ruff=1.2.3\n"), self.run_tool_pins_step("# a comment\nruff==1.2.3\n")[::2]
+        )
+        for label, text in (
+            ("no pin", "# nothing pinned\n"),
+            ("a range rather than a pin", "ruff>=1.2.3\n"),
+            ("two pins", "ruff==1.2.3\nruff==1.2.4\n"),
+        ):
+            with self.subTest(label):
+                code, stdout, written = self.run_tool_pins_step(text)
+                self.assertEqual((1, ""), (code, written))
+                self.assertIn("must pin ruff on exactly one", stdout)
+
+    def test_tool_pins_manifest_is_dependabot_tracked_on_both_branches(self) -> None:
+        """A pin nothing bumps goes stale, so each branch's pip entry watches the manifest's directory."""
+        config = (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
+        watched = set()
+        for entry in re.split(r"(?m)^  - ", config)[1:]:
+            fields = dict(re.findall(r'(?m)^ *([\w-]+): "([^"]*)"$', entry))
+            if fields.get("package-ecosystem") == "pip" and fields.get("directory") == (
+                "/.github/actions/python-tool-pins"
+            ):
+                watched.add(fields.get("target-branch"))
+        self.assertEqual({"main", "develop"}, watched)
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        self.assertNotIn("ruff@latest", workflow)
+        self.assertIn("uses: $/.github/actions/python-tool-pins\n", workflow)
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
