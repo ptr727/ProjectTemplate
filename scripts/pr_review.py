@@ -181,8 +181,8 @@ Subcommands
            30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
            empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one, as does a
            rollup holding only types this cannot read.
-           46 = an attested held head with an unresolved thread, whoever opened it, which ends the
-           poll at once, since no check clears it. `status=THREADS_UNRESOLVED` names the authors.
+           46 = an open attested held head with an unresolved thread, whoever opened it, which ends
+           the poll at once and outranks 30, 44, and 45, since no check clears it. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
            for the head. 64 = the write scope could not
@@ -1627,7 +1627,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             return (
                 holds(polled)
                 and local_cover(polled)
-                and not open_threads((polled.get("reviewThreads") or {}).get("nodes") or [])
+                and not open_threads(polled["reviewThreads"]["nodes"])
                 and held_checks_open(
                     polled,
                     check_nodes(polled),
@@ -1718,8 +1718,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             )
         if verdict:
             return verdict
-        opened = open_threads((final.get("reviewThreads") or {}).get("nodes") or [])
-        if covered and opened:
+        opened = open_threads(final["reviewThreads"]["nodes"])
+        if covered and opened and final.get("state", "OPEN") == "OPEN":
             who = ", ".join(sorted({thread_author(t) or "an unnamed author" for t in opened}))
             mark = "+" if threads_truncated(final) else ""
             print(

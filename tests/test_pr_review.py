@@ -3852,6 +3852,59 @@ class TestCli(GqlCase):
         slept.assert_called_once()
         self.assertIn("status=THREADS_UNRESOLVED", self.out.getvalue())
 
+    def test_an_open_thread_outranks_a_stuck_or_missing_check(self) -> None:
+        """44 and 45 each name a check to act on, while the thread holds the merge either way."""
+        for merge, checks, code in (
+            ("BLOCKED", [check(name="gate", conclusion="FAILURE")], 44),
+            ("DIRTY", [], 45),
+        ):
+            with self.subTest(merge=merge):
+                opened = [thread("PRRT_a", login="qodo-code-review[bot]")]
+                for threads, expected in (([], code), (opened, 46)):
+                    pr = self.into(
+                        payload([review(oid=OLD)], threads=threads, merge=merge, checks=checks),
+                        attest=True,
+                    )
+                    self.answer(pr)
+                    self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                    with mock.patch.object(pr_review.time, "sleep"):
+                        self.assertEqual(expected, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_a_cut_thread_page_and_an_unnamed_author_are_both_named(self) -> None:
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", login="")],
+                more_threads=True,
+                merge="CLEAN",
+                checks=[check(name="gate")],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(46, self.cli(["wait", "7"]))
+        self.assertIn("1+ unresolved thread(s) opened by an unnamed author", self.out.getvalue())
+
+    def test_an_open_thread_on_a_pull_request_no_longer_open_is_not_46(self) -> None:
+        """Nothing is left to dispose of before a merge that already happened, so no rerun clears it."""
+        for state in ("MERGED", "CLOSED"):
+            with self.subTest(state=state):
+                pr = self.into(
+                    payload(
+                        [review(oid=OLD)],
+                        threads=[thread("PRRT_a", login="qodo-code-review[bot]")],
+                        merge="CLEAN",
+                        checks=[check(name="gate")],
+                    ),
+                    attest=True,
+                )
+                self.answer({**pr, "state": state})
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(0, self.cli(["wait", "7"]))
+
     def test_only_resolved_threads_leave_a_settled_held_head_at_0(self) -> None:
         pr = self.into(
             payload(
@@ -4211,7 +4264,7 @@ class TestCli(GqlCase):
         self.assertEqual(5, served.call_count)
 
     def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
-        """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
+        """`Q_HELD` carries no files and thin threads, so the verdict at the timeout reads `Q_FULL`."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
         held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
         self.answer(held)
@@ -4220,7 +4273,13 @@ class TestCli(GqlCase):
         def narrow(query: str, owner: str, repo: str, num: int) -> dict:
             pr = served(query, owner, repo, num)
             if query is pr_review.Q_HELD:
-                return {k: v for k, v in pr.items() if k not in ("reviewThreads", "files")}
+                thin = [
+                    {"isResolved": t["isResolved"], "comments": {"nodes": [{"author": a}]}}
+                    for t in pr["reviewThreads"]["nodes"]
+                    for a in [t["comments"]["nodes"][0]["author"]]
+                ]
+                pr = {k: v for k, v in pr.items() if k != "files"}
+                return {**pr, "reviewThreads": {**pr["reviewThreads"], "nodes": thin}}
             return pr
 
         self.enterContext(mock.patch.object(pr_review, "gql", side_effect=narrow))
