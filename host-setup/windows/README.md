@@ -110,7 +110,7 @@ This moved a boundary the tool used to hold. WSL used to be read-only here, and 
 | Linux | Windows | Why |
 | --- | --- | --- |
 | `upgrade-host.sh --release` moves to the next distribution release | no peer | Windows Update owns a feature update, and an action pretending to drive one is the one thing this must not carry |
-| `install-tools.sh` carries four functions per tool | `install-tools.ps1` carries one registry record per tool | Every source is `winget`, so the per-tool variation those functions exist for does not arise |
+| `install-tools.sh` carries several functions per tool | `install-tools.ps1` carries one registry record per tool | Every source is `winget`, so the per-tool variation those functions exist for does not arise |
 | `git-restore-mtime` is managed | not managed | The spec declares it not applicable on Windows, since it serves a Linux deploy path |
 | `install-tools.sh` refuses docker entirely inside a WSL *distribution* | `install-tools.ps1` checks the WSL *platform* version before installing docker | A WSL distribution takes docker only from Docker Desktop's own WSL integration, and Windows needs WSL2 present for Docker Desktop's own backend |
 | `sudo` re-runs a command as root | nothing elevates | `winget` raises UAC per installer, which is the path with the fewest failures |

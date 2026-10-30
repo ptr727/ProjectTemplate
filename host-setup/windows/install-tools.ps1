@@ -185,7 +185,7 @@ function run {
     }
     # The command's own output goes to the console rather than down the pipeline.
     # A native command writes to this function's output stream.
-    # Without this the caller receives every line the command printed with the exit code appended.
+    # So without this the caller receives every line the command printed with the exit code appended.
     # A check against 0 then compares against the first line of output.
     & $Command @Arguments | Out-Host
     return $LASTEXITCODE
@@ -604,7 +604,7 @@ function Write-InstallFailure {
 # --- Tools ---
 
 # Managed tools, in the order a report lists them.
-# Every one is a single winget package, which is what makes this a table where the Linux script needs four functions per tool.
+# Every one is a single winget package, which is what makes this a table where the Linux script needs several functions per tool.
 # Probe names the executable that proves the tool is present when winget knows no package for it.
 # It is py for python rather than python3.
 # This is because py is registered by the interpreter's own installer, while python3 is created by Repair-PythonName below.
