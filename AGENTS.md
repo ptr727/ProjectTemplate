@@ -106,7 +106,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md) un
 | Branch choice, promotion, keeping branches in sync | `Branching Model`, packaged as the `branching-and-release-model` Skill |
 | Releasing, version bumps, publishing | `Release Model`, packaged as the `branching-and-release-model` Skill |
 | A live config repo rather than a code repo | `Operational Repositories`, packaged as the `branching-and-release-model` Skill |
-| Onboarding a repo or running a conformance sweep | `Repository Onboarding and Conformance` (hub only, not carried). Standing up a new repo from a hub checkout is packaged as the `standup-a-repo` Skill. Resyncing one already stood up, also from a hub checkout, is `resync-a-repo`. Measuring a named repo against the fleet ground truth per `AUDIT.md` is `audit-a-repo`. Each is hub-context only |
+| Onboarding a repo or running a conformance sweep | `Repository Onboarding and Conformance` (hub only, not carried). Standing up a new repo from a hub checkout is packaged as the `standup-a-repo` Skill. Resyncing one already stood up is `resync-a-repo`, which also runs from a hub checkout. Measuring a named repo against the fleet ground truth per `AUDIT.md` is `audit-a-repo`. Each is hub-context only |
 | Running a fleet gate, the review digest, or the config script | `Hub-Hosted Tooling` |
 | Running a lint or format check locally, or a lint tool missing from `command -v` | `Running the Linters Locally (Known-Working Invocations)` (hub only, not carried) |
 | Running a test locally, or a test runner missing or failing to spawn | `Verification Discipline` |
