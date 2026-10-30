@@ -3560,6 +3560,12 @@ class TestDeadPathRule(unittest.TestCase):
         root = self.repo()
         self.assertIn("dead-path", self.kinds(root, "Run `scripts/gone.py` to apply.\n"))
 
+    def test_a_link_between_two_cells_backticks_is_still_read(self) -> None:
+        """markdown-it-py ends a cell inside a code span, so the backticks pair across no cell."""
+        root = self.repo()
+        table = "| A | B | C |\n| --- | --- | --- |\n| x `a | [d](scripts/gone.py) | b` |\n"
+        self.assertIn("dead-path", self.kinds(root, table))
+
     def test_a_living_path_is_not_a_finding(self) -> None:
         root = self.repo()
         self.assertEqual([], self.kinds(root, "Run `scripts/kept.py` to apply.\n"))
@@ -4823,6 +4829,17 @@ class TestIniLanguage(BaitCase):
 
 class TestMarkdown(BaitCase):
     """Markdown extraction through markdown-it-py: code, blocks, HTML, and front matter."""
+
+    def test_an_unpaired_quote_hides_no_later_cell_from_any_rule(self) -> None:
+        """Each rule blanks quotations a cell at a time, so an inch mark pairs with nothing later."""
+        for rule, cell in (("dash", "a - b"), ("dupword", "the the"), ("spelling", "colour")):
+            table = f'| A | B | C |\n| --- | --- | --- |\n| 2" pipe | {cell} | "x" |\n'
+            with self.subTest(rule=rule):
+                self.assertEqual([rule], self.kinds(table, {rule}))
+
+    def test_a_code_span_reaches_across_no_cell(self) -> None:
+        table = "| A | B | C |\n| --- | --- | --- |\n| x `a | p - q | b` |\n"
+        self.assertEqual(["dash"], self.kinds(table, {"dash"}))
 
     def test_structure_is_not_a_sentence(self) -> None:
         """A heading, a link definition, and a blockquote hold no prose sentence.
