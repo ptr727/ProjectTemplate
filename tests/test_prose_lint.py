@@ -645,7 +645,7 @@ class TestSemicolonRule(BaitCase):
         self.assertEqual(["semicolon"], self.kinds(table, {"semicolon"}))
 
     def test_an_escaped_pipe_stays_inside_its_cell(self) -> None:
-        """The row splits where the parser splits it, so the comma still excuses the list."""
+        """An escaped pipe ends no cell, as in the parser, so the comma still excuses the list."""
         table = "| A | B |\n| --- | --- |\n| x | red, green \\| blue; cyan; teal |\n"
         self.assertEqual([], self.kinds(table, {"semicolon"}))
 

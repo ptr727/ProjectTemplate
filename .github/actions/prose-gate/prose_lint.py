@@ -1100,8 +1100,8 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
 
-    A table row is read a cell at a time, split where markdown-it-py splits one, at a pipe no
-    backslash escapes.
+    A table row is read a cell at a time. A cell ends at a pipe no backslash escapes, which is how
+    markdown-it-py reads an escaped pipe.
     """
     out: list[Finding] = []
     for n, _txt, line in prose_lines(unit):
