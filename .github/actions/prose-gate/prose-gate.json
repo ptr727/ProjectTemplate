@@ -167,7 +167,8 @@
       "lexers": ["yaml"],
       "line": ["#"],
       "nested": [{ "key": "run", "lexer": "bash-heredoc-as-code" }, { "key": "lambda", "lexer": "cpp" }, { "tag": "!lambda", "lexer": "cpp" }],
-      "heredoc_programs": ["bash", "csh", "dash", "fish", "ksh", "perl", "pwsh", "pypy", "python", "ruby", "sh", "ssh", "tcsh", "uv", "zsh"],
+      "heredoc_data": ["base64", "cat", "curl", "envsubst", "gh", "grep", "jq", "kubectl", "tee", "yq"],
+      "heredoc_reserved": ["!", "do", "elif", "else", "if", "then", "until", "while"],
       "heredoc_wrappers": ["command", "env", "exec", "nice", "nohup", "sudo", "time", "timeout"]
     }
   }

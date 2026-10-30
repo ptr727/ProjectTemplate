@@ -4550,8 +4550,8 @@ class TestYamlLanguage(BaitCase):
     def test_a_heredoc_body_no_program_runs_is_data(self) -> None:
         """A `#` line a step writes into a file is that file's text, and deleting it changes the file.
 
-        A program the heredoc's own command names runs its body, and so does a command that is an
-        expansion. A backslash-continued opener and a pipe count, a quoted separator does not.
+        A body is data only where every command it feeds writes data, so an unknown command, an
+        expansion among them, keeps it code. A continued opener and a pipe count, a quoted `;` does not.
         """
         written = "    # The template writes this line into the file.\n"
         for opener, label, ran in (
@@ -4576,6 +4576,15 @@ class TestYamlLanguage(BaitCase):
             ("timeout 60 \"$PY\" - <<'PY'", "PY", [3]),
             ("sudo -E \"$PY\" - <<'PY'", "PY", [3]),
             ("uv run - <<'PY'", "PY", [3]),
+            ("out=$(\"$PY\" - <<'PY'", "PY", [3]),
+            ("{ \"$PY\" - <<'PY'", "PY", [3]),
+            ("if \"$PY\" - <<'PY'; then", "PY", [3]),
+            ("sudo -u runner \"$PY\" - <<'PY'", "PY", [3]),
+            ("cat <<'PY'|\"$PY\" -", "PY", [3]),
+            ("awk -f - <<'AWK'", "AWK", [3]),
+            ("sudo tee /etc/app.conf <<'EOF'", "EOF", []),
+            ("cat <<'EOF' | grep -v ssh", "EOF", []),
+            ("kubectl apply -f - <<'YAML'", "YAML", []),
             ("pypy3 - <<'PY'", "PY", [3]),
             ('GH_TOKEN="$TOKEN" gh pr comment "$PR" --body-file - <<\'EOF\'', "EOF", []),
             ("LANG=\"${{ inputs.lang }}\" cat > f <<'EOF'", "EOF", []),

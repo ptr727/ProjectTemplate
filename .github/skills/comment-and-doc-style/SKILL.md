@@ -191,8 +191,8 @@ rule's cost and the label is its answer, since a comment worth keeping takes the
 comment worth writing. A trailing comment is out of scope. That is because which mid-line marker
 opens a comment differs by language in ways a gate cannot settle from the marker alone. A line
 holding code after a block comment's closer is out of scope too, since deleting it deletes that
-code. A heredoc body in a workflow script is data, unless its command names a program that
-runs it, such as `python3`, or is an expansion. A docstring is not a comment line, an instruction to a tool is not a comment the rule
+code. A heredoc body in a workflow script is data only where every command it feeds writes
+data, such as `cat`. A docstring is not a comment line, an instruction to a tool is not a comment the rule
 reads, and Markdown is out of scope.
 
 Deleting the comment is the ordinary answer, since the bullets above already say what one has to
