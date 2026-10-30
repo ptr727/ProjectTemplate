@@ -10,6 +10,11 @@ runs:
   using: composite
   steps:
 
+    - name: Setup uv step
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        python-version: "3.13"
+
     - name: Validate registry and spec step
       shell: bash
       run: |
@@ -17,12 +22,7 @@ runs:
         for f in registry/*.json spec/*.json repo-config/*.json; do
           jq empty "$f"
         done
-        python3 spec/validate.py
-
-    - name: Setup uv step
-      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-      with:
-        python-version: "3.13"
+        uv run --no-project --script spec/validate.py
 
     # The unittest suite under tests/ is the validator's Python leg, since the hub declares '.' in python-directories, so it runs there under coverage and uploads to Codecov like any adopter's.
     # What stays here is the audit's helper suite and each self-test that is not a unittest suite.

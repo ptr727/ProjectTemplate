@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Validate the registry and spec cross-references (stdlib only).
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4"]
+# ///
+"""Validate the registry and spec cross-references.
 
 Checks that every cataloged repo classifies against the spec: its types resolve,
 its publish mechanisms are recognized, and its secrets are consistent with
 spec/secrets.json. Exits non-zero on any failure. This is the classification
-dry-run the CI lint job runs; it needs no third-party packages.
+dry-run the hub's validate hook runs in CI, under `uv run --no-project --script`.
+
+The Markdown checks read through spec/fidelity_text.py, which imports markdown-it-py. They import
+it only on the path main() reaches, so spec/resolve_description.py still imports this module under
+whatever plain python3 repo-config/configure.sh finds.
 """
 
 import argparse
@@ -148,8 +156,6 @@ CONTRACT_KEYS = {
 CHECK_ID_RE = re.compile(r"\(([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\)")
 CHECK_SCOPES = ("repo", "baseline", "file")
 CHECK_KEYS = {"id", "family", "description", "spec", "hub", "scope", "ground", "suppression"}
-MARKDOWN_INLINE_LINK = re.compile(r"\]\((?P<target>[^)\s]+)")
-MARKDOWN_REFERENCE_LINK = re.compile(r"^\[[^]]+\]:\s*(?P<target>\S+)", re.MULTILINE)
 TEMPLATE_REPOSITORY_URL = "https://github.com/ptr727/ProjectTemplate"
 
 
@@ -655,29 +661,23 @@ def github_identity(url):
     return f"{owner}/{repo}"
 
 
-def markdown_targets(text):
-    """Yield link targets outside fenced blocks."""
-    visible = []
-    in_fence = False
-    for line in text.splitlines():
-        if re.match(r"^\s*(```|~~~)", line):
-            in_fence = not in_fence
-            continue
-        if not in_fence:
-            visible.append(line)
-    body = re.sub(r"`+[^`]*`+", "", "\n".join(visible))
-    for pattern in (MARKDOWN_INLINE_LINK, MARKDOWN_REFERENCE_LINK):
-        yield from (match.group("target") for match in pattern.finditer(body))
+def fidelity_text_module():
+    """`spec/fidelity_text.py`, imported on first use rather than at module import.
+
+    Lazily, because it imports markdown-it-py and spec/resolve_description.py imports this module
+    under a plain `python3` for description_errors alone.
+    """
+    import fidelity_text
+
+    return fidelity_text
 
 
 def markdown_section(text, name):
-    """Return one level-two Markdown section, excluding its heading."""
-    match = re.search(rf"^## {re.escape(name)}\s*$", text, re.MULTILINE)
-    if not match:
+    """Return one level-two Markdown section, excluding its heading, or "" where `text` has none."""
+    span = fidelity_text_module().section_span(text, name)
+    if span is None:
         return ""
-    following = re.search(r"^## ", text[match.end() :], re.MULTILINE)
-    end = len(text) if following is None else match.end() + following.start()
-    return text[match.end() : end]
+    return "\n".join(text.split("\n")[span[0] + 1 : span[1]])
 
 
 def carried_link_errors(root, baseline):
@@ -708,7 +708,7 @@ def carried_link_errors(root, baseline):
                 if isinstance(name, str):
                     regions.append((f"section '{name}'", markdown_section(text, name)))
         for region, body in regions:
-            for target in markdown_targets(body):
+            for target in fidelity_text_module().link_targets(body):
                 repository_target = target.split("#", 1)[0]
                 is_template_link = (
                     repository_target == TEMPLATE_REPOSITORY_URL
@@ -1766,9 +1766,7 @@ def main(argv=()):
         # This is Markdown only, and only where the hub ships the file.
         if path.endswith(".md") and (ROOT / path).exists():
             hub_text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
-            headings = {
-                m.group(1).strip() for m in re.finditer(r"^## (.+?)\s*$", hub_text, re.MULTILINE)
-            }
+            headings = {h.text for h in fidelity_text_module().headings(hub_text) if h.level == 2}
             for elt in sections:
                 name = elt.get("name") if isinstance(elt, dict) else elt
                 if isinstance(name, str) and name and name not in headings:

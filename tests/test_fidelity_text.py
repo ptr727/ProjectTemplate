@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise spec/fidelity_text.py's heading, code-block, and region reading on constructed documents."""
+"""Exercise spec/fidelity_text.py's heading, code-block, region, and link reading on constructed documents."""
 
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ class CodeBlockCase(unittest.TestCase):
     def test_code_lines_cover_fenced_and_indented_blocks(self) -> None:
         text = "text\n\n```\na\n```\n\n    code\n\nmore\n"
         self.assertEqual(fidelity_text.code_lines(text), frozenset({2, 3, 4, 6}))
+        self.assertEqual(fidelity_text.code_lines(text, fenced_only=True), frozenset({2, 3, 4}))
 
 
 class SectionCase(unittest.TestCase):
@@ -67,6 +68,62 @@ class SectionCase(unittest.TestCase):
     def test_strip_sections_keeps_an_identical_passage_elsewhere(self) -> None:
         text = "## Keep\n\nsame\n\n## Drop\n\nsame\n"
         self.assertEqual(fidelity_text.strip_sections(text, ["drop"]), "## Keep\n\nsame\n")
+
+
+class LinkCase(unittest.TestCase):
+    def test_the_first_of_definitions_folding_together_wins(self) -> None:
+        text = (
+            "[docs]: https://example.com/a\n"
+            "[docs]: https://example.com/b\n"
+            "[Docs]: https://example.com/c\n"
+        )
+        self.assertEqual(
+            fidelity_text.link_definitions(text),
+            [fidelity_text.LinkDefinition("docs", "https://example.com/a", 0)],
+        )
+        self.assertEqual(fidelity_text.reference_key("Docs"), fidelity_text.reference_key("docs"))
+
+    def test_a_definition_is_read_only_where_the_parser_reads_one(self) -> None:
+        text = (
+            "Para text\n[para]: p.md\n\n```md\n[fenced]: f.md\n```\n\n"
+            "[spaced]: <a b.md>\n[split]:\n  s.md\n\n> [quoted]: q.md\n"
+        )
+        self.assertEqual(
+            [(d.label, d.url, d.line) for d in fidelity_text.link_definitions(text)],
+            [("spaced", "a b.md", 7), ("split", "s.md", 8), ("quoted", "q.md", 11)],
+        )
+
+    def test_an_escape_in_a_label_or_an_angle_destination_is_read_through(self) -> None:
+        text = "[a\\\\]: one.md\n\n[b]: <https://example.test/a\\>b>\n\n[c\\\nd]: two.md\n"
+        self.assertEqual(
+            [(d.label, d.url) for d in fidelity_text.link_definitions(text)],
+            [("a\\\\", "one.md"), ("b", "https://example.test/a\\>b"), ("c\\\nd", "two.md")],
+        )
+
+    def test_an_empty_or_wrapped_definition_is_read_as_written(self) -> None:
+        text = "[empty]: <>\n\n> [two\n> lines]: t.md\n"
+        found = fidelity_text.link_definitions(text)
+        self.assertEqual([(d.label, d.url) for d in found], [("empty", ""), ("two\nlines", "t.md")])
+        self.assertEqual(fidelity_text.reference_key(found[1].label), "TWO LINES")
+
+    def test_a_duplicate_definition_is_still_a_target(self) -> None:
+        text = "[notes]: ./ok.md\n[Notes]: ./hub-only.md\n"
+        self.assertEqual(fidelity_text.link_targets(text), ["./ok.md", "./hub-only.md"])
+
+    def test_a_link_and_its_definition_read_as_one_target(self) -> None:
+        text = "Read [n][n].\n\n[n]: ./docs/a%20b.md\n"
+        self.assertEqual(fidelity_text.link_targets(text), ["./docs/a b.md"])
+
+    def test_link_targets_read_every_link_form_and_skip_code(self) -> None:
+        text = (
+            "See [r][ref], [u](../\u00fc.md), <https://auto.example>, `[c](code.md)`, ![i](i.png).\n\n"
+            "    [indented](no.md)\n\n```md\n[fenced](no.md)\n[f]: no.md\n```\n\n"
+            "[ref]: ../x.md\n[unused]: other.md\n"
+        )
+        self.assertEqual(
+            fidelity_text.link_targets(text),
+            ["../x.md", "../\u00fc.md", "https://auto.example", "i.png", "other.md"],
+        )
 
 
 if __name__ == "__main__":
