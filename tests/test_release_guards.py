@@ -1511,7 +1511,6 @@ gh() {
         )
         return result.returncode, result.stdout, output.read_text(encoding="utf-8")
 
-    @unittest.skipUnless(shutil.which("bash"), "runs the action's bash step")
     def test_tool_pins_read_exactly_one_ruff_pin(self) -> None:
         """The validator's uvx ruff runs the version the hub's Dependabot-tracked manifest pins."""
         manifest = (REPO / ".github/actions/python-tool-pins/requirements.txt").read_text(
