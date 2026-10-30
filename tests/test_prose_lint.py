@@ -4188,6 +4188,23 @@ class TestLexerDispatch(BaitCase):
             with self.subTest(first=first):
                 self.assertEqual(lexer, prose_lint.lexer_name(Path("tool"), first))
 
+    def test_a_uv_run_shebang_selects_python(self) -> None:
+        """`uv` has no lexer of its own, and the script it runs is Python."""
+        for first in (
+            "#!/usr/bin/env -S uv run --script",
+            "#!/usr/bin/env -S uv run",
+            "#!/usr/bin/env uv",
+            "#!/usr/local/bin/uv run --script",
+        ):
+            with self.subTest(first=first):
+                self.assertEqual("python", prose_lint.lexer_name(Path("tool"), first))
+
+    def test_a_uv_run_script_reads_its_metadata_block_as_python(self) -> None:
+        """The extensionless script gets the exemption a `.py` name would give it."""
+        block = '# /// script\n# requires-python = ">=3.13"\n# ///\nvalue = 1\n'
+        text = "#!/usr/bin/env -S uv run --script\n" + block
+        self.assertEqual([], self.kinds(text, {"comment-added"}, name="tool"))
+
     def test_a_shebang_assignment_is_not_the_interpreter(self) -> None:
         first = "#!/usr/bin/env -S PYTHONWARNINGS=error python3"
         self.assertEqual("python", prose_lint.lexer_name(Path("tool"), first))
@@ -4223,7 +4240,12 @@ class TestLexerDispatch(BaitCase):
     def test_every_file_mapping_names_a_declared_language(self) -> None:
         """A mapping to a lexer with no language would read its files as plain text."""
         files = prose_lint.BASE["files"]
-        named = [*files["suffix"].values(), *files["name"].values(), files["extensionless"]]
+        named = [
+            *files["suffix"].values(),
+            *files["name"].values(),
+            *files["runner"].values(),
+            files["extensionless"],
+        ]
         for lexer in named:
             with self.subTest(lexer=lexer):
                 self.assertIsNotNone(prose_lint.language_of(lexer))
