@@ -4572,6 +4572,15 @@ class TestYamlLanguage(BaitCase):
             ("cat <<'PY' |& python3 -", "PY", [3]),
             ("\"$PY\" - <<'PY'", "PY", [3]),
             ("${{ steps.py.outputs.path }} - <<'PY'", "PY", [3]),
+            ("cat <<'PY' | \"$PY\" -", "PY", [3]),
+            ("timeout 60 \"$PY\" - <<'PY'", "PY", [3]),
+            ("sudo -E \"$PY\" - <<'PY'", "PY", [3]),
+            ("uv run - <<'PY'", "PY", [3]),
+            ("pypy3 - <<'PY'", "PY", [3]),
+            ('GH_TOKEN="$TOKEN" gh pr comment "$PR" --body-file - <<\'EOF\'', "EOF", []),
+            ("LANG=\"${{ inputs.lang }}\" cat > f <<'EOF'", "EOF", []),
+            ("cat > f <<'EOF'  # Write the python config.", "EOF", [2]),
+            ("python3 check.py  # From C:\\\n    cat > f <<'EOF'", "EOF", [2]),
             ("# Run it with sh from C:\\\n    cat > f <<'EOF'", "EOF", [2]),
             ("/usr/bin/python3.13 - <<'PY'", "PY", [3]),
             ("docker run --rm -i image \\\n      python3 - <<'PY'", "PY", [4]),
@@ -4580,8 +4589,16 @@ class TestYamlLanguage(BaitCase):
                 text = f"- run: |\n    {opener}\n{written}    {label}\n    # A real comment.\n"
                 lines = [c[0] for c in self.comments("x.yml", text)]
                 self.assertEqual([*ran, text.count("\n")], lines)
+                leading = [c for c in self.comments("x.yml", text) if c[2]]
                 added = self.kinds(text, {"comment-added"}, name="x.yml")
-                self.assertEqual(["comment-added"] * len(lines), added)
+                self.assertEqual(["comment-added"] * len(leading), added)
+
+    def test_a_heredoc_captured_into_a_variable_is_data(self) -> None:
+        for opener in ("body=\"$(cat <<'EOF'", "body=$(cat <<'EOF'"):
+            with self.subTest(opener=opener):
+                rows = (opener, "# Written into the body.", "EOF", ')"' if '"' in opener else ")")
+                text = "- run: |\n" + "".join(f"    {r}\n" for r in (*rows, "# A real comment."))
+                self.assertEqual([6], [c[0] for c in self.comments("x.yml", text)])
 
     def test_each_heredoc_on_one_line_is_judged_by_its_own_command(self) -> None:
         rows = ("cat <<'A' > notes.txt; python3 - <<'B'", "# Written.", "A", "# Run.", "B")

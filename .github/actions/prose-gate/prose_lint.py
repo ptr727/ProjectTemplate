@@ -743,38 +743,72 @@ def step_shell(starts: Starts, key: int) -> str:
 HEREDOC_LABEL = re.compile(r"<<-?[ \t]*(['\"]?)\\?[\w-]+\1")
 SEPARATOR = re.compile(r"&&|\|\||;|(?<![<>&|])&(?![>&])")
 SHELL_QUOTE = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
+SHELL_COMMENT = re.compile(r"(?:^|(?<=\s))#")
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 
 
-def runs_body(starts: Starts, row: int, col: int, programs: frozenset[str]) -> bool:
+def shell_bare(text: str) -> str:
+    """`text` with its heredoc labels blanked, lengths kept, quotes filled, and any comment cut.
+
+    A quote's contents become one word, so its separators split nothing and its spaces no word.
+    """
+    text = HEREDOC_LABEL.sub(lambda m: " " * len(m.group()), text)
+    text = SHELL_QUOTE.sub(lambda m: "_" * len(m.group()), text)
+    return text[: m.start()] if (m := SHELL_COMMENT.search(text)) else text
+
+
+def command_words(tokens: list[str], wrappers: frozenset[str]) -> list[str]:
+    """The word each pipeline stage runs, past its assignments, a wrapper, and the wrapper's flags."""
+    out: list[str] = []
+    head, wrapped = True, False
+    for t in tokens:
+        name = program_name(t.strip("\"'"))
+        if t in ("|", "|&"):
+            head, wrapped = True, False
+        elif head and (
+            ASSIGNMENT.match(t) or name in wrappers or (wrapped and t[:1] in "-0123456789")
+        ):
+            wrapped = wrapped or name in wrappers
+        elif head:
+            out.append(t)
+            head = False
+    return out
+
+
+def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
     """Whether the command holding the heredoc opened at `col` of `row` runs its body.
 
     The command is the opener's own list element, a pipe joining it, after any code lines a trailing
-    backslash continues onto it. A separator inside quotes splits nothing, and the heredoc labels are
-    not words. It runs the body where a word names one of `programs`, or where the command is an
-    expansion naming its program only at run time. Any other command writes the body as data.
+    backslash continues onto it. Quoted text, a comment, and the heredoc labels separate nothing.
+    It runs the body where a word names a program in `heredoc_programs`. It also runs it where the
+    word a stage runs is an expansion, which names its program only at run time. Any other command
+    writes the body as data.
     """
     top = row
-    while top > 1 and (above := starts.line(top - 1)).rstrip().endswith("\\"):
-        if above.lstrip().startswith("#"):
-            break
+    while top > 1 and shell_bare(starts.line(top - 1)).rstrip().endswith("\\"):
         top -= 1
     rows = [starts.line(n) for n in range(top, row + 1)]
-    at, command = sum(len(r) + 1 for r in rows[:-1]) + col, " ".join(rows)
-    bare = SHELL_QUOTE.sub(lambda m: " " * len(m.group()), command)
+    at = sum(len(r) + 1 for r in rows[:-1]) + col
+    lines = [shell_bare(r).ljust(len(r)) for r in rows]
+    command, bare = " ".join(rows), " ".join(lines)
     left = max((m.end() for m in SEPARATOR.finditer(bare, 0, at)), default=0)
     right = next((m.start() for m in SEPARATOR.finditer(bare, at)), len(bare))
-    words = re.split(r"[\s|()`\"'{}<>\\]+", HEREDOC_LABEL.sub(" ", command[left:right]))
-    first = next((w for w in words if w and "=" not in w), "")
-    return first.startswith("$") or any(program_name(w) in programs for w in words)
+    spans = [m.span() for m in re.finditer(r"\S+", bare[left:right])]
+    tokens = [command[left + a : left + b] for a, b in spans]
+    wrappers = frozenset(spec.get("heredoc_wrappers", ()))
+    if any(w.lstrip("\"'").startswith("$") for w in command_words(tokens, wrappers)):
+        return True
+    words = re.split(r"[\s|()`\"'{}<>\\]+", " ".join(tokens))
+    return any(program_name(w) in spec.get("heredoc_programs", ()) for w in words)
 
 
-def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]:
+def split_heredocs(text: str, spec: dict[str, Any]) -> list[tuple[int, str]]:
     """A script as its code with heredoc bodies blanked, then each body, as (line offset, text).
 
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
     next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
     script without its YAML indent. Each is lexed alone so that string ends with the body. Only a
-    body a program in `programs` runs is returned, since any other is data rather than code. An
+    body a command runs, by `runs_body` reading `spec`, is returned, since any other is data rather than code. An
     opener closing nowhere is more often a shift, so the rest of the script stays code.
     """
     rows = text.splitlines(keepends=True)
@@ -788,10 +822,10 @@ def split_heredocs(text: str, programs: frozenset[str]) -> list[tuple[int, str]]
             first, end = starts.at(offset)[0], starts.at(offset + len(value) - 1)[0]
             m = next(re.finditer(HEREDOC, value))
             mid = starts.at(offset + max(m.end(8), 1) - 1)[0]
-            run = [m.end(8) < 0 or runs_body(starts, first, starts.at(offset)[1], programs)]
+            run = [m.end(8) < 0 or runs_body(starts, first, starts.at(offset)[1], spec)]
             if first < mid < end:
                 col = starts.at(offset + m.start(7))[1]
-                run.append(runs_body(starts, first, col, programs))
+                run.append(runs_body(starts, first, col, spec))
             pieces = [(first, mid), (mid, end)] if first < mid < end else [(first, end)]
             spans += [(a, b, r) for (a, b), r in zip(pieces, run, strict=True)]
     code = list(rows)
@@ -811,7 +845,7 @@ def nested_comments(text: str, spec: dict[str, Any]) -> list[tuple[Line, bool]]:
         body = text[start:end]
         if lexer == "bash-heredoc-as-code" and step_shell(starts, key) in ("", "bash", "sh"):
             # Each body starts on a line of its own, so only the code piece takes the column pad.
-            for skip, piece in split_heredocs(body, frozenset(spec.get("heredoc_programs", ()))):
+            for skip, piece in split_heredocs(body, spec):
                 pad = "x" * col if skip == 0 else ""
                 out += comment_lines(pad + piece + "\n", lexer, inner, number - 1 + skip)
             continue
