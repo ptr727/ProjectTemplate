@@ -747,6 +747,7 @@ SHELL_QUOTE = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
 SHELL_COMMENT = re.compile(r"(?:^|(?<=\s))#")
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 PIPE = re.compile(r"\|")
+PROCESS = re.compile(r"[<>]\(")
 
 
 def shell_bare(text: str) -> str:
@@ -786,15 +787,16 @@ def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
 
     The command is the opener's own list element, after any code lines a trailing backslash
     continues onto it. Quoted text, a comment, and the heredoc labels separate nothing. The body is
-    data only where every pipeline stage runs a program in `heredoc_data`, which writes or reads its
-    input as data. Any other command, an unknown one included, may run it, so it stays code.
+    data only where every pipeline stage runs a program in `heredoc_data`, which treats its input
+    as data. No stage may hold a process substitution, which could run it instead. Any other
+    command, an unknown one included, may run it, so it stays code.
     """
     top = row
     while top > 1 and shell_bare(starts.line(top - 1)).rstrip().endswith("\\"):
         top -= 1
     rows = [starts.line(n) for n in range(top, row + 1)]
     at = sum(len(r) + 1 for r in rows[:-1]) + col
-    lines = [shell_bare(r).ljust(len(r)) for r in rows]
+    lines = [re.sub(r"\\(\s*)$", r" \1", shell_bare(r)).ljust(len(r)) for r in rows]
     command, bare = " ".join(rows), " ".join(lines)
     left = max((m.end() for m in SEPARATOR.finditer(bare, 0, at)), default=0)
     right = next((m.start() for m in SEPARATOR.finditer(bare, at)), len(bare))
@@ -806,7 +808,7 @@ def runs_body(starts: Starts, row: int, col: int, spec: dict[str, Any]) -> bool:
             command[a + x : a + y]
             for x, y in (m.span() for m in re.finditer(r"[^\s|]+", bare[a:b]))
         ]
-        if command_word(tokens, reserved, wrappers) not in data:
+        if command_word(tokens, reserved, wrappers) not in data or PROCESS.search(bare, a, b):
             return True
     return False
 
@@ -817,8 +819,8 @@ def split_heredocs(text: str, spec: dict[str, Any]) -> list[tuple[int, str]]:
     A body's prose can hold an apostrophe, which the shell lexer reads as a string running on to the
     next one anywhere after it. The bodies come from the lexer that knows shell state, run on the
     script without its YAML indent. Each is lexed alone so that string ends with the body. Only a
-    body a command runs, by `runs_body` reading `spec`, is returned, since any other is data rather than code. An
-    opener closing nowhere is more often a shift, so the rest of the script stays code.
+    body `runs_body` finds a command may run is returned, since any other is data rather than code.
+    An opener closing nowhere is more often a shift, so the rest of the script stays code.
     """
     rows = text.splitlines(keepends=True)
     indent = min((len(r) - len(r.lstrip()) for r in rows if r.strip()), default=0)
