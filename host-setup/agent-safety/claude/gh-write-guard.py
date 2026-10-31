@@ -916,7 +916,7 @@ def _delete_only_push(args: list[str]) -> bool:
             delete = delete or a == "--delete" or (a[1] != "-" and "d" in a)
         else:
             return False
-    if len(pos) < 2 or not re.fullmatch(r"[A-Za-z0-9][\w-]*", pos[0]):
+    if len(pos) < 2 or not re.fullmatch(r"\w[\w-]*", pos[0]):
         return False
     for spec in pos[1:]:
         dst = spec if delete else spec[1:] if spec.startswith(":") else ""
@@ -1527,6 +1527,7 @@ _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("git push origin feature/x", _PRIMARY, {}, "deny", "R6"),
     ("git push origin --delete feature/x", _PRIMARY, {}, "allow", "1642"),
     ("git push origin :feature/x", _PRIMARY, {}, "allow", "1642"),
+    ("git push my_fork-2 :feature/x", _PRIMARY, {}, "allow", "1642"),
     ("git push -dq origin feature/x feature/y", _PRIMARY, {}, "allow", "1642"),
     ("git push --dry-run origin :refs/heads/feature/x", _PRIMARY, {}, "allow", "1642"),
     (
