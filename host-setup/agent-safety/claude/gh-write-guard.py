@@ -132,12 +132,19 @@ _SEPARATORS = ("&&", "||", ";;", "|&", ";", "&", "|")
 _XARGS_VALUE_OPTS = frozenset({"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"})
 _ENV_LONG = {
     "argv0": "a",
+    "block-signal": "",
     "chdir": "C",
+    "debug": "v",
+    "default-signal": "",
     "ignore-environment": "i",
+    "ignore-signal": "",
+    "list-signal-handling": "",
+    "null": "0",
     "split-string": "S",
     "unset": "u",
 }
 _ENV_VALUE_LETTERS = frozenset("aCPSu")
+_ENV_FLAG_LETTERS = frozenset("0iv")
 _HOME_PREFIX = re.compile(r"^(?:~|\$HOME|\$\{HOME\})(?=/|\\|$)")
 
 _MSYS_DRIVE_PATHS = os.name == "nt"
@@ -376,7 +383,8 @@ class _Launch:
 
     `env` holds the assignments, `unset` each name an `env -u` removes from the environment the
     command inherits, and `cleared` whether an `env -i` empties it. `chdirs` holds each directory an
-    `env -C` moves the command to, in turn.
+    `env -C` moves the command to, in turn. `undetermined` means an `env` option the guard does not
+    recognize, such as an abbreviation of `--chdir`, may have moved it anywhere.
     """
 
     argv: list[str]
@@ -385,12 +393,16 @@ class _Launch:
     cleared: bool = False
     chdirs: list[str] = field(default_factory=list)
     timed: bool = False
+    undetermined: bool = False
 
 
-def _env_option(word: str, nxt: str | None) -> tuple[list[tuple[str, str]], int] | None:
+def _env_option(
+    word: str, nxt: str | None, take: bool = False
+) -> tuple[list[tuple[str, str]], int] | None:
     """The `env` options a word sets, as (letter, value) pairs, and the words they use, or None for an operand.
 
-    A short cluster such as `-iC dir` reads the way `env` reads it.
+    A short cluster such as `-iC dir` reads the way `env` reads it. An option the guard does not
+    recognize reads as `?`, and takes a value only where `take` says it does.
     """
     if word == "-":
         return [("i", "")], 1
@@ -398,17 +410,20 @@ def _env_option(word: str, nxt: str | None) -> tuple[list[tuple[str, str]], int]
         return [], 1
     if word.startswith("--"):
         name, eq, value = word[2:].partition("=")
-        letter = _ENV_LONG.get(name, "")
-        if letter and letter in _ENV_VALUE_LETTERS and not eq:
+        letter = _ENV_LONG.get(name, "?")
+        if not eq and (letter in _ENV_VALUE_LETTERS or (letter == "?" and take)):
             return [(letter, nxt or "")], 2
         return [(letter, value)], 1
     if not word.startswith("-"):
         return None
     opts: list[tuple[str, str]] = []
     for j, ch in enumerate(word[1:], 2):
-        if ch in _ENV_VALUE_LETTERS:
-            return (opts + [(ch, word[j:])], 1) if word[j:] else (opts + [(ch, nxt or "")], 2)
-        opts.append((ch, ""))
+        letter = ch if ch in _ENV_VALUE_LETTERS or ch in _ENV_FLAG_LETTERS else "?"
+        if letter in _ENV_VALUE_LETTERS or (letter == "?" and take):
+            return (
+                (opts + [(letter, word[j:])], 1) if word[j:] else (opts + [(letter, nxt or "")], 2)
+            )
+        opts.append((letter, ""))
     return opts, 1
 
 
@@ -420,8 +435,11 @@ def _split_string(value: str) -> list[str]:
         return value.split()
 
 
-def _launch(argv: list[str]) -> _Launch:
-    """Strip the launchers before a command, reading what an `env` among them changes."""
+def _launch(argv: list[str], take: bool = False) -> _Launch:
+    """Strip the launchers before a command, reading what an `env` among them changes.
+
+    `take` reads each `env` option the guard does not recognize as taking a value.
+    """
     out = _Launch([])
     env = out.env
     while argv:
@@ -444,7 +462,7 @@ def _launch(argv: list[str]) -> _Launch:
             assigned, chdir = False, None
             while i < len(rest):
                 nxt = rest[i + 1] if i + 1 < len(rest) else None
-                got = None if assigned else _env_option(rest[i], nxt)
+                got = None if assigned else _env_option(rest[i], nxt, take)
                 if got is None:
                     if not (m := _ASSIGN.match(rest[i])):
                         break
@@ -464,6 +482,8 @@ def _launch(argv: list[str]) -> _Launch:
                         chdir = value
                     elif letter == "S":
                         rest = rest[:i] + _split_string(value) + rest[i:]
+                    elif letter == "?":
+                        out.undetermined = True
             out.chdirs += [] if chdir is None else [chdir]
             argv = rest[i:]
         elif name == "xargs":
@@ -499,6 +519,7 @@ class _Cmd:
     """One command the text runs, with the environment and directory it runs in.
 
     `own` holds the assignments the command itself carries, before it or through `env`.
+    `undetermined` means an `env` option the guard does not recognize leaves its repository unread.
     """
 
     argv: list[str]
@@ -506,6 +527,7 @@ class _Cmd:
     cwd: str | None
     quiet: bool
     own: dict[str, str] = field(default_factory=dict)
+    undetermined: bool = False
 
 
 @dataclass
@@ -524,10 +546,13 @@ def _read(
     depth: int = 0,
     quiet: bool = False,
     timed: bool = False,
+    undetermined: bool = False,
 ) -> None:
     """Read each command in `text` into `out`, following `cd` and `export` through the text.
 
     A wrapper body is read once, at `depth` 1, with the directory and environment the wrapper sees.
+    An `env` option the guard does not recognize may take the next word as its value. So a command
+    behind one is read both ways.
     """
     segs, _ = _tokenize(text)
     out.texts.append((segs, timed))
@@ -538,31 +563,34 @@ def _read(
             saved.append((cwd, dict(env)))
         elif k and segs[k - 1].op == ")" and saved:
             cwd, env = saved.pop()
-        assigns, argv = _parse(seg.words)
-        launch = _launch(argv)
-        argv = launch.argv
-        if not argv:
-            env.update(assigns)
-            continue
-        kept = {} if launch.cleared else {**env, **assigns}
-        kept = {k: v for k, v in kept.items() if k not in launch.unset}
-        here = {**kept, **launch.env}
-        own = {**{k: v for k, v in assigns.items() if k in kept}, **launch.env}
-        where = _moved(cwd, launch.chdirs)
-        name = _base(argv[0])
-        silenced = quiet or _discards(seg.redirs) or _forced(segs, k)
-        if name == "export":
-            env.update((m[1], m[2]) for a in argv[1:] if (m := _ASSIGN.match(a)))
-        elif name in ("cd", "pushd"):
-            cwd = _cd(cwd, argv[1:])
-        elif name == "popd":
-            cwd = None
-        elif (body := _wrapper_body(argv)) is not None:
-            if depth == 0:
-                bounded = launch.timed and name in _SHELLS
-                _read(body, where, dict(here), out, 1, silenced, bounded)
-        else:
-            out.cmds.append(_Cmd(argv, here, where, silenced, own))
+        assigns, words = _parse(seg.words)
+        first = _launch(words)
+        taken = _launch(words, True) if first.undetermined else first
+        for launch in [first] + ([taken] if taken.argv != first.argv else []):
+            argv = launch.argv
+            if not argv:
+                env.update(assigns)
+                continue
+            kept = {} if launch.cleared else {**env, **assigns}
+            kept = {k: v for k, v in kept.items() if k not in launch.unset}
+            here = {**kept, **launch.env}
+            own = {**{k: v for k, v in assigns.items() if k in kept}, **launch.env}
+            where = _moved(cwd, launch.chdirs)
+            name = _base(argv[0])
+            unread = undetermined or launch.undetermined
+            silenced = quiet or _discards(seg.redirs) or _forced(segs, k)
+            if name == "export":
+                env.update((m[1], m[2]) for a in argv[1:] if (m := _ASSIGN.match(a)))
+            elif name in ("cd", "pushd"):
+                cwd = _cd(cwd, argv[1:])
+            elif name == "popd":
+                cwd = None
+            elif (body := _wrapper_body(argv)) is not None:
+                if depth == 0:
+                    bounded = launch.timed and name in _SHELLS
+                    _read(body, where, dict(here), out, 1, silenced, bounded, unread)
+            else:
+                out.cmds.append(_Cmd(argv, here, where, silenced, own, unread))
 
 
 def _discards(redirs: list[tuple[str, str]]) -> bool:
@@ -851,7 +879,7 @@ def _push_repo(cmd: _Cmd, git: _Git, remote: str | None) -> tuple[str, str] | No
 
     The remote is read in the repository git uses, the one a `--git-dir` or `GIT_DIR` names over
     the directory's own. A config override of a remote, or a repository the text does not name,
-    resolves to None.
+    resolves to None. So does one an `env` option the guard does not recognize may have moved.
     """
     remote = remote or "origin"
     url: str | None = remote
@@ -862,7 +890,7 @@ def _push_repo(cmd: _Cmd, git: _Git, remote: str | None) -> tuple[str, str] | No
         located = where is not None if named is None else git_dir is not None
         query = ["--git-dir", git_dir] if git_dir else []
         query += ["remote", "get-url", "--push", remote]
-        unread = _overrides_remote(cmd, git) or not located
+        unread = _overrides_remote(cmd, git) or not located or cmd.undetermined
         url = None if unread else _git_stdout(where, query)
     m = _URL_OWNER_REPO.search(url or "")
     return (m.group(1).lower(), m.group(2).lower()) if m else None
@@ -1809,6 +1837,18 @@ _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
     ("GIT_DIR={b}/.git env -u GIT_DIR git push origin :feature/x", "example"),
     ("export GIT_DIR={b}/.git; env --unset=GIT_DIR git push origin :feature/x", "example"),
     ("env -S 'GIT_DIR={b}/.git git push origin :feature/x'", "stranger"),
+    ("env --ch={b} GIT_DIR=.git git push origin :feature/x", None),
+    ("env --chd {b} GIT_DIR=.git git push origin :feature/x", None),
+    ("env -X {b} git push origin :feature/x", None),
+    ("env --nu sh -c 'git push origin :feature/x'", None),
+    ("env --ch={b} git push https://github.com/stranger/x :feature/x", "stranger"),
+    ("env -0v - -- git push origin :feature/x", "example"),
+    ("env --null --debug git push origin :feature/x", "example"),
+    (
+        "env --default-signal=INT --ignore-signal --block-signal git push origin :feature/x",
+        "example",
+    ),
+    ("env --list-signal-handling -C {b} git push origin :feature/x", "stranger"),
 ]
 _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ("git push origin", "feature/a"),
@@ -1822,6 +1862,13 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('env -C "$D" git -C {b} push origin', "develop"),
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
+]
+_PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
+    ("env --ch={b} git push origin develop", "deny"),
+    ("env --chd {b} git push origin main", "deny"),
+    ("env --ch={b} git push origin feature/x", "allow"),
+    ("env --chd {b} git push origin feature/x", "allow"),
+    ("env -X git push origin feature/x", "allow"),
 ]
 
 
@@ -1845,7 +1892,7 @@ def _push_repo_selftest() -> bool | str:
         for cmd, want in _PUSH_REPO_CASES:
             reading = _Reading()
             _read(cmd.format(b=b), a, {}, reading)
-            c = reading.cmds[-1]
+            c = [r for r in reading.cmds if _base(r.argv[0]) == "git"][-1]
             git = _git(c.argv)
             got = _push_repo(c, git, _push_targets(git.args, lambda: None)[0])
             passed = (got[0] if got else None) == want
@@ -1861,6 +1908,13 @@ def _push_repo_selftest() -> bool | str:
             passed = (bare if isinstance(bare, str) else None) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
+        for cmd, want in _PUSH_UNDETERMINED_CASES:
+            verdict, _ = classify(
+                cmd.format(b=b), a, environ={}, primary_checkout_lookup=lambda _d: False
+            )
+            ok = ok and verdict == want
+            mark = "ok  " if verdict == want else "FAIL"
+            print(f"  {mark} [{verdict:5}] want={want:5} 3725: {cmd}")
         return ok
 
 
