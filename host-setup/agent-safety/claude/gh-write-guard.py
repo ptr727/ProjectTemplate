@@ -716,24 +716,14 @@ def _current_push_branch(where: str | None, git_dir: str | None = None) -> str |
     return name if name and name != "HEAD" else None
 
 
-def _bare_push_branch(
-    cwd: str | None,
-    c_dirs: list[str],
-    git_dir: str | None,
-    leading_cd: str | None,
-    moved: bool,
-) -> object:
+def _bare_push_branch(cwd: str | None, c_dirs: list[str], git_dir: str | None) -> object:
     """The branch a push naming no refspec writes, or `_UNRESOLVED` where the text does not name its checkout.
 
-    `leading_cd` and then each `-C` value in `c_dirs` move the push from `cwd`, and a `git_dir`
-    names the repository from there. A push `moved` to a directory the text does not name is
-    unresolved unless its `git_dir` is absolute. So is one whose `git_dir` the reading does not
-    resolve.
+    Each `-C` value in `c_dirs` moves the push from `cwd`, which is None where the text does not
+    name it. A `git_dir` names the repository from there. An absolute `-C` or `git_dir` resolves
+    from an unnamed directory, and a relative one leaves the push unresolved.
     """
-    where = None
-    if not moved:
-        where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
-        where = _moved(where, c_dirs)
+    where = _moved(_msys_drive_path(cwd), c_dirs)
     if git_dir is not None:
         named = _join_dir(where, git_dir)
         return _UNRESOLVED if named is None else _current_push_branch(where, named)
@@ -964,7 +954,7 @@ def _bypass_denial(
         if current_branch is not None:
             return current_branch
         named = _named_git_dir(cmd, git)
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, cmd.cwd is None)
+        got = _bare_push_branch(cmd.cwd, git.c_dirs, named)
         return got if isinstance(got, str) else None
 
     remote, targets = _push_targets(git.args, branch_of)
@@ -1819,6 +1809,9 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('git --git-dir="$D" push origin', None),
     ("env -C {b} git push origin", "develop"),
     ('env -C "$D" git push origin', None),
+    ('env -C "$D" git -C {b} push origin', "develop"),
+    ('cd "$X" && git -C {b} push origin', "develop"),
+    ('cd "$X" && git -C sub push origin', None),
 ]
 
 
@@ -1854,7 +1847,7 @@ def _push_repo_selftest() -> bool | str:
             c = reading.cmds[-1]
             git = _git(c.argv)
             named = _named_git_dir(c, git)
-            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, c.cwd is None)
+            bare = _bare_push_branch(c.cwd, git.c_dirs, named)
             passed = (bare if isinstance(bare, str) else None) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
