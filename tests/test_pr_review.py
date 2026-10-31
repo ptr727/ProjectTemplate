@@ -2669,7 +2669,9 @@ class TestPullRequestNotOpen(GqlCase):
         with (
             contextlib.redirect_stdout(io.StringIO()) as out,
             mock.patch.object(pr_review.time, "sleep"),
-            mock.patch.object(pr_review, "request_copilot_review") as requested,
+            mock.patch.object(
+                pr_review, "request_copilot_review", return_value=("", None)
+            ) as requested,
         ):
             pr_review.main(["wait", "7", "--repo", "o/r", "--ignore-quota-signal"])
         requested.assert_not_called()
