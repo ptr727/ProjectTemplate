@@ -123,50 +123,23 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    read and confirmed by reading it back.
    Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
    cleanup stopped, which stops and reports the same as `cleanup`.
-   Some refusals are states this seat clears rather than final ones. They are a
-   `status=THREADS_UNRESOLVED` line, from the gate's exit `46` or from the fresh read, and a gate
-   exit `30` printing `status=CHECKS_PENDING` or `status=PENDING`. They are also a
-   `status=HEAD_MOVED` line, printed for a push during the gate or for `gh` refusing a head that
-   moved. So is a `status=REVIEW_PENDING` line, a review request still
-   pending. So is a `status=MERGE_NOT_CLEAN` line reading `UNKNOWN`, GitHub recomputing
-   mergeability, or `BLOCKED`, which a pending required check or an open thread leaves. For each, dispose of the thread or wait, run step 3 again,
-   and then run `merge` again. A `status=UNPLACED_PARTS_UNACKNOWLEDGED` line clears once this seat
-   posts the acknowledgment pr-review-conduct's Merge Gate item 4 names, and then runs `merge`
-   again. A `status=MERGE_NOT_CLEAN` line reading
-   `DIRTY` is a conflict with `develop`, and one reading `BEHIND` is a branch `develop` passed.
-   For either, merge `develop` into the branch with a merge commit, never a rebase. Resolve any
-   conflict, push, and drive the pull request from step 2 again.
-   A gate exit step 3 names a route for, such as `41` or `49`, clears as step 3 says. Then run
-   `merge` again. A `status=REFUSED` line reading `MERGED, not OPEN` means
-   the pull request already merged, by hand or by a peer. Run the `cleanup` command below.
-   With no `status=MERGED` line before it, a `status=MERGE_REFUSED` line at exit `1` is `gh`
-   refusing a merge that reads back open at the gated head. `develop` moving under a sibling merge
-   is one cause. With no such line, a `status=UNREAD` line at exit `2` is a read that failed before
-   any merge. Run `merge` again once, directly, for either, since it re-reads everything before it
-   writes. A second identical refusal is reported as the gate refusal below.
-   A `status=MERGE_NOT_CONFIRMED` line at exit `2` is not a gate refusal, since the merge may have
-   landed. Read the pull request's state back first, with
-   `gh pr view <number> --repo <owner>/<repo> --json state`. Where it reads `MERGED`, the merge
-   landed, so run the `cleanup` command below. Where it reads `OPEN`, treat it as unmerged and take
-   the route above for a state this seat clears. Only a read that still cannot answer is reported,
-   saying the merge may have landed.
-   A `status=OUTPUT_NOTED` line is one this seat cannot clear. Its count spans every round and
-   falls on no answer. That includes an acknowledged round's parts once a later push moves the head.
-   Read each part by hand and give any finding in it an outcome, then report it as below.
-   A `status=UNTHREADED_FINDINGS` line first asks for each counted finding's outcome, per
-   "Disposing of Every Finding". A `qodo_open` count falls once Qodo re-reviews a fixing push and badges its
-   entry. Where it is among the counts after such a push, post `/review` on the pull request. Qodo
-   does not always reprocess a push on its own. Read `status` once the next `wait` returns.
-   Spot-verify each badge per pr-review-conduct's Merge Gate item 3, and
-   run `merge` again once. A line still standing then is one this seat cannot clear, since `merge`
-   reads no answer posted to a finding. Report either line to the maintainer as a blocked merge, naming the
-   pull request and that each counted finding or noted part has an outcome. The maintainer can
-   then merge it by hand. A `status=COUNT_UNREAD` line is one this seat cannot clear either, since
-   item 3 reads a count it cannot read as unmet. A round stating no count leaves `overview=?`, for
-   one. Report it the same way, naming the unread field rather than an outcome.
-   Any other non-zero exit with no `status=MERGED` line is a gate refusal this seat cannot clear.
-   It reports that refusal and never routes around it, handing the maintainer no command to run
-   instead. There `1` is a refusal that merged nothing. A harness refusing the `merge` call itself is a refused write
+   Any other non-zero exit is a refusal that merged nothing, except as the next paragraph says.
+   Read its `status=` line and do what that line names, each per step 3. That can be disposing of
+   a thread, waiting, or recording and attesting a pass. It can also be posting an acknowledgment,
+   or merging `develop` into the branch with a merge commit, never a rebase. Give each finding the
+   line counts an outcome per "Disposing of Every Finding". Then run `merge` once more. Where the
+   same `status=` line returns on the same head, stop. Report it to the maintainer as a blocked
+   merge, naming the pull request, the line, and each counted finding's outcome. The maintainer can
+   then merge it by hand. Some lines never clear on a rerun, so report those at once. Two are
+   `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`, since `merge` reads no answer. A refusal this
+   seat reports is never routed around, and it hands the maintainer no command to run instead.
+   A `status=MERGE_NOT_CONFIRMED` line at exit `2` is no refusal, since the merge may have landed.
+   Read the state back with `gh pr view <number> --repo <owner>/<repo> --json state`. `MERGED`
+   means the merge landed, so run the `cleanup` command below. `OPEN` means treat it as the refusal
+   above. Only a read that still cannot answer is reported, saying the merge may have landed. A
+   `status=REFUSED` line reading `MERGED, not OPEN` means the pull request already merged, by hand
+   or by a peer. Run the `cleanup` command below for it too.
+   A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
    another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
    Write Safety". Name the maintainer's routes, adding the permission rule or running the command

@@ -346,31 +346,16 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    worker's line the moment it arrives. Work still running then finishes after the run has acted
    on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
-   parking comment so the comment can name it. That includes a `merge` exiting other than `0`
-   with no `status=MERGED` line where the worker cannot clear it. Such a gate refusal is parked
-   with its output rather than routed around. A non-zero exit after that line is a cleanup that
-   stopped, which step 7 names in the close-out.
+   parking comment so the comment can name it. That includes a `merge` refusal `drive-pr` step 4
+   says to report, which the worker parks instead. The worker first clears and reruns it once per
+   that step. So a refusal parks only when the same `status=` line returns on the same head. The
+   parking names the pull request, the line, and each counted finding's outcome, so the maintainer
+   can merge it by hand. A `status=MERGE_NOT_CONFIRMED` line is read back per that step, and only a
+   read that still cannot answer parks, saying the merge may have landed. A non-zero exit after a
+   `status=MERGED` line is a cleanup that stopped, which step 7 names in the close-out.
    It also includes the harness refusing the `merge` call itself. That is a refused write, parked
    as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and Write Safety". The parking
    names the maintainer's routes, adding the permission rule or running the command themselves.
-   A `status=THREADS_UNRESOLVED`, `status=CHECKS_PENDING`, or `status=PENDING` line is no
-   decision. Nor is a `status=HEAD_MOVED`, `status=REVIEW_PENDING`, or
-   `status=UNPLACED_PARTS_UNACKNOWLEDGED` line. Nor is a `status=MERGE_NOT_CLEAN` line reading
-   `UNKNOWN`, `BLOCKED`, `BEHIND`, or `DIRTY`, nor a gate exit step 3 routes. The worker clears each of those per
-   `drive-pr` step 4. It disposes of the thread, acknowledges the parts, merges `develop` into the
-   branch, records and attests a pass, or waits.
-   It then drives again and runs `merge` again. A first `status=MERGE_REFUSED` or `status=UNREAD`
-   line with no `status=MERGED` line before it is no decision either. The worker runs `merge` again
-   once, directly, per that step. A `status=REFUSED` line reading `MERGED, not OPEN` goes on to the
-   cleanup, since the pull request already merged. A `status=MERGE_NOT_CONFIRMED` line is no decision
-   until the pull request's state is read back per that step. A read answering `MERGED` goes on to
-   the cleanup, and one answering `OPEN` is treated as unmerged and cleared the same way. Only a
-   read that still cannot answer parks, the parking saying the merge may have landed. Once each counted
-   finding or noted part has an outcome, a `status=UNTHREADED_FINDINGS` or `status=OUTPUT_NOTED`
-   line still standing after `drive-pr` step 4's route parks. That is because
-   `merge` reads no answer posted to a finding or a part. The parking names the pull request and that each has an outcome, so the
-   maintainer can merge it by hand. A `status=COUNT_UNREAD` line parks the same way, naming the
-   unread field.
    Otherwise a worker parks only
    on a choice the maintainer alone can make, or on a maintainer-only action that
    `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer
