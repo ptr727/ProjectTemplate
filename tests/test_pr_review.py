@@ -3870,6 +3870,27 @@ class TestCli(GqlCase):
                     with mock.patch.object(pr_review.time, "sleep"):
                         self.assertEqual(expected, self.cli(["wait", "7", "--timeout", "0"]))
 
+    def test_a_cut_thread_page_is_walked_once_per_read(self) -> None:
+        """The poll and the exit both judge one read, so its walk is paid for once."""
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", resolved=True)],
+                more_threads=True,
+                merge="CLEAN",
+                checks=[check(name="gate")],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with (
+            mock.patch.object(pr_review, "unresolved_threads", return_value=[]) as walk,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        walk.assert_called_once_with("o", "r", 7)
+
     def test_an_unnamed_author_is_named_as_one(self) -> None:
         pr = self.into(
             payload(

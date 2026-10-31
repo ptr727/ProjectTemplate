@@ -1012,10 +1012,15 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
 
 
 def open_on_head(owner: str, repo: str, num: int, pr: dict) -> list[dict]:
-    """Every unresolved thread in `pr`, walking every page where its thread read was cut."""
-    if threads_truncated(pr):
-        return unresolved_threads(owner, repo, num)
-    return open_threads(pr["reviewThreads"]["nodes"])
+    """Every unresolved thread in `pr`, walking every page where its thread read was cut.
+
+    The answer is kept on `pr` as `_open`, since the poll judges one read more than once.
+    """
+    if "_open" not in pr:
+        cut = threads_truncated(pr)
+        nodes = pr["reviewThreads"]["nodes"]
+        pr["_open"] = unresolved_threads(owner, repo, num) if cut else open_threads(nodes)
+    return pr["_open"]
 
 
 def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
