@@ -36,6 +36,7 @@ import contextlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -129,6 +130,14 @@ _ASSIGN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 _REDIR_OP = re.compile(r"<<<|>>|>&|<&|>\||<>|>|<")
 _SEPARATORS = ("&&", "||", ";;", "|&", ";", "&", "|")
 _XARGS_VALUE_OPTS = frozenset({"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"})
+_ENV_LONG = {
+    "argv0": "a",
+    "chdir": "C",
+    "ignore-environment": "i",
+    "split-string": "S",
+    "unset": "u",
+}
+_ENV_VALUE_LETTERS = frozenset("aCPSu")
 _HOME_PREFIX = re.compile(r"^(?:~|\$HOME|\$\{HOME\})(?=/|\\|$)")
 
 _MSYS_DRIVE_PATHS = os.name == "nt"
@@ -361,11 +370,60 @@ def _base(word: str) -> str:
     return name.removesuffix(".exe")
 
 
-def _launch(argv: list[str]) -> tuple[list[str], dict[str, str], bool]:
-    """Strip the launchers before a command, returning its words, the `env` assignments, and whether
-    a `timeout` runs it."""
-    env: dict[str, str] = {}
-    timed = False
+@dataclass
+class _Launch:
+    """A command's words past its launchers, and how an `env` among them changes what it runs in.
+
+    `env` holds the assignments, `unset` each name an `env -u` removes from the environment the
+    command inherits, and `cleared` whether an `env -i` empties it. `chdirs` holds each directory an
+    `env -C` moves the command to, in turn.
+    """
+
+    argv: list[str]
+    env: dict[str, str] = field(default_factory=dict)
+    unset: set[str] = field(default_factory=set)
+    cleared: bool = False
+    chdirs: list[str] = field(default_factory=list)
+    timed: bool = False
+
+
+def _env_option(word: str, nxt: str | None) -> tuple[list[tuple[str, str]], int] | None:
+    """The `env` options a word sets, as (letter, value) pairs, and the words they use, or None for an operand.
+
+    A short cluster such as `-iC dir` reads the way `env` reads it.
+    """
+    if word == "-":
+        return [("i", "")], 1
+    if word == "--":
+        return [], 1
+    if word.startswith("--"):
+        name, eq, value = word[2:].partition("=")
+        letter = _ENV_LONG.get(name, "")
+        if letter and letter in _ENV_VALUE_LETTERS and not eq:
+            return [(letter, nxt or "")], 2
+        return [(letter, value)], 1
+    if not word.startswith("-"):
+        return None
+    opts: list[tuple[str, str]] = []
+    for j, ch in enumerate(word[1:], 2):
+        if ch in _ENV_VALUE_LETTERS:
+            return (opts + [(ch, word[j:])], 1) if word[j:] else (opts + [(ch, nxt or "")], 2)
+        opts.append((ch, ""))
+    return opts, 1
+
+
+def _split_string(value: str) -> list[str]:
+    """The words an `env -S` string splits into, or its whitespace-separated words where quoting fails."""
+    try:
+        return shlex.split(value)
+    except ValueError:
+        return value.split()
+
+
+def _launch(argv: list[str]) -> _Launch:
+    """Strip the launchers before a command, reading what an `env` among them changes."""
+    out = _Launch([])
+    env = out.env
     while argv:
         name, rest = _base(argv[0]), argv[1:]
         i = 0
@@ -374,24 +432,39 @@ def _launch(argv: list[str]) -> tuple[list[str], dict[str, str], bool]:
                 i += 2 if rest[i] in ("-s", "-k", "--signal", "--kill-after") else 1
             if i >= len(rest):
                 break
-            argv, timed = rest[i + 1 :], True
+            argv, out.timed = rest[i + 1 :], True
         elif name in ("nohup", "command", "exec", "nice"):
             if name == "command" and rest[:1] in (["-v"], ["-V"]):
-                return [], env, timed
+                out.argv = []
+                return out
             while i < len(rest) and rest[i].startswith("-"):
                 i += 2 if rest[i] == "-n" else 1
             argv = rest[i:]
         elif name == "env":
+            assigned, chdir = False, None
             while i < len(rest):
-                if rest[i] in ("-u", "-C", "-S", "--unset", "--chdir"):
-                    i += 2
-                elif rest[i].startswith("-"):
+                nxt = rest[i + 1] if i + 1 < len(rest) else None
+                got = None if assigned else _env_option(rest[i], nxt)
+                if got is None:
+                    if not (m := _ASSIGN.match(rest[i])):
+                        break
+                    env[m[1]], assigned = m[2], True
                     i += 1
-                elif m := _ASSIGN.match(rest[i]):
-                    env[m[1]] = m[2]
-                    i += 1
-                else:
-                    break
+                    continue
+                opts, used = got
+                i += used
+                for letter, value in opts:
+                    if letter == "i":
+                        env.clear()
+                        out.cleared = True
+                    elif letter == "u":
+                        env.pop(value, None)
+                        out.unset.add(value)
+                    elif letter == "C":
+                        chdir = value
+                    elif letter == "S":
+                        rest = rest[:i] + _split_string(value) + rest[i:]
+            out.chdirs += [] if chdir is None else [chdir]
             argv = rest[i:]
         elif name == "xargs":
             while i < len(rest) and rest[i].startswith("-"):
@@ -399,7 +472,8 @@ def _launch(argv: list[str]) -> tuple[list[str], dict[str, str], bool]:
             argv = rest[i:]
         else:
             break
-    return argv, env, timed
+    out.argv = argv
+    return out
 
 
 def _wrapper_body(argv: list[str]) -> str | None:
@@ -465,11 +539,16 @@ def _read(
         elif k and segs[k - 1].op == ")" and saved:
             cwd, env = saved.pop()
         assigns, argv = _parse(seg.words)
-        argv, launched, under_timeout = _launch(argv)
+        launch = _launch(argv)
+        argv = launch.argv
         if not argv:
             env.update(assigns)
             continue
-        here = {**env, **assigns, **launched}
+        kept = {} if launch.cleared else {**env, **assigns}
+        kept = {k: v for k, v in kept.items() if k not in launch.unset}
+        here = {**kept, **launch.env}
+        own = {**{k: v for k, v in assigns.items() if k in kept}, **launch.env}
+        where = _moved(cwd, launch.chdirs)
         name = _base(argv[0])
         silenced = quiet or _discards(seg.redirs) or _forced(segs, k)
         if name == "export":
@@ -480,10 +559,10 @@ def _read(
             cwd = None
         elif (body := _wrapper_body(argv)) is not None:
             if depth == 0:
-                bounded = under_timeout and name in _SHELLS
-                _read(body, cwd, dict(here), out, 1, silenced, bounded)
+                bounded = launch.timed and name in _SHELLS
+                _read(body, where, dict(here), out, 1, silenced, bounded)
         else:
-            out.cmds.append(_Cmd(argv, here, cwd, silenced, {**assigns, **launched}))
+            out.cmds.append(_Cmd(argv, here, where, silenced, own))
 
 
 def _discards(redirs: list[tuple[str, str]]) -> bool:
@@ -885,7 +964,7 @@ def _bypass_denial(
         if current_branch is not None:
             return current_branch
         named = _named_git_dir(cmd, git)
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, cmd.cwd is None)
+        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, False)
         return got if isinstance(got, str) else None
 
     remote, targets = _push_targets(git.args, branch_of)
@@ -1482,6 +1561,11 @@ _CASES: list[tuple[str, str, str]] = [
     ("cat > /example/notes.md <<'EOF'\nas in `NAME=value git ...`\nEOF", "allow", "3380"),
     ("find . -name '*.txt' | xargs -I{} sh -c '{}'", "allow", "3385"),
     ("printf 5 | xargs gh pr comment --body x", "allow", "R3"),
+    ("env -S 'gh issue comment 5 -R stranger/x --body hi'", "deny", "3716"),
+    ("env --split-string='gh issue comment 5 -R stranger/x' -b hi", "deny", "3716"),
+    ("env -iS'gh issue comment 5 -R stranger/x --body hi'", "deny", "3716"),
+    ("env -a x gh issue comment 5 -R stranger/x --body hi", "deny", "3716"),
+    ("env -S 'gh issue comment 5 --body fix#1 -R stranger/x'", "deny", "3716"),
 ]
 
 _ENV_CASES: list[tuple[str, dict[str, str], str, str]] = [
@@ -1505,6 +1589,8 @@ _ENV_CASES: list[tuple[str, dict[str, str], str, str]] = [
         "deny",
         "R5",
     ),
+    ("env -u GH_REPO gh issue comment 5 --body hi", {"GH_REPO": "stranger/x"}, "allow", "3716"),
+    ("env -i gh issue comment 5 --body hi", {"GH_REPO": "stranger/x"}, "allow", "3716"),
 ]
 
 _RULES: dict[str, set[str] | None] = {
@@ -1611,6 +1697,9 @@ _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("bash -c 'cd /c/work/primary && git reset --hard'", _WORKTREE, {}, "deny", "R6"),
     ('git -C "$D" commit -m x', _WORKTREE, {}, "allow", "3382"),
     ("git -C /elsewhere commit -m x", _WORKTREE, {}, "allow", "R6"),
+    ("env -C /c/work/primary git commit -m x", _WORKTREE, {}, "deny", "3716"),
+    ("env --chdir=/c/work/primary sh -c 'git add f'", _WORKTREE, {}, "deny", "3716"),
+    ("env --chdir /c/work/wt git commit -m x", _PRIMARY, {}, "allow", "3716"),
 ]
 
 # A directory that does not exist, so no origin and no branch rules resolve there.
@@ -1708,6 +1797,18 @@ _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
     ("git -c remote.origin.pushurl=https://github.com/x/y push origin :feature/x", None),
     ("GIT_CONFIG_COUNT=1 git push origin :feature/x", None),
     ("git --git-dir={b}/.git push https://github.com/example/x :feature/x", "example"),
+    ("env --chdir={b} GIT_DIR=.git git push origin :feature/x", "stranger"),
+    ("env --chdir=../b GIT_DIR=.git git push origin :feature/x", "stranger"),
+    ("env -C {b} git push origin :feature/x", "stranger"),
+    ("env -iC{b} git push origin :feature/x", "stranger"),
+    ("env -C /nowhere -C ../b git push origin :feature/x", "stranger"),
+    ("env -C {b} env -C . git push origin :feature/x", "stranger"),
+    ("env -C {b} sh -c 'git push origin :feature/x'", "stranger"),
+    ('env -C "$D" git push origin :feature/x', None),
+    ("GIT_DIR={b}/.git env -i git push origin :feature/x", "example"),
+    ("GIT_DIR={b}/.git env -u GIT_DIR git push origin :feature/x", "example"),
+    ("export GIT_DIR={b}/.git; env --unset=GIT_DIR git push origin :feature/x", "example"),
+    ("env -S 'GIT_DIR={b}/.git git push origin :feature/x'", "stranger"),
 ]
 _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ("git push origin", "feature/a"),
@@ -1716,6 +1817,11 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('cd "$X" && git --git-dir={b}/.git push origin', "develop"),
     ("GIT_DIR={b}/.git; git push origin", None),
     ('git --git-dir="$D" push origin', None),
+    ("env -C {b} git push origin", "develop"),
+    ('env -C "$D" git push origin', None),
+    ('env -C "$D" git -C {b} push origin', "develop"),
+    ('cd "$X" && git -C {b} push origin', "develop"),
+    ('cd "$X" && git -C sub push origin', None),
 ]
 
 
@@ -1751,7 +1857,7 @@ def _push_repo_selftest() -> bool | str:
             c = reading.cmds[-1]
             git = _git(c.argv)
             named = _named_git_dir(c, git)
-            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, c.cwd is None)
+            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, False)
             passed = (bare if isinstance(bare, str) else None) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
