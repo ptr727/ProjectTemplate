@@ -356,15 +356,16 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    A `status=THREADS_UNRESOLVED`, `status=CHECKS_PENDING`, or `status=PENDING` line is no
    decision. Nor is a `status=HEAD_MOVED`, `status=REVIEW_PENDING`, or
    `status=UNPLACED_PARTS_UNACKNOWLEDGED` line. Nor is a `status=MERGE_NOT_CLEAN` line reading
-   `UNKNOWN`, `BEHIND`, or `DIRTY`. The worker clears each per `drive-pr` step 4, by disposing of
+   `UNKNOWN`, `BEHIND`, or `DIRTY`. Nor is a first `status=MERGE_REFUSED` or `status=UNREAD`
+   line, which the worker meets by running `merge` again once. The worker clears each per `drive-pr` step 4, by disposing of
    the thread, acknowledging the parts, merging `develop` into the branch, or waiting. It then
    drives again and runs `merge` again. A `status=MERGE_NOT_CONFIRMED` line is no decision
    until the pull request's state is read back per that step. A read answering `MERGED` goes on to
    the cleanup, and one answering `OPEN` is treated as unmerged and cleared the same way. Only a
    read that still cannot answer parks, the parking saying the merge may have landed. A
    `status=UNTHREADED_FINDINGS` or `status=OUTPUT_NOTED` line still standing once each counted
-   finding or noted part has an outcome parks. That is because `merge` counts those across every
-   round and reads no answer. The parking names the pull request and that each has an outcome, so the
+   finding or noted part has an outcome, and after `merge` runs again, parks. That is because
+   `merge` reads no answer posted to a finding or a part. The parking names the pull request and that each has an outcome, so the
    maintainer can merge it by hand.
    Otherwise a worker parks only
    on a choice the maintainer alone can make, or on a maintainer-only action that

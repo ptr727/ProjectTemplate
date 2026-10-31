@@ -134,6 +134,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    again. A `status=MERGE_NOT_CLEAN` line reading `DIRTY` is a conflict with `develop`. Merge
    `develop` into the branch with a merge commit, never a rebase, resolve the conflict, push, and
    drive the pull request from step 2 again.
+   A `status=MERGE_REFUSED` line at exit `1` is `gh` refusing a merge that reads back open at the
+   gated head. `develop` moving under a sibling merge is one cause. A `status=UNREAD` line at exit `2`
+   is a read that failed before any merge. Run `merge` again once for either, since it re-reads
+   everything before it writes. A second identical refusal is reported as the gate refusal below.
    A `status=MERGE_NOT_CONFIRMED` line at exit `2` is not a gate refusal, since the merge may have
    landed. Read the pull request's state back first, with
    `gh pr view <number> --repo <owner>/<repo> --json state`. Where it reads `MERGED`, the merge
@@ -143,14 +147,14 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    A `status=UNTHREADED_FINDINGS` line first asks for each counted finding's outcome, per
    "Disposing of Every Finding". A `status=OUTPUT_NOTED` line first asks for each part under
    `REVIEWER OUTPUT NOTED` to be read by hand and any finding in it given an outcome. Once each has
-   one, this seat cannot clear either line, since `merge` counts those findings and parts across
-   every round and reads no answer. Report it to the maintainer as a blocked merge, naming the
+   one, run `merge` again, since some counts fall once their finding is resolved, such as a Qodo
+   entry badged Resolved. A line still standing then is one this seat cannot clear, since `merge`
+   reads no answer posted to a finding or a part. Report it to the maintainer as a blocked merge, naming the
    pull request and that each counted finding or noted part has an outcome. The maintainer can
    then merge it by hand.
    Any other non-zero exit with no `status=MERGED` line is a gate refusal this seat cannot clear.
    It reports that refusal and never routes around it, handing the maintainer no command to run
-   instead. There `1` is a refusal that merged nothing, `gh` refusing the merge with the pull
-   request reading back open among them. A harness refusing the `merge` call itself is a refused write
+   instead. There `1` is a refusal that merged nothing. A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
    another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
    Write Safety". Name the maintainer's routes, adding the permission rule or running the command
