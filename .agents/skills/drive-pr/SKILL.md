@@ -134,13 +134,16 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    never read.
    Any other non-zero exit is a refusal that merged nothing. Do what its `status=` lines name, per
    step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
-   Every Finding". Then run `merge` once more on this pull request. Report what still stands to the
+   Every Finding". A `status=MERGE_NOT_CLEAN` line reading `BLOCKED` while a check still runs
+   clears by waiting for it, with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`.
+   Then run `merge` once more on this pull request. Report what still stands to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
    outcome. The maintainer can then merge it by hand. A line no action of this seat can change
    is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
    So is the gate's exit `50` printing `status=VERDICT_NAMES_UNCOUNTED_FINDINGS`, which repeats on
-   its head after the answer. So is its exit `41` on a quota state, which pr-review-conduct's Merge
-   Gate item 2 sends to the maintainer. Its other exit `41` states clear as item 2 says.
+   its head after the answer. So is its exit `41` on a quota state, or on a refusal item 2 names no
+   way to clear. pr-review-conduct's Merge Gate item 2 sends those to the maintainer. A
+   file-count refusal and a transient error clear as item 2 says.
    They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
    `suppressed`. A refusal this seat reports is
    never routed around, and it hands the maintainer no command to run instead.
