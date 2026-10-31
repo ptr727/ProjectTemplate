@@ -2653,7 +2653,9 @@ class TestPullRequestNotOpen(GqlCase):
         with (
             contextlib.redirect_stdout(io.StringIO()) as out,
             mock.patch.object(pr_review.time, "sleep") as slept,
-            mock.patch.object(pr_review, "request_copilot_review") as requested,
+            mock.patch.object(
+                pr_review, "request_copilot_review", return_value=("", None)
+            ) as requested,
         ):
             code = pr_review.main(["wait", "7", "--repo", "o/r"])
         self.assertEqual(0, code)
@@ -2678,14 +2680,18 @@ class TestPullRequestNotOpen(GqlCase):
         self.assertIn("state=MERGED", out.getvalue())
 
     def test_wait_stops_polling_once_the_pull_request_merges_under_it(self) -> None:
-        """A seat merging by hand mid-drive leaves the poll nothing to wait for."""
+        """A seat merging by hand mid-drive leaves the poll nothing to wait for.
+
+        No review lands, so only the merged state can end the poll. The bound keeps a regression
+        to a few seconds of polling rather than the default timeout.
+        """
         opened = payload([], merge="BLOCKED")
-        self.answer(opened, opened, self.merged())
+        self.answer(opened, opened, {**self.merged(), "reviews": {"nodes": [], "pageInfo": {}}})
         with (
             contextlib.redirect_stdout(io.StringIO()) as out,
             mock.patch.object(pr_review.time, "sleep") as slept,
         ):
-            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r"]))
+            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "3"]))
         self.assertEqual(1, slept.call_count)
         self.assertIn("state=MERGED", out.getvalue())
         self.assertNotIn("status=PENDING", out.getvalue())

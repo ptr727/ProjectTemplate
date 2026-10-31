@@ -67,7 +67,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    open, whose `merge=UNKNOWN` never clears, so stop re-reading it. Confirm its `merge_commit=` per
    step 4, run the ready-report comparison below against its `head=`, and report both. Dispatch no
    release from here, since whoever merged it may have released it already. The merge has landed
-   all the same, so go on to step 7, which gates itself on scope, and then step 8. A digest carrying
+   all the same, so go on to step 7 where a release scope was chosen, and then step 8. A digest carrying
    `state=CLOSED` is a stop to report. A digest reading `coverage=none` is not a partial gate where the promotion meets the
    one case that skill's Merge Gate item 2 states. Check that case again on every re-run below, and record
    its evidence for the head step 3 merges, as that item says.
@@ -164,7 +164,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    failure, an ambiguous run match, a timeout, a failed run, or a hub Skills refresh all still
    reach this step. So does step 2 finding the promotion already merged. The merge already landed
    by then, in step 3 or before step 2 read it. Every part below is required:
-   - The promotion PR's own worktree, where this session made one: fetch and prune, remove the worktree, then bring the base
+   - The promotion PR's own worktree, where one exists: fetch and prune, remove the worktree, then bring the base
      clone to current `develop`. To do so, check `develop` out first only where it sits on another
      branch, and fast-forward it with `git merge --ff-only origin/develop`. Where that checkout
      is needed, removing first, not after, matters. The reason is that the base clone cannot check out `develop`
