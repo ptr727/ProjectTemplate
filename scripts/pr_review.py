@@ -1993,7 +1993,6 @@ def main(argv: list[str] | None = None) -> int:
     pre.add_argument("first", nargs="?")
     for flag in ("--repo", "--checkout", "--min-age-hours"):
         pre.add_argument(flag)
-    pre.add_argument("--cleanup", action="store_true")
     first = pre.parse_known_args(args)[0].first
     if first in ("cleanup", "merge"):
         sys.modules.setdefault("pr_review", sys.modules[__name__])

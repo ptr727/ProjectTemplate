@@ -125,11 +125,13 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    cleanup stopped, which stops and reports the same as `cleanup`.
    Check the lines below next, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
    line at exit `2` is read back with `gh pr view <number> --repo <owner>/<repo> --json state`.
-   `MERGED` means run the `cleanup` command below, and `OPEN` means treat it as a refusal. Only a
+   `MERGED` means run the `cleanup` command below and report the merge as below, and `OPEN` means
+   treat it as a refusal. Only a
    read that still cannot answer is reported, saying the merge may have landed. A `status=REFUSED`
    line reading `MERGED, not OPEN` means the pull request already merged, by hand or by a peer.
-   So does a `status=PEER_MERGED` line. For either, run the `cleanup` command below. Report the
-   merge as one this run did not make, since the head that merged may be one the gate never read.
+   So does a `status=PEER_MERGED` line. For either, run the `cleanup` command below. Report each
+   of these merges as one this run cannot vouch for, since the head that merged may be one the gate
+   never read.
    Any other non-zero exit is a refusal that merged nothing. Do what its `status=` lines name, per
    step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
    Every Finding". Then run `merge` once more on this pull request. Report what still stands to the
@@ -137,8 +139,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    outcome. The maintainer can then merge it by hand. A line no action of this seat can change
    is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
    So is the gate's exit `50` printing `status=VERDICT_NAMES_UNCOUNTED_FINDINGS`, which repeats on
-   its head after the answer. So is its exit `41`, which pr-review-conduct's Merge Gate item 2
-   sends to the maintainer.
+   its head after the answer. So is its exit `41` on a quota state, which pr-review-conduct's Merge
+   Gate item 2 sends to the maintainer. Its other exit `41` states clear as item 2 says.
    They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
    `suppressed`. A refusal this seat reports is
    never routed around, and it hands the maintainer no command to run instead.
