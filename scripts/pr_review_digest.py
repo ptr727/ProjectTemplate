@@ -225,8 +225,15 @@ def render(
         ("stuck", ",".join(sorted({s for _, s in stuck})) or None),
         ("new", len(shown) if seen is not None else None),
     ]
+    unmatched, marked = adapter.listed_lines(
+        found.listed_items if found else (),
+        threads,
+        (pr.get("files") or {}).get("nodes") or [],
+        truncated,
+    )
+    owed = max(found.unthreaded, unmatched) if found is not None else 0
     if fields_out is not None:
-        fields_out += [*fields, (NO_THREAD, found.unthreaded if found is not None else 0)]
+        fields_out += [*fields, (NO_THREAD, owed)]
     lines = [header(fields)]
     if refusal:
         lines.append(
@@ -263,15 +270,17 @@ def render(
         )
         for part in hold[1]:
             lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
-    if found is not None and found.unthreaded:
+    if owed:
         lines.append(
-            f"  {NO_THREAD} ({found.unthreaded}): the round covering the head names "
-            f"more findings than its open entries link to threads on this pull request, so "
-            f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
+            f"  {NO_THREAD} ({owed}): the round covering the head names more findings "
+            "than its open entries link to threads on this pull request, or lists one no thread "
+            f"sits on, so {owed} {'is' if owed == 1 else 'are'} raised where polling "
             "threads cannot see them. Read the review body and give each the triage a suppressed "
             "finding gets. A thread past the hundred read here counts too, and `threads=` "
             "carries a trailing `+` where that page was cut"
+            + (". Each findings list item prints below" if marked else "")
         )
+        lines += marked
     if flagged and found is not None and found.listed:
         lines.append(
             f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "

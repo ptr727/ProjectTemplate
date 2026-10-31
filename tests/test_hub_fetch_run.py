@@ -204,6 +204,7 @@ class ProvenanceTests(unittest.TestCase):
         {
             "test_the_script_runs_through_uv_with_no_project",
             "test_a_missing_uv_is_the_gate_not_running",
+            "test_moving_main_between_fetches_refuses_a_mixed_pair",
         }
     )
 
@@ -309,6 +310,7 @@ class ProvenanceTests(unittest.TestCase):
                 self.assertEqual(line.count("\n"), 1, line)
                 self.assertTrue(self.urls()[-2].endswith(f"/main/{DATA_PATH}"), self.urls())
                 self.assertTrue(self.urls()[-1].endswith(f"/main/{PROSE_PATH}"), self.urls())
+                self.assertEqual(len(self.urls()), 5, self.urls())
 
     def test_git_fallback_pins_the_script_and_its_data_to_one_commit(self) -> None:
         """A rate-limited API lookup still fetches both files at one commit, so they pair."""
@@ -324,6 +326,33 @@ class ProvenanceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.stderr.getvalue(), "")
+
+    def test_moving_main_between_fetches_refuses_a_mixed_pair(self) -> None:
+        """Without a commit, a push landing mid-fetch changes a file between the two reads."""
+        counts: dict[str, int] = {}
+
+        def urlopen(target, timeout=None):
+            url = target if isinstance(target, str) else target.full_url
+            if url == hub.HUB_MAIN_SHA_URL:
+                raise RATE_LIMITED
+            counts[url] = counts.get(url, 0) + 1
+            return FakeResponse(RECORD + b"#" * (counts[url] if url.endswith(".json") else 0))
+
+        with (
+            self.environment(),
+            mock.patch.object(urllib.request, "urlopen", urlopen),
+            mock.patch.object(hub.subprocess, "run") as run,
+            mock.patch.object(hub.shutil, "which", return_value="uv"),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            self.assertEqual(1, hub.main([PROSE_PATH, str(self.out)]))
+        run.assert_not_called()
+        self.assertIn("mixed pair was refused", self.stderr.getvalue())
+
+    def test_a_pinned_commit_is_fetched_once(self) -> None:
+        self.run_main()
+        fetched = [u for u in self.urls() if u != hub.HUB_MAIN_SHA_URL]
+        self.assertEqual(len(fetched), 2)
 
     def test_git_fallback_is_not_run_when_the_api_resolves(self) -> None:
         self.assertEqual(self.run_main(), RESOLVED)
