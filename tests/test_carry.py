@@ -542,7 +542,10 @@ class CarrySectionTests(unittest.TestCase):
             carry.outside_sections(carry.split_lines(result), ["Fleet Bootstrap"], "AGENTS.md"),
             carry.outside_sections(target, ["Fleet Bootstrap"], "AGENTS.md"),
         )
-        self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
+        self.assertEqual(
+            [key for key, _ in carry.h2_spans(carry.split_lines(result))],
+            [key for key, _ in carry.h2_spans(target)],
+        )
 
     def test_replace_sections_preserves_the_targets_line_endings(self) -> None:
         target = carry.split_lines(TARGET_DOC.replace("\n", "\r\n"))
@@ -584,7 +587,10 @@ class CarrySectionTests(unittest.TestCase):
         )
 
         self.assertIn("The hub's current table.\n\n## Local Addition\n", result)
-        self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
+        self.assertEqual(
+            [key for key, _ in carry.h2_spans(carry.split_lines(result))],
+            [key for key, _ in carry.h2_spans(target)],
+        )
 
     def _unit(
         self, hub_text: str, target_text: str | None, sections: list[str]

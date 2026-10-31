@@ -488,11 +488,6 @@ def normalize_eol(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def h2_headings(lines: list[str]) -> list[str]:
-    """Every level-two heading's parsed text, in order, reading a `## ` inside a code block as content."""
-    return [h.text for h in fidelity_text_module().headings("".join(lines)) if h.level == 2]
-
-
 def h2_spans(lines: list[str]) -> list[tuple[str, tuple[int, int]]]:
     """Each level-two region's folded name and `[start, end)`, in order, repeated names included.
 
@@ -522,7 +517,7 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
 
 def section_body(lines: list[str], span: tuple[int, int]) -> str:
     """A region's text after its heading line, with line endings and surrounding blank lines normalized away."""
-    return normalize_eol("".join(lines[span[0] + 1 : span[1]])).strip()
+    return comparable_region(lines, (span[0] + 1, span[1])).strip()
 
 
 def fold(name: str) -> str:
