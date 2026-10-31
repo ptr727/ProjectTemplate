@@ -28,7 +28,7 @@ same pull request, and its exit is this command's.
 
 Exit 0 = merged and confirmed, or with `--cleanup` the exit `cleanup` returned. Exit 1 = refused,
 nothing merged, a merge `gh` refused that reads back open among them. Exit 2 = a read did not
-answer. It is also a merge call that timed out, never ran, or reads back unsettled, which may have
+answer, or a usage error. It is also a merge call that timed out, never ran, or reads back unsettled, which may have
 happened on the server. Exit 64 = the owner check. Any other code is the gate's, nothing merged.
 """
 
@@ -148,7 +148,7 @@ def merge_call(target: str, num: int, head: str) -> int | None:
     argv += ["--repo", target]
     print(f"merging: #{num} into develop on {target} at {head}")
     proc = core._run(argv, MERGE_TIMEOUT, UNRUN, text=True, encoding="utf-8")
-    unrun = proc.stderr == UNRUN and not proc.stdout
+    unrun = proc.stderr == UNRUN
     print("  gh pr merge did not finish" if unrun else f"  gh pr merge exited {proc.returncode}")
     for stream in (proc.stdout, proc.stderr):
         for line in (stream or "").splitlines():
@@ -159,7 +159,8 @@ def merge_call(target: str, num: int, head: str) -> int | None:
 def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
     """Gate, merge, and confirm pull request `num`, then clean it up where asked.
 
-    The gate's short `GATE_TIMEOUT` only absorbs a merge state still settling. A failed read inside
+    The gate's short `GATE_TIMEOUT` absorbs a merge state still settling where `wait` polls checks,
+    on a head an attested local pass covers. A failed read inside
     the gate ends `wait` with a message, which reads as unread here rather than refused. A merge
     that landed can read OPEN for a moment, so the read back is retried on `cleanup`'s delays.
     """

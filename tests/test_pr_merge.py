@@ -300,7 +300,7 @@ class TestGateNamespace(unittest.TestCase):
     """`gate` builds `wait`'s arguments by hand, so each one `run_wait` reads has to be among them."""
 
     def test_every_argument_run_wait_reads_is_built(self) -> None:
-        source = inspect.getsource(pr_review.run_wait)
+        source = "".join(inspect.getsource(f) for f in (pr_review.run_wait, pr_review.run_status))
         read = set(re.findall(r"\ba\.([a-z_]+)", source))
         built: dict[str, argparse.Namespace] = {}
 

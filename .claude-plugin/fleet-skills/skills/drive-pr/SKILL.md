@@ -123,7 +123,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    read and confirmed by reading it back.
    Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
    cleanup stopped, which stops and reports the same as `cleanup`.
-   Check two lines first, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
+   Check two more lines next, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
    line at exit `2` is read back with `gh pr view <number> --repo <owner>/<repo> --json state`.
    `MERGED` means run the `cleanup` command below, and `OPEN` means treat it as a refusal. Only a
    read that still cannot answer is reported, saying the merge may have landed. A `status=REFUSED`
