@@ -1759,7 +1759,7 @@ class TestAutoMode(StampCase):
     Every fixture is constructed, so no case depends on what a real host's settings.json holds.
     """
 
-    OWN = ("Agents never write to the example USB device", "Agents read example logs freely")
+    OWN = ("Agents leave the example lab bench alone", "Agents read example logs freely")
 
     def _settings(self):
         return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))

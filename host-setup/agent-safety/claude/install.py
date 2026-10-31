@@ -271,7 +271,7 @@ MANAGED_PERMISSIONS = [
     ),
 ]
 
-# Claude Code reads `autoMode` from user or managed settings alone, so a host-wide block nobody owned drifted into one repository's rules.
+# Claude Code reads `autoMode` from user or managed settings alone, so a host-wide block nobody owns can carry one repository's rules.
 # The kit owns an entry by this leading tag rather than by its text, so a reworded rule still replaces the version before it.
 AUTO_MODE_TAG = "[agent-safety] "
 AUTO_MODE_LISTS = ("environment", "allow", "soft_deny", "hard_deny")

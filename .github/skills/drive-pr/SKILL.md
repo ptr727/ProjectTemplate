@@ -136,7 +136,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
    Every Finding". A `status=MERGE_NOT_CLEAN` line reading `BLOCKED` while a check still runs
    clears by waiting for it, with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`.
-   Then run `merge` once more on this pull request. Report what still stands to the
+   After clearing whatever lines this seat can clear, run `merge` once more on this pull request. Report what still stands to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
    outcome. The maintainer can then merge it by hand. A line no action of this seat can change
    is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
