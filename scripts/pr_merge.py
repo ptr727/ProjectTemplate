@@ -207,7 +207,7 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
         commit = (landed.get("mergeCommit") or {}).get("oid") or "unknown"
         if (merged := landed["headRefOid"]) != head:
             print(
-                f"status=MERGED_ELSEWHERE this run merged nothing: #{num} merged at {merged}, a "
+                f"status=PEER_MERGED this run merged nothing: #{num} merged at {merged}, a "
                 f"head this gate never read, since it read {head}"
             )
             return 1

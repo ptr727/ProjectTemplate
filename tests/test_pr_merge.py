@@ -264,7 +264,7 @@ class TestMerge(MergeCase):
         )
         self.assertEqual(1, code)
         self.assertIn(
-            f"status=MERGED_ELSEWHERE this run merged nothing: #123 merged at {MOVED}",
+            f"status=PEER_MERGED this run merged nothing: #123 merged at {MOVED}",
             self.out.getvalue(),
         )
         self.assertNotIn("status=MERGED pr=", self.out.getvalue())

@@ -123,20 +123,21 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    read and confirmed by reading it back.
    Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
    cleanup stopped, which stops and reports the same as `cleanup`.
-   Check two more lines next, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
+   Check the lines below next, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
    line at exit `2` is read back with `gh pr view <number> --repo <owner>/<repo> --json state`.
    `MERGED` means run the `cleanup` command below, and `OPEN` means treat it as a refusal. Only a
    read that still cannot answer is reported, saying the merge may have landed. A `status=REFUSED`
    line reading `MERGED, not OPEN` means the pull request already merged, by hand or by a peer, so
-   run the `cleanup` command below.
+   run the `cleanup` command below. So does a `status=PEER_MERGED` line. Report it as well, since
+   the head that merged is one the gate never read.
    Any other non-zero exit is a refusal that merged nothing. Do what its `status=` lines name, per
    step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
    Every Finding". Then run `merge` once more on this pull request. Report what still stands to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
    outcome. The maintainer can then merge it by hand. A line no action of this seat can change
    is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
-   So is `status=MERGED_ELSEWHERE`, where another hand merged a head the gate never read. So is
-   the gate's exit `50`, which repeats on its head after the answer.
+   So is the gate's exit `50` printing `status=VERDICT_NAMES_UNCOUNTED_FINDINGS`, which repeats on
+   its head after the answer.
    They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
    `suppressed`. A refusal this seat reports is
    never routed around, and it hands the maintainer no command to run instead.
