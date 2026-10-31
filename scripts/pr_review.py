@@ -106,10 +106,9 @@ Subcommands
            round covering the head states beside the threads that round opened, `?` where it
            states no count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
            names findings the round names that no thread on the pull request carries. Each of these is owed the triage a suppressed
-           finding gets, and none decides an exit code. A pull request no longer open leads with
-           `state=` and `merged_at=` and `merge_commit=`, or `closed_at=`. Its `merge=UNKNOWN`
-           never clears. A null node GitHub could not resolve is dropped and named in `null_nodes=`,
-           and blinds its connection the way a cut window does, so a count off it reads `+`.
+           finding gets, and none decides an exit code. On a pull request no longer open, `pr=` is
+           followed by `state=` with `merged_at=` and `merge_commit=`, or with `closed_at=`. Its
+           `merge=UNKNOWN` never clears.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way. The failure is a node id typed
            into a mutation. Such an id resolves globally and so writes to a real thread somewhere
@@ -137,8 +136,9 @@ Subcommands
            The bot id is read from the repository's most recently updated pull requests, the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
-           agent turn, not 90. A pull request no longer open is neither requested nor polled, and
-           `wait` prints its digest and exits as `status` does.
+           agent turn, not 90. A pull request found no longer open, on the first read or on any
+           poll, is neither requested nor polled further. `wait` then prints its digest and exits
+           as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
            present does not poll the checks, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
@@ -245,7 +245,6 @@ from pr_review_rounds import (
     copilot_bot_id,
     coverage,
     describe,
-    drop_null_nodes,
     files_unread,
     finding_text,
     head_review_done,
@@ -257,6 +256,7 @@ from pr_review_rounds import (
     newest_first,
     newest_of,
     newest_request_event,
+    null_node,
     open_threads,
     possible_quota,
     quota_refusal,
@@ -472,15 +472,27 @@ def gh_graphql(query: str, **variables) -> dict:
     """Run one GraphQL document and return its `data`, ending the run on a failed read.
 
     The transport raises `GraphQLError` and never exits, so a failed read prints its detail and
-    ends the run at exit 1. Only an error set made of `workflowRun` paths is tolerated.
+    ends the run at exit 1. Only an error set made of `workflowRun` paths is tolerated. A response
+    holding a null node is unread too. A query is read again on `READ_RETRY_DELAYS` first, and a
+    mutation is never sent twice.
     """
-    try:
-        response = shared.request(query, variables, tolerate=_is_workflow_run_error)
-    except shared.GraphQLError as exc:
-        sys.stderr.write(exc.detail)
-        raise SystemExit(str(exc)) from exc
+    reads = query.lstrip().startswith("query")
+    delays = iter(READ_RETRY_DELAYS if reads else ())
+    while True:
+        try:
+            response = shared.request(query, variables, tolerate=_is_workflow_run_error)
+        except shared.GraphQLError as exc:
+            sys.stderr.write(exc.detail)
+            raise SystemExit(str(exc)) from exc
+        if (where := null_node(response.data)) is None:
+            break
+        if (delay := next(delays, None)) is None:
+            raise SystemExit(
+                f"gh graphql returned a null node GitHub could not resolve under {where}, so the "
+                "response is unread" + ("" if reads else ", though the write it answers was sent")
+            )
+        time.sleep(delay)
     data = response.data
-    drop_null_nodes(data)
     if response.tolerated:
         sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
         data[WORKFLOW_KEYS_UNAVAILABLE] = True
@@ -844,9 +856,10 @@ def liveness(pr: dict, min_rounds: int = 0) -> tuple[bool, dict | None, list[str
 
     The three readings `wait`'s Copilot poll stops on, shared by its first evaluation and every
     re-read. `Q_LIVE` carries the authors, so drift costs no extra call. A `min_rounds` of 0 reads
-    as `reviewed_head`.
+    as `reviewed_head`. A pull request no longer open reads as done, which ends the poll.
     """
-    return head_review_done(pr, min_rounds), answered_outside_review(pr), reviewer_login_drift(pr)
+    done = head_review_done(pr, min_rounds) or pr.get("state", "OPEN") != "OPEN"
+    return done, answered_outside_review(pr), reviewer_login_drift(pr)
 
 
 def live_state(
@@ -1546,9 +1559,9 @@ def utf8_console() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
-def run_status(owner: str, repo: str, a: argparse.Namespace) -> int:
-    """Print the digest and return the verdict's code, both off one payload."""
-    pr = full_read(owner, repo, a.number)
+def run_status(owner: str, repo: str, a: argparse.Namespace, pr: dict | None = None) -> int:
+    """Print the digest and return the verdict's code, both off one payload, read where not given."""
+    pr = full_read(owner, repo, a.number, pr)
     print(digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)[0])
     return report_verdict(pr)
 
@@ -1714,6 +1727,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
 
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
+    if final.get("state", "OPEN") != "OPEN":
+        return run_status(owner, repo, a, final)
     now = datetime.now(UTC)
     # Parsed here and handed down so the digest and the exit code share one read of the rollup.
     checks = check_nodes(final)

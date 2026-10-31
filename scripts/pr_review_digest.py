@@ -17,7 +17,6 @@ from pr_review_checks import checks_stuck, checks_tally
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     KNOWN_REVIEWERS,
-    NULL_NODES,
     OTHER_REVIEWERS,
     QODO_LOGIN,
     REVIEWER,
@@ -29,7 +28,6 @@ from pr_review_rounds import (
     head_nodes,
     head_reviews,
     newest_of,
-    null_nodes,
     open_threads,
     opened_by,
     possible_quota,
@@ -62,10 +60,6 @@ THREADS_TRUNCATED = (
     "the newest rather than the oldest, exactly the ones most likely to still be "
     "open. `threads=` and `unresolved=` above undercount. Read the rest with "
     "`reply`'s own paginated walk before trusting either number"
-)
-NULL_NODES_READ = (
-    "  NULL NODES ({value}): GitHub returned an entry it could not resolve in each connection named, "
-    "so a count read off it may undercount and a reading only it decides reads unknown. Read again"
 )
 REVIEWS_TRUNCATED = (
     "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read "
@@ -167,7 +161,6 @@ def render(
     )
     blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
     answered = "yes" if answer else ("unknown" if blind else "no")
-    behind = " and ".join(f for f in blind if not (pr.get(f) or {}).get(NULL_NODES))
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
     other_on_head = [
@@ -185,8 +178,7 @@ def render(
                 continue
             seen.add(t["id"])
         shown.append(t)
-    plus = "+" if truncated or (pr.get("reviewThreads") or {}).get(NULL_NODES) else ""
-    nulls = null_nodes(pr)
+    plus = "+" if truncated else ""
     # The repository leads the line, since a digest of the wrong pull request is well-formed.
     fields: list[tuple[str, object]] = [
         ("repo", f"{owner}/{repo}"),
@@ -211,7 +203,6 @@ def render(
         ("refusal", refusal_field),
         ("threads", f"{len(threads)}{plus}"),
         ("unresolved", f"{len(unresolved)}{plus}{breakdown}"),
-        ("null_nodes", nulls),
         ("suppressed", suppressed_field),
         ("previously_missed", missed_field if missed or revs_truncated else None),
         (
@@ -305,8 +296,7 @@ def render(
         )
     lines.extend(check_lines(pr, checks, stuck, now))
     for value, template in (
-        (nulls, NULL_NODES_READ),
-        (behind, BEHIND_THE_WINDOW),
+        (" and ".join(blind), BEHIND_THE_WINDOW),
         (truncated, THREADS_TRUNCATED),
         (revs_truncated, REVIEWS_TRUNCATED),
     ):

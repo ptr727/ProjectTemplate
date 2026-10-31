@@ -63,9 +63,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    --jq .headRefOid`. Then, from a hub checkout, `scripts/` is not carried into downstream repos,
    run `uv run --no-project --script scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
    pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
-   partial gate. A digest carrying `state=MERGED` is a promotion already merged, whose
-   `merge=UNKNOWN` never clears, so skip to step 4 and confirm its `merge_commit=` there. A digest
-   carrying `state=CLOSED` is a stop to report. A digest reading `coverage=none` is not a partial gate where the promotion meets the
+   partial gate. A digest carrying `state=MERGED` is a promotion merged before this step ran,
+   whose `merge=UNKNOWN` never clears. Run the ready-report comparison below against its `head=`
+   all the same, since that merge can carry content the go-ahead never covered. Then skip step 3
+   and confirm its `merge_commit=` in step 4. A digest carrying `state=CLOSED` is a stop to report. A digest reading `coverage=none` is not a partial gate where the promotion meets the
    one case that skill's Merge Gate item 2 states. Check that case again on every re-run below, and record
    its evidence for the head step 3 merges, as that item says.
    Confirm the digest's `head=` is a prefix of the recorded SHA, re-running both where it is not.

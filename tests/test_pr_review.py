@@ -2552,69 +2552,69 @@ class TestGqlTransport(unittest.TestCase):
         self.assertEqual(["gh", "api", "graphql"], run.call_args.args[0][:3])
 
 
-class TestNullNodes(GqlCase):
+class TestNullNodes(unittest.TestCase):
     """GraphQL can return null for a list item it could not resolve, with no entry in `errors`.
 
     Every reader takes a node to be an object, so a null one crashed `wait` with a traceback. That
-    is no documented outcome. The transport drops and counts it, and its connection reads blind.
-    The entry it stands for can be the reviewer's newest.
+    is no documented outcome. A null can stand for an open thread or a failed check, so no reading
+    off the response is trusted. A query is read again, and a null that stays ends the run as an
+    unread response does.
     """
 
-    def read(self, pr: dict) -> dict:
-        """`pr` through the real transport, with only the `gh` process replaced."""
-        body = json.dumps({"data": {"repository": {"pullRequest": pr}}})
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=body, stderr="")
-        with mock.patch.object(pr_review.subprocess, "run", return_value=done):
-            return pr_review.gql("query", "o", "r", 7)
+    @staticmethod
+    def body(pr: dict) -> subprocess.CompletedProcess:
+        out = json.dumps({"data": {"repository": {"pullRequest": pr}}})
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=out, stderr="")
 
-    def test_reviewer_nodes_skips_a_null_node(self) -> None:
-        pr = {"comments": {"nodes": [None, {"author": {"login": pr_review_rounds.REVIEWER}}]}}
-        self.assertEqual(1, len(pr_review_rounds.reviewer_nodes(pr, "comments")))
+    def holding_null(self) -> dict:
+        pr = payload([review()], comments=[comment(at=EARLY)])
+        pr["comments"]["nodes"].insert(0, None)
+        return pr
 
-    def test_the_transport_drops_each_null_node_and_counts_it_on_its_connection(self) -> None:
-        sent = payload([review()], [thread("T1"), thread("T2")], comments=[comment(at=EARLY)])
-        sent["comments"]["nodes"].insert(0, None)
-        sent["reviewThreads"]["nodes"][0]["comments"]["nodes"].append(None)
-        sent["reviewThreads"]["nodes"][1]["comments"]["nodes"].append(None)
-        pr = self.read(sent)
-        self.assertEqual(1, len(pr["comments"]["nodes"]))
-        self.assertEqual(1, pr["comments"][pr_review_rounds.NULL_NODES])
-        self.assertNotIn(pr_review_rounds.NULL_NODES, pr["reviews"])
-        self.assertEqual("reviewThreads,comments", pr_review_rounds.null_nodes(pr))
-        self.assertIsNone(pr_review_rounds.null_nodes(payload([review()])))
+    def test_null_node_names_the_connection_holding_one(self) -> None:
+        pr = payload([review()], [thread("T1")])
+        self.assertIsNone(pr_review_rounds.null_node(pr))
+        pr["reviewThreads"]["nodes"][0]["comments"]["nodes"].append(None)
+        self.assertEqual("reviewThreads.nodes.comments", pr_review_rounds.null_node(pr))
 
-    def test_a_null_node_blinds_its_connection_whatever_else_is_in_view(self) -> None:
-        """A reviewer node in view bounds a cut window, and bounds nothing about a null entry."""
-        sent = payload([review(at=EARLY)], comments=[comment(at=LATE)])
-        sent["reviews"]["nodes"].append(None)
-        pr = self.read(sent)
-        self.assertTrue(pr_review_rounds.window_blind(pr, "reviews"))
-        self.assertFalse(pr_review_rounds.window_blind(pr, "comments"))
-        self.assertIsNone(pr_review_rounds.answered_outside_review(pr))
-
-    def test_the_digest_names_the_null_and_marks_the_counts_it_undercuts(self) -> None:
-        sent = payload([review()], [thread("T1")])
-        sent["reviewThreads"]["nodes"].append(None)
-        sent["comments"]["nodes"].append(None)
-        self.answer(self.read(sent))
-        out, unresolved = pr_review.digest("o", "r", 7, now=NOW)
-        self.assertEqual(1, unresolved)
-        self.assertIn(" threads=1+ unresolved=1+ null_nodes=reviewThreads,comments ", out)
-        self.assertIn("answered_outside_review=unknown", out)
-        self.assertIn("NULL NODES (reviewThreads,comments)", out)
-        self.assertNotIn("BEHIND THE WINDOW", out)
-
-    def test_wait_reads_a_null_comment_node_without_a_traceback(self) -> None:
-        """The reported crash: a null in `comments` beside a review on the head."""
-        sent = payload([review()], comments=[comment(at=EARLY)])
-        sent["comments"]["nodes"].insert(0, None)
-        self.answer(self.read(sent))
+    def test_a_query_is_read_again_past_a_null_node(self) -> None:
+        clean = payload([review()], comments=[comment(at=EARLY)])
+        reads = [self.body(self.holding_null()), self.body(clean)]
         with (
-            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.subprocess, "run", side_effect=reads) as run,
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
             mock.patch.object(pr_review.time, "sleep"),
         ):
-            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r"]))
-        self.assertIn("null_nodes=comments", out.getvalue())
+            self.assertEqual(clean, pr_review.gql("query", "o", "r", 7))
+        self.assertEqual(2, run.call_count)
+
+    def test_a_null_node_that_stays_ends_the_run_naming_where_it_sat(self) -> None:
+        """The reported crash's shape, a null in `comments`, now ends on a named unread read."""
+        with (
+            mock.patch.object(
+                pr_review.subprocess, "run", return_value=self.body(self.holding_null())
+            ) as run,
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0, 0)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.assertRaises(SystemExit) as stop,
+        ):
+            pr_review.gql("query", "o", "r", 7)
+        self.assertEqual(3, run.call_count)
+        self.assertIn("null node", str(stop.exception))
+        self.assertIn("repository.pullRequest.comments", str(stop.exception))
+
+    def test_a_mutation_answered_with_a_null_node_is_never_sent_again(self) -> None:
+        with (
+            mock.patch.object(
+                pr_review.subprocess, "run", return_value=self.body(self.holding_null())
+            ) as run,
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0, 0)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.assertRaises(SystemExit) as stop,
+        ):
+            pr_review.gh_graphql("mutation{ x }")
+        self.assertEqual(1, run.call_count)
+        self.assertIn("the write it answers was sent", str(stop.exception))
 
 
 class TestPullRequestNotOpen(GqlCase):
@@ -2661,6 +2661,19 @@ class TestPullRequestNotOpen(GqlCase):
         slept.assert_not_called()
         requested.assert_not_called()
         self.assertIn("state=MERGED", out.getvalue())
+
+    def test_wait_stops_polling_once_the_pull_request_merges_under_it(self) -> None:
+        """A seat merging by hand mid-drive leaves the poll nothing to wait for."""
+        opened = payload([], merge="BLOCKED")
+        self.answer(opened, opened, self.merged())
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertIn("state=MERGED", out.getvalue())
+        self.assertNotIn("status=PENDING", out.getvalue())
 
 
 class TestCli(GqlCase):
