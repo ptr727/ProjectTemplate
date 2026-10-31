@@ -138,6 +138,11 @@ def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
     ]
 
 
+def is_open(pr: dict) -> bool:
+    """True where the pull request is open, a payload naming no state read as open."""
+    return pr.get("state", "OPEN") == "OPEN"
+
+
 def null_node(data: object, path: str = "") -> str | None:
     """The path of the first connection under `data` whose `nodes` holds a null, else None.
 

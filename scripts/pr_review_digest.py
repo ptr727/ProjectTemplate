@@ -27,6 +27,7 @@ from pr_review_rounds import (
     first_comment,
     head_nodes,
     head_reviews,
+    is_open,
     newest_of,
     open_threads,
     opened_by,
@@ -77,11 +78,11 @@ def digest_refusal(pr: dict) -> dict | None:
 
 def state_fields(pr: dict) -> list[tuple[str, object]]:
     """`state=` and when it changed, where the pull request is no longer open, else nothing."""
-    if (state := pr.get("state", "OPEN")) == "OPEN":
+    if is_open(pr):
         return []
     merged, commit = pr.get("mergedAt"), (pr.get("mergeCommit") or {}).get("oid")
     stamp = ("merged_at", merged) if merged else ("closed_at", pr.get("closedAt"))
-    return [("state", state), stamp, ("merge_commit", commit[:8] if commit else None)]
+    return [("state", pr["state"]), stamp, ("merge_commit", commit[:8] if commit else None)]
 
 
 def header(fields: list[tuple[str, object]]) -> str:

@@ -251,6 +251,7 @@ from pr_review_rounds import (
     head_reviews,
     history_entry,
     holds,
+    is_open,
     local_cover,
     matching_threads,
     newest_first,
@@ -799,7 +800,7 @@ def required_for(
     pr: dict, owner: str, repo: str, gated: frozenset[str] = frozenset({"BLOCKED"})
 ) -> frozenset[tuple[str, int | None]]:
     """The required entries a merge in `gated` can be short of, empty wherever none can matter."""
-    if pr.get("state", "OPEN") != "OPEN" or pr.get("mergeStateStatus") not in gated:
+    if not is_open(pr) or pr.get("mergeStateStatus") not in gated:
         return frozenset()
     return required_contexts(owner, repo, pr.get("baseRefName") or "") or frozenset()
 
@@ -858,7 +859,7 @@ def liveness(pr: dict, min_rounds: int = 0) -> tuple[bool, dict | None, list[str
     re-read. `Q_LIVE` carries the authors, so drift costs no extra call. A `min_rounds` of 0 reads
     as `reviewed_head`. A pull request no longer open reads as done, which ends the poll.
     """
-    done = head_review_done(pr, min_rounds) or pr.get("state", "OPEN") != "OPEN"
+    done = head_review_done(pr, min_rounds) or not is_open(pr)
     return done, answered_outside_review(pr), reviewer_login_drift(pr)
 
 
@@ -1574,7 +1575,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
-    if pr.get("state", "OPEN") != "OPEN":
+    if not is_open(pr):
         return run_status(owner, repo, a)
     rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
@@ -1727,7 +1728,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
 
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
-    if final.get("state", "OPEN") != "OPEN":
+    if not is_open(final):
         return run_status(owner, repo, a, final)
     now = datetime.now(UTC)
     # Parsed here and handed down so the digest and the exit code share one read of the rollup.
