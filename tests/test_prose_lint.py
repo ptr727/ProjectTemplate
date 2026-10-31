@@ -3612,6 +3612,31 @@ class TestHomePathRule(BaitCase):
                     ["home-path"], self.kinds(self.compose(entry), {"home-path"}, name)
                 )
 
+    def test_a_compose_block_scalar_is_text_rather_than_a_volume(self) -> None:
+        """A `volumes:` key or a mount inside a `|` or `>` scalar is text, so the rule reads it.
+
+        The real volume entry after each scalar still names a container path, so exactly one
+        finding means the scalar ended where its indentation returned.
+        """
+        real = f"    volumes:\n      - ledger-cache:{NIX_HOME}/data\n"
+        for indicator in ("|", ">", "|-", ">+", "|2", "|-2", "&note |", "!!str >", "| # note"):
+            text = (
+                f"services:\n  ledger:\n    x-readme: {indicator}\n      volumes:\n"
+                f"        - ledger-cache:{NIX_HOME}/data\n{real}"
+            )
+            with self.subTest(indicator=indicator):
+                self.assertEqual(["home-path"], self.kinds(text, {"home-path"}, "compose.yml"))
+        target = f"        target: {NIX_HOME}/media"
+        for entry in (
+            f"      - type: bind\n        x-note: |\n          - ./old:{NIX_HOME}/media\n{target}",
+            f"      - x-note: >-\n          - ./old:{NIX_HOME}/media\n{target}",
+            f"      - |\n        - ./old:{NIX_HOME}/media\n      - ./config:{NIX_HOME}/media",
+        ):
+            with self.subTest(entry=entry):
+                self.assertEqual(
+                    ["home-path"], self.kinds(self.compose(entry), {"home-path"}, "compose.yml")
+                )
+
 
 class TestDeadPathRule(unittest.TestCase):
     """The `dead-path` rule on Markdown prose units."""
@@ -5629,11 +5654,14 @@ class TestChangedLines(unittest.TestCase):
         edit: bool = False,
         excludes: tuple[str, ...] = (),
         keep: bool = False,
+        paths: tuple[str, ...] | None = None,
+        whole: dict[str, frozenset[str]] | None = None,
     ) -> dict[str, set[int]]:
         """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets.
 
         With `keep`, the file is copied rather than moved, and the source gains a fifth line.
-        Copy detection looks for a source only among the files a change modifies.
+        Copy detection looks for a source only among the files a change modifies. Each of `paths`
+        is relative to the repository, as a run narrowed to it would ask.
         """
         root = self.real_repo()
         subprocess.run(["git", "-C", str(root), "config", "diff.renames", renames], check=True)
@@ -5653,7 +5681,8 @@ class TestChangedLines(unittest.TestCase):
             (root / "docs" / "ledger.md").write_text(
                 "One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8"
             )
-        got = prose_lint.changed_lines("HEAD", root, excludes)
+        asked = None if paths is None else [str(root / p) for p in paths]
+        got = prose_lint.changed_lines("HEAD", root, excludes, asked, whole)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         return got
 
@@ -5677,6 +5706,48 @@ class TestChangedLines(unittest.TestCase):
         """An excluded path is one no run reads either, so a file leaving it is read in full."""
         got = self.moved("drafts/ledger.md", excludes=("drafts/",))
         self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+
+    def test_a_rename_from_outside_the_asked_paths_is_read_whole(self) -> None:
+        """A run narrowed to some paths never read a file outside them, so a move in is all new."""
+        got = self.moved("drafts/ledger.md", paths=("docs",))
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+        got = self.moved("docs/old/ledger.md", paths=("docs",), edit=True)
+        self.assertEqual({"docs/ledger.md": {3}}, got)
+
+    def test_a_rename_out_of_a_rules_exempt_file_is_read_whole_for_that_rule(self) -> None:
+        """`home-path` never read the root runbook, so its move is read in full for that rule alone.
+
+        Every other rule read the file where it sat, so its scope stays what the move changed.
+        """
+        for edit, lines in ((False, set()), (True, {3})):
+            with self.subTest(edit=edit):
+                whole: dict[str, frozenset[str]] = {}
+                got = self.moved("OPERATIONS.md", edit=edit, whole=whole)
+                self.assertEqual({"docs/ledger.md": lines}, got)
+                self.assertEqual({"docs/ledger.md": frozenset({"home-path"})}, whole)
+        whole = {}
+        self.assertEqual({}, self.moved("notes/OPERATIONS.md", whole=whole))
+        self.assertEqual({}, whole)
+
+    def test_a_moved_runbook_reports_its_home_path_and_no_older_finding(self) -> None:
+        """The run end to end: the moved line reports for `home-path` and for no other rule."""
+        root = self.real_repo()
+        text = f"Deploy into {NIX_HOME}/stack here.\nOne; two.\n"
+        (root / "OPERATIONS.md").write_text(text, encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "OPERATIONS.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+        (root / "docs").mkdir()
+        subprocess.run(["git", "-C", str(root), "mv", "OPERATIONS.md", "docs/ops.md"], check=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = prose_lint.main(
+                ["--check", "home-path", "--check", "semicolon", "--diff", "HEAD", str(root)]
+            )
+        self.assertEqual(1, code)
+        self.assertEqual(
+            ["docs/ops.md:1: home-path"],
+            [ln.rsplit(":", 1)[0] for ln in out.getvalue().splitlines()],
+        )
 
     def test_a_rename_between_read_paths_adds_only_what_it_changed(self) -> None:
         """A run already read the file where it sat, so a move brings no line into scope unedited.
