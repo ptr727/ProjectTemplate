@@ -3575,6 +3575,42 @@ class TestHomePathRule(BaitCase):
                 target.write_text(f'{{"path": "{NIX_HOME}/x"}}\n', encoding="utf-8")
                 self.assertEqual(1, len(prose_lint.check_file(target, {"home-path"}, self.tmp)))
 
+    def compose(self, entry: str) -> str:
+        """A constructed Compose file whose one service mounts `entry`, the line under test."""
+        return f"services:\n  ledger:\n    image: example/ledger\n    volumes:\n{entry}\n"
+
+    def test_a_compose_container_path_is_not_a_home(self) -> None:
+        """A mount's container side is a path the image ships, so it names no account on a host.
+
+        The account is the same constructed name every other case flags, so only the side of the
+        mapping it sits on decides the verdict.
+        """
+        for entry in (
+            f"      - ${{LEDGER_DATA:?LEDGER_DATA is required}}/config:{NIX_HOME}/media",
+            f'      - "./config:{NIX_HOME}/media:ro"',
+            f"      - ledger-cache:{NIX_HOME}/.cache",
+            f"    - ./config:{NIX_HOME}/media",
+            f"      - type: bind\n        source: ./config\n        target: {NIX_HOME}/media",
+        ):
+            for name in ("compose.yml", "docker-compose.yaml", "compose.override.yml"):
+                with self.subTest(entry=entry, name=name):
+                    self.assertEqual([], self.kinds(self.compose(entry), {"home-path"}, name))
+
+    def test_a_compose_host_path_is_still_a_home(self) -> None:
+        """The host side of the same mapping, and the same text read anywhere else, still report."""
+        for entry, name in (
+            (f"      - {NIX_HOME}/config:/srv/media", "compose.yml"),
+            (f"      - ${{LEDGER_DATA:-{NIX_HOME}}}/config:/srv/media", "compose.yml"),
+            (f"      - C:/Users/{BAIT_USER}/config:/srv/media", "compose.yml"),
+            (f"      - type: bind\n        source: {NIX_HOME}/config", "compose.yml"),
+            (f"      - ./config:{NIX_HOME}/media", "ledger.yml"),
+            (f"    environment:\n      - SEARCH=/srv:{NIX_HOME}/bin", "compose.yml"),
+        ):
+            with self.subTest(entry=entry, name=name):
+                self.assertEqual(
+                    ["home-path"], self.kinds(self.compose(entry), {"home-path"}, name)
+                )
+
 
 class TestDeadPathRule(unittest.TestCase):
     """The `dead-path` rule on Markdown prose units."""
@@ -5584,6 +5620,29 @@ class TestChangedLines(unittest.TestCase):
         got = prose_lint.changed_lines("HEAD", root)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertEqual({1}, got["doc.md"])
+
+    def test_a_rename_out_of_a_generated_tree_is_read_whole(self) -> None:
+        """A moved file's content is new to its destination, so every line of it is in scope.
+
+        Rename detection reports a pure move with no `+++` header and no hunk, so the destination
+        gained no scope at all. Prose a generated tree exempted then arrived in a checked path with
+        no run ever reading it. The repository turns detection on, whatever this host's default.
+        """
+        root = self.real_repo()
+        subprocess.run(["git", "-C", str(root), "config", "diff.renames", "true"], check=True)
+        source = root / "reports" / "ledger.md"
+        source.parent.mkdir()
+        source.write_text("First line.\nSecond line.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "reports"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+        (root / "docs").mkdir()
+        subprocess.run(
+            ["git", "-C", str(root), "mv", "reports/ledger.md", "docs/ledger.md"], check=True
+        )
+
+        got = prose_lint.changed_lines("HEAD", root)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        self.assertEqual({"docs/ledger.md": {1, 2}}, got)
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.

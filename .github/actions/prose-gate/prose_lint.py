@@ -264,13 +264,13 @@ def undiffable_paths(base: str, root: Path) -> set[str] | None:
 # Each option pins a setting a host may change, quoting and prefixes and hunk context among them.
 # The external and textconv drivers would otherwise replace the body this parse reads.
 DIFF_ARGS = (
-    "-c core.quotePath=true diff --unified=0 --inter-hunk-context=0 --no-color "
+    "-c core.quotePath=true diff --unified=0 --inter-hunk-context=0 --no-color --no-renames "
     "--ignore-cr-at-eol --src-prefix=a/ --dst-prefix=b/ --no-ext-diff --no-textconv"
 )
 
 
 def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
-    """Map path -> lines this tree adds vs `base`, an untracked or undiffable text file in full."""
+    """Map path -> lines the tree adds vs `base`, a moved, untracked, or undiffable file in full."""
     raw = git_bytes(root, DIFF_ARGS, base)
     undiffable = undiffable_paths(base, root) if raw is not None else None
     if raw is None or undiffable is None:
@@ -1227,6 +1227,37 @@ HOME_PATH = re.compile(
     r"(?:/home/|/Users/|[A-Za-z]:\\(?i:users)\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)"
 )
 
+COMPOSE_FILE = re.compile(r"(?:docker-)?compose(?:\.[\w-]+)?\.ya?ml")
+VOLUMES_KEY = re.compile(r"^\s*volumes:\s*(?:#.*)?$")
+SHORT_MOUNT = re.compile(
+    r"""^\s*-\s+["']?(?:[A-Za-z]:(?=[\\/]))?(?:\$\{[^}]*\}|[^:\s"'{}])+:(?P<target>/[^:\s"']*)"""
+)
+LONG_MOUNT = re.compile(r"""^\s*(?:-\s+)?target:\s+["']?(?P<target>/[^\s"']*)""")
+
+
+def container_paths(lines: tuple[Line, ...]) -> dict[int, range]:
+    """Where a Compose volume entry names its container path, a path an image ships, not a host.
+
+    The host side keeps a `${...}` expansion and a drive letter whole, so neither colon splits it.
+    A sequence may sit at its key's own indent, so only a sibling key closes the block.
+    """
+    out: dict[int, range] = {}
+    block: int | None = None
+    for line in lines:
+        body = line.text.lstrip()
+        if not body or body.startswith("#"):
+            continue
+        indent = len(line.text) - len(body)
+        if block is not None and (indent < block or (indent == block and body[0] != "-")):
+            block = None
+        if VOLUMES_KEY.match(line.text):
+            block = indent
+            continue
+        m = SHORT_MOUNT.match(line.text) or LONG_MOUNT.match(line.text)
+        if block is not None and m:
+            out[line.number] = range(*m.span("target"))
+    return out
+
 
 def rule_home_path(unit: Unit, ctx: Context) -> list[Finding]:
     """An absolute home path naming a real account, on any line, a fenced transcript included."""
@@ -1235,11 +1266,13 @@ def rule_home_path(unit: Unit, ctx: Context) -> list[Finding]:
         (ctx.root / p).resolve() for p in exempt["home_path_exempt"]
     }:
         return []
+    inside = container_paths(unit.lines) if COMPOSE_FILE.fullmatch(ctx.path.name) else {}
     return [
         finding(line.number, "home-path", path=m.group(0))
         for line in unit.lines
         for m in HOME_PATH.finditer(line.text)
         if m.group("user").lower() not in exempt["service_accounts"]
+        and m.start() not in inside.get(line.number, range(0))
     ]
 
 
