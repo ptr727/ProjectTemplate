@@ -355,14 +355,15 @@ def changed_lines(
 
 
 def path_readings(path: Path, root: Path, config: Config, first: str) -> dict[str, object]:
-    """What a file's path alone decides for each rule that reads by path, `*` for every rule."""
+    """Whether a rule reads a file at all, or the lexer every rule reads it through, as `*`.
+
+    Only these leave a path's every line unread by a rule, so a move changing one is new to it.
+    """
     exempt = exempt_rules(path, root, config)
     return {
         **{rule: rule in exempt for rule in FILE_EXEMPTION},
         "*": lexer_name(path, first),
-        "home-path": ("home-path" in exempt, bool(COMPOSE_FILE.fullmatch(path.name))),
         "issue-ref": is_instruction_text(path, root),
-        "dead-path": path.parent.resolve(),
     }
 
 

@@ -5720,16 +5720,14 @@ class TestChangedLines(unittest.TestCase):
     def test_a_rename_changing_what_its_path_decides_is_read_whole_for_that_rule(self) -> None:
         """A rule that read the file another way where it sat reads it in full, and no other rule.
 
-        The root runbook is exempt from `home-path` and is instruction text for `issue-ref`. A
-        Compose name decides which lines `home-path` reads, and a directory decides what a relative
-        link resolves to. A move keeping each of them adds only what it changed.
+        The root runbook is exempt from `home-path` and is instruction text, which only
+        `issue-ref` reads as prose. A move keeping both adds only what it changed.
         """
         for source, dest, rules in (
-            ("OPERATIONS.md", "docs/ledger.md", {"home-path", "issue-ref", "dead-path"}),
-            ("docs/compose.yml", "docs/ledger.yml", {"home-path"}),
+            ("OPERATIONS.md", "docs/ledger.md", {"home-path", "issue-ref"}),
             ("docs/guide.md", "docs/OPERATIONS.md", set()),
-            ("notes/guide.md", "AGENTS.md", {"issue-ref", "dead-path"}),
-            ("docs/draft.md", "docs/ledger.md", set()),
+            ("notes/guide.md", "AGENTS.md", {"issue-ref"}),
+            ("notes/draft.md", "docs/ledger.md", set()),
         ):
             for edit, lines in ((False, set()), (True, {3})):
                 with self.subTest(source=source, dest=dest, edit=edit):
@@ -5771,8 +5769,8 @@ class TestChangedLines(unittest.TestCase):
         """
         for renames in ("true", "false", "copies"):
             with self.subTest(renames=renames):
-                self.assertEqual({}, self.moved("docs/notes.md", renames))
-                got = self.moved("docs/notes.md", renames, edit=True)
+                self.assertEqual({}, self.moved("notes/ledger.md", renames))
+                got = self.moved("notes/ledger.md", renames, edit=True)
                 self.assertEqual({"docs/ledger.md": {3}}, got)
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
