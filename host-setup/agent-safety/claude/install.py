@@ -277,7 +277,7 @@ AUTO_MODE_TAG = "[agent-safety] "
 AUTO_MODE_LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 AUTO_MODE_DEFAULTS = "$defaults"
 
-# The rules state what each command checks, since who authorizes a write is CLAUDE.md's to say.
+# The rules state what each command checks, since CLAUDE.md and the running skill say who authorizes a write.
 AUTO_MODE_RULES = {
     "environment": (
         (
@@ -287,9 +287,11 @@ AUTO_MODE_RULES = {
             "and the skill that runs it, never by this command."
         ),
         (
-            "`scripts/pr_review.py cleanup` deletes a feature branch only after it verifies the "
-            "pull request merged into develop at the branch's tip. It refuses develop, main, and "
-            "any branch a ruleset covers."
+            "`scripts/pr_review.py cleanup` removes a merged feature branch. A numbered call "
+            "verifies the pull request merged into develop and deletes the remote branch only at "
+            "that pull request's head, refusing any branch a ruleset covers. `--sweep --apply` "
+            "removes local branches whose work a merged pull request or origin's develop or main "
+            "already holds. Neither removes develop or main."
         ),
     ),
     "allow": (

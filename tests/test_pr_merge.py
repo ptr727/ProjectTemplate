@@ -348,6 +348,22 @@ class TestUnmetItems(MergeCase):
     def test_a_clean_payload_leaves_nothing_unmet(self) -> None:
         self.assertEqual([], self.unmet_on(self.clean()))
 
+    def test_an_attested_head_with_no_round_leaves_nothing_unmet(self) -> None:
+        """The ordinary develop pull request, read from real digest fields rather than rewritten ones."""
+        marker = {
+            "author": {"login": "maintainer"},
+            "authorAssociation": "OWNER",
+            "createdAt": fixtures.LATE,
+            "body": f"Attested.\n\n<!-- fleet-local-review: head={fixtures.HEAD} base=develop findings=0 -->",
+        }
+        pr = fixtures.payload([], files=["a.py"], comments=[marker])
+        pr = {
+            **pr,
+            "baseRefName": "develop",
+            "baseRepository": {"defaultBranchRef": {"name": "main"}},
+        }
+        self.assertEqual([], self.unmet_on(pr))
+
     def test_a_finished_state_beside_clean_leaves_nothing_unmet(self) -> None:
         for state in ("UNSTABLE", "HAS_HOOKS"):
             with self.subTest(state):

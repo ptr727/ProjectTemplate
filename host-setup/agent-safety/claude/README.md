@@ -160,7 +160,7 @@ The `uv run --no-project --script` rule beside it matches the spelling the fleet
     "environment": [
       "$defaults",
       "[agent-safety] `scripts/pr_review.py merge` squash-merges a feature pull request into develop only once ...",
-      "[agent-safety] `scripts/pr_review.py cleanup` deletes a feature branch only after ..."
+      "[agent-safety] `scripts/pr_review.py cleanup` removes a merged feature branch. ..."
     ],
     "allow": [
       "$defaults",

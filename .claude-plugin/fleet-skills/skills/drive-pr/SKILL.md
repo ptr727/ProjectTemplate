@@ -133,8 +133,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
    Every Finding". Then run `merge` once more on this pull request. Report what still stands to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
-   outcome. The maintainer can then merge it by hand. A line no action of this seat can change,
-   such as `status=OUTPUT_NOTED`, is reported without the rerun. A refusal this seat reports is
+   outcome. The maintainer can then merge it by hand. A line no action of this seat can change
+   is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
+   They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
+   `suppressed`. A refusal this seat reports is
    never routed around, and it hands the maintainer no command to run instead.
    A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
