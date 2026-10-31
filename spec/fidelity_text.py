@@ -190,14 +190,23 @@ def sections(text):
     return [(h, starts[i + 1].line if i + 1 < len(starts) else None) for i, h in enumerate(starts)]
 
 
+def section_key(name):
+    """The lookup key for a section name: stripped, then case-folded.
+
+    Every comparison of a section or heading name keys through this, so a change to the
+    normalization cannot reach only some lookup paths.
+    """
+    return name.strip().lower()
+
+
 def section_span(text, heading):
     """The `[start, end)` lines of the first `## <heading>` region, or None when `text` has none.
 
     `end` is None for a region that runs to the end of the document. The match is on the parsed
     heading text, case-folded, so a re-cased heading is found rather than read as absent.
     """
-    want = heading.strip().lower()
-    return next(((h.line, end) for h, end in sections(text) if h.text.lower() == want), None)
+    want = section_key(heading)
+    return next(((h.line, end) for h, end in sections(text) if section_key(h.text) == want), None)
 
 
 def extract_section(text, heading):
@@ -218,11 +227,11 @@ def strip_sections(text, names, keep_pins=False):
 
     Positional, so an identical passage elsewhere in the document survives.
     """
-    want = {n.strip().lower() for n in names}
+    want = {section_key(n) for n in names}
     base = text.replace("\r\n", "\n").replace("\r", "\n") if keep_pins else normalize(text)
     lines = base.split("\n")
     dropped = set()
     for h, end in sections(base):
-        if h.text.lower() in want:
+        if section_key(h.text) in want:
             dropped.update(range(h.line, len(lines) if end is None else end))
     return "\n".join(ln for i, ln in enumerate(lines) if i not in dropped)

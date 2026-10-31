@@ -10,7 +10,7 @@ import urllib.request
 import fidelity_text
 import markdown_it
 import validate
-from fidelity_text import extract_section, normalize, strip_sections
+from fidelity_text import extract_section, normalize, section_key, strip_sections
 
 
 def docker_hub_description(slug):
@@ -31,8 +31,8 @@ def docker_hub_description(slug):
 
 def undeclared_h2_headings(text, declared):
     """Top-level `##` headings in `text` that `declared` does not name, folded and sorted."""
-    h2s = {h.strip().lower() for level, h, _, _ in _atx_headings(text) if level == 2}
-    return sorted(h2s - {d.strip().lower() for d in declared})
+    h2s = {section_key(h) for level, h, _, _ in _atx_headings(text) if level == 2}
+    return sorted(h2s - {section_key(d) for d in declared})
 
 
 # CommonMark plus tables, with escapes kept as their own tokens so a line can be rebuilt from its source.
@@ -56,7 +56,7 @@ def references(text):
 
 def heading_texts(markdown):
     """Lowercased texts of the headings `_atx_headings` reads, for case-insensitive section-presence matching."""
-    return {h.strip().lower() for _, h, _, _ in _atx_headings(markdown)}
+    return {section_key(h) for _, h, _, _ in _atx_headings(markdown)}
 
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -164,7 +164,7 @@ def addressed_region(text, address):
     lines = body.split("\n")
     h3s = [h for h in _atx_headings(body) if h[0] == 3]
     for i, (_, name, _, end) in enumerate(h3s):
-        if name.strip().lower() == parts[1].lower():
+        if section_key(name) == section_key(parts[1]):
             stop = h3s[i + 1][2] if i + 1 < len(h3s) else len(lines)
             return "\n".join(lines[end:stop])
     return None
