@@ -51,6 +51,7 @@ from pr_review_rounds import (
     window_blind,
 )
 
+NO_THREAD = "FINDINGS WITH NO THREAD"
 BEHIND_THE_WINDOW = (
     "  BEHIND THE WINDOW ({value}): the newest {window} carry "
     "none from the reviewer and older ones exist, so this cannot decide"
@@ -104,12 +105,15 @@ def render(
     seen: set[str] | None,
     hub: str,
     window: int,
+    fields_out: list[tuple[str, object]] | None = None,
 ) -> tuple[str, int]:
     """Render the digest and return it with the unresolved count.
 
     `quota` is the run log's rate-limit sentence for the refusal `digest_refusal` names, read by the
     caller. `run_log` is the caller's `RUN LOG READING` line for that refusal, empty for none.
     Where `seen` is a set, only threads absent from it print, marked new, and are added.
+    Where `fields_out` is a list, the header's fields and the `NO_THREAD` count are appended to it.
+    A gate then reads the values this renders rather than parsing the text.
     """
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
@@ -221,6 +225,8 @@ def render(
         ("stuck", ",".join(sorted({s for _, s in stuck})) or None),
         ("new", len(shown) if seen is not None else None),
     ]
+    if fields_out is not None:
+        fields_out += [*fields, (NO_THREAD, found.unthreaded if found is not None else 0)]
     lines = [header(fields)]
     if refusal:
         lines.append(
@@ -259,7 +265,7 @@ def render(
             lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
     if found is not None and found.unthreaded:
         lines.append(
-            f"  FINDINGS WITH NO THREAD ({found.unthreaded}): the round covering the head names "
+            f"  {NO_THREAD} ({found.unthreaded}): the round covering the head names "
             f"more findings than its open entries link to threads on this pull request, so "
             f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
             "threads cannot see them. Read the review body and give each the triage a suppressed "

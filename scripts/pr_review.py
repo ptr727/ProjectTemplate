@@ -48,8 +48,8 @@ Subcommands
            installer registers for it.
   merge    Forwarded to `pr_merge.py`, which holds the contract and the exit codes, for the same
            reason. It squash-merges a pull request into `develop` only where the Merge Gate's
-           mechanically readable items read met. The findings a pull request's body lists are the
-           driver's to dispose of first, since no code here reads them.
+           mechanically readable items read met. The items no code here reads, such as a finding a
+           pull request's body lists, stay the driver's per `pr-review-conduct`'s Merge Gate.
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet. 0 is also the exit where the review
            covering the head states no partial coverage and its verdict counts what it flags. 42 = the
@@ -884,6 +884,7 @@ def digest(
     grace: float = CHECK_GRACE,
     stall: float = CHECK_STALL,
     checks: list[dict] | None = None,
+    fields_out: list[tuple[str, object]] | None = None,
 ) -> tuple[str, int]:
     """Read what the digest needs, unless the caller supplied it, and render it.
 
@@ -902,7 +903,20 @@ def digest(
             "limit nor a transient fetch failure"
         )
     return render(
-        owner, repo, num, pr, checks, now, grace, stall, quota, reading, seen, HUB, WINDOW
+        owner,
+        repo,
+        num,
+        pr,
+        checks,
+        now,
+        grace,
+        stall,
+        quota,
+        reading,
+        seen,
+        HUB,
+        WINDOW,
+        fields_out,
     )
 
 

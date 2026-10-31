@@ -1909,7 +1909,7 @@ class TestAutoMode(StampCase):
         self.assertIn("autoMode.environment: 2 untagged entries, without $defaults", r.stdout)
         self.assertIn("autoMode.hard_deny: 0 untagged entries, with $defaults", r.stdout)
 
-    def test_a_retired_rule_leaves_untagged_entries_and_drops_only_a_bare_defaults_list(self):
+    def test_a_retired_rule_leaves_untagged_entries_and_a_bare_defaults_list(self):
         """The removal path: a list the kit owns nothing in loses only its tagged entries."""
         retired = install.AUTO_MODE_TAG + "a rule this kit no longer writes"
         self._write(
@@ -1922,14 +1922,8 @@ class TestAutoMode(StampCase):
         )
         self.install()
         auto = self._settings()["autoMode"]
-        self.assertNotIn("soft_deny", auto)
+        self.assertEqual(auto["soft_deny"], ["$defaults"])
         self.assertEqual(auto["hard_deny"], ["$defaults", *self.OWN])
-
-    def test_a_bare_defaults_list_the_machine_wrote_is_kept(self):
-        """Holding no tagged entry, the list is the machine's own choice rather than the kit's leftover."""
-        self._write({"autoMode": {"soft_deny": ["$defaults"]}})
-        self.install()
-        self.assertEqual(self._settings()["autoMode"]["soft_deny"], ["$defaults"])
 
 
 class TestContainmentPrefix(StampCase):

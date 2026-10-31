@@ -6,8 +6,8 @@ Usage: pr_review.py merge NUMBER --repo OWNER/NAME [--cleanup [--checkout DIR]]
 host-safety installer registers names `pr_review.py`. That rule approves any arguments, so every
 check lives here. Whether the merge is authorized stays with the skill that runs it. What this
 checks in code is the Merge Gate's mechanically readable items, and that the merge is current, in
-the owner, and into `develop` only. A finding the pull request's body lists is judgment no code
-here reads, so the driver disposes of it per `pr-review-conduct` before calling this.
+the owner, and into `develop` only. The items no code here reads, such as a finding the pull
+request's body lists, stay the driver's per `pr-review-conduct`'s Merge Gate.
 
 It refuses unless all of these hold:
 
@@ -16,9 +16,9 @@ It refuses unless all of these hold:
 - Its head lives in the base repository rather than in a fork.
 - Its head branch is not a permanent branch, and no ruleset or branch protection covers it.
 - `wait`'s own gate, run once on a short bound and requesting no review, exits 0.
-- A fresh read after the gate meets each item that 0 leaves undecided. Coverage reads full, a file
-  table, or an attested local pass. No thread is unresolved. Every count the digest gives of a
-  finding no thread carries reads zero. The merge state reads CLEAN.
+- A fresh read after the gate meets each readable item that 0 leaves undecided. Coverage reads full,
+  a file table, or an attested local pass. No thread is unresolved. Every count the digest builds of
+  a finding no thread carries is a zero it can read. The merge state reads CLEAN.
 - The head read after the gate is the head read before it.
 
 The merge is pinned to that head with `--match-head-commit`. It is confirmed by reading the pull
@@ -38,33 +38,14 @@ import re
 
 import pr_cleanup
 import pr_review as core
-
-Q_MERGE_TARGET = """
-query($o:String!,$r:String!,$n:Int!){
-  repository(owner:$o,name:$r){
-    defaultBranchRef{ name }
-    pullRequest(number:$n){
-      state isDraft baseRefName headRefName headRefOid mergeCommit{ oid }
-      headRepository{ nameWithOwner } } }}
-"""
+import pr_review_digest
 
 GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
 UNRUN = "gh could not be run or did not finish"
 MET_COVERAGE = ("full", "table", "carried:table", "local")
 UNTHREADED = ("suppressed", "previously_missed", "cr_outside_diff", "qodo_open")
-
-
-def merge_target(owner: str, repo: str, num: int) -> dict:
-    """The pull request's live merge fields, raising `CleanupUnread` where nothing answered."""
-    data = pr_cleanup.cleanup_read(Q_MERGE_TARGET, o=owner, r=repo, n=num)
-    repository = data.get("repository") or {}
-    pr = repository.get("pullRequest")
-    pr = pr if isinstance(pr, dict) else {}
-    default = (repository.get("defaultBranchRef") or {}).get("name")
-    if not (pr.get("headRefOid") and pr.get("headRefName") and default):
-        raise pr_cleanup.CleanupUnread(f"{owner}/{repo} #{num} returned no head or default branch")
-    return {**pr, "defaultBranch": default}
+COUNTED = (*UNTHREADED, "overview", pr_review_digest.NO_THREAD)
 
 
 def ready(owner: str, repo: str, num: int, rules: bool) -> dict | None:
@@ -72,7 +53,7 @@ def ready(owner: str, repo: str, num: int, rules: bool) -> dict | None:
 
     The rule read is REST, and the head branch cannot change, so the read after the gate skips it.
     """
-    pr = merge_target(owner, repo, num)
+    pr = pr_cleanup.pr_target(owner, repo, num)
     branch, base, refusals = pr["headRefName"], pr.get("baseRefName"), []
     if pr.get("state") != "OPEN":
         refusals.append(f"it reads {pr.get('state')}, not OPEN")
@@ -115,24 +96,32 @@ def gate(owner: str, repo: str, num: int) -> int:
 def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, str]]]:
     """The head one fresh read shows, and each gate item `wait`'s 0 leaves undecided that it fails.
 
-    The coverage and the counts are read off the digest's own line, so a refusal names what the
-    driver was shown. The threads are walked to the end, since that line reads one page.
+    The coverage and the counts are the fields the digest builds, so a refusal names what the
+    driver was shown. A count it did not build, or one holding no number, refuses rather than
+    reading as zero. The threads are walked to the end, since the digest reads one page.
     """
     pr = core.full_read(owner, repo, num)
-    text = core.digest(owner, repo, num, pr=pr)[0]
-    fields = dict(re.findall(r"(?:^| )([a-z_]+)=(\S+)", text.splitlines()[0]))
-    unmet = []
+    built: list[tuple[str, object]] = []
+    core.digest(owner, repo, num, pr=pr, fields_out=built)
+    fields = dict(built)
+    unmet, counts, unread = [], [], []
     if (cover := fields.get("coverage")) not in MET_COVERAGE:
         unmet.append(
             ("COVERAGE_NOT_SHOWN", f"the digest reads coverage={cover}, so item 2 is unmet")
         )
     if opened := core.open_on_head(owner, repo, num, pr):
         unmet.append(("THREADS_UNRESOLVED", f"{len(opened)} review thread(s) are unresolved"))
-    counts = [f"{k}={fields[k]}" for k in UNTHREADED if fields.get(k, "0") != "0"]
-    if fields.get("overview", "").startswith("?"):
-        counts.append(f"overview={fields['overview']}")
-    if "  FINDINGS WITH NO THREAD (" in text:
-        counts.append("FINDINGS WITH NO THREAD")
+    for key in COUNTED:
+        # A field built as None is one the digest leaves out of its line, having nothing to count.
+        value = "0" if key in fields and fields[key] is None else str(fields.get(key, ""))
+        if not re.match(r"\d", value):
+            unread.append(f"{key}={value}" if value else f"{key} (not built)")
+        elif key != "overview" and not re.match(r"0( |$)", value):
+            counts.append(f"{key}={value}")
+    if unread:
+        unmet.append(
+            ("COUNT_UNREAD", f"the digest holds no readable count for {', '.join(unread)}")
+        )
     if counts:
         unmet.append(("UNTHREADED_FINDINGS", f"the digest reads {', '.join(counts)}"))
     if (state := pr.get("mergeStateStatus")) != "CLEAN":
@@ -197,8 +186,8 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
     answered = merge_call(target, num, head)
     try:
         landed = core.backoff(
-            merge_target(owner, repo, num),
-            lambda: merge_target(owner, repo, num),
+            pr_cleanup.pr_target(owner, repo, num),
+            lambda: pr_cleanup.pr_target(owner, repo, num),
             lambda polled: polled.get("state") != "MERGED",
             delays=pr_cleanup.DELETE_SETTLE_DELAYS,
         )

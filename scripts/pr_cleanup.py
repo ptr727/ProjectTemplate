@@ -66,7 +66,8 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     defaultBranchRef{ name }
     pullRequest(number:$n){
-      merged baseRefName headRefName headRefOid headRepository{ nameWithOwner } } }}
+      state isDraft merged baseRefName headRefName headRefOid mergeCommit{ oid }
+      headRepository{ nameWithOwner } } }}
 """
 Q_CLEANUP_REF = """
 query($o:String!,$r:String!,$q:String!){
@@ -210,6 +211,24 @@ def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     return users
 
 
+def pr_target(owner: str, repo: str, num: int) -> dict:
+    """The pull request's live fields beside its repository's default branch, for both writes.
+
+    `merge` reads it before and after its merge, and `cleanup` before its delete. One read keeps
+    the two agreeing on the head and branch they act on. Raises `CleanupUnread` where nothing
+    answered.
+    """
+    data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
+    repository = data.get("repository") or {}
+    pr = repository.get("pullRequest")
+    default = (repository.get("defaultBranchRef") or {}).get("name")
+    if not isinstance(pr, dict) or not default:
+        raise CleanupUnread(f"{owner}/{repo} #{num} returned no pull request or no default branch")
+    if not pr.get("headRefName") or not pr.get("headRefOid"):
+        raise CleanupUnread(f"{owner}/{repo} #{num} returned no head branch or head commit")
+    return {**pr, "defaultBranch": default}
+
+
 class CleanupPlan(NamedTuple):
     branch: str
     head: str
@@ -224,25 +243,17 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
     The write guard's per-branch rule check never sees a delete made from inside this script.
     """
     target = f"{owner}/{repo}"
-    data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
-    repository = data.get("repository") or {}
-    pr = repository.get("pullRequest")
-    default = (repository.get("defaultBranchRef") or {}).get("name")
-    if not isinstance(pr, dict) or not default:
-        raise CleanupUnread(f"{target} #{num} returned no pull request or no default branch")
-    branch = pr.get("headRefName")
-    head = pr.get("headRefOid")
-    if not branch or not head:
-        raise CleanupUnread(f"{target} #{num} returned no head branch or head commit")
+    pr = pr_target(owner, repo, num)
+    branch, head = pr["headRefName"], pr["headRefOid"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or ""
     refusals = []
     if pr.get("merged") is not True:
         refusals.append("the pull request is not merged")
     if pr.get("baseRefName") != "develop":
         refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
-    if head_repo.lower() != target.lower():
+    if not in_repository(pr, owner, repo):
         refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
-    if permanent_branch(branch, default):
+    if permanent_branch(branch, pr["defaultBranch"]):
         refusals.append(f"its head branch {branch!r} is a permanent branch")
     if refusals:
         raise CleanupRefused(

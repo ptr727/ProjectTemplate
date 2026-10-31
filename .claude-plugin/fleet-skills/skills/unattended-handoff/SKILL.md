@@ -347,11 +347,22 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a `merge` exiting other than `0`
-   with no `status=MERGED` line, a gate refusal parked with its output rather than routed around.
-   A non-zero exit after that line is a cleanup that stopped, which step 7 names in the close-out.
+   with no `status=MERGED` line where the worker cannot clear it. Such a gate refusal is parked
+   with its output rather than routed around. A non-zero exit after that line is a cleanup that
+   stopped, which step 7 names in the close-out.
    It also includes the harness refusing the `merge` call itself. That is a refused write, parked
    as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and Write Safety". The parking
    names the maintainer's routes, adding the permission rule or running the command themselves.
+   A `status=THREADS_UNRESOLVED`, `status=CHECKS_PENDING`, or `status=PENDING` line is no
+   decision. The worker clears it per `drive-pr` step 4, disposing of the thread or waiting, then
+   driving again and running `merge` again. A `status=MERGE_NOT_CONFIRMED` line is no decision
+   until the pull request's state is read back per that step. A read answering `MERGED` goes on to
+   the cleanup, and one answering `OPEN` is treated as unmerged and cleared the same way. Only a
+   read that still cannot answer parks, the parking saying the merge may have landed. A
+   `status=UNTHREADED_FINDINGS` line still standing once each counted finding has an outcome
+   parks, since `merge` counts those findings across every round and reads no answer. The parking
+   names the pull request and that each counted finding has an outcome, so the maintainer can
+   merge it by hand.
    Otherwise a worker parks only
    on a choice the maintainer alone can make, or on a maintainer-only action that
    `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer

@@ -250,9 +250,9 @@ def at(data, path):
 # Ownership needs a delimiter after the prefix, so a longer path such as `pr_review.py-custom` is not claimed.
 # These widen rather than restrict, so they stay their own step for the reason the two CLAUDE.md blocks stay separate.
 MANAGED_PERMISSIONS = [
-    # The review loop's reply and resolve, and the `cleanup` delete of a merged pull request's head branch.
-    # Driving either by hand needs a raw mutation carrying an id, which is the shape to avoid.
-    # The `:*` rule approves any arguments, so every check the delete makes lives inside the `cleanup` subcommand.
+    # The review loop's reply and resolve, the `merge` squash into develop, and the `cleanup` delete of a merged head.
+    # Driving the loop by hand needs a raw mutation carrying an id, which is the shape to avoid.
+    # The `:*` rule approves any arguments, so `merge` checks the gate's readable items in code, as `cleanup` checks its delete.
     # The rule decides which command skips a prompt, and it bounds no checkout, since it matches the text.
     ("Bash(python3 scripts/pr_review.py", "Bash(python3 scripts/pr_review.py:*)"),
     (
@@ -277,8 +277,10 @@ AUTO_MODE_RULES = {
         (
             "The develop and main branches are ruleset-protected. An agent merges a feature branch "
             "into develop through `scripts/pr_review.py merge`, which checks the Merge Gate's "
-            "mechanically readable items in code once the agent has disposed of the findings the "
-            "pull request body lists. A promotion from develop to main is the maintainer's."
+            "mechanically readable items in code. The items no code reads, such as a finding the "
+            "pull request body lists, stay the agent's per pr-review-conduct's Merge Gate. A "
+            "promotion merge from develop to main needs the maintainer's explicit go-ahead in the "
+            "session, or the scope the maintainer named for an unattended-handoff run."
         ),
     ),
     "allow": (
@@ -1803,16 +1805,6 @@ def main():
                 )
             continue
         kept = [e for e in held if not tagged(e)]
-        # Only a list emptied of retired rules down to the splice alone reads as one the kit created.
-        if not rules and kept == [AUTO_MODE_DEFAULTS] and len(kept) < len(held):
-            del auto[name]
-            if not auto:
-                del data["autoMode"]
-            done.append(
-                f"autoMode.{name}: removed, since only {AUTO_MODE_DEFAULTS} remained once this "
-                "kit's retired rules left it"
-            )
-            continue
         before = list(held)
         held[:] = kept + rules
         if before == held:

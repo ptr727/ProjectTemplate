@@ -109,18 +109,33 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
    primary clone. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
-   own decision and a fresh read after it. It merges nothing while one reads unmet. A finding the
-   pull request's body lists is judgment no code reads, so dispose of each one per
-   pr-review-conduct before running `merge`. It squash-merges only an open pull request into
-   `develop`, headed in that same repository on a branch neither permanent nor protected. The merge
-   is pinned to the head the gate read and confirmed by reading it back.
-   Exit `0` is merged and cleaned up. Any other exit stops and reports, the same as `cleanup`.
-   A `status=MERGED` line before a non-zero exit means only the cleanup stopped. With no such
-   line, a non-zero exit is a gate refusal, which this seat reports and never routes around. For a
-   gate refusal it hands the maintainer no command to run instead. There `1` is a refusal that
-   merged nothing, `gh` refusing the merge with the pull request reading back open among them. A
-   `2` can mean the merge landed unconfirmed, since the call timed out, never ran, or read back
-   unsettled. A harness refusing the `merge` call itself is a refused write
+   own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
+   code reads, such as a finding the pull request's body lists, stay this seat's per
+   pr-review-conduct's Merge Gate. Dispose of them before running `merge`. It squash-merges only
+   an open pull request into `develop`, headed in that same repository on a branch neither
+   permanent nor protected. The merge is pinned to the head the gate read and confirmed by reading
+   it back.
+   Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
+   cleanup stopped, which stops and reports the same as `cleanup`.
+   Some refusals are states this seat clears rather than final ones. They are a
+   `status=THREADS_UNRESOLVED` line, from the gate's exit `46` or from the fresh read, and a gate
+   exit `30` printing `status=CHECKS_PENDING` or `status=PENDING`. For each, dispose of the thread
+   or wait, run step 3 again, and then run `merge` again.
+   A `status=MERGE_NOT_CONFIRMED` line at exit `2` is not a gate refusal, since the merge may have
+   landed. Read the pull request's state back first, with
+   `gh pr view <number> --repo <owner>/<repo> --json state`. Where it reads `MERGED`, the merge
+   landed, so run the `cleanup` command below. Where it reads `OPEN`, treat it as unmerged and take
+   the route above for a state this seat clears. Only a read that still cannot answer is reported,
+   saying the merge may have landed.
+   A `status=UNTHREADED_FINDINGS` line first asks for each counted finding's outcome, per
+   "Disposing of Every Finding". Once each has one, this seat cannot clear the line, since `merge`
+   counts those findings across every round and reads no answer. Report it to the maintainer as a
+   blocked merge, naming the pull request and that each counted finding has an outcome. The
+   maintainer can then merge it by hand.
+   Any other non-zero exit with no `status=MERGED` line is a gate refusal this seat cannot clear.
+   It reports that refusal and never routes around it, handing the maintainer no command to run
+   instead. There `1` is a refusal that merged nothing, `gh` refusing the merge with the pull
+   request reading back open among them. A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
    another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
    Write Safety". Name the maintainer's routes, adding the permission rule or running the command

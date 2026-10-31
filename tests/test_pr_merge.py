@@ -76,7 +76,7 @@ class MergeCase(unittest.TestCase):
         shared = pr_merge.pr_cleanup.shared
 
         def fake_read(query: str, variables: dict, **_: object) -> shared.Response:
-            self.assertIs(pr_merge.Q_MERGE_TARGET, query)
+            self.assertIs(pr_merge.pr_cleanup.Q_CLEANUP_TARGET, query)
             answer = self.reads.pop(0) if len(self.reads) > 1 else self.reads[0]
             if isinstance(answer, Exception):
                 raise answer
@@ -357,12 +357,45 @@ class TestUnmetItems(MergeCase):
             (
                 "no stated count",
                 fixtures.payload([fixtures.review()], files=["a.py"]),
-                "UNTHREADED_FINDINGS the digest reads overview=?/0",
+                "COUNT_UNREAD the digest holds no readable count for overview=?/0",
             ),
         ):
             with self.subTest(label):
                 unmet = self.unmet_on(pr)
                 self.assertTrue(any(want in item for item in unmet), unmet)
+
+    def test_a_finding_on_an_earlier_round_is_unmet_whatever_answered_it(self) -> None:
+        for label, kind in (
+            ("Comments suppressed due to low confidence (1)", "suppressed"),
+            ("1 previously missed issue", "previously_missed"),
+        ):
+            section = (
+                f"{fixtures.OVERVIEW}\n<details>\n<summary><strong>{label}</strong></summary>\n\n"
+                "In code that has not changed since last review\n\n"
+                "[P2] Guard the write.\n</details>"
+            )
+            earlier = fixtures.review(oid=fixtures.OLD, body=section, rid="PRR_old")
+            pr = fixtures.payload([earlier, fixtures.review(body=self.CLEAN)], files=["a.py"])
+            with self.subTest(kind):
+                self.assertIn(
+                    f"UNTHREADED_FINDINGS the digest reads {kind}=1 (on_head=0 earlier=1)",
+                    self.unmet_on(pr),
+                )
+
+    def test_a_count_the_digest_did_not_build_is_unmet_rather_than_zero(self) -> None:
+        real = pr_review.digest
+
+        def without_qodo(owner: str, repo: str, num: int, **kwargs: Any) -> tuple[str, int]:
+            answer = real(owner, repo, num, **kwargs)
+            built = kwargs["fields_out"]
+            built[:] = [field for field in built if field[0] != "qodo_open"]
+            return answer
+
+        with mock.patch.object(pr_review, "digest", side_effect=without_qodo):
+            unmet = self.unmet_on(self.clean())
+        self.assertEqual(
+            ["COUNT_UNREAD the digest holds no readable count for qodo_open (not built)"], unmet
+        )
 
     def test_a_met_wait_with_an_open_thread_merges_nothing(self) -> None:
         """`wait` returns 0 on a Copilot-covered head without reading its threads."""
