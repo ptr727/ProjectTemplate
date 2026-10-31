@@ -327,7 +327,7 @@ class TestUnmetItems(MergeCase):
             (
                 "blocked",
                 self.clean(merge="BLOCKED"),
-                "MERGE_NOT_CLEAN the merge state reads BLOCKED",
+                "MERGE_NOT_CLEAN the merge state reads BLOCKED, not a finished one",
             ),
             (
                 "no coverage",

@@ -356,7 +356,7 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    A `status=THREADS_UNRESOLVED`, `status=CHECKS_PENDING`, or `status=PENDING` line is no
    decision. Nor is a `status=HEAD_MOVED`, `status=REVIEW_PENDING`, or
    `status=UNPLACED_PARTS_UNACKNOWLEDGED` line. Nor is a `status=MERGE_NOT_CLEAN` line reading
-   `UNKNOWN`, `BEHIND`, or `DIRTY`, nor a gate exit `49`. The worker clears each of those per
+   `UNKNOWN`, `BLOCKED`, `BEHIND`, or `DIRTY`, nor a gate exit step 3 routes. The worker clears each of those per
    `drive-pr` step 4. It disposes of the thread, acknowledges the parts, merges `develop` into the
    branch, records and attests a pass, or waits.
    It then drives again and runs `merge` again. A first `status=MERGE_REFUSED` or `status=UNREAD`
@@ -369,7 +369,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    finding or noted part has an outcome, a `status=UNTHREADED_FINDINGS` or `status=OUTPUT_NOTED`
    line still standing after `drive-pr` step 4's route parks. That is because
    `merge` reads no answer posted to a finding or a part. The parking names the pull request and that each has an outcome, so the
-   maintainer can merge it by hand.
+   maintainer can merge it by hand. A `status=COUNT_UNREAD` line parks the same way, naming the
+   unread field.
    Otherwise a worker parks only
    on a choice the maintainer alone can make, or on a maintainer-only action that
    `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer

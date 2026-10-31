@@ -20,7 +20,7 @@ It refuses unless all of these hold:
 - A fresh read after the gate meets each readable item that 0 leaves undecided. Coverage reads full,
   a file table, or an attested local pass. No thread is unresolved. Every count the digest builds of
   a finding no thread carries is a zero it can read. No reviewer output is held or noted, and no
-  review request is pending. The merge state reads CLEAN.
+  review request is pending. The merge state is one `wait` treats as finished.
 
 The merge is pinned to that head with `--match-head-commit`. It is confirmed by reading the pull
 request back rather than by the merge call's own answer. `--cleanup` then runs `cleanup` on the
@@ -40,13 +40,12 @@ import re
 import pr_cleanup
 import pr_review as core
 import pr_review_digest
+from pr_review_checks import MERGE_UNGATED
 
 GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
 UNRUN = "gh could not be run or did not finish"
 MET_COVERAGE = ("full", "table", "carried:table", "local")
-# The states `wait` treats as finished, since item 1 asks only for the required checks.
-MERGEABLE = ("CLEAN", "UNSTABLE", "HAS_HOOKS")
 UNTHREADED = ("suppressed", "previously_missed", "cr_outside_diff", "qodo_open")
 NOTED = pr_review_digest.NOTED
 COUNTED = (*UNTHREADED, "overview", pr_review_digest.NO_THREAD, NOTED)
@@ -135,8 +134,8 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
         unmet.append(("UNTHREADED_FINDINGS", f"the digest reads {', '.join(counts)}"))
     if noted:
         unmet.append(("OUTPUT_NOTED", f"the digest reads {noted[0]}, which item 4 reads by hand"))
-    if (state := pr.get("mergeStateStatus")) not in MERGEABLE:
-        unmet.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not CLEAN"))
+    if (state := pr.get("mergeStateStatus")) not in MERGE_UNGATED:
+        unmet.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not a finished one"))
     return pr["headRefOid"], unmet
 
 
