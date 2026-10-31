@@ -444,7 +444,7 @@ def _launches(words: list[str], cap: int = 16) -> list[_Launch]:
             continue
         tried.add(takes)
         launch = _launch(words, takes)
-        if all(launch.argv != o.argv for o in out):
+        if launch not in out:
             out.append(launch)
         pending += [takes | 1 << n for n in range(launch.choices)]
     return out
@@ -580,6 +580,7 @@ def _read(
 
     A wrapper body is read once, at `depth` 1, with the directory and environment the wrapper sees.
     A command behind an `env` option the guard does not recognize is read each way `_launches` gives.
+    A reading past the first only adds commands, so a guess never changes the shell state.
     """
     segs, _ = _tokenize(text)
     out.texts.append((segs, timed))
@@ -591,8 +592,11 @@ def _read(
         elif k and segs[k - 1].op == ")" and saved:
             cwd, env = saved.pop()
         assigns, words = _parse(seg.words)
-        for launch in _launches(words):
+        for n, launch in enumerate(_launches(words)):
             argv = launch.argv
+            name = _base(argv[0]) if argv else ""
+            if n and name in ("", "export", "cd", "pushd", "popd"):
+                continue
             if not argv:
                 env.update(assigns)
                 continue
@@ -601,13 +605,13 @@ def _read(
             here = {**kept, **launch.env}
             own = {**{k: v for k, v in assigns.items() if k in kept}, **launch.env}
             where = _moved(cwd, launch.chdirs)
-            name = _base(argv[0])
             unread = undetermined or launch.undetermined
             silenced = quiet or _discards(seg.redirs) or _forced(segs, k)
             if name == "export":
                 env.update((m[1], m[2]) for a in argv[1:] if (m := _ASSIGN.match(a)))
             elif name in ("cd", "pushd"):
                 cwd = _cd(cwd, argv[1:])
+                undetermined = undetermined and _cd(None, argv[1:]) is None
             elif name == "popd":
                 cwd = None
             elif (body := _wrapper_body(argv)) is not None:
@@ -882,11 +886,12 @@ def _named_git_dir(cmd: _Cmd, git: _Git) -> str | None:
     """The repository a `--git-dir`, or else a `GIT_DIR` the command carries, names, as written.
 
     A `GIT_DIR` set earlier in the text reads as a run-time word. Whether git sees it turns on an
-    export or an `unset` the reading does not track.
+    export or an `unset` the reading does not track. So does one behind an `env` option the guard
+    does not recognize, which may be an abbreviation of `--unset`.
     """
     if git.git_dir is not None:
         return git.git_dir
-    if "GIT_DIR" in cmd.own:
+    if "GIT_DIR" in cmd.own and not cmd.undetermined:
         return cmd.own["GIT_DIR"]
     return "$GIT_DIR" if "GIT_DIR" in cmd.env else None
 
@@ -899,23 +904,28 @@ def _overrides_remote(cmd: _Cmd, git: _Git) -> bool:
     )
 
 
+def _push_cwd(cmd: _Cmd) -> str | None:
+    """The directory a push runs in, or None where an `env` option the guard does not recognize may have moved it."""
+    return None if cmd.undetermined else cmd.cwd
+
+
 def _push_repo(cmd: _Cmd, git: _Git, remote: str | None) -> tuple[str, str] | None:
     """The (owner, repo) a push writes, read from its URL or its remote's push URL.
 
     The remote is read in the repository git uses, the one a `--git-dir` or `GIT_DIR` names over
     the directory's own. A config override of a remote, or a repository the text does not name,
-    resolves to None. So does one an `env` option the guard does not recognize may have moved.
+    resolves to None.
     """
     remote = remote or "origin"
     url: str | None = remote
     if not ("://" in remote or re.match(r"^[^/\s]+@[^/\s]+:", remote)):
-        where = _moved(cmd.cwd, git.c_dirs)
+        where = _moved(_push_cwd(cmd), git.c_dirs)
         named = _named_git_dir(cmd, git)
         git_dir = None if named is None else _join_dir(where, named)
         located = where is not None if named is None else git_dir is not None
         query = ["--git-dir", git_dir] if git_dir else []
         query += ["remote", "get-url", "--push", remote]
-        unread = _overrides_remote(cmd, git) or not located or cmd.undetermined
+        unread = _overrides_remote(cmd, git) or not located
         url = None if unread else _git_stdout(where, query)
     m = _URL_OWNER_REPO.search(url or "")
     return (m.group(1).lower(), m.group(2).lower()) if m else None
@@ -1017,7 +1027,7 @@ def _bypass_denial(
         if current_branch is not None:
             return current_branch
         named = _named_git_dir(cmd, git)
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, cmd.undetermined)
+        got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, named, None, False)
         return got if isinstance(got, str) else None
 
     remote, targets = _push_targets(git.args, branch_of)
@@ -1867,6 +1877,8 @@ _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
     ("env -X {b} git push origin :feature/x", None),
     ("env --nu sh -c 'git push origin :feature/x'", None),
     ("env --ch={b} git push https://github.com/stranger/x :feature/x", "stranger"),
+    ("env --ch=/nowhere git --git-dir={b}/.git push origin :feature/x", "stranger"),
+    ("env --nu sh -c 'cd {b} && git push origin :feature/x'", "stranger"),
     ("env -0v - -- git push origin :feature/x", "example"),
     ("env --null --debug git push origin :feature/x", "example"),
     (
@@ -1888,7 +1900,10 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
     ("env --ch={b} git push origin", None),
-    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", "develop"),
+    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", None),
+    ("env --ch=/nowhere git --git-dir={b}/.git push origin", "develop"),
+    ("env --nu git -C {b} push origin", "develop"),
+    ("env --nu sh -c 'cd {b} && git push origin'", "develop"),
 ]
 _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push origin develop", "deny"),
@@ -1899,6 +1914,8 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ignore-env --ch {b} git push origin main", "deny"),
     ("env --ch {b} --nu git push origin develop", "deny"),
     ("cd {b} && env --ch=.. git push -u origin HEAD", "allow"),
+    ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
+    ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
 ]
 
 
@@ -1931,10 +1948,10 @@ def _push_repo_selftest() -> bool | str:
         for cmd, branch in _PUSH_BRANCH_CASES:
             reading = _Reading()
             _read(cmd.format(b=b), a, {}, reading)
-            c = reading.cmds[-1]
+            c = [r for r in reading.cmds if _base(r.argv[0]) == "git"][-1]
             git = _git(c.argv)
             named = _named_git_dir(c, git)
-            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, c.undetermined)
+            bare = _bare_push_branch(_push_cwd(c), git.c_dirs, named, None, False)
             passed = (bare if isinstance(bare, str) else None) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
