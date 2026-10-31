@@ -542,7 +542,10 @@ class CarrySectionTests(unittest.TestCase):
             carry.outside_sections(carry.split_lines(result), ["Fleet Bootstrap"], "AGENTS.md"),
             carry.outside_sections(target, ["Fleet Bootstrap"], "AGENTS.md"),
         )
-        self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
+        self.assertEqual(
+            [key for key, _ in carry.h2_spans(carry.split_lines(result))],
+            [key for key, _ in carry.h2_spans(target)],
+        )
 
     def test_replace_sections_preserves_the_targets_line_endings(self) -> None:
         target = carry.split_lines(TARGET_DOC.replace("\n", "\r\n"))
@@ -584,9 +587,14 @@ class CarrySectionTests(unittest.TestCase):
         )
 
         self.assertIn("The hub's current table.\n\n## Local Addition\n", result)
-        self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
+        self.assertEqual(
+            [key for key, _ in carry.h2_spans(carry.split_lines(result))],
+            [key for key, _ in carry.h2_spans(target)],
+        )
 
-    def _unit(self, hub_text: str, target_text: str | None, sections: list[str]) -> None:
+    def _unit(
+        self, hub_text: str, target_text: str | None, sections: list[str]
+    ) -> carry.SectionPlan:
         """Plan one AGENTS.md unit from two documents written to temporary hub and target trees."""
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -596,7 +604,7 @@ class CarrySectionTests(unittest.TestCase):
             (hub / "AGENTS.md").write_bytes(hub_text.encode("utf-8"))
             if target_text is not None:
                 (target / "AGENTS.md").write_bytes(target_text.encode("utf-8"))
-            carry.plan_unit(hub, target, "AGENTS.md", sections)
+            return carry.plan_unit(hub, target, "AGENTS.md", sections)
 
     def test_plan_unit_refuses_a_file_the_target_does_not_carry(self) -> None:
         with self.assertRaisesRegex(carry.CarryError, "absent from the target, which is a standup"):
@@ -606,10 +614,136 @@ class CarrySectionTests(unittest.TestCase):
         with self.assertRaisesRegex(carry.CarryError, "absent from the hub's own copy"):
             self._unit(HUB_DOC, TARGET_DOC, ["Release Model"])
 
-    def test_plan_unit_refuses_a_section_absent_from_the_target(self) -> None:
+    def test_plan_unit_plans_a_section_absent_from_the_target_as_missing(self) -> None:
         hub = HUB_DOC + "\n## Release Model\n\nHub only.\n"
-        with self.assertRaisesRegex(carry.CarryError, "absent from the target"):
-            self._unit(hub, TARGET_DOC, ["Release Model"])
+        plan = self._unit(hub, TARGET_DOC, ["Release Model"])
+        self.assertEqual(plan.missing, ["Release Model"])
+        self.assertEqual(plan.stale, ["Release Model"])
+
+    def test_plan_unit_refuses_a_section_already_carried_under_another_heading(self) -> None:
+        hub = "# T\n\n## New Name\n\nThe rule text.\n"
+        target = "# T\n\n## Old Name\n\nThe rule text.\n"
+        with self.assertRaisesRegex(carry.CarryError, "already appears in the target"):
+            self._unit(hub, target, ["New Name"])
+
+    def test_plan_unit_ignores_matching_text_outside_a_section_body(self) -> None:
+        hub = "# T\n\n## New Name\n\nThe rule text.\n"
+        target = "# T\n\nThe rule text.\n\n## Other\n\nLocal.\n"
+        self.assertEqual(self._unit(hub, target, ["New Name"]).missing, ["New Name"])
+
+    def test_apply_plans_writes_nothing_when_a_later_insertion_fails(self) -> None:
+        hub = "# T\n\n## A\n\nHub.\n\n## B\n\nb\n"
+        fenced = "# T\n\n## A\n\nOld.\n\n```\nunclosed fence\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            (root / "hub").mkdir()
+            (root / "target").mkdir()
+            for name, target_text in (
+                ("AGENTS.md", "# T\n\n## A\n\nOld.\n"),
+                ("GOVERNANCE.md", fenced),
+            ):
+                (root / "hub" / name).write_bytes(hub.encode("utf-8"))
+                (root / "target" / name).write_bytes(target_text.encode("utf-8"))
+            plans = carry.plan_sections(
+                root / "hub", root / "target", [("AGENTS.md", ["A"]), ("GOVERNANCE.md", ["A", "B"])]
+            )
+            before = (root / "target" / "AGENTS.md").read_bytes()
+            with self.assertRaises(carry.CarryError):
+                carry.apply_plans(root / "target", plans)
+            self.assertEqual((root / "target" / "AGENTS.md").read_bytes(), before)
+
+    def test_plan_record_reports_the_missing_sections_beside_the_stale_ones(self) -> None:
+        hub = "# T\n\n## Fleet Bootstrap\n\nHub.\n\n## Release Model\n\nHub only.\n"
+        target = "# T\n\n## Fleet Bootstrap\n\nOld.\n"
+        plan = self._unit(hub, target, ["Fleet Bootstrap", "Release Model"])
+
+        self.assertEqual(
+            carry.plan_record(plan),
+            {
+                "missing": ["Release Model"],
+                "path": "AGENTS.md",
+                "sections": ["Fleet Bootstrap", "Release Model"],
+                "stale": ["Fleet Bootstrap", "Release Model"],
+            },
+        )
+
+    def test_plan_unit_does_not_read_a_section_the_hub_still_carries_as_a_rename(self) -> None:
+        hub = "# T\n\n## Old\n\nMoved to New.\n\n## New\n\nThe rule text.\n"
+        target = "# T\n\n## Old\n\nThe rule text.\n"
+        plan = self._unit(hub, target, ["Old", "New"])
+        self.assertEqual(plan.missing, ["New"])
+        self.assertEqual(plan.stale, ["Old", "New"])
+
+    def test_plan_unit_compares_every_target_section_even_when_a_name_repeats(self) -> None:
+        hub = "# T\n\n## New Name\n\nThe rule text.\n"
+        target = "# T\n\n## Dup\n\nOne.\n\n## Dup\n\nThe rule text.\n"
+        with self.assertRaisesRegex(carry.CarryError, "already appears in the target"):
+            self._unit(hub, target, ["New Name"])
+
+    def test_insert_sections_keys_a_name_with_stray_whitespace_like_section_span(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
+        target = carry.split_lines("# T\n\n## A\n\na\n")
+
+        result = "".join(carry.insert_sections(target, hub, [" B "], "AGENTS.md"))
+
+        self.assertEqual(result, "# T\n\n## A\n\na\n\n## B\n\nb\n")
+
+    def test_insert_sections_follows_the_hub_order_and_keeps_local_sections(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n")
+        target = carry.split_lines("# T\n\n## A\n\na\n\n## Local\n\nmine\n\n## C\n\nc\n")
+
+        result = "".join(carry.insert_sections(target, hub, ["B"], "AGENTS.md"))
+
+        self.assertEqual(result, "# T\n\n## A\n\na\n\n## B\n\nb\n\n## Local\n\nmine\n\n## C\n\nc\n")
+
+    def test_insert_sections_falls_back_to_the_following_section_then_the_end(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
+        first = carry.split_lines("# T\n\n## B\n\nb\n")
+        none = carry.split_lines("# T\n\n## Local\n\nmine")
+
+        self.assertEqual(
+            "".join(carry.insert_sections(first, hub, ["A"], "AGENTS.md")),
+            "# T\n\n## A\n\na\n\n## B\n\nb\n",
+        )
+        self.assertEqual(
+            "".join(carry.insert_sections(none, hub, ["A"], "AGENTS.md")),
+            "# T\n\n## Local\n\nmine\n\n## A\n\na\n",
+        )
+
+    def test_insert_sections_keeps_a_crlf_file_crlf_and_inserts_several_in_order(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n")
+        target = carry.split_lines("# T\r\n\r\n## A\r\n\r\na\r\n")
+
+        result = "".join(carry.insert_sections(target, hub, ["C", "B"], "AGENTS.md"))
+
+        self.assertEqual(
+            result, "# T\r\n\r\n## A\r\n\r\na\r\n\r\n## B\r\n\r\nb\r\n\r\n## C\r\n\r\nc\r\n"
+        )
+
+    def test_apply_plans_inserts_a_missing_section_and_updates_a_stale_one(self) -> None:
+        hub = (
+            "# T\n\n## Fleet Bootstrap\n\nThe hub's current wording.\n\n"
+            "## Release Model\n\nHub only.\n"
+        )
+        target = "# T\n\n## Fleet Bootstrap\n\nOld wording.\n\n## Local\n\nMine.\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            (root / "hub").mkdir()
+            (root / "target").mkdir()
+            (root / "hub" / "AGENTS.md").write_bytes(hub.encode("utf-8"))
+            (root / "target" / "AGENTS.md").write_bytes(target.encode("utf-8"))
+            plans = carry.plan_sections(
+                root / "hub",
+                root / "target",
+                [("AGENTS.md", ["Fleet Bootstrap", "Release Model"])],
+            )
+            carry.apply_plans(root / "target", plans)
+            written = (root / "target" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(
+            written,
+            "# T\n\n## Fleet Bootstrap\n\nThe hub's current wording.\n\n"
+            "## Release Model\n\nHub only.\n\n## Local\n\nMine.\n",
+        )
 
     def test_a_section_ending_the_hub_file_keeps_a_blank_line_before_what_follows(self) -> None:
         """The hub's last section carries no blank line before a following heading, because it has
@@ -681,7 +815,9 @@ class CarrySectionTests(unittest.TestCase):
             (hub / "GOVERNANCE.md").write_bytes(HUB_DOC.encode("utf-8"))
             before = (target / "AGENTS.md").read_bytes()
 
-            with self.assertRaisesRegex(carry.CarryError, "absent from the target"):
+            with self.assertRaisesRegex(
+                carry.CarryError, "absent from the target, which is a standup"
+            ):
                 carry.plan_sections(
                     hub,
                     target,

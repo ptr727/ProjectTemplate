@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -488,9 +488,15 @@ def normalize_eol(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def h2_headings(lines: list[str]) -> list[str]:
-    """Every level-two heading's parsed text, in order, reading a `## ` inside a code block as content."""
-    return [h.text for h in fidelity_text_module().headings("".join(lines)) if h.level == 2]
+def h2_spans(lines: list[str]) -> list[tuple[str, tuple[int, int]]]:
+    """Each level-two region's folded name and `[start, end)`, in order, repeated names included.
+
+    One parse of the document, with the extents `section_span` reads.
+    """
+    return [
+        (fold(heading.text), (heading.line, len(lines) if end is None else end))
+        for heading, end in fidelity_text_module().sections("".join(lines))
+    ]
 
 
 def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
@@ -509,6 +515,21 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     return span[0], len(lines) if span[1] is None else span[1]
 
 
+def section_body(lines: list[str], span: tuple[int, int]) -> str:
+    """A region's text after its heading line, with line endings and surrounding blank lines normalized away."""
+    return comparable_region(lines, (span[0] + 1, span[1])).strip()
+
+
+def fold(name: str) -> str:
+    """A section name as `section_span` and `verbatim_section_names` key it."""
+    return name.strip().lower()
+
+
+def strip_terminator(line: str) -> str:
+    """The line without its own terminator."""
+    return line[: len(line) - len(terminator(line))]
+
+
 def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
     """The region rendered the way `spec/fidelity_text.py`'s `extract_section` renders it.
 
@@ -522,10 +543,10 @@ def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
 
     The fidelity
     comparison therefore reads them as the same content, and the raw bytes do not. So this is the
-    form to compare. It is not the form to write. `replace_sections` builds its own lines, because
+    form to compare. It is not the form to write. `render_region` builds its own lines, because
     writing needs the target's own terminators and this form has flattened them.
     """
-    bodies = [line[: len(line) - len(terminator(line))] for line in lines[span[0] : span[1]]]
+    bodies = [strip_terminator(line) for line in lines[span[0] : span[1]]]
     if span[1] == len(lines) and lines and terminator(lines[-1]):
         bodies.append("")
     return "\n".join(bodies)
@@ -586,7 +607,7 @@ def verbatim_section_names(item: dict[str, Any], selectors: set[str]) -> list[st
             raise CarryError("section declaration name must be a non-empty string")
         # Folded and stripped, matching `section_span`'s own lookup key.
         # That is because two spellings of one heading resolve to one region, and replacing that region twice would splice its tail in again.
-        if name.strip().lower() not in {seen.strip().lower() for seen in out}:
+        if fold(name) not in {fold(seen) for seen in out}:
             out.append(name)
     return out
 
@@ -622,8 +643,8 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
                 f"a verbatim section is a Markdown heading region, so it cannot be declared on {path}"
             )
         merged = units.setdefault(path, [])
-        seen = {name.strip().lower() for name in merged}
-        merged.extend(name for name in names if name.strip().lower() not in seen)
+        seen = {fold(name) for name in merged}
+        merged.extend(name for name in names if fold(name) not in seen)
     for path in sorted(set(units) & placeholder_paths):
         raise CarryError(
             f"{path} declares both placeholders and verbatim sections, and a verbatim unit carries"
@@ -631,6 +652,29 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
             " overwrite a substituted value"
         )
     return list(units.items())
+
+
+def render_region(
+    source_lines: list[str], source_span: tuple[int, int], ending: str, target_ends_file: bool
+) -> list[str]:
+    """The hub's region as lines carrying the target's `ending`, with its trailing boundary fitted to where it lands.
+
+    A region runs to the next level-two heading.
+    So the blank line before that heading is inside it, and a section ending its file has none.
+    Where the two copies differ on that, `comparable_region` reads both as the same content.
+    So the boundary is reconciled to what this document needs rather than copied from the other one.
+    The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
+    Every line is terminated, or a region spliced ahead of more of the file would run into the next heading.
+    """
+    region = [
+        strip_terminator(line) + ending for line in source_lines[source_span[0] : source_span[1]]
+    ]
+    source_ends_file = source_span[1] == len(source_lines)
+    if source_ends_file and not target_ends_file:
+        region.append(ending)
+    elif target_ends_file and not source_ends_file and region and not region[-1].strip():
+        region.pop()
+    return region
 
 
 def replace_sections(
@@ -663,25 +707,72 @@ def replace_sections(
     default_ending = file_ending(target_lines)
     for (start, end), source_span in ordered:
         ending = terminator(out[start]) or default_ending
-        region = []
-        for line in source_lines[source_span[0] : source_span[1]]:
-            body = line[: len(line) - len(terminator(line))]
-            region.append(body + ending if terminator(line) else body)
-        # A region spliced ahead of more of the file has to end terminated, or its last line would run into the heading that follows it.
-        if region and not terminator(region[-1]):
-            region[-1] += ending
-        # A region runs to the next level-two heading.
-        # So the blank line before that heading is inside it, and a section ending its file has none.
-        # Where the two copies differ on that, `comparable_region` reads both as the same content.
-        # So where they differ, the boundary is reconciled to what this document needs rather than copied from the other one.
-        # The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
-        source_ends_file = source_span[1] == len(source_lines)
-        target_ends_file = end == len(out)
-        if source_ends_file and not target_ends_file:
-            region.append(ending)
-        elif target_ends_file and not source_ends_file and region and not region[-1].strip():
-            region.pop()
+        region = render_region(source_lines, source_span, ending, end == len(out))
         out[start:end] = region
+    return out
+
+
+def insertion_point(target_lines: list[str], hub_order: list[str], section: str) -> int:
+    """The line index where a section the target lacks goes, following the hub's own section order.
+
+    The section goes after the target's copy of the nearest preceding hub section the target holds.
+    Failing that, it goes before the nearest following one. A target sharing no section with the
+    hub gets it appended. A local section sitting between two hub sections therefore stays where
+    the repository put it, and only the hub's relative order is reproduced.
+    """
+    held: dict[str, tuple[int, int]] = {}
+    for name, span in h2_spans(target_lines):
+        held.setdefault(name, span)
+    position = hub_order.index(fold(section))
+    for name in reversed(hub_order[:position]):
+        if name in held:
+            return held[name][1]
+    for name in hub_order[position + 1 :]:
+        if name in held:
+            return held[name][0]
+    return len(target_lines)
+
+
+def insert_sections(
+    target_lines: list[str], source_lines: list[str], sections: list[str], path: str
+) -> list[str]:
+    """`target_lines` with each named section the target lacks added, in the hub's order, nothing else touched.
+
+    Every name is one `plan_unit` has already located in the hub copy.
+
+    Each insertion is placed by `insertion_point` and carries the target's own line ending.
+    A section spliced ahead of a heading ends with a blank line, and one appended to the file
+    ends without. A target ending on a non-blank or unterminated line gains the separator the new
+    heading needs, which is the one change outside the new region.
+    The result is checked to equal the original plus that separator exactly, once the new regions are removed.
+    """
+    out = list(target_lines)
+    ending = file_ending(target_lines)
+    hub_order = [key for key, _ in h2_spans(source_lines)]
+    original = "".join(target_lines)
+    separator = ""
+    appended = False
+    for section in sorted(sections, key=lambda name: hub_order.index(fold(name))):
+        source_span = cast("tuple[int, int]", section_span(source_lines, section))
+        at = insertion_point(out, hub_order, section)
+        at_end = at == len(out)
+        if at_end:
+            if out and not terminator(out[-1]):
+                out[-1] += ending
+                if not appended:
+                    separator += ending
+            if out and out[-1].strip():
+                out.append(ending)
+                if not appended:
+                    separator += ending
+            appended = True
+            at = len(out)
+        region = render_region(source_lines, source_span, ending, at_end)
+        out[at:at] = region
+    if outside_sections(out, sections, path) != original + separator:
+        raise CarryError(
+            f"post-insert check failed for {path}: text outside the inserted sections changed"
+        )
     return out
 
 
@@ -705,9 +796,7 @@ def assert_sections(
     after_lines = split_lines(decode_text(target_file, path), path)
     # Folded, because `section_span` locates a heading folded, so a re-cased heading is drift this tool fixes rather than a change of section set.
     # Any other edit to a heading line is caught byte-for-byte by the two comparisons below.
-    if [name.lower() for name in h2_headings(after_lines)] != [
-        name.lower() for name in h2_headings(before_lines)
-    ]:
+    if [key for key, _ in h2_spans(after_lines)] != [key for key, _ in h2_spans(before_lines)]:
         raise CarryError(
             f"post-apply check failed for {path}: the level-two heading sequence changed,"
             " so the section set or its order did not survive the write"
@@ -766,6 +855,7 @@ class SectionPlan:
     source_lines: list[str]
     target_lines: list[str]
     stale: list[str]
+    missing: list[str]
 
 
 def plan_unit(
@@ -781,7 +871,9 @@ def plan_unit(
         )
     source_lines = split_lines(decode_text(source_file, path), path)
     target_lines = split_lines(decode_text(target_file, path), path)
-    stale = []
+    stale: list[str] = []
+    missing: list[str] = []
+    hub_names = {key for key, _ in h2_spans(source_lines)}
     for section in declared:
         source_span = section_span(source_lines, section)
         if source_span is None:
@@ -789,19 +881,37 @@ def plan_unit(
                 f"{path} section '{section}' is declared verbatim but absent from the hub's own copy"
             )
         target_span = section_span(target_lines, section)
-        if target_span is None:
-            raise CarryError(
-                f"{path} section '{section}' is declared verbatim but absent from the target."
-                " Where a declared section belongs in a file that never carried it is a standup"
-                " question rather than a drift question, so this refuses rather than guessing"
-            )
         source_region = comparable_region(source_lines, source_span)
-        target_region = comparable_region(target_lines, target_span)
         guard_governed_drift(path, section, source_region, "hub")
+        if target_span is None:
+            body = section_body(source_lines, source_span)
+            if body and any(
+                section_body(target_lines, span) == body
+                for key, span in h2_spans(target_lines)
+                if key not in hub_names
+            ):
+                raise CarryError(
+                    f"{path} section '{section}' is absent by heading but its text already appears in the target,"
+                    " so it may be carried under another heading. Reconcile that by hand rather than inserting a duplicate"
+                )
+            missing.append(section)
+            stale.append(section)
+            continue
+        target_region = comparable_region(target_lines, target_span)
         guard_governed_drift(path, section, target_region, "target")
         if source_region != target_region:
             stale.append(section)
-    return SectionPlan(path, declared, source_lines, target_lines, stale)
+    return SectionPlan(path, declared, source_lines, target_lines, stale, missing)
+
+
+def plan_record(plan: SectionPlan) -> dict[str, Any]:
+    """The `check-sections` line for one file: what it declares, which are stale, and which of those it lacks."""
+    return {
+        "missing": plan.missing,
+        "path": plan.path,
+        "sections": plan.declared,
+        "stale": plan.stale,
+    }
 
 
 def plan_sections(
@@ -817,18 +927,24 @@ def plan_sections(
 
 
 def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
-    """Write each plan's stale regions and assert the result, one file at a time.
+    """Insert and re-vendor each plan's regions in memory for every file, then write and assert them one file at a time.
 
-    Every refusal has already been raised by `plan_sections`, so nothing here can decline to
-    proceed. What can still fail is the write itself or the assertion after it. Each names the
+    Every refusal, including a failed insertion or splice, is raised before the first file is written.
+    What can still fail afterwards is the write itself or the assertion after it. Each names the
     file it was working on. That is because by then an earlier file may already hold its
     re-vendored content, and the operator has to know which.
     """
+    pending = []
     for plan in plans:
         if not plan.stale:
             continue
+        inserted = insert_sections(plan.target_lines, plan.source_lines, plan.missing, plan.path)
+        present = [name for name in plan.stale if name not in plan.missing]
+        pending.append(
+            (plan, inserted, replace_sections(inserted, plan.source_lines, present, plan.path))
+        )
+    for plan, inserted, rewritten in pending:
         target_file = relative_root(target, plan.path)
-        rewritten = replace_sections(plan.target_lines, plan.source_lines, plan.stale, plan.path)
         try:
             target_file.write_bytes("".join(rewritten).encode("utf-8"))
         except OSError as exc:
@@ -840,7 +956,7 @@ def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
             plan.source_lines,
             plan.stale,
             plan.declared,
-            plan.target_lines,
+            inserted,
         )
         print(json.dumps({"path": plan.path, "postApply": True, "stale": []}, sort_keys=True))
 
@@ -880,11 +996,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     print(f"types: {','.join(entry_types(entry))}")
     print(f"files: {len(plans)}")
     for plan in plans:
-        print(
-            json.dumps(
-                {"path": plan.path, "sections": plan.declared, "stale": plan.stale}, sort_keys=True
-            )
-        )
+        print(json.dumps(plan_record(plan), sort_keys=True))
     if mode != "apply-sections":
         return 0 if all(not plan.stale for plan in plans) else 1
     apply_plans(target, plans)
