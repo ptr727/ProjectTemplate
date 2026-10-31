@@ -204,6 +204,7 @@ class ProvenanceTests(unittest.TestCase):
         {
             "test_the_script_runs_through_uv_with_no_project",
             "test_a_missing_uv_is_the_gate_not_running",
+            "test_moving_main_between_fetches_refuses_a_mixed_pair",
         }
     )
 

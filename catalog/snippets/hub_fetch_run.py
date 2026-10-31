@@ -65,7 +65,7 @@ def resolve_main_commit() -> str | None:
 
     Every file a run fetches comes from that one commit, so a script and its data always pair.
     Where neither resolves, one line names both causes and the gate runs against `main` instead.
-    A moving `main` is fetched twice and the run is refused if the two reads differ, so a mixed pair never runs.
+    A moving `main` is fetched twice and the run is refused if the two reads differ, which catches a push landing mid-run.
     A hook with no network cannot fetch the gate at all, and the CI gate is the enforcement.
     """
     token = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
@@ -199,7 +199,7 @@ def main(argv: list[str]) -> int:
             if commit is None and len(paths) > 1 and fetch_all(ref, paths) != fetched:
                 print(
                     "hub_fetch_run: main moved while the files were fetched, "
-                    "so a mixed pair was refused.",
+                    "so a mixed pair was refused, re-run to fetch a consistent pair.",
                     file=sys.stderr,
                 )
                 print("hub_fetch_run: the gate did not run.", file=sys.stderr)
