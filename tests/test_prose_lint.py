@@ -3626,6 +3626,22 @@ class TestHomePathRule(BaitCase):
             )
             with self.subTest(indicator=indicator):
                 self.assertEqual(["home-path"], self.kinds(text, {"home-path"}, "compose.yml"))
+        for key, indicator in (
+            ("x-a#b", "|"),
+            ("x-a#b", "| # note"),
+            ("x-a#b", ">-"),
+            ('"x-a#b"', "|"),
+            ("'x a'", "|"),
+            ('"x #b"', "|"),
+            ("'x # b'", "|"),
+            ("x", "| # note"),
+        ):
+            text = (
+                f"services:\n  ledger:\n    {key}: {indicator}\n      volumes:\n"
+                f"        - ledger-cache:{NIX_HOME}/data\n{real}"
+            )
+            with self.subTest(key=key, indicator=indicator):
+                self.assertEqual(["home-path"], self.kinds(text, {"home-path"}, "compose.yml"))
         target = f"        target: {NIX_HOME}/media"
         for entry in (
             f"      - type: bind\n        x-note: |\n          - ./old:{NIX_HOME}/media\n{target}",

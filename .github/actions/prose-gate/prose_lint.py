@@ -1308,10 +1308,23 @@ SHORT_MOUNT = re.compile(
     r"""^\s*-\s+["']?(?:[A-Za-z]:(?=[\\/]))?(?:\$\{[^}]*\}|[^:\s"'{}])+:(?P<target>/[^:\s"']*)"""
 )
 LONG_MOUNT = re.compile(r"""^\s*(?:-\s+)?target:\s+["']?(?P<target>/[^\s"']*)""")
-BLOCK_SCALAR = re.compile(
-    r"^(?P<lead>\s*(?:-\s+)*)(?P<key>[^\s#][^#]*?:\s+)?(?:[!&]\S*\s+)*[|>]"
-    r"(?:[-+][1-9]?|[1-9][-+]?)?\s*(?:#.*)?$"
-)
+SCALAR_LEAD = re.compile(r"^\s*(?:-\s+)*")
+SCALAR_KEY = re.compile(r":\s+(?:[!&]\S*\s+)*$")
+
+
+def scalar_openers(texts: list[str]) -> dict[int, int]:
+    """The line index of each YAML block scalar header, and the column its content sits deeper than."""
+    out: dict[int, int] = {}
+    text = "\n".join(texts)
+    starts = Starts(text)
+    for offset, kind, value in lexer_for("yaml").get_tokens_unprocessed(text):
+        if kind not in Punctuation.Indicator or value not in "|>":
+            continue
+        number, col = starts.at(offset)
+        row, line = number - 1, texts[number - 1]
+        lead = len(line) - len(SCALAR_LEAD.sub("", line, count=1))
+        out[row] = lead if SCALAR_KEY.search(line[lead:col]) else len(line) - len(line.lstrip())
+    return out
 
 
 def container_paths(lines: tuple[Line, ...]) -> dict[int, range]:
@@ -1324,7 +1337,8 @@ def container_paths(lines: tuple[Line, ...]) -> dict[int, range]:
     out: dict[int, range] = {}
     block: int | None = None
     opaque: int | None = None
-    for line in lines:
+    openers = scalar_openers([line.text for line in lines])
+    for row, line in enumerate(lines):
         body = line.text.lstrip()
         if not body or body.startswith("#"):
             continue
@@ -1332,8 +1346,8 @@ def container_paths(lines: tuple[Line, ...]) -> dict[int, range]:
         if opaque is not None and indent > opaque:
             continue
         opaque = None
-        if scalar := BLOCK_SCALAR.match(line.text):
-            opaque = len(scalar["lead"]) if scalar["key"] else indent
+        if row in openers:
+            opaque = openers[row]
         if block is not None and (indent < block or (indent == block and body[0] != "-")):
             block = None
         if VOLUMES_KEY.match(line.text):
