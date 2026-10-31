@@ -14,12 +14,13 @@ It refuses unless all of these hold:
 - The owner and repository pass `cleanup`'s write-scope check, before any read.
 - The pull request is open, not a draft, and based on `develop`.
 - Its head lives in the base repository rather than in a fork.
-- Its head branch is not a permanent branch, and no ruleset or branch protection covers it.
+- Its head branch is not a permanent branch, the only branches the fleet's rulesets cover.
 - `wait`'s own gate, run once on a short bound and requesting no review, exits 0.
+- The head read after the gate is the head read before it.
 - A fresh read after the gate meets each readable item that 0 leaves undecided. Coverage reads full,
   a file table, or an attested local pass. No thread is unresolved. Every count the digest builds of
-  a finding no thread carries is a zero it can read. The merge state reads CLEAN.
-- The head read after the gate is the head read before it.
+  a finding no thread carries is a zero it can read. No reviewer output is held or noted, and no
+  review request is pending. The merge state reads CLEAN.
 
 The merge is pinned to that head with `--match-head-commit`. It is confirmed by reading the pull
 request back rather than by the merge call's own answer. `--cleanup` then runs `cleanup` on the
@@ -45,14 +46,14 @@ MERGE_TIMEOUT = 120
 UNRUN = "gh could not be run or did not finish"
 MET_COVERAGE = ("full", "table", "carried:table", "local")
 UNTHREADED = ("suppressed", "previously_missed", "cr_outside_diff", "qodo_open")
-COUNTED = (*UNTHREADED, "overview", pr_review_digest.NO_THREAD)
+NOTED = pr_review_digest.NOTED
+COUNTED = (*UNTHREADED, "overview", pr_review_digest.NO_THREAD, NOTED)
+# The digest builds these as None where the source they count is absent from the pull request.
+ABSENT = ("previously_missed", "cr_outside_diff", "qodo_open")
 
 
-def ready(owner: str, repo: str, num: int, rules: bool) -> dict | None:
-    """The pull request where this merges it, else None once the refusal is printed.
-
-    The rule read is REST, and the head branch cannot change, so the read after the gate skips it.
-    """
+def ready(owner: str, repo: str, num: int) -> dict | None:
+    """The pull request where this merges it, else None once the refusal is printed."""
     pr = pr_cleanup.pr_target(owner, repo, num)
     branch, base, refusals = pr["headRefName"], pr.get("baseRefName"), []
     if pr.get("state") != "OPEN":
@@ -71,8 +72,6 @@ def ready(owner: str, repo: str, num: int, rules: bool) -> dict | None:
         refusals.append(f"its head lives in {head_repo or 'no repository'}, not {owner}/{repo}")
     if pr_cleanup.permanent_branch(branch, pr["defaultBranch"]):
         refusals.append(f"its head branch {branch!r} is a permanent branch")
-    if found := pr_cleanup.branch_rules(owner, repo, branch) if rules and not refusals else []:
-        refusals.append(f"its head branch {branch!r} is covered by {', '.join(found)}")
     if why := ", and ".join(refusals):
         print(f"status=REFUSED nothing was merged into {owner}/{repo} #{num}: {why}")
         return None
@@ -97,33 +96,43 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
     """The head one fresh read shows, and each gate item `wait`'s 0 leaves undecided that it fails.
 
     The coverage and the counts are the fields the digest builds, so a refusal names what the
-    driver was shown. A count it did not build, or one holding no number, refuses rather than
-    reading as zero. The threads are walked to the end, since the digest reads one page.
+    driver was shown. A count not built, holding no number, or cut short by a window refuses
+    rather than reading as zero. The threads are walked to the end, since the digest reads one page.
     """
     pr = core.full_read(owner, repo, num)
     built: list[tuple[str, object]] = []
     core.digest(owner, repo, num, pr=pr, fields_out=built)
     fields = dict(built)
-    unmet, counts, unread = [], [], []
+    unmet, unread = [], []
+    counts: list[str] = []
+    noted: list[str] = []
     if (cover := fields.get("coverage")) not in MET_COVERAGE:
         unmet.append(
             ("COVERAGE_NOT_SHOWN", f"the digest reads coverage={cover}, so item 2 is unmet")
         )
     if opened := core.open_on_head(owner, repo, num, pr):
         unmet.append(("THREADS_UNRESOLVED", f"{len(opened)} review thread(s) are unresolved"))
+    if (shapes := fields.get("shapes")) == "HELD":
+        unmet.append(("UNPLACED_PARTS_UNACKNOWLEDGED", "shapes=HELD owes item 4 an acknowledgment"))
+    elif shapes not in ("ok", "NOTED", "ACKNOWLEDGED"):
+        unread.append(f"shapes={shapes}")
+    if (asked := fields.get("requested")) != "no":
+        unmet.append(("REVIEW_PENDING", f"the digest reads requested={asked}"))
     for key in COUNTED:
-        # A field built as None is one the digest leaves out of its line, having nothing to count.
-        value = "0" if key in fields and fields[key] is None else str(fields.get(key, ""))
-        if not re.match(r"\d", value):
-            unread.append(f"{key}={value}" if value else f"{key} (not built)")
-        elif key != "overview" and not re.match(r"0( |$)", value):
-            counts.append(f"{key}={value}")
+        absent = key in ABSENT or (key == "overview" and fields.get("review_on_head") != "yes")
+        value = "0" if absent and key in fields and fields[key] is None else fields.get(key, "")
+        if not (m := re.match(r"(\d+)(/\d+)?( |$)", str(value))):
+            unread.append(f"{key}={value}" if value != "" else f"{key} (not built)")
+        elif key != "overview" and m[1] != "0":
+            (noted if key == NOTED else counts).append(f"{key}={value}")
     if unread:
         unmet.append(
             ("COUNT_UNREAD", f"the digest holds no readable count for {', '.join(unread)}")
         )
     if counts:
         unmet.append(("UNTHREADED_FINDINGS", f"the digest reads {', '.join(counts)}"))
+    if noted:
+        unmet.append(("OUTPUT_NOTED", f"the digest reads {noted[0]}, which item 4 reads by hand"))
     if (state := pr.get("mergeStateStatus")) != "CLEAN":
         unmet.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not CLEAN"))
     return pr["headRefOid"], unmet
@@ -156,7 +165,7 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
         return refused
     target = f"{owner}/{repo}"
     try:
-        pr = ready(owner, repo, num, rules=True)
+        pr = ready(owner, repo, num)
     except pr_cleanup.CleanupUnread as exc:
         print(f"status=UNREAD nothing was merged: {exc}")
         return 2
@@ -166,22 +175,22 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
     try:
         code = gate(owner, repo, num)
         read_head, unmet = unmet_items(owner, repo, num) if code == 0 else (head, [])
-        after = ready(owner, repo, num, rules=False) if code == 0 and not unmet else None
+        after = ready(owner, repo, num) if code == 0 and not unmet and read_head == head else None
     except (SystemExit, pr_cleanup.CleanupUnread) as exc:
         print(f"status=UNREAD nothing was merged: a read for the gate did not answer: {exc}")
         return 2
     if code != 0:
         print(f"note: nothing was merged, since the Merge Gate read above exited {code}")
         return code
+    if (now := read_head if read_head != head or after is None else after["headRefOid"]) != head:
+        print(
+            f"status=HEAD_MOVED nothing was merged: #{num} on {target} is at {now}, and the gate "
+            f"read began at {head}"
+        )
+        return 1
     for status, why in unmet:
         print(f"status={status} nothing was merged into {target} #{num}: {why}")
     if after is None:
-        return 1
-    if moved := sorted({read_head, after["headRefOid"]} - {head}):
-        print(
-            f"status=HEAD_MOVED nothing was merged: #{num} on {target} is at "
-            f"{', '.join(moved)}, and the gate read began at {head}"
-        )
         return 1
     answered = merge_call(target, num, head)
     try:
@@ -203,9 +212,10 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
         print(f"status=MERGED pr={num} head={head} merge_commit={commit}, confirmed on read back")
         return pr_cleanup.cleanup(owner, repo, num, checkout) if cleanup else 0
     if answered not in (None, 0) and state == "OPEN":
+        status = "MERGE_REFUSED" if (now := landed.get("headRefOid")) == head else "HEAD_MOVED"
         print(
-            f"status=MERGE_REFUSED gh refused the merge of #{num} on {target} with exit "
-            f"{answered}, and it reads OPEN, so nothing was merged"
+            f"status={status} gh refused the merge of #{num} on {target} with exit "
+            f"{answered}, and it reads OPEN at {now}, so nothing was merged"
         )
         return 1
     print(

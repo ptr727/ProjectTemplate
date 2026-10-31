@@ -51,7 +51,7 @@ from pr_review_rounds import (
     window_blind,
 )
 
-NO_THREAD = "FINDINGS WITH NO THREAD"
+NO_THREAD, NOTED = "FINDINGS WITH NO THREAD", "REVIEWER OUTPUT NOTED"
 BEHIND_THE_WINDOW = (
     "  BEHIND THE WINDOW ({value}): the newest {window} carry "
     "none from the reviewer and older ones exist, so this cannot decide"
@@ -112,8 +112,7 @@ def render(
     `quota` is the run log's rate-limit sentence for the refusal `digest_refusal` names, read by the
     caller. `run_log` is the caller's `RUN LOG READING` line for that refusal, empty for none.
     Where `seen` is a set, only threads absent from it print, marked new, and are added.
-    Where `fields_out` is a list, the header's fields and the `NO_THREAD` count are appended to it.
-    A gate then reads the values this renders rather than parsing the text.
+    Where `fields_out` is a list, the header's fields and the counts a gate reads are appended.
     """
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
@@ -176,13 +175,9 @@ def render(
     }
     qodo = qodo_comment(pr)
     qodo_open = [s for s in reading(qodo, QODO_LOGIN).sections if s.kind == "open"] if qodo else []
-    shown = []
-    for t in unresolved:
-        if seen is not None:
-            if t["id"] in seen:
-                continue
-            seen.add(t["id"])
-        shown.append(t)
+    shown = [t for t in unresolved if seen is None or t["id"] not in seen]
+    if seen is not None:
+        seen.update(t["id"] for t in shown)
     plus = "+" if truncated else ""
     # The repository leads the line, since a digest of the wrong pull request is well-formed.
     fields: list[tuple[str, object]] = [
@@ -225,15 +220,13 @@ def render(
         ("stuck", ",".join(sorted({s for _, s in stuck})) or None),
         ("new", len(shown) if seen is not None else None),
     ]
+    files = (pr.get("files") or {}).get("nodes") or []
     unmatched, marked = adapter.listed_lines(
-        found.listed_items if found else (),
-        threads,
-        (pr.get("files") or {}).get("nodes") or [],
-        truncated,
+        found.listed_items if found else (), threads, files, truncated
     )
     owed = max(found.unthreaded, unmatched) if found is not None else 0
     if fields_out is not None:
-        fields_out += [*fields, (NO_THREAD, owed)]
+        fields_out += [*fields, (NO_THREAD, owed), (NOTED, len(notes))]
     lines = [header(fields)]
     if refusal:
         lines.append(
@@ -250,7 +243,7 @@ def render(
             lines.append(run_log)
     if notes:
         lines.append(
-            f"  REVIEWER OUTPUT NOTED ({len(notes)}): the reader placed part of what the reviewer "
+            f"  {NOTED} ({len(notes)}): the reader placed part of what the reviewer "
             "sent nowhere, so read the body itself before closing the review loop. A spelling "
             f"to add belongs in `scripts/reviewers/` on {hub}, which hosts this script"
         )

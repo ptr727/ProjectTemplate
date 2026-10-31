@@ -98,6 +98,7 @@ mutation($refId:ID!){
   deleteRef(input:{refId:$refId}){ clientMutationId }}
 """
 DELETE_SETTLE_DELAYS = (1, 2, 4)
+PERMANENT = ("develop", "main")
 
 
 class CleanupUnread(Exception):
@@ -163,7 +164,7 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
 
 def permanent_branch(branch: str, default: str) -> bool:
     """Whether `branch` is one a feature pull request's merge or cleanup never takes as its head."""
-    return branch in ("develop", "main", default)
+    return branch in (*PERMANENT, default)
 
 
 def in_repository(node: dict, owner: str, repo: str) -> bool:
@@ -823,7 +824,7 @@ class CleanupSweep:
         self.apply = apply
         self.min_age = min_age
         self.problems = 0
-        self.permanent = {"develop", "main"}
+        self.permanent = set(PERMANENT)
         self.common = ""
         self.operating: set[str] = set()
 

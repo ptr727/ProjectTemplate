@@ -235,6 +235,16 @@ def owns(entry, prefix):
     return entry.startswith(prefix) and entry[len(prefix) : len(prefix) + 1] in (":", " ", ")")
 
 
+def replace_owned(held, owned, current):
+    """Drop every entry `owned` claims from `held` in place, append `current`, and return the dropped.
+
+    The permission rules and the autoMode entries share it, so their two strips cannot drift apart.
+    """
+    dropped = [e for e in held if owned(e)]
+    held[:] = [e for e in held if not owned(e)] + current
+    return dropped
+
+
 def at(data, path):
     """The value at a slash-separated key path, or MISSING where any step of it is absent."""
     node = data
@@ -1771,8 +1781,9 @@ def main():
     # Written in the same pass as the hook, so the file is read once and written once.
     allow = data.setdefault("permissions", {}).setdefault("allow", [])
     for prefix, rule in MANAGED_PERMISSIONS:
-        matched = [a for a in allow if isinstance(a, str) and owns(a, prefix)]
-        allow[:] = [a for a in allow if a not in matched] + [rule]
+        matched = replace_owned(
+            allow, lambda a, p=prefix: isinstance(a, str) and owns(a, p), [rule]
+        )
         # Counted over what the write removes rather than over what the prefix matched.
         # The current rule matches its own prefix, so a match-set count reports it as superseded.
         # A duplicate of it is removed too, and both can happen at once, so both are named.
@@ -1804,16 +1815,15 @@ def main():
                     "built-in rules still apply"
                 )
             continue
-        kept = [e for e in held if not tagged(e)]
         before = list(held)
-        held[:] = kept + rules
+        dropped = replace_owned(held, tagged, rules)
         if before == held:
             action = "already current"
         else:
-            action = "updated" if len(kept) < len(before) else "added"
-        if rules or len(kept) < len(before):
+            action = "updated" if dropped else "added"
+        if rules or dropped:
             done.append(f"autoMode.{name} rules tagged {AUTO_MODE_TAG.strip()}: {action}")
-        if rules and AUTO_MODE_DEFAULTS not in kept:
+        if rules and AUTO_MODE_DEFAULTS not in held:
             done.append(
                 f"autoMode.{name} holds no {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's "
                 "built-in rules. This kit leaves that choice as it stands"

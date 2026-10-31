@@ -1968,7 +1968,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
 COMMANDS = ("attest", "claims", "cleanup", "comment", "merge", "status", "reply", "wait")
 # Each flag listed is refused on a subcommand not owning it, since an ignored flag reads as one that took effect.
 # A late row is checked after the `cleanup` and `number` checks, which fixes the first error printed.
-# `cleanup` owns `--checkout` only once it has dispatched, so its row here only defers to that check.
+# `cleanup` and `merge` check `--checkout` once dispatched, so its row here only defers to them.
 FLAG_OWNERS = (
     ("--match", ("reply",), False),
     ("--path", ("reply",), False),

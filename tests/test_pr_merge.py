@@ -175,20 +175,10 @@ class TestRefusals(MergeCase):
                 self.gate.assert_not_called()
                 self.assert_not_merged()
 
-    def test_a_protected_head_branch_is_refused(self) -> None:
-        self.rules.return_value = ["branch protection"]
-        self.assertEqual(1, self.run_merge(target()))
-        self.assertIn("'feature/example' is covered by branch protection", self.out.getvalue())
-        self.rules.assert_called_once_with("example", "repo", "feature/example")
-        self.gate.assert_not_called()
-        self.assert_not_merged()
-
-    def test_an_unread_branch_rule_is_unread_rather_than_refused(self) -> None:
-        self.rules.side_effect = pr_merge.pr_cleanup.CleanupUnread("the branch rules read failed")
-        self.assertEqual(2, self.run_merge(target()))
-        self.assertIn("status=UNREAD nothing was merged", self.out.getvalue())
-        self.gate.assert_not_called()
-        self.assert_not_merged()
+    def test_no_branch_rule_is_read_before_the_merge(self) -> None:
+        """The fleet's rulesets cover only the permanent branches, which are refused by name."""
+        self.assertEqual(0, self.run_merge(target(), target(), MERGED))
+        self.rules.assert_not_called()
 
     def test_an_unanswered_first_read_is_unread_rather_than_refused(self) -> None:
         unread = pr_merge.pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
@@ -302,7 +292,7 @@ class TestUnmetItems(MergeCase):
         open_count="0 open findings",
         covers="<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
         entries=0,
-        verdict="### No changes recommended",
+        verdict="### Approval recommended",
     )
 
     def unmet_on(self, pr: dict) -> list[str]:
@@ -397,6 +387,71 @@ class TestUnmetItems(MergeCase):
             ["COUNT_UNREAD the digest holds no readable count for qodo_open (not built)"], unmet
         )
 
+    def fields_on(self, pr: dict, **fields: object) -> list[str]:
+        """`unmet_on`, each named digest field rebuilt to a value no crafted payload reaches."""
+        real = pr_review.digest
+
+        def rebuilt(owner: str, repo: str, num: int, **kwargs: Any) -> tuple[str, int]:
+            answer = real(owner, repo, num, **kwargs)
+            kwargs["fields_out"][:] = [(k, fields.get(k, v)) for k, v in kwargs["fields_out"]]
+            return answer
+
+        with mock.patch.object(pr_review, "digest", side_effect=rebuilt):
+            return self.unmet_on(pr)
+
+    def test_reviewer_output_held_or_noted_is_unmet_until_acknowledged(self) -> None:
+        held = fixtures.review(body=fixtures.unplaced())
+        fp = fixtures.pr_review_rounds.shape_hold(fixtures.payload([held]))
+        assert fp is not None
+        acked = fixtures.ack(fp[0], "OWNER")
+        earlier = fixtures.review(oid=fixtures.OLD, body=fixtures.unplaced("Earlier."), rid="PRR_o")
+        for label, reviews, comments, want, unwanted in (
+            ("held", [held], [], "UNPLACED_PARTS_UNACKNOWLEDGED", "OUTPUT_NOTED"),
+            ("acknowledged", [held], [acked], None, "UNPLACED_PARTS"),
+            ("noted", [earlier, fixtures.review(body=self.CLEAN)], [], "OUTPUT_NOTED", "UNPLACED"),
+            ("noted under an acknowledgment", [earlier, held], [acked], "OUTPUT_NOTED", "UNPLACED"),
+        ):
+            with self.subTest(label):
+                pr = fixtures.payload(reviews, comments=comments, files=["a.py"])
+                unmet = self.unmet_on(pr)
+                self.assertFalse(any(item.startswith(unwanted) for item in unmet), unmet)
+                if want is not None:
+                    self.assertTrue(any(item.startswith(want) for item in unmet), unmet)
+
+    def test_a_pending_review_request_is_unmet(self) -> None:
+        self.assertEqual(
+            ["REVIEW_PENDING the digest reads requested=yes"],
+            self.unmet_on(self.clean(pending=True)),
+        )
+        self.assertEqual(
+            ["REVIEW_PENDING the digest reads requested=None"],
+            self.fields_on(self.clean(), requested=None),
+        )
+
+    def test_a_count_built_as_none_is_zero_only_where_its_source_is_absent(self) -> None:
+        unread = "COUNT_UNREAD the digest holds no readable count for"
+        for label, fields, want in (
+            ("no head round", {"overview": None, "review_on_head": "local"}, []),
+            ("head round", {"overview": None}, [f"{unread} overview=None"]),
+            ("suppressed", {"suppressed": None}, [f"{unread} suppressed=None"]),
+            ("no qodo", {"qodo_open": None}, []),
+            ("no outside diff", {"cr_outside_diff": None, "previously_missed": None}, []),
+        ):
+            with self.subTest(label):
+                self.assertEqual(want, self.fields_on(self.clean(), **fields))
+        unmarked = fixtures.payload([fixtures.review(body="Looks narrow.")], files=["a.py"])
+        self.assertIn(f"{unread} overview=None", self.unmet_on(unmarked))
+
+    def test_a_count_a_cut_reviews_window_leaves_a_floor_is_unread(self) -> None:
+        cut = "0+ (on_head=0 earlier=0)"
+        self.assertEqual(
+            [f"COUNT_UNREAD the digest holds no readable count for suppressed={cut}"],
+            self.fields_on(self.clean(), suppressed=cut),
+        )
+        unmet = self.unmet_on(self.clean(older_reviews=True))
+        self.assertTrue(any(item.startswith("COUNT_UNREAD") for item in unmet), unmet)
+        self.assertFalse(any(item.startswith("UNTHREADED_FINDINGS") for item in unmet), unmet)
+
     def test_a_met_wait_with_an_open_thread_merges_nothing(self) -> None:
         """`wait` returns 0 on a Copilot-covered head without reading its threads."""
         self.unmet.side_effect = REAL_UNMET
@@ -414,6 +469,23 @@ class TestUnmetItems(MergeCase):
             self.out.getvalue(),
         )
         self.assert_not_merged()
+
+    def test_a_head_moved_is_reported_before_any_unmet_item(self) -> None:
+        self.unmet.return_value = (MOVED, [("COVERAGE_NOT_SHOWN", "coverage=none")])
+        self.assertEqual(1, self.run_merge(target(), target(), MERGED))
+        self.assertIn(
+            f"status=HEAD_MOVED nothing was merged: #123 on example/repo is at {MOVED}",
+            self.out.getvalue(),
+        )
+        self.assertNotIn("COVERAGE_NOT_SHOWN", self.out.getvalue())
+        self.assert_not_merged()
+
+    def test_a_merge_gh_refused_on_a_moved_head_reads_head_moved(self) -> None:
+        self.merge_rc = 1
+        self.assertEqual(1, self.run_merge(target(), target(), target(headRefOid=MOVED)))
+        self.assertIn("status=HEAD_MOVED gh refused the merge of #123", self.out.getvalue())
+        self.assertIn(f"reads OPEN at {MOVED}", self.out.getvalue())
+        self.cleanup.assert_not_called()
 
 
 class TestCleanup(MergeCase):
