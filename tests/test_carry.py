@@ -586,7 +586,9 @@ class CarrySectionTests(unittest.TestCase):
         self.assertIn("The hub's current table.\n\n## Local Addition\n", result)
         self.assertEqual(carry.h2_headings(carry.split_lines(result)), carry.h2_headings(target))
 
-    def _unit(self, hub_text: str, target_text: str | None, sections: list[str]) -> None:
+    def _unit(
+        self, hub_text: str, target_text: str | None, sections: list[str]
+    ) -> carry.SectionPlan:
         """Plan one AGENTS.md unit from two documents written to temporary hub and target trees."""
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
@@ -596,7 +598,7 @@ class CarrySectionTests(unittest.TestCase):
             (hub / "AGENTS.md").write_bytes(hub_text.encode("utf-8"))
             if target_text is not None:
                 (target / "AGENTS.md").write_bytes(target_text.encode("utf-8"))
-            carry.plan_unit(hub, target, "AGENTS.md", sections)
+            return carry.plan_unit(hub, target, "AGENTS.md", sections)
 
     def test_plan_unit_refuses_a_file_the_target_does_not_carry(self) -> None:
         with self.assertRaisesRegex(carry.CarryError, "absent from the target, which is a standup"):
@@ -608,15 +610,23 @@ class CarrySectionTests(unittest.TestCase):
 
     def test_plan_unit_plans_a_section_absent_from_the_target_as_missing(self) -> None:
         hub = HUB_DOC + "\n## Release Model\n\nHub only.\n"
-        with tempfile.TemporaryDirectory() as temp:
-            root = pathlib.Path(temp)
-            (root / "hub").mkdir()
-            (root / "target").mkdir()
-            (root / "hub" / "AGENTS.md").write_bytes(hub.encode("utf-8"))
-            (root / "target" / "AGENTS.md").write_bytes(TARGET_DOC.encode("utf-8"))
-            plan = carry.plan_unit(root / "hub", root / "target", "AGENTS.md", ["Release Model"])
+        plan = self._unit(hub, TARGET_DOC, ["Release Model"])
         self.assertEqual(plan.missing, ["Release Model"])
         self.assertEqual(plan.stale, ["Release Model"])
+
+    def test_plan_unit_refuses_a_section_already_carried_under_another_heading(self) -> None:
+        hub = "# T\n\n## New Name\n\nThe rule text.\n"
+        target = "# T\n\n## Old Name\n\nThe rule text.\n"
+        with self.assertRaisesRegex(carry.CarryError, "already appears in the target"):
+            self._unit(hub, target, ["New Name"])
+
+    def test_insert_sections_keys_a_name_with_stray_whitespace_like_section_span(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
+        target = carry.split_lines("# T\n\n## A\n\na\n")
+
+        result = "".join(carry.insert_sections(target, hub, [" B "], "AGENTS.md"))
+
+        self.assertEqual(result, "# T\n\n## A\n\na\n\n## B\n\nb\n")
 
     def test_insert_sections_follows_the_hub_order_and_keeps_local_sections(self) -> None:
         hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n")

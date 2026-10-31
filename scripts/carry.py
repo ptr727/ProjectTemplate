@@ -509,6 +509,11 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     return span[0], len(lines) if span[1] is None else span[1]
 
 
+def fold(name: str) -> str:
+    """A section name as `section_span` and `verbatim_section_names` key it."""
+    return name.strip().lower()
+
+
 def strip_terminator(line: str) -> str:
     """The line without its own terminator."""
     return line[: len(line) - len(terminator(line))]
@@ -704,7 +709,7 @@ def insertion_point(target_lines: list[str], hub_order: list[str], section: str)
     hub gets it appended. A local section sitting between two hub sections therefore stays where
     the repository put it, and only the hub's relative order is reproduced.
     """
-    position = hub_order.index(section.lower())
+    position = hub_order.index(fold(section))
     for name in reversed(hub_order[:position]):
         span = section_span(target_lines, name)
         if span is not None:
@@ -725,12 +730,15 @@ def insert_sections(
     A section spliced ahead of a heading ends with a blank line, and one appended to the file
     ends without. A target ending on a non-blank or unterminated line gains the separator the new
     heading needs, which is the one change outside the new region.
-    The result is checked to equal the original, apart from trailing whitespace, once the new regions are removed.
+    The result is checked to equal the original plus that separator exactly, once the new regions are removed.
     """
     out = list(target_lines)
     ending = file_ending(target_lines)
-    hub_order = [name.lower() for name in h2_headings(source_lines)]
-    for section in sorted(sections, key=lambda name: hub_order.index(name.lower())):
+    hub_order = [fold(name) for name in h2_headings(source_lines)]
+    original = "".join(target_lines)
+    separator = ""
+    appended = False
+    for section in sorted(sections, key=lambda name: hub_order.index(fold(name))):
         source_span = section_span(source_lines, section)
         if source_span is None:
             raise CarryError(f"{path} section '{section}' could not be located to insert")
@@ -739,12 +747,15 @@ def insert_sections(
         if at_end:
             if out and not terminator(out[-1]):
                 out[-1] += ending
+                separator += ending if not appended else ""
             if out and out[-1].strip():
                 out.append(ending)
+                separator += ending if not appended else ""
+            appended = True
             at = len(out)
         region = render_region(source_lines, source_span, ending, at_end)
         out[at:at] = region
-    if outside_sections(out, sections, path).rstrip() != "".join(target_lines).rstrip():
+    if outside_sections(out, sections, path) != original + separator:
         raise CarryError(
             f"post-insert check failed for {path}: text outside the inserted sections changed"
         )
@@ -860,6 +871,12 @@ def plan_unit(
         source_region = comparable_region(source_lines, source_span)
         guard_governed_drift(path, section, source_region, "hub")
         if target_span is None:
+            body = normalize_eol("".join(source_lines[source_span[0] + 1 : source_span[1]])).strip()
+            if body and body in normalize_eol("".join(target_lines)):
+                raise CarryError(
+                    f"{path} section '{section}' is absent by heading but its text already appears in the target,"
+                    " so it may be carried under another heading. Reconcile that by hand rather than inserting a duplicate"
+                )
             missing.append(section)
             stale.append(section)
             continue
