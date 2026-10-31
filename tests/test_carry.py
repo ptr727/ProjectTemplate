@@ -620,6 +620,11 @@ class CarrySectionTests(unittest.TestCase):
         with self.assertRaisesRegex(carry.CarryError, "already appears in the target"):
             self._unit(hub, target, ["New Name"])
 
+    def test_plan_unit_ignores_matching_text_outside_a_section_body(self) -> None:
+        hub = "# T\n\n## New Name\n\nThe rule text.\n"
+        target = "# T\n\nThe rule text.\n\n## Other\n\nLocal.\n"
+        self.assertEqual(self._unit(hub, target, ["New Name"]).missing, ["New Name"])
+
     def test_insert_sections_keys_a_name_with_stray_whitespace_like_section_span(self) -> None:
         hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
         target = carry.split_lines("# T\n\n## A\n\na\n")

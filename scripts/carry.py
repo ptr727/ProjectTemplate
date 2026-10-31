@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -509,6 +509,11 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     return span[0], len(lines) if span[1] is None else span[1]
 
 
+def section_body(lines: list[str], span: tuple[int, int]) -> str:
+    """A region's text after its heading line, with line endings and surrounding blank lines normalized away."""
+    return normalize_eol("".join(lines[span[0] + 1 : span[1]])).strip()
+
+
 def fold(name: str) -> str:
     """A section name as `section_span` and `verbatim_section_names` key it."""
     return name.strip().lower()
@@ -596,7 +601,7 @@ def verbatim_section_names(item: dict[str, Any], selectors: set[str]) -> list[st
             raise CarryError("section declaration name must be a non-empty string")
         # Folded and stripped, matching `section_span`'s own lookup key.
         # That is because two spellings of one heading resolve to one region, and replacing that region twice would splice its tail in again.
-        if name.strip().lower() not in {seen.strip().lower() for seen in out}:
+        if fold(name) not in {fold(seen) for seen in out}:
             out.append(name)
     return out
 
@@ -632,8 +637,8 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
                 f"a verbatim section is a Markdown heading region, so it cannot be declared on {path}"
             )
         merged = units.setdefault(path, [])
-        seen = {name.strip().lower() for name in merged}
-        merged.extend(name for name in names if name.strip().lower() not in seen)
+        seen = {fold(name) for name in merged}
+        merged.extend(name for name in names if fold(name) not in seen)
     for path in sorted(set(units) & placeholder_paths):
         raise CarryError(
             f"{path} declares both placeholders and verbatim sections, and a verbatim unit carries"
@@ -726,6 +731,8 @@ def insert_sections(
 ) -> list[str]:
     """`target_lines` with each named section the target lacks added, in the hub's order, nothing else touched.
 
+    Every name is one `plan_unit` has already located in the hub copy.
+
     Each insertion is placed by `insertion_point` and carries the target's own line ending.
     A section spliced ahead of a heading ends with a blank line, and one appended to the file
     ends without. A target ending on a non-blank or unterminated line gains the separator the new
@@ -739,18 +746,18 @@ def insert_sections(
     separator = ""
     appended = False
     for section in sorted(sections, key=lambda name: hub_order.index(fold(name))):
-        source_span = section_span(source_lines, section)
-        if source_span is None:
-            raise CarryError(f"{path} section '{section}' could not be located to insert")
+        source_span = cast("tuple[int, int]", section_span(source_lines, section))
         at = insertion_point(out, hub_order, section)
         at_end = at == len(out)
         if at_end:
             if out and not terminator(out[-1]):
                 out[-1] += ending
-                separator += ending if not appended else ""
+                if not appended:
+                    separator += ending
             if out and out[-1].strip():
                 out.append(ending)
-                separator += ending if not appended else ""
+                if not appended:
+                    separator += ending
             appended = True
             at = len(out)
         region = render_region(source_lines, source_span, ending, at_end)
@@ -782,8 +789,8 @@ def assert_sections(
     after_lines = split_lines(decode_text(target_file, path), path)
     # Folded, because `section_span` locates a heading folded, so a re-cased heading is drift this tool fixes rather than a change of section set.
     # Any other edit to a heading line is caught byte-for-byte by the two comparisons below.
-    if [name.lower() for name in h2_headings(after_lines)] != [
-        name.lower() for name in h2_headings(before_lines)
+    if [fold(name) for name in h2_headings(after_lines)] != [
+        fold(name) for name in h2_headings(before_lines)
     ]:
         raise CarryError(
             f"post-apply check failed for {path}: the level-two heading sequence changed,"
@@ -871,8 +878,11 @@ def plan_unit(
         source_region = comparable_region(source_lines, source_span)
         guard_governed_drift(path, section, source_region, "hub")
         if target_span is None:
-            body = normalize_eol("".join(source_lines[source_span[0] + 1 : source_span[1]])).strip()
-            if body and body in normalize_eol("".join(target_lines)):
+            body = section_body(source_lines, source_span)
+            if body and any(
+                section_body(target_lines, section_span(target_lines, name) or (0, 0)) == body
+                for name in h2_headings(target_lines)
+            ):
                 raise CarryError(
                     f"{path} section '{section}' is absent by heading but its text already appears in the target,"
                     " so it may be carried under another heading. Reconcile that by hand rather than inserting a duplicate"
