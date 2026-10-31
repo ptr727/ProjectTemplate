@@ -341,6 +341,15 @@ def thread_ids(pr: dict) -> tuple[str, ...]:
     )
 
 
+def thread_spots(pr: dict) -> set[tuple[str, int]]:
+    """The path and line each thread's first comment opens at, where it still sits on a line."""
+    return {
+        (c["path"], c["line"])
+        for t in (pr.get("reviewThreads") or {}).get("nodes") or []
+        if (c := first_comment(t)).get("path") and isinstance(c.get("line"), int)
+    }
+
+
 def reading(node: dict, login: str = REVIEWER, pr: dict | None = None) -> adapter.Reading:
     """The adapter's reading of one body, by the vocabulary for its author's login."""
     threads = thread_ids(pr) if pr is not None else None
@@ -391,24 +400,37 @@ def partial_on_record(pr: dict) -> bool:
     )
 
 
-def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
-    """Whether a file table names exactly the changed files, a glob row matching what it names.
+def row_names(entry: str, path: str) -> bool:
+    """Whether a file table row names `path`, exactly or by a glob.
 
     A glob matches one segment at a time, `*` and `?` never crossing a `/`, and every other
     character is literal. A row of `src/*` therefore names `src/a.py` and not `src/sub/b.py`.
     """
+    if entry == path:
+        return True
+    want, have = entry.split("/"), path.split("/")
+    return len(want) == len(have) and all(
+        re.fullmatch(re.escape(w).replace(r"\*", "[^/]*").replace(r"\?", "[^/]"), h)
+        for w, h in zip(want, have, strict=True)
+    )
 
-    def hits(entry: str, path: str) -> bool:
-        if entry == path:
-            return True
-        want, have = entry.split("/"), path.split("/")
-        return len(want) == len(have) and all(
-            re.fullmatch(re.escape(w).replace(r"\*", "[^/]*").replace(r"\?", "[^/]"), h)
-            for w, h in zip(want, have, strict=True)
-        )
 
-    return all(any(hits(e, p) for e in named) for p in changed) and all(
-        any(hits(e, p) for p in changed) for e in named
+def lineless(pr: dict) -> set[str]:
+    """The changed paths GitHub counts no added or deleted line in, a binary file among them.
+
+    A file missing either count is never one, so a payload without them leaves nothing out.
+    """
+    return {
+        n["path"]
+        for n in (pr.get("files") or {}).get("nodes") or []
+        if n.get("path") and n.get("additions") == 0 and n.get("deletions") == 0
+    }
+
+
+def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
+    """Whether a file table names exactly the changed files, a glob row matching what it names."""
+    return all(any(row_names(e, p) for e in named) for p in changed) and all(
+        any(row_names(e, p) for p in changed) for e in named
     )
 
 
@@ -417,7 +439,8 @@ def table_cover(pr: dict) -> tuple[str, str]:
 
     The head's own table is read first, else the newest round's that carries one (`carried:table`).
     Either counts only where it names exactly the files changed now and no round states partial
-    coverage.
+    coverage. A file GitHub counts no changed line in, such as a binary one, is left out where
+    the table does not name it. At least one file with a changed line must remain.
     """
     if partial_on_record(pr):
         return "", "a round on this pull request states partial coverage, so no table stands in"
@@ -437,13 +460,16 @@ def table_cover(pr: dict) -> tuple[str, str]:
         return "", "the changed-file list is incomplete or empty, so no table can be matched"
     named = reading(node).table or ()
     where = (commit_oid(node) or "")[:8] or "a commit this cannot name"
-    if not table_matches(named, changed):
+    skip = {p for p in lineless(pr) if not any(row_names(e, p) for e in named)}
+    kept = [p for p in changed if p not in skip]
+    left = f", {len(skip)} more with no changed line left out" if skip else ""
+    if not kept or not table_matches(named, kept):
         return "", (
             f"the table on {where} names {len(named)} path(s) where the pull request changes "
-            f"{len(changed)} file(s), and the two sets differ"
+            f"{len(kept)} file(s){left}, and the two sets differ"
         )
     return ("table" if node in own else "carried:table"), (
-        f"the table on {where} names exactly the {len(changed)} changed file(s)"
+        f"the table on {where} names exactly the {len(kept)} changed file(s){left}"
     )
 
 

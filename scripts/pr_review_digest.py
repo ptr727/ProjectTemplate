@@ -46,6 +46,7 @@ from pr_review_rounds import (
     shape_hold,
     stopping_refusal,
     thread_author,
+    thread_spots,
     threads_truncated,
     uncounted_verdict,
     window_blind,
@@ -264,8 +265,9 @@ def render(
             f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
             "threads cannot see them. Read the review body and give each the triage a suppressed "
             "finding gets. A thread past the hundred read here counts too, and `threads=` "
-            "carries a trailing `+` where that page was cut"
+            "carries a trailing `+` where that page was cut. Each findings list item prints below"
         )
+        lines += adapter.listed_lines(found.listed_items, thread_spots(pr))
     if flagged and found is not None and found.listed:
         lines.append(
             f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "

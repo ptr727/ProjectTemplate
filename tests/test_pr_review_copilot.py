@@ -361,7 +361,13 @@ class TestOpenFindings(unittest.TestCase):
         self.assertEqual(1, found.unthreaded)
 
     def test_each_top_level_findings_list_spelling_is_placed_and_counted(self) -> None:
-        for label in ("Review findings:", "Open findings remain:", "Unresolved findings:"):
+        for label in (
+            "Review findings:",
+            "Open findings remain:",
+            "Unresolved findings:",
+            "Outstanding findings:",
+            "Unresolved review findings:",
+        ):
             with self.subTest(label=label):
                 listed = f"**{label}**\n- P1 moderate: one.\n- P2 nit: two.\n- P2 nit: three."
                 found = adapter.read(
@@ -371,6 +377,37 @@ class TestOpenFindings(unittest.TestCase):
                 self.assertEqual(1, found.unthreaded)
                 self.assertEqual((), found.notes)
                 self.assertEqual((), found.unplaced)
+
+    def test_a_findings_list_in_the_narrative_keeps_each_item_s_text(self) -> None:
+        for label in ("Outstanding findings:", "Unresolved review findings:"):
+            with self.subTest(label=label):
+                listed = (
+                    f"{label}\n- **Moderate, P2 \u2014 `src/x.py:12` (1 vote):** Guard the write.\n"
+                    "  It can run twice.\n- **Nit, P3:** Name the constant.\n\n"
+                )
+                found = adapter.read(body(sections=what_changed(extra=listed)))
+                self.assertEqual(2, found.listed)
+                self.assertEqual(2, found.unthreaded)
+                self.assertEqual(
+                    (
+                        "**Moderate, P2 \u2014 `src/x.py:12` (1 vote):** Guard the write. It can run twice.",
+                        "**Nit, P3:** Name the constant.",
+                    ),
+                    found.listed_items,
+                )
+                self.assertEqual((), found.notes)
+                self.assertEqual((), found.unplaced)
+
+    def test_each_listed_item_is_marked_by_whether_a_thread_opens_at_its_line(self) -> None:
+        items = ("`src/x.py:12` one.", "**P1 \u2014 `src/y.py:40`:** two.", "three.")
+        self.assertEqual(
+            [
+                "    [no thread at its line] `src/x.py:12` one.",
+                "    [thread at its line] **P1 \u2014 `src/y.py:40`:** two.",
+                "    [names no line] three.",
+            ],
+            adapter.listed_lines(items, {("src/y.py", 40), ("src/x.py", 13)}),
+        )
 
     def test_a_narrative_naming_findings_is_counted_beside_a_clean_headline(self) -> None:
         found = adapter.read(unresolved())

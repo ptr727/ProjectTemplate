@@ -76,6 +76,7 @@ BADGE = re.compile(
     r"</picture>",
     re.DOTALL | re.IGNORECASE,
 )
+SPOT = re.compile(r"(?P<path>[^\s`:*]+):(?P<line>\d+)")
 # A count longer than this is an identifier rather than anything a review states.
 COUNT_DIGITS = 4
 FINGERPRINT_HEX = 12
@@ -111,6 +112,7 @@ class Reading(NamedTuple):
     reader cannot believe. `listed` is the larger of the items its findings lists hold and the
     file table's findings, since both name the same findings. A filled cell counts each finding
     marker it carries, and once where it carries none, so the table alone can still undercount.
+    `listed_items` is each findings-list item's text on one line, printed since no thread holds it.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
     `table` is the paths the body's file table names, None where it carries no table. `unplaced`
     is each part the reader cannot place, with its text, the subset of `notes` that can hold a
@@ -128,6 +130,7 @@ class Reading(NamedTuple):
     open: int | None = None
     entries: int = 0
     listed: int = 0
+    listed_items: tuple[str, ...] = ()
     unthreaded: int = 0
     sections: tuple[Section, ...] = ()
     table: tuple[str, ...] | None = None
@@ -451,6 +454,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     effort, effort_source = "unknown", "unknown"
     table: list[str] | None = None
     listed = tabled = 0
+    listed_items: list[str] = []
 
     def inside(token: Token, ranges: list[tuple[int, int]] = claimed) -> bool:
         return any(a <= (token.map or [0])[0] < b for a, b in ranges)
@@ -511,7 +515,9 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
                 if found_kind[0] == "open":
                     opens.append(count_of(found_kind[1], name))
             elif matched(vocab["finding_lists"], name):
-                listed += items_after(tokens, i + 3)
+                items = items_after(tokens, i + 3, lines)
+                listed += len(items)
+                listed_items += items
             elif (
                 vet
                 and is_label(inline)
@@ -582,6 +588,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         open=open_count,
         entries=entries,
         listed=listed,
+        listed_items=tuple(listed_items),
         unthreaded=max(named - linked, 0),
         sections=tuple(sections),
         table=tuple(table) if table is not None else None,
@@ -676,18 +683,40 @@ def is_label(inline: Token) -> bool:
     return text.endswith(":") and len(text.split()) <= 5
 
 
-def items_after(tokens: list[Token], start: int) -> int:
-    """The items of the list that opens at `start`, counted at its own margin."""
+def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[str]:
+    """Each item of the list that opens at `start`, at its own margin, as one line of its text."""
     if start >= len(tokens) or tokens[start].type != "bullet_list_open":
-        return 0
+        return []
     level = tokens[start].level + 1
-    count = 0
+    items = []
     for token in tokens[start + 1 :]:
         if token.type == "bullet_list_close" and token.level == level - 1:
             break
         if token.type == "list_item_open" and token.level == level:
-            count += 1
-    return count
+            a, b = token.map or (0, 0)
+            said = " ".join(plain("\n".join(lines[a:b])).split())
+            items.append(re.sub(r"^[-*+]\s*", "", said))
+    return items
+
+
+def listed_lines(items: tuple[str, ...], spots: set[tuple[str, int]]) -> list[str]:
+    """Each findings-list item, marked by whether a thread opens at a `path:line` it names.
+
+    `spots` is the path and line each thread on the pull request opens at. A mark is a pointer
+    rather than a match, since a thread at the same line can hold another finding.
+    """
+    out = []
+    for item in items:
+        named = {(m.group("path"), int(m.group("line"))) for m in SPOT.finditer(item)}
+        mark = (
+            "names no line"
+            if not named
+            else "thread at its line"
+            if named & spots
+            else "no thread at its line"
+        )
+        out.append(f"    [{mark}] {item}")
+    return out
 
 
 def table_cells(
