@@ -1322,7 +1322,7 @@ def scalar_openers(texts: list[str]) -> dict[int, int]:
             continue
         number, col = starts.at(offset)
         row, line = number - 1, texts[number - 1]
-        lead = len(SCALAR_LEAD.match(line)[0])  # type: ignore[index]
+        lead = len(line) - len(SCALAR_LEAD.sub("", line, count=1))
         out[row] = lead if SCALAR_KEY.search(line[lead:col]) else len(line) - len(line.lstrip())
     return out
 
