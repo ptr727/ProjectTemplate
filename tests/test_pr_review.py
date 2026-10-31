@@ -3811,6 +3811,166 @@ class TestCli(GqlCase):
             self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
         self.assertIn("status=CHECKS_PENDING", self.out.getvalue())
 
+    def test_an_open_thread_ends_the_held_poll_at_once_over_a_running_check(self) -> None:
+        """No check clears a thread, so the poll stops on it and names who opened it."""
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        opened = [
+            thread("PRRT_a", login="qodo-code-review[bot]"),
+            thread("PRRT_b", login="coderabbitai[bot]"),
+            thread("PRRT_c", resolved=True, login="someone"),
+        ]
+        pr = self.into(
+            payload([review(oid=OLD)], threads=opened, merge="BLOCKED", checks=[gate]), attest=True
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_not_called()
+        self.assertIn(
+            "status=THREADS_UNRESOLVED an attested local pass covers this head, and 2 unresolved "
+            "thread(s) opened by coderabbitai[bot], qodo-code-review[bot] hold the merge",
+            self.out.getvalue(),
+        )
+
+    def test_a_thread_landing_mid_poll_ends_it_on_the_next_read(self) -> None:
+        gate = check(name="gate", status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        quiet = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[gate]), attest=True)
+        landed = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", login="qodo-code-review[bot]")],
+                merge="BLOCKED",
+                checks=[gate],
+            ),
+            attest=True,
+        )
+        self.answer(quiet, quiet, landed)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(46, self.cli(["wait", "7", "--timeout", "60"]))
+        slept.assert_called_once()
+        self.assertIn("status=THREADS_UNRESOLVED", self.out.getvalue())
+
+    def test_an_open_thread_outranks_a_stuck_or_missing_check(self) -> None:
+        """44 and 45 each name a check to act on, while the thread holds the merge either way."""
+        for merge, checks, code in (
+            ("BLOCKED", [check(name="gate", conclusion="FAILURE")], 44),
+            ("DIRTY", [], 45),
+        ):
+            with self.subTest(merge=merge):
+                opened = [thread("PRRT_a", login="qodo-code-review[bot]")]
+                for threads, expected in (([], code), (opened, 46)):
+                    pr = self.into(
+                        payload([review(oid=OLD)], threads=threads, merge=merge, checks=checks),
+                        attest=True,
+                    )
+                    self.answer(pr)
+                    self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                    with mock.patch.object(pr_review.time, "sleep"):
+                        self.assertEqual(expected, self.cli(["wait", "7", "--timeout", "0"]))
+
+    def test_a_cut_thread_page_is_walked_once_per_read(self) -> None:
+        """The poll and the exit both judge one read, so its walk is paid for once."""
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", resolved=True)],
+                more_threads=True,
+                merge="CLEAN",
+                checks=[check(name="gate")],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with (
+            mock.patch.object(pr_review, "unresolved_threads", return_value=[]) as walk,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        walk.assert_called_once_with("o", "r", 7)
+
+    def test_an_unnamed_author_is_named_as_one(self) -> None:
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", login="")],
+                merge="CLEAN",
+                checks=[check(name="gate")],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(46, self.cli(["wait", "7"]))
+        self.assertIn("1 unresolved thread(s) opened by an unnamed author", self.out.getvalue())
+
+    def test_a_cut_thread_page_is_walked_to_its_end_before_it_decides(self) -> None:
+        """A page of resolved threads proves nothing past it, so every page is read first."""
+        past = [thread("PRRT_z", login="coderabbitai[bot]")]
+        for walked, code in (([], 0), (past, 46)):
+            with self.subTest(walked=len(walked)):
+                pr = self.into(
+                    payload(
+                        [review(oid=OLD)],
+                        threads=[thread("PRRT_a", resolved=True)],
+                        more_threads=True,
+                        merge="CLEAN",
+                        checks=[check(name="gate")],
+                    ),
+                    attest=True,
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                self.out.seek(0)
+                self.out.truncate()
+                with (
+                    mock.patch.object(pr_review, "unresolved_threads", return_value=walked) as walk,
+                    mock.patch.object(pr_review.time, "sleep"),
+                ):
+                    self.assertEqual(code, self.cli(["wait", "7"]))
+                walk.assert_called_with("o", "r", 7)
+                if code == 46:
+                    self.assertIn(
+                        "1 unresolved thread(s) opened by coderabbitai[bot]", self.out.getvalue()
+                    )
+
+    def test_an_open_thread_on_a_pull_request_no_longer_open_is_not_46(self) -> None:
+        """Nothing is left to dispose of before a merge that already happened, so no rerun clears it."""
+        for state in ("MERGED", "CLOSED"):
+            with self.subTest(state=state):
+                pr = self.into(
+                    payload(
+                        [review(oid=OLD)],
+                        threads=[thread("PRRT_a", login="qodo-code-review[bot]")],
+                        merge="CLEAN",
+                        checks=[check(name="gate")],
+                    ),
+                    attest=True,
+                )
+                self.answer({**pr, "state": state})
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(0, self.cli(["wait", "7"]))
+
+    def test_only_resolved_threads_leave_a_settled_held_head_at_0(self) -> None:
+        pr = self.into(
+            payload(
+                [review(oid=OLD)],
+                threads=[thread("PRRT_a", resolved=True)],
+                merge="CLEAN",
+                checks=[check(name="gate")],
+            ),
+            attest=True,
+        )
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7"]))
+        self.assertNotIn("status=THREADS_UNRESOLVED", self.out.getvalue())
+
     def test_an_empty_rollup_holds_any_merge_but_a_conflicted_one(self) -> None:
         """A conflicted pull request runs no `pull_request` workflow, so none is coming.
 
@@ -4154,7 +4314,7 @@ class TestCli(GqlCase):
         self.assertEqual(5, served.call_count)
 
     def test_a_held_poll_timing_out_on_a_narrow_read_grades_a_full_one(self) -> None:
-        """`Q_HELD` carries no threads or files, so the verdict at the timeout reads `Q_FULL`."""
+        """`Q_HELD` carries no files and thin threads, so the verdict at the timeout reads `Q_FULL`."""
         running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
         held = self.into(payload([review(oid=OLD)], merge="BLOCKED", checks=[running]), attest=True)
         self.answer(held)
@@ -4163,7 +4323,13 @@ class TestCli(GqlCase):
         def narrow(query: str, owner: str, repo: str, num: int) -> dict:
             pr = served(query, owner, repo, num)
             if query is pr_review.Q_HELD:
-                return {k: v for k, v in pr.items() if k not in ("reviewThreads", "files")}
+                thin = [
+                    {"isResolved": t["isResolved"], "comments": {"nodes": [{"author": a}]}}
+                    for t in pr["reviewThreads"]["nodes"]
+                    for a in [t["comments"]["nodes"][0]["author"]]
+                ]
+                pr = {k: v for k, v in pr.items() if k != "files"}
+                return {**pr, "reviewThreads": {**pr["reviewThreads"], "nodes": thin}}
             return pr
 
         self.enterContext(mock.patch.object(pr_review, "gql", side_effect=narrow))
@@ -6352,11 +6518,20 @@ class TestContract(unittest.TestCase):
         self.assertEqual("done", last)
         self.assertEqual([mock.call(15), mock.call(20)], slept.call_args_list)
 
-    def test_the_held_poll_reads_neither_threads_nor_files(self) -> None:
-        """The poll re-reads every iteration, and only the final digest read needs the two."""
+    def test_the_held_poll_reads_no_files_and_only_each_threads_state_and_author(self) -> None:
+        """The poll re-reads every iteration, and only the final digest read needs the rest.
+
+        It is the poll's own read that sees a thread land, so each thread's state and author ride it.
+        """
         poll = " ".join(pr_review.Q_HELD.split())
-        self.assertNotIn("reviewThreads", poll)
         self.assertNotIn("files(", poll)
+        threads = poll.split("reviewThreads(first:100)", 1)[1].split("pageInfo", 1)[0]
+        for field in ("isResolved", "author{login}"):
+            with self.subTest(field=field):
+                self.assertIn(field, threads)
+        for field in ("body", "path", "fullDatabaseId"):
+            with self.subTest(field=field):
+                self.assertNotIn(field, threads)
         self.assertIn("headRefOid baseRefName state mergeable mergeStateStatus", poll)
         self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", poll)
         self.assertIn("authorAssociation createdAt body", poll)
