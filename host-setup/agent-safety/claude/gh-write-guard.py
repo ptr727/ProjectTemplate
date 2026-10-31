@@ -901,8 +901,8 @@ def _delete_only_push(args: list[str]) -> bool:
     Such a push names its remote by name, so it moves no local branch and touches no working tree.
     Requirement 6's hazard is then absent, and requirement 4 still judges each branch's live rules.
     Any other option keeps the denial. So do a path or URL remote, a forced refspec, one with a
-    source, a bare `:`, a tag, and a run-time word. This reads apart from `_push_targets`, which
-    folds a shape it cannot read into a write, since an exemption must fold it into a denial.
+    source, a bare `:`, a `refs/tags/` name, and a run-time word. This reads apart from
+    `_push_targets`, which drops a refspec it cannot read, since an exemption must deny one.
     """
     delete = False
     pos: list[str] = []
