@@ -1835,7 +1835,6 @@ class TestAutoMode(StampCase):
             ("auto-mode-not-object", ["nope"], "`autoMode` as list"),
             ("list-not-list", {"allow": "nope"}, "`autoMode.allow` as str"),
             ("explicit-null-list", {"environment": None}, "`autoMode.environment` as NoneType"),
-            ("non-string-entry", {"soft_deny": ["$defaults", 7]}, "`autoMode.soft_deny[1]` as int"),
         ):
             with self.subTest(shape=label):
                 self._write({"autoMode": auto})
@@ -1848,11 +1847,30 @@ class TestAutoMode(StampCase):
     def test_the_report_names_a_malformed_shape_rather_than_crashing(self):
         self.install()
         data = self._settings()
-        data["autoMode"] = {"environment": [*self.OWN, None]}
+        data["autoMode"] = {"environment": "nope"}
         self._write(data)
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("`autoMode.environment[2]` as NoneType", r.stdout)
+        self.assertIn("`autoMode.environment` as str", r.stdout)
+
+    def test_a_non_string_entry_is_kept_untouched_as_untagged(self):
+        """The file is the maintainer's, so an entry the kit cannot own is left where it sits."""
+        odd = [7, None, {"note": "a host's own"}]
+        self._write({"autoMode": {"environment": ["$defaults", odd[0], self.OWN[0], *odd[1:]]}})
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(
+            self._settings()["autoMode"]["environment"],
+            ["$defaults", odd[0], self.OWN[0], *odd[1:], *self._owned("environment")],
+        )
+        report = run(self.home, "--report")
+        self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
+        self.assertIn("autoMode.environment: 4 untagged entries, with $defaults", report.stdout)
+
+    def test_tagged_reads_a_non_string_as_untagged(self):
+        for entry in (7, None, [install.AUTO_MODE_TAG], {"rule": install.AUTO_MODE_TAG}):
+            with self.subTest(entry=entry):
+                self.assertFalse(install.tagged(entry))
 
     def test_the_report_is_stale_once_the_owned_text_changes(self):
         """A machine holding an earlier wording is stale against a checkout carrying a newer one."""

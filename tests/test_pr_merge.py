@@ -15,16 +15,19 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_merge
 import pr_review
+import test_pr_review as fixtures
 
-HEAD = "a" * 40
+HEAD = fixtures.HEAD
 MOVED = "b" * 40
 SQUASH = "c" * 40
 REAL_GATE = pr_merge.gate
+REAL_UNMET = pr_merge.unmet_items
 
 
 def target(**overrides: object) -> dict:
@@ -33,10 +36,10 @@ def target(**overrides: object) -> dict:
         "state": "OPEN",
         "isDraft": False,
         "baseRefName": "develop",
+        "headRefName": "feature/example",
         "headRefOid": HEAD,
         "mergeCommit": None,
         "headRepository": {"nameWithOwner": "example/repo"},
-        "baseRepository": {"nameWithOwner": "example/repo"},
     }
     pr.update(overrides)
     return pr
@@ -52,27 +55,41 @@ class MergeCase(unittest.TestCase):
         self.out = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
         self.err = self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="example"))
-        self.enterContext(mock.patch.object(pr_merge, "MERGE_SETTLE_DELAYS", ()))
+        cleanup = pr_merge.pr_cleanup
+        self.registry = self.enterContext(
+            mock.patch.object(cleanup.handoff, "registry", return_value=("example", {"repo"}))
+        )
+        self.enterContext(mock.patch.object(cleanup, "DELETE_SETTLE_DELAYS", ()))
+        self.rules = self.enterContext(mock.patch.object(cleanup, "branch_rules", return_value=[]))
         self.reads: list[object] = []
         self.calls: list[list[str]] = []
+        self.default = "main"
         self.gate = self.enterContext(mock.patch.object(pr_merge, "gate", return_value=0))
+        self.unmet = self.enterContext(
+            mock.patch.object(pr_merge, "unmet_items", return_value=(HEAD, []))
+        )
         self.cleanup = self.enterContext(
             mock.patch.object(pr_merge.pr_cleanup, "cleanup", return_value=0)
         )
         self.merge_rc = 0
+        self.merge_err = "merge answer"
+        shared = pr_merge.pr_cleanup.shared
 
-        def fake_read(query: str, variables: dict, **_: object) -> pr_merge.shared.Response:
+        def fake_read(query: str, variables: dict, **_: object) -> shared.Response:
             self.assertIs(pr_merge.Q_MERGE_TARGET, query)
             answer = self.reads.pop(0) if len(self.reads) > 1 else self.reads[0]
             if isinstance(answer, Exception):
                 raise answer
-            return pr_merge.shared.Response({"repository": {"pullRequest": answer}}, [])
+            repository = {"defaultBranchRef": {"name": self.default}, "pullRequest": answer}
+            return shared.Response({"repository": repository}, [])
 
         def fake_run(argv: list[str], *_: object, **__: object) -> subprocess.CompletedProcess:
             self.calls.append(argv)
-            return subprocess.CompletedProcess(argv, self.merge_rc, "", "merge answer")
+            return subprocess.CompletedProcess(argv, self.merge_rc, "", self.merge_err)
 
-        self.enterContext(mock.patch.object(pr_merge.shared, "request", side_effect=fake_read))
+        self.request = self.enterContext(
+            mock.patch.object(shared, "request", side_effect=fake_read)
+        )
         self.enterContext(mock.patch.object(pr_review, "_run", side_effect=fake_run))
 
     def run_merge(self, *reads: object, extra: tuple[str, ...] = ()) -> int:
@@ -124,13 +141,57 @@ class TestRefusals(MergeCase):
     def test_a_foreign_owner_is_refused_before_any_read(self) -> None:
         with mock.patch.object(pr_review, "origin_owner", return_value="acme"):
             self.assertEqual(64, self.run_merge(target()))
-        self.assertIn("status=OUT_OF_SCOPE", self.out.getvalue())
-        pr_merge.shared.request.assert_not_called()  # type: ignore[attr-defined]
+        self.assertIn("status=OUT_OF_SCOPE nothing was merged", self.out.getvalue())
+        self.request.assert_not_called()
+        self.gate.assert_not_called()
+        self.assert_not_merged()
+
+    def test_a_repository_outside_the_registry_owner_is_refused_before_any_read(self) -> None:
+        """The scope `cleanup` checks, so a `--cleanup` after a landed merge cannot refuse on it."""
+        self.registry.return_value = ("someone", {"repo"})
+        self.assertEqual(1, self.run_merge(target(), extra=("--cleanup",)))
+        self.assertIn(
+            "status=REFUSED nothing was merged, refused by handoff.py", self.out.getvalue()
+        )
+        self.request.assert_not_called()
+        self.assert_not_merged()
+
+    def test_an_unreadable_registry_is_unread_before_any_read(self) -> None:
+        self.registry.side_effect = pr_merge.pr_cleanup.handoff.Execution("no registry")
+        self.assertEqual(2, self.run_merge(target()))
+        self.assertIn("status=UNREAD nothing was merged: no registry", self.out.getvalue())
+        self.request.assert_not_called()
+        self.assert_not_merged()
+
+    def test_a_permanent_head_branch_is_refused(self) -> None:
+        """A `main -> develop` pull request is a sync, never a squash into develop."""
+        self.default = "trunk"
+        for branch in ("main", "develop", "trunk"):
+            with self.subTest(branch=branch):
+                self.assertEqual(1, self.run_merge(target(headRefName=branch)))
+                self.assertIn(
+                    f"its head branch {branch!r} is a permanent branch", self.out.getvalue()
+                )
+                self.gate.assert_not_called()
+                self.assert_not_merged()
+
+    def test_a_protected_head_branch_is_refused(self) -> None:
+        self.rules.return_value = ["branch protection"]
+        self.assertEqual(1, self.run_merge(target()))
+        self.assertIn("'feature/example' is covered by branch protection", self.out.getvalue())
+        self.rules.assert_called_once_with("example", "repo", "feature/example")
+        self.gate.assert_not_called()
+        self.assert_not_merged()
+
+    def test_an_unread_branch_rule_is_unread_rather_than_refused(self) -> None:
+        self.rules.side_effect = pr_merge.pr_cleanup.CleanupUnread("the branch rules read failed")
+        self.assertEqual(2, self.run_merge(target()))
+        self.assertIn("status=UNREAD nothing was merged", self.out.getvalue())
         self.gate.assert_not_called()
         self.assert_not_merged()
 
     def test_an_unanswered_first_read_is_unread_rather_than_refused(self) -> None:
-        unread = pr_merge.shared.GraphQLError("gh graphql failed rc=1")
+        unread = pr_merge.pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
         self.assertEqual(2, self.run_merge(unread))
         self.assertIn("status=UNREAD nothing was merged", self.out.getvalue())
         self.assert_not_merged()
@@ -148,7 +209,7 @@ class TestGate(MergeCase):
     def test_a_gate_read_that_ends_the_run_is_unread(self) -> None:
         self.gate.side_effect = SystemExit("gh graphql failed rc=1")
         self.assertEqual(2, self.run_merge(target()))
-        self.assertIn("the gate read did not answer", self.out.getvalue())
+        self.assertIn("a read for the gate did not answer", self.out.getvalue())
         self.assert_not_merged()
 
     def test_a_head_moved_while_the_gate_read_refuses(self) -> None:
@@ -206,20 +267,120 @@ class TestMerge(MergeCase):
         self.assertIn("  merge answer", self.out.getvalue())
         self.assertIn("status=MERGED", self.out.getvalue())
 
-    def test_a_read_back_still_open_is_unconfirmed(self) -> None:
+    def test_a_merge_gh_refused_that_reads_back_open_is_refused(self) -> None:
         self.merge_rc = 1
+        self.assertEqual(1, self.run_merge(target(), target(), target()))
+        self.assertIn("status=MERGE_REFUSED gh refused the merge of #123", self.out.getvalue())
+        self.assertIn("so nothing was merged", self.out.getvalue())
+        self.cleanup.assert_not_called()
+
+    def test_a_merge_gh_accepted_that_reads_back_open_is_unconfirmed(self) -> None:
         self.assertEqual(2, self.run_merge(target(), target(), target()))
         self.assertIn(
             "status=MERGE_NOT_CONFIRMED #123 on example/repo reads OPEN", self.out.getvalue()
         )
         self.cleanup.assert_not_called()
 
+    def test_a_merge_call_that_never_finished_is_unconfirmed_rather_than_refused(self) -> None:
+        self.merge_rc, self.merge_err = 1, pr_merge.UNRUN
+        self.assertEqual(2, self.run_merge(target(), target(), target()))
+        self.assertIn("status=MERGE_NOT_CONFIRMED", self.out.getvalue())
+        self.cleanup.assert_not_called()
+
     def test_a_read_back_that_does_not_answer_says_the_merge_may_have_happened(self) -> None:
-        unread = pr_merge.shared.GraphQLError("gh graphql failed rc=1")
+        unread = pr_merge.pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
         self.assertEqual(2, self.run_merge(target(), target(), unread))
         self.assertIn("may have happened on the server", self.out.getvalue())
         self.assertEqual(1, len(self.calls))
         self.cleanup.assert_not_called()
+
+
+class TestUnmetItems(MergeCase):
+    """`wait`'s 0 leaves these undecided, so each is read again off a fresh payload."""
+
+    CLEAN = fixtures.overview_v2(
+        open_count="0 open findings",
+        covers="<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
+        entries=0,
+        verdict="### No changes recommended",
+    )
+
+    def unmet_on(self, pr: dict) -> list[str]:
+        with mock.patch.object(pr_review, "full_read", return_value=pr):
+            head, unmet = REAL_UNMET("example", "repo", 123)
+        self.assertEqual(HEAD, head)
+        return [f"{status} {why}" for status, why in unmet]
+
+    def clean(self, **overrides: Any) -> dict:
+        reviews = [fixtures.review(body=self.CLEAN)]
+        return fixtures.payload(reviews, files=["a.py"], **overrides)
+
+    def test_a_clean_payload_leaves_nothing_unmet(self) -> None:
+        self.assertEqual([], self.unmet_on(self.clean()))
+
+    def test_each_item_unmet_is_named(self) -> None:
+        coderabbit = fixtures.review(
+            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
+            body=fixtures.cr_outside_diff_body(),
+            rid="PRR_two",
+        )
+        qodo = fixtures.comment(
+            login=fixtures.pr_review_rounds.QODO_LOGIN, body=fixtures.qodo_review_body()
+        )
+        for label, pr, want in (
+            ("open thread", self.clean(threads=[fixtures.thread("T1")]), "THREADS_UNRESOLVED 1"),
+            (
+                "blocked",
+                self.clean(merge="BLOCKED"),
+                "MERGE_NOT_CLEAN the merge state reads BLOCKED",
+            ),
+            (
+                "no coverage",
+                fixtures.payload([fixtures.review(body=fixtures.OVERVIEW)], files=["a.py"]),
+                "COVERAGE_NOT_SHOWN the digest reads coverage=none",
+            ),
+            (
+                "outside diff",
+                fixtures.payload([fixtures.review(body=self.CLEAN), coderabbit], files=["a.py"]),
+                "UNTHREADED_FINDINGS the digest reads cr_outside_diff=1",
+            ),
+            (
+                "qodo",
+                self.clean(comments=[qodo]),
+                "UNTHREADED_FINDINGS the digest reads qodo_open=1",
+            ),
+            (
+                "unthreaded",
+                fixtures.payload([fixtures.review(body=fixtures.overview_v2())], files=["a.py"]),
+                "FINDINGS WITH NO THREAD",
+            ),
+            (
+                "no stated count",
+                fixtures.payload([fixtures.review()], files=["a.py"]),
+                "UNTHREADED_FINDINGS the digest reads overview=?/0",
+            ),
+        ):
+            with self.subTest(label):
+                unmet = self.unmet_on(pr)
+                self.assertTrue(any(want in item for item in unmet), unmet)
+
+    def test_a_met_wait_with_an_open_thread_merges_nothing(self) -> None:
+        """`wait` returns 0 on a Copilot-covered head without reading its threads."""
+        self.unmet.side_effect = REAL_UNMET
+        pr = self.clean(threads=[fixtures.thread("T1")])
+        with mock.patch.object(pr_review, "full_read", return_value=pr):
+            self.assertEqual(1, self.run_merge(target(), target(), MERGED))
+        self.assertIn("status=THREADS_UNRESOLVED nothing was merged", self.out.getvalue())
+        self.assert_not_merged()
+
+    def test_a_head_moved_before_the_fresh_read_refuses(self) -> None:
+        self.unmet.return_value = (MOVED, [])
+        self.assertEqual(1, self.run_merge(target(), target(), MERGED))
+        self.assertIn(
+            f"status=HEAD_MOVED nothing was merged: #123 on example/repo is at {MOVED}",
+            self.out.getvalue(),
+        )
+        self.assert_not_merged()
 
 
 class TestCleanup(MergeCase):

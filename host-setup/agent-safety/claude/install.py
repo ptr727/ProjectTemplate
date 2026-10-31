@@ -275,17 +275,19 @@ AUTO_MODE_RULES = {
             "is trusted."
         ),
         (
-            "The develop and main branches are ruleset-protected. A feature branch merges into "
-            "develop only through the Merge Gate that `scripts/pr_review.py merge` enforces in "
-            "code, and a promotion from develop to main is the maintainer's."
+            "The develop and main branches are ruleset-protected. An agent merges a feature branch "
+            "into develop through `scripts/pr_review.py merge`, which checks the Merge Gate's "
+            "mechanically readable items in code once the agent has disposed of the findings the "
+            "pull request body lists. A promotion from develop to main is the maintainer's."
         ),
     ),
     "allow": (
         (
             "Running `scripts/pr_review.py merge` or `scripts/pr_review.py cleanup`, under "
             "`python3` or `uv run --no-project --script`, against a repository under the GitHub "
-            "owner of the session checkout's origin remote, since both enforce the review gate in "
-            "code."
+            "owner of the session checkout's origin remote. `merge` checks the Merge Gate's "
+            "mechanically readable items in code before it merges, and `cleanup` verifies the "
+            "merged state before it deletes anything."
         ),
     ),
 }
@@ -335,9 +337,6 @@ def auto_mode_misshape(data):
             continue
         if not isinstance(held, list):
             return (f"autoMode.{name}", held, list)
-        for i, entry in enumerate(held):
-            if not isinstance(entry, str):
-                return (f"autoMode.{name}[{i}]", entry, str)
     return None
 
 

@@ -346,8 +346,13 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    worker's line the moment it arrives. Work still running then finishes after the run has acted
    on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
-   parking comment so the comment can name it. That includes a `merge` exiting other than `0`, a
-   gate refusal parked with its output rather than routed around. Otherwise a worker parks only
+   parking comment so the comment can name it. That includes a `merge` exiting other than `0`
+   with no `status=MERGED` line, a gate refusal parked with its output rather than routed around.
+   A non-zero exit after that line is a cleanup that stopped, which step 7 names in the close-out.
+   It also includes the harness refusing the `merge` call itself. That is a refused write, parked
+   as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and Write Safety". The parking
+   names the maintainer's routes, adding the permission rule or running the command themselves.
+   Otherwise a worker parks only
    on a choice the maintainer alone can make, or on a maintainer-only action that
    `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer
    requested, which its "Expected review loop" sends there. Two others it sends there return `STOP`

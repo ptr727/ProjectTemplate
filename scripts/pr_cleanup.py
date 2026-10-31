@@ -160,6 +160,11 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     return found
 
 
+def permanent_branch(branch: str, default: str) -> bool:
+    """Whether `branch` is one a feature pull request's merge or cleanup never takes as its head."""
+    return branch in ("develop", "main", default)
+
+
 def in_repository(node: dict, owner: str, repo: str) -> bool:
     """Whether a pull request's head lives in `owner/repo`, a fork's same-named branch being none."""
     name = (node.get("headRepository") or {}).get("nameWithOwner") or ""
@@ -237,7 +242,7 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
         refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
     if head_repo.lower() != target.lower():
         refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
-    if branch in ("develop", "main", default):
+    if permanent_branch(branch, default):
         refusals.append(f"its head branch {branch!r} is a permanent branch")
     if refusals:
         raise CleanupRefused(
@@ -347,19 +352,22 @@ def _cleanup(owner: str, repo: str, num: int) -> int:
     return cleanup_remote_delete(owner, repo, plan)
 
 
-def cleanup_scope(owner: str, repo: str) -> int | None:
-    """The exit code where the write scope refuses or cannot be established, else None."""
+def cleanup_scope(owner: str, repo: str, done: str = "deleted") -> int | None:
+    """The exit code where the write scope refuses or cannot be established, else None.
+
+    `done` names the write in the refusal text, since `merge` checks the same scope.
+    """
     ok, why = core.in_scope(owner)
     if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was deleted: {why}")
+        print(f"status=OUT_OF_SCOPE nothing was {done}: {why}")
         return 64
     try:
         handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=f"{owner}/{repo}"))
     except handoff.Refusal as exc:
-        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
+        print(f"status=REFUSED nothing was {done}, refused by handoff.py's write scope: {exc}")
         return 1
     except handoff.Execution as exc:
-        print(f"status=UNREAD nothing was deleted: {exc}")
+        print(f"status=UNREAD nothing was {done}: {exc}")
         return 2
     return None
 

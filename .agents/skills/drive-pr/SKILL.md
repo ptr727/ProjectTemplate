@@ -108,13 +108,23 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 4. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
-   primary clone. It reads the Merge Gate through `wait`'s own decision and merges nothing unless
-   the gate is met. It squash-merges only an open pull request into `develop` headed in that same
-   repository. The merge is pinned to the head the gate read and confirmed by reading it back.
+   primary clone. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
+   own decision and a fresh read after it. It merges nothing while one reads unmet. A finding the
+   pull request's body lists is judgment no code reads, so dispose of each one per
+   pr-review-conduct before running `merge`. It squash-merges only an open pull request into
+   `develop`, headed in that same repository on a branch neither permanent nor protected. The merge
+   is pinned to the head the gate read and confirmed by reading it back.
    Exit `0` is merged and cleaned up. Any other exit stops and reports, the same as `cleanup`.
-   A refused `merge` is a gate refusal this seat reports, and it never hands the maintainer a
-   command to run instead. A `status=MERGED` line before a non-zero exit means only the cleanup
-   stopped. A `2` with no such line can mean the merge landed unconfirmed. Once the merge is
+   A `status=MERGED` line before a non-zero exit means only the cleanup stopped. With no such
+   line, a non-zero exit is a gate refusal, which this seat reports and never routes around. For a
+   gate refusal it hands the maintainer no command to run instead. There `1` is a refusal that
+   merged nothing, `gh` refusing the merge with the pull request reading back open among them. A
+   `2` can mean the merge landed unconfirmed, since the call timed out, never ran, or read back
+   unsettled. A harness refusing the `merge` call itself is a refused write
+   rather than a gate refusal. That happens on a machine with no allow rule for it, or under
+   another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
+   Write Safety". Name the maintainer's routes, adding the permission rule or running the command
+   themselves. Once the merge is
    confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
    `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
    and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.

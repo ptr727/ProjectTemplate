@@ -47,7 +47,9 @@ Subcommands
            line naming this script therefore keeps working under the allow rule the host-safety
            installer registers for it.
   merge    Forwarded to `pr_merge.py`, which holds the contract and the exit codes, for the same
-           reason. It squash-merges a pull request into `develop` only where `wait`'s gate is met.
+           reason. It squash-merges a pull request into `develop` only where the Merge Gate's
+           mechanically readable items read met. The findings a pull request's body lists are the
+           driver's to dispose of first, since no code here reads them.
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet. 0 is also the exit where the review
            covering the head states no partial coverage and its verdict counts what it flags. 42 = the
