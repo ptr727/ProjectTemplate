@@ -277,35 +277,26 @@ AUTO_MODE_TAG = "[agent-safety] "
 AUTO_MODE_LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 AUTO_MODE_DEFAULTS = "$defaults"
 
-# No owner is named, since each session's own checkout decides it, the way the write guard reads the origin.
+# The rules state what each command checks, since who authorizes a write is CLAUDE.md's to say.
 AUTO_MODE_RULES = {
     "environment": (
         (
-            "Repositories under the GitHub owner of each session checkout's origin remote are the "
-            "session's own source control. Merging, publishing, releasing, force-pushing, "
-            "deleting, and changing branch protection there need the maintainer's explicit, current "
-            "go-ahead. The maintainer invoking drive-pr, backlog-burndown, or unattended-handoff in "
-            "this session is that go-ahead for feature merges into develop and the verified cleanup "
-            "after each. An agent's own skill call or a subagent brief is not."
+            "`scripts/pr_review.py merge` squash-merges a feature pull request into develop only "
+            "once it reads the Merge Gate's mechanically readable items as met, and it refuses a "
+            "main base. Whether a merge is authorized is decided by the session's CLAUDE.md rules "
+            "and the skill that runs it, never by this command."
         ),
         (
-            "In a repository the fleet registry lists, develop and main carry rulesets. A feature "
-            "merge into develop the maintainer authorized runs through `scripts/pr_review.py "
-            "merge`, which checks the Merge Gate's "
-            "mechanically readable items in code. The items no code reads, such as a finding the "
-            "pull request body lists, stay the agent's per pr-review-conduct's Merge Gate. A "
-            "promotion merge from develop to main needs the maintainer's explicit go-ahead in the "
-            "session, or the scope the maintainer named for an unattended-handoff run."
+            "`scripts/pr_review.py cleanup` deletes a feature branch only after it verifies the "
+            "pull request merged into develop at the branch's tip. It refuses develop, main, and "
+            "any branch a ruleset covers."
         ),
     ),
     "allow": (
         (
             "Running `scripts/pr_review.py merge` or `scripts/pr_review.py cleanup`, under "
-            "`python3` or `uv run --no-project --script`, against a repository under the GitHub "
-            "owner of the session checkout's origin remote, for a feature merge into develop the "
-            "maintainer authorized in this session and its cleanup. `merge` checks the Merge Gate's "
-            "mechanically readable items in code before it merges, and `cleanup` verifies the "
-            "merged state before it deletes anything."
+            "`python3` or `uv run --no-project --script`, where a skill the session follows "
+            "prescribes it, since each checks its own preconditions in code."
         ),
     ),
 }
