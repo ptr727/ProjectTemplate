@@ -103,7 +103,12 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    step 2's attestation as `coverage=local` and requests none, unless a partial round or a truncated
    review history is on record. Exit `49` means the head carries no attestation, so run and record a
    pass over it, push, and attest. Exit `46` means a thread is open on the head, so dispose of each
-   one per "Disposing of Every Finding" and wait again. A promotion re-reviews content its feature PRs already carried,
+   one per "Disposing of Every Finding" and wait again. Read `state=` in every digest `wait` or `status` prints.
+   A peer can merge or close the pull request mid-drive. A digest carrying `state=MERGED` on a feature PR into develop means the merge has landed.
+   Skip the merge in step 4 and go on to its post-merge path.
+   On a promotion PR it means the drive's end state is passed, so stop and report it merged.
+   A digest carrying `state=CLOSED` is a stop to report, with its `closed_at=`.
+   On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried,
    so the hosted review runs once per change, at the promotion in step 6.
 4. Merge the feature PR into
    develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
