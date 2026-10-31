@@ -356,11 +356,12 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    A `status=THREADS_UNRESOLVED`, `status=CHECKS_PENDING`, or `status=PENDING` line is no
    decision. Nor is a `status=HEAD_MOVED`, `status=REVIEW_PENDING`, or
    `status=UNPLACED_PARTS_UNACKNOWLEDGED` line. Nor is a `status=MERGE_NOT_CLEAN` line reading
-   `UNKNOWN`, `BEHIND`, or `DIRTY`. The worker clears each of those per `drive-pr` step 4, by
+   `UNKNOWN`, `BEHIND`, or `DIRTY`, nor a gate exit `49`. The worker clears each of those per `drive-pr` step 4, by
    disposing of the thread, acknowledging the parts, merging `develop` into the branch, or waiting.
    It then drives again and runs `merge` again. A first `status=MERGE_REFUSED` or `status=UNREAD`
    line with no `status=MERGED` line before it is no decision either. The worker runs `merge` again
-   once, directly, per that step. A `status=MERGE_NOT_CONFIRMED` line is no decision
+   once, directly, per that step. A `status=REFUSED` line reading `MERGED, not OPEN` goes on to the
+   cleanup, since the pull request already merged. A `status=MERGE_NOT_CONFIRMED` line is no decision
    until the pull request's state is read back per that step. A read answering `MERGED` goes on to
    the cleanup, and one answering `OPEN` is treated as unmerged and cleared the same way. Only a
    read that still cannot answer parks, the parking saying the merge may have landed. Once each counted

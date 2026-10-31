@@ -117,7 +117,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
    code reads stay this seat's per pr-review-conduct's Merge Gate. A finding the pull request's
    body lists is one, and so is a part printed under `REVIEWER OUTPUT NOTED`. Dispose of them
-   before running `merge`. It squash-merges only an open pull request into `develop`, headed in
+   before running `merge`, although a noted part still refuses it, as below. It squash-merges only an open pull request into `develop`, headed in
    that same repository on a branch that is not permanent. The merge is pinned to the head the gate
    read and confirmed by reading it back.
    Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
@@ -134,6 +134,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    again. A `status=MERGE_NOT_CLEAN` line reading `DIRTY` is a conflict with `develop`. Merge
    `develop` into the branch with a merge commit, never a rebase, resolve the conflict, push, and
    drive the pull request from step 2 again.
+   A gate exit `49`, `status=AWAITING_LOCAL_PASS`, clears as step 3 says. Record and attest a pass
+   over the head, then run `merge` again. A `status=REFUSED` line reading `MERGED, not OPEN` means
+   the pull request already merged, by hand or by a peer. Run the `cleanup` command below.
    With no `status=MERGED` line before it, a `status=MERGE_REFUSED` line at exit `1` is `gh`
    refusing a merge that reads back open at the gated head. `develop` moving under a sibling merge
    is one cause. With no such line, a `status=UNREAD` line at exit `2` is a read that failed before
@@ -145,14 +148,15 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    landed, so run the `cleanup` command below. Where it reads `OPEN`, treat it as unmerged and take
    the route above for a state this seat clears. Only a read that still cannot answer is reported,
    saying the merge may have landed.
+   A `status=OUTPUT_NOTED` line is one this seat cannot clear. Its count spans every round and
+   falls on no answer. That includes an acknowledged round's parts once a later push moves the head.
+   Read each part by hand and give any finding in it an outcome, then report it as below.
    A `status=UNTHREADED_FINDINGS` line first asks for each counted finding's outcome, per
-   "Disposing of Every Finding". A `status=OUTPUT_NOTED` line first asks for each part under
-   `REVIEWER OUTPUT NOTED` to be read by hand and any finding in it given an outcome. A
-   `qodo_open` count falls once Qodo re-reviews the fixing push and badges its entry. So where
-   `qodo_open` is among the counts, wait for that re-review and spot-verify each badge per
-   pr-review-conduct's Merge Gate item 3. Then run `merge` again. Once each finding or part has an
-   outcome, a line still standing is one this seat cannot clear. That is because `merge` reads no
-   answer posted to either. Report it to the maintainer as a blocked merge, naming the
+   "Disposing of Every Finding". Only `qodo_open` among its counts can fall, once Qodo re-reviews a
+   fixing push and badges its entry. Where it is among them after such a push, run `status` once
+   that push's checks settle. Spot-verify each badge per pr-review-conduct's Merge Gate item 3, and
+   run `merge` again once. A line still standing then is one this seat cannot clear, since `merge`
+   reads no answer posted to a finding. Report either line to the maintainer as a blocked merge, naming the
    pull request and that each counted finding or noted part has an outcome. The maintainer can
    then merge it by hand.
    Any other non-zero exit with no `status=MERGED` line is a gate refusal this seat cannot clear.
