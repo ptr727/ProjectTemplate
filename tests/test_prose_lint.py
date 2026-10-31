@@ -5623,9 +5623,17 @@ class TestChangedLines(unittest.TestCase):
         self.assertEqual({1}, got["doc.md"])
 
     def moved(
-        self, source: str, renames: str = "true", edit: bool = False, excludes: tuple[str, ...] = ()
+        self,
+        source: str,
+        renames: str = "true",
+        edit: bool = False,
+        excludes: tuple[str, ...] = (),
+        keep: bool = False,
     ) -> dict[str, set[int]]:
-        """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets."""
+        """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets.
+
+        With `keep`, the file is copied rather than moved, so the source stays where it was.
+        """
         root = self.real_repo()
         subprocess.run(["git", "-C", str(root), "config", "diff.renames", renames], check=True)
         (root / source).parent.mkdir(parents=True, exist_ok=True)
@@ -5633,7 +5641,11 @@ class TestChangedLines(unittest.TestCase):
         subprocess.run(["git", "-C", str(root), "add", source], check=True)
         subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
         (root / "docs").mkdir(exist_ok=True)
-        subprocess.run(["git", "-C", str(root), "mv", source, "docs/ledger.md"], check=True)
+        if keep:
+            shutil.copyfile(root / source, root / "docs" / "ledger.md")
+            subprocess.run(["git", "-C", str(root), "add", "docs/ledger.md"], check=True)
+        else:
+            subprocess.run(["git", "-C", str(root), "mv", source, "docs/ledger.md"], check=True)
         if edit:
             (root / "docs" / "ledger.md").write_text(
                 "One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8"
@@ -5648,12 +5660,15 @@ class TestChangedLines(unittest.TestCase):
         Rename detection reports a pure move with no `+++` header and no hunk, so the destination
         gained no scope at all. Prose a generated tree exempted then arrived in a checked path with
         no run ever reading it. Detection is pinned on, so the host's own setting decides nothing.
+        Copy detection stays off, since it would report a pure copy with no hunk in the same way.
         """
-        for renames in ("true", "false"):
-            with self.subTest(renames=renames):
-                self.assertEqual(
-                    {"docs/ledger.md": {1, 2, 3, 4}}, self.moved("reports/ledger.md", renames)
-                )
+        for renames in ("true", "false", "copies"):
+            for edit in (False, True):
+                with self.subTest(renames=renames, edit=edit):
+                    got = self.moved("reports/ledger.md", renames, edit)
+                    self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+        got = self.moved("reports/ledger.md", "copies", keep=True)
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
 
     def test_a_rename_out_of_an_excluded_path_is_read_whole(self) -> None:
         """An excluded path is one no run reads either, so a file leaving it is read in full."""
