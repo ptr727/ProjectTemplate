@@ -1050,6 +1050,7 @@ def _bypass_denial(
 
     remote, targets = _push_targets(git.args, branch_of)
     named = set(_push_targets(git.args, lambda: ())[1]) if any(unread) else set(targets)
+    targets.sort(key=lambda t: t not in named)
     repo: tuple[str, str] | None | object = _UNRESOLVED
     for op, br in targets:
         if rules_lookup is not None:
@@ -1963,6 +1964,11 @@ _PUSH_UNREAD_RULES_CASES: list[tuple[str, dict[str, set[str]] | None, str]] = [
     ("env --ch=/nowhere git push origin @", {"develop": {"pull_request"}}, "deny*"),
     ("env --ch=/nowhere git push origin", {}, "allow"),
     ("env --ch=/nowhere git push origin HEAD main", {"main": {"pull_request"}}, "deny"),
+    (
+        "env --ch=/nowhere git push origin HEAD develop",
+        {"main": {"pull_request"}, "develop": {"pull_request"}},
+        "deny",
+    ),
 ]
 
 
