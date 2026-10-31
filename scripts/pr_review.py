@@ -130,14 +130,14 @@ Subcommands
            A held head names it under COPILOT_ERROR_TRANSIENT instead. The auto-request is also skipped on a pull
            request into a branch other than the default, whose every head an attested local
            pass covers. There an attested head has its checks polled instead while they can still
-           move its merge, and one with no attestation exits 49. --request asks for a round anyway.
+           move its merge and no thread is open on it, and one with no attestation exits 49. --request asks for a round anyway.
            The bot id is read from the repository's most recently updated pull requests, the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
            agent turn, not 90.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
-           hold the poll. Exit 0 on a review present does not poll the checks, so it does not prove
-           the required checks ran. On an open attested held head whose commit the payload carries,
+           hold the poll, with no thread open where the pull request is open. Exit 0 on a review
+           present does not poll the checks, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
            every workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
@@ -181,6 +181,9 @@ Subcommands
            30 instead, where the rules and the head's rollup were read, not `CHECKS TRUNCATED`. An
            empty rollup read off the head holds a BLOCKED, BEHIND, or DRAFT one, as does a
            rollup holding only types this cannot read.
+           46 = an open attested held head with an unresolved thread, whoever opened it, which ends
+           the poll at once and outranks 30, 44, and 45, since no check clears it. A thread page cut
+           at 100 is read to its end first. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
            for the head. 64 = the write scope could not
@@ -262,6 +265,8 @@ from pr_review_rounds import (
     shape_hold,
     standing_quota,
     stopping_refusal,
+    thread_author,
+    threads_truncated,
     uncounted_verdict,
 )
 
@@ -367,7 +372,9 @@ HELD_FIELDS = """
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
 query($o:String!,$r:String!,$n:Int!){
-  repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__ }}}
+  repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
+    reviewThreads(first:100){ nodes{ isResolved comments(first:1){ nodes{ author{login} } } } pageInfo{ hasNextPage } }
+  }}}
 """.replace("__HELD_FIELDS__", HELD_FIELDS)
 Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
@@ -1004,6 +1011,13 @@ def unresolved_threads(owner: str, repo: str, num: int) -> list[dict]:
     return out
 
 
+def open_on_head(owner: str, repo: str, num: int, pr: dict) -> list[dict]:
+    """Every unresolved thread in `pr`, walking every page where its thread read was cut."""
+    if threads_truncated(pr):
+        return unresolved_threads(owner, repo, num)
+    return open_threads(pr["reviewThreads"]["nodes"])
+
+
 def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     """Post one PR conversation comment and confirm the returned comment. Returns an exit code."""
     if refused := scope_refusal(owner):
@@ -1621,6 +1635,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             return (
                 holds(polled)
                 and local_cover(polled)
+                and not open_on_head(owner, repo, a.number, polled)
                 and held_checks_open(
                     polled,
                     check_nodes(polled),
@@ -1711,6 +1726,15 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
             )
         if verdict:
             return verdict
+        opened = covered and open_on_head(owner, repo, a.number, final)
+        if opened and final.get("state", "OPEN") == "OPEN":
+            who = ", ".join(sorted({thread_author(t) or "an unnamed author" for t in opened}))
+            print(
+                f"status=THREADS_UNRESOLVED an attested local pass covers this head, and "
+                f"{len(opened)} unresolved thread(s) opened by {who} hold the merge, which no "
+                "check clears: dispose of each one, then wait again"
+            )
+            return 46
         runs = runs_open(final)
         if covered and held_checks_open(
             final,
