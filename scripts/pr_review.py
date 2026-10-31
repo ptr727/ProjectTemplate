@@ -473,25 +473,25 @@ def gh_graphql(query: str, **variables) -> dict:
 
     The transport raises `GraphQLError` and never exits, so a failed read prints its detail and
     ends the run at exit 1. Only an error set made of `workflowRun` paths is tolerated. A response
-    holding a null node is unread too. A query is read again on `READ_RETRY_DELAYS` first, and a
-    mutation is never sent twice.
+    holding a null node ends the run too, and only that case is retried first. A query is read
+    again on `READ_RETRY_DELAYS`, and a mutation is never sent twice.
     """
-    reads = query.lstrip().startswith("query")
-    delays = iter(READ_RETRY_DELAYS if reads else ())
-    while True:
+
+    def send() -> shared.Response:
         try:
-            response = shared.request(query, variables, tolerate=_is_workflow_run_error)
+            return shared.request(query, variables, tolerate=_is_workflow_run_error)
         except shared.GraphQLError as exc:
             sys.stderr.write(exc.detail)
             raise SystemExit(str(exc)) from exc
-        if (where := null_node(response.data)) is None:
-            break
-        if (delay := next(delays, None)) is None:
-            raise SystemExit(
-                f"gh graphql returned a null node GitHub could not resolve under {where}, so the "
-                "response is unread" + ("" if reads else ", though the write it answers was sent")
-            )
-        time.sleep(delay)
+
+    reads = query.lstrip().startswith("query")
+    delays = READ_RETRY_DELAYS if reads else ()
+    response = backoff(send(), send, lambda r: null_node(r.data) is not None, delays=delays)
+    if (where := null_node(response.data)) is not None:
+        raise SystemExit(
+            f"gh graphql returned a null node GitHub could not resolve under {where}, so the "
+            "response is unread" + ("" if reads else ", though the write it answers was sent")
+        )
     data = response.data
     if response.tolerated:
         sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
@@ -1762,7 +1762,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
         if verdict:
             return verdict
         opened = covered and open_on_head(owner, repo, a.number, final)
-        if opened and final.get("state", "OPEN") == "OPEN":
+        if opened:
             who = ", ".join(sorted({thread_author(t) or "an unnamed author" for t in opened}))
             print(
                 f"status=THREADS_UNRESOLVED an attested local pass covers this head, and "
