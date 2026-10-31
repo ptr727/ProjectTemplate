@@ -191,11 +191,7 @@ def sections(text):
 
 
 def section_key(name):
-    """The lookup key for a section name: stripped, then case-folded.
-
-    Every comparison of a section or heading name keys through this, so a change to the
-    normalization cannot reach only some lookup paths.
-    """
+    """The lookup key for a section name: stripped, then case-folded."""
     return name.strip().lower()
 
 
