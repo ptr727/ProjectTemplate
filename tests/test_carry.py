@@ -640,6 +640,13 @@ class CarrySectionTests(unittest.TestCase):
             },
         )
 
+    def test_plan_unit_does_not_read_a_section_the_hub_still_carries_as_a_rename(self) -> None:
+        hub = "# T\n\n## Old\n\nMoved to New.\n\n## New\n\nThe rule text.\n"
+        target = "# T\n\n## Old\n\nThe rule text.\n"
+        plan = self._unit(hub, target, ["Old", "New"])
+        self.assertEqual(plan.missing, ["New"])
+        self.assertEqual(plan.stale, ["Old", "New"])
+
     def test_plan_unit_compares_every_target_section_even_when_a_name_repeats(self) -> None:
         hub = "# T\n\n## New Name\n\nThe rule text.\n"
         target = "# T\n\n## Dup\n\nOne.\n\n## Dup\n\nThe rule text.\n"

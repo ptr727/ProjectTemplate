@@ -880,6 +880,7 @@ def plan_unit(
     target_lines = split_lines(decode_text(target_file, path), path)
     stale: list[str] = []
     missing: list[str] = []
+    hub_names = {key for key, _ in h2_spans(source_lines)}
     for section in declared:
         source_span = section_span(source_lines, section)
         if source_span is None:
@@ -892,7 +893,9 @@ def plan_unit(
         if target_span is None:
             body = section_body(source_lines, source_span)
             if body and any(
-                section_body(target_lines, span) == body for _, span in h2_spans(target_lines)
+                section_body(target_lines, span) == body
+                for key, span in h2_spans(target_lines)
+                if key not in hub_names
             ):
                 raise CarryError(
                     f"{path} section '{section}' is absent by heading but its text already appears in the target,"
