@@ -356,8 +356,9 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    A `status=THREADS_UNRESOLVED`, `status=CHECKS_PENDING`, or `status=PENDING` line is no
    decision. Nor is a `status=HEAD_MOVED`, `status=REVIEW_PENDING`, or
    `status=UNPLACED_PARTS_UNACKNOWLEDGED` line. Nor is a `status=MERGE_NOT_CLEAN` line reading
-   `UNKNOWN`, `BEHIND`, or `DIRTY`, nor a gate exit `49`. The worker clears each of those per `drive-pr` step 4, by
-   disposing of the thread, acknowledging the parts, merging `develop` into the branch, or waiting.
+   `UNKNOWN`, `BEHIND`, or `DIRTY`, nor a gate exit `49`. The worker clears each of those per
+   `drive-pr` step 4. It disposes of the thread, acknowledges the parts, merges `develop` into the
+   branch, records and attests a pass, or waits.
    It then drives again and runs `merge` again. A first `status=MERGE_REFUSED` or `status=UNREAD`
    line with no `status=MERGED` line before it is no decision either. The worker runs `merge` again
    once, directly, per that step. A `status=REFUSED` line reading `MERGED, not OPEN` goes on to the

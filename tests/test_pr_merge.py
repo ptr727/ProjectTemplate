@@ -308,6 +308,11 @@ class TestUnmetItems(MergeCase):
     def test_a_clean_payload_leaves_nothing_unmet(self) -> None:
         self.assertEqual([], self.unmet_on(self.clean()))
 
+    def test_a_finished_state_beside_clean_leaves_nothing_unmet(self) -> None:
+        for state in ("UNSTABLE", "HAS_HOOKS"):
+            with self.subTest(state):
+                self.assertEqual([], self.unmet_on(self.clean(merge=state)))
+
     def test_each_item_unmet_is_named(self) -> None:
         coderabbit = fixtures.review(
             login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,

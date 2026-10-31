@@ -45,6 +45,8 @@ GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
 UNRUN = "gh could not be run or did not finish"
 MET_COVERAGE = ("full", "table", "carried:table", "local")
+# The states `wait` treats as finished, since item 1 asks only for the required checks.
+MERGEABLE = ("CLEAN", "UNSTABLE", "HAS_HOOKS")
 UNTHREADED = ("suppressed", "previously_missed", "cr_outside_diff", "qodo_open")
 NOTED = pr_review_digest.NOTED
 COUNTED = (*UNTHREADED, "overview", pr_review_digest.NO_THREAD, NOTED)
@@ -133,7 +135,7 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
         unmet.append(("UNTHREADED_FINDINGS", f"the digest reads {', '.join(counts)}"))
     if noted:
         unmet.append(("OUTPUT_NOTED", f"the digest reads {noted[0]}, which item 4 reads by hand"))
-    if (state := pr.get("mergeStateStatus")) != "CLEAN":
+    if (state := pr.get("mergeStateStatus")) not in MERGEABLE:
         unmet.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not CLEAN"))
     return pr["headRefOid"], unmet
 

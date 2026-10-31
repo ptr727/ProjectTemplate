@@ -127,13 +127,15 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    exit `30` printing `status=CHECKS_PENDING` or `status=PENDING`. They are also a
    `status=HEAD_MOVED` line, printed for a push during the gate or for `gh` refusing a head that
    moved. So is a `status=REVIEW_PENDING` line, a review request still
-   pending. So is a `status=MERGE_NOT_CLEAN` line reading `UNKNOWN` or `BEHIND`, GitHub recomputing
-   mergeability or `develop` moving. For each, dispose of the thread or wait, run step 3 again,
+   pending. So is a `status=MERGE_NOT_CLEAN` line reading `UNKNOWN`, GitHub recomputing
+   mergeability. For each, dispose of the thread or wait, run step 3 again,
    and then run `merge` again. A `status=UNPLACED_PARTS_UNACKNOWLEDGED` line clears once this seat
    posts the acknowledgment pr-review-conduct's Merge Gate item 4 names, and then runs `merge`
-   again. A `status=MERGE_NOT_CLEAN` line reading `DIRTY` is a conflict with `develop`. Merge
-   `develop` into the branch with a merge commit, never a rebase, resolve the conflict, push, and
-   drive the pull request from step 2 again.
+   again. A `status=COUNT_UNREAD` line reading `overview=?` can still stand after it, since item 3
+   reads a `?` as unmet, and it is reported as below. A `status=MERGE_NOT_CLEAN` line reading
+   `DIRTY` is a conflict with `develop`, and one reading `BEHIND` is a branch `develop` passed.
+   For either, merge `develop` into the branch with a merge commit, never a rebase. Resolve any
+   conflict, push, and drive the pull request from step 2 again.
    A gate exit `49`, `status=AWAITING_LOCAL_PASS`, clears as step 3 says. Record and attest a pass
    over the head, then run `merge` again. A `status=REFUSED` line reading `MERGED, not OPEN` means
    the pull request already merged, by hand or by a peer. Run the `cleanup` command below.
@@ -152,9 +154,12 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    falls on no answer. That includes an acknowledged round's parts once a later push moves the head.
    Read each part by hand and give any finding in it an outcome, then report it as below.
    A `status=UNTHREADED_FINDINGS` line first asks for each counted finding's outcome, per
-   "Disposing of Every Finding". Only `qodo_open` among its counts can fall, once Qodo re-reviews a
-   fixing push and badges its entry. Where it is among them after such a push, run `status` once
-   that push's checks settle. Spot-verify each badge per pr-review-conduct's Merge Gate item 3, and
+   "Disposing of Every Finding". Its `FINDINGS WITH NO THREAD` count reads the head's round alone.
+   So a no-thread finding on an earlier round is this seat's to dispose of before `merge`, which
+   does not read it. A `qodo_open` count falls once Qodo re-reviews a fixing push and badges its
+   entry. Where it is among the counts after such a push, post `/review` on the pull request. Qodo
+   does not always reprocess a push on its own. Read `status` once the next `wait` returns.
+   Spot-verify each badge per pr-review-conduct's Merge Gate item 3, and
    run `merge` again once. A line still standing then is one this seat cannot clear, since `merge`
    reads no answer posted to a finding. Report either line to the maintainer as a blocked merge, naming the
    pull request and that each counted finding or noted part has an outcome. The maintainer can
