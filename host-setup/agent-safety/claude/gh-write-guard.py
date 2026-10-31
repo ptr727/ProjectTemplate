@@ -1063,8 +1063,8 @@ def _bypass_denial(
                 "This push names no refspec, or `HEAD`, behind an `env` option the guard does not "
                 "recognize. That option may have moved it to a checkout on a protected-by-default "
                 "branch (main/master/develop), so the branch it writes could not be read. Drop "
-                "the option, name the branch in the refspec, or name the repository with an "
-                "absolute `git -C` or `--git-dir`."
+                "the option, name the branch in the refspec, or name a checkout on a branch with "
+                "an absolute `git -C` or `--git-dir`."
             )
         if reason:
             return reason
@@ -1949,6 +1949,7 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch=/nowhere git -C {a} push nowhere", "allow"),
     ("env --ch=/nowhere git -C {b} push nowhere", "deny"),
     ("env --ch=/nowhere git push --all nowhere", "deny"),
+    ("GIT_DIR=x; git push nowhere HEAD develop", "deny"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
