@@ -65,6 +65,7 @@ def resolve_main_commit() -> str | None:
 
     Every file a run fetches comes from that one commit, so a script and its data always pair.
     Where neither resolves, one line names both causes and the gate runs against `main` instead.
+    That run fetches twice and refuses to run, if the two reads differ, a push having landed mid-run.
     A hook with no network cannot fetch the gate at all, and the CI gate is the enforcement.
     """
     token = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
@@ -145,6 +146,26 @@ def resolve_unborn_head(argv: list[str]) -> list[str]:
     return out
 
 
+class FetchError(Exception):
+    def __init__(self, url: str, cause: Exception) -> None:
+        super().__init__(url)
+        self.url = url
+        self.cause = cause
+
+
+def fetch_all(ref: str, paths: tuple[str, ...]) -> dict[str, bytes]:
+    """Fetch each hub path at `ref` in order, raising FetchError naming the first that fails."""
+    fetched: dict[str, bytes] = {}
+    for path in paths:
+        url = f"{HUB_RAW_BASE}/{ref}/{path}"
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                fetched[path] = response.read()
+        except (urllib.error.URLError, OSError) as exc:
+            raise FetchError(url, exc) from exc
+    return fetched
+
+
 USAGE = "usage: hub_fetch_run.py <hub-relative-path> [script-args...]"
 
 
@@ -171,16 +192,22 @@ def main(argv: list[str]) -> int:
         else:
             env[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
     with tempfile.TemporaryDirectory() as scratch:
-        # The script is fetched last, so a companion it needs is in place before it can run.
-        for path in (*COMPANIONS.get(hub_path, ()), hub_path):
-            url = f"{HUB_RAW_BASE}/{ref}/{path}"
-            try:
-                with urllib.request.urlopen(url, timeout=30) as response:
-                    content = response.read()
-            except (urllib.error.URLError, OSError) as exc:
-                print(f"hub_fetch_run: could not fetch {url}: {exc}", file=sys.stderr)
+        paths = (*COMPANIONS.get(hub_path, ()), hub_path)
+        try:
+            fetched = fetch_all(ref, paths)
+            if commit is None and len(paths) > 1 and fetch_all(ref, paths) != fetched:
+                print(
+                    "hub_fetch_run: main moved while the files were fetched, "
+                    "so a mixed pair was refused, re-run to fetch a consistent pair.",
+                    file=sys.stderr,
+                )
                 print("hub_fetch_run: the gate did not run.", file=sys.stderr)
                 return 1
+        except FetchError as exc:
+            print(f"hub_fetch_run: could not fetch {exc.url}: {exc.cause}", file=sys.stderr)
+            print("hub_fetch_run: the gate did not run.", file=sys.stderr)
+            return 1
+        for path, content in fetched.items():
             (Path(scratch) / Path(path).name).write_bytes(content)
         script = Path(scratch) / Path(hub_path).name
         cmd = [uv, "run", "--no-project", "--script", str(script), *script_args]
