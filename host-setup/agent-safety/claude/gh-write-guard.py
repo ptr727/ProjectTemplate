@@ -385,7 +385,7 @@ class _Launch:
     command inherits, and `cleared` whether an `env -i` empties it. `chdirs` holds each directory an
     `env -C` moves the command to, in turn. `undetermined` means an `env` option the guard does not
     recognize, such as an abbreviation of `--chdir`, may have moved it anywhere. `choices` counts
-    those options, each of which may or may not take a value.
+    the readings such an option allows: taking a value or not, and splitting that value or not.
     """
 
     argv: list[str]
@@ -461,7 +461,8 @@ def _split_string(value: str) -> list[str]:
 def _launch(argv: list[str], takes: int = 0) -> _Launch:
     """Strip the launchers before a command, reading what an `env` among them changes.
 
-    Bit n of `takes` reads the nth `env` option the guard does not recognize as taking a value.
+    Bit n of `takes` answers the nth choice an `env` option the guard does not recognize poses. That
+    is whether it takes the next word, and whether its value is an `-S` string.
     """
     out = _Launch([])
     env = out.env
@@ -512,6 +513,8 @@ def _launch(argv: list[str], takes: int = 0) -> _Launch:
                         rest = rest[:i] + _split_string(value) + rest[i:]
                     elif letter == "?":
                         out.undetermined = True
+                        if value and take():
+                            rest = rest[:i] + _split_string(value) + rest[i:]
             out.chdirs += [] if chdir is None else [chdir]
             argv = rest[i:]
         elif name == "xargs":
@@ -584,13 +587,13 @@ def _read(
     """
     segs, _ = _tokenize(text)
     out.texts.append((segs, timed))
-    saved: list[tuple[str | None, dict[str, str]]] = []
+    saved: list[tuple[str | None, dict[str, str], bool]] = []
     for k, seg in enumerate(segs):
         # A subshell's cd and export end at its closing parenthesis.
         if k and segs[k - 1].op == "(":
-            saved.append((cwd, dict(env)))
+            saved.append((cwd, dict(env), undetermined))
         elif k and segs[k - 1].op == ")" and saved:
-            cwd, env = saved.pop()
+            cwd, env, undetermined = saved.pop()
         assigns, words = _parse(seg.words)
         for n, launch in enumerate(_launches(words)):
             argv = launch.argv
@@ -1879,6 +1882,9 @@ _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
     ("env --ch={b} git push https://github.com/stranger/x :feature/x", "stranger"),
     ("env --ch=/nowhere git --git-dir={b}/.git push origin :feature/x", "stranger"),
     ("env --nu sh -c 'cd {b} && git push origin :feature/x'", "stranger"),
+    ("env --ch={b} sh -c '(cd /nowhere && make); git push origin :feature/x'", None),
+    ("env --ignore-env --ch {b} git push origin :feature/x", None),
+    ("env --ch {b} --nu git push origin :feature/x", None),
     ("env -0v - -- git push origin :feature/x", "example"),
     ("env --null --debug git push origin :feature/x", "example"),
     (
@@ -1906,14 +1912,11 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ("env --nu sh -c 'cd {b} && git push origin'", "develop"),
 ]
 _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
-    ("env --ch={b} git push origin develop", "deny"),
-    ("env --chd {b} git push origin main", "deny"),
     ("env --ch={b} git push origin feature/x", "allow"),
     ("env --chd {b} git push origin feature/x", "allow"),
     ("env -X git push origin feature/x", "allow"),
-    ("env --ignore-env --ch {b} git push origin main", "deny"),
-    ("env --ch {b} --nu git push origin develop", "deny"),
     ("cd {b} && env --ch=.. git push -u origin HEAD", "allow"),
+    ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
 ]
