@@ -829,10 +829,13 @@ def _branch_name(ref: str) -> str | None:
 
 
 def _push_targets(
-    args: list[str], branch_of: Callable[[], str | None]
+    args: list[str], branch_of: Callable[[], tuple[str, ...]]
 ) -> tuple[str | None, list[tuple[str, str]]]:
     """A push's remote and each (operation, branch) it writes, the operation update, force,
-    delete, or mirror."""
+    delete, or mirror.
+
+    `branch_of` gives each branch a push naming no refspec, or `HEAD`, may write.
+    """
     force = delete = every = mirror = tags = False
     pos: list[str] = []
     i = 0
@@ -866,8 +869,7 @@ def _push_targets(
     if every:
         return remote, [(write, b) for b in _PROTECTED_DEFAULT]
     if not specs:
-        branch = None if delete or tags else branch_of()
-        return remote, [(write, branch)] if branch else []
+        return remote, [] if delete or tags else [(write, b) for b in branch_of()]
     out: list[tuple[str, str]] = []
     for spec in specs:
         op = "force" if force or spec.startswith("+") else "update"
@@ -879,22 +881,21 @@ def _push_targets(
             op = op if src else "delete"
         else:
             dst = spec
-        name = branch_of() if dst in ("HEAD", "@") else _branch_name(dst)
-        if name:
-            out.append((op, name))
+        names = branch_of() if dst in ("HEAD", "@") else (_branch_name(dst),)
+        out += [(op, name) for name in names if name]
     return remote, out
 
 
-def _named_git_dir(cmd: _Cmd, git: _Git, lenient: bool = False) -> str | None:
+def _named_git_dir(cmd: _Cmd, git: _Git) -> str | None:
     """The repository a `--git-dir`, or else a `GIT_DIR` the command carries, names, as written.
 
     A `GIT_DIR` set earlier in the text reads as a run-time word. Whether git sees it turns on an
     export or an `unset` the reading does not track. So does one behind an `env` option the guard
-    does not recognize, which may be an abbreviation of `--unset`, unless `lenient` reads it anyway.
+    does not recognize, which may be an abbreviation of `--unset`.
     """
     if git.git_dir is not None:
         return git.git_dir
-    if "GIT_DIR" in cmd.own and (lenient or not cmd.undetermined):
+    if "GIT_DIR" in cmd.own and not cmd.undetermined:
         return cmd.own["GIT_DIR"]
     return "$GIT_DIR" if "GIT_DIR" in cmd.env else None
 
@@ -915,13 +916,10 @@ def _push_cwd(cmd: _Cmd) -> str | None:
 def _bare_branch(cmd: _Cmd, git: _Git) -> str | None:
     """The branch a push naming no refspec writes, or None where the reading does not resolve it.
 
-    Behind an `env` option the guard does not recognize, a branch nothing else names is read as if
-    the option were absent. So a push from a protected branch still fails closed.
+    An `env` option the guard does not recognize may have moved the push anywhere. Behind one, only
+    an absolute `--git-dir`, git `-C`, or wrapper-body `cd` resolves it.
     """
     got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, _named_git_dir(cmd, git), None, False)
-    if not isinstance(got, str) and cmd.undetermined:
-        named = _named_git_dir(cmd, git, True)
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, False)
     return got if isinstance(got, str) else None
 
 
@@ -1039,12 +1037,20 @@ def _bypass_denial(
     if git.sub != "push":
         return None
 
-    def branch_of() -> str | None:
+    unread: list[bool] = []
+
+    def branch_of() -> tuple[str, ...]:
+        """The branch a push naming no refspec writes, or each protected default an unrecognized
+        `env` option may have moved it to."""
         if current_branch is not None:
-            return current_branch
-        return _bare_branch(cmd, git)
+            return (current_branch,)
+        got = _bare_branch(cmd, git)
+        unread.append(got is None and cmd.undetermined)
+        return (got,) if got else _PROTECTED_DEFAULT if cmd.undetermined else ()
 
     remote, targets = _push_targets(git.args, branch_of)
+    named = set(_push_targets(git.args, lambda: ())[1]) if any(unread) else set(targets)
+    targets.sort(key=lambda t: t not in named)
     repo: tuple[str, str] | None | object = _UNRESOLVED
     for op, br in targets:
         if rules_lookup is not None:
@@ -1054,6 +1060,14 @@ def _bypass_denial(
                 repo = _push_repo(cmd, git, remote)
             rules = _live_branch_rules(repo[0], repo[1], br) if isinstance(repo, tuple) else None
         reason = _rule_denial(op, br, rules)
+        if reason and (op, br) not in named:
+            return (
+                "This push names no refspec, or `HEAD`, behind an `env` option the guard does not "
+                "recognize. That option may have moved it to a checkout on a protected-by-default "
+                "branch (main/master/develop), so the branch it writes could not be read. Drop "
+                "the option, name the branch in the refspec, or name a checkout on a branch with "
+                "an absolute `git -C`, `--git-dir`, or `cd` in a wrapper body."
+            )
         if reason:
             return reason
     return None
@@ -1916,10 +1930,12 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('env -C "$D" git -C {b} push origin', "develop"),
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
-    ("env --ch={b} git push origin", "feature/a"),
-    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", "develop"),
-    ("env --nu sh -c 'GIT_DIR={b}/.git git push origin'", "develop"),
+    ("env --ch={b} git push origin", None),
+    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", None),
+    ("env --nu sh -c 'GIT_DIR={b}/.git git push origin'", None),
     ("env --ch=/nowhere git --git-dir={b}/.git push origin", "develop"),
+    ("env --ch={b} git --git-dir={b}/.git push origin", "develop"),
+    ("env --ch=/nowhere git -C {b} push origin", "develop"),
     ("env --nu git -C {b} push origin", "develop"),
     ("env --nu sh -c 'cd {b} && git push origin'", "develop"),
 ]
@@ -1927,12 +1943,32 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push origin feature/x", "allow"),
     ("env --chd {b} git push origin feature/x", "allow"),
     ("env -X git push origin feature/x", "allow"),
-    ("cd {b} && env --ch=.. git push -u origin HEAD", "deny"),
-    ("cd {b} && env --ignore-env git push", "deny"),
-    ("env --ch={b} git push -u origin HEAD", "allow"),
+    ("cd {b} && env --ch=.. git push -u origin HEAD", "deny*"),
+    ("cd {b} && env --ignore-env git push", "deny*"),
+    ("env --ch={b} git push -u origin HEAD", "deny*"),
+    ("env --ch={b} git push origin", "deny*"),
+    ("env --ch=/nowhere git push origin", "deny*"),
+    ("env --ch=/nowhere git -C {a} push nowhere", "allow"),
+    ("env --ch=/nowhere git -C {b} push nowhere", "deny"),
+    ("env --ch=/nowhere git push --all nowhere", "deny"),
+    ("GIT_DIR=x; git push nowhere HEAD develop", "deny"),
+    ("GIT_DIR=x; git push nowhere", "allow"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
+]
+
+_PUSH_UNREAD_RULES_CASES: list[tuple[str, dict[str, set[str]] | None, str]] = [
+    ("env --ch=/nowhere git push origin", {"main": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin HEAD", {"master": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin @", {"develop": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin", {}, "allow"),
+    ("env --ch=/nowhere git push origin HEAD main", {"main": {"pull_request"}}, "deny"),
+    (
+        "env --ch=/nowhere git push origin HEAD develop",
+        {"main": {"pull_request"}, "develop": {"pull_request"}},
+        "deny",
+    ),
 ]
 
 
@@ -1940,7 +1976,9 @@ def _push_repo_selftest() -> bool | str:
     """Read the repository each push writes from two real checkouts, their origins under different owners.
 
     Each case is a command run in checkout `a`, with `b` beside it, and the owner or the branch it
-    writes. Checkout `a` is on `feature/a` and `b` on `develop`.
+    writes. Checkout `a` is on `feature/a` and `b` on `develop`. A `*` on a verdict marks the
+    denial of a branch an unrecognized `env` option leaves unread. A case carrying rules reads them
+    in place of the live query.
     "skip" where the checkouts could not be built, which is neither a pass nor a failure.
     """
     with tempfile.TemporaryDirectory() as tmp:
@@ -1958,7 +1996,7 @@ def _push_repo_selftest() -> bool | str:
             _read(cmd.format(b=b), a, {}, reading)
             c = [r for r in reading.cmds if _base(r.argv[0]) == "git"][-1]
             git = _git(c.argv)
-            got = _push_repo(c, git, _push_targets(git.args, lambda: None)[0])
+            got = _push_repo(c, git, _push_targets(git.args, lambda: ())[0])
             passed = (got[0] if got else None) == want
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [repo ] want={want} R4: {cmd}")
@@ -1970,10 +2008,21 @@ def _push_repo_selftest() -> bool | str:
             passed = _bare_branch(c, git) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
-        for cmd, want in _PUSH_UNDETERMINED_CASES:
-            verdict, _ = classify(
-                cmd.format(b=b), a, environ={}, primary_checkout_lookup=lambda _d: False
+        cases: list[tuple[str, dict[str, set[str]] | None, str]] = [
+            (cmd, None, want) for cmd, want in _PUSH_UNDETERMINED_CASES
+        ]
+        for cmd, rules, want in cases + _PUSH_UNREAD_RULES_CASES:
+            lookup: Callable[[str], set[str] | None] | None = None
+            if rules is not None:
+                lookup = lambda br, r=rules: r.get(br, set())
+            verdict, reason = classify(
+                cmd.format(a=a, b=b),
+                a,
+                rules_lookup=lookup,
+                environ={},
+                primary_checkout_lookup=lambda _d: False,
             )
+            verdict += "*" if "the branch it writes could not be read" in reason else ""
             ok = ok and verdict == want
             mark = "ok  " if verdict == want else "FAIL"
             print(f"  {mark} [{verdict:5}] want={want:5} 3725: {cmd}")
