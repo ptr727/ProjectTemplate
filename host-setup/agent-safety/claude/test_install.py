@@ -2320,6 +2320,37 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
         self.assertEqual(self._branch(guard, False, [], "/repos/wt-example"), "feature/example")
 
 
+class TestDeleteOnlyPushInPrimaryCheckout(unittest.TestCase):
+    """Requirement 6 exempts a delete-only push, and requirement 4 still judges its branch.
+
+    The exemption lifts only the working-tree test. So a branch whose live rules forbid deletion
+    still denies from a primary checkout. The guard's own self-test holds the allowed shapes.
+    """
+
+    def _classify(self, cmd, rules):
+        spec = importlib.util.spec_from_file_location("guard_delete", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        return guard.classify(
+            cmd,
+            cwd="/c/work/primary",
+            origin=("example", "repo"),
+            current_branch="develop",
+            rules_lookup=lambda b: rules.get(b, set()),
+            environ={},
+            primary_checkout_lookup=lambda _d: True,
+            ref_resolver=lambda _d, _r: True,
+        )
+
+    def test_a_deletion_rule_still_denies(self):
+        for cmd in ("git push origin --delete feature/example", "git push origin :feature/example"):
+            decision, reason = self._classify(cmd, {"feature/example": {"deletion"}})
+            self.assertEqual(decision, "deny", cmd)
+            self.assertIn("forbid deletion", reason)
+
+
 @unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")
 class TestContainmentHookSelftests(unittest.TestCase):
     """The prefix's and the sweep's own matrices, the session tree's cases included, run in this suite.

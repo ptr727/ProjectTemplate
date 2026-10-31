@@ -2552,6 +2552,151 @@ class TestGqlTransport(unittest.TestCase):
         self.assertEqual(["gh", "api", "graphql"], run.call_args.args[0][:3])
 
 
+class TestNullNodes(unittest.TestCase):
+    """GraphQL can return null for a list item it could not resolve, with no entry in `errors`.
+
+    Every reader takes a node to be an object, so a null one crashed `wait` with a traceback. That
+    is no documented outcome. A null can stand for an open thread or a failed check, so no reading
+    off the response is trusted. A query is read again, and a null that stays ends the run as an
+    unread response does.
+    """
+
+    @staticmethod
+    def body(pr: dict) -> subprocess.CompletedProcess:
+        out = json.dumps({"data": {"repository": {"pullRequest": pr}}})
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=out, stderr="")
+
+    def holding_null(self) -> dict:
+        pr = payload([review()], comments=[comment(at=EARLY)])
+        pr["comments"]["nodes"].insert(0, None)
+        return pr
+
+    def test_null_node_names_the_connection_holding_one(self) -> None:
+        pr = payload([review()], [thread("T1")])
+        self.assertIsNone(pr_review_rounds.null_node(pr))
+        pr["reviewThreads"]["nodes"][0]["comments"]["nodes"].append(None)
+        self.assertEqual("reviewThreads.nodes.comments", pr_review_rounds.null_node(pr))
+
+    def test_a_query_is_read_again_past_a_null_node(self) -> None:
+        clean = payload([review()], comments=[comment(at=EARLY)])
+        reads = [self.body(self.holding_null()), self.body(clean)]
+        with (
+            mock.patch.object(pr_review.subprocess, "run", side_effect=reads) as run,
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(clean, pr_review.gql("query", "o", "r", 7))
+        self.assertEqual(2, run.call_count)
+
+    def test_a_null_node_that_stays_ends_the_run_naming_where_it_sat(self) -> None:
+        """The reported crash's shape, a null in `comments`, now ends on a named unread read."""
+        with (
+            mock.patch.object(
+                pr_review.subprocess, "run", return_value=self.body(self.holding_null())
+            ) as run,
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0, 0)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.assertRaises(SystemExit) as stop,
+        ):
+            pr_review.gql("query", "o", "r", 7)
+        self.assertEqual(3, run.call_count)
+        self.assertIn("null node", str(stop.exception))
+        self.assertIn("repository.pullRequest.comments", str(stop.exception))
+
+    def test_a_mutation_answered_with_a_null_node_is_never_sent_again(self) -> None:
+        with (
+            mock.patch.object(
+                pr_review.subprocess, "run", return_value=self.body(self.holding_null())
+            ) as run,
+            mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0, 0)),
+            mock.patch.object(pr_review.time, "sleep"),
+            self.assertRaises(SystemExit) as stop,
+        ):
+            pr_review.gh_graphql("mutation{ x }")
+        self.assertEqual(1, run.call_count)
+        self.assertIn("the write it answers was sent", str(stop.exception))
+
+
+class TestPullRequestNotOpen(GqlCase):
+    """A merged pull request reads `merge=UNKNOWN`, which reads as an open one still computing."""
+
+    MERGE = "c" * 40
+
+    def merged(self) -> dict:
+        pr = payload([review()], merge="UNKNOWN")
+        return {**pr, "state": "MERGED", "mergedAt": LATE, "mergeCommit": {"oid": self.MERGE}}
+
+    def test_status_names_a_merged_pull_requests_state_and_merge_commit(self) -> None:
+        self.answer(self.merged())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        want = f"pr=7 state=MERGED merged_at={LATE} merge_commit={self.MERGE[:8]} head="
+        self.assertIn(want, out.getvalue())
+        self.assertNotIn("closed_at=", out.getvalue())
+
+    def test_a_closed_pull_request_names_when_it_closed(self) -> None:
+        closed = {**payload([review()], merge="UNKNOWN"), "state": "CLOSED", "closedAt": LATE}
+        self.answer({**closed, "mergedAt": None, "mergeCommit": None})
+        out, _ = pr_review.digest("o", "r", 7, now=NOW)
+        self.assertIn(f"pr=7 state=CLOSED closed_at={LATE} head=", out)
+        self.assertNotIn("merge_commit=", out)
+
+    def test_an_open_pull_request_carries_no_state_field(self) -> None:
+        self.answer({**payload([review()]), "state": "OPEN", "closedAt": EARLY})
+        out, _ = pr_review.digest("o", "r", 7, now=NOW)
+        self.assertNotIn("state=", out.split(" head=")[0])
+        self.assertNotIn("closed_at=", out)
+
+    def test_wait_on_a_merged_pull_request_neither_requests_nor_polls(self) -> None:
+        """A seat about to merge stops on the first read rather than waiting out its bound."""
+        self.answer({**self.merged(), "reviews": {"nodes": [], "pageInfo": {}}})
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep") as slept,
+            mock.patch.object(
+                pr_review, "request_copilot_review", return_value=("", None)
+            ) as requested,
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "o/r"])
+        self.assertEqual(0, code)
+        self.assertNotIn("status=PENDING", out.getvalue())
+        slept.assert_not_called()
+        requested.assert_not_called()
+        self.assertIn("state=MERGED", out.getvalue())
+
+    def test_wait_requests_nothing_on_a_merged_pull_request_even_past_a_refusal(self) -> None:
+        """`--ignore-quota-signal` reopens a head refusal as not done, and the first read stops it."""
+        merged = {**self.merged(), "reviews": {"nodes": [review(body=QUOTA_REFUSED)]}}
+        self.answer(merged)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(
+                pr_review, "request_copilot_review", return_value=("", None)
+            ) as requested,
+        ):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--ignore-quota-signal"])
+        requested.assert_not_called()
+        self.assertIn("state=MERGED", out.getvalue())
+
+    def test_wait_stops_polling_once_the_pull_request_merges_under_it(self) -> None:
+        """A seat merging by hand mid-drive leaves the poll nothing to wait for.
+
+        No review lands, so only the merged state can end the poll. The bound keeps a regression
+        to a few seconds of polling rather than the default timeout.
+        """
+        opened = payload([], merge="BLOCKED")
+        self.answer(opened, opened, {**self.merged(), "reviews": {"nodes": [], "pageInfo": {}}})
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "3"]))
+        self.assertEqual(1, slept.call_count)
+        self.assertIn("state=MERGED", out.getvalue())
+        self.assertNotIn("status=PENDING", out.getvalue())
+
+
 class TestCli(GqlCase):
     def setUp(self) -> None:
         super().setUp()
