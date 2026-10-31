@@ -287,9 +287,11 @@ def changed_lines(
     """Map path -> lines this tree adds vs `base`, an untracked or undiffable text file in full.
 
     No run read a file in a generated tree, an excluded path, or a path outside `paths`. So a file
-    moved out of one is read in full too. A move out of a file some rule's `file_exemption` names
-    is read in full for that rule alone, recorded in `whole`. A move between read paths adds only
-    what it changed.
+    moved out of one is read in full too, as is one whose move changes the lexer it reads through.
+    Only directories narrow. A list naming a file is what a hook passes from a commit, which says
+    what this run reads rather than what every run does. A move changing what its path
+    decides for a rule is read in full for that rule alone, recorded in `whole`. Any other move
+    adds only what it changed.
     """
     raw = git_bytes(root, DIFF_ARGS, base)
     undiffable = undiffable_paths(base, root) if raw is not None else None
@@ -297,10 +299,11 @@ def changed_lines(
         return None
     config = config_for(str(root))
     trees = config.exempt["generated_trees"]
-    asked = None if paths is None else [repo_key(Path(p), root) for p in paths]
+    narrowed = paths is not None and all(Path(p).is_dir() for p in paths)
+    asked = [repo_key(Path(p), root) for p in paths] if paths is not None and narrowed else None
     out: dict[str, set[int]] = {}
     unread: list[str] = []
-    skipped: dict[str, frozenset[str]] = {}
+    moved: dict[str, str] = {}
     cur = None
     source = ""
     # A header is honored only in the block a `diff --git` line opens, which content cannot forge.
@@ -318,8 +321,8 @@ def changed_lines(
                 or (asked is not None and not asked_about(source, asked))
             ):
                 unread.append(dest)
-            elif rules := exempt_rules(root / source, root, config):
-                skipped[dest] = rules
+            else:
+                moved[dest] = source
         elif in_header and line.startswith("+++ "):
             in_header = False
             cur = diff_header_path(line[4:])
@@ -333,15 +336,34 @@ def changed_lines(
             if m:
                 start = int(m.group(1))
                 out[cur].update(range(start, start + int(m.group(2) or 1)))
+    for dest, source in moved.items():
+        if not is_text(root / dest):
+            continue
+        first = (root / dest).read_bytes().split(b"\n", 1)[0].decode("utf-8", "replace")
+        before = path_readings(root / source, root, config, first.rstrip("\r"))
+        after = path_readings(root / dest, root, config, first.rstrip("\r"))
+        if before["*"] != after["*"]:
+            unread.append(dest)
+        elif rules := frozenset(r for r in after if r != "*" and before[r] != after[r]):
+            out.setdefault(dest, set())
+            if whole is not None:
+                whole[dest] = rules
     for name in [*undiffable, *untracked_paths(root), *unread]:
         if is_text(root / name):
             out[name] = set(range(1, len((root / name).read_bytes().splitlines()) + 1))
-    for name, rules in skipped.items():
-        if is_text(root / name):
-            out.setdefault(name, set())
-            if whole is not None:
-                whole[name] = rules
     return out
+
+
+def path_readings(path: Path, root: Path, config: Config, first: str) -> dict[str, object]:
+    """What a file's path alone decides for each rule that reads by path, `*` for every rule."""
+    exempt = exempt_rules(path, root, config)
+    return {
+        **{rule: rule in exempt for rule in FILE_EXEMPTION},
+        "*": lexer_name(path, first),
+        "home-path": ("home-path" in exempt, bool(COMPOSE_FILE.fullmatch(path.name))),
+        "issue-ref": is_instruction_text(path, root),
+        "dead-path": path.parent.resolve(),
+    }
 
 
 def exempt_rules(path: Path, root: Path, config: Config) -> frozenset[str]:
@@ -1286,7 +1308,8 @@ SHORT_MOUNT = re.compile(
 )
 LONG_MOUNT = re.compile(r"""^\s*(?:-\s+)?target:\s+["']?(?P<target>/[^\s"']*)""")
 BLOCK_SCALAR = re.compile(
-    r"^(?P<lead>\s*(?:-\s+)*)(?P<key>[^\s#][^#]*?:\s+)?(?:[!&]\S*\s+)*[|>][-+1-9]{0,2}\s*(?:#.*)?$"
+    r"^(?P<lead>\s*(?:-\s+)*)(?P<key>[^\s#][^#]*?:\s+)?(?:[!&]\S*\s+)*[|>]"
+    r"(?:[-+][1-9]?|[1-9][-+]?)?\s*(?:#.*)?$"
 )
 
 
@@ -2030,7 +2053,14 @@ def main(argv: list[str] | None = None) -> int:
             byfile[keys[f]] = byfile.get(keys[f], 0) + 1
             if not a.summary:
                 print(printable(f"{keys[f]}:{ln}: {kind}: {msg}"))
-    inscope = sum(len(scope[keys[f]]) for f in files) if scope is not None else None
+    inscope = (
+        sum(
+            len(f.read_bytes().splitlines()) if keys[f] in whole else len(scope[keys[f]])
+            for f in files
+        )
+        if scope is not None
+        else None
+    )
     provenance = gate_provenance(a.provenance)
     named = [[keys[f] for f in group] for group in (plain, undecoded)]
     note_line = scope_note(len(files), discovered, inscope, a.diff, provenance, *named)
