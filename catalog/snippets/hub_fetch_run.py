@@ -192,7 +192,6 @@ def main(argv: list[str]) -> int:
         else:
             env[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
     with tempfile.TemporaryDirectory() as scratch:
-        # The script is fetched last, so a companion it needs is in place before it can run.
         paths = (*COMPANIONS.get(hub_path, ()), hub_path)
         try:
             fetched = fetch_all(ref, paths)
