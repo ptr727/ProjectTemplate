@@ -493,6 +493,17 @@ def h2_headings(lines: list[str]) -> list[str]:
     return [h.text for h in fidelity_text_module().headings("".join(lines)) if h.level == 2]
 
 
+def h2_spans(lines: list[str]) -> list[tuple[str, tuple[int, int]]]:
+    """Each level-two region's folded name and `[start, end)`, in order, repeated names included.
+
+    One parse of the document, with the extents `section_span` reads.
+    """
+    return [
+        (fold(heading.text), (heading.line, len(lines) if end is None else end))
+        for heading, end in fidelity_text_module().sections("".join(lines))
+    ]
+
+
 def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     """The `[start, end)` line range of the `## <heading>` region, or None when the file has none.
 
@@ -714,15 +725,16 @@ def insertion_point(target_lines: list[str], hub_order: list[str], section: str)
     hub gets it appended. A local section sitting between two hub sections therefore stays where
     the repository put it, and only the hub's relative order is reproduced.
     """
+    held: dict[str, tuple[int, int]] = {}
+    for name, span in h2_spans(target_lines):
+        held.setdefault(name, span)
     position = hub_order.index(fold(section))
     for name in reversed(hub_order[:position]):
-        span = section_span(target_lines, name)
-        if span is not None:
-            return span[1]
+        if name in held:
+            return held[name][1]
     for name in hub_order[position + 1 :]:
-        span = section_span(target_lines, name)
-        if span is not None:
-            return span[0]
+        if name in held:
+            return held[name][0]
     return len(target_lines)
 
 
@@ -880,8 +892,7 @@ def plan_unit(
         if target_span is None:
             body = section_body(source_lines, source_span)
             if body and any(
-                section_body(target_lines, section_span(target_lines, name) or (0, 0)) == body
-                for name in h2_headings(target_lines)
+                section_body(target_lines, span) == body for _, span in h2_spans(target_lines)
             ):
                 raise CarryError(
                     f"{path} section '{section}' is absent by heading but its text already appears in the target,"
@@ -895,6 +906,16 @@ def plan_unit(
         if source_region != target_region:
             stale.append(section)
     return SectionPlan(path, declared, source_lines, target_lines, stale, missing)
+
+
+def plan_record(plan: SectionPlan) -> dict[str, Any]:
+    """The `check-sections` line for one file: what it declares, which are stale, and which of those it lacks."""
+    return {
+        "missing": plan.missing,
+        "path": plan.path,
+        "sections": plan.declared,
+        "stale": plan.stale,
+    }
 
 
 def plan_sections(
@@ -975,17 +996,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     print(f"types: {','.join(entry_types(entry))}")
     print(f"files: {len(plans)}")
     for plan in plans:
-        print(
-            json.dumps(
-                {
-                    "missing": plan.missing,
-                    "path": plan.path,
-                    "sections": plan.declared,
-                    "stale": plan.stale,
-                },
-                sort_keys=True,
-            )
-        )
+        print(json.dumps(plan_record(plan), sort_keys=True))
     if mode != "apply-sections":
         return 0 if all(not plan.stale for plan in plans) else 1
     apply_plans(target, plans)

@@ -625,6 +625,27 @@ class CarrySectionTests(unittest.TestCase):
         target = "# T\n\nThe rule text.\n\n## Other\n\nLocal.\n"
         self.assertEqual(self._unit(hub, target, ["New Name"]).missing, ["New Name"])
 
+    def test_plan_record_reports_the_missing_sections_beside_the_stale_ones(self) -> None:
+        hub = "# T\n\n## Fleet Bootstrap\n\nHub.\n\n## Release Model\n\nHub only.\n"
+        target = "# T\n\n## Fleet Bootstrap\n\nOld.\n"
+        plan = self._unit(hub, target, ["Fleet Bootstrap", "Release Model"])
+
+        self.assertEqual(
+            carry.plan_record(plan),
+            {
+                "missing": ["Release Model"],
+                "path": "AGENTS.md",
+                "sections": ["Fleet Bootstrap", "Release Model"],
+                "stale": ["Fleet Bootstrap", "Release Model"],
+            },
+        )
+
+    def test_plan_unit_compares_every_target_section_even_when_a_name_repeats(self) -> None:
+        hub = "# T\n\n## New Name\n\nThe rule text.\n"
+        target = "# T\n\n## Dup\n\nOne.\n\n## Dup\n\nThe rule text.\n"
+        with self.assertRaisesRegex(carry.CarryError, "already appears in the target"):
+            self._unit(hub, target, ["New Name"])
+
     def test_insert_sections_keys_a_name_with_stray_whitespace_like_section_span(self) -> None:
         hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
         target = carry.split_lines("# T\n\n## A\n\na\n")
@@ -661,8 +682,9 @@ class CarrySectionTests(unittest.TestCase):
 
         result = "".join(carry.insert_sections(target, hub, ["C", "B"], "AGENTS.md"))
 
-        self.assertEqual(result.count("\n"), result.count("\r\n"))
-        self.assertEqual(carry.h2_headings(carry.split_lines(result)), ["A", "B", "C"])
+        self.assertEqual(
+            result, "# T\r\n\r\n## A\r\n\r\na\r\n\r\n## B\r\n\r\nb\r\n\r\n## C\r\n\r\nc\r\n"
+        )
 
     def test_apply_plans_inserts_a_missing_section_and_updates_a_stale_one(self) -> None:
         hub = (
