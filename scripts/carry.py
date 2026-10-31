@@ -927,20 +927,24 @@ def plan_sections(
 
 
 def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
-    """Write each plan's stale regions and assert the result, one file at a time.
+    """Insert and re-vendor each plan's regions in memory for every file, then write and assert them one file at a time.
 
-    Every refusal has already been raised by `plan_sections`, so nothing here can decline to
-    proceed. What can still fail is the write itself or the assertion after it. Each names the
+    Every refusal, including a failed insertion or splice, is raised before the first file is written.
+    What can still fail afterwards is the write itself or the assertion after it. Each names the
     file it was working on. That is because by then an earlier file may already hold its
     re-vendored content, and the operator has to know which.
     """
+    pending = []
     for plan in plans:
         if not plan.stale:
             continue
-        target_file = relative_root(target, plan.path)
         inserted = insert_sections(plan.target_lines, plan.source_lines, plan.missing, plan.path)
         present = [name for name in plan.stale if name not in plan.missing]
-        rewritten = replace_sections(inserted, plan.source_lines, present, plan.path)
+        pending.append(
+            (plan, inserted, replace_sections(inserted, plan.source_lines, present, plan.path))
+        )
+    for plan, inserted, rewritten in pending:
+        target_file = relative_root(target, plan.path)
         try:
             target_file.write_bytes("".join(rewritten).encode("utf-8"))
         except OSError as exc:

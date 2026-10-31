@@ -631,6 +631,27 @@ class CarrySectionTests(unittest.TestCase):
         target = "# T\n\nThe rule text.\n\n## Other\n\nLocal.\n"
         self.assertEqual(self._unit(hub, target, ["New Name"]).missing, ["New Name"])
 
+    def test_apply_plans_writes_nothing_when_a_later_insertion_fails(self) -> None:
+        hub = "# T\n\n## A\n\nHub.\n\n## B\n\nb\n"
+        fenced = "# T\n\n## A\n\nOld.\n\n```\nunclosed fence\n"
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            (root / "hub").mkdir()
+            (root / "target").mkdir()
+            for name, target_text in (
+                ("AGENTS.md", "# T\n\n## A\n\nOld.\n"),
+                ("GOVERNANCE.md", fenced),
+            ):
+                (root / "hub" / name).write_bytes(hub.encode("utf-8"))
+                (root / "target" / name).write_bytes(target_text.encode("utf-8"))
+            plans = carry.plan_sections(
+                root / "hub", root / "target", [("AGENTS.md", ["A"]), ("GOVERNANCE.md", ["A", "B"])]
+            )
+            before = (root / "target" / "AGENTS.md").read_bytes()
+            with self.assertRaises(carry.CarryError):
+                carry.apply_plans(root / "target", plans)
+            self.assertEqual((root / "target" / "AGENTS.md").read_bytes(), before)
+
     def test_plan_record_reports_the_missing_sections_beside_the_stale_ones(self) -> None:
         hub = "# T\n\n## Fleet Bootstrap\n\nHub.\n\n## Release Model\n\nHub only.\n"
         target = "# T\n\n## Fleet Bootstrap\n\nOld.\n"
