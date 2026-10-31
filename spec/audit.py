@@ -45,7 +45,7 @@ from audit_markdown import (
     title_and_intro,
     undeclared_h2_headings,
 )
-from fidelity_text import extract_section, normalize, strip_sections
+from fidelity_text import extract_section, normalize, section_key, strip_sections
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -2004,7 +2004,7 @@ def check_sections_presence(run, path):
             f"section: '{name}' not found as a heading in {path} on {run.ground} (renamed or missing; verify intent per AUDIT.md section 7)",
         )
         for name in sorted(needed)
-        if name.strip().lower() not in present
+        if section_key(name) not in present
     ]
 
 

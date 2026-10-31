@@ -3612,6 +3612,47 @@ class TestHomePathRule(BaitCase):
                     ["home-path"], self.kinds(self.compose(entry), {"home-path"}, name)
                 )
 
+    def test_a_compose_block_scalar_is_text_rather_than_a_volume(self) -> None:
+        """A `volumes:` key or a mount inside a `|` or `>` scalar is text, so the rule reads it.
+
+        The real volume entry after each scalar still names a container path, so exactly one
+        finding means the scalar ended where its indentation returned.
+        """
+        real = f"    volumes:\n      - ledger-cache:{NIX_HOME}/data\n"
+        for indicator in ("|", ">", "|-", ">+", "|2", "|-2", "&note |", "!!str >", "| # note"):
+            text = (
+                f"services:\n  ledger:\n    x-readme: {indicator}\n      volumes:\n"
+                f"        - ledger-cache:{NIX_HOME}/data\n{real}"
+            )
+            with self.subTest(indicator=indicator):
+                self.assertEqual(["home-path"], self.kinds(text, {"home-path"}, "compose.yml"))
+        for key, indicator in (
+            ("x-a#b", "|"),
+            ("x-a#b", "| # note"),
+            ("x-a#b", ">-"),
+            ('"x-a#b"', "|"),
+            ("'x a'", "|"),
+            ('"x #b"', "|"),
+            ("'x # b'", "|"),
+            ("x", "| # note"),
+        ):
+            text = (
+                f"services:\n  ledger:\n    {key}: {indicator}\n      volumes:\n"
+                f"        - ledger-cache:{NIX_HOME}/data\n{real}"
+            )
+            with self.subTest(key=key, indicator=indicator):
+                self.assertEqual(["home-path"], self.kinds(text, {"home-path"}, "compose.yml"))
+        target = f"        target: {NIX_HOME}/media"
+        for entry in (
+            f"      - type: bind\n        x-note: |\n          - ./old:{NIX_HOME}/media\n{target}",
+            f"      - x-note: >-\n          - ./old:{NIX_HOME}/media\n{target}",
+            f"      - |\n        - ./old:{NIX_HOME}/media\n      - ./config:{NIX_HOME}/media",
+        ):
+            with self.subTest(entry=entry):
+                self.assertEqual(
+                    ["home-path"], self.kinds(self.compose(entry), {"home-path"}, "compose.yml")
+                )
+
 
 class TestDeadPathRule(unittest.TestCase):
     """The `dead-path` rule on Markdown prose units."""
@@ -5629,11 +5670,15 @@ class TestChangedLines(unittest.TestCase):
         edit: bool = False,
         excludes: tuple[str, ...] = (),
         keep: bool = False,
+        paths: tuple[str, ...] | None = None,
+        whole: dict[str, frozenset[str]] | None = None,
+        dest: str = "docs/ledger.md",
     ) -> dict[str, set[int]]:
-        """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets.
+        """The scope a move of a committed four-line file from `source` to `dest` gets.
 
         With `keep`, the file is copied rather than moved, and the source gains a fifth line.
-        Copy detection looks for a source only among the files a change modifies.
+        Copy detection looks for a source only among the files a change modifies. Each of `paths`
+        is relative to the repository, as a run narrowed to it would ask.
         """
         root = self.real_repo()
         subprocess.run(["git", "-C", str(root), "config", "diff.renames", renames], check=True)
@@ -5643,17 +5688,16 @@ class TestChangedLines(unittest.TestCase):
         subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
         (root / "docs").mkdir(exist_ok=True)
         if keep:
-            shutil.copyfile(root / source, root / "docs" / "ledger.md")
+            shutil.copyfile(root / source, root / dest)
             with (root / source).open("a", encoding="utf-8") as fh:
                 fh.write("Five.\n")
-            subprocess.run(["git", "-C", str(root), "add", "docs/ledger.md", source], check=True)
+            subprocess.run(["git", "-C", str(root), "add", dest, source], check=True)
         else:
-            subprocess.run(["git", "-C", str(root), "mv", source, "docs/ledger.md"], check=True)
+            subprocess.run(["git", "-C", str(root), "mv", source, dest], check=True)
         if edit:
-            (root / "docs" / "ledger.md").write_text(
-                "One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8"
-            )
-        got = prose_lint.changed_lines("HEAD", root, excludes)
+            (root / dest).write_text("One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8")
+        asked = None if paths is None else [str(root / p) for p in paths]
+        got = prose_lint.changed_lines("HEAD", root, excludes, asked, whole)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         return got
 
@@ -5677,6 +5721,61 @@ class TestChangedLines(unittest.TestCase):
         """An excluded path is one no run reads either, so a file leaving it is read in full."""
         got = self.moved("drafts/ledger.md", excludes=("drafts/",))
         self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+
+    def test_a_rename_from_outside_the_asked_paths_is_read_whole(self) -> None:
+        """A run narrowed to some paths never read a file outside them, so a move in is all new."""
+        got = self.moved("drafts/ledger.md", paths=("docs",))
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+        got = self.moved("docs/draft.md", paths=("docs",), edit=True)
+        self.assertEqual({"docs/ledger.md": {3}}, got)
+
+    def test_a_file_list_narrows_nothing(self) -> None:
+        """A hook passes the files a commit stages, a move's destination alone, not a run's scope."""
+        self.assertEqual({}, self.moved("docs/draft.md", paths=("docs/ledger.md",)))
+
+    def test_a_rename_changing_what_its_path_decides_is_read_whole_for_that_rule(self) -> None:
+        """A rule that read the file another way where it sat reads it in full, and no other rule.
+
+        The root runbook is exempt from `home-path` and is instruction text, which only
+        `issue-ref` reads as prose. A move keeping both adds only what it changed.
+        """
+        for source, dest, rules in (
+            ("OPERATIONS.md", "docs/ledger.md", {"home-path", "issue-ref"}),
+            ("docs/guide.md", "docs/OPERATIONS.md", set()),
+            ("notes/guide.md", "AGENTS.md", {"issue-ref"}),
+            ("notes/draft.md", "docs/ledger.md", set()),
+        ):
+            for edit, lines in ((False, set()), (True, {3})):
+                with self.subTest(source=source, dest=dest, edit=edit):
+                    whole: dict[str, frozenset[str]] = {}
+                    got = self.moved(source, edit=edit, whole=whole, dest=dest)
+                    self.assertEqual({dest: lines} if rules or edit else {}, got)
+                    self.assertEqual({dest: frozenset(rules)} if rules else {}, whole)
+
+    def test_a_rename_changing_its_lexer_is_read_whole(self) -> None:
+        """A file read as plain text where it sat had no comment or Markdown unit read at all."""
+        got = self.moved("docs/notes.txt")
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+
+    def test_a_moved_runbook_reports_its_home_path_and_no_older_finding(self) -> None:
+        """The run end to end: the moved line reports for `home-path` and for no other rule."""
+        root = self.real_repo()
+        text = f"Deploy into {NIX_HOME}/stack here.\nOne; two.\n"
+        (root / "OPERATIONS.md").write_text(text, encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "OPERATIONS.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+        (root / "docs").mkdir()
+        subprocess.run(["git", "-C", str(root), "mv", "OPERATIONS.md", "docs/ops.md"], check=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = prose_lint.main(
+                ["--check", "home-path", "--check", "semicolon", "--diff", "HEAD", str(root)]
+            )
+        self.assertEqual(1, code)
+        self.assertEqual(
+            ["docs/ops.md:1: home-path"],
+            [ln.rsplit(":", 1)[0] for ln in out.getvalue().splitlines()],
+        )
 
     def test_a_rename_between_read_paths_adds_only_what_it_changed(self) -> None:
         """A run already read the file where it sat, so a move brings no line into scope unedited.

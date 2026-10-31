@@ -10,7 +10,7 @@ import urllib.request
 import fidelity_text
 import markdown_it
 import validate
-from fidelity_text import extract_section, normalize, strip_sections
+from fidelity_text import extract_section, normalize, section_key, strip_sections
 
 
 def docker_hub_description(slug):
@@ -31,8 +31,8 @@ def docker_hub_description(slug):
 
 def undeclared_h2_headings(text, declared):
     """Top-level `##` headings in `text` that `declared` does not name, folded and sorted."""
-    h2s = {h.strip().lower() for level, h, _, _ in _atx_headings(text) if level == 2}
-    return sorted(h2s - {d.strip().lower() for d in declared})
+    h2s = {section_key(h) for level, h, _, _ in _atx_headings(text) if level == 2}
+    return sorted(h2s - {section_key(d) for d in declared})
 
 
 # CommonMark plus tables, with escapes kept as their own tokens so a line can be rebuilt from its source.
@@ -56,7 +56,7 @@ def references(text):
 
 def heading_texts(markdown):
     """Lowercased texts of the headings `_atx_headings` reads, for case-insensitive section-presence matching."""
-    return {h.strip().lower() for _, h, _, _ in _atx_headings(markdown)}
+    return {section_key(h) for _, h, _, _ in _atx_headings(markdown)}
 
 
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -164,7 +164,7 @@ def addressed_region(text, address):
     lines = body.split("\n")
     h3s = [h for h in _atx_headings(body) if h[0] == 3]
     for i, (_, name, _, end) in enumerate(h3s):
-        if name.strip().lower() == parts[1].lower():
+        if section_key(name) == section_key(parts[1]):
             stop = h3s[i + 1][2] if i + 1 < len(h3s) else len(lines)
             return "\n".join(lines[end:stop])
     return None
@@ -180,10 +180,10 @@ def ordered_headings(markdown, level):
 def readme_section_findings(text, model, sel, public):
     """README section presence and order against spec/readme-sections.json."""
     findings = []
-    by_name = {s["name"].lower(): s for s in model["sections"]}
-    retired = {r.lower(): s for s in model["sections"] for r in s.get("retiredNames", [])}
+    by_name = {section_key(s["name"]): s for s in model["sections"]}
+    retired = {section_key(r): s for s in model["sections"] for r in s.get("retiredNames", [])}
     heads = ordered_headings(text, 2)
-    lower = [h.lower() for h in heads]
+    lower = [section_key(h) for h in heads]
     present = set(lower)
 
     for h, hl in zip(heads, lower):
@@ -201,8 +201,8 @@ def readme_section_findings(text, model, sel, public):
             continue
         if {t.lower() for t in s.get("notApplicableTo", [])} & {t.lower() for t in sel}:
             continue
-        if s["name"].lower() in present or any(
-            r.lower() in present for r in s.get("retiredNames", [])
+        if section_key(s["name"]) in present or any(
+            section_key(r) in present for r in s.get("retiredNames", [])
         ):
             continue
         why = " (a public repo; optional while private)" if req == "public" else ""
@@ -228,7 +228,7 @@ def readme_section_findings(text, model, sel, public):
             )
 
     last = next((s for s in model["sections"] if s.get("last")), None)
-    if last and last["name"].lower() in present and lower[-1] != last["name"].lower():
+    if last and section_key(last["name"]) in present and lower[-1] != section_key(last["name"]):
         findings.append(
             (
                 "LETTER",
@@ -237,11 +237,11 @@ def readme_section_findings(text, model, sel, public):
         )
 
     for s in model["sections"]:
-        if s["name"].lower() not in present or not s.get("subsections"):
+        if section_key(s["name"]) not in present or not s.get("subsections"):
             continue
-        have = {h.lower() for h in ordered_headings(readme_region(text, s["name"]) or "", 3)}
+        have = {section_key(h) for h in ordered_headings(readme_region(text, s["name"]) or "", 3)}
         for sub in s["subsections"]:
-            if sub.lower() not in have:
+            if section_key(sub) not in have:
                 findings.append(
                     (
                         "LETTER",

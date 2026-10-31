@@ -59,6 +59,12 @@ class CodeBlockCase(unittest.TestCase):
 
 
 class SectionCase(unittest.TestCase):
+    def test_section_key_strips_then_case_folds(self) -> None:
+        self.assertEqual(fidelity_text.section_key("  Mixed CASE \t"), "mixed case")
+        self.assertEqual(
+            fidelity_text.section_key("Mixed case"), fidelity_text.section_key("MIXED CASE")
+        )
+
     def test_the_last_region_runs_to_the_end(self) -> None:
         text = "intro\n\n## Alpha\n\na\n\n## Beta\n\nb\n"
         self.assertEqual(fidelity_text.section_span(text, "alpha"), (2, 6))

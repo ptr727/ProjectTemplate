@@ -516,7 +516,16 @@ def load_through_uvx(path: Path) -> list[object]:
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
     except OSError as error:
-        raise UvxUnavailable(f"the interpreter uvx provided could not start: {error}") from None
+        hint = ""
+        if isinstance(error, FileNotFoundError):
+            hint = (
+                ", because uv deletes the environment when uvx exits under UV_NO_CACHE or"
+                " uv's no-cache = true (unset UV_NO_CACHE, turn off uv's no-cache setting,"
+                " or make PyYAML importable)"
+            )
+        raise UvxUnavailable(
+            f"the interpreter uvx provided could not start: {error}{hint}"
+        ) from None
     if result.returncode != 0:
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         raise ValueError(lines[-1] if lines else f"the reader exited {result.returncode}")
@@ -528,6 +537,8 @@ def load_action(path: Path) -> object:
     """The one parsed document of an action file, through PyYAML on every host.
 
     PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
+    uvx alone is not enough under UV_NO_CACHE or uv's no-cache = true, which delete the environment
+    uvx resolved before the reader launches.
     """
     try:
         import yaml  # type: ignore[import-untyped]

@@ -522,7 +522,7 @@ def section_body(lines: list[str], span: tuple[int, int]) -> str:
 
 def fold(name: str) -> str:
     """A section name as `section_span` and `verbatim_section_names` key it."""
-    return name.strip().lower()
+    return fidelity_text_module().section_key(name)
 
 
 def strip_terminator(line: str) -> str:
