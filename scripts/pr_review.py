@@ -71,7 +71,7 @@ Subcommands
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
            on (`PARTIAL` instead where an earlier round states partial coverage), `table` where a
            round covering the head names exactly the changed files in its own file table, one
-           GitHub counts no changed line in, such as a binary file, left out where it is unnamed,
+           added, modified, or deleted with no changed line GitHub counts left out where unnamed,
            `carried:table` where the newest round carrying a table does, `local` where an attested
            local pass covers a head on a pull request into a branch other than the default, and
            `none` otherwise. A table stands in only where no round on record states partial
@@ -107,9 +107,9 @@ Subcommands
            round covering the head states beside the threads that round opened, `?` where it
            states no count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
            names findings the round names that no thread on the pull request carries. Each
-           findings list item prints beneath it, marked by whether a thread opens at a `path:line`
-           it names. Each of these is owed the triage a suppressed finding gets, and none decides
-           an exit code. On a pull request no longer open, `pr=` is
+           findings list item prints beneath it, marked by whether a read thread sits on a
+           `path:line` its code spans name. Each of these is owed the triage a suppressed finding
+           gets, and none decides an exit code. On a pull request no longer open, `pr=` is
            followed by `state=` with `merged_at=` and `merge_commit=`, or with `closed_at=`. Its
            `merge=UNKNOWN` never clears.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
@@ -389,14 +389,14 @@ Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
     reviewThreads(first:100){ nodes{ id isResolved
-      comments(first:1){ nodes{ author{login} path line body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
-    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage endCursor } nodes{ path additions deletions } }
+      comments(first:1){ nodes{ author{login} path line startLine originalLine originalStartLine body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
+    files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage endCursor } nodes{ path additions deletions changeType } }
   }}}
 """.replace("__HELD_FIELDS__", HELD_FIELDS).replace("__FILES_WINDOW__", str(FILES_WINDOW))
 Q_FILES = """
 query($o:String!,$r:String!,$n:Int!,$after:String){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid
-    files(first:__FILES_WINDOW__, after:$after){ pageInfo{ hasNextPage endCursor } nodes{ path additions deletions } }
+    files(first:__FILES_WINDOW__, after:$after){ pageInfo{ hasNextPage endCursor } nodes{ path additions deletions changeType } }
   }}}
 """.replace("__FILES_WINDOW__", str(FILES_WINDOW))
 # Substituted rather than interpolated, because GraphQL is braces from end to end.

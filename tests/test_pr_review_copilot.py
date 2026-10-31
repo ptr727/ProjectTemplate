@@ -390,23 +390,95 @@ class TestOpenFindings(unittest.TestCase):
                 self.assertEqual(2, found.unthreaded)
                 self.assertEqual(
                     (
-                        "**Moderate, P2 \u2014 `src/x.py:12` (1 vote):** Guard the write. It can run twice.",
-                        "**Nit, P3:** Name the constant.",
+                        adapter.Item(
+                            "**Moderate, P2 \u2014 `src/x.py:12` (1 vote):** Guard the write. "
+                            "It can run twice.",
+                            (("src/x.py", 12, 12),),
+                        ),
+                        adapter.Item("**Nit, P3:** Name the constant.", ()),
                     ),
                     found.listed_items,
                 )
                 self.assertEqual((), found.notes)
                 self.assertEqual((), found.unplaced)
 
-    def test_each_listed_item_is_marked_by_whether_a_thread_opens_at_its_line(self) -> None:
-        items = ("`src/x.py:12` one.", "**P1 \u2014 `src/y.py:40`:** two.", "three.")
+    def test_a_numbered_findings_list_is_read_like_a_bulleted_one(self) -> None:
+        listed = "Outstanding findings:\n\n1. **P1 `src/x.py:12`:** Guard.\n2. **P2:** Name.\n"
+        found = adapter.read(body(sections=listed))
+        self.assertEqual(2, found.listed)
         self.assertEqual(
-            [
-                "    [no thread at its line] `src/x.py:12` one.",
-                "    [thread at its line] **P1 \u2014 `src/y.py:40`:** two.",
-                "    [names no line] three.",
-            ],
-            adapter.listed_lines(items, {("src/y.py", 40), ("src/x.py", 13)}),
+            ("**P1 `src/x.py:12`:** Guard.", "**P2:** Name."),
+            tuple(i.text for i in found.listed_items),
+        )
+        self.assertEqual((), found.notes)
+
+    def test_a_quoted_findings_list_drops_its_quote_markers(self) -> None:
+        found = adapter.read(body(sections="> Outstanding findings:\n> - **P1:** Guard.\n"))
+        self.assertEqual(("**P1:** Guard.",), tuple(i.text for i in found.listed_items))
+
+    def test_a_findings_list_label_with_no_list_is_noted_rather_than_placed(self) -> None:
+        for sections, held in (
+            ("Outstanding findings:\n\nGuard the write in `src/x.py`.", True),
+            (what_changed(extra="Outstanding findings:\n\nGuard the write.\n\n"), False),
+        ):
+            with self.subTest(held=held):
+                found = adapter.read(body(sections=sections))
+                note = (
+                    "a findings list label with no list this reader reads: `outstanding findings:`"
+                )
+                self.assertEqual(0, found.listed)
+                self.assertIn(note, found.notes)
+                self.assertEqual(held, any(p.note == note for p in found.unplaced))
+
+    def test_an_item_s_spans_come_from_its_code_spans_whole(self) -> None:
+        for text, spans in (
+            ("`docs/my file.md:12` spaces.", (("docs/my file.md", 12, 12),)),
+            ("`src/x.py:12-14` a range.", (("src/x.py", 12, 14),)),
+            ("`src/[id]/x.py:L3` brackets.", (("src/[id]/x.py", 3, 3),)),
+            ("`src/\u200bx.py:5` a zero-width space.", (("src/x.py", 5, 5),)),
+            ("Guard it (src/y.py:3).", ()),
+            ("[src/y.py:3](https://example.test/x) a link.", ()),
+            ("`src/y.py` with no line.", ()),
+        ):
+            with self.subTest(text=text):
+                found = adapter.read(body(sections=f"Outstanding findings:\n- {text}\n"))
+                self.assertEqual(spans, found.listed_items[0].spans)
+
+    def test_each_listed_item_is_marked_by_whether_a_thread_sits_on_its_line(self) -> None:
+        items = (
+            adapter.Item("one.", (("src/x.py", 12, 12),)),
+            adapter.Item("two.", (("src/y.py", 12, 14),)),
+            adapter.Item("three.", ()),
+        )
+        spots = {("src/y.py", 14, 14), ("src/x.py", 13, 13)}
+        self.assertEqual(
+            (
+                1,
+                [
+                    "    [no thread at its line] one.",
+                    "    [thread at its line] two.",
+                    "    [no path:line code span] three.",
+                ],
+            ),
+            adapter.listed_lines(items, spots, False),
+        )
+        cut = adapter.listed_lines(items, spots, True)
+        self.assertEqual((1, "    [thread page cut, unknown] one."), (cut[0], cut[1][0]))
+
+    def test_a_thread_spot_is_its_range_or_its_original_one_when_outdated(self) -> None:
+        def made(**comment: object) -> dict:
+            return {"comments": {"nodes": [{"path": "src/x.py", **comment}]}}
+
+        self.assertEqual(
+            {("src/x.py", 3, 3), ("src/x.py", 10, 14), ("src/x.py", 7, 9)},
+            adapter.thread_spots(
+                [
+                    made(line=3),
+                    made(line=14, startLine=10),
+                    made(line=None, originalLine=9, originalStartLine=7),
+                    made(line=None),
+                ]
+            ),
         )
 
     def test_a_narrative_naming_findings_is_counted_beside_a_clean_headline(self) -> None:
@@ -449,6 +521,39 @@ class TestOpenFindings(unittest.TestCase):
         )
         found = adapter.read(body(sections=nested), threads=("101", "102"))
         self.assertEqual(2, found.entries)
+
+
+class TestLeftOut(unittest.TestCase):
+    @staticmethod
+    def node(path: str, kind: str = "ADDED", added: int = 0, deleted: int = 0) -> dict:
+        return {"path": path, "changeType": kind, "additions": added, "deletions": deleted}
+
+    def test_a_lineless_added_modified_or_deleted_file_may_be_left_out(self) -> None:
+        for kind in ("ADDED", "MODIFIED", "DELETED"):
+            with self.subTest(kind=kind):
+                files = [self.node("a.md", added=3), self.node("b.png", kind)]
+                self.assertEqual({"b.png"}, adapter.left_out(("a.md",), files))
+
+    def test_a_rename_a_copy_a_type_change_or_a_missing_count_is_never_left_out(self) -> None:
+        for odd in (
+            self.node("b.sh", "RENAMED"),
+            self.node("b.sh", "COPIED"),
+            self.node("b.sh", "CHANGED"),
+            {"path": "b.png", "changeType": "ADDED"},
+            {"path": "b.png", "additions": 0, "deletions": 0},
+        ):
+            with self.subTest(odd=odd):
+                self.assertEqual(
+                    set(), adapter.left_out(("a.md",), [self.node("a.md", added=1), odd])
+                )
+
+    def test_nothing_is_left_out_where_no_file_with_a_changed_line_remains(self) -> None:
+        files = [self.node("a.png"), self.node("b.png")]
+        self.assertEqual(set(), adapter.left_out(("a.png",), files))
+
+    def test_a_file_the_table_names_is_never_left_out(self) -> None:
+        files = [self.node("a.md", added=1), self.node("static/b.png")]
+        self.assertEqual(set(), adapter.left_out(("a.md", "static/*"), files))
 
 
 class TestCollapsedSections(unittest.TestCase):

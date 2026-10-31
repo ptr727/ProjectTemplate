@@ -460,7 +460,10 @@ def payload(
         # A case naming none gets the empty connection a pull request of no files carries.
         "files": {
             "nodes": [{"path": p} for p in files or []]
-            + [{"path": p, "additions": 0, "deletions": 0} for p in lineless or []],
+            + [
+                {"path": p, "additions": 0, "deletions": 0, "changeType": "ADDED"}
+                for p in lineless or []
+            ],
             "pageInfo": {"hasNextPage": more_files},
         },
         "reviews": {"nodes": reviews, "pageInfo": {"hasPreviousPage": older_reviews}},
@@ -2271,8 +2274,24 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn("coverage=none ", out)
                 self.assertIn("changes 2 file(s), 1 more with no changed line left out", out)
 
-    def test_an_empty_table_over_only_lineless_files_covers_nothing(self) -> None:
-        pr = payload([review(body=summarized([], covers=""))], lineless=["static/b.png"])
+    def test_a_table_over_only_lineless_files_leaves_none_out(self) -> None:
+        for named in ([], ["static/a.png"]):
+            with self.subTest(named=named):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = payload(
+                    [review(body=summarized(named, covers=""))],
+                    lineless=["static/a.png", "static/b.png"],
+                )
+                self.assertEqual(0, self.status(pr))
+                self.assertIn("coverage=none ", self.out.getvalue())
+                self.assertNotIn("left out", self.out.getvalue())
+
+    def test_a_lineless_rename_is_not_left_out(self) -> None:
+        pr = payload([review(body=summarized(["docs/a.md"], covers=""))], files=["docs/a.md"])
+        pr["files"]["nodes"].append(
+            {"path": "hooks/b.sh", "additions": 0, "deletions": 0, "changeType": "RENAMED"}
+        )
         self.assertEqual(0, self.status(pr))
         self.assertIn("coverage=none ", self.out.getvalue())
 
@@ -2412,6 +2431,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         out = self.out.getvalue()
         self.assertIn("overview=2/1 ", out)
         self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertNotIn("Each findings list item prints below", out)
 
     def test_an_outstanding_findings_list_is_placed_and_each_item_printed(self) -> None:
         for label in ("Outstanding findings:", "Unresolved review findings:"):
@@ -2433,11 +2453,29 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn("shapes=ok ", out)
                 self.assertNotIn("REVIEWER OUTPUT NOTED", out)
                 self.assertIn("FINDINGS WITH NO THREAD (2)", out)
+                self.assertIn("Each findings list item prints below", out)
                 self.assertIn(
                     "    [no thread at its line] **Moderate, P2 \u2014 `src/x.py:12`", out
                 )
                 self.assertIn("    [thread at its line] **Moderate, P1 \u2014 `src/y.py:40`", out)
-                self.assertIn("    [names no line] **Nit, P3:** Name the constant.", out)
+                self.assertIn("    [no path:line code span] **Nit, P3:** Name the constant.", out)
+
+    def test_a_listed_item_no_thread_sits_on_is_owed_though_the_counts_balance(self) -> None:
+        text = overview_v2(open_count="1 open issue", entries=1).replace(
+            "- Narrow the reader.\n",
+            "- Narrow the reader.\n\nOutstanding findings:\n- **P2 `src/x.py:12`:** Guard.\n",
+            1,
+        )
+        threads = [thread("T1", path="src/y.py", line=40, cid="4000000001")]
+        for cut, mark in ((False, "no thread at its line"), (True, "thread page cut, unknown")):
+            with self.subTest(cut=cut):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = payload([review(body=text)], threads=threads, files=["a.py"], more_threads=cut)
+                self.assertEqual(0, self.status(pr))
+                out = self.out.getvalue()
+                self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+                self.assertIn(f"    [{mark}] **P2 `src/x.py:12`:** Guard.", out)
 
     def test_a_previously_missed_finding_is_counted_by_round_and_printed(self) -> None:
         missed = (

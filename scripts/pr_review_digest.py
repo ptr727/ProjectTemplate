@@ -46,7 +46,6 @@ from pr_review_rounds import (
     shape_hold,
     stopping_refusal,
     thread_author,
-    thread_spots,
     threads_truncated,
     uncounted_verdict,
     window_blind,
@@ -258,16 +257,20 @@ def render(
         )
         for part in hold[1]:
             lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
-    if found is not None and found.unthreaded:
+    unmatched, marked = adapter.listed_lines(
+        found.listed_items if found else (), adapter.thread_spots(threads), truncated
+    )
+    if found is not None and (owed := max(found.unthreaded, unmatched)):
         lines.append(
-            f"  FINDINGS WITH NO THREAD ({found.unthreaded}): the round covering the head names "
-            f"more findings than its open entries link to threads on this pull request, so "
-            f"{found.unthreaded} {'is' if found.unthreaded == 1 else 'are'} raised where polling "
+            f"  FINDINGS WITH NO THREAD ({owed}): the round covering the head names more findings "
+            "than its open entries link to threads on this pull request, or lists one no thread "
+            f"sits on, so {owed} {'is' if owed == 1 else 'are'} raised where polling "
             "threads cannot see them. Read the review body and give each the triage a suppressed "
             "finding gets. A thread past the hundred read here counts too, and `threads=` "
-            "carries a trailing `+` where that page was cut. Each findings list item prints below"
+            "carries a trailing `+` where that page was cut"
+            + (". Each findings list item prints below" if marked else "")
         )
-        lines += adapter.listed_lines(found.listed_items, thread_spots(pr))
+        lines += marked
     if flagged and found is not None and found.listed:
         lines.append(
             f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "

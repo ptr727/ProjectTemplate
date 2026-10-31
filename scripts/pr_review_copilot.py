@@ -76,7 +76,8 @@ BADGE = re.compile(
     r"</picture>",
     re.DOTALL | re.IGNORECASE,
 )
-SPOT = re.compile(r"(?P<path>[^\s`:*]+):(?P<line>\d+)")
+SPOT = re.compile(r"(?P<path>.+):L?(?P<start>\d+)(?:\s*[-\u2013]\s*L?(?P<end>\d+))?")
+EXCUSED = ("ADDED", "MODIFIED", "DELETED")
 # A count longer than this is an identifier rather than anything a review states.
 COUNT_DIGITS = 4
 FINGERPRINT_HEX = 12
@@ -105,6 +106,13 @@ class Unplaced(NamedTuple):
     text: str
 
 
+class Item(NamedTuple):
+    """One findings-list item: its text on one line, and each `path:line` range its code spans name."""
+
+    text: str
+    spans: tuple[tuple[str, int, int], ...]
+
+
 class Reading(NamedTuple):
     """What one body says, in the fields the gate reads.
 
@@ -112,7 +120,7 @@ class Reading(NamedTuple):
     reader cannot believe. `listed` is the larger of the items its findings lists hold and the
     file table's findings, since both name the same findings. A filled cell counts each finding
     marker it carries, and once where it carries none, so the table alone can still undercount.
-    `listed_items` is each findings-list item's text on one line, printed since no thread holds it.
+    `listed_items` is each findings-list item, printed since no thread holds it.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
     `table` is the paths the body's file table names, None where it carries no table. `unplaced`
     is each part the reader cannot place, with its text, the subset of `notes` that can hold a
@@ -130,7 +138,7 @@ class Reading(NamedTuple):
     open: int | None = None
     entries: int = 0
     listed: int = 0
-    listed_items: tuple[str, ...] = ()
+    listed_items: tuple[Item, ...] = ()
     unthreaded: int = 0
     sections: tuple[Section, ...] = ()
     table: tuple[str, ...] | None = None
@@ -311,15 +319,16 @@ def inline_text(token: Token) -> str:
     return "".join(parts)
 
 
+def bare(raw: str) -> str:
+    """Text with its format characters, such as a zero-width space, dropped and its ends stripped."""
+    return "".join(c for c in raw if unicodedata.category(c) != "Cf").strip()
+
+
 def paths(token: Token) -> list[str]:
     """The paths a file table cell names: its code spans, or its whole text where it has none."""
     spans = [c.content for c in token.children or [] if c.type == "code_inline"]
     named = spans or [inline_text(token)]
-    return [
-        cleaned
-        for raw in named
-        if (cleaned := "".join(c for c in raw if unicodedata.category(c) != "Cf").strip())
-    ]
+    return [cleaned for raw in named if (cleaned := bare(raw))]
 
 
 def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None = None) -> Reading:
@@ -454,7 +463,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     effort, effort_source = "unknown", "unknown"
     table: list[str] | None = None
     listed = tabled = 0
-    listed_items: list[str] = []
+    listed_items: list[Item] = []
 
     def inside(token: Token, ranges: list[tuple[int, int]] = claimed) -> bool:
         return any(a <= (token.map or [0])[0] < b for a, b in ranges)
@@ -514,17 +523,22 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             ):
                 if found_kind[0] == "open":
                     opens.append(count_of(found_kind[1], name))
-            elif matched(vocab["finding_lists"], name):
-                items = items_after(tokens, i + 3, lines)
+            elif (listing := matched(vocab["finding_lists"], name)) and (
+                items := items_after(tokens, i + 3, lines)
+            ):
                 listed += len(items)
                 listed_items += items
             elif (
                 vet
                 and is_label(inline)
-                and not matched(vocab["labels"], name)
+                and (listing or not matched(vocab["labels"], name))
                 and not inside(token, opaque)
             ):
-                note = f"a label this reader has no spelling for: `{name}`"
+                note = (
+                    f"a findings list label with no list this reader reads: `{name}`"
+                    if listing
+                    else f"a label this reader has no spelling for: `{name}`"
+                )
                 if token.level or inside(token):
                     notes.append(note)
                 else:
@@ -683,40 +697,107 @@ def is_label(inline: Token) -> bool:
     return text.endswith(":") and len(text.split()) <= 5
 
 
-def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[str]:
-    """Each item of the list that opens at `start`, at its own margin, as one line of its text."""
-    if start >= len(tokens) or tokens[start].type != "bullet_list_open":
+def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[Item]:
+    """Each item of the bullet or numbered list opening at `start`, at its own margin.
+
+    An item's text is its source on one line, quote and list markers dropped. Its spans are read
+    from its code spans, so a path holding a space or a bracket still reads whole.
+    """
+    if start >= len(tokens) or tokens[start].type not in ("bullet_list_open", "ordered_list_open"):
         return []
     level = tokens[start].level + 1
-    items = []
+    items: list[Item] = []
+    spans: list[tuple[str, int, int]] = []
     for token in tokens[start + 1 :]:
-        if token.type == "bullet_list_close" and token.level == level - 1:
+        if token.type.endswith("_list_close") and token.level == level - 1:
             break
         if token.type == "list_item_open" and token.level == level:
             a, b = token.map or (0, 0)
-            said = " ".join(plain("\n".join(lines[a:b])).split())
-            items.append(re.sub(r"^[-*+]\s*", "", said))
+            said = " ".join(plain(re.sub(r"^\s*(?:>\s?)+", "", ln)) for ln in lines[a:b])
+            text = re.sub(r"^(?:[-*+]|\d+[.)])\s*", "", " ".join(said.split()))
+            spans = []
+            items.append(Item(text, ()))
+        for child in token.children or []:
+            if child.type == "code_inline" and (m := SPOT.fullmatch(bare(child.content))):
+                first = int(m.group("start"))
+                spans.append((m.group("path"), first, max(first, int(m.group("end") or first))))
+                items[-1] = Item(items[-1].text, tuple(spans))
     return items
 
 
-def listed_lines(items: tuple[str, ...], spots: set[tuple[str, int]]) -> list[str]:
-    """Each findings-list item, marked by whether a thread opens at a `path:line` it names.
+def thread_spots(threads: list[dict]) -> set[tuple[str, int, int]]:
+    """The path and line range each thread's first comment sits on, its original one if outdated."""
+    spots = set()
+    for t in threads:
+        c = ((t.get("comments") or {}).get("nodes") or [{}])[0]
+        end = c.get("line") if c.get("line") is not None else c.get("originalLine")
+        start = c.get("startLine") if c.get("line") is not None else c.get("originalStartLine")
+        if c.get("path") and isinstance(end, int):
+            spots.add((c["path"], start if isinstance(start, int) else end, end))
+    return spots
 
-    `spots` is the path and line each thread on the pull request opens at. A mark is a pointer
-    rather than a match, since a thread at the same line can hold another finding.
+
+def listed_lines(
+    items: tuple[Item, ...], spots: set[tuple[str, int, int]], cut: bool
+) -> tuple[int, list[str]]:
+    """How many items name a `path:line` no read thread sits on, and each item marked by that.
+
+    `spots` is each thread's path and line range, from `thread_spots`. A mark is a pointer rather
+    than a match, since a thread on the same line can hold another finding. Where `cut`, the
+    thread page was cut, so an item no read thread sits on is unknown rather than threadless.
     """
     out = []
+    unmatched = 0
     for item in items:
-        named = {(m.group("path"), int(m.group("line"))) for m in SPOT.finditer(item)}
+        hit = any(p == q and a <= d and c <= b for p, a, b in item.spans for q, c, d in spots)
         mark = (
-            "names no line"
-            if not named
+            "no path:line code span"
+            if not item.spans
             else "thread at its line"
-            if named & spots
+            if hit
+            else "thread page cut, unknown"
+            if cut
             else "no thread at its line"
         )
-        out.append(f"    [{mark}] {item}")
-    return out
+        unmatched += bool(item.spans) and not hit
+        out.append(f"    [{mark}] {item.text}")
+    return unmatched, out
+
+
+def row_names(entry: str, path: str) -> bool:
+    """Whether a file table row names `path`, exactly or by a glob.
+
+    A glob matches one segment at a time, `*` and `?` never crossing a `/`, and every other
+    character is literal. A row of `src/*` therefore names `src/a.py` and not `src/sub/b.py`.
+    """
+    if entry == path:
+        return True
+    want, have = entry.split("/"), path.split("/")
+    return len(want) == len(have) and all(
+        re.fullmatch(re.escape(w).replace(r"\*", "[^/]*").replace(r"\?", "[^/]"), h)
+        for w, h in zip(want, have, strict=True)
+    )
+
+
+def left_out(named: tuple[str, ...], files: list[dict]) -> set[str]:
+    """The changed files a file table may leave out: each one GitHub counts no changed line in.
+
+    Such a file is added, modified, or deleted with no added and no deleted line, a binary file
+    among them. An empty file and a mode-only change read the same, since the file list holds
+    nothing telling them apart. A rename or copy is never one, and nor is a file missing a count.
+    None is left out unless a file with a changed line remains to be named.
+    """
+    lineless = {
+        n["path"]
+        for n in files
+        if n.get("path")
+        and n.get("changeType") in EXCUSED
+        and n.get("additions") == 0
+        and n.get("deletions") == 0
+    }
+    if not {n.get("path") for n in files if n.get("path")} - lineless:
+        return set()
+    return {p for p in lineless if not any(row_names(e, p) for e in named)}
 
 
 def table_cells(
