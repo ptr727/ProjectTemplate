@@ -212,14 +212,14 @@ def file_units(rel: str, text: str) -> dict[str, str]:
         # Keeping the last would record a read of one of them as covering both.
         # Case-folded, because the declared-name lookup folds and spec/audit.py's heading match folds.
         # So a pair differing only in case is one name to every reader but this one.
-        earlier = seen.get(key.lower())
+        earlier = seen.get(fidelity_text.section_key(key))
         if earlier is not None:
             shown = f"'{earlier}'" if earlier == name else f"'{earlier}' and '{name}'"
             raise CannotRun(
                 f"{rel} carries two level-two sections named {shown},"
                 " so a review of one cannot be told from a review of the other"
             )
-        seen[key.lower()] = name
+        seen[fidelity_text.section_key(key)] = name
         out[key] = region
     return out
 
@@ -372,12 +372,12 @@ def build_units(
         # So one re-cased declaration cannot make a section silently stop being a unit while the fidelity check still hashes it.
         # The key is the document's heading rather than the manifest's spelling, so what `sweep` prints is what the file holds.
         by_heading = {
-            key.split(SECTION_DELIM, 1)[1].strip().lower(): key
+            fidelity_text.section_key(key.split(SECTION_DELIM, 1)[1]): key
             for key in found
             if SECTION_DELIM in key
         }
         for name in sections:
-            key = by_heading.get(name.strip().lower())
+            key = by_heading.get(fidelity_text.section_key(name))
             if key is None:
                 missing.append(f"{rel}{SECTION_DELIM}{name}")
             else:
