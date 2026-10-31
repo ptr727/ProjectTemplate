@@ -548,7 +548,7 @@ def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
 
     The fidelity
     comparison therefore reads them as the same content, and the raw bytes do not. So this is the
-    form to compare. It is not the form to write. `replace_sections` builds its own lines, because
+    form to compare. It is not the form to write. `render_region` builds its own lines, because
     writing needs the target's own terminators and this form has flattened them.
     """
     bodies = [strip_terminator(line) for line in lines[span[0] : span[1]]]
@@ -753,7 +753,7 @@ def insert_sections(
     """
     out = list(target_lines)
     ending = file_ending(target_lines)
-    hub_order = [fold(name) for name in h2_headings(source_lines)]
+    hub_order = [key for key, _ in h2_spans(source_lines)]
     original = "".join(target_lines)
     separator = ""
     appended = False
@@ -801,9 +801,7 @@ def assert_sections(
     after_lines = split_lines(decode_text(target_file, path), path)
     # Folded, because `section_span` locates a heading folded, so a re-cased heading is drift this tool fixes rather than a change of section set.
     # Any other edit to a heading line is caught byte-for-byte by the two comparisons below.
-    if [fold(name) for name in h2_headings(after_lines)] != [
-        fold(name) for name in h2_headings(before_lines)
-    ]:
+    if [key for key, _ in h2_spans(after_lines)] != [key for key, _ in h2_spans(before_lines)]:
         raise CarryError(
             f"post-apply check failed for {path}: the level-two heading sequence changed,"
             " so the section set or its order did not survive the write"
