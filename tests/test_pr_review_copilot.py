@@ -444,13 +444,22 @@ class TestOpenFindings(unittest.TestCase):
                 found = adapter.read(body(sections=f"Outstanding findings:\n- {text}\n"))
                 self.assertEqual(spans, found.listed_items[0].spans)
 
+    @staticmethod
+    def threads(*comments: dict) -> list[dict]:
+        """Thread nodes whose first comments are `comments`."""
+        return [{"comments": {"nodes": [c]}} for c in comments]
+
     def test_each_listed_item_is_marked_by_whether_a_thread_sits_on_its_line(self) -> None:
         items = (
             adapter.Item("one.", (("src/x.py", 12, 12),)),
             adapter.Item("two.", (("src/y.py", 12, 14),)),
             adapter.Item("three.", ()),
+            adapter.Item("four.", (("src/z.py", 9, 9),)),
         )
-        spots = {("src/y.py", 14, 14), ("src/x.py", 13, 13)}
+        threads = self.threads(
+            {"path": "src/y.py", "line": 14}, {"path": "src/z.py", "line": 30, "startLine": 5}
+        )
+        files = [{"path": "src/x.py"}]
         self.assertEqual(
             (
                 1,
@@ -458,27 +467,27 @@ class TestOpenFindings(unittest.TestCase):
                     "    [no thread at its line] one.",
                     "    [thread at its line] two.",
                     "    [no path:line code span] three.",
+                    "    [thread at its line] four.",
                 ],
             ),
-            adapter.listed_lines(items, spots, False),
+            adapter.listed_lines(items, threads, files, False),
         )
-        cut = adapter.listed_lines(items, spots, True)
+        cut = adapter.listed_lines(items, threads, files, True)
         self.assertEqual((1, "    [thread page cut, unknown] one."), (cut[0], cut[1][0]))
 
-    def test_a_thread_spot_is_its_range_or_its_original_one_when_outdated(self) -> None:
-        def made(**comment: object) -> dict:
-            return {"comments": {"nodes": [{"path": "src/x.py", **comment}]}}
-
+    def test_a_span_naming_no_changed_file_or_thread_path_is_no_line(self) -> None:
+        items = (adapter.Item("Pin `node:20`.", (("node", 20, 20),)),)
         self.assertEqual(
-            {("src/x.py", 3, 3), ("src/x.py", 10, 14), ("src/x.py", 7, 9)},
-            adapter.thread_spots(
-                [
-                    made(line=3),
-                    made(line=14, startLine=10),
-                    made(line=None, originalLine=9, originalStartLine=7),
-                    made(line=None),
-                ]
-            ),
+            (0, ["    [no path:line code span] Pin `node:20`."]),
+            adapter.listed_lines(items, [], [{"path": "Dockerfile"}], False),
+        )
+
+    def test_an_outdated_thread_on_an_item_s_path_is_named_rather_than_counted(self) -> None:
+        items = (adapter.Item("one.", (("src/x.py", 12, 12),)),)
+        threads = self.threads({"path": "src/x.py", "line": None})
+        self.assertEqual(
+            (0, ["    [outdated thread on its path] one."]),
+            adapter.listed_lines(items, threads, [], False),
         )
 
     def test_a_narrative_naming_findings_is_counted_beside_a_clean_headline(self) -> None:
@@ -548,8 +557,15 @@ class TestLeftOut(unittest.TestCase):
                 )
 
     def test_nothing_is_left_out_where_no_file_with_a_changed_line_remains(self) -> None:
-        files = [self.node("a.png"), self.node("b.png")]
-        self.assertEqual(set(), adapter.left_out(("a.png",), files))
+        for other in (
+            self.node("b.png"),
+            self.node("b.sh", "RENAMED"),
+            self.node("b.sh", "CHANGED"),
+            {"path": "b.md", "changeType": "MODIFIED"},
+        ):
+            with self.subTest(other=other):
+                files = [self.node("a.png"), other]
+                self.assertEqual(set(), adapter.left_out((other["path"],), files))
 
     def test_a_file_the_table_names_is_never_left_out(self) -> None:
         files = [self.node("a.md", added=1), self.node("static/b.png")]

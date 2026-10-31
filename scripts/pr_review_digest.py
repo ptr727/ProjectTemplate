@@ -258,7 +258,10 @@ def render(
         for part in hold[1]:
             lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
     unmatched, marked = adapter.listed_lines(
-        found.listed_items if found else (), adapter.thread_spots(threads), truncated
+        found.listed_items if found else (),
+        threads,
+        (pr.get("files") or {}).get("nodes") or [],
+        truncated,
     )
     if found is not None and (owed := max(found.unthreaded, unmatched)):
         lines.append(

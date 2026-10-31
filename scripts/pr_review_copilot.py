@@ -120,7 +120,8 @@ class Reading(NamedTuple):
     reader cannot believe. `listed` is the larger of the items its findings lists hold and the
     file table's findings, since both name the same findings. A filled cell counts each finding
     marker it carries, and once where it carries none, so the table alone can still undercount.
-    `listed_items` is each findings-list item, printed since no thread holds it.
+    `listed_items` is each findings-list item, each printed with a mark wherever the digest
+    prints its findings with no thread.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
     `table` is the paths the body's file table names, None where it carries no table. `unplaced`
     is each part the reader cannot place, with its text, the subset of `notes` that can hold a
@@ -725,41 +726,37 @@ def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[Item]
     return items
 
 
-def thread_spots(threads: list[dict]) -> set[tuple[str, int, int]]:
-    """The path and line range each thread's first comment sits on, its original one if outdated."""
-    spots = set()
-    for t in threads:
-        c = ((t.get("comments") or {}).get("nodes") or [{}])[0]
-        end = c.get("line") if c.get("line") is not None else c.get("originalLine")
-        start = c.get("startLine") if c.get("line") is not None else c.get("originalStartLine")
-        if c.get("path") and isinstance(end, int):
-            spots.add((c["path"], start if isinstance(start, int) else end, end))
-    return spots
-
-
 def listed_lines(
-    items: tuple[Item, ...], spots: set[tuple[str, int, int]], cut: bool
+    items: tuple[Item, ...], threads: list[dict], files: list[dict], cut: bool
 ) -> tuple[int, list[str]]:
     """How many items name a `path:line` no read thread sits on, and each item marked by that.
 
-    `spots` is each thread's path and line range, from `thread_spots`. A mark is a pointer rather
-    than a match, since a thread on the same line can hold another finding. Where `cut`, the
-    thread page was cut, so an item no read thread sits on is unknown rather than threadless.
+    A span counts only where its path is a changed file or a thread's, so `node:20` is no line.
+    A mark is a pointer rather than a match, since a thread on the same line can hold another
+    finding. An outdated thread's lines predate the head, so one on an item's path says only
+    that. Where `cut`, the thread page was cut, so an item no read thread sits on is unknown.
     """
+    firsts = [((t.get("comments") or {}).get("nodes") or [{}])[0] for t in threads]
+    spots = {
+        (c["path"], c.get("startLine") or c["line"], c["line"])
+        for c in firsts
+        if c.get("path") and isinstance(c.get("line"), int)
+    }
+    outdated = {c["path"] for c in firsts if c.get("path") and c.get("line") is None}
+    known = {n.get("path") for n in files} | {c.get("path") for c in firsts}
     out = []
     unmatched = 0
     for item in items:
-        hit = any(p == q and a <= d and c <= b for p, a, b in item.spans for q, c, d in spots)
-        mark = (
-            "no path:line code span"
-            if not item.spans
-            else "thread at its line"
-            if hit
-            else "thread page cut, unknown"
-            if cut
-            else "no thread at its line"
-        )
-        unmatched += bool(item.spans) and not hit
+        named = [(p, a, b) for p, a, b in item.spans if p in known]
+        if not named:
+            mark = "no path:line code span"
+        elif any(p == q and a <= d and c <= b for p, a, b in named for q, c, d in spots):
+            mark = "thread at its line"
+        elif any(p in outdated for p, _, _ in named):
+            mark = "outdated thread on its path"
+        else:
+            mark = "thread page cut, unknown" if cut else "no thread at its line"
+            unmatched += 1
         out.append(f"    [{mark}] {item.text}")
     return unmatched, out
 
@@ -783,9 +780,10 @@ def left_out(named: tuple[str, ...], files: list[dict]) -> set[str]:
     """The changed files a file table may leave out: each one GitHub counts no changed line in.
 
     Such a file is added, modified, or deleted with no added and no deleted line, a binary file
-    among them. An empty file and a mode-only change read the same, since the file list holds
-    nothing telling them apart. A rename or copy is never one, and nor is a file missing a count.
-    None is left out unless a file with a changed line remains to be named.
+    among them. An empty file, a mode-only change, and a text file `.gitattributes` marks binary
+    read the same, since the file list holds nothing telling them apart. A rename or copy is
+    never one, and nor is a file missing a count. None is left out unless a file with an added or
+    deleted line remains to be named.
     """
     lineless = {
         n["path"]
@@ -795,7 +793,7 @@ def left_out(named: tuple[str, ...], files: list[dict]) -> set[str]:
         and n.get("additions") == 0
         and n.get("deletions") == 0
     }
-    if not {n.get("path") for n in files if n.get("path")} - lineless:
+    if not any((n.get("additions") or 0) + (n.get("deletions") or 0) > 0 for n in files):
         return set()
     return {p for p in lineless if not any(row_names(e, p) for e in named)}
 

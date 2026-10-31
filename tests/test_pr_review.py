@@ -459,7 +459,10 @@ def payload(
         # The diff's own file list, which the round's file table is compared against.
         # A case naming none gets the empty connection a pull request of no files carries.
         "files": {
-            "nodes": [{"path": p} for p in files or []]
+            "nodes": [
+                {"path": p, "additions": 1, "deletions": 0, "changeType": "MODIFIED"}
+                for p in files or []
+            ]
             + [
                 {"path": p, "additions": 0, "deletions": 0, "changeType": "ADDED"}
                 for p in lineless or []
@@ -2447,7 +2450,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
                     1,
                 )
                 threads = [thread("T1", path="src/y.py", line=40, cid="4000000001")]
-                pr = payload([review(body=text)], threads=threads, files=["a.py"])
+                pr = payload([review(body=text)], threads=threads, files=["a.py", "src/x.py"])
                 self.assertEqual(0, self.status(pr))
                 out = self.out.getvalue()
                 self.assertIn("shapes=ok ", out)
@@ -2471,7 +2474,9 @@ class TestReadingsThroughTheAdapter(GqlCase):
             with self.subTest(cut=cut):
                 self.out.seek(0)
                 self.out.truncate()
-                pr = payload([review(body=text)], threads=threads, files=["a.py"], more_threads=cut)
+                pr = payload(
+                    [review(body=text)], threads=threads, files=["src/x.py"], more_threads=cut
+                )
                 self.assertEqual(0, self.status(pr))
                 out = self.out.getvalue()
                 self.assertIn("FINDINGS WITH NO THREAD (1)", out)
