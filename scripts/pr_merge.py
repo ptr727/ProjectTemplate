@@ -205,7 +205,10 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
     state = landed.get("state")
     if state == "MERGED":
         commit = (landed.get("mergeCommit") or {}).get("oid") or "unknown"
-        print(f"status=MERGED pr={num} head={head} merge_commit={commit}, confirmed on read back")
+        merged = landed.get("headRefOid") or head
+        print(f"status=MERGED pr={num} head={merged} merge_commit={commit}, confirmed on read back")
+        if merged != head:
+            print(f"note: the gate read {head}, so another hand merged a head this gate never read")
         return pr_cleanup.cleanup(owner, repo, num, checkout) if cleanup else 0
     if answered not in (None, 0) and state == "OPEN":
         status = "MERGE_REFUSED" if (now := landed.get("headRefOid")) == head else "HEAD_MOVED"

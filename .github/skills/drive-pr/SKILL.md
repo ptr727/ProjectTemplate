@@ -153,7 +153,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    repository. It also refuses a permanent branch or one any ruleset or branch protection covers. It
    checks the tip is still at the pull request's `headRefOid` before deleting, and reads the ref
    back to confirm.
-   Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
+   These exits are `cleanup`'s, read once a `status=MERGED` line printed or a standalone `cleanup`
+   ran. Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
    than deleting by hand. `1` is a refusal, a moved tip among them. `2` is a read that did not
    answer or a delete it could not confirm. `64` is a target under an owner other than the hub
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
