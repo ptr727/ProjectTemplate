@@ -422,12 +422,16 @@ def _wrapper_body(argv: list[str]) -> str | None:
 
 @dataclass
 class _Cmd:
-    """One command the text runs, with the environment and directory it runs in."""
+    """One command the text runs, with the environment and directory it runs in.
+
+    `own` holds the assignments the command itself carries, before it or through `env`.
+    """
 
     argv: list[str]
     env: dict[str, str]
     cwd: str | None
     quiet: bool
+    own: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -479,7 +483,7 @@ def _read(
                 bounded = under_timeout and name in _SHELLS
                 _read(body, cwd, dict(here), out, 1, silenced, bounded)
         else:
-            out.cmds.append(_Cmd(argv, here, cwd, silenced))
+            out.cmds.append(_Cmd(argv, here, cwd, silenced, {**assigns, **launched}))
 
 
 def _discards(redirs: list[tuple[str, str]]) -> bool:
@@ -626,9 +630,10 @@ def _resolves_as_ref(target_dir: str, ref: str) -> bool:
     )
 
 
-def _current_push_branch(where: str) -> str | None:
-    """The branch checked out in `where`, or None when HEAD is detached or unreadable."""
-    name = _git_stdout(where, ["rev-parse", "--abbrev-ref", "HEAD"])
+def _current_push_branch(where: str | None, git_dir: str | None = None) -> str | None:
+    """The branch checked out in `where`, or in `git_dir`, or None when HEAD is detached or unreadable."""
+    query = ["--git-dir", git_dir] if git_dir else []
+    name = _git_stdout(where, [*query, "rev-parse", "--abbrev-ref", "HEAD"])
     return name if name and name != "HEAD" else None
 
 
@@ -641,13 +646,18 @@ def _bare_push_branch(
 ) -> object:
     """The branch a push naming no refspec writes, or `_UNRESOLVED` where the text does not name its checkout.
 
-    `leading_cd` and then each `-C` value in `c_dirs` move the push from `cwd`. A push with a
-    `git_dir`, or one `moved` to a directory the text does not name, is unresolved.
+    `leading_cd` and then each `-C` value in `c_dirs` move the push from `cwd`, and a `git_dir`
+    names the repository from there. A push `moved` to a directory the text does not name is
+    unresolved unless its `git_dir` is absolute. So is one whose `git_dir` the reading does not
+    resolve.
     """
-    if git_dir is not None or moved:
-        return _UNRESOLVED
-    where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
-    where = _moved(where, c_dirs)
+    where = None
+    if not moved:
+        where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
+        where = _moved(where, c_dirs)
+    if git_dir is not None:
+        named = _join_dir(where, git_dir)
+        return _UNRESOLVED if named is None else _current_push_branch(where, named)
     return _UNRESOLVED if where is None else _current_push_branch(where)
 
 
@@ -736,11 +746,45 @@ def _push_targets(
     return remote, out
 
 
-def _push_repo(where: str | None, remote: str | None) -> tuple[str, str] | None:
-    """The (owner, repo) a push writes, read from its URL or its remote's push URL."""
+def _named_git_dir(cmd: _Cmd, git: _Git) -> str | None:
+    """The repository a `--git-dir`, or else a `GIT_DIR` the command carries, names, as written.
+
+    A `GIT_DIR` set earlier in the text reads as a run-time word. Whether git sees it turns on an
+    export or an `unset` the reading does not track.
+    """
+    if git.git_dir is not None:
+        return git.git_dir
+    if "GIT_DIR" in cmd.own:
+        return cmd.own["GIT_DIR"]
+    return "$GIT_DIR" if "GIT_DIR" in cmd.env else None
+
+
+def _overrides_remote(cmd: _Cmd, git: _Git) -> bool:
+    """Whether the text sets config that can change a remote's URL, which the reading does not apply."""
+    keys = [c.split("=", 1)[0].lower() for c in git.configs]
+    return any(k.startswith(("remote.", "url.")) for k in keys) or any(
+        name.startswith("GIT_CONFIG") for name in cmd.env
+    )
+
+
+def _push_repo(cmd: _Cmd, git: _Git, remote: str | None) -> tuple[str, str] | None:
+    """The (owner, repo) a push writes, read from its URL or its remote's push URL.
+
+    The remote is read in the repository git uses, the one a `--git-dir` or `GIT_DIR` names over
+    the directory's own. A config override of a remote, or a repository the text does not name,
+    resolves to None.
+    """
     remote = remote or "origin"
-    looks_like_url = "://" in remote or re.match(r"^[^/\s]+@[^/\s]+:", remote)
-    url = remote if looks_like_url else _git_stdout(where, ["remote", "get-url", "--push", remote])
+    url: str | None = remote
+    if not ("://" in remote or re.match(r"^[^/\s]+@[^/\s]+:", remote)):
+        where = _moved(cmd.cwd, git.c_dirs)
+        named = _named_git_dir(cmd, git)
+        git_dir = None if named is None else _join_dir(where, named)
+        located = where is not None if named is None else git_dir is not None
+        query = ["--git-dir", git_dir] if git_dir else []
+        query += ["remote", "get-url", "--push", remote]
+        unread = _overrides_remote(cmd, git) or not located
+        url = None if unread else _git_stdout(where, query)
     m = _URL_OWNER_REPO.search(url or "")
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -836,12 +880,12 @@ def _bypass_denial(
             )
     if git.sub != "push":
         return None
-    where = _moved(cmd.cwd, git.c_dirs)
 
     def branch_of() -> str | None:
         if current_branch is not None:
             return current_branch
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, git.git_dir, None, cmd.cwd is None)
+        named = _named_git_dir(cmd, git)
+        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, cmd.cwd is None)
         return got if isinstance(got, str) else None
 
     remote, targets = _push_targets(git.args, branch_of)
@@ -851,7 +895,7 @@ def _bypass_denial(
             rules = rules_lookup(br)
         else:
             if repo is _UNRESOLVED:
-                repo = _push_repo(where, remote) if where is not None else None
+                repo = _push_repo(cmd, git, remote)
             rules = _live_branch_rules(repo[0], repo[1], br) if isinstance(repo, tuple) else None
         reason = _rule_denial(op, br, rules)
         if reason:
@@ -1648,6 +1692,72 @@ def _is_primary_checkout_selftest() -> bool | str:
         return _is_primary_checkout(primary) is True and _is_primary_checkout(linked) is False
 
 
+_PUSH_REPO_CASES: list[tuple[str, str | None]] = [
+    ("git push origin :feature/x", "example"),
+    ("git --git-dir={b}/.git push origin :feature/x", "stranger"),
+    ("git --git-dir {b}/.git push origin :feature/x", "stranger"),
+    ("git -C {b} push origin :feature/x", "stranger"),
+    ("git -C {b} --git-dir=.git push origin :feature/x", "stranger"),
+    ("git --work-tree={b} push origin :feature/x", "example"),
+    ("GIT_DIR={b}/.git git push origin :feature/x", "stranger"),
+    ("env GIT_DIR={b}/.git git push origin :feature/x", "stranger"),
+    ('cd "$X" && git --git-dir={b}/.git push origin :feature/x', "stranger"),
+    ("export GIT_DIR={b}/.git; git push origin :feature/x", None),
+    ("GIT_DIR={b}/.git; git push origin :feature/x", None),
+    ('git --git-dir="$D" push origin :feature/x', None),
+    ("git -c remote.origin.pushurl=https://github.com/x/y push origin :feature/x", None),
+    ("GIT_CONFIG_COUNT=1 git push origin :feature/x", None),
+    ("git --git-dir={b}/.git push https://github.com/example/x :feature/x", "example"),
+]
+_PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
+    ("git push origin", "feature/a"),
+    ("git --git-dir={b}/.git push origin", "develop"),
+    ("GIT_DIR={b}/.git git push origin", "develop"),
+    ('cd "$X" && git --git-dir={b}/.git push origin', "develop"),
+    ("GIT_DIR={b}/.git; git push origin", None),
+    ('git --git-dir="$D" push origin', None),
+]
+
+
+def _push_repo_selftest() -> bool | str:
+    """Read the repository each push writes from two real checkouts, their origins under different owners.
+
+    Each case is a command run in checkout `a`, with `b` beside it, and the owner or the branch it
+    writes. Checkout `a` is on `feature/a` and `b` on `develop`.
+    "skip" where the checkouts could not be built, which is neither a pass nor a failure.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        a, b = (os.path.join(tmp, name).replace("\\", "/") for name in ("a", "b"))
+        for repo, owner, steps in (
+            (a, "example", [["switch", "-q", "-c", "feature/a"]]),
+            (b, "stranger", []),
+        ):
+            url = f"https://github.com/{owner}/x.git"
+            if not _build_selftest_repo(repo, [["remote", "add", "origin", url], *steps]):
+                return "skip"
+        ok = True
+        for cmd, want in _PUSH_REPO_CASES:
+            reading = _Reading()
+            _read(cmd.format(b=b), a, {}, reading)
+            c = reading.cmds[-1]
+            git = _git(c.argv)
+            got = _push_repo(c, git, _push_targets(git.args, lambda: None)[0])
+            passed = (got[0] if got else None) == want
+            ok = ok and passed
+            print(f"  {'ok  ' if passed else 'FAIL'} [repo ] want={want} R4: {cmd}")
+        for cmd, branch in _PUSH_BRANCH_CASES:
+            reading = _Reading()
+            _read(cmd.format(b=b), a, {}, reading)
+            c = reading.cmds[-1]
+            git = _git(c.argv)
+            named = _named_git_dir(c, git)
+            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, c.cwd is None)
+            passed = (bare if isinstance(bare, str) else None) == branch
+            ok = ok and passed
+            print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
+        return ok
+
+
 def _selftest() -> int:
     """Run every self-test case with no variable naming a repository in the environment."""
     with _git_location_cleared():
@@ -1692,6 +1802,10 @@ def _selftest_cases() -> int:
         absent = os.path.join(tmp, "absent")
         for cmd, want, source in _NO_ORIGIN_CASES:
             check(cmd, want, source, cwd=absent, origin=None, rules_lookup=None)
+    repos = _push_repo_selftest()
+    ok = ok and repos in (True, "skip")
+    if repos == "skip":
+        print("  ok   [repo ] the push-repository checkouts could not be built: skip")
     live = _is_primary_checkout_selftest()
     ok = ok and live in (True, "skip")
     print(
