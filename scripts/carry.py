@@ -685,6 +685,71 @@ def replace_sections(
     return out
 
 
+def insertion_point(target_lines: list[str], source_lines: list[str], section: str) -> int:
+    """The line index where a section the target lacks goes, following the hub's own section order.
+
+    The section goes after the target's copy of the nearest preceding hub section the target holds.
+    Failing that, it goes before the nearest following one. A target sharing no section with the
+    hub gets it appended. A local section sitting between two hub sections therefore stays where
+    the repository put it, and only the hub's relative order is reproduced.
+    """
+    hub_order = [name.lower() for name in h2_headings(source_lines)]
+    held = {name.lower() for name in h2_headings(target_lines)}
+    position = hub_order.index(section.lower())
+    for name in reversed(hub_order[:position]):
+        if name in held:
+            span = section_span(target_lines, name)
+            if span is not None:
+                return span[1]
+    for name in hub_order[position + 1 :]:
+        if name in held:
+            span = section_span(target_lines, name)
+            if span is not None:
+                return span[0]
+    return len(target_lines)
+
+
+def insert_sections(
+    target_lines: list[str], source_lines: list[str], sections: list[str], path: str
+) -> list[str]:
+    """`target_lines` with each named section the target lacks added, in the hub's order, nothing else touched.
+
+    Each insertion is placed by `insertion_point` and carries the target's own line ending.
+    A section spliced ahead of a heading ends with a blank line, and one appended to the file
+    ends without. A target ending on a non-blank or unterminated line gains the separator the new
+    heading needs, which is the one change outside the new region.
+    The result is checked to equal the original, apart from trailing whitespace, once the new regions are removed.
+    """
+    out = list(target_lines)
+    ending = file_ending(target_lines)
+    hub_order = [name.lower() for name in h2_headings(source_lines)]
+    for section in sorted(sections, key=lambda name: hub_order.index(name.lower())):
+        source_span = section_span(source_lines, section)
+        if source_span is None:
+            raise CarryError(f"{path} section '{section}' could not be located to insert")
+        at = insertion_point(out, source_lines, section)
+        region = []
+        for line in source_lines[source_span[0] : source_span[1]]:
+            body = line[: len(line) - len(terminator(line))]
+            region.append(body + ending)
+        if at == len(out):
+            while region and not region[-1].strip():
+                region.pop()
+            if out and not terminator(out[-1]):
+                out[-1] += ending
+            if out and out[-1].strip():
+                out.append(ending)
+            at = len(out)
+        elif region and region[-1].strip():
+            region.append(ending)
+        out[at:at] = region
+    if outside_sections(out, sections, path).rstrip() != "".join(target_lines).rstrip():
+        raise CarryError(
+            f"post-insert check failed for {path}: text outside the inserted sections changed"
+        )
+    return out
+
+
 def assert_sections(
     path: str,
     target_file: pathlib.Path,
@@ -766,6 +831,7 @@ class SectionPlan:
     source_lines: list[str]
     target_lines: list[str]
     stale: list[str]
+    missing: list[str]
 
 
 def plan_unit(
@@ -781,7 +847,8 @@ def plan_unit(
         )
     source_lines = split_lines(decode_text(source_file, path), path)
     target_lines = split_lines(decode_text(target_file, path), path)
-    stale = []
+    stale: list[str] = []
+    missing: list[str] = []
     for section in declared:
         source_span = section_span(source_lines, section)
         if source_span is None:
@@ -789,19 +856,17 @@ def plan_unit(
                 f"{path} section '{section}' is declared verbatim but absent from the hub's own copy"
             )
         target_span = section_span(target_lines, section)
-        if target_span is None:
-            raise CarryError(
-                f"{path} section '{section}' is declared verbatim but absent from the target."
-                " Where a declared section belongs in a file that never carried it is a standup"
-                " question rather than a drift question, so this refuses rather than guessing"
-            )
         source_region = comparable_region(source_lines, source_span)
-        target_region = comparable_region(target_lines, target_span)
         guard_governed_drift(path, section, source_region, "hub")
+        if target_span is None:
+            missing.append(section)
+            stale.append(section)
+            continue
+        target_region = comparable_region(target_lines, target_span)
         guard_governed_drift(path, section, target_region, "target")
         if source_region != target_region:
             stale.append(section)
-    return SectionPlan(path, declared, source_lines, target_lines, stale)
+    return SectionPlan(path, declared, source_lines, target_lines, stale, missing)
 
 
 def plan_sections(
@@ -828,7 +893,9 @@ def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
         if not plan.stale:
             continue
         target_file = relative_root(target, plan.path)
-        rewritten = replace_sections(plan.target_lines, plan.source_lines, plan.stale, plan.path)
+        inserted = insert_sections(plan.target_lines, plan.source_lines, plan.missing, plan.path)
+        present = [name for name in plan.stale if name not in plan.missing]
+        rewritten = replace_sections(inserted, plan.source_lines, present, plan.path)
         try:
             target_file.write_bytes("".join(rewritten).encode("utf-8"))
         except OSError as exc:
@@ -840,7 +907,7 @@ def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
             plan.source_lines,
             plan.stale,
             plan.declared,
-            plan.target_lines,
+            inserted,
         )
         print(json.dumps({"path": plan.path, "postApply": True, "stale": []}, sort_keys=True))
 
@@ -882,7 +949,13 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     for plan in plans:
         print(
             json.dumps(
-                {"path": plan.path, "sections": plan.declared, "stale": plan.stale}, sort_keys=True
+                {
+                    "missing": plan.missing,
+                    "path": plan.path,
+                    "sections": plan.declared,
+                    "stale": plan.stale,
+                },
+                sort_keys=True,
             )
         )
     if mode != "apply-sections":
