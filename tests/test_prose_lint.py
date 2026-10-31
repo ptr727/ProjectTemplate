@@ -3605,6 +3605,7 @@ class TestHomePathRule(BaitCase):
             (f"      - type: bind\n        source: {NIX_HOME}/config", "compose.yml"),
             (f"      - ./config:{NIX_HOME}/media", "ledger.yml"),
             (f"    environment:\n      - SEARCH=/srv:{NIX_HOME}/bin", "compose.yml"),
+            (f"      - ./config:/srv/media\nx-paths:\n- /srv:{NIX_HOME}/bin", "compose.yml"),
         ):
             with self.subTest(entry=entry, name=name):
                 self.assertEqual(
@@ -5621,28 +5622,52 @@ class TestChangedLines(unittest.TestCase):
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertEqual({1}, got["doc.md"])
 
+    def moved(
+        self, source: str, renames: str = "true", edit: bool = False, excludes: tuple[str, ...] = ()
+    ) -> dict[str, set[int]]:
+        """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets."""
+        root = self.real_repo()
+        subprocess.run(["git", "-C", str(root), "config", "diff.renames", renames], check=True)
+        (root / source).parent.mkdir(parents=True, exist_ok=True)
+        (root / source).write_text("One.\nTwo.\nThree.\nFour.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", source], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+        (root / "docs").mkdir(exist_ok=True)
+        subprocess.run(["git", "-C", str(root), "mv", source, "docs/ledger.md"], check=True)
+        if edit:
+            (root / "docs" / "ledger.md").write_text(
+                "One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8"
+            )
+        got = prose_lint.changed_lines("HEAD", root, excludes)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        return got
+
     def test_a_rename_out_of_a_generated_tree_is_read_whole(self) -> None:
-        """A moved file's content is new to its destination, so every line of it is in scope.
+        """No run read the file where it sat, so every line of it is new to the gate.
 
         Rename detection reports a pure move with no `+++` header and no hunk, so the destination
         gained no scope at all. Prose a generated tree exempted then arrived in a checked path with
-        no run ever reading it. The repository turns detection on, whatever this host's default.
+        no run ever reading it. Detection is pinned on, so the host's own setting decides nothing.
         """
-        root = self.real_repo()
-        subprocess.run(["git", "-C", str(root), "config", "diff.renames", "true"], check=True)
-        source = root / "reports" / "ledger.md"
-        source.parent.mkdir()
-        source.write_text("First line.\nSecond line.\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(root), "add", "reports"], check=True)
-        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
-        (root / "docs").mkdir()
-        subprocess.run(
-            ["git", "-C", str(root), "mv", "reports/ledger.md", "docs/ledger.md"], check=True
-        )
+        for renames in ("true", "false"):
+            with self.subTest(renames=renames):
+                self.assertEqual(
+                    {"docs/ledger.md": {1, 2, 3, 4}}, self.moved("reports/ledger.md", renames)
+                )
 
-        got = prose_lint.changed_lines("HEAD", root)
-        assert got is not None, "git failed, so this case proved nothing about scoping"
-        self.assertEqual({"docs/ledger.md": {1, 2}}, got)
+    def test_a_rename_out_of_an_excluded_path_is_read_whole(self) -> None:
+        """An excluded path is one no run reads either, so a file leaving it is read in full."""
+        got = self.moved("drafts/ledger.md", excludes=("drafts/",))
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+
+    def test_a_rename_between_read_paths_adds_only_what_it_changed(self) -> None:
+        """A run already read the file where it sat, so a move brings no line into scope unedited.
+
+        Read whole, every move of a commented code file would need the comment label. Every older
+        finding in a moved file would also block the move.
+        """
+        self.assertEqual({}, self.moved("notes/ledger.md"))
+        self.assertEqual({"docs/ledger.md": {3}}, self.moved("notes/ledger.md", edit=True))
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.
