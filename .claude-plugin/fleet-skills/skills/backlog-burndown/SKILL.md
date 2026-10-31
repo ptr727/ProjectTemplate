@@ -256,7 +256,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   for the same reason.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
-  a worker following either alone will clean up. The worker still performs the merge itself. What
+  a worker following either alone will clean up. The worker still performs the merge itself, with
+  `drive-pr` step 4's `merge` run without `--cleanup` or `--checkout`. What
   the override moves is the two cleanup halves `drive-pr` runs after it, the worktree procedure
   and the verify-then-delete of the merged remote branch. It moves **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this same section, says why and what it covers.

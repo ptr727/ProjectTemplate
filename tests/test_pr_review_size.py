@@ -15,6 +15,7 @@ CEILINGS = {
     "pr_review_digest.py": 350,
     "pr_review_copilot.py": 1500,
     "pr_cleanup.py": 1200,
+    "pr_merge.py": 250,
 }
 
 

@@ -3288,6 +3288,24 @@ class TestCli(GqlCase):
         self.assertEqual("PR_test", mutations[0][1].get("pr"))
         self.assertIn("auto-request: requested a Copilot review", self.out.getvalue())
 
+    def test_a_wait_that_may_not_request_sends_none_where_one_is_owed(self) -> None:
+        """`merge` reads the gate through this, so a gate it reads never changes what it gates."""
+        self.answer(payload([review(oid=OLD)]), payload([review()]))
+        calls = self.wire_bot("BOT_123")
+        ns = argparse.Namespace(
+            number=7,
+            timeout=60,
+            min_rounds=0,
+            check_grace=pr_review.CHECK_GRACE,
+            check_stall=pr_review.CHECK_STALL,
+            ignore_quota_signal=False,
+            request=False,
+        )
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, pr_review.run_wait("o", "r", ns, may_request=False))
+        self.assertFalse([c for c in calls if "requestReviews" in c[0]])
+        self.assertNotIn("auto-request:", self.out.getvalue())
+
     def test_no_bot_id_anywhere_skips_the_request_and_still_polls(self) -> None:
         """A repository with no Copilot history falls back to plain polling, not a crash."""
         self.answer(payload([review(oid=OLD)]), payload([review()]))
@@ -5997,7 +6015,7 @@ class TestReplyArguments(unittest.TestCase):
             ),
             (
                 ["status", "--repo", "o/r", "--fingerprint", "f", "--checkout", "."],
-                "--checkout belongs to `attest` or `cleanup`, not `status`",
+                "--checkout belongs to `attest` or `cleanup` or `merge`, not `status`",
             ),
             (
                 ["status", "--repo", "o/r", "--fingerprint", "f", "--body", "b"],
@@ -7008,6 +7026,7 @@ WRITE_COMMANDS: dict[str, list[str]] = {
     "wait": ["wait", "7", "--repo", "someone-else/r"],
     "attest": ["attest", "7", "--repo", "someone-else/r"],
     "cleanup": ["cleanup", "7", "--repo", "someone-else/r"],
+    "merge": ["merge", "7", "--repo", "someone-else/r"],
 }
 
 # The parser's remaining `cmd` choices, none of which write.

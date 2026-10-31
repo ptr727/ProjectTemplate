@@ -346,8 +346,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    worker's line the moment it arrives. Work still running then finishes after the run has acted
    on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
-   parking comment so the comment can name it. That includes a merge the harness refuses after one
-   retry, which is parked as ready to merge rather than routed around. Otherwise a worker parks only
+   parking comment so the comment can name it. That includes a `merge` exiting other than `0`, a
+   gate refusal parked with its output rather than routed around. Otherwise a worker parks only
    on a choice the maintainer alone can make, or on a maintainer-only action that
    `pr-review-conduct` sends to the maintainer. One is a review stall with a human or team reviewer
    requested, which its "Expected review loop" sends there. Two others it sends there return `STOP`

@@ -106,14 +106,18 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    one per "Disposing of Every Finding" and wait again. A promotion re-reviews content its feature PRs already carried,
    so the hosted review runs once per change, at the promotion in step 6.
 4. Merge the feature PR into
-   develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
-   call. It is run from inside the task's own worktree per step 1, where the
-   feature branch is checked out. `gh pr merge --delete-branch` needs to switch that worktree to
-   the base branch to delete it. That fails when `develop` is already checked out somewhere else,
-   the ordinary case in this layout. Instead run repo-worktree's post-merge cleanup with
-   `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
-   primary clone. It deletes the remote branch, then removes the task's worktree and local branch.
+   primary clone. It reads the Merge Gate through `wait`'s own decision and merges nothing unless
+   the gate is met. It squash-merges only an open pull request into `develop` headed in that same
+   repository. The merge is pinned to the head the gate read and confirmed by reading it back.
+   Exit `0` is merged and cleaned up. Any other exit stops and reports, the same as `cleanup`.
+   A refused `merge` is a gate refusal this seat reports, and it never hands the maintainer a
+   command to run instead. A `status=MERGED` line before a non-zero exit means only the cleanup
+   stopped. A `2` with no such line can mean the merge landed unconfirmed. Once the merge is
+   confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
+   `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in
