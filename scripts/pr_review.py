@@ -1188,7 +1188,7 @@ def await_registered_head(
     """
     meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
     ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
-    if meta.get("state") != "OPEN" or not ref or not source or not safe_ref(ref):
+    if not is_open(meta) or not ref or not source or not safe_ref(ref):
         return head, True
     tip = _git(checkout, "ls-remote", source, f"refs/heads/{ref}")
     if tip.returncode != 0 or tip.stdout.split()[:1] != [local]:
