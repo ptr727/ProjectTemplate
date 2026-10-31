@@ -895,6 +895,35 @@ def _primary_checkout_verdict(
     return sub in _ALWAYS_DENY_SUBS
 
 
+def _delete_only_push(args: list[str]) -> bool:
+    """Whether a push only deletes remote branches outside the protected defaults.
+
+    Such a push moves no local branch and touches no working tree, so requirement 6's hazard is
+    absent. Requirement 4 still judges each branch's live rules. Any other option keeps the
+    denial, and so do a forced refspec, one with a source, a bare `:`, a tag, and a run-time word.
+    """
+    delete = False
+    pos: list[str] = []
+    for i, a in enumerate(args):
+        if a == "--":
+            pos += args[i + 1 :]
+            break
+        if not a.startswith("-"):
+            pos.append(a)
+        elif a in ("--delete", "--dry-run", "--quiet", "--verbose") or re.fullmatch(r"-[dnqv]+", a):
+            delete = delete or a == "--delete" or (a[1] != "-" and "d" in a)
+        else:
+            return False
+    if len(pos) < 2:
+        return False
+    for spec in pos[1:]:
+        dst = spec if delete else spec[1:] if spec.startswith(":") else ""
+        name = _branch_name(dst) if ":" not in dst and not dst.startswith("+") else None
+        if not name or name in _PROTECTED_DEFAULT or name in ("HEAD", "@"):
+            return False
+    return True
+
+
 def _primary_denial(
     cmd: _Cmd,
     environ: dict[str, str],
@@ -906,6 +935,8 @@ def _primary_denial(
         return None
     git = _git(cmd.argv)
     if git.sub not in _VERDICT_SUBS:
+        return None
+    if git.sub == "push" and not git.configs and _delete_only_push(git.args):
         return None
     target = _moved(cmd.cwd, git.c_dirs)
     if target is None or not _primary_checkout_verdict(git.sub, git.args, target, ref_resolver):
@@ -1276,6 +1307,21 @@ _CASES: list[tuple[str, str, str]] = [
     ("gh pr comment 5 --body 'add || true to the script'", "allow", "R1"),
     ('gh pr comment 5 --body ">/dev/null hides output"', "allow", "R1"),
     ('git push origin feature/x || { echo "push failed" >&2; exit 1; }', "allow", "R1"),
+    (
+        (
+            "cat > /example/b.md <<'EOF'\nquote 2>/dev/null and || true\nEOF\n"
+            "gh issue create --title x --body-file /example/b.md"
+        ),
+        "allow",
+        "1628",
+    ),
+    ("gh pr edit 5 --body-file - <<'EOF'\nthe || echo form\nEOF", "allow", "1628"),
+    ("git commit -F - <<'EOF'\nsay 2>/dev/null\nEOF\ngit push origin feature/x", "allow", "1628"),
+    (
+        "cat > /example/b.md <<'EOF'\nx\nEOF\ngh pr edit 5 --body-file /example/b.md || :",
+        "deny",
+        "1628",
+    ),
     ("git fetch origin >/dev/null 2>&1", "allow", "R1"),
     (_STRANGER_REPLY + ' -F t="PRRT_kwDOExample12345" >/dev/null 2>&1 || true', "deny", "incident"),
     (_STRANGER_REPLY + ' -F t="PRRT_kwDOExample12345"', "deny", "R2"),
@@ -1477,6 +1523,34 @@ _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("git fetch origin", _PRIMARY, {}, "allow", "R6"),
     ("git status", _PRIMARY, {}, "allow", "R6"),
     ("git push origin feature/x", _PRIMARY, {}, "deny", "R6"),
+    ("git push origin --delete feature/x", _PRIMARY, {}, "allow", "1642"),
+    ("git push origin :feature/x", _PRIMARY, {}, "allow", "1642"),
+    ("git push -dq origin feature/x feature/y", _PRIMARY, {}, "allow", "1642"),
+    ("git push --dry-run origin :refs/heads/feature/x", _PRIMARY, {}, "allow", "1642"),
+    (
+        (
+            "git ls-remote --heads --exit-code -- origin refs/heads/feature/x "
+            "&& git push origin --delete -- feature/x"
+        ),
+        _PRIMARY,
+        {},
+        "allow",
+        "1642",
+    ),
+    ("git push origin --delete develop", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin :refs/heads/main", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin --delete feature/x develop", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin :feature/x feature/y", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin +:feature/x", _PRIMARY, {}, "deny", "1642"),
+    ("git push -f origin :feature/x", _PRIMARY, {}, "deny", "1642"),
+    ("git push -u origin --delete feature/x", _PRIMARY, {}, "deny", "1642"),
+    ("git push --prune origin :feature/x", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin :", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin :refs/tags/v1", _PRIMARY, {}, "deny", "1642"),
+    ("git push origin --delete :feature/x", _PRIMARY, {}, "deny", "1642"),
+    ("git push --delete origin", _PRIMARY, {}, "deny", "1642"),
+    ('git push origin --delete "$BRANCH"', _PRIMARY, {}, "deny", "1642"),
+    ("git -c core.sshCommand=ssh push origin :feature/x", _PRIMARY, {}, "deny", "1642"),
     ("cd /c/work/wt && git commit -m x", _PRIMARY, {}, "allow", "R6"),
     ("git commit -m x", _WORKTREE, {}, "allow", "R6"),
     ("cd /c/work/primary && git commit -m x", _WORKTREE, {}, "deny", "incident"),
