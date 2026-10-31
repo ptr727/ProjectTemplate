@@ -227,13 +227,18 @@ def untracked_paths(root: Path) -> list[str]:
     return [name for name in (out or "").split("\0") if name]
 
 
-def diff_header_path(field: str) -> str | None:
-    """The path a `+++` header names, its C-quoted form decoded, or None where it names no file."""
-    field = field.split("\t", 1)[0]
+def unquoted(field: str) -> str:
+    """A path as a diff header prints it, its C-quoted form decoded."""
     if field.startswith('"') and field.endswith('"') and len(field) > 1:
         # Latin-1 round-trips each byte, so a raw byte the escape carries survives the decode.
         unescaped = field[1:-1].encode("latin-1", "backslashreplace").decode("unicode-escape")
         field = unescaped.encode("latin-1", "surrogateescape").decode("utf-8", "surrogateescape")
+    return field
+
+
+def diff_header_path(field: str) -> str | None:
+    """The path a `+++` header names, its C-quoted form decoded, or None where it names no file."""
+    field = unquoted(field.split("\t", 1)[0])
     return field[2:] if field.startswith("b/") else None
 
 
@@ -264,24 +269,38 @@ def undiffable_paths(base: str, root: Path) -> set[str] | None:
 # Each option pins a setting a host may change, quoting and prefixes and hunk context among them.
 # The external and textconv drivers would otherwise replace the body this parse reads.
 DIFF_ARGS = (
-    "-c core.quotePath=true diff --unified=0 --inter-hunk-context=0 --no-color "
+    "-c core.quotePath=true diff --unified=0 --inter-hunk-context=0 --no-color --find-renames "
     "--ignore-cr-at-eol --src-prefix=a/ --dst-prefix=b/ --no-ext-diff --no-textconv"
 )
 
 
-def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
-    """Map path -> lines this tree adds vs `base`, an untracked or undiffable text file in full."""
+def changed_lines(
+    base: str, root: Path, excludes: tuple[str, ...] = ()
+) -> dict[str, set[int]] | None:
+    """Map path -> lines this tree adds vs `base`, an untracked or undiffable text file in full.
+
+    A file moved out of a generated tree or an excluded path is read in full too, since no run read
+    it there. A move between read paths adds only what it changed.
+    """
     raw = git_bytes(root, DIFF_ARGS, base)
     undiffable = undiffable_paths(base, root) if raw is not None else None
     if raw is None or undiffable is None:
         return None
+    trees = config_for(str(root)).exempt["generated_trees"]
     out: dict[str, set[int]] = {}
+    unread: list[str] = []
     cur = None
+    source = ""
     # A header is honored only in the block a `diff --git` line opens, which content cannot forge.
     in_header = False
     for line in raw.split("\n"):
         if line.startswith("diff --git "):
             in_header, cur = True, None
+        elif in_header and line.startswith("rename from "):
+            source = unquoted(line.removeprefix("rename from "))
+        elif in_header and line.startswith("rename to "):
+            if not trees.isdisjoint(Path(source).parts) or any(x in source for x in excludes):
+                unread.append(unquoted(line.removeprefix("rename to ")))
         elif in_header and line.startswith("+++ "):
             in_header = False
             cur = diff_header_path(line[4:])
@@ -295,7 +314,7 @@ def changed_lines(base: str, root: Path) -> dict[str, set[int]] | None:
             if m:
                 start = int(m.group(1))
                 out[cur].update(range(start, start + int(m.group(2) or 1)))
-    for name in [*undiffable, *untracked_paths(root)]:
+    for name in [*undiffable, *untracked_paths(root), *unread]:
         if is_text(root / name):
             out[name] = set(range(1, len((root / name).read_bytes().splitlines()) + 1))
     return out
@@ -1227,6 +1246,37 @@ HOME_PATH = re.compile(
     r"(?:/home/|/Users/|[A-Za-z]:\\(?i:users)\\)(?P<user>[A-Za-z][A-Za-z0-9._-]*)"
 )
 
+COMPOSE_FILE = re.compile(r"(?:docker-)?compose(?:\.[\w-]+)?\.ya?ml")
+VOLUMES_KEY = re.compile(r"^\s*volumes:\s*(?:#.*)?$")
+SHORT_MOUNT = re.compile(
+    r"""^\s*-\s+["']?(?:[A-Za-z]:(?=[\\/]))?(?:\$\{[^}]*\}|[^:\s"'{}])+:(?P<target>/[^:\s"']*)"""
+)
+LONG_MOUNT = re.compile(r"""^\s*(?:-\s+)?target:\s+["']?(?P<target>/[^\s"']*)""")
+
+
+def container_paths(lines: tuple[Line, ...]) -> dict[int, range]:
+    """Where a Compose volume entry names its container path, a path an image ships, not a host.
+
+    The host side keeps a `${...}` expansion and a drive letter whole, so neither colon splits it.
+    A sequence may sit at its key's own indent, so only a sibling key closes the block.
+    """
+    out: dict[int, range] = {}
+    block: int | None = None
+    for line in lines:
+        body = line.text.lstrip()
+        if not body or body.startswith("#"):
+            continue
+        indent = len(line.text) - len(body)
+        if block is not None and (indent < block or (indent == block and body[0] != "-")):
+            block = None
+        if VOLUMES_KEY.match(line.text):
+            block = indent
+            continue
+        m = SHORT_MOUNT.match(line.text) or LONG_MOUNT.match(line.text)
+        if block is not None and m:
+            out[line.number] = range(*m.span("target"))
+    return out
+
 
 def rule_home_path(unit: Unit, ctx: Context) -> list[Finding]:
     """An absolute home path naming a real account, on any line, a fenced transcript included."""
@@ -1235,11 +1285,13 @@ def rule_home_path(unit: Unit, ctx: Context) -> list[Finding]:
         (ctx.root / p).resolve() for p in exempt["home_path_exempt"]
     }:
         return []
+    inside = container_paths(unit.lines) if COMPOSE_FILE.fullmatch(ctx.path.name) else {}
     return [
         finding(line.number, "home-path", path=m.group(0))
         for line in unit.lines
         for m in HOME_PATH.finditer(line.text)
         if m.group("user").lower() not in exempt["service_accounts"]
+        and m.start() not in inside.get(line.number, range(0))
     ]
 
 
@@ -1903,7 +1955,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     discovered = len(files)
     # Presence rather than truthiness, since an empty value is a base that failed to compute.
-    scope = changed_lines(a.diff, scan_root) if a.diff is not None else None
+    scope = changed_lines(a.diff, scan_root, tuple(a.exclude)) if a.diff is not None else None
     if a.diff is not None and scope is None:
         return refuse("error-no-diff", base=a.diff)
     if scope is not None:

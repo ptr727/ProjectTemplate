@@ -3575,6 +3575,43 @@ class TestHomePathRule(BaitCase):
                 target.write_text(f'{{"path": "{NIX_HOME}/x"}}\n', encoding="utf-8")
                 self.assertEqual(1, len(prose_lint.check_file(target, {"home-path"}, self.tmp)))
 
+    def compose(self, entry: str) -> str:
+        """A constructed Compose file whose one service mounts `entry`, the line under test."""
+        return f"services:\n  ledger:\n    image: example/ledger\n    volumes:\n{entry}\n"
+
+    def test_a_compose_container_path_is_not_a_home(self) -> None:
+        """A mount's container side is a path the image ships, so it names no account on a host.
+
+        The account is the same constructed name every other case flags, so only the side of the
+        mapping it sits on decides the verdict.
+        """
+        for entry in (
+            f"      - ${{LEDGER_DATA:?LEDGER_DATA is required}}/config:{NIX_HOME}/media",
+            f'      - "./config:{NIX_HOME}/media:ro"',
+            f"      - ledger-cache:{NIX_HOME}/.cache",
+            f"    - ./config:{NIX_HOME}/media",
+            f"      - type: bind\n        source: ./config\n        target: {NIX_HOME}/media",
+        ):
+            for name in ("compose.yml", "docker-compose.yaml", "compose.override.yml"):
+                with self.subTest(entry=entry, name=name):
+                    self.assertEqual([], self.kinds(self.compose(entry), {"home-path"}, name))
+
+    def test_a_compose_host_path_is_still_a_home(self) -> None:
+        """The host side of the same mapping, and the same text read anywhere else, still report."""
+        for entry, name in (
+            (f"      - {NIX_HOME}/config:/srv/media", "compose.yml"),
+            (f"      - ${{LEDGER_DATA:-{NIX_HOME}}}/config:/srv/media", "compose.yml"),
+            (f"      - C:/Users/{BAIT_USER}/config:/srv/media", "compose.yml"),
+            (f"      - type: bind\n        source: {NIX_HOME}/config", "compose.yml"),
+            (f"      - ./config:{NIX_HOME}/media", "ledger.yml"),
+            (f"    environment:\n      - SEARCH=/srv:{NIX_HOME}/bin", "compose.yml"),
+            (f"      - ./config:/srv/media\nx-paths:\n- /srv:{NIX_HOME}/bin", "compose.yml"),
+        ):
+            with self.subTest(entry=entry, name=name):
+                self.assertEqual(
+                    ["home-path"], self.kinds(self.compose(entry), {"home-path"}, name)
+                )
+
 
 class TestDeadPathRule(unittest.TestCase):
     """The `dead-path` rule on Markdown prose units."""
@@ -5584,6 +5621,74 @@ class TestChangedLines(unittest.TestCase):
         got = prose_lint.changed_lines("HEAD", root)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         self.assertEqual({1}, got["doc.md"])
+
+    def moved(
+        self,
+        source: str,
+        renames: str = "true",
+        edit: bool = False,
+        excludes: tuple[str, ...] = (),
+        keep: bool = False,
+    ) -> dict[str, set[int]]:
+        """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets.
+
+        With `keep`, the file is copied rather than moved, and the source gains a fifth line.
+        Copy detection looks for a source only among the files a change modifies.
+        """
+        root = self.real_repo()
+        subprocess.run(["git", "-C", str(root), "config", "diff.renames", renames], check=True)
+        (root / source).parent.mkdir(parents=True, exist_ok=True)
+        (root / source).write_text("One.\nTwo.\nThree.\nFour.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", source], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+        (root / "docs").mkdir(exist_ok=True)
+        if keep:
+            shutil.copyfile(root / source, root / "docs" / "ledger.md")
+            with (root / source).open("a", encoding="utf-8") as fh:
+                fh.write("Five.\n")
+            subprocess.run(["git", "-C", str(root), "add", "docs/ledger.md", source], check=True)
+        else:
+            subprocess.run(["git", "-C", str(root), "mv", source, "docs/ledger.md"], check=True)
+        if edit:
+            (root / "docs" / "ledger.md").write_text(
+                "One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8"
+            )
+        got = prose_lint.changed_lines("HEAD", root, excludes)
+        assert got is not None, "git failed, so this case proved nothing about scoping"
+        return got
+
+    def test_a_rename_out_of_a_generated_tree_is_read_whole(self) -> None:
+        """No run read the file where it sat, so every line of it is new to the gate.
+
+        Rename detection reports a pure move with no `+++` header and no hunk, so the destination
+        gained no scope at all. Prose a generated tree exempted then arrived in a checked path with
+        no run ever reading it. Detection is pinned on, so the host's own setting decides nothing.
+        Copy detection stays off, since it would report a pure copy with no hunk in the same way.
+        """
+        for renames in ("true", "false", "copies"):
+            for edit in (False, True):
+                with self.subTest(renames=renames, edit=edit):
+                    got = self.moved("reports/ledger.md", renames, edit)
+                    self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+        got = self.moved("reports/ledger.md", "copies", keep=True)
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}, "reports/ledger.md": {5}}, got)
+
+    def test_a_rename_out_of_an_excluded_path_is_read_whole(self) -> None:
+        """An excluded path is one no run reads either, so a file leaving it is read in full."""
+        got = self.moved("drafts/ledger.md", excludes=("drafts/",))
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+
+    def test_a_rename_between_read_paths_adds_only_what_it_changed(self) -> None:
+        """A run already read the file where it sat, so a move brings no line into scope unedited.
+
+        Read whole, every move of a commented code file would need the comment label. Every older
+        finding in a moved file would also block the move.
+        """
+        for renames in ("true", "false", "copies"):
+            with self.subTest(renames=renames):
+                self.assertEqual({}, self.moved("notes/ledger.md", renames))
+                got = self.moved("notes/ledger.md", renames, edit=True)
+                self.assertEqual({"docs/ledger.md": {3}}, got)
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.
