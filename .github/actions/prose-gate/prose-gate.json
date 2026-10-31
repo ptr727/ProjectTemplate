@@ -12,7 +12,7 @@
     "sentence-split": { "default": false, "summary": "a sentence wrapping across lines" },
     "sentence-length": { "default": true, "summary": "a sentence over the word cap" },
     "spelling": { "default": true, "summary": "a British spelling where the repo convention is US English" },
-    "home-path": { "default": true, "summary": "an absolute home path naming a real account" },
+    "home-path": { "default": true, "summary": "an absolute home path naming a real account", "file_exemption": "home_path_exempt" },
     "dead-path": { "default": true, "summary": "a mention of a path git once tracked and the tree no longer holds" },
     "issue-ref": { "default": true, "summary": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text" }
   },
