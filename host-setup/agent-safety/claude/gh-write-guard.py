@@ -885,16 +885,16 @@ def _push_targets(
     return remote, out
 
 
-def _named_git_dir(cmd: _Cmd, git: _Git) -> str | None:
+def _named_git_dir(cmd: _Cmd, git: _Git, lenient: bool = False) -> str | None:
     """The repository a `--git-dir`, or else a `GIT_DIR` the command carries, names, as written.
 
     A `GIT_DIR` set earlier in the text reads as a run-time word. Whether git sees it turns on an
     export or an `unset` the reading does not track. So does one behind an `env` option the guard
-    does not recognize, which may be an abbreviation of `--unset`.
+    does not recognize, which may be an abbreviation of `--unset`, unless `lenient` reads it anyway.
     """
     if git.git_dir is not None:
         return git.git_dir
-    if "GIT_DIR" in cmd.own and not cmd.undetermined:
+    if "GIT_DIR" in cmd.own and (lenient or not cmd.undetermined):
         return cmd.own["GIT_DIR"]
     return "$GIT_DIR" if "GIT_DIR" in cmd.env else None
 
@@ -915,12 +915,12 @@ def _push_cwd(cmd: _Cmd) -> str | None:
 def _bare_branch(cmd: _Cmd, git: _Git) -> str | None:
     """The branch a push naming no refspec writes, or None where the reading does not resolve it.
 
-    Behind an `env` option the guard does not recognize, a branch nothing else names is read in the
-    working directory. So a push from a protected branch still fails closed.
+    Behind an `env` option the guard does not recognize, a branch nothing else names is read as if
+    the option were absent. So a push from a protected branch still fails closed.
     """
-    named = _named_git_dir(cmd, git)
-    got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, named, None, False)
+    got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, _named_git_dir(cmd, git), None, False)
     if not isinstance(got, str) and cmd.undetermined:
+        named = _named_git_dir(cmd, git, True)
         got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, False)
     return got if isinstance(got, str) else None
 
@@ -1917,7 +1917,8 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
     ("env --ch={b} git push origin", "feature/a"),
-    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", None),
+    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", "develop"),
+    ("env --nu sh -c 'GIT_DIR={b}/.git git push origin'", "develop"),
     ("env --ch=/nowhere git --git-dir={b}/.git push origin", "develop"),
     ("env --nu git -C {b} push origin", "develop"),
     ("env --nu sh -c 'cd {b} && git push origin'", "develop"),
