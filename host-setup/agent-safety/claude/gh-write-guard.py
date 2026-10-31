@@ -1950,6 +1950,7 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch=/nowhere git -C {b} push nowhere", "deny"),
     ("env --ch=/nowhere git push --all nowhere", "deny"),
     ("GIT_DIR=x; git push nowhere HEAD develop", "deny"),
+    ("GIT_DIR=x; git push nowhere", "allow"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
