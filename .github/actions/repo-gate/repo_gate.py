@@ -519,8 +519,9 @@ def load_through_uvx(path: Path) -> list[object]:
         hint = ""
         if isinstance(error, FileNotFoundError):
             hint = (
-                "; with UV_NO_CACHE or uv's no-cache = true, uv deletes the environment when uvx"
-                " exits, so unset it or make PyYAML importable"
+                ", because uv deletes the environment when uvx exits under UV_NO_CACHE or"
+                " uv's no-cache = true (unset UV_NO_CACHE, turn off uv's no-cache setting,"
+                " or make PyYAML importable)"
             )
         raise UvxUnavailable(
             f"the interpreter uvx provided could not start: {error}{hint}"
@@ -536,6 +537,8 @@ def load_action(path: Path) -> object:
     """The one parsed document of an action file, through PyYAML on every host.
 
     PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
+    uvx alone is not enough under UV_NO_CACHE or uv's no-cache = true, which delete the environment
+    uvx resolved before the reader launches.
     """
     try:
         import yaml  # type: ignore[import-untyped]
