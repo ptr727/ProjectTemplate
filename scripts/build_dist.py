@@ -344,12 +344,12 @@ def heading_body(lines, heading, key):
     heading of its level or above, level one included. A fidelity region ends only at the next
     level-two heading.
     """
-    want = heading.strip().lower()
     reader = _fidelity_text()
+    want = reader.section_key(heading)
     text = "\n".join(lines)
     # Every level, so a level-one heading ends a body, though a key names level two down.
     # That is because a level-one heading is a document's title rather than a section a skill would carry.
-    headings = [(h.line, h.level, h.text.lower()) for h in reader.headings(text)]
+    headings = [(h.line, h.level, reader.section_key(h.text)) for h in reader.headings(text)]
     matches = [(index, depth) for index, depth, name in headings if name == want and depth > 1]
     if not matches:
         raise ValueError(f"include {key!r}: no heading {heading.strip()!r} in its source")
