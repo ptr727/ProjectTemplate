@@ -5632,7 +5632,8 @@ class TestChangedLines(unittest.TestCase):
     ) -> dict[str, set[int]]:
         """The scope a move of a committed four-line file from `source` to `docs/ledger.md` gets.
 
-        With `keep`, the file is copied rather than moved, so the source stays where it was.
+        With `keep`, the file is copied rather than moved, and the source gains a fifth line.
+        Copy detection looks for a source only among the files a change modifies.
         """
         root = self.real_repo()
         subprocess.run(["git", "-C", str(root), "config", "diff.renames", renames], check=True)
@@ -5643,7 +5644,9 @@ class TestChangedLines(unittest.TestCase):
         (root / "docs").mkdir(exist_ok=True)
         if keep:
             shutil.copyfile(root / source, root / "docs" / "ledger.md")
-            subprocess.run(["git", "-C", str(root), "add", "docs/ledger.md"], check=True)
+            with (root / source).open("a", encoding="utf-8") as fh:
+                fh.write("Five.\n")
+            subprocess.run(["git", "-C", str(root), "add", "docs/ledger.md", source], check=True)
         else:
             subprocess.run(["git", "-C", str(root), "mv", source, "docs/ledger.md"], check=True)
         if edit:
@@ -5668,7 +5671,7 @@ class TestChangedLines(unittest.TestCase):
                     got = self.moved("reports/ledger.md", renames, edit)
                     self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
         got = self.moved("reports/ledger.md", "copies", keep=True)
-        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}}, got)
+        self.assertEqual({"docs/ledger.md": {1, 2, 3, 4}, "reports/ledger.md": {5}}, got)
 
     def test_a_rename_out_of_an_excluded_path_is_read_whole(self) -> None:
         """An excluded path is one no run reads either, so a file leaving it is read in full."""
@@ -5681,8 +5684,11 @@ class TestChangedLines(unittest.TestCase):
         Read whole, every move of a commented code file would need the comment label. Every older
         finding in a moved file would also block the move.
         """
-        self.assertEqual({}, self.moved("notes/ledger.md"))
-        self.assertEqual({"docs/ledger.md": {3}}, self.moved("notes/ledger.md", edit=True))
+        for renames in ("true", "false", "copies"):
+            with self.subTest(renames=renames):
+                self.assertEqual({}, self.moved("notes/ledger.md", renames))
+                got = self.moved("notes/ledger.md", renames, edit=True)
+                self.assertEqual({"docs/ledger.md": {3}}, got)
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.
