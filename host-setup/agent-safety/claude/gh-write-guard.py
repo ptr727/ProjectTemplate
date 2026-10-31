@@ -917,7 +917,7 @@ def _bare_branch(cmd: _Cmd, git: _Git) -> str | None:
     """The branch a push naming no refspec writes, or None where the reading does not resolve it.
 
     An `env` option the guard does not recognize may have moved the push anywhere. Behind one, only
-    an absolute `--git-dir`, git `-C`, or `cd` resolves it.
+    an absolute `--git-dir`, git `-C`, or wrapper-body `cd` resolves it.
     """
     got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, _named_git_dir(cmd, git), None, False)
     return got if isinstance(got, str) else None
@@ -1941,12 +1941,14 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push origin feature/x", "allow"),
     ("env --chd {b} git push origin feature/x", "allow"),
     ("env -X git push origin feature/x", "allow"),
-    ("cd {b} && env --ch=.. git push -u origin HEAD", "deny"),
-    ("cd {b} && env --ignore-env git push", "deny"),
-    ("env --ch={b} git push -u origin HEAD", "deny"),
-    ("env --ch={b} git push origin", "deny"),
-    ("env --ch=/nowhere git push origin", "deny"),
+    ("cd {b} && env --ch=.. git push -u origin HEAD", "deny*"),
+    ("cd {b} && env --ignore-env git push", "deny*"),
+    ("env --ch={b} git push -u origin HEAD", "deny*"),
+    ("env --ch={b} git push origin", "deny*"),
+    ("env --ch=/nowhere git push origin", "deny*"),
     ("env --ch=/nowhere git -C {a} push nowhere", "allow"),
+    ("env --ch=/nowhere git -C {b} push nowhere", "deny"),
+    ("env --ch=/nowhere git push --all nowhere", "deny"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
@@ -1957,7 +1959,8 @@ def _push_repo_selftest() -> bool | str:
     """Read the repository each push writes from two real checkouts, their origins under different owners.
 
     Each case is a command run in checkout `a`, with `b` beside it, and the owner or the branch it
-    writes. Checkout `a` is on `feature/a` and `b` on `develop`.
+    writes. Checkout `a` is on `feature/a` and `b` on `develop`. A `*` on a verdict marks the
+    denial of a branch an unrecognized `env` option leaves unread.
     "skip" where the checkouts could not be built, which is neither a pass nor a failure.
     """
     with tempfile.TemporaryDirectory() as tmp:
@@ -1988,9 +1991,10 @@ def _push_repo_selftest() -> bool | str:
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
         for cmd, want in _PUSH_UNDETERMINED_CASES:
-            verdict, _ = classify(
+            verdict, reason = classify(
                 cmd.format(a=a, b=b), a, environ={}, primary_checkout_lookup=lambda _d: False
             )
+            verdict += "*" if "the branch it writes could not be read" in reason else ""
             ok = ok and verdict == want
             mark = "ok  " if verdict == want else "FAIL"
             print(f"  {mark} [{verdict:5}] want={want:5} 3725: {cmd}")
