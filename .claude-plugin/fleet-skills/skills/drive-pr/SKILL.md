@@ -111,14 +111,50 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried,
    so the hosted review runs once per change, at the promotion in step 6.
 4. Merge the feature PR into
-   develop, `gh pr merge <number> --squash --repo <owner>/<repo>`. Never `--delete-branch` on this
-   call. It is run from inside the task's own worktree per step 1, where the
-   feature branch is checked out. `gh pr merge --delete-branch` needs to switch that worktree to
-   the base branch to delete it. That fails when `develop` is already checked out somewhere else,
-   the ordinary case in this layout. Instead run repo-worktree's post-merge cleanup with
-   `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
-   primary clone. It deletes the remote branch, then removes the task's worktree and local branch.
+   primary clone. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
+   own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
+   code reads stay this seat's per pr-review-conduct's Merge Gate. A finding the pull request's
+   body lists is one, and so is a part printed under `REVIEWER OUTPUT NOTED`. A no-thread finding
+   on an earlier round is one too, since `FINDINGS WITH NO THREAD` reads the head's round alone.
+   Dispose of them before running `merge`, although a noted part still refuses it, as below. It squash-merges only an open pull request into `develop`, headed in
+   that same repository on a branch that is not permanent. The merge is pinned to the head the gate
+   read and confirmed by reading it back.
+   Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
+   cleanup stopped, which stops and reports the same as `cleanup`.
+   Check the lines below next, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
+   line at exit `2` is read back with `gh pr view <number> --repo <owner>/<repo> --json state`.
+   `MERGED` means run the `cleanup` command below and report the merge as below, and `OPEN` means
+   treat it as a refusal. Only a
+   read that still cannot answer is reported, saying the merge may have landed. A `status=REFUSED`
+   line reading `MERGED, not OPEN` means the pull request already merged, by hand or by a peer.
+   So does a `status=PEER_MERGED` line. For either, run the `cleanup` command below. Report each
+   of these merges as one this run cannot vouch for, since the head that merged may be one the gate
+   never read.
+   Any other non-zero exit is a refusal that merged nothing. Do what its `status=` lines name, per
+   step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
+   Every Finding". A `status=MERGE_NOT_CLEAN` line reading `BLOCKED` while a check still runs
+   clears by waiting for it, with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`.
+   After clearing whatever lines this seat can clear, run `merge` once more on this pull request. Report what still stands to the
+   maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
+   outcome. The maintainer can then merge it by hand. A line no action of this seat can change
+   is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
+   So is the gate's exit `50` printing `status=VERDICT_NAMES_UNCOUNTED_FINDINGS`, which repeats on
+   its head after the answer. So is its exit `41` on a quota state, or on a refusal item 2 names no
+   way to clear. pr-review-conduct's Merge Gate item 2 sends those to the maintainer. A
+   file-count refusal and a transient error clear as item 2 says.
+   They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
+   `suppressed`. A refusal this seat reports is
+   never routed around, and it hands the maintainer no command to run instead.
+   A harness refusing the `merge` call itself is a refused write
+   rather than a gate refusal. That happens on a machine with no allow rule for it, or under
+   another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
+   Write Safety". Name the maintainer's routes, adding the permission rule or running the command
+   themselves. Once the merge is
+   confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
+   `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in
@@ -126,7 +162,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    repository. It also refuses a permanent branch or one any ruleset or branch protection covers. It
    checks the tip is still at the pull request's `headRefOid` before deleting, and reads the ref
    back to confirm.
-   Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
+   These exits are `cleanup`'s, read once a `status=MERGED` line printed or a standalone `cleanup`
+   ran. Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
    than deleting by hand. `1` is a refusal, a moved tip among them. `2` is a read that did not
    answer or a delete it could not confirm. `64` is a target under an owner other than the hub
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs

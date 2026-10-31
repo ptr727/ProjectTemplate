@@ -447,7 +447,8 @@ the GitHub-specific API operations, each taking `<number> --repo <owner>/<repo>`
 request description against the branch it describes, catching a commit or `uses:` ref the head no
 longer carries. `status` reports coverage, threads, body-only findings, and
 shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-conversation
-answer after it reads the PR node ID. `reply` answers a thread by matching the finding's own
+answer after it reads the PR node ID. `merge` squash-merges a feature pull request into
+`develop` once the gate's mechanically readable items read met, per `drive-pr` step 4. `reply` answers a thread by matching the finding's own
 words instead of a line number a fix push can move. It resolves the thread only when `--resolve`
 is given. A finding posted twice on one file, as two threads with the same text, is answered with
 `--all-identical`, which the refusal names. The repository's

@@ -46,6 +46,10 @@ Subcommands
   cleanup  Forwarded to `pr_cleanup.py`, which holds the contract and the exit codes. A command
            line naming this script therefore keeps working under the allow rule the host-safety
            installer registers for it.
+  merge    Forwarded to `pr_merge.py`, which holds the contract and the exit codes, for the same
+           reason. It squash-merges a pull request into `develop` only where the Merge Gate's
+           mechanically readable items read met. The items no code here reads, such as a finding a
+           pull request's body lists, stay the driver's per `pr-review-conduct`'s Merge Gate.
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet. 0 is also the exit where the review
            covering the head states no partial coverage and its verdict counts what it flags. 42 = the
@@ -883,6 +887,7 @@ def digest(
     grace: float = CHECK_GRACE,
     stall: float = CHECK_STALL,
     checks: list[dict] | None = None,
+    fields_out: list[tuple[str, object]] | None = None,
 ) -> tuple[str, int]:
     """Read what the digest needs, unless the caller supplied it, and render it.
 
@@ -901,7 +906,20 @@ def digest(
             "limit nor a transient fetch failure"
         )
     return render(
-        owner, repo, num, pr, checks, now, grace, stall, quota, reading, seen, HUB, WINDOW
+        owner,
+        repo,
+        num,
+        pr,
+        checks,
+        now,
+        grace,
+        stall,
+        quota,
+        reading,
+        seen,
+        HUB,
+        WINDOW,
+        fields_out,
     )
 
 
@@ -1570,8 +1588,11 @@ def run_status(owner: str, repo: str, a: argparse.Namespace, pr: dict | None = N
     return report_verdict(pr)
 
 
-def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
-    """Request a review where one is owed, poll until it lands or the timeout, and return the code."""
+def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = True) -> int:
+    """Request a review where one is owed, poll until it lands or the timeout, and return the code.
+
+    `may_request` False sends no request whatever is owed, for a caller reading the gate as is.
+    """
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     if refused := scope_refusal(owner):
         return refused
@@ -1618,7 +1639,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
     recorded: bool | None = None
     final: dict | None = None
     if (
-        not done
+        may_request
+        and not done
         and not answer
         and not drift
         and not quota_stop
@@ -1943,17 +1965,18 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
     return 30
 
 
-COMMANDS = ("attest", "claims", "cleanup", "comment", "status", "reply", "wait")
+COMMANDS = ("attest", "claims", "cleanup", "comment", "merge", "status", "reply", "wait")
 # Each flag listed is refused on a subcommand not owning it, since an ignored flag reads as one that took effect.
 # A late row is checked after the `cleanup` and `number` checks, which fixes the first error printed.
-# `cleanup` owns `--checkout` only once it has dispatched, so its row here only defers to that check.
+# `cleanup` and `merge` check `--checkout` once dispatched, so its row here only defers to them.
 FLAG_OWNERS = (
     ("--match", ("reply",), False),
     ("--path", ("reply",), False),
     ("--resolve", ("reply",), False),
     ("--all-identical", ("reply",), False),
     ("--request", ("wait",), False),
-    ("--checkout", ("attest", "cleanup"), False),
+    ("--checkout", ("attest", "cleanup", "merge"), False),
+    ("--cleanup", ("merge",), False),
     ("--fingerprint", ("comment",), True),
     ("--body", ("comment", "reply"), True),
     ("--timeout", ("wait",), True),
@@ -1970,13 +1993,15 @@ def main(argv: list[str] | None = None) -> int:
     pre.add_argument("first", nargs="?")
     for flag in ("--repo", "--checkout", "--min-age-hours"):
         pre.add_argument(flag)
-    if pre.parse_known_args(args)[0].first == "cleanup":
+    first = pre.parse_known_args(args)[0].first
+    if first in ("cleanup", "merge"):
         sys.modules.setdefault("pr_review", sys.modules[__name__])
         import pr_cleanup
+        import pr_merge
 
         rest = list(args)
-        rest.remove("cleanup")
-        return pr_cleanup.main(rest)
+        rest.remove(first)
+        return (pr_cleanup.main if first == "cleanup" else pr_merge.main)(rest)
     utf8_console()
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=COMMANDS)
@@ -2071,6 +2096,11 @@ def main(argv: list[str] | None = None) -> int:
         help="attest: the checkout holding the pull request's head and its recorded local pass "
         "(default the current directory)",
     )
+    ap.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="merge: run `cleanup` on the pull request once its merge is confirmed",
+    )
     a = ap.parse_args(args)
 
     def refuse_foreign(late: bool) -> None:
@@ -2087,8 +2117,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
     refuse_foreign(late=False)
-    if a.cmd == "cleanup":
-        ap.error("`cleanup` takes its arguments after it, as `cleanup NUMBER --repo OWNER/NAME`")
+    if a.cmd in ("cleanup", "merge"):
+        ap.error(f"`{a.cmd}` takes its arguments after it, as `{a.cmd} NUMBER --repo OWNER/NAME`")
     if a.number is None:
         ap.error("the following arguments are required: number")
     refuse_foreign(late=True)

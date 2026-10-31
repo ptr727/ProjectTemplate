@@ -4,7 +4,8 @@
 Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tier mapping, the
 SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
 user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
-`env`. It merges the permission rules this kit owns into the same file. It renders the user
+`env`. It merges the permission rules this kit owns into the same file. It merges the `autoMode`
+rules this kit owns there too, each found by its tag. It renders the user
 CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
 before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
@@ -234,6 +235,16 @@ def owns(entry, prefix):
     return entry.startswith(prefix) and entry[len(prefix) : len(prefix) + 1] in (":", " ", ")")
 
 
+def replace_owned(held, owned, current):
+    """Drop every entry `owned` claims from `held` in place, append `current`, and return the dropped.
+
+    The permission rules and the autoMode entries share it, so their two strips cannot drift apart.
+    """
+    dropped = [e for e in held if owned(e)]
+    held[:] = [e for e in held if not owned(e)] + current
+    return dropped
+
+
 def at(data, path):
     """The value at a slash-separated key path, or MISSING where any step of it is absent."""
     node = data
@@ -249,9 +260,9 @@ def at(data, path):
 # Ownership needs a delimiter after the prefix, so a longer path such as `pr_review.py-custom` is not claimed.
 # These widen rather than restrict, so they stay their own step for the reason the two CLAUDE.md blocks stay separate.
 MANAGED_PERMISSIONS = [
-    # The review loop's reply and resolve, and the `cleanup` delete of a merged pull request's head branch.
-    # Driving either by hand needs a raw mutation carrying an id, which is the shape to avoid.
-    # The `:*` rule approves any arguments, so every check the delete makes lives inside the `cleanup` subcommand.
+    # The review loop's reply and resolve, the `merge` squash into develop, and the `cleanup` delete of a merged head.
+    # Driving the loop by hand needs a raw mutation carrying an id, which is the shape to avoid.
+    # The `:*` rule approves any arguments, so `merge` checks the gate's readable items in code, as `cleanup` checks its delete.
     # The rule decides which command skips a prompt, and it bounds no checkout, since it matches the text.
     ("Bash(python3 scripts/pr_review.py", "Bash(python3 scripts/pr_review.py:*)"),
     (
@@ -259,6 +270,98 @@ MANAGED_PERMISSIONS = [
         "Bash(uv run --no-project --script scripts/pr_review.py:*)",
     ),
 ]
+
+# Claude Code reads `autoMode` from user or managed settings alone, so a host-wide block nobody owns can carry one repository's rules.
+# The kit owns an entry by this leading tag rather than by its text, so a reworded rule still replaces the version before it.
+AUTO_MODE_TAG = "[agent-safety] "
+AUTO_MODE_LISTS = ("environment", "allow", "soft_deny", "hard_deny")
+AUTO_MODE_DEFAULTS = "$defaults"
+
+# The rules state what each command checks, since CLAUDE.md and the running skill say who authorizes a write.
+AUTO_MODE_RULES = {
+    "environment": (
+        (
+            "`scripts/pr_review.py merge` squash-merges a feature pull request into develop only "
+            "once it reads the Merge Gate's mechanically readable items as met, and it refuses a "
+            "main base. Whether a merge is authorized is decided by the session's CLAUDE.md rules "
+            "and the skill that runs it, never by this command."
+        ),
+        (
+            "`scripts/pr_review.py cleanup` removes a merged feature branch. A numbered call "
+            "verifies the pull request merged into develop and deletes the remote branch only at "
+            "that pull request's head, refusing any branch a ruleset covers. With `--checkout` it "
+            "also removes the branch's worktrees and local branch and fast-forwards develop in "
+            "that clone. `--sweep --apply` "
+            "removes the local branches and worktrees whose work a merged pull request or origin's "
+            "develop or main already holds, and the remote branch of a merged develop pull request. "
+            "Neither removes develop or main. Whether a delete is authorized is decided by the "
+            "session's CLAUDE.md rules and the skill that runs it, never by this command."
+        ),
+    ),
+    "allow": (
+        (
+            "Running `scripts/pr_review.py merge` or `scripts/pr_review.py cleanup`, under "
+            "`python3` or `uv run --no-project --script`, where a skill the session follows "
+            "prescribes it, since each checks its own preconditions in code."
+        ),
+    ),
+}
+
+
+def tagged(entry):
+    """Whether an autoMode entry is this kit's own."""
+    return isinstance(entry, str) and entry.startswith(AUTO_MODE_TAG)
+
+
+def owned_auto_mode():
+    """The entries this kit writes into each managed autoMode list, in list order."""
+    return {
+        name: [AUTO_MODE_TAG + rule for rule in AUTO_MODE_RULES.get(name, ())]
+        for name in AUTO_MODE_LISTS
+    }
+
+
+def tagged_auto_mode(data):
+    """The tagged entries each managed autoMode list in `data` holds, reading a bad shape as none."""
+    auto = data.get("autoMode") if isinstance(data, dict) else None
+    out = {}
+    for name in AUTO_MODE_LISTS:
+        held = auto.get(name) if isinstance(auto, dict) else None
+        out[name] = [e for e in held if tagged(e)] if isinstance(held, list) else []
+    return out
+
+
+def auto_mode_bytes(lists):
+    """The digest input for a set of autoMode lists, identical on the payload and installed sides."""
+    return json.dumps([lists.get(name, []) for name in AUTO_MODE_LISTS]).encode("utf-8")
+
+
+def auto_mode_misshape(data):
+    """The first autoMode key the merge cannot read, as (where, held, want), or None.
+
+    One reader for the install's refusal and the report's verdict, so the two name the same key.
+    """
+    auto = data.get("autoMode", MISSING)
+    if auto is MISSING:
+        return None
+    if not isinstance(auto, dict):
+        return ("autoMode", auto, dict)
+    for name in AUTO_MODE_LISTS:
+        held = auto.get(name, MISSING)
+        if held is MISSING:
+            continue
+        if not isinstance(held, list):
+            return (f"autoMode.{name}", held, list)
+    return None
+
+
+def read_settings(claude_home):
+    """settings.json parsed, or None where it is absent, not a regular file, or not readable JSON."""
+    try:
+        raw = read_regular_file(claude_home / "settings.json")
+        return None if raw is None else json.loads(raw.decode("utf-8") or "{}")
+    except (ValueError, OSError):
+        return None
 
 
 def containment_capable(prefix, env=None, system=None, uid=None, controllers=None):
@@ -814,6 +917,7 @@ def payload_digest():
         if name.endswith(".md"):
             raw = raw.decode("utf-8").strip().encode("utf-8")
         h.update(raw)
+    h.update(auto_mode_bytes(owned_auto_mode()))
     return h.hexdigest()[:16]
 
 
@@ -903,6 +1007,7 @@ def installed_digest(claude_home):
         if not found:
             return None
         h.update(found.group(0).encode("utf-8"))
+    h.update(auto_mode_bytes(tagged_auto_mode(read_settings(claude_home))))
     return h.hexdigest()[:16]
 
 
@@ -1159,6 +1264,21 @@ def registration_problems(claude_home):
     for _, rule in MANAGED_PERMISSIONS:
         if not isinstance(allow, list) or rule not in allow:
             out.append(f"the permission rule {rule} is absent from settings.json")
+    misshape = auto_mode_misshape(data)
+    if misshape is not None:
+        where, held, want = misshape
+        out.append(
+            f"settings.json has `{where}` as {type(held).__name__} where {want.__name__} is "
+            "required, so the owned autoMode rules cannot be read and a re-run refuses the file"
+        )
+    else:
+        found = tagged_auto_mode(data)
+        for name, want_rules in owned_auto_mode().items():
+            if found[name] != want_rules:
+                out.append(
+                    f"the autoMode.{name} entries tagged {AUTO_MODE_TAG.strip()} differ from what "
+                    "this checkout writes"
+                )
     return out
 
 
@@ -1248,11 +1368,18 @@ def report(claude_home):
         problems.append("the installed content differs from what this checkout would write")
     # Correct bytes on disk are not a running guard, so the wiring is checked as well.
     problems.extend(registration_problems(claude_home))
-    try:
-        settings_raw = read_regular_file(claude_home / "settings.json")
-        settings_data = None if settings_raw is None else json.loads(settings_raw.decode("utf-8"))
-    except (ValueError, OSError):
-        settings_data = None
+    settings_data = read_settings(claude_home)
+    auto = settings_data.get("autoMode") if isinstance(settings_data, dict) else None
+    for name in AUTO_MODE_LISTS:
+        held = auto.get(name) if isinstance(auto, dict) else None
+        if isinstance(held, list):
+            untagged = sum(1 for e in held if not tagged(e) and e != AUTO_MODE_DEFAULTS)
+            splice = (
+                f"with {AUTO_MODE_DEFAULTS}"
+                if AUTO_MODE_DEFAULTS in held
+                else f"without {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's built-in rules"
+            )
+            print(f"autoMode.{name}: {untagged} untagged entries, {splice}")
     foreign = foreign_prefix(settings_data)
     env_block = settings_data.get("env") if isinstance(settings_data, dict) else None
     unset = not isinstance(env_block, dict) or env_block.get(PREFIX_VAR) is None
@@ -1594,6 +1721,10 @@ def main():
                 if not isinstance(h, dict):
                     reject(f"hooks.{event}[{i}].hooks[{j}]", h, dict)
                     return 1
+    misshape = auto_mode_misshape(data)
+    if misshape is not None:
+        reject(*misshape)
+        return 1
 
     pre = data.setdefault("hooks", {}).setdefault("PreToolUse", [])
     register_hook(
@@ -1653,8 +1784,9 @@ def main():
     # Written in the same pass as the hook, so the file is read once and written once.
     allow = data.setdefault("permissions", {}).setdefault("allow", [])
     for prefix, rule in MANAGED_PERMISSIONS:
-        matched = [a for a in allow if isinstance(a, str) and owns(a, prefix)]
-        allow[:] = [a for a in allow if a not in matched] + [rule]
+        matched = replace_owned(
+            allow, lambda a, p=prefix: isinstance(a, str) and owns(a, p), [rule]
+        )
         # Counted over what the write removes rather than over what the prefix matched.
         # The current rule matches its own prefix, so a match-set count reports it as superseded.
         # A duplicate of it is removed too, and both can happen at once, so both are named.
@@ -1672,6 +1804,33 @@ def main():
         else:
             action = "already current"
         done.append(f"permission {rule}: {action}")
+
+    # 4. The autoMode rules, stripped by their tag and appended again.
+    # A list the kit creates splices in the built-ins, since a list without the splice replaces them.
+    for name, rules in owned_auto_mode().items():
+        auto = data.get("autoMode", {})
+        held = auto.get(name)
+        if held is None:
+            if rules:
+                data.setdefault("autoMode", {})[name] = [AUTO_MODE_DEFAULTS, *rules]
+                done.append(
+                    f"autoMode.{name}: created with {AUTO_MODE_DEFAULTS} first, so Claude Code's "
+                    "built-in rules still apply"
+                )
+            continue
+        before = list(held)
+        dropped = replace_owned(held, tagged, rules)
+        if before == held:
+            action = "already current"
+        else:
+            action = "updated" if dropped else "added"
+        if rules or dropped:
+            done.append(f"autoMode.{name} rules tagged {AUTO_MODE_TAG.strip()}: {action}")
+        if rules and AUTO_MODE_DEFAULTS not in held:
+            done.append(
+                f"autoMode.{name} holds no {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's "
+                "built-in rules. This kit leaves that choice as it stands"
+            )
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
     # A line printed before it claims a change that a later failure would leave unmade.
