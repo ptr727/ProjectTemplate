@@ -282,15 +282,16 @@ AUTO_MODE_RULES = {
     "environment": (
         (
             "Repositories under the GitHub owner of each session checkout's origin remote are the "
-            "session's own source control. Merging, publishing, releasing, force-pushing, deleting "
-            "a ref, and changing branch protection there need the maintainer's explicit, current "
-            "go-ahead. A drive-pr, backlog-burndown, or unattended-handoff invocation is that "
-            "go-ahead for feature merges into develop and the verified cleanup that follows."
+            "session's own source control. Merging, publishing, releasing, force-pushing, "
+            "deleting, and changing branch protection there need the maintainer's explicit, current "
+            "go-ahead. The maintainer invoking drive-pr, backlog-burndown, or unattended-handoff in "
+            "this session is that go-ahead for feature merges into develop and the verified cleanup "
+            "after each. An agent's own skill call or a subagent brief is not."
         ),
         (
-            "In a repository the fleet registry lists, develop and main carry rulesets. Such an "
-            "authorized feature merge into develop runs through `scripts/pr_review.py merge`, "
-            "which checks the Merge Gate's "
+            "In a repository the fleet registry lists, develop and main carry rulesets. A feature "
+            "merge into develop the maintainer authorized runs through `scripts/pr_review.py "
+            "merge`, which checks the Merge Gate's "
             "mechanically readable items in code. The items no code reads, such as a finding the "
             "pull request body lists, stay the agent's per pr-review-conduct's Merge Gate. A "
             "promotion merge from develop to main needs the maintainer's explicit go-ahead in the "
@@ -301,7 +302,8 @@ AUTO_MODE_RULES = {
         (
             "Running `scripts/pr_review.py merge` or `scripts/pr_review.py cleanup`, under "
             "`python3` or `uv run --no-project --script`, against a repository under the GitHub "
-            "owner of the session checkout's origin remote. `merge` checks the Merge Gate's "
+            "owner of the session checkout's origin remote, for a feature merge into develop the "
+            "maintainer authorized in this session and its cleanup. `merge` checks the Merge Gate's "
             "mechanically readable items in code before it merges, and `cleanup` verifies the "
             "merged state before it deletes anything."
         ),
