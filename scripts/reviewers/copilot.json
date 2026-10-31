@@ -48,13 +48,17 @@
     "findings:",
     "open findings remain:",
     "unresolved findings:",
-    "review findings remain unresolved:"
+    "review findings remain unresolved:",
+    "outstanding findings:",
+    "unresolved review findings:"
   ],
   "finding_lists": [
     "review findings:",
     "open findings remain:",
     "unresolved findings:",
-    "review findings remain unresolved:"
+    "review findings remain unresolved:",
+    "outstanding findings:",
+    "unresolved review findings:"
   ],
   "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
   "table_header": "file",
