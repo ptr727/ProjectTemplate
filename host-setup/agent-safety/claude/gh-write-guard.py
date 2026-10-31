@@ -93,6 +93,7 @@ _GH_REPO_SHORT_VALUES = _GH_SHORT_VALUES | {"-d", "-h", "-s"}
 _GH_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 
 _PROTECTED_DEFAULT = ("main", "master", "develop")
+_ANY_PROTECTED = "\0"
 
 _ALWAYS_DENY_SUBS = frozenset(
     {"reset", "rebase", "cherry-pick", "revert", "restore", "add", "commit", "rm", "mv", "apply"}
@@ -885,16 +886,16 @@ def _push_targets(
     return remote, out
 
 
-def _named_git_dir(cmd: _Cmd, git: _Git, lenient: bool = False) -> str | None:
+def _named_git_dir(cmd: _Cmd, git: _Git) -> str | None:
     """The repository a `--git-dir`, or else a `GIT_DIR` the command carries, names, as written.
 
     A `GIT_DIR` set earlier in the text reads as a run-time word. Whether git sees it turns on an
     export or an `unset` the reading does not track. So does one behind an `env` option the guard
-    does not recognize, which may be an abbreviation of `--unset`, unless `lenient` reads it anyway.
+    does not recognize, which may be an abbreviation of `--unset`.
     """
     if git.git_dir is not None:
         return git.git_dir
-    if "GIT_DIR" in cmd.own and (lenient or not cmd.undetermined):
+    if "GIT_DIR" in cmd.own and not cmd.undetermined:
         return cmd.own["GIT_DIR"]
     return "$GIT_DIR" if "GIT_DIR" in cmd.env else None
 
@@ -915,13 +916,10 @@ def _push_cwd(cmd: _Cmd) -> str | None:
 def _bare_branch(cmd: _Cmd, git: _Git) -> str | None:
     """The branch a push naming no refspec writes, or None where the reading does not resolve it.
 
-    Behind an `env` option the guard does not recognize, a branch nothing else names is read as if
-    the option were absent. So a push from a protected branch still fails closed.
+    An `env` option the guard does not recognize may have moved the push anywhere. Behind one, only
+    an absolute `--git-dir`, git `-C`, or `cd` resolves it.
     """
     got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, _named_git_dir(cmd, git), None, False)
-    if not isinstance(got, str) and cmd.undetermined:
-        named = _named_git_dir(cmd, git, True)
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, False)
     return got if isinstance(got, str) else None
 
 
@@ -1042,9 +1040,14 @@ def _bypass_denial(
     def branch_of() -> str | None:
         if current_branch is not None:
             return current_branch
-        return _bare_branch(cmd, git)
+        return _bare_branch(cmd, git) or (_ANY_PROTECTED if cmd.undetermined else None)
 
     remote, targets = _push_targets(git.args, branch_of)
+    targets = [
+        (op, b)
+        for op, br in targets
+        for b in (_PROTECTED_DEFAULT if br == _ANY_PROTECTED else [br])
+    ]
     repo: tuple[str, str] | None | object = _UNRESOLVED
     for op, br in targets:
         if rules_lookup is not None:
@@ -1916,10 +1919,12 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('env -C "$D" git -C {b} push origin', "develop"),
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
-    ("env --ch={b} git push origin", "feature/a"),
-    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", "develop"),
-    ("env --nu sh -c 'GIT_DIR={b}/.git git push origin'", "develop"),
+    ("env --ch={b} git push origin", None),
+    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", None),
+    ("env --nu sh -c 'GIT_DIR={b}/.git git push origin'", None),
     ("env --ch=/nowhere git --git-dir={b}/.git push origin", "develop"),
+    ("env --ch={b} git --git-dir={b}/.git push origin", "develop"),
+    ("env --ch=/nowhere git -C {b} push origin", "develop"),
     ("env --nu git -C {b} push origin", "develop"),
     ("env --nu sh -c 'cd {b} && git push origin'", "develop"),
 ]
@@ -1929,7 +1934,9 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env -X git push origin feature/x", "allow"),
     ("cd {b} && env --ch=.. git push -u origin HEAD", "deny"),
     ("cd {b} && env --ignore-env git push", "deny"),
-    ("env --ch={b} git push -u origin HEAD", "allow"),
+    ("env --ch={b} git push -u origin HEAD", "deny"),
+    ("env --ch={b} git push origin", "deny"),
+    ("env --ch=/nowhere git push origin", "deny"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
