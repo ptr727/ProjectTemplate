@@ -1049,6 +1049,7 @@ def _bypass_denial(
         return (got,) if got else _PROTECTED_DEFAULT if cmd.undetermined else ()
 
     remote, targets = _push_targets(git.args, branch_of)
+    named = set(_push_targets(git.args, lambda: ())[1]) if any(unread) else set(targets)
     repo: tuple[str, str] | None | object = _UNRESOLVED
     for op, br in targets:
         if rules_lookup is not None:
@@ -1058,13 +1059,13 @@ def _bypass_denial(
                 repo = _push_repo(cmd, git, remote)
             rules = _live_branch_rules(repo[0], repo[1], br) if isinstance(repo, tuple) else None
         reason = _rule_denial(op, br, rules)
-        if reason and any(unread):
+        if reason and (op, br) not in named:
             return (
                 "This push names no refspec, or `HEAD`, behind an `env` option the guard does not "
                 "recognize. That option may have moved it to a checkout on a protected-by-default "
                 "branch (main/master/develop), so the branch it writes could not be read. Drop "
                 "the option, name the branch in the refspec, or name a checkout on a branch with "
-                "an absolute `git -C` or `--git-dir`."
+                "an absolute `git -C`, `--git-dir`, or `cd` in a wrapper body."
             )
         if reason:
             return reason
@@ -1961,6 +1962,7 @@ _PUSH_UNREAD_RULES_CASES: list[tuple[str, dict[str, set[str]] | None, str]] = [
     ("env --ch=/nowhere git push origin HEAD", {"master": {"pull_request"}}, "deny*"),
     ("env --ch=/nowhere git push origin @", {"develop": {"pull_request"}}, "deny*"),
     ("env --ch=/nowhere git push origin", {}, "allow"),
+    ("env --ch=/nowhere git push origin HEAD main", {"main": {"pull_request"}}, "deny"),
 ]
 
 
