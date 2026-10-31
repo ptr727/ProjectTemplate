@@ -2324,7 +2324,7 @@ class TestDeleteOnlyPushInPrimaryCheckout(unittest.TestCase):
     """Requirement 6 exempts a delete-only push, and requirement 4 still judges its branch.
 
     The exemption lifts only the working-tree test. So a branch whose live rules forbid deletion
-    still denies from a primary checkout, and one with no such rule passes.
+    still denies from a primary checkout. The guard's own self-test holds the allowed shapes.
     """
 
     def _classify(self, cmd, rules):
@@ -2349,15 +2349,6 @@ class TestDeleteOnlyPushInPrimaryCheckout(unittest.TestCase):
             decision, reason = self._classify(cmd, {"feature/example": {"deletion"}})
             self.assertEqual(decision, "deny", cmd)
             self.assertIn("forbid deletion", reason)
-
-    def test_no_deletion_rule_allows(self):
-        for cmd in ("git push origin --delete feature/example", "git push origin :feature/example"):
-            self.assertEqual(self._classify(cmd, {})[0], "allow", cmd)
-
-    def test_an_update_push_still_denies(self):
-        decision, reason = self._classify("git push origin feature/example", {})
-        self.assertEqual(decision, "deny")
-        self.assertIn("primary checkout", reason)
 
 
 @unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")

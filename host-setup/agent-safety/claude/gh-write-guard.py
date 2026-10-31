@@ -898,9 +898,11 @@ def _primary_checkout_verdict(
 def _delete_only_push(args: list[str]) -> bool:
     """Whether a push only deletes remote branches outside the protected defaults.
 
-    Such a push moves no local branch and touches no working tree, so requirement 6's hazard is
-    absent. Requirement 4 still judges each branch's live rules. Any other option keeps the
-    denial, and so do a forced refspec, one with a source, a bare `:`, a tag, and a run-time word.
+    Such a push names its remote by name, so it moves no local branch and touches no working tree.
+    Requirement 6's hazard is then absent, and requirement 4 still judges each branch's live rules.
+    Any other option keeps the denial. So do a path or URL remote, a forced refspec, one with a
+    source, a bare `:`, a tag, and a run-time word. This reads apart from `_push_targets`, which
+    folds a shape it cannot read into a write, since an exemption must fold it into a denial.
     """
     delete = False
     pos: list[str] = []
@@ -914,7 +916,7 @@ def _delete_only_push(args: list[str]) -> bool:
             delete = delete or a == "--delete" or (a[1] != "-" and "d" in a)
         else:
             return False
-    if len(pos) < 2:
+    if len(pos) < 2 or not re.fullmatch(r"[A-Za-z0-9][\w-]*", pos[0]):
         return False
     for spec in pos[1:]:
         dst = spec if delete else spec[1:] if spec.startswith(":") else ""
@@ -1549,6 +1551,8 @@ _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("git push origin :refs/tags/v1", _PRIMARY, {}, "deny", "1642"),
     ("git push origin --delete :feature/x", _PRIMARY, {}, "deny", "1642"),
     ("git push --delete origin", _PRIMARY, {}, "deny", "1642"),
+    ("git push . --delete feature/x", _PRIMARY, {}, "deny", "1642"),
+    ("git push ../other :feature/x", _PRIMARY, {}, "deny", "1642"),
     ('git push origin --delete "$BRANCH"', _PRIMARY, {}, "deny", "1642"),
     ("git -c core.sshCommand=ssh push origin :feature/x", _PRIMARY, {}, "deny", "1642"),
     ("cd /c/work/wt && git commit -m x", _PRIMARY, {}, "allow", "R6"),
