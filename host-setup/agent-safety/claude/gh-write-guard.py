@@ -93,7 +93,6 @@ _GH_REPO_SHORT_VALUES = _GH_SHORT_VALUES | {"-d", "-h", "-s"}
 _GH_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 
 _PROTECTED_DEFAULT = ("main", "master", "develop")
-_ANY_PROTECTED = "\0"
 
 _ALWAYS_DENY_SUBS = frozenset(
     {"reset", "rebase", "cherry-pick", "revert", "restore", "add", "commit", "rm", "mv", "apply"}
@@ -830,10 +829,18 @@ def _branch_name(ref: str) -> str | None:
 
 
 def _push_targets(
-    args: list[str], branch_of: Callable[[], str | None]
+    args: list[str], branch_of: Callable[[], str | tuple[str, ...] | None]
 ) -> tuple[str | None, list[tuple[str, str]]]:
     """A push's remote and each (operation, branch) it writes, the operation update, force,
-    delete, or mirror."""
+    delete, or mirror.
+
+    `branch_of` gives the branch a push naming no refspec, or `HEAD`, writes, or each it may write.
+    """
+
+    def branches() -> tuple[str, ...]:
+        got = branch_of()
+        return (got,) if got and isinstance(got, str) else got or ()
+
     force = delete = every = mirror = tags = False
     pos: list[str] = []
     i = 0
@@ -867,8 +874,7 @@ def _push_targets(
     if every:
         return remote, [(write, b) for b in _PROTECTED_DEFAULT]
     if not specs:
-        branch = None if delete or tags else branch_of()
-        return remote, [(write, branch)] if branch else []
+        return remote, [] if delete or tags else [(write, b) for b in branches()]
     out: list[tuple[str, str]] = []
     for spec in specs:
         op = "force" if force or spec.startswith("+") else "update"
@@ -880,9 +886,8 @@ def _push_targets(
             op = op if src else "delete"
         else:
             dst = spec
-        name = branch_of() if dst in ("HEAD", "@") else _branch_name(dst)
-        if name:
-            out.append((op, name))
+        names = branches() if dst in ("HEAD", "@") else (_branch_name(dst),)
+        out += [(op, name) for name in names if name]
     return remote, out
 
 
@@ -1037,17 +1042,14 @@ def _bypass_denial(
     if git.sub != "push":
         return None
 
-    def branch_of() -> str | None:
+    def branch_of() -> str | tuple[str, ...] | None:
+        """The branch a push naming no refspec writes, or each protected default an unrecognized
+        `env` option may have moved it to."""
         if current_branch is not None:
             return current_branch
-        return _bare_branch(cmd, git) or (_ANY_PROTECTED if cmd.undetermined else None)
+        return _bare_branch(cmd, git) or (_PROTECTED_DEFAULT if cmd.undetermined else None)
 
     remote, targets = _push_targets(git.args, branch_of)
-    targets = [
-        (op, b)
-        for op, br in targets
-        for b in (_PROTECTED_DEFAULT if br == _ANY_PROTECTED else [br])
-    ]
     repo: tuple[str, str] | None | object = _UNRESOLVED
     for op, br in targets:
         if rules_lookup is not None:
@@ -1937,6 +1939,7 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push -u origin HEAD", "deny"),
     ("env --ch={b} git push origin", "deny"),
     ("env --ch=/nowhere git push origin", "deny"),
+    ("env --ch=/nowhere git -C {a} push nowhere", "allow"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
@@ -1979,7 +1982,7 @@ def _push_repo_selftest() -> bool | str:
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
         for cmd, want in _PUSH_UNDETERMINED_CASES:
             verdict, _ = classify(
-                cmd.format(b=b), a, environ={}, primary_checkout_lookup=lambda _d: False
+                cmd.format(a=a, b=b), a, environ={}, primary_checkout_lookup=lambda _d: False
             )
             ok = ok and verdict == want
             mark = "ok  " if verdict == want else "FAIL"
