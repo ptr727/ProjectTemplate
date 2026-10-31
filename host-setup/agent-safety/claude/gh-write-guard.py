@@ -130,10 +130,12 @@ _ASSIGN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 _REDIR_OP = re.compile(r"<<<|>>|>&|<&|>\||<>|>|<")
 _SEPARATORS = ("&&", "||", ";;", "|&", ";", "&", "|")
 _XARGS_VALUE_OPTS = frozenset({"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"})
-_ENV_LONG = {"argv0": "a", "chdir": "C", "split-string": "S", "unset": "u"} | {
+_ENV_LONG = {
+    "argv0": "a",
+    "chdir": "C",
     "ignore-environment": "i",
-    **dict.fromkeys(("block-signal", "default-signal", "ignore-signal", "debug", "null"), ""),
-    **dict.fromkeys(("list-signal-handling", "help", "version"), ""),
+    "split-string": "S",
+    "unset": "u",
 }
 _ENV_VALUE_LETTERS = frozenset("aCPSu")
 _HOME_PREFIX = re.compile(r"^(?:~|\$HOME|\$\{HOME\})(?=/|\\|$)")
@@ -388,8 +390,7 @@ class _Launch:
 def _env_option(word: str, nxt: str | None) -> tuple[list[tuple[str, str]], int] | None:
     """The `env` options a word sets, as (letter, value) pairs, and the words they use, or None for an operand.
 
-    A short cluster such as `-iC dir` and an unambiguous long prefix such as `--ch=dir` read the way
-    `env` reads them.
+    A short cluster such as `-iC dir` reads the way `env` reads it.
     """
     if word == "-":
         return [("i", "")], 1
@@ -397,8 +398,7 @@ def _env_option(word: str, nxt: str | None) -> tuple[list[tuple[str, str]], int]
         return [], 1
     if word.startswith("--"):
         name, eq, value = word[2:].partition("=")
-        hits = [k for k in _ENV_LONG if k.startswith(name)]
-        letter = _ENV_LONG.get(name, _ENV_LONG[hits[0]] if len(hits) == 1 else "")
+        letter = _ENV_LONG.get(name, "")
         if letter and letter in _ENV_VALUE_LETTERS and not eq:
             return [(letter, nxt or "")], 2
         return [(letter, value)], 1
@@ -415,7 +415,7 @@ def _env_option(word: str, nxt: str | None) -> tuple[list[tuple[str, str]], int]
 def _split_string(value: str) -> list[str]:
     """The words an `env -S` string splits into, or its whitespace-separated words where quoting fails."""
     try:
-        return shlex.split(value, comments=True)
+        return shlex.split(value)
     except ValueError:
         return value.split()
 
@@ -441,7 +441,7 @@ def _launch(argv: list[str]) -> _Launch:
                 i += 2 if rest[i] == "-n" else 1
             argv = rest[i:]
         elif name == "env":
-            assigned = False
+            assigned, chdir = False, None
             while i < len(rest):
                 nxt = rest[i + 1] if i + 1 < len(rest) else None
                 got = None if assigned else _env_option(rest[i], nxt)
@@ -461,9 +461,10 @@ def _launch(argv: list[str]) -> _Launch:
                         env.pop(value, None)
                         out.unset.add(value)
                     elif letter == "C":
-                        out.chdirs.append(value)
+                        chdir = value
                     elif letter == "S":
                         rest = rest[:i] + _split_string(value) + rest[i:]
+            out.chdirs += [] if chdir is None else [chdir]
             argv = rest[i:]
         elif name == "xargs":
             while i < len(rest) and rest[i].startswith("-"):
@@ -1564,6 +1565,7 @@ _CASES: list[tuple[str, str, str]] = [
     ("env --split-string='gh issue comment 5 -R stranger/x' -b hi", "deny", "3716"),
     ("env -iS'gh issue comment 5 -R stranger/x --body hi'", "deny", "3716"),
     ("env -a x gh issue comment 5 -R stranger/x --body hi", "deny", "3716"),
+    ("env -S 'gh issue comment 5 --body fix#1 -R stranger/x'", "deny", "3716"),
 ]
 
 _ENV_CASES: list[tuple[str, dict[str, str], str, str]] = [
@@ -1799,7 +1801,8 @@ _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
     ("env --chdir=../b GIT_DIR=.git git push origin :feature/x", "stranger"),
     ("env -C {b} git push origin :feature/x", "stranger"),
     ("env -iC{b} git push origin :feature/x", "stranger"),
-    ("env --ch {b} git push origin :feature/x", "stranger"),
+    ("env -C /nowhere -C ../b git push origin :feature/x", "stranger"),
+    ("env -C {b} env -C . git push origin :feature/x", "stranger"),
     ("env -C {b} sh -c 'git push origin :feature/x'", "stranger"),
     ('env -C "$D" git push origin :feature/x', None),
     ("GIT_DIR={b}/.git env -i git push origin :feature/x", "example"),
