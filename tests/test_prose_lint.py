@@ -3632,6 +3632,8 @@ class TestHomePathRule(BaitCase):
             ("x-a#b", ">-"),
             ('"x-a#b"', "|"),
             ("'x a'", "|"),
+            ('"x #b"', "|"),
+            ("'x # b'", "|"),
             ("x", "| # note"),
         ):
             text = (
