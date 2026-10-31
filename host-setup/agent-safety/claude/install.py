@@ -289,11 +289,13 @@ AUTO_MODE_RULES = {
         (
             "`scripts/pr_review.py cleanup` removes a merged feature branch. A numbered call "
             "verifies the pull request merged into develop and deletes the remote branch only at "
-            "that pull request's head, refusing any branch a ruleset covers. `--sweep --apply` "
+            "that pull request's head, refusing any branch a ruleset covers. With `--checkout` it "
+            "also removes the branch's worktrees and local branch and fast-forwards develop in "
+            "that clone. `--sweep --apply` "
             "removes the local branches and worktrees whose work a merged pull request or origin's "
             "develop or main already holds, and the remote branch of a merged develop pull request. "
             "Neither removes develop or main. Whether a delete is authorized is decided by the "
-            "session's CLAUDE.md rules and the skill that runs it."
+            "session's CLAUDE.md rules and the skill that runs it, never by this command."
         ),
     ),
     "allow": (
