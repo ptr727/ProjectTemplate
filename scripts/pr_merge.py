@@ -148,11 +148,12 @@ def merge_call(target: str, num: int, head: str) -> int | None:
     argv += ["--repo", target]
     print(f"merging: #{num} into develop on {target} at {head}")
     proc = core._run(argv, MERGE_TIMEOUT, UNRUN, text=True, encoding="utf-8")
-    print(f"  gh pr merge exited {proc.returncode}")
+    unrun = proc.stderr == UNRUN and not proc.stdout
+    print("  gh pr merge did not finish" if unrun else f"  gh pr merge exited {proc.returncode}")
     for stream in (proc.stdout, proc.stderr):
         for line in (stream or "").splitlines():
             print(f"  {line}")
-    return None if proc.stderr == UNRUN and not proc.stdout else proc.returncode
+    return None if unrun else proc.returncode
 
 
 def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
@@ -175,15 +176,17 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
     head = pr["headRefOid"]
     try:
         code = gate(owner, repo, num)
-        read_head, unmet = unmet_items(owner, repo, num) if code == 0 else (head, [])
-        after = ready(owner, repo, num) if code == 0 and not unmet and read_head == head else None
+        after = ready(owner, repo, num) if code == 0 else None
+        read_head, unmet = unmet_items(owner, repo, num) if after is not None else (head, [])
     except (SystemExit, pr_cleanup.CleanupUnread) as exc:
         print(f"status=UNREAD nothing was merged: a read for the gate did not answer: {exc}")
         return 2
     if code != 0:
         print(f"note: nothing was merged, since the Merge Gate read above exited {code}")
         return code
-    if (now := read_head if read_head != head or after is None else after["headRefOid"]) != head:
+    if after is None:
+        return 1
+    if (now := after["headRefOid"] if after["headRefOid"] != head else read_head) != head:
         print(
             f"status=HEAD_MOVED nothing was merged: #{num} on {target} is at {now}, and the gate "
             f"read began at {head}"
@@ -191,7 +194,7 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
         return 1
     for status, why in unmet:
         print(f"status={status} nothing was merged into {target} #{num}: {why}")
-    if after is None:
+    if unmet:
         return 1
     answered = merge_call(target, num, head)
     try:

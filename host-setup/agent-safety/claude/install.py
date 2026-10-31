@@ -285,7 +285,8 @@ AUTO_MODE_RULES = {
             "is trusted."
         ),
         (
-            "The develop and main branches are ruleset-protected. An agent merges a feature branch "
+            "In a repository the fleet registry lists, develop and main carry rulesets. An agent "
+            "merges a feature branch "
             "into develop through `scripts/pr_review.py merge`, which checks the Merge Gate's "
             "mechanically readable items in code. The items no code reads, such as a finding the "
             "pull request body lists, stay the agent's per pr-review-conduct's Merge Gate. A "

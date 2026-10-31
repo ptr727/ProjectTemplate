@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import inspect
 import io
+import re
 import subprocess
 import sys
 import unittest
@@ -216,6 +218,15 @@ class TestGate(MergeCase):
         self.assertIn("it reads MERGED, not OPEN", self.out.getvalue())
         self.assert_not_merged()
 
+    def test_a_merged_pull_request_is_named_before_any_unmet_item(self) -> None:
+        """A peer merge during the gate reads as merged rather than as items a dead head lacks."""
+        self.unmet.return_value = (HEAD, [("MERGE_NOT_CLEAN", "the merge state reads UNKNOWN")])
+        self.assertEqual(1, self.run_merge(target(), MERGED))
+        self.assertIn("it reads MERGED, not OPEN", self.out.getvalue())
+        self.assertNotIn("MERGE_NOT_CLEAN", self.out.getvalue())
+        self.unmet.assert_not_called()
+        self.assert_not_merged()
+
     def test_the_gate_is_waits_own_and_requests_nothing(self) -> None:
         seen: list[tuple[argparse.Namespace, bool]] = []
 
@@ -283,6 +294,23 @@ class TestMerge(MergeCase):
         self.assertIn("may have happened on the server", self.out.getvalue())
         self.assertEqual(1, len(self.calls))
         self.cleanup.assert_not_called()
+
+
+class TestGateNamespace(unittest.TestCase):
+    """`gate` builds `wait`'s arguments by hand, so each one `run_wait` reads has to be among them."""
+
+    def test_every_argument_run_wait_reads_is_built(self) -> None:
+        source = inspect.getsource(pr_review.run_wait)
+        read = set(re.findall(r"\ba\.([a-z_]+)", source))
+        built: dict[str, argparse.Namespace] = {}
+
+        def capture(owner: str, repo: str, a: argparse.Namespace, may_request: bool) -> int:
+            built["a"] = a
+            return 0
+
+        with mock.patch.object(pr_review, "run_wait", side_effect=capture):
+            pr_merge.gate("example", "repo", 123)
+        self.assertLessEqual(read, set(vars(built["a"])))
 
 
 class TestUnmetItems(MergeCase):
