@@ -422,12 +422,16 @@ def _wrapper_body(argv: list[str]) -> str | None:
 
 @dataclass
 class _Cmd:
-    """One command the text runs, with the environment and directory it runs in."""
+    """One command the text runs, with the environment and directory it runs in.
+
+    `own` holds the assignments the command itself carries, before it or through `env`.
+    """
 
     argv: list[str]
     env: dict[str, str]
     cwd: str | None
     quiet: bool
+    own: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -479,7 +483,7 @@ def _read(
                 bounded = under_timeout and name in _SHELLS
                 _read(body, cwd, dict(here), out, 1, silenced, bounded)
         else:
-            out.cmds.append(_Cmd(argv, here, cwd, silenced))
+            out.cmds.append(_Cmd(argv, here, cwd, silenced, {**assigns, **launched}))
 
 
 def _discards(redirs: list[tuple[str, str]]) -> bool:
@@ -643,13 +647,14 @@ def _bare_push_branch(
     """The branch a push naming no refspec writes, or `_UNRESOLVED` where the text does not name its checkout.
 
     `leading_cd` and then each `-C` value in `c_dirs` move the push from `cwd`, and a `git_dir`
-    names the repository from there. A push `moved` to a directory the text does not name, or with
-    a `git_dir` the reading does not resolve, is unresolved.
+    names the repository from there. A push `moved` to a directory the text does not name is
+    unresolved unless its `git_dir` is absolute. So is one whose `git_dir` the reading does not
+    resolve.
     """
-    if moved:
-        return _UNRESOLVED
-    where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
-    where = _moved(where, c_dirs)
+    where = None
+    if not moved:
+        where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
+        where = _moved(where, c_dirs)
     if git_dir is not None:
         named = _join_dir(where, git_dir)
         return _UNRESOLVED if named is None else _current_push_branch(where, named)
@@ -742,8 +747,16 @@ def _push_targets(
 
 
 def _named_git_dir(cmd: _Cmd, git: _Git) -> str | None:
-    """The repository a `--git-dir`, or else a `GIT_DIR` in the text, names, as written."""
-    return git.git_dir if git.git_dir is not None else cmd.env.get("GIT_DIR")
+    """The repository a `--git-dir`, or else a `GIT_DIR` the command carries, names, as written.
+
+    A `GIT_DIR` set earlier in the text reads as a run-time word. Whether git sees it turns on an
+    export or an `unset` the reading does not track.
+    """
+    if git.git_dir is not None:
+        return git.git_dir
+    if "GIT_DIR" in cmd.own:
+        return cmd.own["GIT_DIR"]
+    return "$GIT_DIR" if "GIT_DIR" in cmd.env else None
 
 
 def _overrides_remote(cmd: _Cmd, git: _Git) -> bool:
@@ -1688,7 +1701,9 @@ _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
     ("git --work-tree={b} push origin :feature/x", "example"),
     ("GIT_DIR={b}/.git git push origin :feature/x", "stranger"),
     ("env GIT_DIR={b}/.git git push origin :feature/x", "stranger"),
-    ("export GIT_DIR={b}/.git; git push origin :feature/x", "stranger"),
+    ('cd "$X" && git --git-dir={b}/.git push origin :feature/x', "stranger"),
+    ("export GIT_DIR={b}/.git; git push origin :feature/x", None),
+    ("GIT_DIR={b}/.git; git push origin :feature/x", None),
     ('git --git-dir="$D" push origin :feature/x', None),
     ("git -c remote.origin.pushurl=https://github.com/x/y push origin :feature/x", None),
     ("GIT_CONFIG_COUNT=1 git push origin :feature/x", None),
@@ -1698,6 +1713,8 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ("git push origin", "feature/a"),
     ("git --git-dir={b}/.git push origin", "develop"),
     ("GIT_DIR={b}/.git git push origin", "develop"),
+    ('cd "$X" && git --git-dir={b}/.git push origin', "develop"),
+    ("GIT_DIR={b}/.git; git push origin", None),
     ('git --git-dir="$D" push origin', None),
 ]
 
@@ -1733,7 +1750,8 @@ def _push_repo_selftest() -> bool | str:
             _read(cmd.format(b=b), a, {}, reading)
             c = reading.cmds[-1]
             git = _git(c.argv)
-            bare = _bare_push_branch(c.cwd, git.c_dirs, _named_git_dir(c, git), None, False)
+            named = _named_git_dir(c, git)
+            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, c.cwd is None)
             passed = (bare if isinstance(bare, str) else None) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
