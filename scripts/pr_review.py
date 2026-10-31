@@ -106,7 +106,10 @@ Subcommands
            round covering the head states beside the threads that round opened, `?` where it
            states no count. A count it cannot believe reads `?` too. `FINDINGS WITH NO THREAD`
            names findings the round names that no thread on the pull request carries. Each of these is owed the triage a suppressed
-           finding gets, and none decides an exit code.
+           finding gets, and none decides an exit code. A pull request no longer open leads with
+           `state=` and `merged_at=` and `merge_commit=`, or `closed_at=`. Its `merge=UNKNOWN`
+           never clears. A null node GitHub could not resolve is dropped and named in `null_nodes=`,
+           and blinds its connection the way a cut window does, so a count off it reads `+`.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
            because the hand-run form keeps failing the same way. The failure is a node id typed
            into a mutation. Such an id resolves globally and so writes to a real thread somewhere
@@ -134,7 +137,8 @@ Subcommands
            The bot id is read from the repository's most recently updated pull requests, the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
            carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
-           agent turn, not 90.
+           agent turn, not 90. A pull request no longer open is neither requested nor polled, and
+           `wait` prints its digest and exits as `status` does.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
            present does not poll the checks, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
@@ -241,6 +245,7 @@ from pr_review_rounds import (
     copilot_bot_id,
     coverage,
     describe,
+    drop_null_nodes,
     files_unread,
     finding_text,
     head_review_done,
@@ -318,7 +323,7 @@ HISTORY_PRS_WIDE = 100
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    id headRefOid
+    id headRefOid state
     reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
@@ -355,7 +360,7 @@ mutation($pr:ID!,$bot:ID!){
 
 # The rollup rides this query and hangs off the last commit, which a case holds equal to `headRefOid`.
 HELD_FIELDS = """
-    headRefOid baseRefName state mergeable mergeStateStatus
+    headRefOid baseRefName state mergeable mergeStateStatus mergedAt closedAt mergeCommit{ oid }
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized } pageInfo{ hasPreviousPage } }
@@ -475,6 +480,7 @@ def gh_graphql(query: str, **variables) -> dict:
         sys.stderr.write(exc.detail)
         raise SystemExit(str(exc)) from exc
     data = response.data
+    drop_null_nodes(data)
     if response.tolerated:
         sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
         data[WORKFLOW_KEYS_UNAVAILABLE] = True
@@ -1540,6 +1546,13 @@ def utf8_console() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
+def run_status(owner: str, repo: str, a: argparse.Namespace) -> int:
+    """Print the digest and return the verdict's code, both off one payload."""
+    pr = full_read(owner, repo, a.number)
+    print(digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)[0])
+    return report_verdict(pr)
+
+
 def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
     """Request a review where one is owed, poll until it lands or the timeout, and return the code."""
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
@@ -1548,6 +1561,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace) -> int:
 
     start = time.monotonic()
     pr = gql(Q_LIVE, owner, repo, a.number)
+    if pr.get("state", "OPEN") != "OPEN":
+        return run_status(owner, repo, a)
     rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
     if done and a.ignore_quota_signal:
@@ -2097,11 +2112,7 @@ def main(argv: list[str] | None = None) -> int:
         return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
 
     if a.cmd == "status":
-        # One payload renders the digest and decides the code, as in `wait`.
-        pr = full_read(owner, repo, a.number)
-        out, _ = digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)
-        print(out)
-        return report_verdict(pr)
+        return run_status(owner, repo, a)
 
     if a.cmd == "reply":
         return reply_to_thread(

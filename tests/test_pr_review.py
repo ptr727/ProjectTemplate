@@ -2552,6 +2552,117 @@ class TestGqlTransport(unittest.TestCase):
         self.assertEqual(["gh", "api", "graphql"], run.call_args.args[0][:3])
 
 
+class TestNullNodes(GqlCase):
+    """GraphQL can return null for a list item it could not resolve, with no entry in `errors`.
+
+    Every reader takes a node to be an object, so a null one crashed `wait` with a traceback. That
+    is no documented outcome. The transport drops and counts it, and its connection reads blind.
+    The entry it stands for can be the reviewer's newest.
+    """
+
+    def read(self, pr: dict) -> dict:
+        """`pr` through the real transport, with only the `gh` process replaced."""
+        body = json.dumps({"data": {"repository": {"pullRequest": pr}}})
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=body, stderr="")
+        with mock.patch.object(pr_review.subprocess, "run", return_value=done):
+            return pr_review.gql("query", "o", "r", 7)
+
+    def test_reviewer_nodes_skips_a_null_node(self) -> None:
+        pr = {"comments": {"nodes": [None, {"author": {"login": pr_review_rounds.REVIEWER}}]}}
+        self.assertEqual(1, len(pr_review_rounds.reviewer_nodes(pr, "comments")))
+
+    def test_the_transport_drops_each_null_node_and_counts_it_on_its_connection(self) -> None:
+        sent = payload([review()], [thread("T1"), thread("T2")], comments=[comment(at=EARLY)])
+        sent["comments"]["nodes"].insert(0, None)
+        sent["reviewThreads"]["nodes"][0]["comments"]["nodes"].append(None)
+        sent["reviewThreads"]["nodes"][1]["comments"]["nodes"].append(None)
+        pr = self.read(sent)
+        self.assertEqual(1, len(pr["comments"]["nodes"]))
+        self.assertEqual(1, pr["comments"][pr_review_rounds.NULL_NODES])
+        self.assertNotIn(pr_review_rounds.NULL_NODES, pr["reviews"])
+        self.assertEqual("reviewThreads,comments", pr_review_rounds.null_nodes(pr))
+        self.assertIsNone(pr_review_rounds.null_nodes(payload([review()])))
+
+    def test_a_null_node_blinds_its_connection_whatever_else_is_in_view(self) -> None:
+        """A reviewer node in view bounds a cut window, and bounds nothing about a null entry."""
+        sent = payload([review(at=EARLY)], comments=[comment(at=LATE)])
+        sent["reviews"]["nodes"].append(None)
+        pr = self.read(sent)
+        self.assertTrue(pr_review_rounds.window_blind(pr, "reviews"))
+        self.assertFalse(pr_review_rounds.window_blind(pr, "comments"))
+        self.assertIsNone(pr_review_rounds.answered_outside_review(pr))
+
+    def test_the_digest_names_the_null_and_marks_the_counts_it_undercuts(self) -> None:
+        sent = payload([review()], [thread("T1")])
+        sent["reviewThreads"]["nodes"].append(None)
+        sent["comments"]["nodes"].append(None)
+        self.answer(self.read(sent))
+        out, unresolved = pr_review.digest("o", "r", 7, now=NOW)
+        self.assertEqual(1, unresolved)
+        self.assertIn(" threads=1+ unresolved=1+ null_nodes=reviewThreads,comments ", out)
+        self.assertIn("answered_outside_review=unknown", out)
+        self.assertIn("NULL NODES (reviewThreads,comments)", out)
+        self.assertNotIn("BEHIND THE WINDOW", out)
+
+    def test_wait_reads_a_null_comment_node_without_a_traceback(self) -> None:
+        """The reported crash: a null in `comments` beside a review on the head."""
+        sent = payload([review()], comments=[comment(at=EARLY)])
+        sent["comments"]["nodes"].insert(0, None)
+        self.answer(self.read(sent))
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(0, pr_review.main(["wait", "7", "--repo", "o/r"]))
+        self.assertIn("null_nodes=comments", out.getvalue())
+
+
+class TestPullRequestNotOpen(GqlCase):
+    """A merged pull request reads `merge=UNKNOWN`, which reads as an open one still computing."""
+
+    MERGE = "c" * 40
+
+    def merged(self) -> dict:
+        pr = payload([review()], merge="UNKNOWN")
+        return {**pr, "state": "MERGED", "mergedAt": LATE, "mergeCommit": {"oid": self.MERGE}}
+
+    def test_status_names_a_merged_pull_requests_state_and_merge_commit(self) -> None:
+        self.answer(self.merged())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, pr_review.main(["status", "7", "--repo", "o/r"]))
+        want = f"pr=7 state=MERGED merged_at={LATE} merge_commit={self.MERGE[:8]} head="
+        self.assertIn(want, out.getvalue())
+        self.assertNotIn("closed_at=", out.getvalue())
+
+    def test_a_closed_pull_request_names_when_it_closed(self) -> None:
+        closed = {**payload([review()], merge="UNKNOWN"), "state": "CLOSED", "closedAt": LATE}
+        self.answer({**closed, "mergedAt": None, "mergeCommit": None})
+        out, _ = pr_review.digest("o", "r", 7, now=NOW)
+        self.assertIn(f"pr=7 state=CLOSED closed_at={LATE} head=", out)
+        self.assertNotIn("merge_commit=", out)
+
+    def test_an_open_pull_request_carries_no_state_field(self) -> None:
+        self.answer({**payload([review()]), "state": "OPEN", "closedAt": EARLY})
+        out, _ = pr_review.digest("o", "r", 7, now=NOW)
+        self.assertNotIn("state=", out.split(" head=")[0])
+        self.assertNotIn("closed_at=", out)
+
+    def test_wait_on_a_merged_pull_request_neither_requests_nor_polls(self) -> None:
+        """A seat about to merge stops on the first read rather than waiting out its bound."""
+        self.answer({**self.merged(), "reviews": {"nodes": [], "pageInfo": {}}})
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep") as slept,
+            mock.patch.object(pr_review, "request_copilot_review") as requested,
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "o/r"])
+        self.assertEqual(0, code)
+        self.assertNotIn("status=PENDING", out.getvalue())
+        slept.assert_not_called()
+        requested.assert_not_called()
+        self.assertIn("state=MERGED", out.getvalue())
+
+
 class TestCli(GqlCase):
     def setUp(self) -> None:
         super().setUp()

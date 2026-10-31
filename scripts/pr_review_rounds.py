@@ -32,6 +32,7 @@ ATTESTATION = re.compile(
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 ACK_MARKER = "<!-- fleet-shape-ack: fingerprint={} -->"
 CARRIED_PARTIAL = "an earlier round states partial coverage"
+NULL_NODES = "_null_nodes"
 
 
 def reviewer_requested(pr: dict) -> bool:
@@ -130,12 +131,39 @@ def request_recorded(before: dict, after: dict) -> bool | None:
 
 
 def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
-    """This login's own nodes under `field`, oldest first as the API returns them."""
+    """This login's own nodes under `field`, oldest first as the API returns them, nulls skipped."""
     return [
         n
         for n in ((pr.get(field) or {}).get("nodes") or [])
-        if (n.get("author") or {}).get("login") == login
+        if n and (n.get("author") or {}).get("login") == login
     ]
+
+
+def drop_null_nodes(data: object) -> None:
+    """Drop each null entry from every `nodes` list in a response, counting them on its connection.
+
+    GraphQL can return null for a list item it could not resolve at read time, with no entry in
+    `errors`. Every reader takes a node to be an object. The count left under `NULL_NODES` says the
+    list read short, so a reading resting on it is blind rather than decided.
+    """
+    if isinstance(data, dict) and isinstance(nodes := data.get("nodes"), list) and None in nodes:
+        data[NULL_NODES] = nodes.count(None)
+        nodes[:] = [n for n in nodes if n is not None]
+    for value in (
+        data.values() if isinstance(data, dict) else data if isinstance(data, list) else ()
+    ):
+        drop_null_nodes(value)
+
+
+def null_nodes(pr: dict) -> str | None:
+    """The connections of `pr` that dropped a null node at any depth, joined by commas, or None."""
+
+    def dropped(data: object) -> bool:
+        if isinstance(data, dict):
+            return bool(data.get(NULL_NODES)) or any(dropped(v) for v in data.values())
+        return isinstance(data, list) and any(dropped(v) for v in data)
+
+    return ",".join(key for key, value in pr.items() if dropped(value)) or None
 
 
 def commit_oid(node: dict) -> str | None:
@@ -167,12 +195,15 @@ def answered_outside_review(pr: dict) -> dict | None:
 
 
 def window_blind(pr: dict, field: str, login: str = REVIEWER) -> bool:
-    """True where this login's own nodes can sit behind the window, so the view cannot decide.
+    """True where this login's own nodes can sit outside the view, so the view cannot decide.
 
     `login` defaults to the fully-modeled reviewer. Nodes arrive in creation order, so one of this
     login's in view bounds every hidden one as older. `hasPreviousPage` says whether anything is
-    back there at all.
+    back there at all. A null node dropped from `field` blinds it whatever is in view, since the
+    entry GraphQL could not resolve can be this login's newest.
     """
+    if (pr.get(field) or {}).get(NULL_NODES):
+        return True
     return page_flag(pr, field, "hasPreviousPage") and not reviewer_nodes(pr, field, login)
 
 
