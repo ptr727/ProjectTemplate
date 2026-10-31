@@ -392,23 +392,9 @@ def partial_on_record(pr: dict) -> bool:
 
 
 def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
-    """Whether a file table names exactly the changed files, a glob row matching what it names.
-
-    A glob matches one segment at a time, `*` and `?` never crossing a `/`, and every other
-    character is literal. A row of `src/*` therefore names `src/a.py` and not `src/sub/b.py`.
-    """
-
-    def hits(entry: str, path: str) -> bool:
-        if entry == path:
-            return True
-        want, have = entry.split("/"), path.split("/")
-        return len(want) == len(have) and all(
-            re.fullmatch(re.escape(w).replace(r"\*", "[^/]*").replace(r"\?", "[^/]"), h)
-            for w, h in zip(want, have, strict=True)
-        )
-
-    return all(any(hits(e, p) for e in named) for p in changed) and all(
-        any(hits(e, p) for p in changed) for e in named
+    """Whether a file table names exactly the changed files, a glob row matching what it names."""
+    return all(any(adapter.row_names(e, p) for e in named) for p in changed) and all(
+        any(adapter.row_names(e, p) for p in changed) for e in named
     )
 
 
@@ -417,7 +403,7 @@ def table_cover(pr: dict) -> tuple[str, str]:
 
     The head's own table is read first, else the newest round's that carries one (`carried:table`).
     Either counts only where it names exactly the files changed now and no round states partial
-    coverage.
+    coverage. A file the table may leave out under `adapter.left_out` is left out of that match.
     """
     if partial_on_record(pr):
         return "", "a round on this pull request states partial coverage, so no table stands in"
@@ -437,13 +423,16 @@ def table_cover(pr: dict) -> tuple[str, str]:
         return "", "the changed-file list is incomplete or empty, so no table can be matched"
     named = reading(node).table or ()
     where = (commit_oid(node) or "")[:8] or "a commit this cannot name"
-    if not table_matches(named, changed):
+    skip = adapter.left_out(named, (pr.get("files") or {}).get("nodes") or [])
+    kept = [p for p in changed if p not in skip]
+    left = f", {len(skip)} more with no changed line left out" if skip else ""
+    if not table_matches(named, kept):
         return "", (
             f"the table on {where} names {len(named)} path(s) where the pull request changes "
-            f"{len(changed)} file(s), and the two sets differ"
+            f"{len(kept)} file(s){left}, and the two sets differ"
         )
     return ("table" if node in own else "carried:table"), (
-        f"the table on {where} names exactly the {len(changed)} changed file(s)"
+        f"the table on {where} names exactly the {len(kept)} changed file(s){left}"
     )
 
 
