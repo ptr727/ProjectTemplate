@@ -1956,13 +1956,19 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
 ]
 
+_PUSH_UNREAD_RULES_CASES: list[tuple[str, dict[str, set[str]] | None, str]] = [
+    ("env --ch=/nowhere git push origin", {"develop": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin", {}, "allow"),
+]
+
 
 def _push_repo_selftest() -> bool | str:
     """Read the repository each push writes from two real checkouts, their origins under different owners.
 
     Each case is a command run in checkout `a`, with `b` beside it, and the owner or the branch it
     writes. Checkout `a` is on `feature/a` and `b` on `develop`. A `*` on a verdict marks the
-    denial of a branch an unrecognized `env` option leaves unread.
+    denial of a branch an unrecognized `env` option leaves unread. A case carrying rules reads them
+    in place of the live query.
     "skip" where the checkouts could not be built, which is neither a pass nor a failure.
     """
     with tempfile.TemporaryDirectory() as tmp:
@@ -1992,9 +1998,19 @@ def _push_repo_selftest() -> bool | str:
             passed = _bare_branch(c, git) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
-        for cmd, want in _PUSH_UNDETERMINED_CASES:
+        cases: list[tuple[str, dict[str, set[str]] | None, str]] = [
+            (cmd, None, want) for cmd, want in _PUSH_UNDETERMINED_CASES
+        ]
+        for cmd, rules, want in cases + _PUSH_UNREAD_RULES_CASES:
+            lookup: Callable[[str], set[str] | None] | None = None
+            if rules is not None:
+                lookup = lambda br, r=rules: r.get(br, set())
             verdict, reason = classify(
-                cmd.format(a=a, b=b), a, environ={}, primary_checkout_lookup=lambda _d: False
+                cmd.format(a=a, b=b),
+                a,
+                rules_lookup=lookup,
+                environ={},
+                primary_checkout_lookup=lambda _d: False,
             )
             verdict += "*" if "the branch it writes could not be read" in reason else ""
             ok = ok and verdict == want
