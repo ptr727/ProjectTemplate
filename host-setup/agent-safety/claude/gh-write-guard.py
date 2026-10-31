@@ -384,7 +384,8 @@ class _Launch:
     `env` holds the assignments, `unset` each name an `env -u` removes from the environment the
     command inherits, and `cleared` whether an `env -i` empties it. `chdirs` holds each directory an
     `env -C` moves the command to, in turn. `undetermined` means an `env` option the guard does not
-    recognize, such as an abbreviation of `--chdir`, may have moved it anywhere.
+    recognize, such as an abbreviation of `--chdir`, may have moved it anywhere. `choices` counts
+    those options, each of which may or may not take a value.
     """
 
     argv: list[str]
@@ -394,15 +395,16 @@ class _Launch:
     chdirs: list[str] = field(default_factory=list)
     timed: bool = False
     undetermined: bool = False
+    choices: int = 0
 
 
 def _env_option(
-    word: str, nxt: str | None, take: bool = False
+    word: str, nxt: str | None, take: Callable[[], bool] = lambda: False
 ) -> tuple[list[tuple[str, str]], int] | None:
     """The `env` options a word sets, as (letter, value) pairs, and the words they use, or None for an operand.
 
     A short cluster such as `-iC dir` reads the way `env` reads it. An option the guard does not
-    recognize reads as `?`, and takes a value only where `take` says it does.
+    recognize reads as `?`, and takes a value only where `take()`, asked once for each, says so.
     """
     if word == "-":
         return [("i", "")], 1
@@ -411,7 +413,7 @@ def _env_option(
     if word.startswith("--"):
         name, eq, value = word[2:].partition("=")
         letter = _ENV_LONG.get(name, "?")
-        if not eq and (letter in _ENV_VALUE_LETTERS or (letter == "?" and take)):
+        if not eq and (letter in _ENV_VALUE_LETTERS or (letter == "?" and take())):
             return [(letter, nxt or "")], 2
         return [(letter, value)], 1
     if not word.startswith("-"):
@@ -419,12 +421,33 @@ def _env_option(
     opts: list[tuple[str, str]] = []
     for j, ch in enumerate(word[1:], 2):
         letter = ch if ch in _ENV_VALUE_LETTERS or ch in _ENV_FLAG_LETTERS else "?"
-        if letter in _ENV_VALUE_LETTERS or (letter == "?" and take):
+        if letter in _ENV_VALUE_LETTERS or (letter == "?" and take()):
             return (
                 (opts + [(letter, word[j:])], 1) if word[j:] else (opts + [(letter, nxt or "")], 2)
             )
         opts.append((letter, ""))
     return opts, 1
+
+
+def _launches(words: list[str], cap: int = 16) -> list[_Launch]:
+    """Each distinct reading of a command's launchers, up to `cap`.
+
+    An `env` option the guard does not recognize may take the next word as its value. So every
+    combination of those choices is read.
+    """
+    out: list[_Launch] = []
+    pending: list[int] = [0]
+    tried: set[int] = set()
+    while pending and len(tried) < cap:
+        takes = pending.pop()
+        if takes in tried:
+            continue
+        tried.add(takes)
+        launch = _launch(words, takes)
+        if all(launch.argv != o.argv for o in out):
+            out.append(launch)
+        pending += [takes | 1 << n for n in range(launch.choices)]
+    return out
 
 
 def _split_string(value: str) -> list[str]:
@@ -435,13 +458,18 @@ def _split_string(value: str) -> list[str]:
         return value.split()
 
 
-def _launch(argv: list[str], take: bool = False) -> _Launch:
+def _launch(argv: list[str], takes: int = 0) -> _Launch:
     """Strip the launchers before a command, reading what an `env` among them changes.
 
-    `take` reads each `env` option the guard does not recognize as taking a value.
+    Bit n of `takes` reads the nth `env` option the guard does not recognize as taking a value.
     """
     out = _Launch([])
     env = out.env
+
+    def take() -> bool:
+        out.choices += 1
+        return bool(takes >> (out.choices - 1) & 1)
+
     while argv:
         name, rest = _base(argv[0]), argv[1:]
         i = 0
@@ -551,8 +579,7 @@ def _read(
     """Read each command in `text` into `out`, following `cd` and `export` through the text.
 
     A wrapper body is read once, at `depth` 1, with the directory and environment the wrapper sees.
-    An `env` option the guard does not recognize may take the next word as its value. So a command
-    behind one is read both ways.
+    A command behind an `env` option the guard does not recognize is read each way `_launches` gives.
     """
     segs, _ = _tokenize(text)
     out.texts.append((segs, timed))
@@ -564,9 +591,7 @@ def _read(
         elif k and segs[k - 1].op == ")" and saved:
             cwd, env = saved.pop()
         assigns, words = _parse(seg.words)
-        first = _launch(words)
-        taken = _launch(words, True) if first.undetermined else first
-        for launch in [first] + ([taken] if taken.argv != first.argv else []):
+        for launch in _launches(words):
             argv = launch.argv
             if not argv:
                 env.update(assigns)
@@ -992,7 +1017,7 @@ def _bypass_denial(
         if current_branch is not None:
             return current_branch
         named = _named_git_dir(cmd, git)
-        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, False)
+        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, cmd.undetermined)
         return got if isinstance(got, str) else None
 
     remote, targets = _push_targets(git.args, branch_of)
@@ -1862,6 +1887,8 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('env -C "$D" git -C {b} push origin', "develop"),
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
+    ("env --ch={b} git push origin", None),
+    ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", "develop"),
 ]
 _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push origin develop", "deny"),
@@ -1869,6 +1896,9 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push origin feature/x", "allow"),
     ("env --chd {b} git push origin feature/x", "allow"),
     ("env -X git push origin feature/x", "allow"),
+    ("env --ignore-env --ch {b} git push origin main", "deny"),
+    ("env --ch {b} --nu git push origin develop", "deny"),
+    ("cd {b} && env --ch=.. git push -u origin HEAD", "allow"),
 ]
 
 
@@ -1904,7 +1934,7 @@ def _push_repo_selftest() -> bool | str:
             c = reading.cmds[-1]
             git = _git(c.argv)
             named = _named_git_dir(c, git)
-            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, False)
+            bare = _bare_push_branch(c.cwd, git.c_dirs, named, None, c.undetermined)
             passed = (bare if isinstance(bare, str) else None) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
