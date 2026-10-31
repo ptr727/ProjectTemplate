@@ -135,6 +135,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
    outcome. The maintainer can then merge it by hand. A line no action of this seat can change
    is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
+   So is `status=MERGED_ELSEWHERE`, where another hand merged a head the gate never read. So is
+   the gate's exit `50`, which repeats on its head after the answer.
    They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
    `suppressed`. A refusal this seat reports is
    never routed around, and it hands the maintainer no command to run instead.

@@ -257,11 +257,18 @@ class TestGate(MergeCase):
 
 
 class TestMerge(MergeCase):
-    def test_a_peer_merge_of_a_newer_head_names_the_head_that_merged(self) -> None:
+    def test_a_peer_merge_of_a_newer_head_is_no_merge_of_this_run(self) -> None:
         self.merge_rc = 1
-        self.assertEqual(0, self.run_merge(target(), target(), {**MERGED, "headRefOid": MOVED}))
-        self.assertIn(f"status=MERGED pr=123 head={MOVED}", self.out.getvalue())
-        self.assertIn("another hand merged a head this gate never read", self.out.getvalue())
+        code = self.run_merge(
+            target(), target(), {**MERGED, "headRefOid": MOVED}, extra=("--cleanup",)
+        )
+        self.assertEqual(1, code)
+        self.assertIn(
+            f"status=MERGED_ELSEWHERE this run merged nothing: #123 merged at {MOVED}",
+            self.out.getvalue(),
+        )
+        self.assertNotIn("status=MERGED pr=", self.out.getvalue())
+        self.cleanup.assert_not_called()
 
     def test_a_merge_reading_open_for_a_moment_is_read_again(self) -> None:
         cleanup = pr_merge.pr_cleanup
