@@ -27,6 +27,7 @@ from pr_review_rounds import (
     first_comment,
     head_nodes,
     head_reviews,
+    is_open,
     newest_of,
     open_threads,
     opened_by,
@@ -73,6 +74,15 @@ REVIEWS_TRUNCATED = (
 def digest_refusal(pr: dict) -> dict | None:
     """The refusal the digest reports: a stopping one, else one standing in for a missing head round."""
     return stopping_refusal(pr) or (None if head_reviews(pr) else refusing_review(pr))
+
+
+def state_fields(pr: dict) -> list[tuple[str, object]]:
+    """`state=` and when it changed, where the pull request is no longer open, else nothing."""
+    if is_open(pr):
+        return []
+    merged, commit = pr.get("mergedAt"), (pr.get("mergeCommit") or {}).get("oid")
+    stamp = ("merged_at", merged) if merged else ("closed_at", pr.get("closedAt"))
+    return [("state", pr["state"]), stamp, ("merge_commit", commit[:8] if commit else None)]
 
 
 def header(fields: list[tuple[str, object]]) -> str:
@@ -174,6 +184,7 @@ def render(
     fields: list[tuple[str, object]] = [
         ("repo", f"{owner}/{repo}"),
         ("pr", num),
+        *state_fields(pr),
         ("head", head[:8]),
         ("rounds", len(revs)),
         ("review_on_head", "yes" if on_head else "local" if cover == "local" else "NO"),

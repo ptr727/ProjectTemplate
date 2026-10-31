@@ -138,6 +138,29 @@ def reviewer_nodes(pr: dict, field: str, login: str = REVIEWER) -> list[dict]:
     ]
 
 
+def is_open(pr: dict) -> bool:
+    """True where the pull request is open, a payload naming no state read as open."""
+    return pr.get("state", "OPEN") == "OPEN"
+
+
+def null_node(data: object, path: str = "") -> str | None:
+    """The path of the first connection under `data` whose `nodes` holds a null, else None.
+
+    GraphQL can return null for a list item it could not resolve at read time, with no entry in
+    `errors`. Any connection can hold one, the threads and checks a gate decides on included. So
+    no reading off such a response can be trusted, and the response reads as unread.
+    """
+    if isinstance(data, list):
+        items = [(path, value) for value in data]
+    elif isinstance(data, dict):
+        if isinstance(nodes := data.get("nodes"), list) and None in nodes:
+            return path or "nodes"
+        items = [(f"{path}.{key}".lstrip("."), value) for key, value in data.items()]
+    else:
+        return None
+    return next((found for key, value in items if (found := null_node(value, key))), None)
+
+
 def commit_oid(node: dict) -> str | None:
     """The oid of the commit this node carries, or None where the payload names none."""
     return (node.get("commit") or {}).get("oid")
