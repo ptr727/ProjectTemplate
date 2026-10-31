@@ -509,6 +509,11 @@ def section_span(lines: list[str], heading: str) -> tuple[int, int] | None:
     return span[0], len(lines) if span[1] is None else span[1]
 
 
+def strip_terminator(line: str) -> str:
+    """The line without its own terminator."""
+    return line[: len(line) - len(terminator(line))]
+
+
 def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
     """The region rendered the way `spec/fidelity_text.py`'s `extract_section` renders it.
 
@@ -525,7 +530,7 @@ def comparable_region(lines: list[str], span: tuple[int, int]) -> str:
     form to compare. It is not the form to write. `replace_sections` builds its own lines, because
     writing needs the target's own terminators and this form has flattened them.
     """
-    bodies = [line[: len(line) - len(terminator(line))] for line in lines[span[0] : span[1]]]
+    bodies = [strip_terminator(line) for line in lines[span[0] : span[1]]]
     if span[1] == len(lines) and lines and terminator(lines[-1]):
         bodies.append("")
     return "\n".join(bodies)
@@ -633,6 +638,29 @@ def section_units(manifest: dict[str, Any], selectors: set[str]) -> list[tuple[s
     return list(units.items())
 
 
+def render_region(
+    source_lines: list[str], source_span: tuple[int, int], ending: str, target_ends_file: bool
+) -> list[str]:
+    """The hub's region as lines carrying the target's `ending`, with its trailing boundary fitted to where it lands.
+
+    A region runs to the next level-two heading.
+    So the blank line before that heading is inside it, and a section ending its file has none.
+    Where the two copies differ on that, `comparable_region` reads both as the same content.
+    So the boundary is reconciled to what this document needs rather than copied from the other one.
+    The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
+    Every line is terminated, or a region spliced ahead of more of the file would run into the next heading.
+    """
+    region = [
+        strip_terminator(line) + ending for line in source_lines[source_span[0] : source_span[1]]
+    ]
+    source_ends_file = source_span[1] == len(source_lines)
+    if source_ends_file and not target_ends_file:
+        region.append(ending)
+    elif target_ends_file and not source_ends_file and region and not region[-1].strip():
+        region.pop()
+    return region
+
+
 def replace_sections(
     target_lines: list[str], source_lines: list[str], sections: list[str], path: str
 ) -> list[str]:
@@ -663,29 +691,12 @@ def replace_sections(
     default_ending = file_ending(target_lines)
     for (start, end), source_span in ordered:
         ending = terminator(out[start]) or default_ending
-        region = []
-        for line in source_lines[source_span[0] : source_span[1]]:
-            body = line[: len(line) - len(terminator(line))]
-            region.append(body + ending if terminator(line) else body)
-        # A region spliced ahead of more of the file has to end terminated, or its last line would run into the heading that follows it.
-        if region and not terminator(region[-1]):
-            region[-1] += ending
-        # A region runs to the next level-two heading.
-        # So the blank line before that heading is inside it, and a section ending its file has none.
-        # Where the two copies differ on that, `comparable_region` reads both as the same content.
-        # So where they differ, the boundary is reconciled to what this document needs rather than copied from the other one.
-        # The reconciliation pads where a heading follows, and drops the trailing blank where nothing does.
-        source_ends_file = source_span[1] == len(source_lines)
-        target_ends_file = end == len(out)
-        if source_ends_file and not target_ends_file:
-            region.append(ending)
-        elif target_ends_file and not source_ends_file and region and not region[-1].strip():
-            region.pop()
+        region = render_region(source_lines, source_span, ending, end == len(out))
         out[start:end] = region
     return out
 
 
-def insertion_point(target_lines: list[str], source_lines: list[str], section: str) -> int:
+def insertion_point(target_lines: list[str], hub_order: list[str], section: str) -> int:
     """The line index where a section the target lacks goes, following the hub's own section order.
 
     The section goes after the target's copy of the nearest preceding hub section the target holds.
@@ -693,19 +704,15 @@ def insertion_point(target_lines: list[str], source_lines: list[str], section: s
     hub gets it appended. A local section sitting between two hub sections therefore stays where
     the repository put it, and only the hub's relative order is reproduced.
     """
-    hub_order = [name.lower() for name in h2_headings(source_lines)]
-    held = {name.lower() for name in h2_headings(target_lines)}
     position = hub_order.index(section.lower())
     for name in reversed(hub_order[:position]):
-        if name in held:
-            span = section_span(target_lines, name)
-            if span is not None:
-                return span[1]
+        span = section_span(target_lines, name)
+        if span is not None:
+            return span[1]
     for name in hub_order[position + 1 :]:
-        if name in held:
-            span = section_span(target_lines, name)
-            if span is not None:
-                return span[0]
+        span = section_span(target_lines, name)
+        if span is not None:
+            return span[0]
     return len(target_lines)
 
 
@@ -727,21 +734,15 @@ def insert_sections(
         source_span = section_span(source_lines, section)
         if source_span is None:
             raise CarryError(f"{path} section '{section}' could not be located to insert")
-        at = insertion_point(out, source_lines, section)
-        region = []
-        for line in source_lines[source_span[0] : source_span[1]]:
-            body = line[: len(line) - len(terminator(line))]
-            region.append(body + ending)
-        if at == len(out):
-            while region and not region[-1].strip():
-                region.pop()
+        at = insertion_point(out, hub_order, section)
+        at_end = at == len(out)
+        if at_end:
             if out and not terminator(out[-1]):
                 out[-1] += ending
             if out and out[-1].strip():
                 out.append(ending)
             at = len(out)
-        elif region and region[-1].strip():
-            region.append(ending)
+        region = render_region(source_lines, source_span, ending, at_end)
         out[at:at] = region
     if outside_sections(out, sections, path).rstrip() != "".join(target_lines).rstrip():
         raise CarryError(
