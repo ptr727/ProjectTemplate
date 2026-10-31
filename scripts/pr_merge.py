@@ -2,34 +2,19 @@
 
 Usage: pr_review.py merge NUMBER --repo OWNER/NAME [--cleanup [--checkout DIR]]
 
-`pr_review.py merge` forwards here. Call it through that spelling, since the allow rule the
-host-safety installer registers names `pr_review.py`. That rule approves any arguments, so every
-check lives here. Whether the merge is authorized stays with the skill that runs it. What this
-checks in code is the Merge Gate's mechanically readable items, and that the merge is current, in
-the owner, and into `develop` only. The items no code here reads, such as a finding the pull
-request's body lists, stay the driver's per `pr-review-conduct`'s Merge Gate.
-
-It refuses unless all of these hold:
-
-- The owner and repository pass `cleanup`'s write-scope check, before any read.
-- The pull request is open, not a draft, and based on `develop`.
-- Its head lives in the base repository rather than in a fork.
-- Its head branch is not a permanent branch, the only branches the fleet's rulesets cover.
-- `wait`'s own gate, run once on a short bound and requesting no review, exits 0.
-- The head read after the gate is the head read before it.
-- A fresh read after the gate meets each readable item that 0 leaves undecided. Coverage reads full,
-  a file table, or an attested local pass. No thread is unresolved. Every count the digest builds of
-  a finding no thread carries is a zero it can read. No reviewer output is held or noted, and no
-  review request is pending. The merge state is one `wait` treats as finished.
-
-The merge is pinned to that head with `--match-head-commit`. It is confirmed by reading the pull
-request back rather than by the merge call's own answer. `--cleanup` then runs `cleanup` on the
-same pull request, and its exit is this command's.
+`pr_review.py merge` forwards here, since the installer's allow rule names `pr_review.py` and
+approves any arguments, so every check lives here. Whether the merge is authorized stays with the
+skill that runs it. `scripts/README.md` "`pr_merge.py`" states each refusal. In short, it merges
+only an open, non-draft pull request into `develop`, headed in its own repository on a branch that
+is not permanent. It does so once `wait`'s gate exits 0 and a fresh read meets each readable item
+that 0 leaves undecided. The merge is pinned with `--match-head-commit` and confirmed by reading
+the pull request back. The items no code here reads stay the driver's per `pr-review-conduct`.
 
 Exit 0 = merged and confirmed, or with `--cleanup` the exit `cleanup` returned. Exit 1 = refused,
 nothing merged, a merge `gh` refused that reads back open among them. Exit 2 = a read did not
-answer, or a usage error. It is also a merge call that timed out, never ran, or reads back unsettled, which may have
-happened on the server. Exit 64 = the owner check. Any other code is the gate's, nothing merged.
+answer, or a usage error. It is also a merge call that timed out, never ran, or reads back
+unsettled, which may have happened on the server. Exit 64 = the owner check. Any other code is
+the gate's, nothing merged.
 """
 
 from __future__ import annotations
@@ -168,7 +153,12 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
         return refused
     target = f"{owner}/{repo}"
     try:
+        if cleanup and checkout is not None:
+            pr_cleanup.cleanup_primary(checkout, target)
         pr = ready(owner, repo, num)
+    except pr_cleanup.CleanupRefused as exc:
+        print(f"status={exc.status} nothing was merged: {exc}")
+        return 1
     except pr_cleanup.CleanupUnread as exc:
         print(f"status=UNREAD nothing was merged: {exc}")
         return 2

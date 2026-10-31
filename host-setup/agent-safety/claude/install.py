@@ -281,8 +281,9 @@ AUTO_MODE_DEFAULTS = "$defaults"
 AUTO_MODE_RULES = {
     "environment": (
         (
-            "GitHub source control under the GitHub owner of each session checkout's origin remote "
-            "is trusted."
+            "Repositories under the GitHub owner of each session checkout's origin remote are the "
+            "session's own source control. Publishing, releasing, force-pushing, deleting a ref, "
+            "and changing branch protection there still need the maintainer's explicit go-ahead."
         ),
         (
             "In a repository the fleet registry lists, develop and main carry rulesets. An agent "

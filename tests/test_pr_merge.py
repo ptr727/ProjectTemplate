@@ -73,6 +73,9 @@ class MergeCase(unittest.TestCase):
         self.cleanup = self.enterContext(
             mock.patch.object(pr_merge.pr_cleanup, "cleanup", return_value=0)
         )
+        self.enterContext(
+            mock.patch.object(pr_merge.pr_cleanup, "cleanup_primary", return_value="/primary")
+        )
         self.merge_rc = 0
         self.merge_err = "merge answer"
         shared = pr_merge.pr_cleanup.shared
@@ -108,6 +111,15 @@ class TestRefusals(MergeCase):
         self.assertEqual(1, self.run_merge(target(baseRefName="main")))
         self.assertIn("status=REFUSED", self.out.getvalue())
         self.assertIn("`merge-and-release`", self.out.getvalue())
+        self.gate.assert_not_called()
+        self.assert_not_merged()
+
+    def test_an_unusable_checkout_is_refused_before_any_merge(self) -> None:
+        refused = pr_merge.pr_cleanup.CleanupRefused("BAD_CHECKOUT", "not a git checkout")
+        with mock.patch.object(pr_merge.pr_cleanup, "cleanup_primary", side_effect=refused):
+            code = self.run_merge(target(), extra=("--cleanup", "--checkout", "/nowhere"))
+        self.assertEqual(1, code)
+        self.assertIn("status=BAD_CHECKOUT nothing was merged", self.out.getvalue())
         self.gate.assert_not_called()
         self.assert_not_merged()
 
