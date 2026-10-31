@@ -1957,7 +1957,9 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
 ]
 
 _PUSH_UNREAD_RULES_CASES: list[tuple[str, dict[str, set[str]] | None, str]] = [
-    ("env --ch=/nowhere git push origin", {"develop": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin", {"main": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin HEAD", {"master": {"pull_request"}}, "deny*"),
+    ("env --ch=/nowhere git push origin @", {"develop": {"pull_request"}}, "deny*"),
     ("env --ch=/nowhere git push origin", {}, "allow"),
 ]
 
