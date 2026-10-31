@@ -385,7 +385,7 @@ class _Launch:
     command inherits, and `cleared` whether an `env -i` empties it. `chdirs` holds each directory an
     `env -C` moves the command to, in turn. `undetermined` means an `env` option the guard does not
     recognize, such as an abbreviation of `--chdir`, may have moved it anywhere. `choices` counts
-    the readings such an option allows: taking a value or not, and splitting that value or not.
+    the yes-or-no questions such options pose, whether each takes a value and whether it splits it.
     """
 
     argv: list[str]
@@ -912,6 +912,19 @@ def _push_cwd(cmd: _Cmd) -> str | None:
     return None if cmd.undetermined else cmd.cwd
 
 
+def _bare_branch(cmd: _Cmd, git: _Git) -> str | None:
+    """The branch a push naming no refspec writes, or None where the reading does not resolve it.
+
+    Behind an `env` option the guard does not recognize, a branch nothing else names is read in the
+    working directory. So a push from a protected branch still fails closed.
+    """
+    named = _named_git_dir(cmd, git)
+    got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, named, None, False)
+    if not isinstance(got, str) and cmd.undetermined:
+        got = _bare_push_branch(cmd.cwd, git.c_dirs, named, None, False)
+    return got if isinstance(got, str) else None
+
+
 def _push_repo(cmd: _Cmd, git: _Git, remote: str | None) -> tuple[str, str] | None:
     """The (owner, repo) a push writes, read from its URL or its remote's push URL.
 
@@ -1029,9 +1042,7 @@ def _bypass_denial(
     def branch_of() -> str | None:
         if current_branch is not None:
             return current_branch
-        named = _named_git_dir(cmd, git)
-        got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, named, None, False)
-        return got if isinstance(got, str) else None
+        return _bare_branch(cmd, git)
 
     remote, targets = _push_targets(git.args, branch_of)
     repo: tuple[str, str] | None | object = _UNRESOLVED
@@ -1905,7 +1916,7 @@ _PUSH_BRANCH_CASES: list[tuple[str, str | None]] = [
     ('env -C "$D" git -C {b} push origin', "develop"),
     ('cd "$X" && git -C {b} push origin', "develop"),
     ('cd "$X" && git -C sub push origin', None),
-    ("env --ch={b} git push origin", None),
+    ("env --ch={b} git push origin", "feature/a"),
     ("env --ch=/nowhere GIT_DIR={b}/.git git push origin", None),
     ("env --ch=/nowhere git --git-dir={b}/.git push origin", "develop"),
     ("env --nu git -C {b} push origin", "develop"),
@@ -1915,7 +1926,9 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch={b} git push origin feature/x", "allow"),
     ("env --chd {b} git push origin feature/x", "allow"),
     ("env -X git push origin feature/x", "allow"),
-    ("cd {b} && env --ch=.. git push -u origin HEAD", "allow"),
+    ("cd {b} && env --ch=.. git push -u origin HEAD", "deny"),
+    ("cd {b} && env --ignore-env git push", "deny"),
+    ("env --ch={b} git push -u origin HEAD", "allow"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
@@ -1953,9 +1966,7 @@ def _push_repo_selftest() -> bool | str:
             _read(cmd.format(b=b), a, {}, reading)
             c = [r for r in reading.cmds if _base(r.argv[0]) == "git"][-1]
             git = _git(c.argv)
-            named = _named_git_dir(c, git)
-            bare = _bare_push_branch(_push_cwd(c), git.c_dirs, named, None, False)
-            passed = (bare if isinstance(bare, str) else None) == branch
+            passed = _bare_branch(c, git) == branch
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [branch] want={branch} R4: {cmd}")
         for cmd, want in _PUSH_UNDETERMINED_CASES:
