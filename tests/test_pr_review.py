@@ -2662,6 +2662,19 @@ class TestPullRequestNotOpen(GqlCase):
         requested.assert_not_called()
         self.assertIn("state=MERGED", out.getvalue())
 
+    def test_wait_requests_nothing_on_a_merged_pull_request_even_past_a_refusal(self) -> None:
+        """`--ignore-quota-signal` reopens a head refusal as not done, and the first read stops it."""
+        merged = {**self.merged(), "reviews": {"nodes": [review(body=QUOTA_REFUSED)]}}
+        self.answer(merged)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep"),
+            mock.patch.object(pr_review, "request_copilot_review") as requested,
+        ):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--ignore-quota-signal"])
+        requested.assert_not_called()
+        self.assertIn("state=MERGED", out.getvalue())
+
     def test_wait_stops_polling_once_the_pull_request_merges_under_it(self) -> None:
         """A seat merging by hand mid-drive leaves the poll nothing to wait for."""
         opened = payload([], merge="BLOCKED")

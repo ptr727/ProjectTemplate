@@ -1561,7 +1561,7 @@ def utf8_console() -> None:
 
 def run_status(owner: str, repo: str, a: argparse.Namespace, pr: dict | None = None) -> int:
     """Print the digest and return the verdict's code, both off one payload, read where not given."""
-    pr = full_read(owner, repo, a.number, pr)
+    pr = full_read(owner, repo, a.number) if pr is None else pr
     print(digest(owner, repo, a.number, pr=pr, grace=a.check_grace, stall=a.check_stall)[0])
     return report_verdict(pr)
 

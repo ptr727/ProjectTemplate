@@ -66,7 +66,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    partial gate. A digest carrying `state=MERGED` is a promotion merged since step 1 found it
    open, whose `merge=UNKNOWN` never clears, so stop re-reading it. Confirm its `merge_commit=` per
    step 4, run the ready-report comparison below against its `head=`, and report both. Dispatch no
-   release from here, since whoever merged it may have released it already. A digest carrying
+   release from here, since whoever merged it may have released it already. The merge has landed
+   all the same, so go on to step 8's cleanup. A digest carrying
    `state=CLOSED` is a stop to report. A digest reading `coverage=none` is not a partial gate where the promotion meets the
    one case that skill's Merge Gate item 2 states. Check that case again on every re-run below, and record
    its evidence for the head step 3 merges, as that item says.
