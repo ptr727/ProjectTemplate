@@ -829,18 +829,13 @@ def _branch_name(ref: str) -> str | None:
 
 
 def _push_targets(
-    args: list[str], branch_of: Callable[[], str | tuple[str, ...] | None]
+    args: list[str], branch_of: Callable[[], tuple[str, ...]]
 ) -> tuple[str | None, list[tuple[str, str]]]:
     """A push's remote and each (operation, branch) it writes, the operation update, force,
     delete, or mirror.
 
-    `branch_of` gives the branch a push naming no refspec, or `HEAD`, writes, or each it may write.
+    `branch_of` gives each branch a push naming no refspec, or `HEAD`, may write.
     """
-
-    def branches() -> tuple[str, ...]:
-        got = branch_of()
-        return (got,) if got and isinstance(got, str) else got or ()
-
     force = delete = every = mirror = tags = False
     pos: list[str] = []
     i = 0
@@ -874,7 +869,7 @@ def _push_targets(
     if every:
         return remote, [(write, b) for b in _PROTECTED_DEFAULT]
     if not specs:
-        return remote, [] if delete or tags else [(write, b) for b in branches()]
+        return remote, [] if delete or tags else [(write, b) for b in branch_of()]
     out: list[tuple[str, str]] = []
     for spec in specs:
         op = "force" if force or spec.startswith("+") else "update"
@@ -886,7 +881,7 @@ def _push_targets(
             op = op if src else "delete"
         else:
             dst = spec
-        names = branches() if dst in ("HEAD", "@") else (_branch_name(dst),)
+        names = branch_of() if dst in ("HEAD", "@") else (_branch_name(dst),)
         out += [(op, name) for name in names if name]
     return remote, out
 
@@ -1042,12 +1037,16 @@ def _bypass_denial(
     if git.sub != "push":
         return None
 
-    def branch_of() -> str | tuple[str, ...] | None:
+    unread: list[bool] = []
+
+    def branch_of() -> tuple[str, ...]:
         """The branch a push naming no refspec writes, or each protected default an unrecognized
         `env` option may have moved it to."""
         if current_branch is not None:
-            return current_branch
-        return _bare_branch(cmd, git) or (_PROTECTED_DEFAULT if cmd.undetermined else None)
+            return (current_branch,)
+        got = _bare_branch(cmd, git)
+        unread.append(got is None and cmd.undetermined)
+        return (got,) if got else _PROTECTED_DEFAULT if cmd.undetermined else ()
 
     remote, targets = _push_targets(git.args, branch_of)
     repo: tuple[str, str] | None | object = _UNRESOLVED
@@ -1059,6 +1058,14 @@ def _bypass_denial(
                 repo = _push_repo(cmd, git, remote)
             rules = _live_branch_rules(repo[0], repo[1], br) if isinstance(repo, tuple) else None
         reason = _rule_denial(op, br, rules)
+        if reason and any(unread):
+            return (
+                "This push names no refspec, or `HEAD`, behind an `env` option the guard does not "
+                "recognize. That option may have moved it to a checkout on a protected-by-default "
+                "branch (main/master/develop), so the branch it writes could not be read. Drop "
+                "the option, name the branch in the refspec, or name the repository with an "
+                "absolute `git -C` or `--git-dir`."
+            )
         if reason:
             return reason
     return None
@@ -1968,7 +1975,7 @@ def _push_repo_selftest() -> bool | str:
             _read(cmd.format(b=b), a, {}, reading)
             c = [r for r in reading.cmds if _base(r.argv[0]) == "git"][-1]
             git = _git(c.argv)
-            got = _push_repo(c, git, _push_targets(git.args, lambda: None)[0])
+            got = _push_repo(c, git, _push_targets(git.args, lambda: ())[0])
             passed = (got[0] if got else None) == want
             ok = ok and passed
             print(f"  {'ok  ' if passed else 'FAIL'} [repo ] want={want} R4: {cmd}")
