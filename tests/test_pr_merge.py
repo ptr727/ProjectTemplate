@@ -257,6 +257,16 @@ class TestGate(MergeCase):
 
 
 class TestMerge(MergeCase):
+    def test_a_merge_reading_open_for_a_moment_is_read_again(self) -> None:
+        cleanup = pr_merge.pr_cleanup
+        with (
+            mock.patch.object(cleanup, "DELETE_SETTLE_DELAYS", (1,)),
+            mock.patch.object(pr_review.time, "sleep") as slept,
+        ):
+            self.assertEqual(0, self.run_merge(target(), target(), target(), MERGED))
+        slept.assert_called_once_with(1)
+        self.assertIn("status=MERGED", self.out.getvalue())
+
     def test_a_met_gate_merges_pinned_to_the_head_read_before_it(self) -> None:
         self.assertEqual(0, self.run_merge(target(), target(), MERGED))
         want = ["gh", "pr", "merge", "123", "--squash", "--match-head-commit", HEAD]
