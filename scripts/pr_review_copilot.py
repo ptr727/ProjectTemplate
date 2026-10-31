@@ -739,10 +739,14 @@ def listed_lines(
     firsts = [((t.get("comments") or {}).get("nodes") or [{}])[0] for t in threads]
     spots = {
         (c["path"], c.get("startLine") or c["line"], c["line"])
-        for c in firsts
-        if c.get("path") and isinstance(c.get("line"), int)
+        for t, c in zip(threads, firsts, strict=True)
+        if c.get("path") and isinstance(c.get("line"), int) and not t.get("isOutdated")
     }
-    outdated = {c["path"] for c in firsts if c.get("path") and c.get("line") is None}
+    outdated = {
+        c["path"]
+        for t, c in zip(threads, firsts, strict=True)
+        if c.get("path") and t.get("isOutdated")
+    }
     known = {n.get("path") for n in files} | {c.get("path") for c in firsts}
     out = []
     unmatched = 0

@@ -388,7 +388,7 @@ query($o:String!,$r:String!,$n:Int!){
 Q_FULL = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ __HELD_FIELDS__
-    reviewThreads(first:100){ nodes{ id isResolved
+    reviewThreads(first:100){ nodes{ id isResolved isOutdated
       comments(first:1){ nodes{ author{login} path line startLine body fullDatabaseId pullRequestReview{ id } } } } pageInfo{ hasNextPage } }
     files(first:__FILES_WINDOW__){ pageInfo{ hasNextPage endCursor } nodes{ path additions deletions changeType } }
   }}}

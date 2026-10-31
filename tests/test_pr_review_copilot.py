@@ -484,9 +484,21 @@ class TestOpenFindings(unittest.TestCase):
 
     def test_an_outdated_thread_on_an_item_s_path_is_named_rather_than_counted(self) -> None:
         items = (adapter.Item("one.", (("src/x.py", 12, 12),)),)
-        threads = self.threads({"path": "src/x.py", "line": None})
+        threads = [
+            {**t, "isOutdated": True} for t in self.threads({"path": "src/x.py", "line": 12})
+        ]
         self.assertEqual(
             (0, ["    [outdated thread on its path] one."]),
+            adapter.listed_lines(items, threads, [], False),
+        )
+
+    def test_a_current_file_level_thread_is_neither_outdated_nor_at_a_line(self) -> None:
+        items = (adapter.Item("one.", (("src/x.py", 12, 12),)),)
+        threads = [
+            {**t, "isOutdated": False} for t in self.threads({"path": "src/x.py", "line": None})
+        ]
+        self.assertEqual(
+            (1, ["    [no thread at its line] one."]),
             adapter.listed_lines(items, threads, [], False),
         )
 
