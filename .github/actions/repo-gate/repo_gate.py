@@ -516,7 +516,15 @@ def load_through_uvx(path: Path) -> list[object]:
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
     except OSError as error:
-        raise UvxUnavailable(f"the interpreter uvx provided could not start: {error}") from None
+        hint = ""
+        if isinstance(error, FileNotFoundError):
+            hint = (
+                "; with UV_NO_CACHE or uv's no-cache = true, uv deletes the environment when uvx"
+                " exits, so unset it or make PyYAML importable"
+            )
+        raise UvxUnavailable(
+            f"the interpreter uvx provided could not start: {error}{hint}"
+        ) from None
     if result.returncode != 0:
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         raise ValueError(lines[-1] if lines else f"the reader exited {result.returncode}")

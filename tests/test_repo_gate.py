@@ -1188,7 +1188,16 @@ class TestCompositeActions(TreeCase):
         self.assertEqual(2, len(hits))
         self.assertIn("the interpreter uvx provided could not start", hits[0])
         self.assertIn("/gone", hits[0])
+        self.assertIn("UV_NO_CACHE", hits[0])
+        self.assertIn("make PyYAML importable", hits[0])
         self.assertEqual("schema ran", hits[1])
+
+    def test_a_non_missing_start_failure_does_not_blame_the_uv_cache(self) -> None:
+        denied = PermissionError(13, "Permission denied", "/py")
+        run = mock.Mock(side_effect=[self.completed(0, "/py\n"), denied])
+        hits = self.uvx_hits(run, {"docker": "/d", "uvx": "/u"})
+        self.assertIn("the interpreter uvx provided could not start", hits[0])
+        self.assertNotIn("UV_NO_CACHE", hits[0])
 
     def stub_python(self, body: str) -> str:
         stub = self.tmp / "python"
