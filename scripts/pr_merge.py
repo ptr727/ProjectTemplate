@@ -10,7 +10,8 @@ is not permanent. It does so once `wait`'s gate exits 0 and a fresh read meets e
 that 0 leaves undecided. The merge is pinned with `--match-head-commit` and confirmed by reading
 the pull request back. The items no code here reads stay the driver's per `pr-review-conduct`.
 
-Exit 0 = merged and confirmed, or with `--cleanup` the exit `cleanup` returned. Exit 1 = refused,
+After a `status=MERGED` line the exit is `cleanup`'s own under `--cleanup`. Otherwise:
+exit 0 = merged and confirmed. Exit 1 = refused,
 nothing merged, a merge `gh` refused that reads back open among them. Exit 2 = a read did not
 answer, or a usage error. It is also a merge call that timed out, never ran, or reads back
 unsettled, which may have happened on the server. Exit 64 = the owner check. Any other code is

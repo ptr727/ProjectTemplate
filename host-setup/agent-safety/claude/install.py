@@ -282,13 +282,15 @@ AUTO_MODE_RULES = {
     "environment": (
         (
             "Repositories under the GitHub owner of each session checkout's origin remote are the "
-            "session's own source control. Publishing, releasing, force-pushing, deleting a ref, "
-            "and changing branch protection there still need the maintainer's explicit go-ahead."
+            "session's own source control. Merging, publishing, releasing, force-pushing, deleting "
+            "a ref, and changing branch protection there need the maintainer's explicit, current "
+            "go-ahead. A drive-pr, backlog-burndown, or unattended-handoff invocation is that "
+            "go-ahead for feature merges into develop and the verified cleanup that follows."
         ),
         (
-            "In a repository the fleet registry lists, develop and main carry rulesets. An agent "
-            "merges a feature branch "
-            "into develop through `scripts/pr_review.py merge`, which checks the Merge Gate's "
+            "In a repository the fleet registry lists, develop and main carry rulesets. Such an "
+            "authorized feature merge into develop runs through `scripts/pr_review.py merge`, "
+            "which checks the Merge Gate's "
             "mechanically readable items in code. The items no code reads, such as a finding the "
             "pull request body lists, stay the agent's per pr-review-conduct's Merge Gate. A "
             "promotion merge from develop to main needs the maintainer's explicit go-ahead in the "
