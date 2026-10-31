@@ -32,7 +32,6 @@ with surrogateescape, so a byte the locale cannot map neither ends the read nor 
 from __future__ import annotations
 
 import argparse
-import bisect
 import contextlib
 import functools
 import json
@@ -1316,16 +1315,15 @@ SCALAR_KEY = re.compile(r":\s+(?:[!&]\S*\s+)*$")
 def scalar_openers(texts: list[str]) -> dict[int, int]:
     """The line index of each YAML block scalar header, and the column its content sits deeper than."""
     out: dict[int, int] = {}
-    starts = [0]
-    for text in texts:
-        starts.append(starts[-1] + len(text) + 1)
-    for offset, kind, value in lexer_for("yaml").get_tokens_unprocessed("\n".join(texts)):
+    text = "\n".join(texts)
+    starts = Starts(text)
+    for offset, kind, value in lexer_for("yaml").get_tokens_unprocessed(text):
         if kind not in Punctuation.Indicator or value not in "|>":
             continue
-        row = bisect.bisect_right(starts, offset) - 1
-        text, col = texts[row], offset - starts[row]
-        lead = len(SCALAR_LEAD.match(text)[0])  # type: ignore[index]
-        out[row] = lead if SCALAR_KEY.search(text[lead:col]) else len(text) - len(text.lstrip())
+        number, col = starts.at(offset)
+        row, line = number - 1, texts[number - 1]
+        lead = len(SCALAR_LEAD.match(line)[0])  # type: ignore[index]
+        out[row] = lead if SCALAR_KEY.search(line[lead:col]) else len(line) - len(line.lstrip())
     return out
 
 
