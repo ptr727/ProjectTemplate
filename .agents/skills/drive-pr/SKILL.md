@@ -123,16 +123,31 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    read and confirmed by reading it back.
    Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
    cleanup stopped, which stops and reports the same as `cleanup`.
-   Any other non-zero exit is a refusal that merged nothing, except as the next paragraph says.
-   Read its `status=` line and do what that line names, each per step 3. That can be disposing of
-   a thread, waiting, or recording and attesting a pass. It can also be posting an acknowledgment,
-   or merging `develop` into the branch with a merge commit, never a rebase. Give each finding the
-   line counts an outcome per "Disposing of Every Finding". Then run `merge` once more. Where the
-   same `status=` line returns on the same head, stop. Report it to the maintainer as a blocked
-   merge, naming the pull request, the line, and each counted finding's outcome. The maintainer can
-   then merge it by hand. Some lines never clear on a rerun, so report those at once. Two are
-   `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`, since `merge` reads no answer. A refusal this
-   seat reports is never routed around, and it hands the maintainer no command to run instead.
+   Any other non-zero exit merged nothing, apart from the read-back cases after this list. It
+   prints one `status=` line per unmet item, and each line takes one of these routes.
+
+   - A line no action this seat takes can change is reported at once. Examples are
+     `status=OUTPUT_NOTED`, `status=COUNT_UNREAD`, any `status=REFUSED` line, and an exit `64`.
+     So is a `status=UNTHREADED_FINDINGS` line holding a count that spans every round, such as
+     `suppressed`, since `merge` reads no answer.
+   - A `status=MERGE_NOT_CLEAN` line reading `DIRTY` or `BEHIND` calls for merging `develop` into
+     the branch with a merge commit, never a rebase. Resolve any conflict, then drive the pull
+     request from step 2 again, which owes a new local pass over the merge commit.
+   - A `status=UNTHREADED_FINDINGS` line whose only count is `qodo_open`, after a fixing push,
+     calls for posting `/review` on the pull request. Qodo does not always reprocess a push on its
+     own. Spot-verify each badge it sets per pr-review-conduct's Merge Gate item 3.
+   - Any other line names a state this seat clears as the drive does before a merge. That is
+     disposing of a thread, waiting out a pending check or review, or posting the acknowledgment
+     pr-review-conduct's Merge Gate item 4 names. It is also recording and attesting a pass per
+     step 3.
+
+   Give each finding a line counts an outcome per "Disposing of Every Finding" before any rerun.
+   Once every line still printed is cleared, run `merge` again. A line printed again on the same
+   head is reported, and so is anything still standing after the third `merge` run of the drive.
+   Report it to the maintainer as a blocked merge, naming the pull request, each line still
+   standing, and each counted finding's outcome. The maintainer can then merge it by hand. A
+   refusal this seat reports is never routed around, and it hands the maintainer no command to run
+   instead.
    A `status=MERGE_NOT_CONFIRMED` line at exit `2` is no refusal, since the merge may have landed.
    Read the state back with `gh pr view <number> --repo <owner>/<repo> --json state`. `MERGED`
    means the merge landed, so run the `cleanup` command below. `OPEN` means treat it as the refusal

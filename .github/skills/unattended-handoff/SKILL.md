@@ -347,9 +347,8 @@ does not qualify, since skipping one costs nothing and a guess costs a revert an
    on a line that no longer describes it.
 5. **Park at the first decision**, per "Parking" below, filing any lesson per step 6 before the
    parking comment so the comment can name it. That includes a `merge` refusal `drive-pr` step 4
-   says to report, which the worker parks instead. The worker first clears and reruns it once per
-   that step. So a refusal parks only when the same `status=` line returns on the same head. The
-   parking names the pull request, the line, and each counted finding's outcome, so the maintainer
+   says to report, which the worker parks instead, at the point that step reports it. The
+   parking names the pull request, each line still standing, and each counted finding's outcome, so the maintainer
    can merge it by hand. A `status=MERGE_NOT_CONFIRMED` line is read back per that step, and only a
    read that still cannot answer parks, saying the merge may have landed. A non-zero exit after a
    `status=MERGED` line is a cleanup that stopped, which step 7 names in the close-out.
