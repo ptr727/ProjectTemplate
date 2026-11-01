@@ -5671,7 +5671,7 @@ class TestChangedLines(unittest.TestCase):
         excludes: tuple[str, ...] = (),
         keep: bool = False,
         paths: tuple[str, ...] | None = None,
-        whole: dict[str, frozenset[str]] | None = None,
+        moves: dict[str, str] | None = None,
         dest: str = "docs/ledger.md",
     ) -> dict[str, set[int]]:
         """The scope a move of a committed four-line file from `source` to `dest` gets.
@@ -5697,7 +5697,7 @@ class TestChangedLines(unittest.TestCase):
         if edit:
             (root / dest).write_text("One.\nTwo.\nEdited.\nFour.\n", encoding="utf-8")
         asked = None if paths is None else [str(root / p) for p in paths]
-        got = prose_lint.changed_lines("HEAD", root, excludes, asked, whole)
+        got = prose_lint.changed_lines("HEAD", root, excludes, asked, moves)
         assert got is not None, "git failed, so this case proved nothing about scoping"
         return got
 
@@ -5731,26 +5731,27 @@ class TestChangedLines(unittest.TestCase):
 
     def test_a_file_list_narrows_nothing(self) -> None:
         """A hook passes the files a commit stages, a move's destination alone, not a run's scope."""
-        self.assertEqual({}, self.moved("docs/draft.md", paths=("docs/ledger.md",)))
+        got = self.moved("docs/draft.md", paths=("docs/ledger.md",))
+        self.assertEqual({"docs/ledger.md": set()}, got)
 
-    def test_a_rename_changing_what_its_path_decides_is_read_whole_for_that_rule(self) -> None:
-        """A rule that read the file another way where it sat reads it in full, and no other rule.
+    def test_a_rename_between_read_paths_names_where_it_sat(self) -> None:
+        """A run reads a moved file at both paths to report what the new one adds, so needs both.
 
-        The root runbook is exempt from `home-path` and is instruction text, which only
-        `issue-ref` reads as prose. A move keeping both adds only what it changed.
+        The root runbook is exempt from `home-path` and is instruction text, which only `issue-ref`
+        reads as prose. A move into or out of either, or keeping both, records its source alike.
         """
-        for source, dest, rules in (
-            ("OPERATIONS.md", "docs/ledger.md", {"home-path", "issue-ref"}),
-            ("docs/guide.md", "docs/OPERATIONS.md", set()),
-            ("notes/guide.md", "AGENTS.md", {"issue-ref"}),
-            ("notes/draft.md", "docs/ledger.md", set()),
+        for source, dest in (
+            ("OPERATIONS.md", "docs/ledger.md"),
+            ("docs/guide.md", "docs/OPERATIONS.md"),
+            ("notes/guide.md", "AGENTS.md"),
+            ("notes/draft.md", "docs/ledger.md"),
         ):
             for edit, lines in ((False, set()), (True, {3})):
                 with self.subTest(source=source, dest=dest, edit=edit):
-                    whole: dict[str, frozenset[str]] = {}
-                    got = self.moved(source, edit=edit, whole=whole, dest=dest)
-                    self.assertEqual({dest: lines} if rules or edit else {}, got)
-                    self.assertEqual({dest: frozenset(rules)} if rules else {}, whole)
+                    moves: dict[str, str] = {}
+                    got = self.moved(source, edit=edit, moves=moves, dest=dest)
+                    self.assertEqual({dest: lines}, got)
+                    self.assertEqual({dest: source}, moves)
 
     def test_a_rename_changing_its_lexer_is_read_whole(self) -> None:
         """A file read as plain text where it sat had no comment or Markdown unit read at all."""
@@ -5777,6 +5778,19 @@ class TestChangedLines(unittest.TestCase):
             [ln.rsplit(":", 1)[0] for ln in out.getvalue().splitlines()],
         )
 
+    def test_a_move_into_instruction_text_reports_its_issue_references(self) -> None:
+        """Only instruction text reads a bare reference as a finding, so a move into it adds one."""
+        for source, dest, reported in (
+            ("notes/guide.md", "AGENTS.md", ["AGENTS.md:1: issue-ref"]),
+            ("AGENTS.md", "notes/guide.md", []),
+        ):
+            with self.subTest(source=source, dest=dest):
+                root = self.real_repo()
+                self.commit(root, {source: "Fixed in #123 already.\n"})
+                (root / dest).parent.mkdir(exist_ok=True)
+                subprocess.run(["git", "-C", str(root), "mv", source, dest], check=True)
+                self.assertEqual(reported, self.gate(root, "issue-ref"))
+
     def test_a_rename_between_read_paths_adds_only_what_it_changed(self) -> None:
         """A run already read the file where it sat, so a move brings no line into scope unedited.
 
@@ -5785,9 +5799,89 @@ class TestChangedLines(unittest.TestCase):
         """
         for renames in ("true", "false", "copies"):
             with self.subTest(renames=renames):
-                self.assertEqual({}, self.moved("notes/ledger.md", renames))
+                self.assertEqual({"docs/ledger.md": set()}, self.moved("notes/ledger.md", renames))
                 got = self.moved("notes/ledger.md", renames, edit=True)
                 self.assertEqual({"docs/ledger.md": {3}}, got)
+
+    def commit(self, root: Path, files: dict[str, str]) -> None:
+        """Write and commit `files`, each relative to `root`."""
+        for name, text in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text, encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", *files], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "baseline"], check=True)
+
+    def gate(self, root: Path, *checks: str) -> list[str]:
+        """Each `path:line: rule` a run scoped to the diff against `HEAD` reports."""
+        out = io.StringIO()
+        args = [arg for check in checks for arg in ("--check", check)]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = prose_lint.main([*args, "--diff", "HEAD", str(root)])
+        reported = [": ".join(ln.split(": ")[:2]) for ln in out.getvalue().splitlines()]
+        self.assertEqual(1 if reported else 0, code)
+        return reported
+
+    def test_a_move_off_a_compose_name_reports_the_container_paths_it_exposes(self) -> None:
+        """Only a Compose file skips a volume's container side, so a move off the name adds it.
+
+        The host side is a finding at either name, so it stays the older finding it already was.
+        """
+        text = (
+            f"services:\n  app:\n    volumes:\n      - {NIX_HOME}/a:/data\n"
+            f"      - cache:{NIX_HOME}/data\n"
+        )
+        for dest, reported in (
+            ("ledger.yml", ["ledger.yml:5: home-path"]),
+            ("app/compose.yml", []),
+        ):
+            with self.subTest(dest=dest):
+                root = self.real_repo()
+                self.commit(root, {"compose.yml": text})
+                (root / dest).parent.mkdir(exist_ok=True)
+                subprocess.run(["git", "-C", str(root), "mv", "compose.yml", dest], check=True)
+                self.assertEqual(reported, self.gate(root, "home-path"))
+
+    def test_a_move_to_another_directory_reports_the_mentions_it_turns_dead(self) -> None:
+        """A relative mention resolves against the file's own directory, which a move changes.
+
+        The mention of a deleted root file is dead from either directory, so it is not reported.
+        """
+        root = self.real_repo()
+        mentions = "See [b](b.md).\nSee [old](old.md).\n"
+        self.commit(
+            root,
+            {"notes/b.md": "B.\n", "docs/b.md": "B.\n", "old.md": "Old.\n", "notes/a.md": mentions},
+        )
+        subprocess.run(["git", "-C", str(root), "rm", "--quiet", "docs/b.md", "old.md"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "--quiet", "-m", "delete"], check=True)
+        (root / "docs").mkdir()
+        subprocess.run(["git", "-C", str(root), "mv", "notes/a.md", "docs/a.md"], check=True)
+        self.assertEqual(["docs/a.md:1: dead-path"], self.gate(root, "dead-path"))
+
+    def test_an_edited_shebang_changing_the_lexer_reads_the_script_whole(self) -> None:
+        """The shebang picks how every line is read, so a change to its lexer is new to every line.
+
+        A sentence Python reads as a docstring is a shell string, read by no rule.
+        """
+        doc = '"""' + " ".join(["word"] * 60) + '."""\n'
+        for before, after, scope in (
+            ("#!/bin/sh\n" + doc, "#!/usr/bin/env python3\n" + doc, {1, 2}),
+            (doc, "#!/usr/bin/env python3\n" + doc, {1, 2}),
+            ("#!/usr/bin/env python3\n" + doc, doc, {1}),
+            ("#!/bin/sh\n" + doc, "#!/bin/bash\n" + doc, {1}),
+            ("#!/bin/sh\n" + doc, "#!/bin/sh\n" + doc + "echo\n", {3}),
+        ):
+            with self.subTest(before=before[:12], after=after[:12]):
+                root = self.real_repo()
+                self.commit(root, {"tools/run": before})
+                (root / "tools" / "run").write_text(after, encoding="utf-8")
+                self.assertEqual({"tools/run": scope}, prose_lint.changed_lines("HEAD", root))
+        root = self.real_repo()
+        self.commit(root, {"tools/run": "#!/bin/sh\n" + doc})
+        (root / "bin").mkdir()
+        subprocess.run(["git", "-C", str(root), "mv", "tools/run", "bin/run"], check=True)
+        (root / "bin" / "run").write_text("#!/usr/bin/env python3\n" + doc, encoding="utf-8")
+        self.assertEqual(["bin/run:2: sentence-length"], self.gate(root, "sentence-length"))
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.
