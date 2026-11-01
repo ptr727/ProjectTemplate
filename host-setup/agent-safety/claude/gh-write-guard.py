@@ -1745,6 +1745,7 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git push -fofoo origin main", _RULES, "feature/x", "deny", "3720"),
     ("git push -ofoo origin main", _RULES, "feature/x", "allow", "3720"),
     ("git push -4f origin main", _RULES, "feature/x", "deny", "3720"),
+    ("git push -uo ci.skip origin", _RULES, "develop", "deny", "3720"),
     ("git push origin :main", _RULES, "feature/x", "deny", "R4"),
     ("git push origin --delete main", _RULES, "feature/x", "deny", "R4"),
     ("git push origin --delete feature/example", _RULES, "feature/x", "allow", "3314"),
