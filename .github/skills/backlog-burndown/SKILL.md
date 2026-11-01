@@ -90,7 +90,7 @@ A round is the unit. Each one runs these steps in order.
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
-   finished or been abandoned, per "Dispatching a Worker".
+   merged or been abandoned, per "Dispatching a Worker".
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
    the next round prepares under the freeze "The Promotion Boundary" describes. Under that freeze
@@ -157,6 +157,13 @@ batched with any other question the run is sending at that moment, and goes in a
 otherwise. It stays unranked until answered. An issue carrying `decision` is such a question already
 filed, and is held back the same way. An away-mode run asks neither, per "Away Mode".
 
+An issue whose fix edits anything under the hub's `host-setup/agent-safety/` is not ranked until
+an approval is recorded on it. `decision-triage` "Needs the Maintainer", carried under "Away Mode"
+below, says what counts as one. Without it the issue goes to the maintainer the way a question
+does, asking for that approval. With it the issue is ranked, and its pull request's merge still
+waits per "What Invoking This Skill Authorizes". An away-mode run holds every such issue, approved
+or not.
+
 An issue carrying the `deferred` label is counted and is not ranked. The maintainer answered its
 decision "not yet", and its answer comment states the condition the work waits for, per
 `decision-triage`. It is neither asked again nor guessed at, and the round's report gives the
@@ -191,14 +198,24 @@ for, and it binds harder than any throughput target.
   auto-close, so a `Fixes #N` line there closes nothing. **The feature pull request body instead
   carries a line reading `Closes on promotion: #N`**. It lists every issue that pull request
   actually fixes and nothing it merely mentions. The promotion body is assembled from that line,
-  per "The Promotion Boundary". Without that line nothing records which issues a merged pull
-  request closes. That is because the closing keyword is deliberately absent, and a body's other
-  issue references are not the same set.
+  per "The Promotion Boundary". GitHub reads a closing keyword only where the issue reference
+  follows the keyword directly, with at most a colon between them. So the words `on promotion:` keep the line inert. Without that line nothing records which issues a merged pull request closes, since a
+  body's other issue references are not the same set.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
-  branch that holds it**, before dispatching. The branch name is what lets a later session walk
-  from a worktree it found back to the claim explaining it. That is the direction the next bullet
-  actually travels. Working notes do not survive the session, so a claim living only in them is
+  branch that holds it**, before dispatching. The comment writes the branch name in backticks.
+  Recording a release, wherever this skill calls for one, edits that comment to open with the
+  release. A claim comment opening with one holds no files.
+  The branch name is what lets a later session walk from a worktree it found back to the claim
+  explaining it. That is the direction the next bullet actually travels. This lists the open
+  issues where a visible comment from an account with write access names a branch:
+
+  ```sh
+  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | contains("`<branch>`")))) | .number'
+  ```
+
+  Matching the name with its backticks keeps a branch from matching a claim on a longer name that
+  starts with it. Working notes do not survive the session, so a claim living only in them is
   invisible to the round that has to respect it. Recording it on the issue is what makes the next
   bullet a read of durable state rather than of the orchestrator's memory.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
@@ -237,8 +254,12 @@ for, and it binds harder than any throughput target.
   worktree and a hand-driven task's branch are enumerated above and carry no claim comment. So
   reading only the comments records them as holding nothing. That is the collision this section
   exists to prevent rather than the absence of one. Read the branch itself instead:
-  `git diff --name-only origin/develop...<branch>` for what it has committed, and, for a
-  registered worktree, `git -C <worktree> status --porcelain` for what it holds uncommitted. Where
+  `git diff --name-only origin/<base>...<branch>` for what it has committed, and, for a
+  registered worktree, `git -C <worktree> status --porcelain` for what it holds uncommitted.
+  `<base>` is the `baseRefName` of the branch's pull request where it has one, and `develop`
+  otherwise. That is because `repo-worktree` "The Base Branch" lets a task branch from `main`. Read against
+  `develop`, a `main`-based branch can list files it never touched, which errs toward a collision
+  rather than a miss. Where
   neither read is available the set is unknown rather than empty, and an unknown set collides with
   every group. So ask the maintainer what that branch holds, per "Raising a Blocked Question".
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
@@ -277,9 +298,12 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   so brief the group and the bounds rather than restating the loop.
 - **The worker creates its own worktree**, always, as `drive-pr`'s worktree isolation and
   `repo-worktree`'s task-start mandate already require of the task itself. No worker inherits
-  another's worktree. That is why "Bounding the Wait on a Worker" either removes a dead worker's
-  tree and branch or leaves that tree untouched for the maintainer. It never passes the tree on,
-  for the same reason.
+  another's worktree. That is why "Bounding the Wait on a Worker" removes a dead worker's tree,
+  with or without its branch, or leaves that tree untouched for the maintainer. It never passes
+  the tree on, for the same reason.
+- **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
+  clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the path the
+  worker reports is the only way "Cleanup Is the Orchestrator's" can find it.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself, with
@@ -330,10 +354,15 @@ It also refuses a branch another open pull request has as its head or base.
 Any exit other than `0` is reported to the maintainer as it stands, since a `2` can mean the delete landed unconfirmed.
 No hand-typed delete stands in.
 Where the orchestrator's seat cannot run it, the delete is reported to the maintainer with the pull request number and `--repo`.
-The procedure covers every group that is done with its tree, which is the finished ones **and the abandoned ones**.
+The procedure covers every group that is done with its tree, which is the merged ones **and the abandoned ones**.
 A group told to abandon its branch keeps a registered worktree until something removes it.
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
+A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
+The orchestrator confirms the clone at the path the worker reported is clean and its branch tip is the pull request's `headRefOid`.
+Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
+Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
+The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
 
 **Retiring a worktree and deleting its branch are two dispositions with two tests.** Citing one for
 the other is how a removal that discards nothing gets routed to the maintainer. It is also how a
@@ -347,6 +376,15 @@ substitute below for one whose has not. Which check that is matters. A squash me
 the feature tip an ancestor of develop. So the substitute would fail on every merged group if it
 were read as covering them. Every disposition in this skill names which of the two it is.
 
+**A worker told to abandon its branch cleans its own tree first.** `git-commit-conventions` lets a
+command discard work only on the developer's explicit instruction. The maintainer gives it for this
+one case through this skill, and it takes effect when the orchestrator tells a worker to abandon. That message states the
+grant, since the worker never reads this skill. On it the worker
+discards its own uncommitted edits in its own linked worktree, and then reports. It runs
+`git -C <its-worktree> reset --hard` and then `git -C <its-worktree> clean -fd`. Only the seat that
+made the edits can tell they are throwaway. Its commits stay for the branch check below, and it discards
+nothing in any other tree.
+
 An abandoned group, and a dead worker's clean tree, have no merged pull request for
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
 what it exists to establish, that nothing unmerged is being thrown away. Confirm the branch
@@ -355,11 +393,12 @@ Where every confirmation holds, the worktree and local branch are removed by han
 The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`.
 `git branch -d` refuses rather than discards where that check was wrong.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
-Its claim comment is released and its issue returns to the next round's ranking.
+Once both succeed, the orchestrator records the release by editing the group's claim comment, and the issue returns to the next round's ranking.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
-No remote branch is left to report where none was pushed. Where a confirmation fails, cleanup stops there and
-the group is stopped for the maintainer per "Raising a Blocked Question", since past that point removal
-discards work.
+No remote branch is left to report where none was pushed.
+Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
+That stop is per "Raising a Blocked Question", since past that point removal discards work.
+A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
 Where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
 
@@ -394,8 +433,8 @@ The bound is a state read rather than a clock. When the other workers in the rou
 read the silent worker's branch and pull request directly, with `git log` on that branch and
 `gh pr view <branch>`. Pass the branch as that command's positional argument, since a
 bare `gh pr view` resolves the pull request of whatever branch the caller is standing on. It never
-resolves the worker's. Let what they show decide. A pull request that is merged, or a branch whose
-work is complete, means the worker died after doing the work. The group is then finished.
+resolves the worker's. Let what they show decide. A pull request that is merged means the worker
+died after doing the work. The group is then finished.
 
 Anything else needs one thing established before anything is touched: whether that worker is gone
 or merely slow. No git read answers that, and the two call for opposite actions. So the answer
@@ -408,9 +447,12 @@ as an abandoned group's is, per "Cleanup Is the Orchestrator's". That procedure 
 carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
 So that check is what separates the two. It holds, and the issue returns to the next round's
-ranking to be dispatched on a new branch, its claim comment released with the worktree. It fails,
-and cleanup stops there and the group is stopped for the maintainer per
-"Raising a Blocked Question", since past that point removal discards work. **A dirty one is left
+ranking to be dispatched on a new branch. Its claim is released as that procedure records it. It
+fails, and the branch holds the dead worker's work. So the worktree alone is retired, per
+"Cleanup Is the Orchestrator's". The branch, its claim, and any pull request it heads stay
+standing. A fresh worker is then dispatched on that same branch to finish the drive, in the dead
+worker's slot. That is the retire-then-dispatch shape "Raising a Blocked Question" uses. It happens
+once per group, so a second worker dying on that branch stops the group for the maintainer instead. **A dirty one is left
 exactly as it stands**, and the group is stopped for the maintainer per "Raising a Blocked Question". What goes
 to the maintainer names the worktree and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
 replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety".
@@ -726,8 +768,8 @@ leaves the work findable.
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
 answer, the planner returns the group as resuming. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
-ends the work with nothing to merge, it records that instead, and closes any pull request the answer
-retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
+ends the work with nothing to merge, it records the release, stating that the answer ended the work with nothing to merge. It
+also closes any pull request the answer retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
 answer. That closing follows the maintainer's recorded answer, so it is not a close on judgment.
 
 A worker that finds a lesson a future agent must honor files it as a `decision` issue stating the
