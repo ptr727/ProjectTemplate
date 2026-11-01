@@ -66,7 +66,8 @@ query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){
     defaultBranchRef{ name }
     pullRequest(number:$n){
-      merged baseRefName headRefName headRefOid headRepository{ nameWithOwner } } }}
+      state isDraft merged baseRefName headRefName headRefOid mergeCommit{ oid }
+      headRepository{ nameWithOwner } } }}
 """
 Q_CLEANUP_REF = """
 query($o:String!,$r:String!,$q:String!){
@@ -97,6 +98,7 @@ mutation($refId:ID!){
   deleteRef(input:{refId:$refId}){ clientMutationId }}
 """
 DELETE_SETTLE_DELAYS = (1, 2, 4)
+PERMANENT = ("develop", "main")
 
 
 class CleanupUnread(Exception):
@@ -160,6 +162,11 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     return found
 
 
+def permanent_branch(branch: str, default: str) -> bool:
+    """Whether `branch` is one a feature pull request's merge or cleanup never takes as its head."""
+    return branch in (*PERMANENT, default)
+
+
 def in_repository(node: dict, owner: str, repo: str) -> bool:
     """Whether a pull request's head lives in `owner/repo`, a fork's same-named branch being none."""
     name = (node.get("headRepository") or {}).get("nameWithOwner") or ""
@@ -205,6 +212,24 @@ def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     return users
 
 
+def pr_target(owner: str, repo: str, num: int) -> dict:
+    """The pull request's live fields beside its repository's default branch, for both writes.
+
+    `merge` reads it before and after its merge, and `cleanup` before its delete. One read keeps
+    the two agreeing on the head and branch they act on. Raises `CleanupUnread` where nothing
+    answered.
+    """
+    data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
+    repository = data.get("repository") or {}
+    pr = repository.get("pullRequest")
+    default = (repository.get("defaultBranchRef") or {}).get("name")
+    if not isinstance(pr, dict) or not default:
+        raise CleanupUnread(f"{owner}/{repo} #{num} returned no pull request or no default branch")
+    if not pr.get("headRefName") or not pr.get("headRefOid"):
+        raise CleanupUnread(f"{owner}/{repo} #{num} returned no head branch or head commit")
+    return {**pr, "defaultBranch": default}
+
+
 class CleanupPlan(NamedTuple):
     branch: str
     head: str
@@ -219,25 +244,17 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
     The write guard's per-branch rule check never sees a delete made from inside this script.
     """
     target = f"{owner}/{repo}"
-    data = cleanup_read(Q_CLEANUP_TARGET, o=owner, r=repo, n=num)
-    repository = data.get("repository") or {}
-    pr = repository.get("pullRequest")
-    default = (repository.get("defaultBranchRef") or {}).get("name")
-    if not isinstance(pr, dict) or not default:
-        raise CleanupUnread(f"{target} #{num} returned no pull request or no default branch")
-    branch = pr.get("headRefName")
-    head = pr.get("headRefOid")
-    if not branch or not head:
-        raise CleanupUnread(f"{target} #{num} returned no head branch or head commit")
+    pr = pr_target(owner, repo, num)
+    branch, head = pr["headRefName"], pr["headRefOid"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or ""
     refusals = []
     if pr.get("merged") is not True:
         refusals.append("the pull request is not merged")
     if pr.get("baseRefName") != "develop":
         refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
-    if head_repo.lower() != target.lower():
+    if not in_repository(pr, owner, repo):
         refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
-    if branch in ("develop", "main", default):
+    if permanent_branch(branch, pr["defaultBranch"]):
         refusals.append(f"its head branch {branch!r} is a permanent branch")
     if refusals:
         raise CleanupRefused(
@@ -347,19 +364,22 @@ def _cleanup(owner: str, repo: str, num: int) -> int:
     return cleanup_remote_delete(owner, repo, plan)
 
 
-def cleanup_scope(owner: str, repo: str) -> int | None:
-    """The exit code where the write scope refuses or cannot be established, else None."""
+def cleanup_scope(owner: str, repo: str, done: str = "deleted") -> int | None:
+    """The exit code where the write scope refuses or cannot be established, else None.
+
+    `done` names the write in the refusal text, since `merge` checks the same scope.
+    """
     ok, why = core.in_scope(owner)
     if not ok:
-        print(f"status=OUT_OF_SCOPE nothing was deleted: {why}")
+        print(f"status=OUT_OF_SCOPE nothing was {done}: {why}")
         return 64
     try:
         handoff.require_write_scope(argparse.Namespace(cmd="cleanup", repo=f"{owner}/{repo}"))
     except handoff.Refusal as exc:
-        print(f"status=REFUSED nothing was deleted, refused by handoff.py's write scope: {exc}")
+        print(f"status=REFUSED nothing was {done}, refused by handoff.py's write scope: {exc}")
         return 1
     except handoff.Execution as exc:
-        print(f"status=UNREAD nothing was deleted: {exc}")
+        print(f"status=UNREAD nothing was {done}: {exc}")
         return 2
     return None
 
@@ -804,7 +824,7 @@ class CleanupSweep:
         self.apply = apply
         self.min_age = min_age
         self.problems = 0
-        self.permanent = {"develop", "main"}
+        self.permanent = set(PERMANENT)
         self.common = ""
         self.operating: set[str] = set()
 

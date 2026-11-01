@@ -113,9 +113,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      until its acknowledgment posts under item 4.
 
    The merge then runs with `--match-head-commit` set to the head those were checked on. The
-   evidence names each constituent pull request and how its coverage was stated. An
-   `unattended-handoff` worker records it on the handoff, and an attended merge reports it to the
-   maintainer. Any other shortfall still goes to the maintainer. One example is a promotion
+   evidence names each constituent pull request and how its coverage was stated. A
+   `backlog-burndown` away-mode worker records it on the promotion pull request, and an attended
+   merge reports it to the maintainer. Any other shortfall still goes to the maintainer. One example is a promotion
    carrying a change whose own pull request lacked that coverage. A pull request another lane
    merged with no attested local pass and no review round is one such. The case answers item 2 alone, so item 5's permission is still owed.
    Every pull request other than a promotion owes this item's coverage in full.
@@ -447,7 +447,8 @@ the GitHub-specific API operations, each taking `<number> --repo <owner>/<repo>`
 request description against the branch it describes, catching a commit or `uses:` ref the head no
 longer carries. `status` reports coverage, threads, body-only findings, and
 shapes in one call. `wait` requests and polls in-process. `comment` posts a PR-conversation
-answer after it reads the PR node ID. `reply` answers a thread by matching the finding's own
+answer after it reads the PR node ID. `merge` squash-merges a feature pull request into
+`develop` once the gate's mechanically readable items read met, per `drive-pr` step 4. `reply` answers a thread by matching the finding's own
 words instead of a line number a fix push can move. It resolves the thread only when `--resolve`
 is given. A finding posted twice on one file, as two threads with the same text, is answered with
 `--all-identical`, which the refusal names. The repository's

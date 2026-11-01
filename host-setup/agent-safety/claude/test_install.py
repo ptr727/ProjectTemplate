@@ -1753,6 +1753,179 @@ class TestRegistration(StampCase):
                 self.assertTrue(install.names_hook(command, install.GUARD_NAME), command)
 
 
+class TestAutoMode(StampCase):
+    """The kit owns its tagged autoMode entries, and a machine's own entries are never touched.
+
+    Every fixture is constructed, so no case depends on what a real host's settings.json holds.
+    """
+
+    OWN = ("Agents leave the example lab bench alone", "Agents read example logs freely")
+
+    def _settings(self):
+        return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
+
+    def _write(self, data):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "settings.json").write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def _owned(self, name):
+        return install.owned_auto_mode()[name]
+
+    def test_a_tagged_entry_is_replaced_while_untagged_entries_keep_their_text_and_order(self):
+        stale = install.AUTO_MODE_TAG + "an older wording of a kit rule"
+        quoting_the_tag_mid_string = "A host rule that quotes " + install.AUTO_MODE_TAG.strip()
+        self._write(
+            {
+                "autoMode": {
+                    "environment": [
+                        "$defaults",
+                        self.OWN[0],
+                        stale,
+                        quoting_the_tag_mid_string,
+                        self.OWN[1],
+                    ],
+                    "classifyAllShell": True,
+                }
+            }
+        )
+        self.install()
+        auto = self._settings()["autoMode"]
+        self.assertEqual(
+            auto["environment"],
+            [
+                "$defaults",
+                self.OWN[0],
+                quoting_the_tag_mid_string,
+                self.OWN[1],
+                *self._owned("environment"),
+            ],
+        )
+        self.assertIs(auto["classifyAllShell"], True)
+
+    def test_a_list_the_kit_creates_starts_with_defaults(self):
+        self.install()
+        auto = self._settings()["autoMode"]
+        for name in install.AUTO_MODE_LISTS:
+            with self.subTest(list=name):
+                owned = self._owned(name)
+                if owned:
+                    self.assertEqual(auto[name], [install.AUTO_MODE_DEFAULTS, *owned])
+                else:
+                    self.assertNotIn(name, auto, "a list the kit owns nothing in was created")
+
+    def test_an_existing_list_without_defaults_is_reported_rather_than_rewritten(self):
+        self._write({"autoMode": {"allow": list(self.OWN)}})
+        r = self.install()
+        self.assertEqual(self._settings()["autoMode"]["allow"], [*self.OWN, *self._owned("allow")])
+        self.assertIn("autoMode.allow holds no $defaults", r.stdout)
+        self.assertIn("replaces Claude Code's built-in rules", r.stdout)
+
+    def test_a_second_run_writes_byte_identical_settings(self):
+        self._write({"autoMode": {"environment": list(self.OWN), "soft_deny": ["$defaults"]}})
+        self.install()
+        first = (self.home / "settings.json").read_bytes()
+        r = self.install()
+        self.assertEqual((self.home / "settings.json").read_bytes(), first)
+        self.assertIn("already current", r.stdout)
+
+    def test_a_malformed_shape_refuses_the_file_and_leaves_it_unchanged(self):
+        for label, auto, where in (
+            ("auto-mode-not-object", ["nope"], "`autoMode` as list"),
+            ("list-not-list", {"allow": "nope"}, "`autoMode.allow` as str"),
+            ("explicit-null-list", {"environment": None}, "`autoMode.environment` as NoneType"),
+        ):
+            with self.subTest(shape=label):
+                self._write({"autoMode": auto})
+                before = (self.home / "settings.json").read_bytes()
+                r = run(self.home)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn(where, r.stderr)
+                self.assertEqual((self.home / "settings.json").read_bytes(), before)
+
+    def test_the_report_names_a_malformed_shape_rather_than_crashing(self):
+        self.install()
+        data = self._settings()
+        data["autoMode"] = {"environment": "nope"}
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("`autoMode.environment` as str", r.stdout)
+
+    def test_a_non_string_entry_is_kept_untouched_as_untagged(self):
+        """The file is the maintainer's, so an entry the kit cannot own is left where it sits."""
+        odd = [7, None, {"note": "a host's own"}]
+        self._write({"autoMode": {"environment": ["$defaults", odd[0], self.OWN[0], *odd[1:]]}})
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(
+            self._settings()["autoMode"]["environment"],
+            ["$defaults", odd[0], self.OWN[0], *odd[1:], *self._owned("environment")],
+        )
+        report = run(self.home, "--report")
+        self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
+        self.assertIn("autoMode.environment: 4 untagged entries, with $defaults", report.stdout)
+
+    def test_tagged_reads_a_non_string_as_untagged(self):
+        for entry in (7, None, [install.AUTO_MODE_TAG], {"rule": install.AUTO_MODE_TAG}):
+            with self.subTest(entry=entry):
+                self.assertFalse(install.tagged(entry))
+
+    def test_the_report_is_stale_once_the_owned_text_changes(self):
+        """A machine holding an earlier wording is stale against a checkout carrying a newer one."""
+        self.install()
+        data = self._settings()
+        data["autoMode"]["environment"][-1] = install.AUTO_MODE_TAG + "an earlier wording"
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("the installed content differs", r.stdout)
+        self.assertIn("autoMode.environment entries tagged", r.stdout)
+        self.install()
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_the_owned_text_is_in_the_payload_digest(self):
+        baseline = install.payload_digest()
+        changed = dict(install.AUTO_MODE_RULES, allow=("a reworded rule",))
+        with mock.patch.dict(install.AUTO_MODE_RULES, changed):
+            self.assertNotEqual(install.payload_digest(), baseline)
+        self.assertEqual(install.payload_digest(), baseline)
+
+    def test_an_untagged_entry_never_moves_either_digest(self):
+        self.install()
+        current = install.installed_digest(self.home)
+        data = self._settings()
+        data["autoMode"]["environment"].insert(0, self.OWN[0])
+        self._write(data)
+        self.assertEqual(install.installed_digest(self.home), current)
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_the_report_counts_untagged_entries_without_judging_them(self):
+        self._write({"autoMode": {"environment": list(self.OWN), "hard_deny": ["$defaults"]}})
+        self.install()
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("autoMode.environment: 2 untagged entries, without $defaults", r.stdout)
+        self.assertIn("autoMode.hard_deny: 0 untagged entries, with $defaults", r.stdout)
+
+    def test_a_retired_rule_leaves_untagged_entries_and_a_bare_defaults_list(self):
+        """The removal path: a list the kit owns nothing in loses only its tagged entries."""
+        retired = install.AUTO_MODE_TAG + "a rule this kit no longer writes"
+        self._write(
+            {
+                "autoMode": {
+                    "soft_deny": ["$defaults", retired],
+                    "hard_deny": ["$defaults", self.OWN[0], retired, self.OWN[1]],
+                }
+            }
+        )
+        self.install()
+        auto = self._settings()["autoMode"]
+        self.assertEqual(auto["soft_deny"], ["$defaults"])
+        self.assertEqual(auto["hard_deny"], ["$defaults", *self.OWN])
+
+
 class TestContainmentPrefix(StampCase):
     """The shell prefix is set where the host can contain a command, and owned only while it names ours."""
 
