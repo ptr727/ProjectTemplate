@@ -136,8 +136,8 @@ of its own.
    same order. Each prompt then names the group's questions that the other prompts carry.
 6. **Offer to close the overtaken issues**, as one question naming each issue and what overtook
    it. Closing them is the recommended option. An issue that still tracks other work is named as
-   staying open instead. Comment on each issue kept open, that one or one the maintainer declines
-   to close, that it stays open and what overtook it. A later history check reads that comment as
+   staying open instead. An issue stays open where it tracks other work or where the maintainer
+   declines to close it. Comment on each such issue that it stays open and what overtook it. A later history check reads that comment as
    settling only the overtaken part, and classifies the work that remains.
 7. **Apply each answer** as it arrives, as "Communicating with the User" below states for an item
    leaving the queue. Where the answer settles the work, leave the issue open as work, so an away
