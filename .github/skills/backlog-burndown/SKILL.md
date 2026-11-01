@@ -400,7 +400,8 @@ Where it was pushed, the orchestrator also deletes the remote branch, since `cle
 That is the one remote delete this skill types by hand.
 Before `git worktree remove` runs, it records the local tip with `git rev-parse refs/heads/<exact-branch>`.
 The delete runs only where three checks hold.
-The recorded tip carries no commit develop lacks, so `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` exits `0`.
+The recorded tip carries no commit develop lacks.
+After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` exits `0`.
 The remote tip, read live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, equals the recorded tip.
 And no open pull request uses the branch as its head or its base.
 `gh pr list --head <exact-branch> --state open --json number --jq length` prints `0`, and so does the same command with `--base`.
