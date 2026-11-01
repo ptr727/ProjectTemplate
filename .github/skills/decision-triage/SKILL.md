@@ -122,7 +122,8 @@ of its own.
    - For an `OVERTAKEN` one, from either seat, take it out of the queue as "Communicating with
      the User" below states, recording the reason. It is not asked. Do the same for a queued
      `decision` issue the history check returned as `HELD` awaiting promotion. That issue skips
-     step 6 and stays open, since the promotion closes it.
+     step 6 and stays open until a promotion lands. The first triage after it then returns the
+     issue as `OVERTAKEN`.
 
    The comment states the question, then the options, the recommended one first, each with its
    reason. It names the evidence and what each option does to any work in flight.
