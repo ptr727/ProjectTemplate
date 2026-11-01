@@ -983,10 +983,14 @@ def check_interface(path, contract, text):
         findings.append(
             (
                 "DRIFT",
-                f"interface: {path} missing the ruleset-bound check name '{name}' as a job name",
+                f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
             )
         )
-    elif name and name not in gated and workflow_events(_yaml(text)[0]) - {"pull_request"}:
+    elif (
+        name
+        and name not in gated
+        and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}
+    ):
         findings.append(
             (
                 "DRIFT",

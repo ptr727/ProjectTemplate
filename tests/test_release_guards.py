@@ -1376,6 +1376,9 @@ gh() {
             yaml_value(yaml_step(job, "Resolve lint Python version step"), "if"),
         )
         script = step_script_text(job, "Resolve lint Python version step")
+        # A file rather than bash -c, since Git Bash collapses the filter's doubled backslash in a -c argument.
+        resolve_script = Path(self.enterContext(tempfile.TemporaryDirectory())) / "resolve.sh"
+        resolve_script.write_text(script, encoding="utf-8", newline="\n")
         cases = {
             '["3.14", "3.13"]': "version=3.14\n",
             '["3.13"]': "version=3.13\n",
@@ -1390,7 +1393,7 @@ gh() {
                 output = Path(scratch) / "output"
                 output.write_text("", encoding="utf-8")
                 result = run(
-                    [bash_or_skip(), "-c", script],
+                    [bash_or_skip(), str(resolve_script)],
                     env={**os.environ, "PYTHON_VERSIONS": versions, "GITHUB_OUTPUT": str(output)},
                     capture_output=True,
                     text=True,
