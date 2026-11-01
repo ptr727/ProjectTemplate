@@ -96,7 +96,9 @@ of its own.
 2. **Classify the rest** in batches, one `standard` classifier per batch, at most four running at
    once. Each applies "Needs the Maintainer" above, which its brief quotes whole. Before that, it
    checks whether a later change has already overtaken the issue, which is a cheap history check
-   rather than research. The check reads `git log origin/main` on the files the issue names, the
+   rather than research. The check fetches `origin` immediately before it reads, and stops and
+   reports if the fetch fails. A stale `origin/main` or `origin/develop` reads an overtaken issue
+   as `HELD` or as open work. It reads `git log origin/main` on the files the issue names, the
    state of any child issues it tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
    `OVERTAKEN`. The queued `decision` issues get the same check and no classification beyond it.
@@ -111,7 +113,7 @@ of its own.
    code. It returns in the form "Return Lines" below, and writes only to the scratch directory
    its brief names. A queued question a later change has already answered or overtaken comes
    back as `OVERTAKEN` rather than as options. A fix counts as that change only once it is on
-   `origin/main`.
+   `origin/main`, read after a fetch the same way the step 2 check reads it.
 4. **Record each question** before asking it, so the question survives an interrupted session.
    - For an `ASK`, comment the researched question on the issue and add the `decision` label.
    - For a `SPLIT`, file a new issue holding only the undecided item, carrying `decision`.
