@@ -54,6 +54,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    whose own file table names exactly the changed files covers it, `coverage=table`. That is the
    reading a Copilot round at Balanced review effort gives. Where no round covering the head carries a table of its own, the newest round
    that does stands in as `coverage=carried:table`. Its table has to name exactly the changed files.
+   Either table may leave out an added, modified, or deleted file with no changed line, such as a
+   binary. That holds while some changed file has one.
    A table stands in only where no Copilot round on the pull request, on any commit, states
    partial coverage. So a pull request that ever had a partial round goes to the maintainer.
    `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
@@ -67,13 +69,17 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is
    its own ordinary "reviewed, nothing to flag" shape.
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
-   it where it can. A file-count refusal is cleared by splitting the pull request, which is the
-   only cause on record that the loop can clear. `pr_review.py wait` exits `41` on every refusal
-   and quota state, its `status=` line naming which. The digest's `refusal=` field carries a
+   it where it can. A file-count refusal is cleared by splitting the pull request. A refusal saying
+   every changed file is in Copilot's default review exclusions says nothing about the content, and
+   no round follows it. On a pull request into a branch other than the default, the attested local
+   pass covers that head. Where none can, it goes to the maintainer, `wait` exiting `41` as
+   `REVIEW_EXCLUDED_FILES_ONLY`. `pr_review.py wait` exits `41` on every other refusal and quota
+   state no local pass covers, its `status=` line naming which. The digest's `refusal=` field carries a
    refusal on this pull request.
    `refusal=QUOTA` or `refusal=ERROR` means the pull request's newest Copilot review is an
    account-quota refusal or an error refusal read as a possible quota hit. That review can sit on
-   this head or an earlier one. Nothing the loop does clears it, which is the case "Which
+   this head or an earlier one. On a pull request into a branch other than the default, an attested
+   local pass on a later head clears it, `coverage=local`. Otherwise nothing the loop does clears it, which is the case "Which
    Reviewers a Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
    transient is the exception. `wait` re-requests it once and exits `30` while that request is
    pending. A second error refusal in a row, or a re-request made with no round answering it,
@@ -237,11 +243,12 @@ must have done.
   step below is where a missing one is answered, on the terms stated there. A refusal naming the
   account quota is its own case rather than a review. So is one saying only that Copilot
   encountered an error, which is what the
-  weekly rate limit posts. Each covers no head, so the gate stays unsatisfied. Nothing the
-  loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
+  weekly rate limit posts. Each covers no head, so the gate stays unsatisfied where no local pass
+  stands in. Nothing the loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
   reviewer's run log names a reset time `pr_review.py` reports it. Where it names a transient
-  fetch failure instead, `pr_review.py wait` re-requests once. Every other refusal, a repeat of
-  that one included, goes to the maintainer rather than into a wait.
+  fetch failure instead, `pr_review.py wait` re-requests once. Where no local pass stands in, every
+  other refusal goes to the maintainer rather than into a wait, a repeat of that one included. A
+  file-count refusal is the exception, since splitting the pull request clears it.
 
 The hub's `docs/pr-reviewer-reference.md` records what each reviewer does, what shapes it, and
 which repositories its plan covers. That is the record for a reviewer whose behavior still

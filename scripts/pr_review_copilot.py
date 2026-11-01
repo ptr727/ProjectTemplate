@@ -36,7 +36,7 @@ from markdown_it.token import Token
 VOCABULARY = Path(__file__).resolve().parent / "reviewers"
 REVIEWERS = ("copilot", "coderabbit", "qodo")
 COVERAGE = ("full", "partial", "none", "unknown")
-REFUSALS = ("none", "quota", "file_count", "error", "unknown")
+REFUSALS = ("none", "quota", "file_count", "excluded", "error", "unknown")
 VERDICTS = ("clean", "flagging", "unknown")
 KINDS = ("open", "suppressed", "previously_missed")
 # Every key a vocabulary file carries, and the shape each value takes.
