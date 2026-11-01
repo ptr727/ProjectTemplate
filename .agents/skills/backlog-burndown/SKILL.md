@@ -57,6 +57,13 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 - Naming this skill is the maintainer's explicit go-ahead for the feature -> develop squash merges
   this run performs, in every round of it. A per-round merge question would idle every agent at
   every boundary, which is the thing this skill exists to avoid.
+- **The grant does not reach a pull request editing the hub's `host-setup/agent-safety/`.** Its
+  merge waits on the maintainer's go-ahead for that pull request, given after reading its diff,
+  per `decision-triage` "Needs the Maintainer". A worker brief for such a group states that the
+  worker drives the pull request to the gate and does not merge it. The group then ends as stopped
+  on a maintainer-only question, and "Raising a Blocked Question" puts the merge go-ahead to the
+  maintainer. Once the maintainer gives it, the resumed worker's brief carries that go-ahead for
+  that pull request in place of the no-merge line.
 - **The grant is bounded by the session it was named in.** A run interrupted and resumed in a new
   session needs the skill named again. Naming it again costs one sentence, and it is the
   difference between a grant and a mode. A grant read back from a note is one nobody gave.
@@ -149,6 +156,11 @@ except how the question travels. It goes to the maintainer at the end of ranking
 batched with any other question the run is sending at that moment, and goes in a prompt of its own
 otherwise. It stays unranked until answered. An issue carrying `decision` is such a question already
 filed, and is held back the same way. An away-mode run asks neither, per "Away Mode".
+
+An issue carrying the `deferred` label is counted and is not ranked. The maintainer answered its
+decision "not yet", and its answer comment states the condition the work waits for, per
+`decision-triage`. It is neither asked again nor guessed at, and the round's report gives the
+count of open `deferred` issues rather than naming each one.
 
 An issue whose group is stopped, per "Raising a Blocked Question", is counted but not ranked until the maintainer's answer releases that group's claim.
 The round's report names it as stopped.
@@ -597,7 +609,13 @@ and a guess costs a revert and a review round.
   visibility, a secret, or a release condition. Or it needs a credential, an account, or a host
   the session lacks.
 - **The fix edits anything under the hub's `host-setup/agent-safety/`.** That tree is the agent's
-  own guard, so a human approves every change to it.
+  own guard, so a human approves every change to it. An approval on the issue lets an attended
+  run implement the edit and drive its pull request. The approval is a comment from an account
+  with write access that approves the change, written by the maintainer or recording the
+  maintainer's answer. A recommendation a triage seat posted is never one. Merging the pull
+  request still waits on the maintainer's go-ahead for that pull request, given after reading its
+  diff. The approval covers the design and not the diff, and a standing merge go-ahead a run
+  carries does not reach it. An away-mode run holds every such edit, approved or not.
 - **The fix reverses a settled decision** recorded in an issue, a handoff, or the rule text.
 - **The fix adds a rule the issue does not ask for.** A rule a future agent must honor is the
   maintainer's to judge. An issue that asks for a rule has been judged, and one that only reports
@@ -611,7 +629,9 @@ These are not reasons an issue needs the maintainer, and a report never counts t
 issue that is `blocked` on another issue waits on that issue. One that needs a platform, by the
 test `session-handoff` "The Chain" states, waits on that platform's lane. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
-that owns it. A handoff link carrying the `handoff` label is not an issue of its own.
+that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
+condition its answer comment states. A handoff link carrying the `handoff` label is not an issue
+of its own.
 
 <!-- /include -->
 
@@ -783,7 +803,7 @@ also covers an issue held back for a setting, a credential, a host, or the agent
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
-request, and awaiting promotion. A held promotion is named too, with each `decision` issue holding
+request, awaiting promotion, and `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
 it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State

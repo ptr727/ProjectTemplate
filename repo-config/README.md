@@ -41,6 +41,10 @@ The triage labels classify an issue by the kind of work it needs. So a backlog s
 
 A parked handoff also carries `blocked`, and differs from the paragraph above in three ways. It carries no triage label, since no handoff does. It waits on a `decision` issue in this repository, named in its parking comment rather than its body. And it stays out of every backlog count, as every handoff does. When it goes on and comes off is set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge] as well.
 
+`deferred` is a marker as well. It goes on an issue whose `decision` the maintainer answered "not yet", as that label comes off. The answer comment states the condition the work waits for. So it differs from `blocked`, which waits on another issue, in waiting on the maintainer's timing. Every count of the open backlog includes it. A triage or a round reports it by count, and neither ranks it nor asks it again. It comes off at the maintainer's word. A session lifts it alone only where the stated condition is checkable state, such as an issue closing, and comments the evidence. When it goes on and comes off is set by the `decision-triage` Skill, and what a round does with it is the `backlog-burndown` Skill's "Ranking".
+
+- **`deferred`**: a decision answered not yet, waiting on the condition its answer comment states.
+
 `handoff` is a surface marker like `agents` and `skills` rather than a triage label. A handoff issue carries no triage label at all, because it records work to do next rather than work of its own. Without that stated here, the next reader of this taxonomy reads a handoff issue carrying no triage label as drift. The chain it indexes is found by this label rather than by a title search. That is what lets a handoff title carry a human subject with nothing parsing it. Every enumeration that ranks or counts the open backlog excludes the label for the same reason one is always open by design.
 
 - **`handoff`**: a link in the session handoff chain, one open issue per track.

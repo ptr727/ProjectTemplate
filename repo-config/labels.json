@@ -7,6 +7,7 @@
     { "name": "codegen", "color": "3526d4", "description": "Codegen bot" },
     { "name": "comments", "color": "8a63d2", "description": "Permits the comment lines the pull request adds or edits, which the prose gate otherwise refuses" },
     { "name": "decision", "color": "b60205", "description": "A question waiting on the maintainer, alone or beside whatever else the issue carries" },
+    { "name": "deferred", "color": "fef2c0", "description": "A decision answered not yet, waiting on the condition its answer comment states" },
     { "name": "dependencies", "color": "0366d6", "description": "Pull requests that update a dependency file" },
     { "name": "documentation", "color": "0075ca", "description": "Improvements or additions to documentation" },
     { "name": "duplicate", "color": "cfd3d7", "description": "This issue or pull request already exists" },
