@@ -89,7 +89,7 @@ A round is the unit. Each one runs these steps in order.
    parked behind another group's file claim, handed back for review, or abandoned.
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
-6. **Clean up** the worktrees, local branches, and merged remote branches of every group that has
+6. **Clean up** the worktrees, local branches, and remote branches of every group that has
    merged or been abandoned, per "Dispatching a Worker".
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
@@ -214,7 +214,8 @@ for, and it binds harder than any throughput target.
   gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | contains("`<branch>`")))) | .number'
   ```
 
-  Matching the name with its backticks keeps a branch from matching a claim on a longer name that
+  Before it runs, `<branch>` is replaced with the name of the branch being looked up, its
+  backticks kept. Matching the name with its backticks keeps a branch from matching a claim on a longer name that
   starts with it. Working notes do not survive the session, so a claim living only in them is
   invisible to the round that has to respect it. Recording it on the issue is what makes the next
   bullet a read of durable state rather than of the orchestrator's memory.
@@ -393,9 +394,17 @@ Where every confirmation holds, the worktree and local branch are removed by han
 The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`.
 `git branch -d` refuses rather than discards where that check was wrong.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
-Once both succeed, the orchestrator records the release by editing the group's claim comment, and the issue returns to the next round's ranking.
-A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
-No remote branch is left to report where none was pushed.
+Where the branch was never pushed, the orchestrator records the release once both succeed.
+It edits the group's claim comment, and the issue returns to the next round's ranking.
+Where it was pushed, the orchestrator also deletes the remote branch by hand, since `cleanup` needs a merged pull request to read.
+That delete runs only where two checks hold.
+The remote tip, read live with `git ls-remote origin refs/heads/<exact-branch>`, equals the local tip the no-merge check above just read.
+And no open pull request uses the branch as its head, read live with `gh pr list --head <exact-branch> --state open`.
+The delete is `git push origin --delete <exact-branch>`, an outward-facing write bound by `GOVERNANCE.md` "Repository Boundaries and Write Safety".
+So it names the exact branch, takes every identifier from a live read, and keeps its output unsuppressed.
+The orchestrator then reads the ref back with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, and only its exit `2`, no matching ref, confirms the delete.
+Only after that confirmation is the release recorded on the claim comment, and the issue then returns to the next round's ranking.
+Where either check fails or the delete is not confirmed, the claim is kept and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
 That stop is per "Raising a Blocked Question", since past that point removal discards work.
 A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
@@ -446,8 +455,8 @@ Once the worker is confirmed gone, its worktree decides what follows. **A clean 
 as an abandoned group's is, per "Cleanup Is the Orchestrator's". That procedure confirms the branch
 carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
-So that check is what separates the two. It holds, and the issue returns to the next round's
-ranking to be dispatched on a new branch. Its claim is released as that procedure records it. It
+So that check is what separates the two. It holds, and once that procedure releases the claim,
+the issue returns to the next round's ranking to be dispatched on a new branch. It
 fails, and the branch holds the dead worker's work. So the worktree alone is retired, per
 "Cleanup Is the Orchestrator's". The branch, its claim, and any pull request it heads stay
 standing. A fresh worker is then dispatched on that same branch to finish the drive, in the dead
