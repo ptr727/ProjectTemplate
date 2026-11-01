@@ -381,9 +381,9 @@ def shape_hold(pr: dict, oid: str = "") -> tuple[str, list[adapter.Unplaced], bo
 
 
 def answering_comments(pr: dict) -> Iterator[list[str]]:
-    """The HTML lines of each trusted comment that also carries a written line, not a marker alone."""
+    """The HTML lines of each trusted comment that also carries prose outside code, not a marker alone."""
     for body, lines in trusted_comments(pr):
-        if any(ln.strip() and not ln.strip().startswith("<!-- fleet-") for ln in body.splitlines()):
+        if adapter.has_prose(body):
             yield lines
 
 

@@ -836,6 +836,14 @@ def html_lines(body: str) -> list[str]:
     ]
 
 
+def has_prose(body: str) -> bool:
+    """Whether the body carries written text outside code and raw HTML, such as a marker line."""
+    return any(
+        token.type == "inline" and token.content.strip()
+        for token in PARSER.parse((body or "").replace("\r\n", "\n"))
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="pr_review_copilot.py",

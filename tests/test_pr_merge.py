@@ -508,6 +508,7 @@ class TestUnmetItems(MergeCase):
             ("no written outcome", {**good, "body": marker_only}),
             ("unknown outcome", self.answer(pr, ("previously_missed",), outcome="ignored")),
             ("quoted in code", {**good, "body": good["body"].replace("<!--", "`<!--")}),
+            ("outcome only in a fence", {**good, "body": f"```\nDeclined.\n```\n\n{marker_only}"}),
         ):
             with self.subTest(label):
                 unmet = self.unmet_on(self.with_comments(pr, comment))
@@ -587,6 +588,15 @@ class TestUnmetItems(MergeCase):
         ]
         self.assertTrue(qodo[0])
         self.assertNotEqual([i.key for i in qodo[0]], [i.key for i in qodo[1]])
+
+    def test_a_no_thread_block_s_key_moves_with_what_it_counts(self) -> None:
+        def key(text: str) -> str:
+            pr = fixtures.payload([fixtures.review(body=text)], files=["a.py"])
+            return next(i.key for i in answers.items(pr) if i.kind == answers.NO_THREAD)
+
+        self.assertNotEqual(
+            key(fixtures.overview_v2()), key(fixtures.overview_v2(open_count="3 open findings"))
+        )
 
     def test_a_login_drift_takes_no_answer(self) -> None:
         drifted = fixtures.review(login="copilot-pull-request-reviewer-v2", rid="PRR_d")

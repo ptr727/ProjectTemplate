@@ -145,8 +145,9 @@ def items(pr: dict) -> list[Item]:
         ]
     newest = newest_of(head_reviews(pr))
     anchor = (newest or {}).get("id") or ""
-    if owed(pr)[0]:
-        found.append(Item(NO_THREAD, key(NO_THREAD, anchor, ""), "", ""))
+    if (unthreaded := owed(pr))[0]:
+        text = "\n".join([str(unthreaded[0]), *unthreaded[1]])
+        found.append(Item(NO_THREAD, key(NO_THREAD, anchor, text), "", ""))
     if flagged := uncounted_verdict(pr):
         found.append(Item(VERDICT, key(VERDICT, anchor, flagged[1]), "", flagged[1]))
     return found + noted(pr)
