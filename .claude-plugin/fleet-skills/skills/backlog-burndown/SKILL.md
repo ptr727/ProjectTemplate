@@ -180,7 +180,7 @@ merged feature pull request leaves its issue open, per "Grouping and File Claims
 keywords. So ranking it again dispatches a second fix for finished work. Read the fixed set the way
 "The Promotion Boundary" and "Assembling the Promotion Body" read it, over
 `origin/main..origin/develop`, freshly fetched. That is each pull request's `Closes on promotion:`
-line, and on the operational model the `Closes on promotion:` line in each commit message too.
+line, and on the operational model each direct push's own line too.
 The round's report names each such issue as awaiting promotion.
 
 ## Grouping and File Claims
@@ -282,7 +282,7 @@ for, and it binds harder than any throughput target.
 - **A grown set entering the hub's `host-setup/agent-safety/` takes the hold "Ranking" applies**,
   whether or not another group holds the file. Without an approval recorded on the issue, the group
   stops for one per "Raising a Blocked Question", and the worker does not edit there. With
-  one, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
+  one, in an attended run, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
   requires of such a brief.
 - **Cap the round at four workers**, whatever the grouping allows.
 
@@ -313,12 +313,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   with or without its branch, or leaves that tree untouched for the maintainer. It never passes
   the tree on, for the same reason.
 - **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
-  clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the brief names a
-  scratch directory and tells a worker choosing that fallback to record the clone's absolute path
-  there before it clones. The file is `clone-<branch>.path`. Every scratch file named for a branch writes each `/` in it as `-`.
-  A worker that cannot write that file does not clone, and stops and reports instead.
-  A worker that dies reports nothing, and that file is then the only way "Cleanup Is the
-  Orchestrator's" finds the clone.
+  clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the path the
+  worker reports is the only way "Cleanup Is the Orchestrator's" can find it.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself, with
@@ -374,7 +370,7 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone at the path the worker reported or recorded is clean and its branch tip is the pull request's `headRefOid`.
+The orchestrator confirms the clone at the path the worker reported is clean and its branch tip is the pull request's `headRefOid`.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
 The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
@@ -394,8 +390,7 @@ were read as covering them. Every disposition in this skill names which of the t
 **A worker told to abandon its branch cleans its own tree first.** `git-commit-conventions` lets a
 command discard work only on the developer's explicit instruction. The maintainer gives it for this
 one case through this skill, and it takes effect when the orchestrator tells a worker to abandon. That message states the
-grant, since the worker never reads this skill. It leaves the grant out for a worker whose
-reported or recorded checkout is a standalone clone. On it the worker
+grant, since the worker never reads this skill. On it the worker
 discards its own uncommitted edits in its own linked worktree, and then reports. It runs
 `git -C <its-worktree> reset --hard` and then `git -C <its-worktree> clean -fd`. Only the seat that
 made the edits can tell they are throwaway. Its commits stay for the branch check below, and it discards
@@ -429,16 +424,6 @@ That stop is per "Raising a Blocked Question", since past that point removal dis
 A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
 Where a pushed branch still heads or bases an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
-
-**An abandoned group's or a dead worker's standalone clone is left exactly as it stands.**
-Neither removal above reaches it. `git worktree remove` acts on the base clone's registered
-worktrees, and `git branch -d` on its branches. The clone is found at the path its worker reported
-or recorded, per "Dispatching a Worker". The group is stopped for the maintainer per "Raising a
-Blocked Question", naming the clone's path. The discard grant above does not reach a clone, since
-it names the worker's own linked worktree. A recorded path naming no directory counts as no
-checkout. A group with no registered worktree and no recorded path is released only where its
-branch exists neither locally nor on the remote. The orchestrator then records the release, and
-the issue returns to the next round's ranking. Otherwise the group is stopped for the maintainer.
 
 ### Choosing the Worker's Model Tier
 
@@ -480,9 +465,7 @@ comes from the dispatch mechanism itself, which knows whether the subagent it st
 running. Nothing about the worktree is acted on while the answer is "still running", however long
 that is. Waiting costs a round's latency and guessing costs another task's uncommitted work.
 
-A confirmed-gone worker whose branch has no registered worktree is disposed of per "Cleanup Is
-the Orchestrator's" on a standalone clone. Otherwise, once the worker is confirmed gone, its
-worktree decides what follows. **A clean one** is cleaned up
+Once the worker is confirmed gone, its worktree decides what follows. **A clean one** is cleaned up
 as an abandoned group's is, per "Cleanup Is the Orchestrator's". That procedure confirms the branch
 carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
@@ -610,8 +593,8 @@ request** number and not the issue number. And this skill deliberately keeps the
 off the feature pull request. Read the pull request numbers out of that range, freshly fetched.
 Then read each of those pull requests for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
-ask for. A direct push has no pull request to carry the line. So on an operational-model repository,
-also read every commit message in the range for its own line. Reading either alone returns a
+ask for. On an operational-model repository, a commit whose subject does not end in the `(#<number>)` a
+squash merge appends is a direct push. Read its message for its own line. Reading either alone returns a
 partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
@@ -804,7 +787,8 @@ leaves the work findable.
 4. **Comment the state on the group's issue.** It says what is done and names the branch and pull
    request. It says whether the worktree was left standing, what remains, and the `decision` issue
    it waits on. The comment is complete enough for a worker with no other context to resume from.
-5. **Record the park in the group's claim comment**, naming the `decision` issue. The group keeps
+5. **Record the park in the group's claim comment**, naming the `decision` issue and keeping the
+   comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
