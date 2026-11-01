@@ -2462,16 +2462,18 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
         spec.loader.exec_module(guard)
         return guard
 
-    def _branch(self, guard, msys, c_dirs, leading_cd):
+    def _branch(self, guard, msys, c_dirs, cd):
+        """The branch a push reads after a `cd` to `cd`, if any, then each `-C` in `c_dirs`."""
         with (
             mock.patch.object(guard, "_MSYS_DRIVE_PATHS", msys),
             mock.patch.object(guard, "_current_push_branch", return_value="feature/example"),
             mock.patch.object(guard.os.path, "isdir", return_value=True),
             mock.patch.object(guard.os, "access", return_value=True),
         ):
-            return guard._bare_push_branch("/c/session", c_dirs, None, leading_cd, False)
+            cwd = guard._cd("/c/session", [cd]) if cd else "/c/session"
+            return guard._bare_push_branch(cwd, c_dirs, None)
 
-    def test_a_rooted_leading_cd_without_a_drive_is_unresolved_on_windows(self):
+    def test_a_rooted_cd_without_a_drive_is_unresolved_on_windows(self):
         guard = self._guard()
         got = self._branch(guard, True, [], "/repos/wt-example")
         self.assertIs(got, guard._UNRESOLVED)

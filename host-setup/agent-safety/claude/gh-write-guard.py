@@ -776,24 +776,14 @@ def _current_push_branch(where: str | None, git_dir: str | None = None) -> str |
     return name if name and name != "HEAD" else None
 
 
-def _bare_push_branch(
-    cwd: str | None,
-    c_dirs: list[str],
-    git_dir: str | None,
-    leading_cd: str | None,
-    moved: bool,
-) -> object:
+def _bare_push_branch(cwd: str | None, c_dirs: list[str], git_dir: str | None) -> object:
     """The branch a push naming no refspec writes, or `_UNRESOLVED` where the text does not name its checkout.
 
-    `leading_cd` and then each `-C` value in `c_dirs` move the push from `cwd`, and a `git_dir`
-    names the repository from there. A push `moved` to a directory the text does not name is
-    unresolved unless its `git_dir` is absolute. So is one whose `git_dir` the reading does not
-    resolve.
+    Each `-C` value in `c_dirs` moves the push from `cwd`, and a `git_dir` names the repository
+    from there. A push from a directory the text does not name is unresolved unless its `git_dir`
+    is absolute. So is one whose `git_dir` the reading does not resolve.
     """
-    where = None
-    if not moved:
-        where = _moved(_msys_drive_path(cwd), [leading_cd] if leading_cd else [])
-        where = _moved(where, c_dirs)
+    where = _moved(_msys_drive_path(cwd), c_dirs)
     if git_dir is not None:
         named = _join_dir(where, git_dir)
         return _UNRESOLVED if named is None else _current_push_branch(where, named)
@@ -919,7 +909,7 @@ def _bare_branch(cmd: _Cmd, git: _Git) -> str | None:
     An `env` option the guard does not recognize may have moved the push anywhere. Behind one, only
     an absolute `--git-dir`, git `-C`, or wrapper-body `cd` resolves it.
     """
-    got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, _named_git_dir(cmd, git), None, False)
+    got = _bare_push_branch(_push_cwd(cmd), git.c_dirs, _named_git_dir(cmd, git))
     return got if isinstance(got, str) else None
 
 
@@ -998,10 +988,31 @@ def _skips_hooks(sub: str, args: list[str]) -> bool:
     return False
 
 
+def _moves_branch(argv: list[str]) -> bool:
+    """Whether a command can change the branch checked out, which the guard reads before the text runs."""
+    name = _base(argv[0]) if argv else ""
+    if name == "gh":
+        return _gh(argv).path[:2] == ["pr", "checkout"]
+    if name != "git":
+        return False
+    git = _git(argv)
+    if git.sub == "stash":
+        return git.args[:1] == ["branch"]
+    if git.sub == "branch":
+        return any(re.fullmatch(r"-[A-Za-z]*[mM][A-Za-z]*|--mo.*", a) for a in git.args)
+    return git.sub in ("switch", "checkout", "rebase", "symbolic-ref")
+
+
 def _bypass_denial(
-    cmd: _Cmd, current_branch: str | None, rules_lookup: Callable[[str], set[str] | None] | None
+    cmd: _Cmd,
+    current_branch: str | None,
+    rules_lookup: Callable[[str], set[str] | None] | None,
+    switched: bool,
 ) -> str | None:
-    """Requirement 4: why this command lands only by bypassing a branch rule, or None."""
+    """Requirement 4: why this command lands only by bypassing a branch rule, or None.
+
+    `switched` means a command in the same text can change the branch checked out.
+    """
     name = _base(cmd.argv[0])
     if name == "gh":
         g = _gh(cmd.argv)
@@ -1040,13 +1051,10 @@ def _bypass_denial(
     unread: list[bool] = []
 
     def branch_of() -> tuple[str, ...]:
-        """The branch a push naming no refspec writes, or each protected default an unrecognized
-        `env` option may have moved it to."""
-        if current_branch is not None:
-            return (current_branch,)
-        got = _bare_branch(cmd, git)
-        unread.append(got is None and cmd.undetermined)
-        return (got,) if got else _PROTECTED_DEFAULT if cmd.undetermined else ()
+        """The branch a push naming no refspec writes, or each protected default where it is not read."""
+        got = None if switched else current_branch or _bare_branch(cmd, git)
+        unread.append(got is None)
+        return (got,) if got else _PROTECTED_DEFAULT
 
     remote, targets = _push_targets(git.args, branch_of)
     named = set(_push_targets(git.args, lambda: ())[1]) if any(unread) else set(targets)
@@ -1062,11 +1070,10 @@ def _bypass_denial(
         reason = _rule_denial(op, br, rules)
         if reason and (op, br) not in named:
             return (
-                "This push names no refspec, or `HEAD`, behind an `env` option the guard does not "
-                "recognize. That option may have moved it to a checkout on a protected-by-default "
-                "branch (main/master/develop), so the branch it writes could not be read. Drop "
-                "the option, name the branch in the refspec, or name a checkout on a branch with "
-                "an absolute `git -C`, `--git-dir`, or `cd` in a wrapper body."
+                "This push names no refspec, or `HEAD`, and the branch it writes could not be "
+                "read. The same command may switch branches, or the guard cannot read the "
+                "checkout it runs in, so it may write a protected-by-default branch "
+                "(main/master/develop). Name the branch in the refspec."
             )
         if reason:
             return reason
@@ -1430,8 +1437,9 @@ def classify(
     cwd = _msys_drive_path(cwd)
     reading = _Reading()
     _read(cmd, cwd, {"GH_REPO": env_in["GH_REPO"]} if env_in.get("GH_REPO") else {}, reading)
+    switched = any(_moves_branch(c.argv) for c in reading.cmds)
     for c in reading.cmds:
-        if reason := _bypass_denial(c, current_branch, rules_lookup):
+        if reason := _bypass_denial(c, current_branch, rules_lookup, switched):
             return "deny", reason
     for c in reading.cmds:
         if reason := _primary_denial(c, env_in, lookup, resolver):
@@ -1711,6 +1719,18 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git push --all origin", _RULES, "feature/x", "deny", "R4"),
     ("git push --mirror origin", _RULES, "feature/x", "deny", "R4"),
     ("git push origin develop", {"develop": set()}, "feature/x", "allow", "R4"),
+    ("git switch develop && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git checkout -b feature/y && git push -u origin HEAD", _RULES, "feature/x", "deny", "3729"),
+    ("git push origin; git switch develop", _RULES, "feature/x", "deny", "3729 loop or function"),
+    ("sh -c 'cd /c/a && git switch develop && git push'", _RULES, "feature/x", "deny", "3729"),
+    ("git rebase origin/develop develop && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git stash branch develop && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git branch -M develop && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git symbolic-ref HEAD refs/heads/develop && git push", _RULES, "feature/x", "deny", "3729"),
+    ("gh pr checkout 5 && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git switch develop && git push origin feature/x", _RULES, "feature/x", "allow", "3729"),
+    ("git branch -d feature/y && git push origin", _RULES, "feature/x", "allow", "3729"),
+    ("git commit -m x && git push origin", _RULES, "feature/x", "allow", "3729"),
     ("git push origin develop", _UNREADABLE, "feature/x", "deny", "R4"),
     ("git push origin feature/x", _UNREADABLE, "feature/x", "allow", "R4"),
     ('git push origin "$BRANCH"', _UNREADABLE, "feature/x", "allow", "R4 run-time refspec"),
@@ -1952,7 +1972,15 @@ _PUSH_UNDETERMINED_CASES: list[tuple[str, str]] = [
     ("env --ch=/nowhere git -C {b} push nowhere", "deny"),
     ("env --ch=/nowhere git push --all nowhere", "deny"),
     ("GIT_DIR=x; git push nowhere HEAD develop", "deny"),
-    ("GIT_DIR=x; git push nowhere", "allow"),
+    ("GIT_DIR=x; git push nowhere", "deny*"),
+    ('cd "$D" && git push origin', "deny*"),
+    ('git -C "$D" push origin', "deny*"),
+    ('env -C "$D" git push origin', "deny*"),
+    ("git -C {a}/absent push origin", "deny*"),
+    ("GIT_DIR={b}/.git sh -c 'git push origin'", "deny*"),
+    ("export GIT_DIR={b}/.git; git push origin", "deny*"),
+    ('cd "$D" && git push origin feature/x', "allow"),
+    ("git push origin", "allow"),
     ("env --split='git push origin develop'", "deny"),
     ("GH_REPO=stranger/x env --nu true && gh issue comment 5 --body hi", "allow"),
     ("GH_REPO=stranger/x env --a -i gh issue comment 5 --body hi", "deny"),
@@ -1977,7 +2005,7 @@ def _push_repo_selftest() -> bool | str:
 
     Each case is a command run in checkout `a`, with `b` beside it, and the owner or the branch it
     writes. Checkout `a` is on `feature/a` and `b` on `develop`. A `*` on a verdict marks the
-    denial of a branch an unrecognized `env` option leaves unread. A case carrying rules reads them
+    denial of a branch the reading leaves unread. A case carrying rules reads them
     in place of the live query.
     "skip" where the checkouts could not be built, which is neither a pass nor a failure.
     """
