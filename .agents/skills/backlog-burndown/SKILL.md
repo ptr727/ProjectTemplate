@@ -695,7 +695,8 @@ A parked group stops that group and nothing else. Once its `decision` issue is c
 answer, the planner returns the group as resuming. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
 ends the work with nothing to merge, it records that instead, and closes any pull request the answer
-retires.
+retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
+answer. That closing follows the maintainer's recorded answer, so it is not a close on judgment.
 
 A worker that finds a lesson a future agent must honor files it as a `decision` issue stating the
 proposed rule. It does not write that rule, since no one is present to judge it.
