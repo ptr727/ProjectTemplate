@@ -199,7 +199,7 @@ for, and it binds harder than any throughput target.
   carries a line reading `Closes on promotion: #N`**. It lists every issue that pull request
   actually fixes and nothing it merely mentions. The promotion body is assembled from that line,
   per "The Promotion Boundary". GitHub reads a closing keyword only where the issue reference
-  follows it directly or after a colon. So the words `on promotion:` keep the line inert. Without that line nothing records which issues a merged pull request closes, since a
+  follows the keyword directly, with at most a colon between them. So the words `on promotion:` keep the line inert. Without that line nothing records which issues a merged pull request closes, since a
   body's other issue references are not the same set.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
