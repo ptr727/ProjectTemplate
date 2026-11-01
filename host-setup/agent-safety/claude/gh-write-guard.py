@@ -107,6 +107,9 @@ _CHECKOUT_FORCE_FLAGS = frozenset(
     | {"--force-create"}
 )
 _CHECKOUT_FORCE_CHARS = frozenset("bBcCf")
+_REBASE_VALUES = frozenset(
+    {"--onto", "-x", "--exec", "-s", "--strategy", "-X", "--strategy-option"}
+)
 
 _ALLOW_ENV = "GH_WRITE_GUARD_ALLOW"
 _ALLOW_PRIMARY_ENV = "GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT"
@@ -988,19 +991,43 @@ def _skips_hooks(sub: str, args: list[str]) -> bool:
     return False
 
 
+def _operands(args: list[str], values: frozenset[str]) -> list[str]:
+    """The words in `args` that are not options, skipping the word after each option in `values`."""
+    out: list[str] = []
+    skip = False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in values:
+            skip = True
+        elif not a.startswith("-"):
+            out.append(a)
+    return out
+
+
 def _moves_branch(argv: list[str]) -> bool:
-    """Whether a command can change the branch checked out, which the guard reads before the text runs."""
-    name = _base(argv[0]) if argv else ""
+    """Whether a command can change the branch checked out, which the guard reads before the text runs.
+
+    A rebase naming one upstream, a symbolic-ref read, and a checkout of paths after `--` cannot.
+    """
+    name = _base(argv[0])
     if name == "gh":
         return _gh(argv).path[:2] == ["pr", "checkout"]
     if name != "git":
         return False
     git = _git(argv)
+    args = git.args
     if git.sub == "stash":
-        return git.args[:1] == ["branch"]
+        return args[:1] == ["branch"]
     if git.sub == "branch":
-        return any(re.fullmatch(r"-[A-Za-z]*[mM][A-Za-z]*|--mo.*", a) for a in git.args)
-    return git.sub in ("switch", "checkout", "rebase", "symbolic-ref")
+        return any(re.fullmatch(r"-[A-Za-z]*[mM][A-Za-z]*|--mo.*", a) for a in args)
+    if git.sub == "rebase":
+        return len(_operands(args, _REBASE_VALUES)) >= (1 if "--root" in args else 2)
+    if git.sub == "symbolic-ref":
+        return bool({"-d", "--delete"} & set(args)) or len(_operands(args, frozenset({"-m"}))) > 1
+    if git.sub == "checkout":
+        return "--" not in args or args.index("--") == len(args) - 1
+    return git.sub == "switch"
 
 
 def _bypass_denial(
@@ -1052,9 +1079,10 @@ def _bypass_denial(
 
     def branch_of() -> tuple[str, ...]:
         """The branch a push naming no refspec writes, or each protected default where it is not read."""
-        got = None if switched else current_branch or _bare_branch(cmd, git)
-        unread.append(got is None)
-        return (got,) if got else _PROTECTED_DEFAULT
+        got = current_branch or _bare_branch(cmd, git)
+        unread.append(switched or got is None)
+        read = (got,) if got else ()
+        return read if read and not switched else read + _PROTECTED_DEFAULT
 
     remote, targets = _push_targets(git.args, branch_of)
     named = set(_push_targets(git.args, lambda: ())[1]) if any(unread) else set(targets)
@@ -1731,6 +1759,26 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git switch develop && git push origin feature/x", _RULES, "feature/x", "allow", "3729"),
     ("git branch -d feature/y && git push origin", _RULES, "feature/x", "allow", "3729"),
     ("git commit -m x && git push origin", _RULES, "feature/x", "allow", "3729"),
+    (
+        "git push origin; git switch develop",
+        {"release": {"pull_request"}},
+        "release",
+        "deny",
+        "3729",
+    ),
+    ("git rebase --root develop && git push origin", _RULES, "feature/x", "deny", "3729"),
+    (
+        "git rebase --onto main origin/develop && git push origin",
+        _RULES,
+        "feature/x",
+        "allow",
+        "3729",
+    ),
+    ("git rebase origin/develop && git push origin HEAD", _RULES, "feature/x", "allow", "3729"),
+    ("git symbolic-ref --short HEAD && git push origin", _RULES, "feature/x", "allow", "3729"),
+    ("git symbolic-ref -d HEAD && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git checkout -- f && git push origin", _RULES, "feature/x", "allow", "3729"),
+    ("git checkout develop -- && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git push origin develop", _UNREADABLE, "feature/x", "deny", "R4"),
     ("git push origin feature/x", _UNREADABLE, "feature/x", "allow", "R4"),
     ('git push origin "$BRANCH"', _UNREADABLE, "feature/x", "allow", "R4 run-time refspec"),

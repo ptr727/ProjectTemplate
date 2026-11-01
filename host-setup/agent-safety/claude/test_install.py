@@ -2467,8 +2467,6 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
         with (
             mock.patch.object(guard, "_MSYS_DRIVE_PATHS", msys),
             mock.patch.object(guard, "_current_push_branch", return_value="feature/example"),
-            mock.patch.object(guard.os.path, "isdir", return_value=True),
-            mock.patch.object(guard.os, "access", return_value=True),
         ):
             cwd = guard._cd("/c/session", [cd]) if cd else "/c/session"
             return guard._bare_push_branch(cwd, c_dirs, None)
