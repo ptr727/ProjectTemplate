@@ -397,8 +397,8 @@ A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
 It edits the group's claim comment, and the issue returns to the next round's ranking.
 Where it was pushed, the orchestrator also deletes the remote branch, since `cleanup` needs a merged pull request to read.
-That is the one delete this skill types by hand.
-Before that removal, it records the local tip with `git rev-parse refs/heads/<exact-branch>`.
+That is the one remote delete this skill types by hand.
+Before `git worktree remove` runs, it records the local tip with `git rev-parse refs/heads/<exact-branch>`.
 The delete runs only where three checks hold.
 The recorded tip carries no commit develop lacks, so `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` exits `0`.
 The remote tip, read live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, equals the recorded tip.
@@ -412,7 +412,7 @@ Where any check fails or the delete is not confirmed, the claim is kept and the 
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
 That stop is per "Raising a Blocked Question", since past that point removal discards work.
 A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
-Where a pushed branch still heads an open pull request, what goes to the maintainer names that pull request.
+Where a pushed branch still heads or bases an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
 
 ### Choosing the Worker's Model Tier
