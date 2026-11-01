@@ -604,7 +604,7 @@ class TestUnmetItems(MergeCase):
         (drift,) = [i for i in answers.items(pr) if i.where == answers.DRIFT]
         self.assertEqual(
             ([], f"'declined' does not answer {drift.key}, which takes none while it stands"),
-            answers.ack_lines(pr, [f"{drift.key}=declined"], "Declined."),
+            answers.ack_lines(pr, [f"{drift.key}=declined"]),
         )
         mark = answers.FINDING_ACK.format(drift.key, "declined")
         written = fixtures.ack("0" * 12, "OWNER", text=f"Declined.\n\n{mark}")

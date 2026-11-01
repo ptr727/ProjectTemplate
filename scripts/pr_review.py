@@ -44,8 +44,8 @@ Subcommands
            item is a finding no thread carries, a noted part, or a verdict naming no counted
            finding. Each pair adds `<!-- fleet-finding-ack: key=<key> outcome=<outcome> -->`.
            `pr_review_answers.py` holds the outcomes each item takes. 69 = an --ack names a key
-           no such item carries or an outcome that item does not take. It is also a body with no
-           prose outside code.
+           no such item carries or an outcome that item does not take. It is also an --ack or
+           --fingerprint body with no prose outside code.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure. It is caught
            by a reviewer or not at all. Read-only. Exit 0 = every reference resolves. 70 = one does
@@ -254,6 +254,7 @@ from pr_review_checks import (
     held_checks_open,
     runs_open,
 )
+from pr_review_copilot import has_prose
 from pr_review_digest import digest_refusal, render
 from pr_review_rounds import (
     ACK_MARKER,
@@ -2140,8 +2141,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "comment":
         marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
+        # An acknowledgment the gate would not count posts nothing, rather than reading as answered.
+        if (a.fingerprint or a.ack) and not has_prose(a.body):
+            return not_written("ACK_REFUSED", "the body holds no prose outside code", 69)
         if a.ack:
-            acks, why = ack_lines(full_read(owner, repo, a.number), a.ack, a.body)
+            acks, why = ack_lines(full_read(owner, repo, a.number), a.ack)
             if not acks:
                 return not_written("ACK_REFUSED", why, 69)
             marker += "\n\n" + "\n".join(acks)

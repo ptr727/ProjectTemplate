@@ -5932,6 +5932,13 @@ class TestCommentAcknowledgesAnUnplacedSet(CommentCase):
         answered = {**held, "comments": {"nodes": [ack(hold[0], "OWNER", text=sent)]}}
         self.assertEqual((hold[0], hold[1], True), pr_review_rounds.shape_hold(answered))
 
+    def test_a_body_with_no_prose_outside_code_posts_nothing(self) -> None:
+        self.wire({"id": "PR_from_query", "url": COMMENT["url"]})
+        argv = ["comment", "7", "--repo", "o/r", "--fingerprint", "0" * 12]
+        self.assertEqual(69, pr_review.main([*argv, "--body", "```\nFixed in abc.\n```"]))
+        self.assertEqual([], self.calls)
+        self.assertIn("status=ACK_REFUSED", self.out.getvalue())
+
     def test_the_fingerprint_belongs_to_comment_alone(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             pr_review.main(["status", "7", "--repo", "o/r", "--fingerprint", "0" * 12])
