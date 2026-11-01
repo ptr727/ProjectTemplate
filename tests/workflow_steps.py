@@ -91,3 +91,5 @@ def yaml_value(text: str, *keys: str) -> str | None:
             children.append(line)
         lines = children
     return value
+
+# Automated fix for issue #3770: Exempt the Roslyn lang= Marker from the Prose Gate's comment-case Rule
