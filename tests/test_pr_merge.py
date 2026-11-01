@@ -599,7 +599,9 @@ class TestUnmetItems(MergeCase):
         mark = answers.FINDING_ACK.format(drift.key, "declined")
         written = fixtures.ack("0" * 12, "OWNER", text=f"Declined.\n\n{mark}")
         unmet = self.unmet_on(self.with_comments(pr, written))
-        self.assertTrue(any(i.startswith("OUTPUT_NOTED") for i in unmet), unmet)
+        self.assertTrue(any(i.startswith("REVIEWER_LOGIN_DRIFT") for i in unmet), unmet)
+        self.assertFalse(any(i.startswith("OUTPUT_NOTED") for i in unmet), unmet)
+        self.assertEqual("", answers.mark(drift, {}))
 
     def test_a_noted_part_its_own_round_acknowledged_on_its_head_is_answered(self) -> None:
         """A fix push turns an acknowledged head hold into noted output, already answered."""

@@ -173,8 +173,9 @@ def answer_of(item: Item, acks: dict[str, str]) -> str:
 def answered(pr: dict, kind: str) -> bool:
     """True where the pull request holds items under `kind` and each one carries an outcome."""
     acks = acknowledged(pr)
-    found = [it for it in items(pr) if it.kind == kind]
-    return bool(found) and all(answer_of(it, acks) for it in found)
+    found = [it for it in items(pr) if it.kind == kind and it.where != DRIFT]
+    drift = kind == NOTED and bool(reviewer_login_drift(pr))
+    return (bool(found) or drift) and all(answer_of(it, acks) for it in found)
 
 
 def unanswered(pr: dict, fields: dict) -> tuple[list[str], list[str], list[str]]:
@@ -228,6 +229,8 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
         found.append(
             ("OUTPUT_NOTED", f"the digest reads {notes[0]} with a part no acknowledgment answers")
         )
+    if drifted := reviewer_login_drift(pr):
+        found.append(("REVIEWER_LOGIN_DRIFT", f"{drifted[0]}, which only a login change clears"))
     if (state := pr.get("mergeStateStatus")) not in MERGE_UNGATED:
         found.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not a finished one"))
     return found
@@ -249,7 +252,9 @@ def ack_lines(pr: dict, pairs: list[str]) -> tuple[list[str], str]:
 
 
 def mark(item: Item, acks: dict[str, str]) -> str:
-    """` key=<key>`, with the outcome answering the item where one does."""
+    """` key=<key>`, with the outcome answering the item where one does, and nothing for a drift."""
+    if item.where == DRIFT:
+        return ""
     outcome = answer_of(item, acks)
     said = ", answered by its round's shape acknowledgment" if outcome == "shape" else ""
     return f" key={item.key}" + (said or (f", acknowledged as {outcome}" if outcome else ""))

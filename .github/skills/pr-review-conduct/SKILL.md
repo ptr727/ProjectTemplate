@@ -209,7 +209,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A part on an earlier round prints under `REVIEWER OUTPUT NOTED` and decides no exit code. So
    does a label nested in a list, a quote, or a placed part. Read that block rather than the
    `shapes=` field, which names a head hold first. Read each such part by hand, and give any
-   finding in it item 3's outcome. Post it with `--ack` by the key beside it. A part from a round
+   finding in it item 3's outcome. Post it with `--ack` by the key beside it. A reviewer login
+   drift prints no key, and `merge` refuses it as `REVIEWER_LOGIN_DRIFT` for the maintainer. Only a
+   login change in the hub's `scripts/reviewers/copilot.json` clears it. A part from a round
    whose own head hold was acknowledged reads as answered already. A push is what turned that
    hold into a note.
 5. The maintainer has given **explicit** permission to merge.

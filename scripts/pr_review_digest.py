@@ -237,7 +237,10 @@ def render(
             "sent nowhere, so read the body itself before closing the review loop. A spelling "
             f"to add belongs in `scripts/reviewers/` on {hub}, which hosts this script"
         )
-        lines += [f"    {note.text} ({answers.mark(note, acks).strip()})" for note in notes]
+        lines += [
+            f"    {note.text}" + (f" ({m.strip()})" if (m := answers.mark(note, acks)) else "")
+            for note in notes
+        ]
     if hold:
         lines.append(
             f"  UNPLACED ON THE HEAD (fingerprint={hold[0]}): a round covering the head carries "
