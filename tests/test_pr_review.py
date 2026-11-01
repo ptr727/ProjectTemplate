@@ -4947,7 +4947,12 @@ class TestCli(GqlCase):
                 self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
     def test_an_excluded_files_refusal_leaves_a_feature_head_to_its_local_pass(self) -> None:
-        """Every changed file being excluded says nothing of the content, so no round follows it."""
+        """Every changed file being excluded says nothing of the content, so no round follows it.
+
+        The liveness read carries no body and takes the refusal for a finished round. Only the full
+        read after it can hold the head.
+        """
+        live = payload([{k: v for k, v in review().items() if k != "body"}])
         for attest, code, said in (
             (False, 49, "every changed file is in its default review exclusions"),
             (True, 0, "coverage=local"),
@@ -4955,7 +4960,8 @@ class TestCli(GqlCase):
             with self.subTest(attest=attest):
                 self.out.seek(0)
                 self.out.truncate()
-                self.answer(self.into(payload([review(body=EXCLUDED_REFUSED)]), attest=attest))
+                full = self.into(payload([review(body=EXCLUDED_REFUSED)]), attest=attest)
+                self.answer(self.into(live, attest=attest), full)
                 calls = self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
                 with mock.patch.object(pr_review.time, "sleep"):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
@@ -4966,14 +4972,27 @@ class TestCli(GqlCase):
                 self.assertNotIn("overrules it", out)
 
     def test_an_excluded_files_refusal_with_no_local_cover_names_its_own_remedy(self) -> None:
-        self.answer(self.into(payload([review(body=EXCLUDED_REFUSED)]), base="main", attest=True))
-        self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
-        with mock.patch.object(pr_review.time, "sleep"):
-            self.assertEqual(41, self.cli(["wait", "7", "--timeout", "0"]))
-        out = self.out.getvalue()
-        self.assertIn("status=REVIEW_EXCLUDED_FILES_ONLY", out)
-        self.assertIn("hand it to the maintainer", out)
-        self.assertNotIn("REVIEW_IS_A_REFUSAL", out)
+        live = payload([{k: v for k, v in review().items() if k != "body"}])
+        full = payload([review(body=EXCLUDED_REFUSED)])
+        for name, pr in (
+            ("promotion", self.into(full, base="main", attest=True)),
+            ("--request", self.into(full, attest=True)),
+        ):
+            with self.subTest(case=name):
+                self.out.seek(0)
+                self.out.truncate()
+                self.answer(self.into(live, base=pr["baseRefName"], attest=True), pr)
+                calls = self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
+                args = ["wait", "7", "--timeout", "0"] + (
+                    ["--request"] if name == "--request" else []
+                )
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(41, self.cli(args))
+                self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+                out = self.out.getvalue()
+                self.assertIn("status=REVIEW_EXCLUDED_FILES_ONLY", out)
+                self.assertIn("hand it to the maintainer", out)
+                self.assertNotIn("REVIEW_IS_A_REFUSAL", out)
 
     def test_an_attested_head_behind_a_stale_error_refusal_is_covered(self) -> None:
         """An error refusal on an earlier head is spent by an attested later one, as item 2 says."""

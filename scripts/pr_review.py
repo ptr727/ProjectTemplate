@@ -1777,7 +1777,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     print(out)
     print(f"waited={int(time.monotonic() - start)}s")
     # A stuck required check decides the code only once the review itself is sound.
-    held = held and holds(final)
+    head_refusal = refusing_review(final)
+    late = head_refusal is not None and excluded_refusal(head_refusal) and not a.request
+    held = (held or late) and holds(final)
     covered = held and local_cover(final)
     halted = None if a.ignore_quota_signal else stopping_refusal(final)
     if covered or (not halted and head_review_done(final, a.min_rounds)):

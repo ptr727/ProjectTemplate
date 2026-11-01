@@ -79,8 +79,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `refusal=QUOTA` or `refusal=ERROR` means the pull request's newest Copilot review is an
    account-quota refusal or an error refusal read as a possible quota hit. That review can sit on
    this head or an earlier one. On a pull request into a branch other than the default, an attested
-   local pass on a later head clears it, `coverage=local`. The head moving spends a refusal on an
-   earlier one. Otherwise nothing the loop does clears it, which is the case "Which
+   local pass on a later head clears it, `coverage=local`. Otherwise nothing the loop does clears it, which is the case "Which
    Reviewers a Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
    transient is the exception. `wait` re-requests it once and exits `30` while that request is
    pending. A second error refusal in a row, or a re-request made with no round answering it,
@@ -247,8 +246,8 @@ must have done.
   weekly rate limit posts. Each covers no head, so the gate stays unsatisfied where no local pass
   stands in. Nothing the loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
   reviewer's run log names a reset time `pr_review.py` reports it. Where it names a transient
-  fetch failure instead, `pr_review.py wait` re-requests once. Every other refusal, a repeat of
-  that one included, goes to the maintainer rather than into a wait.
+  fetch failure instead, `pr_review.py wait` re-requests once. Where no local pass stands in, every
+  other refusal, a repeat of that one included, goes to the maintainer rather than into a wait.
 
 The hub's `docs/pr-reviewer-reference.md` records what each reviewer does, what shapes it, and
 which repositories its plan covers. That is the record for a reviewer whose behavior still
