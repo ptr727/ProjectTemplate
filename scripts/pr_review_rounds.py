@@ -653,7 +653,7 @@ def polled_past(pr: dict, ignore_quota: bool, request: bool) -> bool:
     if refusal is None or reviewed_head(pr):
         return False
     return ignore_quota or (
-        excluded_refusal(refusal) and not request and (holds(pr) or reviewer_requested(pr))
+        excluded_refusal(refusal) and (reviewer_requested(pr) or (not request and holds(pr)))
     )
 
 

@@ -4993,6 +4993,30 @@ class TestCli(GqlCase):
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
         self.assertNotIn("REVIEW_EXCLUDED_FILES_ONLY", self.out.getvalue())
 
+    def test_a_requested_round_past_an_excluded_files_refusal_is_polled_for(self) -> None:
+        """`--request` reads past the refusal too, so the wait ends on the round it asked for.
+
+        The first re-read still shows only the refusal, so the round count it bumps is what keeps
+        the poll going past it. Without that, the wait ends on the next read, still pending.
+        """
+        bare = {k: v for k, v in review().items() if k != "body"}
+        landed = review(at=LATE, rid="PRR_b")
+        refused = review(body=EXCLUDED_REFUSED)
+        pending = self.into(payload([refused], pending=True), attest=True)
+        self.answer(
+            self.into(payload([bare], pending=True), attest=True),
+            pending,
+            self.into(payload([bare], pending=True), attest=True),
+            pending,
+            self.into(payload([bare, landed]), attest=True),
+            self.into(payload([refused, landed]), attest=True),
+        )
+        calls = self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep") as slept:
+            self.assertEqual(0, self.cli(["wait", "7", "--request", "--timeout", "600"]))
+        self.assertTrue(slept.called)
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+
     def test_a_round_on_the_head_before_an_excluded_files_refusal_still_covers_it(self) -> None:
         live = payload([{k: v for k, v in review().items() if k != "body"}])
         rounds = [review(rid="PRR_a"), review(body=EXCLUDED_REFUSED, at=LATE, rid="PRR_b")]
