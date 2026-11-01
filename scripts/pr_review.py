@@ -1610,7 +1610,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
     full = None
-    if done and (a.ignore_quota_signal or not a.request):
+    if done:
         full = gql(Q_FULL, owner, repo, a.number)
     if full is not None and polled_past(full, a.ignore_quota_signal, a.request):
         a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
