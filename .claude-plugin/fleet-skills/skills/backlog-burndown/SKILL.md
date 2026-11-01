@@ -396,15 +396,19 @@ The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-br
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
 It edits the group's claim comment, and the issue returns to the next round's ranking.
-Where it was pushed, the orchestrator also deletes the remote branch by hand, since `cleanup` needs a merged pull request to read.
-That delete runs only where two checks hold.
-The remote tip, read live with `git ls-remote origin refs/heads/<exact-branch>`, equals the local tip the no-merge check above just read.
-And no open pull request uses the branch as its head, read live with `gh pr list --head <exact-branch> --state open`.
+Where it was pushed, the orchestrator also deletes the remote branch, since `cleanup` needs a merged pull request to read.
+That is the one delete this skill types by hand.
+Before that removal, it records the local tip with `git rev-parse refs/heads/<exact-branch>`.
+The delete runs only where three checks hold.
+The recorded tip carries no commit develop lacks, so `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` exits `0`.
+The remote tip, read live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, equals the recorded tip.
+And no open pull request uses the branch as its head or its base.
+`gh pr list --head <exact-branch> --state open --json number --jq length` prints `0`, and so does the same command with `--base`.
 The delete is `git push origin --delete <exact-branch>`, an outward-facing write bound by `GOVERNANCE.md` "Repository Boundaries and Write Safety".
 So it names the exact branch, takes every identifier from a live read, and keeps its output unsuppressed.
 The orchestrator then reads the ref back with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, and only its exit `2`, no matching ref, confirms the delete.
 Only after that confirmation is the release recorded on the claim comment, and the issue then returns to the next round's ranking.
-Where either check fails or the delete is not confirmed, the claim is kept and the group is stopped for the maintainer per "Raising a Blocked Question".
+Where any check fails or the delete is not confirmed, the claim is kept and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
 That stop is per "Raising a Blocked Question", since past that point removal discards work.
 A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
