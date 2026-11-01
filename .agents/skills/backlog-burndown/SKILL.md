@@ -204,15 +204,16 @@ for, and it binds harder than any throughput target.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The comment opens with `**Backlog burndown claim`
-  and writes the branch name in backticks.
+  and writes the branch name in backticks. Every edit to it other than a release keeps that
+  opening, a park or an adjudication update included.
   Recording a release, wherever this skill calls for one, edits that comment to open with it.
   The release is written as `**Released (<date>):**` and why the claim holds no files. The claim
   text stays below it. A claim comment opening with `**Released` holds no files.
   The branch name is what lets a later session walk from a worktree it found back to the claim
   explaining it. That is the direction the next bullet actually travels. This lists the open
-  issues where a visible claim comment from an account with write access names a branch. A
-  released claim opens with `**Released` instead, so the lookup skips it, and so it skips any other
-  comment that merely names the branch:
+  issues where a visible claim comment from an account with write access names a branch. It
+  matches the claim opening, so it skips a released claim and any other comment naming the branch.
+  The command is:
 
   ```sh
   gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | startswith("**Backlog burndown claim")) and (.body | contains("`<branch>`")))) | .number'
@@ -314,10 +315,10 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   the tree on, for the same reason.
 - **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the brief names a
-  scratch directory. A worker choosing that fallback writes the clone's absolute path there at
-  once, in a file named for its branch. A worker that dies
-  reports nothing, and that file is then the only way "Cleanup Is the Orchestrator's" finds the
-  clone.
+  scratch directory and tells a worker choosing that fallback to record the clone's absolute path
+  there before it clones. The file is `clone-<branch>.path`, each `/` in the branch written as `-`.
+  A worker that dies reports nothing, and that file is then the only way "Cleanup Is the
+  Orchestrator's" finds the clone.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself, with
@@ -431,18 +432,15 @@ A worker still live, a promotion fix included, keeps its worktree until the next
 **A standalone clone takes neither removal above**, since `git worktree remove` acts on the base
 clone's registered worktrees and `git branch -d` on its branches. The clone is found at the path its
 worker reported or wrote, per "Dispatching a Worker". An abandoned group's or a dead worker's clone
-is removed only where it is clean and its branch carries no commit develop lacks. That is read in
-the clone itself. The tip is `git -C <clone> rev-parse refs/heads/<exact-branch>`, and after
-`git -C <clone> fetch origin develop`,
-`git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` exits `0`. Where both hold, the
+is removed only where it is clean and its branch carries no commit develop lacks. That is the
+branch check above, each git command run as `git -C <clone>`. Where both hold, the
 exact clone directory is deleted per `repo-worktree` "Listing and Cleanup". A pushed branch's
 remote delete then runs as above, and the release is recorded as above. Anything else leaves the clone
 exactly as it stands and stops the group for the maintainer per "Raising a Blocked Question",
-naming the clone's path. Its branch lives only in the clone, so it has no worktree-only retirement.
-The discard grant above does not reach a clone either, since it names the worker's own linked
-worktree. Where no registered worktree and no reported or written path names a group's checkout,
-the group is stopped for the maintainer. An unrecorded clone cannot be told from no checkout at
-all.
+naming the clone's path. The discard grant above does not reach a clone, since it names the
+worker's own linked worktree. Where no registered worktree and no recorded path names a group's
+checkout, the worker made none, since it records the path before cloning. The orchestrator then
+records the release, and the issue returns to the next round's ranking.
 
 ### Choosing the Worker's Model Tier
 
@@ -484,9 +482,9 @@ comes from the dispatch mechanism itself, which knows whether the subagent it st
 running. Nothing about the worktree is acted on while the answer is "still running", however long
 that is. Waiting costs a round's latency and guessing costs another task's uncommitted work.
 
-Once the worker is confirmed gone, its worktree decides what follows. A worker whose branch has no
-registered worktree is disposed of per "Cleanup Is the Orchestrator's" on a standalone clone
-instead. **A clean one** is cleaned up
+A confirmed-gone worker whose branch has no registered worktree is disposed of per "Cleanup Is
+the Orchestrator's" on a standalone clone. Otherwise, once the worker is confirmed gone, its
+worktree decides what follows. **A clean one** is cleaned up
 as an abandoned group's is, per "Cleanup Is the Orchestrator's". That procedure confirms the branch
 carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
@@ -549,11 +547,11 @@ That difference changes nothing about how this run's own work is read. Every wor
 requests carrying the `Closes on promotion:` line. The operational model adds a second kind
 of commit in the same range, a direct push to develop that never had a pull request. It names
 the issues it fixes in a `Closes on promotion:` line in its own commit message, per `GOVERNANCE.md`
-"Operational Repositories", and one without that line closes nothing. "Assembling the Promotion
-Body" reads both kinds.
+"Operational Repositories". The promotion body closes nothing for a push without that line.
+"Assembling the Promotion Body" reads both kinds.
 
 1. **Open it whenever develop is ahead of main**, on an operational-model repository only once
-   the maintainer confirmed one is wanted, per the paragraph above. Ahead is what
+   the maintainer has confirmed one is wanted there. Ahead is what
    `git fetch origin` and then
    `git rev-list --count origin/main..origin/develop` answers, and this round's own outcome does
    not. Fetch first every time: a stale remote-tracking ref reports zero and the round would report
@@ -614,9 +612,9 @@ request** number and not the issue number. And this skill deliberately keeps the
 off the feature pull request. Read the pull request numbers out of that range, freshly fetched.
 Then read each of those pull requests for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
-ask for. On an operational-model repository, a commit in the range whose subject names no pull
-request is a direct push. Its own message carries the line. Read both kinds, since
-reading either alone returns a partial set.
+ask for. A direct push has no pull request to carry the line. So on an operational-model repository,
+also read every commit message in the range for its own line. Reading either alone returns a
+partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral

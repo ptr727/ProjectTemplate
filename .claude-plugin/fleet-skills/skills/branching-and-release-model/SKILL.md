@@ -136,7 +136,7 @@ stays the same:
 - **A direct push names the issues it fixes in its commit message**, as a line reading
   `Closes on promotion: #N`. The words `on promotion:` keep the line inert to GitHub. The promotion
   PR carrying the push puts a closing keyword in its own body for each issue the line names, per the
-  closing-keyword bullet above. A push without the line closes nothing.
+  closing-keyword bullet above. It closes nothing for a push without the line.
 - **A PR into `develop` stays available, and CI runs on it, reported but not required.** Dropping
   the requirement permits the direct push. It does not withdraw the pull request, so a change worth
   reviewing takes one and both paths into `develop` are legitimate.

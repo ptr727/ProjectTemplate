@@ -44,9 +44,10 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   the same way. Whoever the author is, a change this session did not make is never bundled. Ask whether to include it, or leave it unstaged and say so, rather than committing half-finished
   work or stranding it in an unrelated commit. An unexpected change in the tree is also the
   signal to re-check isolation per the `repo-worktree` skill. That is because an unexpected change may mean another task is live in this checkout.
-- **A direct push to `develop` on an operational-model repository names the issues it fixes**
-  in a `Closes on promotion: #N` line in its commit message, per `branching-and-release-model`
-  "Operational repositories (the complete delta)". A push without one closes nothing.
+- **A direct push to `develop` on an operational-model repository names its issues.** Its commit
+  message carries a `Closes on promotion: #N` line for each issue it fixes. The promotion closes
+  nothing for a push without one, per `branching-and-release-model` "Operational repositories (the
+  complete delta)".
 
 ## Signing, verified not configured
 
@@ -143,4 +144,4 @@ any rewrite. See `references/history-rewrite.md` for the full rule.
 
 ## Never run destructive git commands without being asked
 
-`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`, and other commands that discard work require explicit developer instruction. Never use them as a convenience inside a larger task. One narrow cleanup exception applies to `git branch -D <exact-task-branch>` after a squash merge. It requires live proof, per `repo-worktree`, that the pull request for that exact branch merged. The same proof must show that the worktree is clean and the branch is at the verified head SHA or behind it. The exception never applies to `develop`, an unmerged branch, an unresolved pull request, or a branch with uncommitted work. A second applies to a worker the `backlog-burndown` orchestrator tells to abandon its branch. That message carries the developer's instruction to run `git reset --hard` and then `git clean -fd` in the worker's own linked worktree, and nowhere else, per that skill's "Cleanup Is the Orchestrator's".
+`git reset --hard`, `git checkout .`, `git restore .`, `git clean -f`, and other commands that discard work require explicit developer instruction. Never use them as a convenience inside a larger task. One narrow cleanup exception applies to `git branch -D <exact-task-branch>` after a squash merge. It requires live proof, per `repo-worktree`, that the pull request for that exact branch merged. The same proof must show that the worktree is clean and the branch is at the verified head SHA or behind it. The exception never applies to `develop`, an unmerged branch, an unresolved pull request, or a branch with uncommitted work. A second applies to a worker the `backlog-burndown` orchestrator tells to abandon its branch. That message carries the developer's instruction for this one case, per that skill's "Cleanup Is the Orchestrator's". The worker runs `git reset --hard` and then `git clean -fd` in its own linked worktree, and nowhere else.
