@@ -5906,7 +5906,7 @@ class TestCommentAcknowledgesAFinding(CommentCase):
         (item,) = [i for i in pr_review_answers.items(pr) if i.kind == pr_review_answers.VERDICT]
         self.wire(pr)
         self.assertEqual(69, self.run_ack(f"{item.key}=fixed"))
-        self.assertIn("which takes one of declined, filed, listed, dropped", self.out.getvalue())
+        self.assertIn("which takes declined, filed, listed, dropped", self.out.getvalue())
 
     def test_the_ack_belongs_to_comment_alone(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

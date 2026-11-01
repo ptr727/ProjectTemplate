@@ -27,6 +27,7 @@ from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
     REVIEWER,
+    answering_comments,
     collected,
     commit_oid,
     coverage,
@@ -34,11 +35,11 @@ from pr_review_rounds import (
     newest_of,
     qodo_comment,
     reading,
+    refusal_of,
     reviewer_login_drift,
     reviewer_nodes,
     shape_hold,
     threads_truncated,
-    trusted_comments,
     uncounted_verdict,
 )
 
@@ -46,6 +47,7 @@ FINDING_ACK = "<!-- fleet-finding-ack: key={} outcome={} -->"
 ACK_LINE = re.compile(r"^<!-- fleet-finding-ack: key=([0-9a-f]{12}) outcome=([a-z]+) -->$")
 OUTCOMES = ("fixed", "declined", "filed", "listed", "dropped")
 NO_THREAD, NOTED, VERDICT = "FINDINGS WITH NO THREAD", "REVIEWER OUTPUT NOTED", "verdict"
+DRIFT = "login drift"
 # A digest count and the reviewer's sections it is read from, so an answer clears what it counts.
 SOURCES = {
     "suppressed": (REVIEWER, "suppressed", "SUPPRESSED"),
@@ -85,9 +87,7 @@ def key(kind: str, anchor: str, text: str) -> str:
 def acknowledged(pr: dict) -> dict[str, str]:
     """Each key a trusted comment carrying written outcomes acknowledges, with its outcome."""
     found: dict[str, str] = {}
-    for body, lines in trusted_comments(pr):
-        if not any(ln.strip() and not ACK_LINE.match(ln.strip()) for ln in body.splitlines()):
-            continue
+    for lines in answering_comments(pr):
         for line in lines:
             if (m := ACK_LINE.match(line)) and m[2] in OUTCOMES:
                 found.setdefault(m[1], m[2])
@@ -102,17 +102,18 @@ def noted(pr: dict) -> list[Item]:
     on_head, found = head_reviews(pr), dict[str, Item]()
     for node in reviewer_nodes(pr, "reviews"):
         oid = commit_oid(node) or ""
-        parts = {p.note for p in reading(node).unplaced}
+        parts = {p.note: p.text for p in reading(node).unplaced}
         for n in reading(node).notes:
             if node in on_head and n in parts:
                 continue
             note = f"round {(oid or 'unknown')[:8]}: {n}"
-            held = shape_hold(pr, oid) if oid and n in parts else None
-            found.setdefault(
-                note, Item(NOTED, key(NOTED, "", note), "", note, bool(held and held[2]))
-            )
+            own = oid and n in parts and not refusal_of(node)
+            held = shape_hold(pr, oid) if own else None
+            k = key(NOTED, node.get("id") or oid, f"{n}\0{parts.get(n, '')}")
+            found.setdefault(k, Item(NOTED, k, "", note, bool(held and held[2])))
+    # A drifted login's own reviews are never read, so no answer clears the note while it stands.
     for note in reviewer_login_drift(pr):
-        found.setdefault(note, Item(NOTED, key(NOTED, "", note), "", note))
+        found.setdefault(note, Item(NOTED, key(NOTED, "", note), DRIFT, note))
     return list(found.values())
 
 
@@ -139,7 +140,8 @@ def items(pr: dict) -> list[Item]:
         anchor = qodo.get("id") or qodo.get("createdAt") or ""
         sections = [s for s in reading(qodo, QODO_LOGIN).sections if s.kind == "open"]
         found += [
-            Item("qodo_open", key("qodo_open", anchor, s.title), "", s.title) for s in sections
+            Item("qodo_open", key("qodo_open", anchor, f"{s.title}\0{s.text}"), "", s.title)
+            for s in sections
         ]
     newest = newest_of(head_reviews(pr))
     anchor = (newest or {}).get("id") or ""
@@ -151,7 +153,12 @@ def items(pr: dict) -> list[Item]:
 
 
 def takes(item: Item, outcome: str) -> bool:
-    """Whether `outcome` answers `item`. A verdict is never `fixed` on the head it reviews."""
+    """Whether `outcome` answers `item`. A verdict is never `fixed` on the head it reviews.
+
+    A login drift takes none, since the drifted login's rounds stay unread whatever answers it.
+    """
+    if item.where == DRIFT:
+        return False
     return outcome in OUTCOMES and not (item.kind == VERDICT and outcome == "fixed")
 
 
@@ -235,8 +242,8 @@ def ack_lines(pr: dict, pairs: list[str]) -> tuple[list[str], str]:
         if (item := known.get(k)) is None:
             return [], f"{k!r} names no item `status` prints a key for on this pull request"
         if not takes(item, outcome):
-            allowed = [o for o in OUTCOMES if takes(item, o)]
-            return [], f"{outcome!r} does not answer {k}, which takes one of {', '.join(allowed)}"
+            allowed = ", ".join(o for o in OUTCOMES if takes(item, o)) or "none while it stands"
+            return [], f"{outcome!r} does not answer {k}, which takes {allowed}"
         lines.append(FINDING_ACK.format(k, outcome))
     return lines, ""
 
@@ -343,7 +350,7 @@ NEXT = {
             *("REVIEW_PENDING", "UNTHREADED_FINDINGS", "OUTPUT_NOTED", "MERGE_NOT_CLEAN"),
             *("VERDICT_NAMES_UNCOUNTED_FINDINGS", "AWAITING_LOCAL_PASS", "PENDING"),
             *("CHECKS_PENDING", "CHECKS_NOT_MERGEABLE", "CHECKS_MISSING", "BAD_CHECKOUT"),
-            *("COPILOT_ERROR_TRANSIENT", "REVIEW_IS_A_REFUSAL"),
+            "COPILOT_ERROR_TRANSIENT",
         ),
         "redrive",
     ),

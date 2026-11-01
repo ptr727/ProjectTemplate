@@ -376,12 +376,15 @@ def shape_hold(pr: dict, oid: str = "") -> tuple[str, list[adapter.Unplaced], bo
     if not parts:
         return None
     fp = adapter.fingerprint(parts)
-    marker = ACK_MARKER.format(fp)
-    acked = any(
-        marker in lines and any(ln.strip() not in ("", marker) for ln in body.splitlines())
-        for body, lines in trusted_comments(pr)
-    )
+    acked = any(ACK_MARKER.format(fp) in lines for lines in answering_comments(pr))
     return fp, parts, acked
+
+
+def answering_comments(pr: dict) -> Iterator[list[str]]:
+    """The HTML lines of each trusted comment that also carries a written line, not a marker alone."""
+    for body, lines in trusted_comments(pr):
+        if any(ln.strip() and not ln.strip().startswith("<!-- fleet-") for ln in body.splitlines()):
+            yield lines
 
 
 def trusted_comments(pr: dict) -> Iterator[tuple[str, list[str]]]:

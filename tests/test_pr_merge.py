@@ -565,6 +565,42 @@ class TestUnmetItems(MergeCase):
                 left = [i for i in self.unmet_on(answered) if not i.startswith("COUNT_UNREAD")]
                 self.assertEqual([], left)
 
+    def test_a_key_moves_with_the_round_and_the_text_it_names(self) -> None:
+        """Two rounds on one commit, or a Qodo entry edited in place, never share an answer."""
+        odd = "## Pull request overview\n\nThe change is narrow.\n"
+        rounds = [
+            fixtures.review(oid=fixtures.OLD, body=odd, rid=rid) for rid in ("PRR_a", "PRR_b")
+        ]
+        notes = [i.key for i in answers.items(fixtures.payload(rounds)) if i.kind == answers.NOTED]
+        self.assertEqual(2, len(set(notes)))
+        login = fixtures.pr_review_rounds.QODO_LOGIN
+        qodo = [
+            answers.items(
+                fixtures.payload(
+                    [], comments=[{**fixtures.comment(login=login, body=body), "id": "IC_q"}]
+                )
+            )
+            for body in (
+                fixtures.qodo_review_body(),
+                fixtures.qodo_review_body().replace("does not describe", "hides"),
+            )
+        ]
+        self.assertTrue(qodo[0])
+        self.assertNotEqual([i.key for i in qodo[0]], [i.key for i in qodo[1]])
+
+    def test_a_login_drift_takes_no_answer(self) -> None:
+        drifted = fixtures.review(login="copilot-pull-request-reviewer-v2", rid="PRR_d")
+        pr = fixtures.payload([drifted, fixtures.review(body=self.CLEAN)], files=["a.py"])
+        (drift,) = [i for i in answers.items(pr) if i.where == answers.DRIFT]
+        self.assertEqual(
+            ([], f"'declined' does not answer {drift.key}, which takes none while it stands"),
+            answers.ack_lines(pr, [f"{drift.key}=declined"]),
+        )
+        mark = answers.FINDING_ACK.format(drift.key, "declined")
+        written = fixtures.ack("0" * 12, "OWNER", text=f"Declined.\n\n{mark}")
+        unmet = self.unmet_on(self.with_comments(pr, written))
+        self.assertTrue(any(i.startswith("OUTPUT_NOTED") for i in unmet), unmet)
+
     def test_a_noted_part_its_own_round_acknowledged_on_its_head_is_answered(self) -> None:
         """A fix push turns an acknowledged head hold into noted output, already answered."""
         earlier = fixtures.review(oid=fixtures.OLD, body=fixtures.unplaced("Earlier."), rid="PRR_o")
@@ -712,13 +748,13 @@ ROUTED = {
             "CHECKS_NOT_MERGEABLE",
             "CHECKS_MISSING",
             "COPILOT_ERROR_TRANSIENT",
-            "REVIEW_IS_A_REFUSAL",
         ),
         "redrive",
     ),
     **dict.fromkeys(
         (
             "REFUSED",
+            "REVIEW_IS_A_REFUSAL",
             "OUT_OF_SCOPE",
             "COVERAGE_NOT_SHOWN",
             "COUNT_UNREAD",

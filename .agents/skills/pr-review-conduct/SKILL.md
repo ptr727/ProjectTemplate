@@ -427,14 +427,16 @@ own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `
 `Awaiting maintainer` answer leaves the finding open until a later answer records the
 maintainer's decision. State the `(N)` count the block gave so answers can be checked against
 findings, and link the review round.
-Each such finding, each `FINDINGS WITH NO THREAD` block, and each `REVIEWER OUTPUT NOTED` part
-prints a `key=` in the digest, and `pr_review.py merge` refuses while one stands unanswered. So
-post the answer with one `--ack <key>=<outcome>` per item, the outcome following the verdict.
+Each collapsed section of such findings, each `FINDINGS WITH NO THREAD` block, and each `REVIEWER
+OUTPUT NOTED` part prints a `key=` in the digest. `pr_review.py merge` refuses while one stands
+unanswered. One key covers every finding its section or block holds, so answer each finding in the
+body. Then post one `--ack <key>=<outcome>` per key, the outcome following the verdicts.
 `Fixed in <SHA>` is `fixed`, `Disproven` and `No change needed` are `declined`, and `Deferred to
 <issue>` is `filed`. `Listed in the body` is `listed`, or `dropped` for a line under `Dropped
-findings`. `Awaiting maintainer` has no outcome, so that item stays unanswered until the
-maintainer decides. The record counts only from an owner, member, or collaborator. Code checks
-that each item carries an outcome, never that the outcome is right, which stays this section's.
+findings`. `Awaiting maintainer` has no outcome, so a key holding such a finding takes no
+`--ack` until the maintainer decides. The record counts only from an owner, member, or
+collaborator. Code checks that each item carries an outcome, never that the outcome is right,
+which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
 supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --ack <key>=<outcome> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.

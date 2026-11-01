@@ -11,9 +11,10 @@ each turn re-bills the whole session context. The bytes `gh` returns are trivial
 invocation whose output is a few hundred bytes. See GOVERNANCE.md "Context and Delegation
 Discipline" for the rule this implements.
 
-This file is the gate: the plumbing, the verdict, the wait loop, and the writes. The head's checks
+This file is the gate: the plumbing, the wait loop, and the writes. The head's checks
 are read by `pr_review_checks.py` and its review rounds by `pr_review_rounds.py`, both off a payload
-this file fetched. `pr_review_digest.py` renders the digest from those readings. What a reviewer's
+this file fetched. `pr_review_digest.py` renders the digest from those readings.
+`pr_review_answers.py` holds the verdict's exit, the acknowledgment record, and `merge`'s routes. What a reviewer's
 body says is read by `pr_review_copilot.py`, whose vocabulary lives in
 `reviewers/<name>.json`. A change in the reviewer's wording is therefore a data edit there and
 never an edit here. A part of a head round the adapter cannot place holds the gate. A trusted author's
