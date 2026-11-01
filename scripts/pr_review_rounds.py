@@ -229,6 +229,14 @@ def possible_quota(node: dict) -> bool:
     return reading(node).refusal == "error"
 
 
+def excluded_refusal(node: dict) -> bool:
+    """True where a refusal on this node says every changed file is in Copilot's default exclusions.
+
+    It says nothing about the content, so a local pass can cover what no Copilot round ever will.
+    """
+    return reading(node).refusal == "excluded"
+
+
 def stopping_refusal(pr: dict) -> dict | None:
     """The reviewer's newest review on any head, where it is a quota refusal or an error."""
     if answered_outside_review(pr):
@@ -635,6 +643,20 @@ def holds(pr: dict) -> bool:
     )
 
 
+def polled_past(pr: dict, ignore_quota: bool, request: bool) -> bool:
+    """Whether `wait` reads on past a head refusal its body-less liveness read took for a round.
+
+    Only a head no Copilot round covers is read past. `--ignore-quota-signal` reads past any such
+    refusal. An excluded-files one is held for a local pass, or read past while a request is pending.
+    """
+    refusal = refusing_review(pr)
+    if refusal is None or reviewed_head(pr):
+        return False
+    return ignore_quota or (
+        excluded_refusal(refusal) and not request and (holds(pr) or reviewer_requested(pr))
+    )
+
+
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 
@@ -646,10 +668,13 @@ def local_cover(pr: dict) -> bool:
     - The whole review history is in view.
 
     A refusal on this head
-    is Copilot's own word, which only a later Copilot round on the head spends.
+    is Copilot's own word, which only a later Copilot round on the head spends. One saying every
+    changed file is in Copilot's default exclusions is the exception, since no round will follow it.
+    A refusal on an earlier head is spent by the head moving.
     """
+    refusal = refusing_review(pr)
     return (
-        not refusing_review(pr)
+        (refusal is None or excluded_refusal(refusal))
         and not promotion(pr)
         and attested(pr)
         and not reviews_truncated(pr)
