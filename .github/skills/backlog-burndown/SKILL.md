@@ -595,8 +595,9 @@ Then read each of those pull requests for its `Closes on promotion:` line. That 
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
 ask for. On an operational-model repository, a commit whose subject names no pull request is a direct
 push. A squash merge appends `(#<number>)`, and a merge commit reads `Merge pull request
-#<number>`. Read a direct push's message for its own line. Reading either alone returns a
-partial set.
+#<number>`. Read a direct push's message for its own line. Walk the range first-parent, with
+`git log --first-parent origin/main..origin/develop`, so a merge commit's own branch commits are not
+read as direct pushes. Reading either kind alone returns a partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
