@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -19,12 +20,10 @@ from host_capability import bash_or_skip
 from runner_commands import forged_lines
 from workflow_steps import step_script, step_script_text
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
+from git_env import without_git_location
+
 REPO = Path(__file__).resolve().parents[1]
-
-
-def repository_free_env() -> dict[str, str]:
-    """The process environment less every GIT_ variable, which a git hook sets to point at its own repository."""
-    return {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
 
 
 SHELL_LABELS = ("bash", "sh", "shell")
@@ -1350,9 +1349,20 @@ gh() {
         setup = "      - name: Setup uv step\n"
         self.assertLess(job.index(resolve), job.index(setup))
         self.assertIn(
-            "          python-version: ${{ steps.lint-python.outputs.version }}",
-            job.split(setup, 1)[1].split("\n\n", 1)[0],
+            '          python-version: "3.13"', job.split(setup, 1)[1].split("\n\n", 1)[0]
         )
+        for step in (
+            "Sync Python dependencies step",
+            "Lint Python step",
+            "Check Python formatting step",
+            "Type check Python step",
+        ):
+            with self.subTest(step=step):
+                self.assertIn(
+                    "          UV_PYTHON: ${{ steps.lint-python.outputs.version }}\n",
+                    job.split(f"      - name: {step}\n", 1)[1].split("        run: |", 1)[0],
+                )
+        self.assertNotIn("UV_PYTHON", job.split("      - name: Check prose step\n", 1)[1])
         self.assertNotIn(
             "PYTHON_VERSIONS",
             job.split("- name: Sync Python dependencies step\n", 1)[1].split("\n\n", 1)[0],
@@ -1962,14 +1972,14 @@ gh() {
                 run(
                     ["git", "init", "-q"],
                     cwd=work,
-                    env=repository_free_env(),
+                    env=without_git_location(),
                     check=True,
                     timeout=60,
                 )
                 run(
                     ["git", "add", "App.slnx"],
                     cwd=work,
-                    env=repository_free_env(),
+                    env=without_git_location(),
                     check=True,
                     timeout=60,
                 )
@@ -1977,7 +1987,7 @@ gh() {
                     [bash_or_skip(), "-c", script],
                     cwd=work,
                     env={
-                        **repository_free_env(),
+                        **without_git_location(),
                         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
                     },
                     capture_output=True,
@@ -2060,14 +2070,14 @@ gh() {
                     run(
                         ["git", "init", "-q"],
                         cwd=work,
-                        env=repository_free_env(),
+                        env=without_git_location(),
                         check=True,
                         timeout=60,
                     )
                     run(
                         ["git", "add", "."],
                         cwd=work,
-                        env=repository_free_env(),
+                        env=without_git_location(),
                         check=True,
                         timeout=60,
                     )
@@ -2075,7 +2085,7 @@ gh() {
                         [bash_or_skip(), "-c", script],
                         cwd=work,
                         env={
-                            **repository_free_env(),
+                            **without_git_location(),
                             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
                             "STUB_LOG": str(log),
                         },

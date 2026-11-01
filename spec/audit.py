@@ -953,15 +953,13 @@ PR_ONLY_NAME = re.compile(
 )
 
 
-def workflow_events(root):
-    """The event names a workflow's `on:` declares, in any of its string, list, or mapping forms."""
-    # The safe loader reads a bare `on` key as the boolean true, so the key is matched by its source text.
-    node = _mapping(root).get("on")
-    if isinstance(node, yaml.ScalarNode):
-        return {str(node.value)}
-    if isinstance(node, yaml.SequenceNode):
-        return {str(n.value) for n in node.value if isinstance(n, yaml.ScalarNode)}
-    return set(_mapping(node))
+def workflow_events(doc):
+    """The event names a safe-loaded workflow's `on:` declares, in any of its string, list, or mapping forms."""
+    # PyYAML reads a bare `on` key as the boolean true, per YAML 1.1.
+    on = doc.get("on", doc.get(True)) if isinstance(doc, dict) else None
+    if on is None:
+        return set()
+    return {str(event) for event in on} if isinstance(on, (dict, list)) else {str(on)}
 
 
 def check_interface(path, contract, text):
@@ -985,7 +983,7 @@ def check_interface(path, contract, text):
                 f"interface: {path} missing the ruleset-bound check name '{name}' as a job name",
             )
         )
-    elif name and name not in gated and workflow_events(root) - {"pull_request"}:
+    elif name and name not in gated and workflow_events(_yaml(text)[0]) - {"pull_request"}:
         findings.append(
             (
                 "DRIFT",
@@ -1144,9 +1142,7 @@ def _scalar_text(value):
 
 def _schedule_never_publishes(doc):
     """True where `on:` admits a `schedule` and no `push`, and every build-release-task.yml job requires a dispatch."""
-    # PyYAML reads a bare `on` key as the boolean true, per YAML 1.1.
-    on = doc.get("on", doc.get(True))
-    triggers = set(on) if isinstance(on, (dict, list)) else {on}
+    triggers = workflow_events(doc)
     if "schedule" not in triggers or "push" in triggers:
         return False
     release_jobs = 0

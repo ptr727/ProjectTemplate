@@ -346,17 +346,19 @@ jobs:
       # The other uvx tools run @latest, since a `uvx <tool>@<ver>` literal in a run: line is nothing Dependabot tracks and would silently go stale.
       # The setup-uv SHA here is Dependabot-tracked.
       # This step and the Read Python tool pins step are the one place the fleet's uvx tools are pinned or floated, decided here.
-      # UV_PYTHON, which setup-uv exports, carries the resolved interpreter to every uv call below.
+      # The job-wide interpreter stays at the floor the hub's own uv scripts declare, since the prose and repo gates below run under it.
+      # Each Python step sets UV_PYTHON to the resolved interpreter instead, which every uv call in it reads.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          python-version: ${{ steps.lint-python.outputs.version }}
+          python-version: "3.13"
 
       # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
@@ -389,6 +391,7 @@ jobs:
       - name: Lint Python step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
           RUFF_VERSION: ${{ steps.pins.outputs.ruff }}
@@ -409,6 +412,7 @@ jobs:
       - name: Check Python formatting step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
           RUFF_VERSION: ${{ steps.pins.outputs.ruff }}
@@ -437,6 +441,7 @@ jobs:
       - name: Type check Python step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
