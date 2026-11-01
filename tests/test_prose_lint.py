@@ -5671,7 +5671,7 @@ class TestChangedLines(unittest.TestCase):
         excludes: tuple[str, ...] = (),
         keep: bool = False,
         paths: tuple[str, ...] | None = None,
-        moves: dict[str, str] | None = None,
+        moves: dict[str, tuple[str, str]] | None = None,
         dest: str = "docs/ledger.md",
     ) -> dict[str, set[int]]:
         """The scope a move of a committed four-line file from `source` to `dest` gets.
@@ -5748,10 +5748,10 @@ class TestChangedLines(unittest.TestCase):
         ):
             for edit, lines in ((False, set()), (True, {3})):
                 with self.subTest(source=source, dest=dest, edit=edit):
-                    moves: dict[str, str] = {}
+                    moves: dict[str, tuple[str, str]] = {}
                     got = self.moved(source, edit=edit, moves=moves, dest=dest)
                     self.assertEqual({dest: lines}, got)
-                    self.assertEqual({dest: source}, moves)
+                    self.assertEqual({dest: (source, "One.")}, moves)
 
     def test_a_rename_changing_its_lexer_is_read_whole(self) -> None:
         """A file read as plain text where it sat had no comment or Markdown unit read at all."""
@@ -5870,6 +5870,7 @@ class TestChangedLines(unittest.TestCase):
             ("#!/usr/bin/env python3\n" + doc, doc, {1}),
             ("#!/bin/sh\n" + doc, "#!/bin/bash\n" + doc, {1}),
             ("#!/bin/sh\n" + doc, "#!/bin/sh\n" + doc + "echo\n", {3}),
+            ("\ufeff#!/bin/sh\n" + doc, "\ufeff#!/usr/bin/env python3\n" + doc, {1, 2}),
         ):
             with self.subTest(before=before[:12], after=after[:12]):
                 root = self.real_repo()
@@ -5882,6 +5883,23 @@ class TestChangedLines(unittest.TestCase):
         subprocess.run(["git", "-C", str(root), "mv", "tools/run", "bin/run"], check=True)
         (root / "bin" / "run").write_text("#!/usr/bin/env python3\n" + doc, encoding="utf-8")
         self.assertEqual(["bin/run:2: sentence-length"], self.gate(root, "sentence-length"))
+
+    def test_a_moved_file_is_judged_where_it_sat_by_the_first_line_it_had_there(self) -> None:
+        """Read through its new shebang at its old path, the comment bash read there would report.
+
+        The suffix the move adds keeps the lexer bash, so the file is not read whole. Python skips
+        an inline script metadata block, and bash reads it as comments.
+        """
+        body = "# /// script\n# Read the the ledger.\n# ///\necho\n"
+        root = self.real_repo()
+        self.commit(root, {"tools/run": "#!/bin/sh\n" + body})
+        subprocess.run(["git", "-C", str(root), "mv", "tools/run", "tools/run.sh"], check=True)
+        (root / "tools" / "run.sh").write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+        moves: dict[str, tuple[str, str]] = {}
+        got = prose_lint.changed_lines("HEAD", root, moves=moves)
+        self.assertEqual({"tools/run.sh": {1}}, got)
+        self.assertEqual({"tools/run.sh": ("tools/run", "#!/bin/sh")}, moves)
+        self.assertEqual([], self.gate(root, "dupword"))
 
     def test_a_binary_change_contributes_no_scope_entry(self) -> None:
         """A genuinely binary path stays out of the map entirely, gaining no entry at all.

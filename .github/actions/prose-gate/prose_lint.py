@@ -84,6 +84,7 @@ TIER2 = {chr(int(k.removeprefix("U+"), 16)): v for k, v in BASE["charset"]["tier
 TIER3 = frozenset(chr(int(k.removeprefix("U+"), 16)) for k in BASE["charset"]["tier3"])
 TIER4 = frozenset(chr(int(k.removeprefix("U+"), 16)) for k in BASE["charset"]["tier4"])
 VARIATION_SELECTOR_16 = chr(0xFE0F)
+BOM = chr(0xFEFF)
 GENERATED_ROOTS = frozenset(BASE["generated_roots"])
 INSTRUCTION_DOCS = frozenset(BASE["instruction_docs"])
 DUP_ALLOW = frozenset(BASE["exemptions"]["dupword_allow"])
@@ -283,7 +284,7 @@ def changed_lines(
     root: Path,
     excludes: tuple[str, ...] = (),
     paths: list[str] | None = None,
-    moves: dict[str, str] | None = None,
+    moves: dict[str, tuple[str, str]] | None = None,
 ) -> dict[str, set[int]] | None:
     """Map path -> lines this tree adds vs `base`, an untracked or undiffable text file in full.
 
@@ -291,7 +292,8 @@ def changed_lines(
     moved out of one is read in full too. So is one whose lexer the change alters, by its path or
     its first line. Only directories narrow. A list naming a file is what a hook passes from a
     commit, which says what this run reads rather than what every run does. Any other move adds
-    what it changed, and `moves` records its source so a run reports what the new path adds.
+    what it changed. `moves` records its source and first line, so a run reports what the new
+    path adds.
     """
     raw = git_bytes(root, DIFF_ARGS, base)
     undiffable = undiffable_paths(base, root) if raw is not None else None
@@ -343,7 +345,7 @@ def changed_lines(
                 elif m.group(1) == "1" and m.group(2) != "0":
                     firsts[cur] = None
         elif line.startswith("-") and cur and cur in firsts and firsts[cur] is None:
-            firsts[cur] = line[1:].rstrip("\r")
+            firsts[cur] = line[1:].rstrip("\r").removeprefix(BOM)
     for name in sorted(out.keys() | moved.keys()):
         if name not in firsts and name not in moved:
             continue
@@ -359,7 +361,7 @@ def changed_lines(
         elif name in moved:
             out.setdefault(name, set())
             if moves is not None:
-                moves[name] = moved[name]
+                moves[name] = (moved[name], was)
     for name in [*undiffable, *untracked_paths(root), *unread]:
         if is_text(root / name):
             out[name] = set(range(1, len((root / name).read_bytes().splitlines()) + 1))
@@ -367,12 +369,17 @@ def changed_lines(
 
 
 def nth_line(path: Path, n: int) -> str:
-    """Line `n` of `path`, counted from 1, or empty where the file holds fewer lines or none."""
+    """Line `n` of `path` as a lexer reads a first line, or empty where the file holds fewer lines.
+
+    Line `n` is counted from 1, and a byte order mark opening it is dropped as `check_file` drops it.
+    """
     try:
         lines = path.read_bytes().split(b"\n", n)
     except OSError:
         return ""
-    return lines[n - 1].decode("utf-8", "replace").rstrip("\r") if len(lines) >= n else ""
+    if len(lines) < n:
+        return ""
+    return lines[n - 1].decode("utf-8", "replace").rstrip("\r").removeprefix(BOM)
 
 
 def exempt_rules(path: Path, root: Path, config: Config) -> frozenset[str]:
@@ -1032,13 +1039,14 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     return out
 
 
-def extract(path: Path, text: str, lex: bool = True) -> Extracted:
+def extract(path: Path, text: str, lex: bool = True, first: str | None = None) -> Extracted:
     """The units the rules read in this file, and whether it was read as plain text.
 
     Without `lex`, a code file's comments and docstrings are left unread, no rule asking for them.
+    The lexer is chosen from `first` in place of the text's own first line where it is given.
     """
     lines = [line.rstrip("\r") for line in text.split("\n")]
-    lexer = lexer_name(path, lines[0])
+    lexer = lexer_name(path, lines[0] if first is None else first)
     if lexer == "markdown":
         return extract_markdown(lines)
     fenced = fenced_lines(lines)
@@ -1936,9 +1944,9 @@ def check_file(
     allowed: set[int] | None = None,
     plain: list[Path] | None = None,
     undecoded: list[Path] | None = None,
-    at: Path | None = None,
+    at: tuple[Path, str] | None = None,
 ) -> list[Finding]:
-    """Every finding the rules in `rules` make on `path`, judged as sitting at `at` where given.
+    """Every finding the rules in `rules` make on `path`, or judged at `at`, a path and a first line.
 
     `plain` collects a file with no lexer and `undecoded` one that is not UTF-8, since each is
     otherwise counted as read with nothing found. A byte order mark is judged on its own.
@@ -1949,15 +1957,14 @@ def check_file(
         if undecoded is not None:
             undecoded.append(path)
         return []
-    bom = chr(0xFEFF)
-    text = decoded.removeprefix(bom)
-    out = [f for f in charset_findings(1, bom) if f[1] in rules] if text != decoded else []
+    text = decoded.removeprefix(BOM)
+    out = [f for f in charset_findings(1, BOM) if f[1] in rules] if text != decoded else []
     lex = any(RULE_TABLE[r][1] - {"source", "prose", "code"} for r in rules)
-    judged = at or path
-    units, fenced, read_plain = extract(judged, text, lex)
+    judged, first = at or (path, text.split("\n", 1)[0].rstrip("\r"))
+    units, fenced, read_plain = extract(judged, text, lex, first)
     if read_plain and plain is not None:
         plain.append(path)
-    lexer = lexer_name(judged, text.split("\n", 1)[0].rstrip("\r"))
+    lexer = lexer_name(judged, first)
     config = config_for(str(root) if root else None)
     ctx = Context(judged, root, fenced, language_of(lexer) or {}, config, allowed)
     units = [without_metadata_blocks(unit, ctx) for unit in units]
@@ -2044,7 +2051,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     discovered = len(files)
     # Presence rather than truthiness, since an empty value is a base that failed to compute.
-    moves: dict[str, str] = {}
+    moves: dict[str, tuple[str, str]] = {}
     scope = (
         changed_lines(a.diff, scan_root, tuple(a.exclude), scan_paths, moves)
         if a.diff is not None
@@ -2072,9 +2079,10 @@ def main(argv: list[str] | None = None) -> int:
         allowed = scope.get(keys[f]) if scope is not None else None
         findings = check_file(f, rules, scan_root, allowed, plain, undecoded)
         # A moved file reports what its new path finds beyond what the old one did, not the backlog.
+        source, opener = moves.get(keys[f], ("", ""))
         added = (
             Counter(findings)
-            - Counter(check_file(f, rules, scan_root, allowed, at=scan_root / moves[keys[f]]))
+            - Counter(check_file(f, rules, scan_root, allowed, at=(scan_root / source, opener)))
             if keys[f] in moves
             else Counter()
         )
