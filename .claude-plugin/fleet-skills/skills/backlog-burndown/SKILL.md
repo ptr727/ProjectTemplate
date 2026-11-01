@@ -199,18 +199,17 @@ for, and it binds harder than any throughput target.
   carries a line reading `Closes on promotion: #N`**. It lists every issue that pull request
   actually fixes and nothing it merely mentions. The promotion body is assembled from that line,
   per "The Promotion Boundary". GitHub reads a closing keyword only where the issue reference
-  follows it directly, so the words `on promotion:` between them keep the line from closing
-  anything. Without that line nothing records which issues a merged pull request closes, since a
+  follows it directly or after a colon. So the words `on promotion:` keep the line inert. Without that line nothing records which issues a merged pull request closes, since a
   body's other issue references are not the same set.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The comment writes the branch name in backticks.
   The branch name is what lets a later session walk from a worktree it found back to the claim
-  explaining it. That is the direction the next bullet actually travels, and this lists the open
-  issues whose comments name a branch:
+  explaining it. That is the direction the next bullet actually travels. This lists the open
+  issues where a visible comment from an account with write access names a branch:
 
   ```sh
-  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; .body | contains("`<branch>`"))) | .number'
+  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | contains("`<branch>`")))) | .number'
   ```
 
   Matching the name with its backticks keeps a branch from matching a claim on a longer name that
@@ -256,7 +255,7 @@ for, and it binds harder than any throughput target.
   `git diff --name-only origin/<base>...<branch>` for what it has committed, and, for a
   registered worktree, `git -C <worktree> status --porcelain` for what it holds uncommitted.
   `<base>` is the `baseRefName` of the branch's pull request where it has one, and `develop`
-  otherwise, since `repo-worktree` "The Base Branch" lets a task branch from `main`. Read against
+  otherwise. That is because `repo-worktree` "The Base Branch" lets a task branch from `main`. Read against
   `develop`, a `main`-based branch can list files it never touched, which errs toward a collision
   rather than a miss. Where
   neither read is available the set is unknown rather than empty, and an unknown set collides with
@@ -297,9 +296,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   so brief the group and the bounds rather than restating the loop.
 - **The worker creates its own worktree**, always, as `drive-pr`'s worktree isolation and
   `repo-worktree`'s task-start mandate already require of the task itself. No worker inherits
-  another's worktree. That is why "Bounding the Wait on a Worker" either removes a dead worker's
-  tree and branch or leaves that tree untouched for the maintainer. It never passes the tree on,
-  for the same reason.
+  another's worktree. That is why "Bounding the Wait on a Worker" removes a dead worker's tree,
+  with or without its branch, or leaves that tree untouched for the maintainer. It never passes
+  the tree on, for the same reason.
 - **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the path the
   worker reports is the only way "Cleanup Is the Orchestrator's" can find it.
@@ -361,6 +360,7 @@ A merged group that worked in a standalone clone still runs `cleanup`, which del
 `cleanup` removes only the base clone's registered worktrees, so the orchestrator then removes the clone at the path the worker reported, per `repo-worktree` "Listing and Cleanup".
 Before deleting it, the orchestrator confirms the clone is clean and its branch tip is the pull request's `headRefOid`.
 Deleting the directory discards any commit no remote holds.
+Where either confirmation fails, the clone is left as it stands and the group is stopped for the maintainer per "Raising a Blocked Question".
 
 **Retiring a worktree and deleting its branch are two dispositions with two tests.** Citing one for
 the other is how a removal that discards nothing gets routed to the maintainer. It is also how a
@@ -375,8 +375,8 @@ the feature tip an ancestor of develop. So the substitute would fail on every me
 were read as covering them. Every disposition in this skill names which of the two it is.
 
 **A worker told to abandon its branch cleans its own tree first.** `git-commit-conventions` lets a
-command discard work only on explicit instruction. This skill gives that instruction for this one
-case, and it takes effect when the orchestrator tells a worker to abandon. That message states the
+command discard work only on the developer's explicit instruction. The maintainer gives it for this
+one case through this skill, and it takes effect when the orchestrator tells a worker to abandon. That message states the
 grant, since the worker never reads this skill. On it the worker
 discards its own uncommitted edits in its own linked worktree, and then reports. It runs
 `git -C <its-worktree> reset --hard` and then `git -C <its-worktree> clean -fd`. Only the seat that
@@ -448,8 +448,9 @@ So that check is what separates the two. It holds, and the issue returns to the 
 ranking to be dispatched on a new branch. Its claim is released as that procedure records it. It
 fails, and the branch holds the dead worker's work. So the worktree alone is retired, per
 "Cleanup Is the Orchestrator's". The branch, its claim, and any pull request it heads stay
-standing. A fresh worker is then dispatched on that same branch to finish
-the drive, the retire-then-dispatch shape "Raising a Blocked Question" uses. **A dirty one is left
+standing. A fresh worker is then dispatched on that same branch to finish the drive, in the dead
+worker's slot. That is the retire-then-dispatch shape "Raising a Blocked Question" uses. It happens
+once per group, so a second worker dying on that branch stops the group for the maintainer instead. **A dirty one is left
 exactly as it stands**, and the group is stopped for the maintainer per "Raising a Blocked Question". What goes
 to the maintainer names the worktree and what is uncommitted in it. The orchestrator does not commit that work, hand the tree to a
 replacement to commit, or remove it, per `GOVERNANCE.md` "Repository Boundaries and Write Safety".
