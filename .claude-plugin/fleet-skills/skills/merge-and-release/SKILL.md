@@ -13,8 +13,8 @@ description: >-
   for the pr-review-conduct Merge Gate, a promotion PR that is not actually green and fully
   resolved gets reported and stopped on, not merged. Where a merge or dispatch is actually
   performed this skill wins over `branching-and-release-model`, which supplies the policy it
-  follows, and an `unattended-handoff` run invoked with scope main or release is the one standing
-  go-ahead it accepts in place of asking.
+  follows, and a `backlog-burndown` away-mode run invoked with scope main or release is the one
+  standing go-ahead it accepts in place of asking.
 ---
 
 # Merge and Release
@@ -49,9 +49,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead. That go-ahead is to merge the promotion PR and to perform the scope chosen, for the one
   repo and PR in front of the agent. It is never a standing mode carried to the next PR.
-- The one standing grant is an `unattended-handoff` run the maintainer invoked with scope `main`
-  or `release`. That invocation names in advance each promotion that run's workers make, in that session
-  only. A worker handing a promotion here under it asks no how-far question, since the scope
+- The one standing grant is a `backlog-burndown` away-mode run the maintainer invoked with scope
+  `main` or `release`. That invocation names in advance each promotion that run makes, in that
+  session only. A worker handing a promotion here under it asks no how-far question, since the scope
   states it. The Merge Gate is still re-verified per promotion.
 - It is never permission to merge a PR that fails the Merge Gate. Re-verify the gate at
   invocation time, a check from earlier in the session can be stale.
@@ -76,16 +76,15 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    head and it is not a prefix of the recorded one, stop and re-ask with the commits added,
    `gh api repos/owner/repo/compare/<reported>...<recorded> --jq '.commits[] | .sha[:8] + " " +
    (.commit.message | split("\n")[0])'`. The reason is that a feature PR squashed into `develop` after the
-   report moves the promotion's head onto content the maintainer never saw. Under an
-   `unattended-handoff` standing grant this comparison is skipped, even where the worker holds a
-   ready report. Content another session merged meanwhile rides along, as that skill's grant
-   accepts.
+   report moves the promotion's head onto content the maintainer never saw. Under an away-mode
+   standing grant this comparison is skipped, even where the worker holds a ready report. Content
+   another session merged meanwhile rides along, as `backlog-burndown` "Away Mode" accepts.
    Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
    this step recorded.
 3. `gh pr merge [number] --merge --match-head-commit <sha> --repo owner/repo`, where `<sha>` is
    the head the go-ahead covers. Attended, that is the head `drive-pr`'s ready report named, or
-   the moved head the maintainer approved after step 2's re-ask. Under an `unattended-handoff`
-   grant, or where no report named a head, it is the head step 2 recorded. The server then
+   the moved head the maintainer approved after step 2's re-ask. Under an away-mode grant, or
+   where no report named a head, it is the head step 2 recorded. The server then
    refuses the merge if the head moved past that SHA. Never `--delete-branch`, the promotion
    PR's head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
@@ -220,6 +219,6 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
   are each a stop. Report the exact state, never force or retry blindly.
 - A merge refused by `--match-head-commit` means the head moved past the SHA it was given.
   Attended, stop and report the commits added, named as step 2 names them, and never retry with
-  the new SHA on the old go-ahead. Under an `unattended-handoff` grant, re-run step 2 on the new head instead.
+  the new SHA on the old go-ahead. Under an away-mode grant, re-run step 2 on the new head instead.
 - `gh pr merge` or `gh workflow run` failing is reported with its actual output, never
   suppressed, never assumed harmless on the agent's side alone.

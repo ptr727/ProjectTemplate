@@ -39,7 +39,7 @@ The triage labels classify an issue by the kind of work it needs. So a backlog s
 
 - **`blocked`**: blocked on another issue, one in another repository or a `decision` issue here for a parked handoff.
 
-A handoff parked by an unattended run also carries `blocked`, and differs from the paragraph above in three ways. It carries no triage label, since no handoff does. It waits on a `decision` issue in this repository, named in its parking comment rather than its body. And it stays out of every backlog count, as every handoff does. When it goes on and comes off is set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge] as well.
+A parked handoff also carries `blocked`, and differs from the paragraph above in three ways. It carries no triage label, since no handoff does. It waits on a `decision` issue in this repository, named in its parking comment rather than its body. And it stays out of every backlog count, as every handoff does. When it goes on and comes off is set by [GOVERNANCE.md "Durable Knowledge and Self-Improvement"][governance-durable-knowledge] as well.
 
 `handoff` is a surface marker like `agents` and `skills` rather than a triage label. A handoff issue carries no triage label at all, because it records work to do next rather than work of its own. Without that stated here, the next reader of this taxonomy reads a handoff issue carrying no triage label as drift. The chain it indexes is found by this label rather than by a title search. That is what lets a handoff title carry a human subject with nothing parsing it. Every enumeration that ranks or counts the open backlog excludes the label for the same reason one is always open by design.
 
