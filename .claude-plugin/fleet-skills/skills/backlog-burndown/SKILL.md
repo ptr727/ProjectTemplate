@@ -284,8 +284,9 @@ for, and it binds harder than any throughput target.
   stops for one per "Raising a Blocked Question", and the worker does not edit there. With
   one, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
   requires of such a brief. An away-mode run parks the group instead, per "Parking
-  Instead of Asking". It stays parked for the rest of that run, approved or not, since an away run
-  holds every such issue.
+  Instead of Asking". Its `decision` issue asks for the approval, or for the merge go-ahead where
+  one is recorded. The group stays parked for the rest of that run even once that is answered,
+  since an away run holds every such issue.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -318,6 +319,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the brief names a
   scratch directory and tells a worker choosing that fallback to record the clone's absolute path
   there before it clones. The file is `clone-<branch>.path`, each `/` in the branch written as `-`.
+  A worker that cannot write that file does not clone, and stops and reports instead.
   A worker that dies reports nothing, and that file is then the only way "Cleanup Is the
   Orchestrator's" finds the clone.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
@@ -396,7 +398,7 @@ were read as covering them. Every disposition in this skill names which of the t
 command discard work only on the developer's explicit instruction. The maintainer gives it for this
 one case through this skill, and it takes effect when the orchestrator tells a worker to abandon. That message states the
 grant, since the worker never reads this skill. It leaves the grant out for a worker whose
-reported checkout is a standalone clone. On it the worker
+reported or recorded checkout is a standalone clone. On it the worker
 discards its own uncommitted edits in its own linked worktree, and then reports. It runs
 `git -C <its-worktree> reset --hard` and then `git -C <its-worktree> clean -fd`. Only the seat that
 made the edits can tell they are throwaway. Its commits stay for the branch check below, and it discards
@@ -433,11 +435,16 @@ A worker still live, a promotion fix included, keeps its worktree until the next
 
 **A standalone clone takes neither removal above**, since `git worktree remove` acts on the base
 clone's registered worktrees and `git branch -d` on its branches. The clone is found at the path its
-worker reported or wrote, per "Dispatching a Worker". An abandoned group's or a dead worker's clone
-is removed only where it is clean and its branch carries no commit develop lacks. That is the
+worker reported or wrote, per "Dispatching a Worker". Deleting a clone deletes the local branch
+it holds, so it is the branch-deleting disposition. An abandoned group's or a dead worker's clone
+is deleted only where it is clean and its branch carries no commit develop lacks. That is the
 branch check above, each git command run as `git -C <clone>`. Where both hold, the
 exact clone directory is deleted per `repo-worktree` "Listing and Cleanup". A pushed branch's
-remote delete then runs as above, and the release is recorded as above. Anything else leaves the clone
+remote delete then runs as above, and the release is recorded as above. A dead worker's clean
+clone can fail that check while its tip equals the branch's live remote tip, read with
+`git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds all it does.
+So the clone is deleted alone, the remote branch kept, and the group continues as a retired
+worktree's does per "Bounding the Wait on a Worker". Anything else leaves the clone
 exactly as it stands and stops the group for the maintainer per "Raising a Blocked Question",
 naming the clone's path. The discard grant above does not reach a clone, since it names the
 worker's own linked worktree. A recorded path naming no directory counts as no

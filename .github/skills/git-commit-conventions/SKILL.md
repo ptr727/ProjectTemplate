@@ -46,7 +46,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   signal to re-check isolation per the `repo-worktree` skill. That is because an unexpected change may mean another task is live in this checkout.
 - **A direct push to `develop` on an operational-model repository names its issues.** Its commit
   message carries one `Closes on promotion:` line listing each issue it fixes. The promotion
-  body names no issue for a push without one, per `branching-and-release-model` "Operational repositories (the
+  body takes no closing keyword for a push without one, per `branching-and-release-model` "Operational repositories (the
   complete delta)".
 
 ## Signing, verified not configured
