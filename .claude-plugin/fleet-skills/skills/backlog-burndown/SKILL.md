@@ -602,10 +602,13 @@ and a guess costs a revert and a review round.
   visibility, a secret, or a release condition. Or it needs a credential, an account, or a host
   the session lacks.
 - **The fix edits anything under the hub's `host-setup/agent-safety/`.** That tree is the agent's
-  own guard, so a human approves every change to it. An approval comment on the issue, from an
-  account with write access, lets an attended run implement the edit and drive its pull request.
-  Merging it still needs the maintainer present, since the maintainer approves the diff and not
-  only the design. An away-mode run holds every such edit, approved or not.
+  own guard, so a human approves every change to it. An approval on the issue lets an attended
+  run implement the edit and drive its pull request. The approval is a comment from an account
+  with write access that approves the change, written by the maintainer or recording the
+  maintainer's answer. A recommendation a triage seat posted is never one. Merging the pull
+  request still waits on the maintainer's go-ahead for that pull request, given after reading its
+  diff. The approval covers the design and not the diff, and a standing merge go-ahead a run
+  carries does not reach it. An away-mode run holds every such edit, approved or not.
 - **The fix reverses a settled decision** recorded in an issue, a handoff, or the rule text.
 - **The fix adds a rule the issue does not ask for.** A rule a future agent must honor is the
   maintainer's to judge. An issue that asks for a rule has been judged, and one that only reports
