@@ -780,7 +780,8 @@ The final message is the report "Ending the Run" describes, with every held-back
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
-reported as needing the maintainer present. Each other reason is named as itself, never as a
+reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
+as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
 request, and awaiting promotion. A held promotion is named too, with each `decision` issue holding
 it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
