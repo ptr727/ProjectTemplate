@@ -247,7 +247,8 @@ must have done.
   stands in. Nothing the loop does clears it, since re-requesting returns it again and spends quota doing so. Where the
   reviewer's run log names a reset time `pr_review.py` reports it. Where it names a transient
   fetch failure instead, `pr_review.py wait` re-requests once. Where no local pass stands in, every
-  other refusal, a repeat of that one included, goes to the maintainer rather than into a wait.
+  other refusal goes to the maintainer rather than into a wait, a repeat of that one included. A
+  file-count refusal is the exception, since splitting the pull request clears it.
 
 The hub's `docs/pr-reviewer-reference.md` records what each reviewer does, what shapes it, and
 which repositories its plan covers. That is the record for a reviewer whose behavior still

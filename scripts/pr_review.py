@@ -271,12 +271,12 @@ from pr_review_rounds import (
     newest_request_event,
     null_node,
     open_threads,
+    polled_past,
     possible_quota,
     quota_refusal,
     quota_signal,
     refusing_review,
     request_recorded,
-    reviewed_head,
     reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
@@ -1597,6 +1597,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     """Request a review where one is owed, poll until it lands or the timeout, and return the code.
 
     `may_request` False sends no request whatever is owed, for a caller reading the gate as is.
+    The body-less liveness read takes a head refusal for a round, so `polled_past` reads past it.
     """
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     if refused := scope_refusal(owner):
@@ -1608,15 +1609,16 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         return run_status(owner, repo, a)
     rounds_before = len(reviewer_nodes(pr, "reviews"))
     done, answer, drift = liveness(pr, a.min_rounds)
-    if done and a.ignore_quota_signal:
+    full = None
+    if done and (a.ignore_quota_signal or not a.request):
         full = gql(Q_FULL, owner, repo, a.number)
-        if refusing_review(full) and not reviewed_head(full):
-            a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
-            done = False
+    if full is not None and polled_past(full, a.ignore_quota_signal, a.request):
+        a.min_rounds = max(a.min_rounds, len(reviewer_nodes(full, "reviews")))
+        done = False
     # Read whenever nothing has landed yet, since a pending request with no answer is the shape repo-wide quota exhaustion leaves.
     # The bot id for a fresh request comes from the same traversal.
     history = [] if done or answer or drift else copilot_history(owner, repo)
-    snapshot = None if done or drift else gql(Q_FULL, owner, repo, a.number)
+    snapshot = None if done or drift else (full or gql(Q_FULL, owner, repo, a.number))
     # `--ignore-quota-signal` changes only whether the signal is acted on, not whether the history is read.
     # The history is unfiltered, so a review on an earlier head of this pull request counts as evidence.
     signal = None if a.ignore_quota_signal else quota_signal(history)
@@ -1642,7 +1644,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     # Request before the first poll, so `wait` makes a review happen rather than only watching for one.
     # Skipped once a round past --min-rounds covers the head, Copilot answered outside a review, or a request is pending.
     recorded: bool | None = None
-    final: dict | None = None
+    final: dict | None = full if done else None
     if (
         may_request
         and not done
@@ -1777,9 +1779,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     print(out)
     print(f"waited={int(time.monotonic() - start)}s")
     # A stuck required check decides the code only once the review itself is sound.
-    head_refusal = refusing_review(final)
-    late = head_refusal is not None and excluded_refusal(head_refusal) and not a.request
-    held = (held or late) and holds(final)
+    held = held and holds(final)
     covered = held and local_cover(final)
     halted = None if a.ignore_quota_signal else stopping_refusal(final)
     if covered or (not halted and head_review_done(final, a.min_rounds)):
@@ -1907,13 +1907,10 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         )
         return 41
     excluded = refusal is not None and excluded_refusal(refusal)
+    if excluded and reviewer_requested(final):
+        refusal, excluded = None, False
     if held and (not refusal or excluded):
-        why = (
-            "Copilot refused this head because every changed file is in its default review "
-            "exclusions, and no round follows that refusal. "
-            if excluded
-            else ""
-        )
+        why = "Copilot's refusal says every changed file is excluded from its review. " * excluded
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
             f"since a head into a branch other than the default is covered by a local pass. {why}Run "

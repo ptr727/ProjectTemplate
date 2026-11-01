@@ -643,6 +643,20 @@ def holds(pr: dict) -> bool:
     )
 
 
+def polled_past(pr: dict, ignore_quota: bool, request: bool) -> bool:
+    """Whether `wait` reads on past a head refusal its body-less liveness read took for a round.
+
+    `--ignore-quota-signal` reads past one on a head no round covers. An excluded-files refusal is
+    held for a local pass, or read past while a request is pending.
+    """
+    refusal = refusing_review(pr)
+    if refusal is None:
+        return False
+    if ignore_quota and not reviewed_head(pr):
+        return True
+    return excluded_refusal(refusal) and not request and (holds(pr) or reviewer_requested(pr))
+
+
 def local_cover(pr: dict) -> bool:
     """Whether a recorded local pass stands in for a Copilot round on this head.
 

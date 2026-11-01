@@ -4954,7 +4954,7 @@ class TestCli(GqlCase):
         """
         live = payload([{k: v for k, v in review().items() if k != "body"}])
         for attest, code, said in (
-            (False, 49, "every changed file is in its default review exclusions"),
+            (False, 49, "every changed file is excluded from its review"),
             (True, 0, "coverage=local"),
         ):
             with self.subTest(attest=attest):
@@ -4970,6 +4970,28 @@ class TestCli(GqlCase):
                 self.assertIn(said, out)
                 self.assertNotIn("REVIEW_IS_A_REFUSAL", out)
                 self.assertNotIn("overrules it", out)
+
+    def test_an_attested_excluded_files_head_is_held_through_the_check_poll(self) -> None:
+        live = payload([{k: v for k, v in review().items() if k != "body"}])
+        running = check(status="IN_PROGRESS", conclusion="", started=real_ago(60))
+        full = payload([review(body=EXCLUDED_REFUSED)], merge="BLOCKED", checks=[running])
+        self.answer(self.into(live, attest=True), self.into(full, attest=True))
+        self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        out = self.out.getvalue()
+        self.assertIn("An attested head has its checks polled instead", out)
+        self.assertIn("status=CHECKS_PENDING", out)
+
+    def test_a_pending_request_past_an_excluded_files_refusal_is_polled_for(self) -> None:
+        live = payload([{k: v for k, v in review().items() if k != "body"}], pending=True)
+        full = payload([review(body=EXCLUDED_REFUSED)], pending=True)
+        self.answer(self.into(live, attest=True), self.into(full, attest=True))
+        calls = self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
+        self.assertNotIn("REVIEW_EXCLUDED_FILES_ONLY", self.out.getvalue())
 
     def test_an_excluded_files_refusal_with_no_local_cover_names_its_own_remedy(self) -> None:
         live = payload([{k: v for k, v in review().items() if k != "body"}])
