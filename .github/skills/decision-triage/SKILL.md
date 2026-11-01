@@ -84,33 +84,28 @@ that owns it. A handoff link carrying the `handoff` label is not an issue of its
    once. Each applies "Needs the Maintainer" above, which its brief quotes whole. It returns one
    line per issue in the form "Return Lines" below.
 3. **Research each question**, one `frontier` researcher per question, at most four running at
-   once. That covers each `ask` and `split` line and each queued `decision` issue that states no
-   options. A researcher reads the issue, the rule text it touches, and the code. It returns the
-   question, its options, and its evidence, in the form "Return Lines" below. It writes nothing.
+   once. That covers each `ASK` and `SPLIT` line and every queued `decision` issue. A researcher
+   reads the issue, the rule text it touches, and the code. It returns in the form "Return Lines"
+   below, and writes nothing. A queued question a later change has already answered or overtaken
+   comes back as `OVERTAKEN` rather than as options.
 4. **Record each question** before asking it, so the question survives an interrupted session.
-   - For an `ask`, comment the researched question on the issue and add the `decision` label.
-   - For a `split`, file a new issue holding only the undecided item, carrying `decision`.
+   - For an `ASK`, comment the researched question on the issue and add the `decision` label.
+   - For a `SPLIT`, file a new issue holding only the undecided item, carrying `decision`.
      Comment on the original issue naming the new one and the part that stays with it.
    - For a queued `decision` issue, comment the researched options where it stated none.
+   - For an `OVERTAKEN` one, take it out of the queue as "Communicating with the User" below
+     states, recording the reason. It is not asked.
 
-   The comment states the question, then the options, the recommended one first and marked as the
-   recommendation, each with its reason. It names the evidence and what each option does to any
-   work in flight, per `GOVERNANCE.md` "Communicating with the User".
-5. **Post the queue, then ask it.** First post one message listing every question with its issue
-   as a clickable link, since a prompt's own text links nothing. Then put the questions through
-   the interface's prompt mechanism, one question per decision, its options as the choices. Fill
-   each prompt with as many questions as it carries, and repeat until the queue is empty. Order
-   them by what blocks work in flight first, then by longest waited. Where no prompt mechanism
-   exists, the questions go as one numbered list.
-6. **Apply each answer** as it arrives.
-   - Comment the answer on the issue and take the `decision` label off.
-   - Close the issue where it held nothing but the question, as a `split` issue does.
-   - Where the answer settles the work, leave the issue open as work. An away run then fixes it.
-   - Where an answer unblocks a parked group, the parking comment names the group's issue. Comment
-     on that issue that its decision is answered. Leave its `blocked` label for the worker that
-     resumes it, per `GOVERNANCE.md` "Durable Knowledge and Self-Improvement".
-
-   A question the maintainer skips keeps its label and stays in the queue.
+   The comment states the question, then the options, the recommended one first, each with its
+   reason. It names the evidence and what each option does to any work in flight.
+5. **Ask the whole queue** as "Communicating with the User" below states, every question rather
+   than only the top of the queue. Fill each prompt with as many questions as it carries, and
+   repeat until the queue is empty.
+6. **Apply each answer** as it arrives, as "Communicating with the User" below states for an item
+   leaving the queue. Where the answer settles the work, leave the issue open as work, so an away
+   run fixes it. Where the researcher's `BLOCKS` line names a parked group's issue, comment on that
+   issue that its decision is answered. A question the maintainer skips keeps its label and stays
+   in the queue.
 7. **Report** the counts: issues an agent can fix alone, questions answered, questions still
    open, and splits filed. Also name each issue held back for a reason "Needs the Maintainer"
    does not count, under that reason. End with one line saying a `backlog-burndown` away-mode run
@@ -124,7 +119,8 @@ that owns it. A handoff link carrying the `handoff` label is not an issue of its
 | classifier | `ASK #<n> <the question in one sentence>` | the whole issue needs the maintainer |
 | classifier | `SPLIT #<n> <the undecided item in one sentence>` | part needs the maintainer, the rest does not |
 | classifier | `HELD #<n> <reason>` | waits on something other than the maintainer |
-| researcher | a block holding `QUESTION`, then `OPTION` lines, recommended first, each with its reason, then `EVIDENCE` | the researched question |
+| researcher | a block of `QUESTION`, `OPTION` lines with the recommended one first, `EVIDENCE`, and `BLOCKS` | the researched question, each option with its reason, and each issue and pull request it blocks |
+| researcher | `OVERTAKEN #<n> <what answered or overtook it>` | a queued question no longer open |
 
 A reply in no form above is not read further. Its issue is classified again in the next batch, or
 reported as unclassified where it fails twice.
@@ -136,6 +132,25 @@ quotes "Needs the Maintainer" whole and lists its issue numbers. A researcher's 
 issue, the question, and the rule files the issue touches. Each brief states that the subagent
 writes nothing. It also states that the subagent stops and reports where a rule it was given does
 not cover what it finds.
+
+## Communicating with the User
+
+`GOVERNANCE.md` "Communicating with the User" keeps how a question is put to the maintainer and how
+an item leaves the queue, carried here whole as a generated include.
+
+<!-- include: GOVERNANCE.md > Communicating with the User -->
+
+- **Reference every pull request as a clickable link.** When you mention a PR on a surface that renders Markdown (chat, a summary, a report), render it as a Markdown link to the PR. Write it as `[#N](https://github.com/OWNER/REPO/pull/N)`, never a bare `#N`. The same applies to issues and commits. **The form follows the surface.** Some surfaces link neither a Markdown link nor a bare URL, an interactive prompt's question and option text among them. Pasting a full URL into one of those does not rescue it, since the reader gets a string to copy. That is the outcome this rule exists to prevent. There the reference is a bare `#N`. The clickable link goes in the message that comes **before** the prompt rather than merely alongside it. That is because the prompt blocks on an answer, and a message emitted after it is read once that answer is already given. That is the one moment the link is no longer any use. The test is whether the reader can click it where it is read, not whether it was written in the syntax that works elsewhere.
+- **Put a command the user must run where the user can run it.** This session's input line is where the user types to the agent. A command runs outside this session where this session's input line cannot run it or cannot hold its effect. One waiting on typed input, such as a password or a confirmation, is such a command. So is one meant for another host, or one setting a variable the session reads at launch. Every other one runs at this session's input line, where that line can run a command, and outside the session otherwise. **A command the user runs outside this session goes in the question's own text.** Where a question asks the user to run one, the question carries the exact command, complete and ready to paste. A message before the prompt may repeat the command, but the question never points at that message. A question pointing at it can leave the reader to find the command among a long run of earlier output. Such a command stays in the prompt, where the turn opens one, although the clickable-link bullet above moves a link out of one. The command needs no rendering, since the prompt shows it as plain text the reader can copy. **A command the user runs at this session's input line never goes in an interactive prompt.** On Claude Code such a command is a `!` line, typed at the session's input line so its output lands in the session. While an interactive prompt is open, the user cannot type at the session's input line. So a command placed in one sits in the one surface that blocks running it. It goes in a plain message instead, as a fenced block holding the `!` line itself, complete and ready to paste. Several commands join on that one line with `&&`, which runs them in order and stops at the first that fails. The block opens the message. Any question the same turn owes follows it as a numbered list, and any report comes after both. The message asks the user to reply once the command has run, and the turn ends with no interactive prompt open. The agent then checks the result on the user's next message. It reads back the state the command was meant to change, or the output it left in the session. An answer saying the command ran is not that check.
+- **Ask every question through the interface's prompt, never in prose.** When you need the user to decide, answer, or approve anything, put it to them through the interface's own prompt mechanism. Do so whether or not work is blocked on it. An offer to do more work ("want me to file that?") is a question like any other. A question written into a message is lost in the report around it, however short it is. One closing a long report sits where the reader is least likely to reach it. Where no prompt mechanism is available, the questions go as a numbered list opening the message rather than closing it. The user can then reply per number. A turn asking for a command the user runs at this session's input line is an exception, per the command bullet above. It puts every question it owes in that message, since a prompt open beside the command would block the place it runs. This bullet settles how a question is put once it is asked. Whether a question is asked now or recorded for later is the parking bullet's to settle. That is the one opening "A question filed as an issue is parked rather than asked".
+- **Raise work blocked on the user as a direct interactive prompt.** When progress needs a decision, an authorization, or an answer only the user can give, ask for it at the point the work stops. Ask through the interface's own prompt mechanism. Never leave it as prose in a summary. A handoff buried in a paragraph is a handoff that did not happen. That is because a summary reads as a report of finished work. It is also because the one line still waiting on the user is the easiest in a summary to skim past. The blocked item is the message, not a closing remark on a message about something else. **The options offered are the actions themselves.** The one that unblocks the work names the action it authorizes ("squash and merge it"). Selecting it is then the go-ahead rather than a note to act on later. Offering only ways to wait is the same failure in interactive clothing. That is because a prompt whose every choice is inaction reports the block rather than clearing it. Where the agent may not perform the authorized action itself, the option says who does it. Where no interactive prompt is available, the numbered list the bullet above names is the fallback. In a turn asking for a command the user runs at this session's input line, the command bullet above replaces the interactive prompt.
+- **Lead every choice with a recommendation and its reason.** Wherever the user is asked to choose, in a prompt or in a numbered list, the option the agent recommends comes first. It is marked as the recommendation, and every option states the reason for it. A user who takes the recommendation then reads one line, and one who does not sees what the other options trade away. A question with no defensible recommendation says so rather than inventing one. Where an open question has no options and the agent does have an answer, that answer and its reason go in the question's text. They never go in as an invented option.
+- **A question filed as an issue is parked rather than asked, and it stays owed.** Where the work cannot continue without the answer, the interactive-prompt bullet governs and the question is asked at the point the work stops. Wherever the question is recorded rather than asked, recording it is the right thing to do, and recording it is still not asking it. That holds whether the work can continue without the answer or the question was asked once and deferred. So the issue carries the fleet's `decision` label. When the filing session knows the choices the question is between, the issue states them. The label and the stated choices are what let a later session, one that was not there when the issue was filed, find the question. That session can then put the question to the user without inventing its answers. **The parked queue is the failure, not the parking.** An issue holding a question the user has never seen reads to every later session as tracked work rather than as a block. So each session files correctly and moves on. Presenting the accumulation is the step nobody owns.
+- **The session that writes a handoff presents the parked queue in the same act.** This binds at the moment the session writes the handoff that `AGENTS.md` "Session Scope" defines, rather than at the moment the session ends. That is because a session also ends by interruption, where no agent acts at all and no rule reaches it. The session enumerates this repository's open issues carrying that label, and states how many issues the queue holds. It puts the highest-ranked of them to the user as questions, **one question per parked decision, carrying that decision's own answers as its options**. That is the interactive-prompt bullet's own shape applied per decision, rather than a single prompt whose options are topics. An issue that states no choices is put as the open question it is, never as invented options. That is because the label marks every decision waiting on the user, rather than only the ones filed under this rule. It is also because the issues that already carry the label predate the rule. Rank them longest-waited first. Every issue records how long it has waited, so any session can reproduce that order. Promote one ahead of that order where it blocks work in flight, and say in the handoff that it was promoted. That is because two sessions order the same queue differently where the key is subjective and nobody records it. Where more are parked than one round of questions can carry, the stated count still covers every one of them. The handoff names the remainder by issue number in that order, a list of numbers rather than of questions. That is what keeps the handoff inside the size rule that `AGENTS.md` "Session Scope" sets for it. **A count nobody states is a queue nobody can see**, which is how a backlog reported as healthy hides the questions inside it. Where a user is present but no prompt mechanism is available, the questions go as a numbered list. That is the fallback the interactive-prompt bullet already names, and it reaches a reader who is there to read it. They go as a numbered list too in a turn asking for a command the user runs at this session's input line. Where no user is present at all, the session asks nothing and names the whole queue by issue number in the handoff. It leaves the asking to the next session that has one. An item leaves the queue when the user answers it, and also at triage where a later change has already answered or overtaken its decision. Either way it leaves by losing the label, with the answer or the reason recorded on the issue. The issue itself closes only where it held nothing but the question. That is because the queue holds issues that outlive their decision. It is also because closing such an issue just to clear the queue discards the other work that issue tracks.
+
+`GOVERNANCE.md` "Communicating with the User" keeps the full rules. The `agent-conduct` and `session-handoff` Skills at `.agents/skills/agent-conduct/SKILL.md` and `.agents/skills/session-handoff/SKILL.md` in the hub each carry it whole as a generated include. Each surfaces it at its own decision moment. Those paths are not repo-relative links, since they are hub-local and not carried into every fleet repo.
+
+<!-- /include -->
 
 ## Model Tiers
 
@@ -164,7 +179,5 @@ Each cell is the name that tool's subagent dispatch takes, which follows the lat
 
 ## Mechanics Live Elsewhere
 
-- How a question is put to the maintainer, and when an item leaves the queue: `GOVERNANCE.md`
-  "Communicating with the User".
 - The parked decision queue a session close presents: `session-handoff`.
 - Working the issues that need no one, attended or away: `backlog-burndown`.
