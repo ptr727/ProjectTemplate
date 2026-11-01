@@ -168,8 +168,12 @@ Subcommands
            - The reviewer writes under a login no query filters on.
            41 = the newest round is a refusal or a quota state. The kind is printed in its status
            line and, for a refusal on this pull request, in the digest's `refusal=`. The cases are:
-           - A refusal on the head.
-           - The pull request's newest review being a quota or error refusal on any head.
+           - A refusal on the head. One saying every changed file is in Copilot's default review
+             exclusions is one only where no local pass is to cover the head, its status line
+             `REVIEW_EXCLUDED_FILES_ONLY`.
+           - The pull request's newest review being a quota or error refusal on any head. On a
+             pull request into a branch other than the default, an attested local pass on a later
+             head covers that head instead.
            - The reviewer's newest activity elsewhere in the repository being a quota refusal
              nothing answered since while this head carries none of its own.
            Proceed on the other reviewers' coverage rather than retrying, and pass
@@ -197,7 +201,7 @@ Subcommands
            at 100 is read to its end first. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
            pull request merging into a branch other than the default with no attestation vouching
-           for the head. 64 = the write scope could not
+           for the head, a refusal naming Copilot's default review exclusions on it included. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.
 
 Reading is the bulk of this and the writing commands are a trade rather than a free win. A
@@ -252,6 +256,7 @@ from pr_review_rounds import (
     copilot_bot_id,
     coverage,
     describe,
+    excluded_refusal,
     files_unread,
     finding_text,
     head_review_done,
@@ -1899,14 +1904,31 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             "--ignore-quota-signal once the limit is believed to have reset"
         )
         return 41
-    if held and not refusal:
+    excluded = refusal is not None and excluded_refusal(refusal)
+    if held and (not refusal or excluded):
+        why = (
+            "Copilot refused this head because every changed file is in its default review "
+            "exclusions, and no round follows that refusal. "
+            if excluded
+            else ""
+        )
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
-            "since a head into a branch other than the default is covered by a local pass. Run "
+            f"since a head into a branch other than the default is covered by a local pass. {why}Run "
             "the local strict review, record it, push, and run `pr_review.py attest` from the "
             "checkout, or pass --request to ask Copilot for a round instead"
         )
         return 49
+    if excluded:
+        print(
+            "status=REVIEW_EXCLUDED_FILES_ONLY the review carrying the head says it reviewed no "
+            "file, since every changed file is in Copilot's default review exclusions, printed "
+            "above under COPILOT REFUSED THIS ROUND. Re-requesting and splitting the pull request "
+            "both clear nothing. Into a branch other than the default, an attested local pass "
+            "covers this head while no round states partial coverage and the whole review history "
+            "is in view, and `wait` without --request reads it. Otherwise hand it to the maintainer"
+        )
+        return 41
     if refusal:
         print(
             "status=REVIEW_IS_A_REFUSAL the review carrying the head says it did not review, "

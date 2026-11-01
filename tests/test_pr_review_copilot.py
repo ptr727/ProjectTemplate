@@ -76,7 +76,10 @@ class TestVocabulary(unittest.TestCase):
                 for key, kind in adapter.KEYS.items():
                     self.assertIsInstance(data[key], kind, key)
                 self.assertEqual(set(adapter.KINDS) | {"vetted"}, set(data["sections"]))
-                self.assertEqual({"quota", "error", "file_count"}, set(data["refusal_kinds"]))
+                kinds = set(adapter.REFUSALS) - {"none", "unknown"}
+                self.assertLessEqual(set(data["refusal_kinds"]), kinds)
+                if name == "copilot":
+                    self.assertEqual(kinds, set(data["refusal_kinds"]))
                 self.assertEqual({"clean", "flagging"}, set(data["verdicts"]))
 
     def test_every_key_the_adapter_source_names_is_declared(self) -> None:
@@ -116,6 +119,13 @@ class TestRefusal(unittest.TestCase):
                     "maximum number of files (300)."
                 ),
                 "file_count",
+            ),
+            (
+                (
+                    "Copilot wasn't able to review any files in this pull request. Check if the "
+                    "**Files changed** in this pull request are included in default exclusions."
+                ),
+                "excluded",
             ),
             ("Copilot wasn\u2019t able to review this pull request.", "unknown"),
         ):
@@ -367,6 +377,8 @@ class TestOpenFindings(unittest.TestCase):
             "Unresolved findings:",
             "Outstanding findings:",
             "Unresolved review findings:",
+            "Open review findings:",
+            "Review findings remain:",
         ):
             with self.subTest(label=label):
                 listed = f"**{label}**\n- P1 moderate: one.\n- P2 nit: two.\n- P2 nit: three."
@@ -379,7 +391,12 @@ class TestOpenFindings(unittest.TestCase):
                 self.assertEqual((), found.unplaced)
 
     def test_a_findings_list_in_the_narrative_keeps_each_item_s_text(self) -> None:
-        for label in ("Outstanding findings:", "Unresolved review findings:"):
+        for label in (
+            "Outstanding findings:",
+            "Unresolved review findings:",
+            "Open review findings:",
+            "Review findings remain:",
+        ):
             with self.subTest(label=label):
                 listed = (
                     f"{label}\n- **Moderate, P2 \u2014 `src/x.py:12` (1 vote):** Guard the write.\n"

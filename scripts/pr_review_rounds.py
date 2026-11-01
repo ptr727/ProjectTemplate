@@ -229,6 +229,14 @@ def possible_quota(node: dict) -> bool:
     return reading(node).refusal == "error"
 
 
+def excluded_refusal(node: dict) -> bool:
+    """True where a refusal on this node says every changed file is in Copilot's default exclusions.
+
+    It says nothing about the content, so a local pass can cover what no Copilot round ever will.
+    """
+    return reading(node).refusal == "excluded"
+
+
 def stopping_refusal(pr: dict) -> dict | None:
     """The reviewer's newest review on any head, where it is a quota refusal or an error."""
     if answered_outside_review(pr):
@@ -646,10 +654,13 @@ def local_cover(pr: dict) -> bool:
     - The whole review history is in view.
 
     A refusal on this head
-    is Copilot's own word, which only a later Copilot round on the head spends.
+    is Copilot's own word, which only a later Copilot round on the head spends. One saying every
+    changed file is in Copilot's default exclusions is the exception, since no round will follow it.
+    A refusal on an earlier head is spent by the head moving.
     """
+    refusal = refusing_review(pr)
     return (
-        not refusing_review(pr)
+        (refusal is None or excluded_refusal(refusal))
         and not promotion(pr)
         and attested(pr)
         and not reviews_truncated(pr)
