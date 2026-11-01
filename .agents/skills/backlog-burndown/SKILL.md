@@ -283,10 +283,9 @@ for, and it binds harder than any throughput target.
   whether or not another group holds the file. Without an approval recorded on the issue, the group
   stops for one per "Raising a Blocked Question", and the worker does not edit there. With
   one, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
-  requires of such a brief. An away-mode run parks the group instead, per "Parking
-  Instead of Asking". Its `decision` issue asks for the approval, or for the merge go-ahead where
-  one is recorded. The group stays parked for the rest of that run even once that is answered,
-  since an away run holds every such issue.
+  requires of such a brief. An away-mode run stops the group instead, its claim and
+  branch kept, since it holds every such issue. It files no `decision` issue, and its report names
+  the group as held for the agent-safety tree, needing the maintainer present.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -318,7 +317,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the brief names a
   scratch directory and tells a worker choosing that fallback to record the clone's absolute path
-  there before it clones. The file is `clone-<branch>.path`, each `/` in the branch written as `-`.
+  there before it clones. The file is `clone-<branch>.path`. Every scratch file named for a branch writes each `/` in it as `-`.
   A worker that cannot write that file does not clone, and stops and reports instead.
   A worker that dies reports nothing, and that file is then the only way "Cleanup Is the
   Orchestrator's" finds the clone.
@@ -377,7 +376,7 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone at the path the worker reported or wrote is clean and its branch tip is the pull request's `headRefOid`.
+The orchestrator confirms the clone at the path the worker reported or recorded is clean and its branch tip is the pull request's `headRefOid`.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
 The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
@@ -433,24 +432,14 @@ A dead worker's clean tree whose branch fails the check is retired alone instead
 Where a pushed branch still heads or bases an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
 
-**A standalone clone takes neither removal above**, since `git worktree remove` acts on the base
-clone's registered worktrees and `git branch -d` on its branches. The clone is found at the path its
-worker reported or wrote, per "Dispatching a Worker". Deleting a clone deletes the local branch
-it holds, so it is the branch-deleting disposition. An abandoned group's or a dead worker's clone
-is deleted only where it is clean and its branch carries no commit develop lacks. That is the
-branch check above, each git command run as `git -C <clone>`. Where both hold, the
-exact clone directory is deleted per `repo-worktree` "Listing and Cleanup". A pushed branch's
-remote delete then runs as above, and the release is recorded as above. A dead worker's clean
-clone can fail that check while its tip equals the branch's live remote tip, read with
-`git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds all it does.
-So the clone is deleted alone, the remote branch kept, and the group continues as a retired
-worktree's does per "Bounding the Wait on a Worker". Anything else leaves the clone
-exactly as it stands and stops the group for the maintainer per "Raising a Blocked Question",
-naming the clone's path. The discard grant above does not reach a clone, since it names the
-worker's own linked worktree. A recorded path naming no directory counts as no
-checkout, and the path file is deleted once its clone is disposed of. Where no registered worktree
-and no recorded path names a group's checkout, the worker made none, since it records the path
-before cloning. Where the group's branch then exists neither locally nor on the remote, the
+**An abandoned group's or a dead worker's standalone clone is left exactly as it stands.**
+Neither removal above reaches it. `git worktree remove` acts on the base clone's registered
+worktrees, and `git branch -d` on its branches. The clone is found at the path its worker reported or recorded, per "Dispatching a
+Worker". The group is stopped for the maintainer per "Raising a Blocked Question", naming the
+clone's path. The discard grant above does not reach a
+clone, since it names the worker's own linked worktree. A recorded path naming no directory counts
+as no checkout. Where no registered worktree and no recorded path names a group's checkout, the
+worker made none, since it records the path before cloning. Where the group's branch then exists neither locally nor on the remote, the
 orchestrator records the release. The issue then returns to the next round's ranking. Where it
 exists, the group is stopped for the maintainer.
 
