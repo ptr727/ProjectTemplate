@@ -214,17 +214,11 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
             return 1
         print(f"status=MERGED pr={num} head={head} merge_commit={commit}, confirmed on read back")
         return pr_cleanup.cleanup(owner, repo, num, checkout) if cleanup else 0
-    if state == "CLOSED":
-        print(
-            f"status=REFUSED nothing was merged into {target} #{num}: it reads CLOSED after the "
-            "merge call, and a closed pull request cannot merge"
-        )
-        return 1
-    if answered not in (None, 0) and state == "OPEN":
+    if state == "CLOSED" or (answered not in (None, 0) and state == "OPEN"):
         status = "MERGE_REFUSED" if (now := landed.get("headRefOid")) == head else "HEAD_MOVED"
         print(
-            f"status={status} gh refused the merge of #{num} on {target} with exit "
-            f"{answered}, and it reads OPEN at {now}, so nothing was merged"
+            f"status={status} gh answered the merge of #{num} on {target} with exit "
+            f"{answered}, and it reads {state} at {now}, so nothing was merged"
         )
         return 1
     print(
