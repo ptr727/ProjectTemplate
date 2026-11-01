@@ -94,6 +94,8 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
     unmet, unread = [], []
     counts: list[str] = []
     noted: list[str] = []
+    if (base := pr.get("baseRefName")) != "develop":
+        unmet.append(("BASE_CHANGED", f"the fresh read shows its base is {base!r}, not 'develop'"))
     if (cover := fields.get("coverage")) not in MET_COVERAGE:
         unmet.append(
             ("COVERAGE_NOT_SHOWN", f"the digest reads coverage={cover}, so item 2 is unmet")
@@ -214,6 +216,12 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
             return 1
         print(f"status=MERGED pr={num} head={head} merge_commit={commit}, confirmed on read back")
         return pr_cleanup.cleanup(owner, repo, num, checkout) if cleanup else 0
+    if state == "CLOSED":
+        print(
+            f"status=REFUSED nothing was merged into {target} #{num}: it reads CLOSED after the "
+            "merge call, and a closed pull request cannot merge"
+        )
+        return 1
     if answered not in (None, 0) and state == "OPEN":
         status = "MERGE_REFUSED" if (now := landed.get("headRefOid")) == head else "HEAD_MOVED"
         print(

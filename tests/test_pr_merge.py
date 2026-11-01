@@ -323,6 +323,16 @@ class TestMerge(MergeCase):
         self.assertIn("status=MERGE_NOT_CONFIRMED", self.out.getvalue())
         self.cleanup.assert_not_called()
 
+    def test_a_read_back_closed_is_a_refusal_rather_than_unconfirmed(self) -> None:
+        for rc in (0, 1):
+            with self.subTest(rc=rc):
+                self.calls.clear()
+                self.merge_rc = rc
+                self.assertEqual(1, self.run_merge(target(), target(), target(state="CLOSED")))
+                self.assertIn("it reads CLOSED after the merge call", self.out.getvalue())
+                self.assertNotIn("MERGE_NOT_CONFIRMED", self.out.getvalue())
+                self.cleanup.assert_not_called()
+
     def test_a_read_back_that_does_not_answer_says_the_merge_may_have_happened(self) -> None:
         unread = pr_merge.pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
         self.assertEqual(2, self.run_merge(target(), target(), unread))
@@ -386,6 +396,10 @@ class TestUnmetItems(MergeCase):
             "baseRepository": {"defaultBranchRef": {"name": "main"}},
         }
         self.assertEqual([], self.unmet_on(pr))
+
+    def test_a_base_retargeted_before_the_fresh_read_is_unmet(self) -> None:
+        unmet = self.unmet_on({**self.clean(), "baseRefName": "main"})
+        self.assertIn("BASE_CHANGED the fresh read shows its base is 'main', not 'develop'", unmet)
 
     def test_a_finished_state_beside_clean_leaves_nothing_unmet(self) -> None:
         for state in ("UNSTABLE", "HAS_HOOKS"):
