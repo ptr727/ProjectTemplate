@@ -18,7 +18,7 @@ from typing import NamedTuple
 
 from host_capability import bash_or_skip
 from runner_commands import forged_lines
-from workflow_steps import step_script, step_script_text
+from workflow_steps import step_script, step_script_text, yaml_step, yaml_value
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 from git_env import without_git_location
@@ -726,10 +726,13 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_a_rerun_release_leaves_latest_on_a_newer_one(self) -> None:
         """make_latest is decided against the current Latest release, so a late re-run cannot take the flag from a newer version."""
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
-        create = workflow.split("      - name: Create GitHub release step\n", 1)[1].split(
-            "\n\n", 1
-        )[0]
-        self.assertIn("          make_latest: ${{ steps.latest.outputs.make_latest }}\n", create)
+        create = yaml_step(workflow, "Create GitHub release step")
+        decide = yaml_step(workflow, "Decide latest release step")
+        self.assertEqual(
+            "${{ steps.latest.outputs.make_latest }}", yaml_value(create, "with", "make_latest")
+        )
+        # A narrower decide condition would leave make_latest empty on a create, which restores the default.
+        self.assertEqual(yaml_value(create, "if"), yaml_value(decide, "if"))
         self.assertLess(
             workflow.index("      - name: Decide latest release step\n"),
             workflow.index("      - name: Create GitHub release step\n"),
@@ -1326,7 +1329,7 @@ gh() {
         "runs stand-in tools only a POSIX host can execute",
     )
     def test_lint_installs_a_declared_pip_directory_under_the_lint_interpreter(self) -> None:
-        """setup-uv exports UV_PYTHON as the lint job's interpreter, which the install keeps."""
+        """The step-scoped UV_PYTHON carrying the lint job's interpreter reaches every uv call the install makes."""
         tree = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
         env = {"UV_PYTHON": "3.14"}
         code, _, written = self.run_python_tests_step(
@@ -1348,8 +1351,8 @@ gh() {
         resolve = "      - name: Resolve lint Python version step\n"
         setup = "      - name: Setup uv step\n"
         self.assertLess(job.index(resolve), job.index(setup))
-        self.assertIn(
-            '          python-version: "3.13"', job.split(setup, 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(
+            '"3.13"', yaml_value(yaml_step(job, "Setup uv step"), "with", "python-version")
         )
         for step in (
             "Sync Python dependencies step",
@@ -1358,14 +1361,19 @@ gh() {
             "Type check Python step",
         ):
             with self.subTest(step=step):
-                self.assertIn(
-                    "          UV_PYTHON: ${{ steps.lint-python.outputs.version }}\n",
-                    job.split(f"      - name: {step}\n", 1)[1].split("        run: |", 1)[0],
+                self.assertEqual(
+                    "${{ steps.lint-python.outputs.version }}",
+                    yaml_value(yaml_step(job, step), "env", "UV_PYTHON"),
                 )
-        self.assertNotIn("UV_PYTHON", job.split("      - name: Check prose step\n", 1)[1])
-        self.assertNotIn(
-            "PYTHON_VERSIONS",
-            job.split("- name: Sync Python dependencies step\n", 1)[1].split("\n\n", 1)[0],
+        for step in ("Check prose step", "Check repo gates step"):
+            with self.subTest(step=step):
+                self.assertIsNone(yaml_value(yaml_step(job, step), "env", "UV_PYTHON"))
+        self.assertIsNone(
+            yaml_value(yaml_step(job, "Sync Python dependencies step"), "env", "PYTHON_VERSIONS")
+        )
+        self.assertEqual(
+            "steps.python.outputs.any == 'true'",
+            yaml_value(yaml_step(job, "Resolve lint Python version step"), "if"),
         )
         script = step_script_text(job, "Resolve lint Python version step")
         cases = {

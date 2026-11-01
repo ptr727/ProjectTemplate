@@ -948,9 +948,8 @@ def split_jobs(text):
 
 
 # A job name yielding its first string only on a pull_request run, the shape WORKFLOW.md D1.5 gives a ruleset-bound name.
-PR_ONLY_NAME = re.compile(
-    r"\$\{\{\s*github\.event_name\s*==\s*'pull_request'\s*&&\s*'([^']*)'\s*\|\|\s*'([^']*)'\s*\}\}"
-)
+# It matches the tight form _strip_unquoted_space gives, which leaves the quoted names intact.
+PR_ONLY_NAME = re.compile(r"\$\{\{github\.event_name=='pull_request'&&'([^']*)'\|\|'([^']*)'\}\}")
 
 
 def workflow_events(doc):
@@ -975,7 +974,11 @@ def check_interface(path, contract, text):
     name = contract.get("requiredCheckName")
     nodes = (_mapping(job).get("name") for job in jobs.values())
     values = [n.value for n in nodes if isinstance(n, yaml.ScalarNode)]
-    gated = {m[1] for v in values if (m := PR_ONLY_NAME.fullmatch(v)) and m[1] != m[2]}
+    gated = {
+        m[1]
+        for v in values
+        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v))) and m[1] != m[2]
+    }
     if name and name not in gated and name not in values:
         findings.append(
             (

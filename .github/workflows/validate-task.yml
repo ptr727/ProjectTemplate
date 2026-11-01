@@ -332,7 +332,7 @@ jobs:
       # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
       - name: Resolve lint Python version step
         id: lint-python
-        if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
+        if: steps.python.outputs.any == 'true'
         env:
           PYTHON_VERSIONS: ${{ inputs.python-versions }}
         run: |
