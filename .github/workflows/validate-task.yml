@@ -293,11 +293,14 @@ jobs:
           set -Eeuo pipefail
           # Both dotnet format and dotnet test resolve a lone solution or project from the working directory, and fail where the root holds none.
           # A root holding one keeps that bare call.
-          # Otherwise each tracked solution is named, or each tracked project matching the pattern where the tree holds no solution.
+          # Otherwise each tracked project matching the first argument is named.
+          # With a second argument of solutions, each tracked solution is named instead wherever the tree holds one.
           dotnet_workspaces() {
-            local solutions
+            local solutions=
             if [ -z "$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')" ]; then
-              solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+              if [ "${2:-}" = solutions ]; then
+                solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+              fi
               if [ -n "$solutions" ]; then
                 printf '%s\n' "$solutions"
               else
@@ -305,7 +308,7 @@ jobs:
               fi
             fi
           }
-          workspaces=$(dotnet_workspaces ':(glob)**/*.csproj')
+          workspaces=$(dotnet_workspaces ':(glob)**/*.csproj' solutions)
           if [ -z "$workspaces" ]; then
             dotnet format style --verify-no-changes --severity=info --verbosity=detailed
           fi
@@ -328,7 +331,7 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: $/.github/actions/python-tool-pins
 
-      # The job runs under the first interpreter the caller names, so a uv.lock whose floor is above the default still syncs.
+      # The job's Python steps run under the first interpreter the caller names, so a uv.lock whose floor is above the default still syncs.
       # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
       - name: Resolve lint Python version step
         id: lint-python
@@ -660,11 +663,14 @@ jobs:
           rm -rf ./coverage
           # Both dotnet format and dotnet test resolve a lone solution or project from the working directory, and fail where the root holds none.
           # A root holding one keeps that bare call.
-          # Otherwise each tracked solution is named, or each tracked project matching the pattern where the tree holds no solution.
+          # Otherwise each tracked project matching the first argument is named.
+          # With a second argument of solutions, each tracked solution is named instead wherever the tree holds one.
           dotnet_workspaces() {
-            local solutions
+            local solutions=
             if [ -z "$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')" ]; then
-              solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+              if [ "${2:-}" = solutions ]; then
+                solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+              fi
               if [ -n "$solutions" ]; then
                 printf '%s\n' "$solutions"
               else
@@ -672,6 +678,7 @@ jobs:
               fi
             fi
           }
+          # A solution holding no test project fails dotnet test with no test projects found, so the tests are named one project at a time.
           workspaces=$(dotnet_workspaces ':(glob)**/*Tests*.csproj')
           if [ -z "$workspaces" ]; then
             dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage

@@ -2045,7 +2045,7 @@ gh() {
                     f"format style {w} --verify-no-changes --severity=info --verbosity=detailed"
                     for w in ("src/App.sln", "tools/Tool.slnx")
                 ],
-                [f"test --project {w} {flags}" for w in ("src/App.sln", "tools/Tool.slnx")],
+                [f"test --project src/LibTests/LibTests.csproj {flags}"],
             ),
             "projects and no solution": (
                 ["FindInFile/FindInFile.csproj", "FindInFileTests/FindInFileTests.csproj"],
