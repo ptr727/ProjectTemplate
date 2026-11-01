@@ -768,7 +768,7 @@ leaves the work findable.
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
 answer, the planner returns the group as resuming. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
-ends the work with nothing to merge, it records the release, stating that the work ended there. It
+ends the work with nothing to merge, it records the release, stating that the answer ended the work with nothing to merge. It
 also closes any pull request the answer retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
 answer. That closing follows the maintainer's recorded answer, so it is not a close on judgment.
 
