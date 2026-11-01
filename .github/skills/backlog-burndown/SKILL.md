@@ -204,14 +204,15 @@ for, and it binds harder than any throughput target.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The comment writes the branch name in backticks.
-  Recording a release, wherever this skill calls for one, edits that comment to open with the
-  release. A claim comment opening with one holds no files.
+  Recording a release, wherever this skill calls for one, edits that comment to open with it.
+  The release is written as `**Released (<date>):**` and why the claim holds no files. The claim
+  text stays below it. A claim comment opening with `**Released` holds no files.
   The branch name is what lets a later session walk from a worktree it found back to the claim
   explaining it. That is the direction the next bullet actually travels. This lists the open
-  issues where a visible comment from an account with write access names a branch:
+  issues where a visible, unreleased comment from an account with write access names a branch:
 
   ```sh
-  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | contains("`<branch>`")))) | .number'
+  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | startswith("**Released") | not) and (.body | contains("`<branch>`")))) | .number'
   ```
 
   Before it runs, `<branch>` is replaced with the name of the branch being looked up, its
