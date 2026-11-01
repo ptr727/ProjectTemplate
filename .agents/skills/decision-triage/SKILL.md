@@ -104,13 +104,14 @@ of its own.
 3. **Research the questions** in clusters, one `frontier` researcher per cluster of five or six
    questions that share a topic, at most four running at once. A topic with fewer questions is a
    smaller cluster rather than one padded with other topics. That covers each `ASK` and `SPLIT`
-   line and every queued `decision` issue the history check did not return as `OVERTAKEN`.
-   Before dispatching, state how many researchers the
-   run sends and an estimate of the tokens they spend. The cost is then visible before it is paid.
+   line and every queued `decision` issue the history check returned as neither `OVERTAKEN` nor
+   `HELD`. Before dispatching, state how many researchers the run sends and an estimate of the
+   tokens they spend. The cost is then visible before it is paid.
    A researcher reads each issue with all of its comments, the rule text it touches, and the
    code. It returns in the form "Return Lines" below, and writes only to the scratch directory
    its brief names. A queued question a later change has already answered or overtaken comes
-   back as `OVERTAKEN` rather than as options.
+   back as `OVERTAKEN` rather than as options. A fix counts as that change only once it is on
+   `origin/main`.
 4. **Record each question** before asking it, so the question survives an interrupted session.
    - For an `ASK`, comment the researched question on the issue and add the `decision` label.
    - For a `SPLIT`, file a new issue holding only the undecided item, carrying `decision`.
@@ -132,15 +133,17 @@ of its own.
    same order. Each prompt then names the group's questions that the other prompts carry.
 6. **Offer to close the overtaken issues**, as one question naming each issue and what overtook
    it. Closing them is the recommended option. An issue that still tracks other work is named as
-   staying open instead. Comment each issue kept open with what overtook it, so a later history
-   check reads that comment rather than returning it again.
+   staying open instead. Comment on each issue kept open, that one or one the maintainer declines
+   to close, that it stays open and what overtook it. A later history check reads that comment as
+   settling only the overtaken part, and classifies the work that remains.
 7. **Apply each answer** as it arrives, as "Communicating with the User" below states for an item
    leaving the queue. Where the answer settles the work, leave the issue open as work, so an away
    run fixes it. Where the answer is "not yet", record it in a comment stating the condition the
    work waits for. Then add the `deferred` label as the `decision` label comes off. A "not yet"
    is an answer, so the item leaves the queue. The issue stays open, because the answer leaves it
-   holding work for later. The label comes off at the maintainer's word, or once a session reads
-   the stated condition met and comments so. Where the researcher's `BLOCKS` line names a parked
+   holding work for later. The label comes off at the maintainer's word. A session lifts it alone
+   only where the stated condition is checkable state, such as an issue closing. It then comments
+   the evidence. Where the researcher's `BLOCKS` line names a parked
    group's issue, comment on that issue that its decision is answered. For a "not yet", that
    comment says the group stays parked until the stated condition holds. A question the
    maintainer skips keeps its label and stays in the queue.

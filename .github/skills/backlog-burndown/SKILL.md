@@ -57,6 +57,10 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 - Naming this skill is the maintainer's explicit go-ahead for the feature -> develop squash merges
   this run performs, in every round of it. A per-round merge question would idle every agent at
   every boundary, which is the thing this skill exists to avoid.
+- **The grant does not reach a pull request editing the hub's `host-setup/agent-safety/`.** Its
+  merge waits on the maintainer's go-ahead for that pull request, given after reading its diff,
+  per `decision-triage` "Needs the Maintainer". A worker brief for such a group states that the
+  worker drives the pull request to the gate and does not merge it.
 - **The grant is bounded by the session it was named in.** A run interrupted and resumed in a new
   session needs the skill named again. Naming it again costs one sentence, and it is the
   difference between a grant and a mode. A grant read back from a note is one nobody gave.
