@@ -947,6 +947,23 @@ def split_jobs(text):
     }
 
 
+# A job name yielding its first string only on a pull_request run, the shape WORKFLOW.md D1.5 gives a ruleset-bound name.
+PR_ONLY_NAME = re.compile(
+    r"\$\{\{\s*github\.event_name\s*==\s*'pull_request'\s*&&\s*'([^']*)'\s*\|\|\s*'([^']*)'\s*\}\}"
+)
+
+
+def workflow_events(root):
+    """The event names a workflow's `on:` declares, in any of its string, list, or mapping forms."""
+    # The safe loader reads a bare `on` key as the boolean true, so the key is matched by its source text.
+    node = _mapping(root).get("on")
+    if isinstance(node, yaml.ScalarNode):
+        return {str(node.value)}
+    if isinstance(node, yaml.SequenceNode):
+        return {str(n.value) for n in node.value if isinstance(n, yaml.ScalarNode)}
+    return set(_mapping(node))
+
+
 def check_interface(path, contract, text):
     """DRIFT where a workflow breaks its fixed contract by name and wiring, never its body (spec/fidelity-model.md)."""
     root, parsed = _yaml(text, compose=True)
@@ -959,12 +976,20 @@ def check_interface(path, contract, text):
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
     nodes = (_mapping(job).get("name") for job in jobs.values())
-    names = {n.value for n in nodes if isinstance(n, yaml.ScalarNode)}
-    if name and name not in names:
+    values = [n.value for n in nodes if isinstance(n, yaml.ScalarNode)]
+    gated = {m[1] for v in values if (m := PR_ONLY_NAME.fullmatch(v)) and m[1] != m[2]}
+    if name and name not in gated and name not in values:
         findings.append(
             (
                 "DRIFT",
                 f"interface: {path} missing the ruleset-bound check name '{name}' as a job name",
+            )
+        )
+    elif name and name not in gated and workflow_events(root) - {"pull_request"}:
+        findings.append(
+            (
+                "DRIFT",
+                f"interface: {path} names its job '{name}' on every event, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
             )
         )
     tok = contract.get("artifactNameToken")

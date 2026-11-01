@@ -22,6 +22,11 @@ from workflow_steps import step_script, step_script_text
 REPO = Path(__file__).resolve().parents[1]
 
 
+def repository_free_env() -> dict[str, str]:
+    """The process environment less every GIT_ variable, which a git hook sets to point at its own repository."""
+    return {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+
+
 SHELL_LABELS = ("bash", "sh", "shell")
 
 
@@ -719,6 +724,91 @@ class ReleaseGuardCase(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, stub_text)
 
+    def test_a_rerun_release_leaves_latest_on_a_newer_one(self) -> None:
+        """make_latest is decided against the current Latest release, so a late re-run cannot take the flag from a newer version."""
+        workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        create = workflow.split("      - name: Create GitHub release step\n", 1)[1].split(
+            "\n\n", 1
+        )[0]
+        self.assertIn("          make_latest: ${{ steps.latest.outputs.make_latest }}\n", create)
+        self.assertLess(
+            workflow.index("      - name: Decide latest release step\n"),
+            workflow.index("      - name: Create GitHub release step\n"),
+        )
+        script = step_script_text(workflow, "Decide latest release step")
+        # The stand-in answers releases/latest with LATEST, or fails the way gh does with FAILURE.
+        gh = (
+            "#!/usr/bin/env bash\n"
+            'if [ -n "${FAILURE:-}" ]; then echo "gh: $FAILURE" >&2; exit 1; fi\n'
+            'echo "$LATEST"\n'
+        )
+        cases = [
+            ("a newer main release", "main", "2.0.11", {"LATEST": "2.0.10"}, "true"),
+            ("a re-run older main release", "main", "2.0.10", {"LATEST": "2.0.11"}, "false"),
+            ("a numeric rather than a text order", "main", "2.0.10", {"LATEST": "2.0.9"}, "true"),
+            ("a refresh of the Latest release", "main", "2.0.11", {"LATEST": "2.0.11"}, "true"),
+            ("a v-prefixed Latest tag", "main", "2.0.11", {"LATEST": "v2.0.10"}, "true"),
+            ("no Latest release yet", "main", "1.0.0", {"FAILURE": "Not Found (HTTP 404)"}, "true"),
+            ("a prerelease", "develop", "2.0.12-g1234567", {"FAILURE": "never read"}, "false"),
+            (
+                "an unreadable Latest release",
+                "main",
+                "2.0.11",
+                {"FAILURE": "Bad gateway (HTTP 502)"},
+                None,
+            ),
+        ]
+        for label, branch, tag, answer, want in cases:
+            with self.subTest(label), tempfile.TemporaryDirectory() as scratch:
+                bin_dir = Path(scratch) / "bin"
+                bin_dir.mkdir()
+                (bin_dir / "gh").write_text(gh, encoding="utf-8")
+                (bin_dir / "gh").chmod(0o755)
+                output = Path(scratch) / "output"
+                output.write_text("", encoding="utf-8")
+                result = run(
+                    [bash_or_skip(), "-c", script],
+                    env={
+                        **os.environ,
+                        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+                        "BRANCH": branch,
+                        "TAG": tag,
+                        "GITHUB_REPOSITORY": "acme/widget",
+                        "GITHUB_OUTPUT": str(output),
+                        **answer,
+                    },
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=60,
+                    check=False,
+                )
+                if want is None:
+                    self.assertEqual(1, result.returncode)
+                    self.assertIn("::error::", result.stdout)
+                    self.assertEqual("", output.read_text(encoding="utf-8"))
+                else:
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertEqual(f"make_latest={want}\n", output.read_text(encoding="utf-8"))
+
+    def test_pull_request_stubs_filter_no_base_branch(self) -> None:
+        """A retarget fires edited, which no stub listens for, so a base filter would strand a retargeted pull request."""
+        stubs = (
+            ".github/workflows/test-pull-request.yml",
+            "catalog/snippets/workflows/test-pull-request.yml",
+            "catalog/snippets/workflows/test-pull-request-smoke.yml",
+        )
+        texts = {stub: (REPO / stub).read_text(encoding="utf-8") for stub in stubs}
+        blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
+        texts.update(
+            {f"docs block {i}": b for i, b in enumerate(blocks) if "\n  pull_request:" in b}
+        )
+        for label, text in texts.items():
+            with self.subTest(label):
+                trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
+                self.assertIn("  pull_request:\n", trigger + "\n")
+                self.assertNotRegex(trigger, r"(?m)^  pull_request:\n    ")
+
     def test_smoke_caller_stub_is_its_snippet_byte_for_byte(self) -> None:
         """The documented release-with-smoke stub is the catalog snippet, so the two cannot drift."""
         stub = (REPO / "catalog/snippets/workflows/test-pull-request-smoke.yml").read_text(
@@ -1236,10 +1326,10 @@ gh() {
         shutil.which("bash") and os.name == "posix",
         "runs stand-in tools only a POSIX host can execute",
     )
-    def test_lint_installs_a_declared_pip_directory_under_the_named_interpreter(self) -> None:
-        """setup-uv exports UV_PYTHON, which every uv call reads, so the named interpreter has to replace it."""
+    def test_lint_installs_a_declared_pip_directory_under_the_lint_interpreter(self) -> None:
+        """setup-uv exports UV_PYTHON as the lint job's interpreter, which the install keeps."""
         tree = {"pyproject.toml": "[tool.mypy]\n", "requirements.txt": ""}
-        env = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": '["3.14", "3.13"]'}
+        env = {"UV_PYTHON": "3.14"}
         code, _, written = self.run_python_tests_step(
             "pip", tree, True, step_name="Sync Python dependencies step", extra_env=env
         )
@@ -1250,14 +1340,53 @@ gh() {
             "pip", tree, False, step_name="Sync Python dependencies step", extra_env=env
         )
         self.assertEqual((0, ""), (code, written))
-        for versions in ("[3.14]", '[" "]', "[]", "not json", '["3.14"] ["3.13"]'):
-            with self.subTest(versions=versions):
-                bad = {"UV_PYTHON": "3.13", "PYTHON_VERSIONS": versions}
-                code, stdout, _ = self.run_python_tests_step(
-                    "pip", tree, True, step_name="Sync Python dependencies step", extra_env=bad
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is what the step under test runs")
+    def test_lint_runs_under_the_first_named_interpreter(self) -> None:
+        """The lint job's interpreter is the first python-versions entry, refused with a named cause when malformed."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  lint:\n", 1)[1].split("\n  unit-test:\n", 1)[0]
+        resolve = "      - name: Resolve lint Python version step\n"
+        setup = "      - name: Setup uv step\n"
+        self.assertLess(job.index(resolve), job.index(setup))
+        self.assertIn(
+            "          python-version: ${{ steps.lint-python.outputs.version }}",
+            job.split(setup, 1)[1].split("\n\n", 1)[0],
+        )
+        self.assertNotIn(
+            "PYTHON_VERSIONS",
+            job.split("- name: Sync Python dependencies step\n", 1)[1].split("\n\n", 1)[0],
+        )
+        script = step_script_text(job, "Resolve lint Python version step")
+        cases = {
+            '["3.14", "3.13"]': "version=3.14\n",
+            '["3.13"]': "version=3.13\n",
+            "[3.14]": None,
+            '[" "]': None,
+            "[]": None,
+            "not json": None,
+            '["3.14"] ["3.13"]': None,
+        }
+        for versions, want in cases.items():
+            with self.subTest(versions=versions), tempfile.TemporaryDirectory() as scratch:
+                output = Path(scratch) / "output"
+                output.write_text("", encoding="utf-8")
+                result = run(
+                    [bash_or_skip(), "-c", script],
+                    env={**os.environ, "PYTHON_VERSIONS": versions, "GITHUB_OUTPUT": str(output)},
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=60,
+                    check=False,
                 )
-                self.assertEqual(1, code)
-                self.assertIn("::error::The python-versions input", stdout)
+                if want is None:
+                    self.assertEqual(1, result.returncode)
+                    self.assertIn("::error::The python-versions input", result.stdout)
+                    self.assertEqual("", output.read_text(encoding="utf-8"))
+                else:
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertEqual(want, output.read_text(encoding="utf-8"))
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
@@ -1828,11 +1957,27 @@ gh() {
                 (work / "coverage/coverage-committed.cobertura.xml").write_text(
                     "<coverage/>", encoding="utf-8"
                 )
+                # The step reads the tracked tree for its workspaces, so the work directory is a repository holding one at its root.
+                (work / "App.slnx").write_text("", encoding="utf-8")
+                run(
+                    ["git", "init", "-q"],
+                    cwd=work,
+                    env=repository_free_env(),
+                    check=True,
+                    timeout=60,
+                )
+                run(
+                    ["git", "add", "App.slnx"],
+                    cwd=work,
+                    env=repository_free_env(),
+                    check=True,
+                    timeout=60,
+                )
                 verdict = run(
                     [bash_or_skip(), "-c", script],
                     cwd=work,
                     env={
-                        **os.environ,
+                        **repository_free_env(),
                         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
                     },
                     capture_output=True,
@@ -1847,6 +1992,101 @@ gh() {
                     self.assertIn("::error::", verdict.stdout)
                 else:
                     self.assertTrue((work / "coverage/coverage-0f1e2d3c.cobertura.xml").exists())
+
+    @unittest.skipUnless(shutil.which("git"), "the steps under test read the tracked tree with git")
+    def test_validator_dotnet_steps_run_once_per_workspace(self) -> None:
+        """A root holding no solution or project gets each tracked solution, or each project, named instead."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        lint = workflow.split("\n  lint:\n", 1)[1].split("\n  unit-test:\n", 1)[0]
+        unit = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        style = step_script_text(lint, "Check C# style step")
+        tests = step_script_text(unit, "Run unit tests step")
+
+        def resolver(script: str) -> str:
+            return script.split("dotnet_workspaces() {", 1)[1].split("\n}\n", 1)[0]
+
+        self.assertEqual(resolver(style), resolver(tests))
+        flags = "--coverage --coverage-output-format cobertura --results-directory ./coverage"
+        trees = {
+            "a root solution": (
+                ["App.sln", "src/Lib/Lib.csproj", "tests/LibTests/LibTests.csproj"],
+                ["format style --verify-no-changes --severity=info --verbosity=detailed"],
+                [f"test {flags}"],
+            ),
+            "solutions below the root": (
+                [
+                    "src/App.sln",
+                    "tools/Tool.slnx",
+                    "src/Lib/Lib.csproj",
+                    "src/LibTests/LibTests.csproj",
+                ],
+                [
+                    f"format style {w} --verify-no-changes --severity=info --verbosity=detailed"
+                    for w in ("src/App.sln", "tools/Tool.slnx")
+                ],
+                [f"test --project {w} {flags}" for w in ("src/App.sln", "tools/Tool.slnx")],
+            ),
+            "projects and no solution": (
+                ["FindInFile/FindInFile.csproj", "FindInFileTests/FindInFileTests.csproj"],
+                [
+                    f"format style {w} --verify-no-changes --severity=info --verbosity=detailed"
+                    for w in (
+                        "FindInFile/FindInFile.csproj",
+                        "FindInFileTests/FindInFileTests.csproj",
+                    )
+                ],
+                [f"test --project FindInFileTests/FindInFileTests.csproj {flags}"],
+            ),
+        }
+        for label, (tracked, want_style, want_tests) in trees.items():
+            for script, want in ((style, want_style), (tests, want_tests)):
+                with (
+                    self.subTest(label, step=script is style),
+                    tempfile.TemporaryDirectory() as scratch,
+                ):
+                    bin_dir, work = Path(scratch) / "bin", Path(scratch) / "work"
+                    bin_dir.mkdir()
+                    log = Path(scratch) / "log"
+                    stand_in = bin_dir / "dotnet"
+                    stand_in.write_text(
+                        '#!/usr/bin/env bash\necho "$*" >> "$STUB_LOG"\n'
+                        'mkdir -p ./coverage && echo "<coverage/>" > "./coverage/$RANDOM.cobertura.xml"\n',
+                        encoding="utf-8",
+                    )
+                    stand_in.chmod(0o755)
+                    for path in tracked:
+                        (work / path).parent.mkdir(parents=True, exist_ok=True)
+                        (work / path).write_text("", encoding="utf-8")
+                    run(
+                        ["git", "init", "-q"],
+                        cwd=work,
+                        env=repository_free_env(),
+                        check=True,
+                        timeout=60,
+                    )
+                    run(
+                        ["git", "add", "."],
+                        cwd=work,
+                        env=repository_free_env(),
+                        check=True,
+                        timeout=60,
+                    )
+                    result = run(
+                        [bash_or_skip(), "-c", script],
+                        cwd=work,
+                        env={
+                            **repository_free_env(),
+                            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+                            "STUB_LOG": str(log),
+                        },
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        timeout=60,
+                        check=False,
+                    )
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    self.assertEqual(want, log.read_text(encoding="utf-8").splitlines())
 
     @unittest.skipUnless(shutil.which("jq"), "jq is what the step under test runs")
     def test_validator_refuses_a_python_versions_value_fromjson_would_admit(self) -> None:
