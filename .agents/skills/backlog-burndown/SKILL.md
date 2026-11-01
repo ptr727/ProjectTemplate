@@ -693,7 +693,9 @@ leaves the work findable.
 
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
 answer, the planner returns the group as resuming. The worker it dispatches follows the answer. It
-records the release in the claim comment once its pull request merges to develop.
+records the release in the claim comment once its pull request merges to develop. Where the answer
+ends the work with nothing to merge, it records that instead, and closes any pull request the answer
+retires.
 
 A worker that finds a lesson a future agent must honor files it as a `decision` issue stating the
 proposed rule. It does not write that rule, since no one is present to judge it.
@@ -727,9 +729,11 @@ its own feature -> develop pass, and a later round's promotion worker merges.
 the promotion pull request's comments, under "Trusting a Comment", for each `decision` issue named
 there. Any such issue that is open holds the promotion. For a closed one, read its recorded answer.
 An answer about the promotion is followed, so one saying not to merge holds it. An answer settling
-a parked group's work holds the promotion until that group's pull request has merged to develop.
-That holds whether or not the decision issue still carries its label. A claim released with no
-merge, as a dead worker's or an abandoned group's is, does not lift it either. A read that cannot run holds the
+a parked group's work holds the promotion until the group has applied it. Applied means its pull
+request merged to develop, or its claim comment records that the answer ended the work with nothing
+to merge. That holds whether or not the decision issue still carries its label. A claim released
+with no merge for any other reason, as a dead worker's or an abandoned group's is, does not lift
+it. A read that cannot run holds the
 promotion too, since it shows nothing about whether the promotion is blocked. A held promotion
 leaves the round at develop, and later rounds keep merging to develop.
 
@@ -761,8 +765,8 @@ maintainer.** That is an open `decision` issue, a group parked on one, and a par
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
-request, and awaiting promotion. The report gives the count of open `decision` issues and names
-each by number. It names `decision-triage` as where they get answered. It asks nothing.
+request, and awaiting promotion. A held promotion is named too, with each `decision` issue holding
+it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State
 
