@@ -2462,16 +2462,16 @@ class TestBarePushRootedDirectoryOnWindows(unittest.TestCase):
         spec.loader.exec_module(guard)
         return guard
 
-    def _branch(self, guard, msys, c_dirs, leading_cd):
+    def _branch(self, guard, msys, c_dirs, cd):
+        """The branch a push reads after a `cd` to `cd`, if any, then each `-C` in `c_dirs`."""
         with (
             mock.patch.object(guard, "_MSYS_DRIVE_PATHS", msys),
             mock.patch.object(guard, "_current_push_branch", return_value="feature/example"),
-            mock.patch.object(guard.os.path, "isdir", return_value=True),
-            mock.patch.object(guard.os, "access", return_value=True),
         ):
-            return guard._bare_push_branch("/c/session", c_dirs, None, leading_cd, False)
+            cwd = guard._cd("/c/session", [cd]) if cd else "/c/session"
+            return guard._bare_push_branch(cwd, c_dirs, None)
 
-    def test_a_rooted_leading_cd_without_a_drive_is_unresolved_on_windows(self):
+    def test_a_rooted_cd_without_a_drive_is_unresolved_on_windows(self):
         guard = self._guard()
         got = self._branch(guard, True, [], "/repos/wt-example")
         self.assertIs(got, guard._UNRESOLVED)
@@ -2522,6 +2522,30 @@ class TestDeleteOnlyPushInPrimaryCheckout(unittest.TestCase):
             decision, reason = self._classify(cmd, {"feature/example": {"deletion"}})
             self.assertEqual(decision, "deny", cmd)
             self.assertIn("forbid deletion", reason)
+
+
+class TestBarePushAfterABranchSwitch(unittest.TestCase):
+    """A switch in the same command adds every protected default, and the branch read keeps its own reason."""
+
+    def test_the_branch_read_is_denied_on_its_own_rule(self):
+        spec = importlib.util.spec_from_file_location("guard_switch", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        rules = {"release": {"pull_request"}}
+        decision, reason = guard.classify(
+            "git push origin; git switch develop",
+            cwd="/c/work/wt",
+            origin=("example", "repo"),
+            current_branch="release",
+            rules_lookup=lambda b: rules.get(b, set()),
+            environ={},
+            primary_checkout_lookup=lambda _d: False,
+            ref_resolver=lambda _d, _r: True,
+        )
+        self.assertEqual(decision, "deny")
+        self.assertIn("'release', whose rules require a pull request", reason)
 
 
 @unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")
