@@ -12,10 +12,12 @@ description: >-
   to work by hand, because the failure it exists to prevent is two agents editing the same
   prose-heavy Markdown file in the same round, which surfaces as a merge conflict long after both
   branches are already deep in review. Drives one repository, the one the session is in, never a
-  fleet-wide sweep. Ends when a re-rank finds nothing left it can act on, and never merges main,
-  which stays the maintainer's own step through merge-and-release. With no maintainer present, the
-  loop is `unattended-handoff` instead, which works one issue needing no decision per round and
-  parks the rest.
+  fleet-wide sweep. Ends when a re-rank finds nothing left it can act on. Attended, it never merges
+  main, which stays the maintainer's own step through merge-and-release. Also use this whenever
+  the maintainer is away: asked to run unattended, overnight, while the maintainer is away, or to
+  work everything that needs no decision. That is its away mode, which parks a group meeting a
+  question rather than asking it, and merges as far as the scope named at invocation. Run
+  `decision-triage` first, while the maintainer is present, so the away run meets fewer questions.
 ---
 
 # Backlog Burndown
@@ -61,10 +63,11 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 - The grant does not weaken the `pr-review-conduct` Merge Gate. It answers that gate's
   explicit-permission item for this run's feature -> develop merges and nothing else. So a pull
   request with one open finding still does not merge.
-- It is never authorization to merge a develop -> main promotion pull request or to dispatch a
-  release. Nor is it authorization to close an issue on judgment or to touch another repository.
-  Each stays the maintainer's, and merging a promotion pull request is `merge-and-release`,
-  invoked on its own.
+- Attended, it is never authorization to merge a develop -> main promotion pull request or to
+  dispatch a release. Merging a promotion pull request is then `merge-and-release`, invoked on its
+  own. An away-mode run's scope can carry those merges, and only as "Away Mode" states.
+- No mode authorizes closing an issue on judgment or touching another repository. Each stays the
+  maintainer's.
 
 ## The Round
 
@@ -126,7 +129,8 @@ blocker clears it has no group, no worker, and no claim, and spends none of the 
 slots. Whether the blocker still stands is read from what its body names rather than from the
 label. That is because the label comes off by hand and lags the fix. It is also because a fix
 merged into `develop` leaves the issue it fixes open, per "Grouping and File Claims" below on
-closing keywords. Where the read cannot be made, from a private or deleted repository or an
+closing keywords. A group an away-mode run parked names its blocker in the parking comment. That
+blocker is a `decision` issue, and its closing with an answer clears it. Where the read cannot be made, from a private or deleted repository or an
 unreadable reference, the blocker stands rather than being assumed cleared. The round's report
 names every issue it held back this way and the blocker each one waits on. It names them because
 the maintainer reads the report rather than the issue bodies. Unnamed, a stuck issue reads as
@@ -144,7 +148,8 @@ It has no group, no worker, and no claim, so nothing in "Raising a Blocked Quest
 except how the question travels. It goes to the maintainer at the end of ranking, per
 `GOVERNANCE.md` "Communicating with the User". It does not wait for a stop that may not come. It is
 batched with any other question the run is sending at that moment, and goes in a prompt of its own
-otherwise. It stays unranked until answered.
+otherwise. It stays unranked until answered. An issue carrying `decision` is such a question already
+filed, and is held back the same way. An away-mode run asks neither, per "Away Mode".
 
 An issue whose group is stopped, per "Raising a Blocked Question", is counted but not ranked until the maintainer's answer releases that group's claim.
 The round's report names it as stopped.
@@ -392,7 +397,8 @@ Where no other worker remains to bound the wait, the same liveness answer bounds
 ## Raising a Blocked Question
 
 A group reaching a question only the maintainer can answer stops that group and nothing else.
-A review handback is not a blocked question.
+A review handback is not a blocked question. An away-mode run parks the group rather than asking,
+per "Away Mode", and this section describes the attended stop.
 `pr-review-conduct`'s "Escalate to the maintainer when" list is what makes a finding a question
 rather than a decision.
 
@@ -421,7 +427,8 @@ rather than a decision.
 ## The Promotion Boundary
 
 Each round ends with at most one develop -> main promotion pull request, driven to green and left
-for the maintainer. That way it carries a single round rather than accumulating several.
+for the maintainer. That way it carries a single round rather than accumulating several. This
+section describes the attended run. An away-mode run promotes as its scope states, per "Away Mode".
 
 **This section assumes the release workflow model**, where feature work reaches develop through
 squash-merged pull requests and a promotion pull request carries develop to main. A repository
@@ -518,6 +525,178 @@ from a read of the body made immediately before the write, keeping every line th
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
 range calls for. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
+
+## Away Mode
+
+Away mode is the same run with no maintainer to ask. Every round still ranks, groups, verifies
+claims, dispatches, collects, cleans up, and re-ranks. What changes is what happens at each point
+the attended run would ask the maintainer something. It also changes how the orchestrator holds
+its context, since an away run lasts for hours.
+
+### Invoking It
+
+The maintainer says the run is away and names a scope. The scope is the whole merge grant.
+
+| Scope | The run may merge |
+| --- | --- |
+| `develop`, the default | each group's feature -> develop pull request |
+| `main` | that, then each round's develop -> main promotion pull request |
+| `release` | both, then dispatch the release each promotion unblocks |
+
+The default keeps every main merge the maintainer's. `main` promotes each round alone, since many
+develop merges queued behind one promotion make it too large to review. `release` exists because a
+merge to main with no release never exercises artifact creation.
+
+- **The grant is bounded by the session it was named in**, as "What Invoking This Skill
+  Authorizes" bounds the attended one. A run resumed in a new session needs the scope named again.
+- **Under `main` or `release` it is the one standing promotion grant** `merge-and-release`
+  recognizes. It covers each promotion this run makes, since naming the scope names every such
+  merge in advance. A promotion carries whatever develop holds, so a change another session merged
+  meanwhile rides along. Naming the scope accepts that.
+- **The grant answers only the explicit-permission item of the `pr-review-conduct` Merge Gate**,
+  for the merges its scope names. A pull request with an open finding still does not merge.
+- **A run may be given a round cap.** Where none is named, it is 20.
+
+### Needs the Maintainer
+
+`decision-triage` owns the test for what needs the maintainer, carried here whole as a generated
+include. The away run holds back what it names, and a worker parks on it.
+
+<!-- include: .agents/skills/decision-triage/SKILL.md > Needs the Maintainer -->
+
+An issue needs the maintainer when any of the following holds. Where it is unclear whether one
+holds, the issue needs the maintainer. A question asked costs one line of the maintainer's time,
+and a guess costs a revert and a review round.
+
+- **The outcome is not determined.** The issue asks a question, or names alternatives without
+  choosing one, and the committed rules do not choose for it. An outcome the issue and the rules
+  together settle needs no one, however large the fix.
+- **It waits on the maintainer already.** It carries the `decision` label, or a comment asks the
+  maintainer something still unanswered.
+- **The fix reaches past the repository's tree.** It changes a repository setting, a ruleset,
+  visibility, a secret, or a release condition. Or it needs a credential, an account, or a host
+  the session lacks.
+- **The fix edits anything under the hub's `host-setup/agent-safety/`.** That tree is the agent's
+  own guard, so a human approves every change to it.
+- **The fix reverses a settled decision** recorded in an issue, a handoff, or the rule text.
+- **The fix adds a rule the issue does not ask for.** A rule a future agent must honor is the
+  maintainer's to judge. An issue that asks for a rule has been judged, and one that only reports
+  a defect has not.
+
+An issue where only part needs the maintainer is a split rather than a whole. The part that needs
+no one is worked, and the undecided part is filed as its own `decision` issue. Skipping the whole
+issue for one undecided item is the failure this rule exists to prevent.
+
+These are not reasons an issue needs the maintainer, and a report never counts them as such. An
+issue that is `blocked` on another issue waits on that issue. One that needs a platform, by the
+test `session-handoff` "The Chain" states, waits on that platform's lane. One that another group
+or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
+that owns it. A handoff link carrying the `handoff` label is not an issue of its own.
+
+<!-- /include -->
+
+### The Lean Orchestrator
+
+The orchestrator reads no issue body, diff, or review thread in away mode. Each round it dispatches
+subagents and holds only what they return.
+
+1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository.
+   It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
+   each claim comment. It files a question-shaped issue as `decision`, commenting the question,
+   rather than asking it. It returns the round plan: each group's issues, branch, claimed files,
+   and tier, then each held-back issue with its reason.
+2. **Dispatch the workers** from that plan, per "Dispatching a Worker", each brief built from the
+   group's line. The brief also states the park duty below, and that the scope is not the
+   worker's to use. A worker drives to develop and ends there, whatever the scope.
+3. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
+   Worker".
+4. **Clean up** per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
+   status line are all the orchestrator reads.
+5. **Promote** per "Promoting" below.
+6. **Record the round's report** in working notes, per "Run State", and start the next round.
+
+The orchestrator's working notes hold the round plans, the outcome lines, and the reports. Nothing
+else read in a round outlives it.
+
+### Parking Instead of Asking
+
+Every point at which the attended run stops a group for the maintainer parks the group instead. A
+worker meeting a question parks it, and so does the orchestrator for a dead worker's dirty tree or
+a refused cleanup. Park in this order, so an interruption part way leaves the work findable.
+
+1. **Keep the work.** Commit it and push the branch under the ordinary push rules. Leave the branch
+   and any pull request open. Where the push cannot run, leave the worktree exactly as it stands.
+2. **File the question** as an issue carrying `decision`. It states the question, then its
+   options, the recommended one first with its reason, per `GOVERNANCE.md` "Communicating with the
+   User". It states what each option does to the parked work. It names the group's issue and every
+   pull request the decision blocks, the open promotion included where it blocks that. Where an
+   open `decision` issue already asks the same question, comment on that one instead.
+3. **Comment the state on the group's issue.** It says what is done and names the branch and pull
+   request. It says whether the worktree was left standing, what remains, and the `decision` issue
+   it waits on. The comment
+   is complete enough for a worker with no other context to resume from.
+4. **Label the group's issue `blocked`**, per `GOVERNANCE.md` "Durable Knowledge and
+   Self-Improvement". The group keeps its claim and its branch.
+
+A parked group stops that group and nothing else. Once its `decision` issue is closed with an
+answer, the planner ranks the issue again. The worker it dispatches resumes the parked branch
+following the recorded answer, and takes `blocked` off once the work proceeds.
+
+A worker that finds a lesson a future agent must honor files it as a `decision` issue stating the
+proposed rule. It does not write that rule, since no one is present to judge it.
+
+Each of these is an outward-facing write bound by `GOVERNANCE.md` "Repository Boundaries and Write
+Safety". So it targets this repository only, reads every identifier live in the same run, and
+suppresses no output.
+
+### Promoting
+
+**Under `develop`**, no round opens a promotion pull request and no round freezes. At the run's
+end, dispatch one worker to open the promotion pull request where develop is ahead of main. It
+drives that pull request per "The Promotion Boundary" steps 1 and 2 and leaves it for the
+maintainer. An open promotion pull request does not freeze an away run under `develop`, since no one
+is present to merge it.
+
+**Under `main` or `release`**, each round's promotion is dispatched to a worker. The worker opens
+or updates it per "The Promotion Boundary" and "Assembling the Promotion Body". It drives it to
+every Merge Gate item but the permission, then hands it to `merge-and-release` under the standing
+grant. It merges only under `main`, and merges and releases under `release`. A finding against the
+promotion lands as its own feature -> develop pass, per "The Promotion Boundary" step 4.
+
+**A decision can hold the promotion.** Immediately before each promotion merge, the worker reads
+the `decision` issues with `gh issue list --label decision --state all --json
+number,state,closedAt,body,comments` and an explicit `--limit`. A read returning as many rows as
+its limit may be truncated, so raise the limit and read again until one returns fewer. Where one
+states that it blocks the open promotion, and is open or was closed since the run started, the
+promotion does not merge. That round narrows to develop, and later rounds keep merging to develop.
+A read that cannot run holds the promotion too, since it shows nothing about whether the promotion
+is blocked.
+
+### Existing Single-Issue Lanes
+
+An open handoff on an `auto-*` track is a single-issue lane an earlier unattended loop left. Its
+link is not ranked, per "Ranking". Where it carries `blocked`, its issue is held back on the
+`decision` issue its parking comment names. Otherwise the planner ranks the issue its next steps
+name, and that group continues the lane's branch. Once the group's pull request merges, the worker
+ends the track with `close`, per `session-handoff` "Running the Chain".
+
+### Ending an Away Run
+
+The run ends at the first of these, each an ending of its own:
+
+- A re-rank finds nothing it can act on.
+- The round cap is reached.
+- A condition every later round would meet. Examples are a missing label, an exhausted reviewer
+  allowance, a refused push or merge, and a read the planner cannot make.
+- The session ends.
+
+The final message is the report "Ending the Run" describes, with every held-back issue under the
+reason that holds it back. **Only a question counts as needing the maintainer.** That is an open
+`decision` issue, or a group parked on one. Each other reason is named as itself, never as a
+decision. Those are `blocked` on another issue, needs a platform, and held by an open group or pull
+request. The report
+gives the count of open `decision` issues and names each by number. It names `decision-triage` as
+where they get answered. It asks nothing.
 
 ## Run State
 

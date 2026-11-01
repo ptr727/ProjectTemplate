@@ -113,9 +113,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      until its acknowledgment posts under item 4.
 
    The merge then runs with `--match-head-commit` set to the head those were checked on. The
-   evidence names each constituent pull request and how its coverage was stated. An
-   `unattended-handoff` worker records it on the handoff, and an attended merge reports it to the
-   maintainer. Any other shortfall still goes to the maintainer. One example is a promotion
+   evidence names each constituent pull request and how its coverage was stated. A
+   `backlog-burndown` away-mode worker records it on the promotion pull request, and an attended
+   merge reports it to the maintainer. Any other shortfall still goes to the maintainer. One example is a promotion
    carrying a change whose own pull request lacked that coverage. A pull request another lane
    merged with no attested local pass and no review round is one such. The case answers item 2 alone, so item 5's permission is still owed.
    Every pull request other than a promotion owes this item's coverage in full.
