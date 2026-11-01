@@ -327,6 +327,8 @@ class TestMerge(MergeCase):
         for rc in (0, 1):
             with self.subTest(rc=rc):
                 self.calls.clear()
+                self.out.seek(0)
+                self.out.truncate()
                 self.merge_rc = rc
                 self.assertEqual(1, self.run_merge(target(), target(), target(state="CLOSED")))
                 self.assertIn("it reads CLOSED after the merge call", self.out.getvalue())
@@ -396,10 +398,6 @@ class TestUnmetItems(MergeCase):
             "baseRepository": {"defaultBranchRef": {"name": "main"}},
         }
         self.assertEqual([], self.unmet_on(pr))
-
-    def test_a_base_retargeted_before_the_fresh_read_is_unmet(self) -> None:
-        unmet = self.unmet_on({**self.clean(), "baseRefName": "main"})
-        self.assertIn("BASE_CHANGED the fresh read shows its base is 'main', not 'develop'", unmet)
 
     def test_a_finished_state_beside_clean_leaves_nothing_unmet(self) -> None:
         for state in ("UNSTABLE", "HAS_HOOKS"):

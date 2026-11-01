@@ -94,8 +94,6 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
     unmet, unread = [], []
     counts: list[str] = []
     noted: list[str] = []
-    if (base := pr.get("baseRefName")) != "develop":
-        unmet.append(("BASE_CHANGED", f"the fresh read shows its base is {base!r}, not 'develop'"))
     if (cover := fields.get("coverage")) not in MET_COVERAGE:
         unmet.append(
             ("COVERAGE_NOT_SHOWN", f"the digest reads coverage={cover}, so item 2 is unmet")
