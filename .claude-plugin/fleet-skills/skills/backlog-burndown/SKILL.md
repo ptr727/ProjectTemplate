@@ -356,11 +356,11 @@ The procedure covers every group that is done with its tree, which is the merged
 A group told to abandon its branch keeps a registered worktree until something removes it.
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
-A merged group that worked in a standalone clone still runs `cleanup`, which deletes its remote branch.
-`cleanup` removes only the base clone's registered worktrees, so the orchestrator then removes the clone at the path the worker reported, per `repo-worktree` "Listing and Cleanup".
-Before deleting it, the orchestrator confirms the clone is clean and its branch tip is the pull request's `headRefOid`.
-Deleting the directory discards any commit no remote holds.
-Where either confirmation fails, the clone is left as it stands and the group is stopped for the maintainer per "Raising a Blocked Question".
+A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
+The orchestrator confirms the clone at the path the worker reported is clean and its branch tip is the pull request's `headRefOid`.
+Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
+Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
+The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
 
 **Retiring a worktree and deleting its branch are two dispositions with two tests.** Citing one for
 the other is how a removal that discards nothing gets routed to the maintainer. It is also how a
@@ -392,6 +392,7 @@ The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-br
 `git branch -d` refuses rather than discards where that check was wrong.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Once both succeed, the orchestrator records the release by editing the group's claim comment, and the issue returns to the next round's ranking.
+The edit opens the comment with that release, and a claim comment opening with one holds no files.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
 No remote branch is left to report where none was pushed.
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
