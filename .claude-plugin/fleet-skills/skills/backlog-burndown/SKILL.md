@@ -204,6 +204,8 @@ for, and it binds harder than any throughput target.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The comment writes the branch name in backticks.
+  Recording a release, wherever this skill calls for one, edits that comment to open with the
+  release. A claim comment opening with one holds no files.
   The branch name is what lets a later session walk from a worktree it found back to the claim
   explaining it. That is the direction the next bullet actually travels. This lists the open
   issues where a visible comment from an account with write access names a branch:
@@ -392,7 +394,6 @@ The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-br
 `git branch -d` refuses rather than discards where that check was wrong.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Once both succeed, the orchestrator records the release by editing the group's claim comment, and the issue returns to the next round's ranking.
-The edit opens the comment with that release, and a claim comment opening with one holds no files.
 A remote branch that was pushed is reported to the maintainer rather than deleted, since `cleanup` needs a merged pull request to read.
 No remote branch is left to report where none was pushed.
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
