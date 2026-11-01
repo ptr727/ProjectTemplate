@@ -153,8 +153,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    prints its headline under `VERDICT WITH NO COUNTED FINDING`, and `status` and `wait` exit
    `50`. The headline is where that round names what it
    flags, beside any findings list or file table it carries. So answer each as a suppressed
-   finding.
-   The exit code repeats on that head after the answer. A clean verdict on the same terms prints
+   finding, posted with `--ack` by the key the digest prints beside the headline. "Answering a
+   suppressed finding" below states how. One from an owner, member, or collaborator clears the exit.
+   A headline naming a concrete failing input is a real finding under outcome 1, so fix it and
+   push. `--ack` refuses `fixed` for a verdict, since the fix moves the head the verdict covers.
+   A clean verdict on the same terms prints
    its headline under `CLEAN VERDICT HEADLINE`, which changes no exit code. Read that headline,
    since it can name a nit no thread carries, and answer any such nit with `comment`. A clean
    round whose findings list or file table names a finding prints none, since `FINDINGS WITH NO
@@ -206,7 +209,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A part on an earlier round prints under `REVIEWER OUTPUT NOTED` and decides no exit code. So
    does a label nested in a list, a quote, or a placed part. Read that block rather than the
    `shapes=` field, which names a head hold first. Read each such part by hand, and give any
-   finding in it item 3's outcome.
+   finding in it item 3's outcome. Post it with `--ack` by the key beside it. A part from a round
+   whose own head hold was acknowledged reads as answered already. A push is what turned that
+   hold into a note.
 5. The maintainer has given **explicit** permission to merge.
 
 The agent never merges on its own. A green or CLEAN PR with one open finding is not mergeable,
@@ -422,8 +427,16 @@ own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `
 `Awaiting maintainer` answer leaves the finding open until a later answer records the
 maintainer's decision. State the `(N)` count the block gave so answers can be checked against
 findings, and link the review round.
+Each such finding, each `FINDINGS WITH NO THREAD` block, and each `REVIEWER OUTPUT NOTED` part
+prints a `key=` in the digest, and `pr_review.py merge` refuses while one stands unanswered. So
+post the answer with one `--ack <key>=<outcome>` per item, the outcome following the verdict.
+`Fixed in <SHA>` is `fixed`, `Disproven` and `No change needed` are `declined`, and `Deferred to
+<issue>` is `filed`. `Listed in the body` is `listed`, or `dropped` for a line under `Dropped
+findings`. `Awaiting maintainer` has no outcome, so that item stays unanswered until the
+maintainer decides. The record counts only from an owner, member, or collaborator. Code checks
+that each item carries an outcome, never that the outcome is right, which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
-supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --body <text>`
+supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --ack <key>=<outcome> --body <text>`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when

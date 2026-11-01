@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pr_review_answers as answers
 import pr_review_copilot as adapter
 from pr_review_check_lines import check_lines
 from pr_review_checks import checks_stuck, checks_tally
@@ -22,8 +23,8 @@ from pr_review_rounds import (
     REVIEWER,
     answered_outside_review,
     collected,
-    commit_oid,
     coverage,
+    excluded_refusal,
     first_comment,
     head_nodes,
     head_reviews,
@@ -39,7 +40,6 @@ from pr_review_rounds import (
     reading,
     refusing_review,
     review_effort,
-    reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
     reviews_truncated,
@@ -51,7 +51,7 @@ from pr_review_rounds import (
     window_blind,
 )
 
-NO_THREAD, NOTED = "FINDINGS WITH NO THREAD", "REVIEWER OUTPUT NOTED"
+NO_THREAD, NOTED = answers.NO_THREAD, answers.NOTED
 BEHIND_THE_WINDOW = (
     "  BEHIND THE WINDOW ({value}): the newest {window} carry "
     "none from the reviewer and older ones exist, so this cannot decide"
@@ -122,16 +122,8 @@ def render(
     effort, effort_source = review_effort(pr)
     cover, cover_why = coverage(pr)
     hold = shape_hold(pr)
-    # Every round's notes, since a renamed section on an earlier round hides a finding too.
-    notes = [
-        *dict.fromkeys(
-            f"round {(commit_oid(node) or 'unknown')[:8]}: {n}"
-            for node in revs
-            for n in reading(node).notes
-            if node not in on_head or n not in {p.note for p in reading(node).unplaced}
-        ),
-        *reviewer_login_drift(pr),
-    ]
+    notes = answers.noted(pr)
+    acks = answers.acknowledged(pr)
     threads = pr["reviewThreads"]["nodes"]
     truncated = threads_truncated(pr)
     revs_truncated = reviews_truncated(pr)
@@ -146,7 +138,6 @@ def render(
         if len(contributors) > 1 or "other" in contributors
         else ""
     )
-    suppressed, suppressed_field = collected(pr, REVIEWER, "suppressed")
     missed, missed_field = collected(pr, REVIEWER, "previously_missed")
     outside, outside_field = collected(pr, CODERABBIT_LOGIN, "previously_missed")
     listed = len(opened_by(pr, newest)) if newest is not None else 0
@@ -161,6 +152,8 @@ def render(
         if quota_refusal(refusal) or quota
         else "ERROR"
         if possible_quota(refusal)
+        else "EXCLUDED"
+        if excluded_refusal(refusal)
         else "YES"
     )
     blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
@@ -203,7 +196,7 @@ def render(
         ("refusal", refusal_field),
         ("threads", f"{len(threads)}{plus}"),
         ("unresolved", f"{len(unresolved)}{plus}{breakdown}"),
-        ("suppressed", suppressed_field),
+        ("suppressed", collected(pr, REVIEWER, "suppressed")[1]),
         ("previously_missed", missed_field if missed or revs_truncated else None),
         (
             "overview",
@@ -220,11 +213,8 @@ def render(
         ("stuck", ",".join(sorted({s for _, s in stuck})) or None),
         ("new", len(shown) if seen is not None else None),
     ]
-    files = (pr.get("files") or {}).get("nodes") or []
-    unmatched, marked = adapter.listed_lines(
-        found.listed_items if found else (), threads, files, truncated
-    )
-    owed = max(found.unthreaded, unmatched) if found is not None else 0
+    owed, marked = answers.owed(pr)
+    keyed = {it.kind: answers.mark(it, acks) for it in answers.items(pr)}
     if fields_out is not None:
         fields_out += [*fields, (NO_THREAD, owed), (NOTED, len(notes))]
     lines = [header(fields)]
@@ -247,7 +237,7 @@ def render(
             "sent nowhere, so read the body itself before closing the review loop. A spelling "
             f"to add belongs in `scripts/reviewers/` on {hub}, which hosts this script"
         )
-        lines += [f"    {note}" for note in notes]
+        lines += [f"    {note.text} ({answers.mark(note, acks).strip()})" for note in notes]
     if hold:
         lines.append(
             f"  UNPLACED ON THE HEAD (fingerprint={hold[0]}): a round covering the head carries "
@@ -265,7 +255,7 @@ def render(
             lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
     if owed:
         lines.append(
-            f"  {NO_THREAD} ({owed}): the round covering the head names more findings "
+            f"  {NO_THREAD} ({owed}){keyed.get(NO_THREAD, '')}: the round covering the head names more findings "
             "than its open entries link to threads on this pull request, or lists one no thread "
             f"sits on, so {owed} {'is' if owed == 1 else 'are'} raised where polling "
             "threads cannot see them. Read the review body and give each the triage a suppressed "
@@ -276,14 +266,14 @@ def render(
         lines += marked
     if flagged and found is not None and found.listed:
         lines.append(
-            f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
+            f"  VERDICT WITH NO COUNTED FINDING{keyed.get(answers.VERDICT, '')}: the round covering the head opens on "
             f"`{flagged[0]}` and states no open finding, so its headline and its findings list "
             "or file table are where what it flags is named. Give both the triage a suppressed "
             "finding gets"
         )
     elif flagged:
         lines.append(
-            f"  VERDICT WITH NO COUNTED FINDING: the round covering the head opens on "
+            f"  VERDICT WITH NO COUNTED FINDING{keyed.get(answers.VERDICT, '')}: the round covering the head opens on "
             f"`{flagged[0]}` and counts no finding, so its headline is the one place what it "
             "flags is named. Give the headline the triage a suppressed finding gets"
         )
@@ -327,22 +317,5 @@ def render(
         body = " ".join((c.get("body") or "").split())
         lines.append(f"  {mark}{t['id']} {c.get('path')}:{c.get('line')} {body[:160]}")
     # Printed whole, since a finding with no thread appears nowhere but here.
-    for heading, entries in (
-        ("SUPPRESSED", suppressed),
-        ("PREVIOUSLY MISSED", missed),
-        ("CODERABBIT OUTSIDE-DIFF", outside),
-    ):
-        for where, section in entries:
-            lines.append(
-                f"  {heading} ({where}): no thread to resolve, "
-                "answer it in the PR conversation quoting the finding"
-            )
-            lines += [f"    {ln}" for ln in section.text.splitlines() if ln.strip()]
-    for section in qodo_open:
-        lines.append(
-            "  QODO OPEN FINDING: neither Resolved nor Dismissed, no thread to resolve, "
-            "answer it in the PR conversation quoting the finding, and spot-verify Qodo's "
-            "own badge against `gh pr diff` rather than trusting it outright"
-        )
-        lines.append(f"    {section.title}")
+    lines += answers.unthreaded_lines(pr, owner, repo, num)
     return "\n".join(lines), len(unresolved)

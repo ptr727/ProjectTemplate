@@ -38,6 +38,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_review
+import pr_review_answers
 import pr_review_check_lines
 import pr_review_checks
 import pr_review_rounds
@@ -54,6 +55,7 @@ GATE_SOURCES = (
     "pr_review_check_lines.py",
     "pr_review_rounds.py",
     "pr_review_digest.py",
+    "pr_review_answers.py",
 )
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
 READER_IMPORTS = frozenset(
@@ -61,7 +63,10 @@ READER_IMPORTS = frozenset(
         "__future__",
         "collections",
         "datetime",
+        "hashlib",
         "re",
+        "typing",
+        "pr_review_answers",
         "pr_review_copilot",
         "pr_review_checks",
         "pr_review_check_lines",
@@ -73,7 +78,8 @@ READER_FLOORS = {
     "pr_review_checks": "datetime",
     "pr_review_check_lines": "pr_review_checks",
     "pr_review_rounds": "pr_review_copilot",
-    "pr_review_digest": "pr_review_rounds",
+    "pr_review_digest": "pr_review_answers",
+    "pr_review_answers": "pr_review_rounds",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -1128,6 +1134,13 @@ class TestRefusal(GqlCase):
     pull request it was observed on had 301 changed files, one over the reviewer's limit. That pull
     request was one command from merging on a round that never ran.
     """
+
+    def test_an_excluded_files_refusal_reads_as_its_own_kind(self) -> None:
+        """A file-count refusal blocks and an excluded-files one a local pass covers, so they differ."""
+        for body, want in ((EXCLUDED_REFUSED, "refusal=EXCLUDED "), (REFUSED, "refusal=YES ")):
+            with self.subTest(want):
+                self.answer(payload([review(body=body)]))
+                self.assertIn(want, pr_review.digest("o", "r", 7)[0])
 
     def test_a_refusal_on_the_head_is_not_coverage(self) -> None:
         self.answer(payload([review(body=REFUSED)]))
@@ -2395,6 +2408,50 @@ class TestReadingsThroughTheAdapter(GqlCase):
         out = self.out.getvalue()
         self.assertIn("VERDICT WITH NO COUNTED FINDING", out)
         self.assertIn("The change is narrow.", out)
+
+    def test_an_acknowledged_verdict_clears_fifty_unless_it_claims_a_fix(self) -> None:
+        text = overview_v2(
+            open_count="0 open findings", entries=0, verdict="### Needs a closer look"
+        )
+        pr = payload([review(body=text)], files=["a.py"])
+        (item,) = [i for i in pr_review_answers.items(pr) if i.kind == pr_review_answers.VERDICT]
+        for label, outcome, association, code in (
+            ("declined by the owner", "declined", "OWNER", 0),
+            ("claimed fixed", "fixed", "OWNER", 50),
+            ("declined by an outsider", "declined", "NONE", 50),
+        ):
+            with self.subTest(label):
+                self.out.seek(0)
+                self.out.truncate()
+                mark = pr_review_answers.FINDING_ACK.format(item.key, outcome)
+                answer = ack(
+                    "0" * 12, association, text=f"Declined: nothing names a fault.\n\n{mark}"
+                )
+                answered = {**pr, "comments": {"nodes": [answer]}}
+                self.assertEqual(code, self.status(answered))
+                out = self.out.getvalue()
+                self.assertIn(f"VERDICT WITH NO COUNTED FINDING key={item.key}", out)
+                self.assertEqual(code == 50, "status=VERDICT_NAMES_UNCOUNTED_FINDINGS" in out)
+                self.assertEqual(code == 0, "acknowledged as declined" in out)
+
+    def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
+        missed = (
+            f"{OVERVIEW}\n<details>\n<summary><strong>1 previously missed issue</strong></summary>"
+            "\n\nIn code that has not changed since last review\n\n[P2] Guard the write.\n</details>"
+        )
+        pr = payload([review(oid=OLD, body=missed, rid="A"), review(rid="B")], files=["a.py"])
+        (item,) = [i for i in pr_review_answers.items(pr) if i.kind == "previously_missed"]
+        self.status(pr)
+        self.assertIn(f"earlier round) key={item.key}: no thread to resolve", self.out.getvalue())
+        self.assertIn("--ack <key>=<outcome>", self.out.getvalue())
+        self.out.seek(0)
+        self.out.truncate()
+        mark = pr_review_answers.FINDING_ACK.format(item.key, "declined")
+        answer = ack("0" * 12, "OWNER", text=f"Declined: guarded upstream.\n\n{mark}")
+        self.status({**pr, "comments": {"nodes": [answer]}})
+        out = self.out.getvalue()
+        self.assertIn(f"key={item.key}, acknowledged as declined", out)
+        self.assertNotIn("Guard the write.", out)
 
     def test_an_open_thread_defers_the_uncounted_verdict(self) -> None:
         text = overview_v2(
@@ -5804,6 +5861,56 @@ class TestCommentConfirmsItsTargetAndResult(CommentCase):
             self.assertEqual(64, self.run_comment())
         self.assertEqual([], self.calls)
         self.assertIn("OUT_OF_SCOPE", self.out.getvalue())
+
+
+class TestCommentAcknowledgesAFinding(CommentCase):
+    MISSED = (
+        f"{OVERVIEW}\n<details>\n<summary><strong>1 previously missed issue</strong></summary>"
+        "\n\nIn code that has not changed since last review\n\n[P2] Guard the write.\n</details>"
+    )
+
+    def target(self, body: str = MISSED) -> dict:
+        pr = payload([review(oid=OLD, body=body, rid="A"), review(rid="B")], files=["a.py"])
+        return {**pr, "id": "PR_from_query", "url": "https://github.com/o/r/pull/7"}
+
+    def run_ack(self, *pairs: str) -> int:
+        flags = [arg for pair in pairs for arg in ("--ack", pair)]
+        return pr_review.main(["comment", "7", "--repo", "o/r", *flags, "--body", COMMENT_BODY])
+
+    def test_the_outcome_posts_with_the_marker_merge_reads(self) -> None:
+        pr = self.target()
+        (item,) = [i for i in pr_review_answers.items(pr) if i.kind == "previously_missed"]
+        sent = f"{COMMENT_BODY}\n\n{pr_review_answers.FINDING_ACK.format(item.key, 'declined')}"
+        self.wire(pr, {**COMMENT, "body": sent})
+        self.assertEqual(0, self.run_ack(f"{item.key}=declined"))
+        mutation = next((v for q, v in self.calls if "addComment" in q))
+        self.assertEqual(sent, mutation["body"])
+        answered = {**pr, "comments": {"nodes": [ack("0" * 12, "OWNER", text=sent)]}}
+        self.assertTrue(pr_review_answers.answered(answered, "previously_missed"))
+
+    def test_an_unknown_key_or_outcome_posts_nothing(self) -> None:
+        pr = self.target()
+        (item,) = [i for i in pr_review_answers.items(pr) if i.kind == "previously_missed"]
+        for pair in ("0" * 12 + "=declined", f"{item.key}=ignored", item.key):
+            with self.subTest(pair):
+                self.wire(pr)
+                self.assertEqual(69, self.run_ack(pair))
+                self.assertFalse(any("addComment" in query for query, _ in self.calls))
+                self.assertIn("status=ACK_REFUSED", self.out.getvalue())
+
+    def test_a_verdict_is_never_acknowledged_as_fixed(self) -> None:
+        text = overview_v2(
+            open_count="0 open findings", entries=0, verdict="### Needs a closer look"
+        )
+        pr = {**payload([review(body=text)], files=["a.py"]), "id": "PR_x", "url": "u"}
+        (item,) = [i for i in pr_review_answers.items(pr) if i.kind == pr_review_answers.VERDICT]
+        self.wire(pr)
+        self.assertEqual(69, self.run_ack(f"{item.key}=fixed"))
+        self.assertIn("which takes one of declined, filed, listed, dropped", self.out.getvalue())
+
+    def test_the_ack_belongs_to_comment_alone(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            pr_review.main(["status", "7", "--repo", "o/r", "--ack", "0" * 12 + "=fixed"])
 
 
 class TestCommentAcknowledgesAnUnplacedSet(CommentCase):

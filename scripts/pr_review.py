@@ -38,7 +38,12 @@ Subcommands
            write. Exit 0 = done. 64 = write scope could not be established or excludes the
            target. 65 = the PR could not be read. 66 = the response did not confirm the comment.
            --fingerprint posts the body as the acknowledgment of the unplaced set `status` names,
-           with `<!-- fleet-shape-ack: fingerprint=<fp> -->` beneath it.
+           with `<!-- fleet-shape-ack: fingerprint=<fp> -->` beneath it. --ack KEY=OUTCOME, once
+           per item, posts it as the answer to the item `status` prints that key beside. Such an
+           item is a finding no thread carries, a noted part, or a verdict naming no counted
+           finding. Each pair adds `<!-- fleet-finding-ack: key=<key> outcome=<outcome> -->`.
+           `pr_review_answers.py` holds the outcomes each item takes. 69 = an --ack names a key
+           no such item on the pull request carries, or an outcome that item does not take.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure. It is caught
            by a reviewer or not at all. Read-only. Exit 0 = every reference resolves. 70 = one does
@@ -50,6 +55,7 @@ Subcommands
            reason. It squash-merges a pull request into `develop` only where the Merge Gate's
            mechanically readable items read met. The items no code here reads, such as a finding a
            pull request's body lists, stay the driver's per `pr-review-conduct`'s Merge Gate.
+           It ends on one `next=` line naming the route its status lines decide.
   status   One digest line, any unresolved threads, and any finding no thread carries. Read-only.
            Exit 0 = no Copilot review covers the head yet. 0 is also the exit where the review
            covering the head states no partial coverage and its verdict counts what it flags. 42 = the
@@ -63,9 +69,8 @@ Subcommands
            - No thread is open.
            What it flags is then named in its headline, printed under
            `VERDICT WITH NO COUNTED FINDING`, and in any findings list or file table the body
-           carries. The code
-           repeats on that head after the headline is answered, since nothing here reads an
-           answer. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
+           carries. A trusted `comment --ack` answering the key printed there clears it, though
+           never as `fixed`, since a fix moves the head. A clean verdict on the same terms prints its headline under `CLEAN VERDICT
            HEADLINE`, which changes no exit code. A clean round whose findings list or file
            table names a finding prints none, since `FINDINGS WITH NO THREAD` names those.
            50 is also a head round's part the adapter cannot place, `shapes=HELD` with an
@@ -92,7 +97,8 @@ Subcommands
            `other_rate_limited` names one whose newest comment or review is its own rate-limit
            notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
            the account quota or an error whose run log names a rate limit, `ERROR` for any other
-           error refusal, `YES` for any other refusal. Under `ERROR`, a `RUN LOG READING` line
+           error refusal, `EXCLUDED` for one saying every changed file is in Copilot's default
+           review exclusions, `YES` for any other refusal. Under `ERROR`, a `RUN LOG READING` line
            names the reading taken. It is transient where the run log names a fetch failure while
            the refusal's one re-request is still `owed` or `pending`. It is possible quota once
            that re-request is `sent` with no round answering it. A second error refusal in a row,
@@ -104,8 +110,8 @@ Subcommands
            `+` and a `THREADS TRUNCATED` block naming a cut page. `suppressed=`,
            `previously_missed=`, and `cr_outside_diff=N (on_head=X earlier=Y)` count findings
            collapsed into review bodies over every round, split into the head's and earlier ones,
-           each printed whole since no thread carries it, a trailing `+` marking a cut reviews
-           window. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N`
+           each printed whole with its acknowledgment key since no thread carries it, a trailing
+           `+` marking a cut reviews window. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N`
            counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
            where that comment can sit behind the window. `overview=T/M` is the open findings the
            round covering the head states beside the threads that round opened, `?` where it
@@ -113,7 +119,8 @@ Subcommands
            names findings the round names that no thread on the pull request carries. Each
            findings list item prints beneath it, marked by whether a read thread sits on a
            `path:line` its code spans name. Each of these is owed the triage a suppressed finding
-           gets, and none decides an exit code. On a pull request no longer open, `pr=` is
+           gets, and none decides an exit code. `merge` refuses until a `comment --ack` answers
+           each, and each noted part, by the `key=` printed beside it. On a pull request no longer open, `pr=` is
            followed by `state=` with `merged_at=` and `merge_commit=`, or with `closed_at=`. Its
            `merge=UNKNOWN` never clears.
   reply    Answer one thread selected by its text, and resolve it on request. Exists
@@ -231,6 +238,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as shared
+from pr_review_answers import ack_lines, report_verdict
 from pr_review_checks import (
     CHECK_GRACE,
     CHECK_STALL,
@@ -247,20 +255,17 @@ from pr_review_checks import (
 from pr_review_digest import digest_refusal, render
 from pr_review_rounds import (
     ACK_MARKER,
-    CARRIED_PARTIAL,
     FILES_UNREAD,
     REVIEWER,
     answered_outside_review,
     attested,
     commit_oid,
     copilot_bot_id,
-    coverage,
     describe,
     excluded_refusal,
     files_unread,
     finding_text,
     head_review_done,
-    head_reviews,
     history_entry,
     holds,
     is_open,
@@ -280,12 +285,10 @@ from pr_review_rounds import (
     reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
-    shape_hold,
     standing_quota,
     stopping_refusal,
     thread_author,
     threads_truncated,
-    uncounted_verdict,
 )
 
 # The directory this script sits in, the anchor every scope answer is read from.
@@ -926,57 +929,6 @@ def digest(
         WINDOW,
         fields_out,
     )
-
-
-def report_verdict(pr: dict) -> int:
-    """Print the blocking verdict's own status line, and return the exit code it carries.
-
-    A missing head review has no verdict yet, which the wait path owns. Coverage shown nowhere is a
-    note rather than an exit. A head round's unplaced part is an exit until it is acknowledged.
-    """
-    if not head_reviews(pr):
-        return 0
-    state, why = coverage(pr)
-    if state == "partial":
-        if why.startswith(CARRIED_PARTIAL):
-            print(
-                f"status=COVERAGE_IS_PARTIAL the head reads as partial because {why}, so part of "
-                "the diff may have no review. A round on the head stating full coverage clears "
-                "this, unless a round on it already states a reading this cannot believe. "
-                "Otherwise this is the maintainer's call"
-            )
-        else:
-            print(
-                f"status=COVERAGE_IS_PARTIAL the review covering the head states it read fewer "
-                f"files than the pull request changed ({why}), so part of the diff has no review "
-                "at all. A re-request is not the remedy it reads as. Splitting is the remedy where "
-                "it applies, and it does not apply to a promotion. Otherwise this is the "
-                "maintainer's call"
-            )
-        return 42
-    if flagged := uncounted_verdict(pr):
-        print(
-            f"status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on "
-            f"`{flagged[0]}`, a verdict that is not the clean one, while it states no open "
-            "finding, so what it flags is named in its headline, printed above under VERDICT "
-            "WITH NO COUNTED FINDING, and in any findings list or file table in the review body. "
-            "Fix what it names and push, or answer it with `comment`. This code repeats on this "
-            "head after the answer, since nothing here reads one"
-        )
-    if (hold := shape_hold(pr)) and not hold[2]:
-        print(
-            f"status=UNPLACED_PARTS_UNACKNOWLEDGED the round covering the head carries text the "
-            f"reader cannot place, under UNPLACED ON THE HEAD. Acknowledging fingerprint {hold[0]} "
-            "with `comment --fingerprint` and each item's outcome clears this code"
-        )
-    if flagged or (hold and not hold[2]):
-        return 50
-    if state in ("none", "unknown"):
-        print(
-            "note: no statement, file table, or attested local pass shows full coverage of this "
-            "head, so Merge Gate item 2 is unmet unless the promotion case it states applies"
-        )
-    return 0
 
 
 def origin_owner() -> str | None:
@@ -1787,8 +1739,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         if verdict == 50 and checks_settling(checks, now, a.check_grace, a.check_stall):
             print(
                 "note: a check on this head has not concluded, and this wait returns 50 at once "
-                "while the hold above stands, which for a headline is until the head moves. Once "
-                "it is answered, watch the checks with a bounded "
+                "while the hold above stands, which for a headline is until its acknowledgment "
+                "posts or the head moves. Once it is answered, watch the checks with a bounded "
                 f"`timeout 1800 gh pr checks {a.number} --repo {owner}/{repo} --watch`, then run "
                 "status"
             )
@@ -1999,6 +1951,7 @@ FLAG_OWNERS = (
     ("--checkout", ("attest", "cleanup", "merge"), False),
     ("--cleanup", ("merge",), False),
     ("--fingerprint", ("comment",), True),
+    ("--ack", ("comment",), True),
     ("--body", ("comment", "reply"), True),
     ("--timeout", ("wait",), True),
     ("--min-rounds", ("wait",), True),
@@ -2107,6 +2060,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--fingerprint", help="comment: acknowledge the unplaced set it names")
     ap.add_argument(
+        "--ack",
+        action="append",
+        metavar="KEY=OUTCOME",
+        help="comment: record OUTCOME for the item `status` prints KEY beside, repeatable",
+    )
+    ap.add_argument(
         "--resolve",
         action="store_true",
         help="reply: resolve the thread once the reply is confirmed",
@@ -2179,6 +2138,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "comment":
         marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
+        if a.ack:
+            acks, why = ack_lines(full_read(owner, repo, a.number), a.ack)
+            if not acks:
+                return not_written("ACK_REFUSED", why, 69)
+            marker += "\n\n" + "\n".join(acks)
         return comment_on_pr(owner, repo, a.number, a.body.strip() + marker)
 
     if a.cmd == "status":
