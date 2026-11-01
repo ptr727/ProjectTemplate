@@ -120,7 +120,9 @@ of its own.
    - For each pull request a `BLOCKS` line names, comment the `decision` issue on it. That comment
      is what holds a promotion the question blocks, per `backlog-burndown` "Away Mode".
    - For an `OVERTAKEN` one, from either seat, take it out of the queue as "Communicating with
-     the User" below states, recording the reason. It is not asked.
+     the User" below states, recording the reason. It is not asked. Do the same for a queued
+     `decision` issue the history check returned as `HELD` awaiting promotion. That issue skips
+     step 6 and stays open, since the promotion closes it.
 
    The comment states the question, then the options, the recommended one first, each with its
    reason. It names the evidence and what each option does to any work in flight.
@@ -172,7 +174,7 @@ reported as unclassified where it fails twice.
 
 Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape. A classifier's brief
 quotes "Needs the Maintainer" whole, states the history check in step 2, and lists its issue
-numbers. A researcher's brief names each issue in its cluster, its question, and the rule files
+numbers. It also states how step 6 says a kept-open comment reads. A researcher's brief names each issue in its cluster, its question, and the rule files
 it touches. It also states how to weigh what the issue holds:
 
 - Read every comment, newest last, rather than the body alone.

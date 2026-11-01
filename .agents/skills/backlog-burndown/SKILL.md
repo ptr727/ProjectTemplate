@@ -60,7 +60,9 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 - **The grant does not reach a pull request editing the hub's `host-setup/agent-safety/`.** Its
   merge waits on the maintainer's go-ahead for that pull request, given after reading its diff,
   per `decision-triage` "Needs the Maintainer". A worker brief for such a group states that the
-  worker drives the pull request to the gate and does not merge it.
+  worker drives the pull request to the gate and does not merge it. The group then ends as stopped
+  on a maintainer-only question, and "Raising a Blocked Question" puts the merge go-ahead to the
+  maintainer.
 - **The grant is bounded by the session it was named in.** A run interrupted and resumed in a new
   session needs the skill named again. Naming it again costs one sentence, and it is the
   difference between a grant and a mode. A grant read back from a note is one nobody gave.
