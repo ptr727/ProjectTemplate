@@ -47,7 +47,7 @@ Agent-authored text illustrates with data the agent constructed, never with data
 
 ## Git and Commit Rules
 
-The fleet's mechanical git rules follow. Default to staging rather than committing, and stage by explicit path only, never with a blanket add. Commit means commit and push. Every commit is signed and carries the committer's own verified GitHub `noreply` identity. Never force push. A history rewrite re-identifies only the commits it touches that aren't yours. And destructive git commands run only on explicit instruction. The Skill names the narrow exceptions. One is `git branch -D` on a squash-merged task branch. Another is a `backlog-burndown` worker, told to abandon its branch, discarding the uncommitted edits in its own linked worktree.
+The fleet's mechanical git rules follow. Default to staging rather than committing, and stage by explicit path only, never with a blanket add. Commit means commit and push. Every commit is signed and carries the committer's own verified GitHub `noreply` identity. Never force push. A history rewrite re-identifies only the commits it touches that aren't yours. And destructive git commands run only on explicit instruction. The Skill names the narrow cases. One is `git branch -D` on a squash-merged task branch. Another is a `backlog-burndown` worker whose abandon message states the grant, discarding the uncommitted edits in its own linked worktree.
 
 This is packaged as the `git-commit-conventions` Skill at
 `.agents/skills/git-commit-conventions/SKILL.md` in the hub. That path is not a repo-relative link,

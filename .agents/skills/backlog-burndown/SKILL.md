@@ -283,9 +283,7 @@ for, and it binds harder than any throughput target.
   whether or not another group holds the file. Without an approval recorded on the issue, the group
   stops for one per "Raising a Blocked Question", and the worker does not edit there. With
   one, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
-  requires of such a brief. An away-mode run stops the group instead, its claim and
-  branch kept, since it holds every such issue. It files no `decision` issue, and its report names
-  the group as held for the agent-safety tree, needing the maintainer present.
+  requires of such a brief.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -434,14 +432,13 @@ A worker still live, a promotion fix included, keeps its worktree until the next
 
 **An abandoned group's or a dead worker's standalone clone is left exactly as it stands.**
 Neither removal above reaches it. `git worktree remove` acts on the base clone's registered
-worktrees, and `git branch -d` on its branches. The clone is found at the path its worker reported or recorded, per "Dispatching a
-Worker". The group is stopped for the maintainer per "Raising a Blocked Question", naming the
-clone's path. The discard grant above does not reach a
-clone, since it names the worker's own linked worktree. A recorded path naming no directory counts
-as no checkout. Where no registered worktree and no recorded path names a group's checkout, the
-worker made none, since it records the path before cloning. Where the group's branch then exists neither locally nor on the remote, the
-orchestrator records the release. The issue then returns to the next round's ranking. Where it
-exists, the group is stopped for the maintainer.
+worktrees, and `git branch -d` on its branches. The clone is found at the path its worker reported
+or recorded, per "Dispatching a Worker". The group is stopped for the maintainer per "Raising a
+Blocked Question", naming the clone's path. The discard grant above does not reach a clone, since
+it names the worker's own linked worktree. A recorded path naming no directory counts as no
+checkout. A group with no registered worktree and no recorded path is released only where its
+branch exists neither locally nor on the remote. The orchestrator then records the release, and
+the issue returns to the next round's ranking. Otherwise the group is stopped for the maintainer.
 
 ### Choosing the Worker's Model Tier
 
