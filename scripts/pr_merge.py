@@ -216,9 +216,10 @@ def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) 
         return pr_cleanup.cleanup(owner, repo, num, checkout) if cleanup else 0
     if state == "CLOSED" or (answered not in (None, 0) and state == "OPEN"):
         status = "MERGE_REFUSED" if (now := landed.get("headRefOid")) == head else "HEAD_MOVED"
+        status = "REFUSED" if state == "CLOSED" else status
         print(
-            f"status={status} gh answered the merge of #{num} on {target} with exit "
-            f"{answered}, and it reads {state} at {now}, so nothing was merged"
+            f"status={status} #{num} on {target} reads {state} at {now} after gh pr merge "
+            f"answered {'nothing' if answered is None else answered}, so nothing was merged"
         )
         return 1
     print(
