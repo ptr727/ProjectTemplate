@@ -593,8 +593,9 @@ request** number and not the issue number. And this skill deliberately keeps the
 off the feature pull request. Read the pull request numbers out of that range, freshly fetched.
 Then read each of those pull requests for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
-ask for. On an operational-model repository, a commit whose subject does not end in the `(#<number>)` a
-squash merge appends is a direct push. Read its message for its own line. Reading either alone returns a
+ask for. On an operational-model repository, a commit whose subject names no pull request is a direct
+push. A squash merge appends `(#<number>)`, and a merge commit reads `Merge pull request
+#<number>`. Read a direct push's message for its own line. Reading either alone returns a
 partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
