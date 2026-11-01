@@ -154,6 +154,7 @@ An issue whose group is stopped, per "Raising a Blocked Question", is counted bu
 The round's report names it as stopped.
 That release is recorded in the group's claim comment before the issue is ranked again.
 A group an away-mode run parked is a stopped group, and its claim comment names the `decision` issue it waits on.
+It is ranked again once that issue is closed with an answer, as a resuming group, and "Away Mode" says when its release is recorded.
 
 An issue already fixed on develop is counted and not ranked until a promotion closes it. A
 merged feature pull request leaves its issue open, per "Grouping and File Claims" on closing
@@ -566,9 +567,9 @@ merge to main with no release never exercises artifact creation.
   for the merges its scope names. A pull request with an open finding still does not merge.
 - **A run may be given a round cap.** Where none is named, it is 20.
 - **One away run per repository at a time.** A run reads a parked group with an answered decision
-  as free to resume. That reading holds only while no other run is live, so the maintainer starts a
-  second only once the first has ended. An attended session taking up a parked group's issue first
-  records a claim comment naming its own branch, which holds the issue as in flight.
+  as free to resume. That reading holds only while no other run is live, and while no attended
+  session works a parked group's issue. So the maintainer starts an away run only once any earlier
+  run has ended and no such attended work is in flight.
 
 ### Needs the Maintainer
 
@@ -691,8 +692,9 @@ leaves the work findable.
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
-answer, the planner returns the group as resuming. The worker it dispatches follows the answer and
-records the release in the claim comment.
+answer, the planner returns the group as resuming. The worker it dispatches follows the answer. It
+records the release in the claim comment once its pull request merges to develop. So a promotion
+the decision held stays held until the answer's work is on develop.
 
 A worker that finds a lesson a future agent must honor files it as a `decision` issue stating the
 proposed rule. It does not write that rule, since no one is present to judge it.

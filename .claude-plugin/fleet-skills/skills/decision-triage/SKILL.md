@@ -93,6 +93,8 @@ that owns it. A handoff link carrying the `handoff` label is not an issue of its
    - For a `SPLIT`, file a new issue holding only the undecided item, carrying `decision`.
      Comment on the original issue naming the new one and the part that stays with it.
    - For a queued `decision` issue, comment the researched options where it stated none.
+   - For each pull request a `BLOCKS` line names, comment the `decision` issue on it. That comment
+     is what holds a promotion the question blocks, per `backlog-burndown` "Away Mode".
    - For an `OVERTAKEN` one, take it out of the queue as "Communicating with the User" below
      states, recording the reason. It is not asked.
 
