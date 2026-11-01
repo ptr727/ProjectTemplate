@@ -2524,6 +2524,30 @@ class TestDeleteOnlyPushInPrimaryCheckout(unittest.TestCase):
             self.assertIn("forbid deletion", reason)
 
 
+class TestBarePushAfterABranchSwitch(unittest.TestCase):
+    """A switch in the same command adds every protected default, and the branch read keeps its own reason."""
+
+    def test_the_branch_read_is_denied_on_its_own_rule(self):
+        spec = importlib.util.spec_from_file_location("guard_switch", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        rules = {"release": {"pull_request"}}
+        decision, reason = guard.classify(
+            "git push origin; git switch develop",
+            cwd="/c/work/wt",
+            origin=("example", "repo"),
+            current_branch="release",
+            rules_lookup=lambda b: rules.get(b, set()),
+            environ={},
+            primary_checkout_lookup=lambda _d: False,
+            ref_resolver=lambda _d, _r: True,
+        )
+        self.assertEqual(decision, "deny")
+        self.assertIn("'release', whose rules require a pull request", reason)
+
+
 @unittest.skipUnless(os.name == "posix", "the containment prefix and the sweep act on Linux only")
 class TestContainmentHookSelftests(unittest.TestCase):
     """The prefix's and the sweep's own matrices, the session tree's cases included, run in this suite.

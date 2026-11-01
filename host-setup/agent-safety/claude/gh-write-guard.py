@@ -1076,16 +1076,20 @@ def _bypass_denial(
         return None
 
     unread: list[bool] = []
+    read: list[str] = []
 
     def branch_of() -> tuple[str, ...]:
-        """The branch a push naming no refspec writes, or each protected default where it is not read."""
+        """The branch a push naming no refspec writes, and each protected default where a switch
+        may change it or it is not read."""
         got = current_branch or _bare_branch(cmd, git)
         unread.append(switched or got is None)
-        read = (got,) if got else ()
-        return read if read and not switched else read + _PROTECTED_DEFAULT
+        read.extend([got] if got else [])
+        return ((got,) if got else ()) + (_PROTECTED_DEFAULT if unread[-1] else ())
 
     remote, targets = _push_targets(git.args, branch_of)
-    named = set(_push_targets(git.args, lambda: ())[1]) if any(unread) else set(targets)
+    named = set(targets)
+    if any(unread):
+        named = set(_push_targets(git.args, lambda: ())[1]) | {t for t in targets if t[1] in read}
     targets.sort(key=lambda t: t not in named)
     repo: tuple[str, str] | None | object = _UNRESOLVED
     for op, br in targets:
