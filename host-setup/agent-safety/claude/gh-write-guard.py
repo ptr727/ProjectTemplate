@@ -851,9 +851,9 @@ def _push_targets(
             tags = True
         elif a in ("--repo", "--receive-pack", "--exec", "-o", "--push-option"):
             i += 1
-        elif re.fullmatch(r"-[A-Za-z]+", a):
-            force, delete = force or "f" in a, delete or "d" in a
-            i += a.endswith("o")
+        elif m := re.fullmatch(r"-([A-Za-np-z0-9]*)(o?)(.*)", a):
+            force, delete = force or "f" in m[1], delete or "d" in m[1]
+            i += bool(m[2]) and not m[3]
         i += 1
     remote, specs = (pos[0], pos[1:]) if pos else (None, [])
     write = "force" if force else "update"
@@ -1740,6 +1740,11 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git push origin main", _RULES, "feature/x", "allow", "R4"),
     ("git push origin +main", _RULES, "feature/x", "deny", "R4"),
     ("git push -f origin main", _RULES, "feature/x", "deny", "R4"),
+    ("git push -ofoo origin develop", _RULES, "feature/x", "deny", "3720"),
+    ("git push -o foo origin develop", _RULES, "feature/x", "deny", "3720"),
+    ("git push -fofoo origin main", _RULES, "feature/x", "deny", "3720"),
+    ("git push -ofoo origin main", _RULES, "feature/x", "allow", "3720"),
+    ("git push -4f origin main", _RULES, "feature/x", "deny", "3720"),
     ("git push origin :main", _RULES, "feature/x", "deny", "R4"),
     ("git push origin --delete main", _RULES, "feature/x", "deny", "R4"),
     ("git push origin --delete feature/example", _RULES, "feature/x", "allow", "3314"),
