@@ -5897,6 +5897,11 @@ class TestCommentAcknowledgesAFinding(CommentCase):
                 self.assertEqual(69, self.run_ack(pair))
                 self.assertFalse(any("addComment" in query for query, _ in self.calls))
                 self.assertIn("status=ACK_REFUSED", self.out.getvalue())
+        with self.subTest("fenced body"):
+            self.wire(pr)
+            argv = ["comment", "7", "--repo", "o/r", "--ack", f"{item.key}=declined"]
+            self.assertEqual(69, pr_review.main([*argv, "--body", "```\nDeclined.\n```"]))
+            self.assertFalse(any("addComment" in query for query, _ in self.calls))
 
     def test_a_verdict_is_never_acknowledged_as_fixed(self) -> None:
         text = overview_v2(

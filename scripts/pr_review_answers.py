@@ -237,8 +237,13 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
     return found
 
 
-def ack_lines(pr: dict, pairs: list[str]) -> tuple[list[str], str]:
-    """The marker lines for `--ack KEY=OUTCOME` pairs, or empty with the reason one is refused."""
+def ack_lines(pr: dict, pairs: list[str], body: str) -> tuple[list[str], str]:
+    """The marker lines for `--ack KEY=OUTCOME` pairs, or empty with the reason one is refused.
+
+    A `body` with no prose outside code would post a record the gate never counts.
+    """
+    if not adapter.has_prose(body):
+        return [], "the body holds no written outcome outside code, so the gate would not count it"
     known = {it.key: it for it in items(pr)}
     lines = []
     for pair in pairs:

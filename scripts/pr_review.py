@@ -44,7 +44,8 @@ Subcommands
            item is a finding no thread carries, a noted part, or a verdict naming no counted
            finding. Each pair adds `<!-- fleet-finding-ack: key=<key> outcome=<outcome> -->`.
            `pr_review_answers.py` holds the outcomes each item takes. 69 = an --ack names a key
-           no such item on the pull request carries, or an outcome that item does not take.
+           no such item carries or an outcome that item does not take. It is also a body with no
+           prose outside code.
   claims   Check the description against the branch it describes. A body claiming a commit or
            quoting a `uses:` ref the head tree no longer carries is a silent failure. It is caught
            by a reviewer or not at all. Read-only. Exit 0 = every reference resolves. 70 = one does
@@ -2140,7 +2141,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "comment":
         marker = f"\n\n{ACK_MARKER.format(a.fingerprint)}" if a.fingerprint else ""
         if a.ack:
-            acks, why = ack_lines(full_read(owner, repo, a.number), a.ack)
+            acks, why = ack_lines(full_read(owner, repo, a.number), a.ack, a.body)
             if not acks:
                 return not_written("ACK_REFUSED", why, 69)
             marker += "\n\n" + "\n".join(acks)
