@@ -306,7 +306,10 @@ class TestMerge(MergeCase):
     def test_a_merge_gh_refused_that_reads_back_open_is_refused(self) -> None:
         self.merge_rc = 1
         self.assertEqual(1, self.run_merge(target(), target(), target()))
-        self.assertIn("status=MERGE_REFUSED gh refused the merge of #123", self.out.getvalue())
+        self.assertIn(
+            f"status=MERGE_REFUSED #123 on example/repo reads OPEN at {HEAD} after gh pr merge answered 1",
+            self.out.getvalue(),
+        )
         self.assertIn("so nothing was merged", self.out.getvalue())
         self.cleanup.assert_not_called()
 
@@ -322,6 +325,22 @@ class TestMerge(MergeCase):
         self.assertEqual(2, self.run_merge(target(), target(), target()))
         self.assertIn("status=MERGE_NOT_CONFIRMED", self.out.getvalue())
         self.cleanup.assert_not_called()
+
+    def test_a_read_back_closed_is_a_refusal_rather_than_unconfirmed(self) -> None:
+        for rc, err, said in ((0, "", "0"), (1, "", "1"), (1, pr_merge.UNRUN, "nothing")):
+            with self.subTest(rc=rc, err=err):
+                self.calls.clear()
+                self.out.seek(0)
+                self.out.truncate()
+                self.merge_rc, self.merge_err = rc, err
+                self.assertEqual(1, self.run_merge(target(), target(), target(state="CLOSED")))
+                self.assertIn(
+                    f"status=REFUSED #123 on example/repo reads CLOSED at {HEAD} after gh pr "
+                    f"merge answered {said}, so nothing was merged",
+                    self.out.getvalue(),
+                )
+                self.assertNotIn("MERGE_NOT_CONFIRMED", self.out.getvalue())
+                self.cleanup.assert_not_called()
 
     def test_a_read_back_that_does_not_answer_says_the_merge_may_have_happened(self) -> None:
         unread = pr_merge.pr_cleanup.shared.GraphQLError("gh graphql failed rc=1")
@@ -567,7 +586,7 @@ class TestUnmetItems(MergeCase):
     def test_a_merge_gh_refused_on_a_moved_head_reads_head_moved(self) -> None:
         self.merge_rc = 1
         self.assertEqual(1, self.run_merge(target(), target(), target(headRefOid=MOVED)))
-        self.assertIn("status=HEAD_MOVED gh refused the merge of #123", self.out.getvalue())
+        self.assertIn("status=HEAD_MOVED #123 on example/repo reads OPEN", self.out.getvalue())
         self.assertIn(f"reads OPEN at {MOVED}", self.out.getvalue())
         self.cleanup.assert_not_called()
 
