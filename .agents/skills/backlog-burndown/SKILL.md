@@ -180,7 +180,7 @@ merged feature pull request leaves its issue open, per "Grouping and File Claims
 keywords. So ranking it again dispatches a second fix for finished work. Read the fixed set the way
 "The Promotion Boundary" and "Assembling the Promotion Body" read it, over
 `origin/main..origin/develop`, freshly fetched. That is each pull request's `Closes on promotion:`
-line, and on the operational model each direct push's own `Closes on promotion:` line as well.
+line, and on the operational model the `Closes on promotion:` line in each commit message too.
 The round's report names each such issue as awaiting promotion.
 
 ## Grouping and File Claims
@@ -284,7 +284,8 @@ for, and it binds harder than any throughput target.
   stops for one per "Raising a Blocked Question", and the worker does not edit there. With
   one, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
   requires of such a brief. An away-mode run parks the group instead, per "Parking
-  Instead of Asking", since it holds every such issue.
+  Instead of Asking". It stays parked for the rest of that run, approved or not, since an away run
+  holds every such issue.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -394,7 +395,8 @@ were read as covering them. Every disposition in this skill names which of the t
 **A worker told to abandon its branch cleans its own tree first.** `git-commit-conventions` lets a
 command discard work only on the developer's explicit instruction. The maintainer gives it for this
 one case through this skill, and it takes effect when the orchestrator tells a worker to abandon. That message states the
-grant, since the worker never reads this skill. On it the worker
+grant, since the worker never reads this skill. It leaves the grant out for a worker whose
+reported checkout is a standalone clone. On it the worker
 discards its own uncommitted edits in its own linked worktree, and then reports. It runs
 `git -C <its-worktree> reset --hard` and then `git -C <its-worktree> clean -fd`. Only the seat that
 made the edits can tell they are throwaway. Its commits stay for the branch check below, and it discards
@@ -438,9 +440,12 @@ exact clone directory is deleted per `repo-worktree` "Listing and Cleanup". A pu
 remote delete then runs as above, and the release is recorded as above. Anything else leaves the clone
 exactly as it stands and stops the group for the maintainer per "Raising a Blocked Question",
 naming the clone's path. The discard grant above does not reach a clone, since it names the
-worker's own linked worktree. Where no registered worktree and no recorded path names a group's
-checkout, the worker made none, since it records the path before cloning. The orchestrator then
-records the release, and the issue returns to the next round's ranking.
+worker's own linked worktree. A recorded path naming no directory counts as no
+checkout, and the path file is deleted once its clone is disposed of. Where no registered worktree
+and no recorded path names a group's checkout, the worker made none, since it records the path
+before cloning. Where the group's branch then exists neither locally nor on the remote, the
+orchestrator records the release. The issue then returns to the next round's ranking. Where it
+exists, the group is stopped for the maintainer.
 
 ### Choosing the Worker's Model Tier
 

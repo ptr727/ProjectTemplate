@@ -45,8 +45,8 @@ scope-widened commit, a rewritten shared history, a destructive reset).
   work or stranding it in an unrelated commit. An unexpected change in the tree is also the
   signal to re-check isolation per the `repo-worktree` skill. That is because an unexpected change may mean another task is live in this checkout.
 - **A direct push to `develop` on an operational-model repository names its issues.** Its commit
-  message carries a `Closes on promotion: #N` line for each issue it fixes. The promotion closes
-  nothing for a push without one, per `branching-and-release-model` "Operational repositories (the
+  message carries one `Closes on promotion:` line listing each issue it fixes. The promotion
+  body names no issue for a push without one, per `branching-and-release-model` "Operational repositories (the
   complete delta)".
 
 ## Signing, verified not configured

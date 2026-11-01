@@ -93,9 +93,10 @@ The registry `workflowModel` field is `release` (the default) or `operational`. 
 repos track a live service's running state rather than shipping versioned units of delivery.
 They hold live-service config such as Home Assistant, ESPHome, Vantage, and home automation. Commits go
 directly to `develop`, and CI runs on the push as advisory feedback only. A direct push names
-each issue it fixes in a `Closes on promotion: #N` line in its commit message. The promotion pull
-request carrying that push closes the issues the line names, and it closes nothing for a push
-without one. A PR still exists for a
+the issues it fixes in one `Closes on promotion:` line in its commit message, such as
+`Closes on promotion: #N, #M`. The promotion pull request carrying that push takes a closing
+keyword in its body for each issue the line names. Its body names no issue for a push without
+one. A PR still exists for a
 change worth reviewing, and the `main` promotion gate is unchanged. Release happens only by manual
 dispatch.
 
