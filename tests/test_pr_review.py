@@ -4993,6 +4993,15 @@ class TestCli(GqlCase):
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
         self.assertNotIn("REVIEW_EXCLUDED_FILES_ONLY", self.out.getvalue())
 
+    def test_a_round_on_the_head_before_an_excluded_files_refusal_still_covers_it(self) -> None:
+        live = payload([{k: v for k, v in review().items() if k != "body"}])
+        rounds = [review(rid="PRR_a"), review(body=EXCLUDED_REFUSED, at=LATE, rid="PRR_b")]
+        self.answer(self.into(live), self.into(payload(rounds)))
+        self.wire_history([hist_review(7, EXCLUDED_REFUSED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertNotIn("AWAITING_LOCAL_PASS", self.out.getvalue())
+
     def test_an_excluded_files_refusal_with_no_local_cover_names_its_own_remedy(self) -> None:
         live = payload([{k: v for k, v in review().items() if k != "body"}])
         full = payload([review(body=EXCLUDED_REFUSED)])
