@@ -443,10 +443,10 @@ maintainer.
 The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
 live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
-only copy of the branch. A clone removed with its branch, as an abandoned group's is, instead needs
+only copy of the branch. A clone removed with its branch and no merged pull request instead needs
 `git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
-`git -C <clone> fetch origin develop`. A pushed branch then takes the abandoned-group remote checks,
-delete, and confirmation above first. Where the checks hold, the orchestrator then deletes the
+`git -C <clone> fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
+remote checks, delete, and confirmation above first. Where the checks hold, the orchestrator then deletes the
 clone's exact directory, per `repo-worktree` "Listing and Cleanup", and removes its recorded name
 from the claim comments. A clone removed with its branch has its release recorded once the
 directory is gone. Where any check fails, the clone is left exactly as it stands and the group is stopped for the maintainer per "Raising a Blocked Question". The one
@@ -533,8 +533,8 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether it
-  holds commits the remote lacks, and that pushing them is the maintainer's. That is
+  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether the
+  remote lacks any of its branch, and that pushing the branch is the maintainer's. That is
   because what becomes of it is part of what is being asked, rather than something to settle while
   waiting.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
@@ -543,7 +543,7 @@ rather than a decision.
   clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
   one branch. It is retired per "Cleanup Is the Orchestrator's", once the maintainer has pushed
-  what the remote lacked. Only then dispatch. This is the
+  its branch. Only then dispatch. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
