@@ -1904,6 +1904,9 @@ class TestCommentWrapRule(BaitCase):
             ("app.ts", "// eslint-disable-next-line no-console\n"),
             ("app.ts", "// prettier-ignore\n"),
             ("settings.jsonc", "// cSpell:ignore exampleword\n"),
+            ("Parse.cs", "// lang=json\n"),
+            ("Parse.cs", "// language=regex\n"),
+            ("Parse.cs", "// lang = json\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))

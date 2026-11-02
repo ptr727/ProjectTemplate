@@ -110,7 +110,7 @@
     ],
     "tool_directives": [
       "syntax=", "escape=", "check=", "fmt:\\s*(?:on|off|skip)\\b", "pragma:", "nosec\\b", "checkov:", "hadolint\\b", "renovate:",
-      "yaml-language-server:", "-\\*-\\s*coding[:=]", "pyright:", "isort:", "codespell:", "doctest:"
+      "yaml-language-server:", "-\\*-\\s*coding[:=]", "pyright:", "isort:", "codespell:", "doctest:", "lang(?:uage)?\\s*="
     ]
   },
   "not_prose": [
