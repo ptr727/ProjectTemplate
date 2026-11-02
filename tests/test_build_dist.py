@@ -1022,6 +1022,94 @@ class IncludeCase(TreeCase):
         self.assertEqual(after, [], "importing skills_install pulled in a Markdown reader")
 
 
+class DescriptionCase(TreeCase):
+    """The description-length gate, measured on the parsed frontmatter string."""
+
+    def frontmatter(self, description: str, width: int = 80) -> str:
+        """A SKILL.md whose description is a folded block scalar, wrapped the way the authored tree wraps one."""
+        words, lines, line = description.split(" "), [], ""
+        for word in words:
+            if line and len(line) + 1 + len(word) > width:
+                lines.append(line)
+                line = word
+            else:
+                line = f"{line} {word}" if line else word
+        lines.append(line)
+        folded = "".join(f"  {chunk}\n" for chunk in lines)
+        return f"---\nname: foo\ndescription: >-\n{folded}---\n\n# Foo\n"
+
+    def sized(self, length: int) -> str:
+        text = ("word " * length)[:length]
+        return text[:-1] + "x" if text.endswith(" ") else text
+
+    def test_a_description_at_the_limit_regenerates_and_one_past_it_is_refused(self) -> None:
+        limit = build_dist.DESCRIPTION_LIMIT
+        self.make_skill("foo", self.frontmatter(self.sized(limit)))
+        self.assertEqual(len(build_dist.skill_description("foo")), limit)
+        build_dist.regenerate()
+        self.make_skill("foo", self.frontmatter(self.sized(limit + 1)))
+        with self.assertRaisesRegex(ValueError, rf"foo \({limit + 1}\)"):
+            build_dist.regenerate()
+
+    def test_the_limit_is_measured_on_the_parsed_string_not_the_raw_lines(self) -> None:
+        """The folded scalar's indentation and breaks push the raw lines past the limit while the string a loader keeps sits at it."""
+        limit = build_dist.DESCRIPTION_LIMIT
+        text = self.frontmatter(self.sized(limit))
+        raw = text.split("description: >-\n", 1)[1].split("---", 1)[0]
+        self.assertGreater(len(raw), limit)
+        self.make_skill("foo", text)
+        build_dist.check_descriptions(["foo"])
+
+    def test_check_reports_an_over_limit_description_as_2_and_regenerate_writes_nothing(
+        self,
+    ) -> None:
+        self.make_skill("foo", self.frontmatter(self.sized(build_dist.DESCRIPTION_LIMIT + 1)))
+        argv = sys.argv
+        try:
+            sys.argv = ["build_dist.py", "--check"]
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(build_dist.main(), 2)
+            self.assertIn("Agent Skills limit", err.getvalue())
+            sys.argv = ["build_dist.py"]
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(build_dist.main(), 1)
+        finally:
+            sys.argv = argv
+        self.assertFalse(self.dist_plugin.exists())
+        self.assertFalse(self.github_skills.exists())
+
+    def test_a_skill_with_no_frontmatter_or_no_description_is_not_measured(self) -> None:
+        self.make_skill("bare", "# Bare\n")
+        self.make_skill("named", "---\nname: named\n---\n\n# Named\n")
+        self.assertIsNone(build_dist.skill_description("bare"))
+        self.assertIsNone(build_dist.skill_description("named"))
+        build_dist.check_descriptions(["bare", "named"])
+
+    def test_a_description_that_cannot_be_measured_is_refused(self) -> None:
+        cases = {
+            "not a string": "---\nname: foo\ndescription: 12\n---\n",
+            "never closes": "---\nname: foo\ndescription: x\n",
+            "not valid YAML": "---\nname: foo\ndescription: [x\n---\n",
+        }
+        for message, body in cases.items():
+            with self.subTest(message):
+                self.make_skill("foo", body)
+                with self.assertRaisesRegex(ValueError, message):
+                    build_dist.check_descriptions(["foo"])
+
+    def test_importing_skills_install_imports_no_yaml_reader(self) -> None:
+        """skills_install.py imports build_dist under a plain python3, where PyYAML may be absent."""
+        before, after = import_delta(Path(build_dist.__file__).parent, "skills_install", ("yaml",))
+        if before:
+            self.skipTest(
+                "this interpreter imports yaml at startup, so the import delta cannot be read here"
+            )
+        self.assertEqual(after, [], "importing skills_install pulled in PyYAML")
+
+
 class DeclaredDestinationCase(TreeCase):
     """The manifest rule on a destination, exercised on tuples this case declares.
 

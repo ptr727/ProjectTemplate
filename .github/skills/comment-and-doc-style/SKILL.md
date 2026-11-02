@@ -3,19 +3,14 @@ name: comment-and-doc-style
 description: >-
   Governs prose, comment, Markdown, character-set, line-ending, and PR-title/commit-message
   conventions for every ptr727/ProjectTemplate fleet repo. Use this whenever writing or editing a
-  code comment, workflow comment, Markdown doc, commit message, or PR title, whenever choosing
-  which characters to type in agent-authored text, whenever the file being edited is CRLF, and
-  whenever naming a tool in prose or docs. Triggers even when the task looks purely mechanical,
-  such as "just fix a typo" or "add a one-line comment", because the fleet's ASCII character-set
-  tiers, no-semicolon rule, comment-growth discipline, and CRLF-preservation rule are each easy to
-  violate without noticing: an em dash slipped into a sentence, a comment that grew by one more
-  clause, or a text-mode edit that silently flattens a CRLF file to LF. Also triggers when
-  authoring a new Markdown file (reference-style links, Table of Contents, present tense), when a
-  carried instruction file (AGENTS.md, GOVERNANCE.md, CODESTYLE.md, WORKFLOW.md,
-  .github/copilot-instructions.md) is being edited (no coordination references to the template or
-  a sibling repo), and when writing a PR title or commit message (imperative subject, no vague
-  titles, no unsolicited Co-Authored-By, no release-bump magnitude). Also triggers when text
-  states how many items a list or a table holds, since that count goes stale.
+  code comment, workflow comment, Markdown doc, commit message, or PR title, whenever choosing which
+  characters to type in agent-authored text, whenever the file being edited is CRLF, whenever naming
+  a tool in prose or docs, whenever authoring a new Markdown file, whenever editing a carried
+  instruction file (AGENTS.md, GOVERNANCE.md, CODESTYLE.md, WORKFLOW.md,
+  .github/copilot-instructions.md), and whenever text states how many items a list or a table holds.
+  Triggers even when the task looks purely mechanical, such as "just fix a typo" or "add a one-line
+  comment", because an em dash slipped into a sentence, a comment that grew by one more clause, or a
+  text-mode edit that silently flattens a CRLF file to LF are each easy to miss.
 ---
 
 # Comment and Doc Style

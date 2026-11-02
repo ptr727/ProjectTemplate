@@ -2,18 +2,16 @@
 name: python-codestyle
 description: >-
   Governs Python code style for ptr727/ProjectTemplate fleet repos: the build-versus-lint-only
-  profile split, the uv/ruff/pyright/mypy/pytest toolchain, src layout, formatting and linting,
-  comment and docstring conventions, type hints, naming, imports, patterns to avoid, test
-  conventions, versioning, and the --help and unknown-argument rule for a script. Use this
-  whenever writing, reviewing, or editing a .py file, a pyproject.toml, or a uv.lock, whenever
-  running or choosing a Python formatting, lint, type-check, or test command, whenever deciding
-  whether a Python subtree is a shippable project or a lint-only scripts tree, whenever choosing
-  pyright versus mypy for a repo's CI gate, or whenever writing or reviewing a Python test.
-  Triggers even when the task looks like a small local fix ("just add a helper function", "silence
-  this lint warning", "add a dependency") or verification step ("run the tests"), because choosing
-  pytest before reading the profile turns an intentional unittest suite into a false
-  missing-dependency diagnosis. Applies only to a repo's Python side, a repo with no Python has no
-  use for this Skill.
+  profile split, the uv/ruff/pyright/mypy/pytest toolchain, src layout, comment and docstring
+  conventions, type hints, naming, imports, patterns to avoid, test conventions, versioning, and the
+  --help and unknown-argument rule for a script. Use this whenever writing, reviewing, or editing a
+  .py file, a pyproject.toml, or a uv.lock, whenever running or choosing a Python formatting, lint,
+  type-check, or test command, pyright versus mypy included, whenever deciding whether a Python
+  subtree is a shippable project or a lint-only scripts tree, or whenever writing or reviewing a
+  Python test. Triggers even when the task looks like a small local fix ("just add a helper
+  function", "add a dependency") or a verification step ("run the tests"), because choosing pytest
+  before reading the profile turns an intentional unittest suite into a false missing-dependency
+  diagnosis. Applies only to a repo's Python side.
 ---
 
 # Python Codestyle
