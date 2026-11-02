@@ -3800,7 +3800,6 @@ class SecretStemCase(unittest.TestCase):
                     ),
                     ".gitignore": "legacy/secrets/\nlegacy/*/secrets/\n/tools/secrets\n",
                     "tools/secrets": "",
-                    ".secrets/app.env.example": "",
                 },
                 [],
                 [],
