@@ -284,7 +284,10 @@ for, and it binds harder than any throughput target.
   needs the edit. Without one, the group stops for it per "Raising a Blocked Question", and the
   worker does not edit there. With one, in an attended run, the orchestrator's answer carries the
   no-merge line "What Invoking This Skill Authorizes" requires of such a brief. An away-mode run
-  parks the group either way, since it holds every such edit, approved or not.
+  stops the group either way rather than parking it, since it holds every such edit, approved or
+  not. It files no `decision` issue. It records the stop in the group's claim comment, keeping its
+  opening. Its report names the group as held for the agent-safety tree, needing the maintainer
+  present.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -588,17 +591,20 @@ gate, stated plainly rather than left for a stalled round to reveal.
 
 ### Assembling the Promotion Body
 
-The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. A squash
-merge in `origin/main..origin/develop` takes two hops, because its subject carries the **pull
-request** number and not the issue number. And this skill deliberately keeps the closing keyword
-off the feature pull request. Read the pull request numbers out of that range, freshly fetched.
-Then read each of those pull requests for its `Closes on promotion:` line. That is the line
+The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. A merged
+pull request's commit carries no issue number, since this skill keeps the closing keyword off the
+feature pull request. So its issues take two hops. First, for each commit in
+`origin/main..origin/develop`, freshly fetched, read the pull request that merged it into develop:
+
+```sh
+gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at != null and .base.ref == "develop") | .number'
+```
+
+Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
-ask for. On an operational-model repository, a commit in the range that no pull request merged
-into develop is a direct push. Read its message for its own line. A commit's merged pull requests
-are read with
-`gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '[.[] | select(.merged_at != null and .base.ref == "develop")] | length'`,
-which prints `0` for a direct push. Reading either kind alone returns a partial set.
+ask for. A commit it prints nothing for is a direct push, which only an operational-model
+repository has. Read that commit's own message for its line instead. Reading either kind alone
+returns a partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
