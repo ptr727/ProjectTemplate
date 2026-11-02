@@ -4861,9 +4861,19 @@ class RegistryCase(unittest.TestCase):
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "files.intent"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
 
-    def test_files_intent_runs_after_the_baseline_read(self) -> None:
-        order = [c["id"] for c in audit.registered_checks()]
-        self.assertGreater(order.index("files.intent"), order.index("files.presence"))
+    def test_a_repo_check_reading_the_baseline_runs_after_it(self) -> None:
+        checks = list(audit.registered_checks())
+        first_read = next(i for i, c in enumerate(checks) if c["scope"] == "baseline")
+        reads = re.compile(r"run\.(content|found|docs)\b|_readme\(run\)")
+        readers = []
+        for i, check in enumerate(checks):
+            if check["scope"] != "repo":
+                continue
+            if reads.search(inspect.getsource(audit.check_function(check))):
+                readers.append(check["id"])
+                with self.subTest(check["id"]):
+                    self.assertGreater(i, first_read)
+        self.assertIn("files.intent", readers)
 
     def test_only_these_checks_skip_the_hub(self) -> None:
         skipped = {c["id"] for c in audit.registered_checks() if not c["hub"]}
