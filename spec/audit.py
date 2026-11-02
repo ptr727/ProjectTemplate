@@ -974,11 +974,10 @@ def check_interface(path, contract, text):
     name = contract.get("requiredCheckName")
     nodes = (_mapping(job).get("name") for job in jobs.values())
     values = [n.value for n in nodes if isinstance(n, yaml.ScalarNode)]
-    gated = {
-        m[1]
-        for v in values
-        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v))) and m[1] != m[2]
-    }
+    matches = [m for v in values if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))]
+    gated = {m[1] for m in matches if m[1] != m[2]}
+    # Each job is read on its own, so one gated job never excuses another posting the name off a pull request run.
+    ungated = set(values) | {m[2] for m in matches}
     if name and name not in gated and name not in values:
         findings.append(
             (
@@ -988,7 +987,7 @@ def check_interface(path, contract, text):
         )
     elif (
         name
-        and name not in gated
+        and name in ungated
         and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}
     ):
         findings.append(

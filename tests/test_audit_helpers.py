@@ -184,6 +184,25 @@ INTERFACE_CASES = [
         1,
     ),
     (
+        "a literal check name beside a gated one, on a workflow a dispatch also triggers",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
+        + PR_CHECK.replace("check-workflow-status:", "extra:"),
+        PR_CONTRACT,
+        1,
+    ),
+    (
+        "an expression falling back to the check name beside a gated one",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
+        + PR_CHECK.replace("check-workflow-status:", "extra:").replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || '" + PR_CHECK_NAME + "' }}",
+        ),
+        PR_CONTRACT,
+        1,
+    ),
+    (
         "an expression yielding the check name on every event",
         PR_HEAD
         + PR_CHECK.replace(
