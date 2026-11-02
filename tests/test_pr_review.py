@@ -1922,13 +1922,21 @@ class TestCheckShapes(unittest.TestCase):
         """CodeRabbit posts no review once it is rate limited, so its pending status is not one.
 
         A limit posted before the check began is one CodeRabbit has moved past, so it still holds.
+        One edited into its summary comment since the check began clears it like a new one.
         """
         now = datetime.now(UTC)
-        for limit_at, check_at, want in ((LATE, EARLY, []), (EARLY, LATE, ["CodeRabbit"])):
-            with self.subTest(limit_at=limit_at):
+        cases: tuple[tuple[str, str | None, str, list[str]], ...] = (
+            (LATE, None, EARLY, []),
+            (EARLY, None, LATE, ["CodeRabbit"]),
+            (EARLY, LATE, LATE, []),
+        )
+        for limit_at, edited_at, check_at, want in cases:
+            with self.subTest(limit_at=limit_at, edited_at=edited_at):
                 limited = comment(
                     login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT, at=limit_at
                 )
+                if edited_at:
+                    limited["updatedAt"] = edited_at
                 running = status_context("CodeRabbit", "PENDING", created=check_at)
                 pr = payload([review()], comments=[limited], checks=[running])
                 nodes = pr_review_checks.check_nodes(pr)
@@ -7158,6 +7166,7 @@ class TestContract(unittest.TestCase):
         self.assertIn("headRefOid baseRefName state mergeable mergeStateStatus", poll)
         self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", poll)
         self.assertIn("authorAssociation createdAt body", poll)
+        self.assertIn("body isMinimized updatedAt }", poll)
 
 
 class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):

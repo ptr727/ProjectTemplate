@@ -252,12 +252,14 @@ def checks_settling(
 
 
 def limited_since(pr: dict, login: str, since: str) -> bool:
-    """True where `login`'s newest output is its rate limit and posted no earlier than `since`.
+    """True where `login`'s newest output is its rate limit and posted or edited since `since`.
 
     A limit older than the check is one the reviewer has since moved past, so it clears nothing.
+    An edit counts, since CodeRabbit rewrites its one summary comment in place.
     """
     nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
-    newest = max((n.get("createdAt") or n.get("submittedAt") or "" for n in nodes), default="")
+    stamps = (n.get("updatedAt") or n.get("createdAt") or n.get("submittedAt") for n in nodes)
+    newest = max((s or "" for s in stamps), default="")
     return rate_limited_by(pr, login) is not None and newest >= since
 
 
