@@ -3829,7 +3829,10 @@ class SecretStemCase(unittest.TestCase):
                     ),
                     "src/secrets/manager.py": "",
                     "src/secrets/__init__.py": "",
-                    ".vscode/tasks.json": '{"command": "docker run -v ${workspaceFolder}/.secrets/Prod_Certs:/certs app"}\n',
+                    ".vscode/tasks.json": (
+                        '{"command": "docker run -v ${workspaceFolder}/.secrets/Prod_Certs:/certs app",'
+                        ' "detail": "Mounts the certs in ${workspaceFolder}/.secrets/Tls_Certs."}\n'
+                    ),
                     ".secrets/README.md": "",
                 },
                 [],

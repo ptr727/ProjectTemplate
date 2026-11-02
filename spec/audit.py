@@ -726,7 +726,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                 written, folder, rest = match.group(1, 2, 3)
                 if compose and file and rest is None:
                     continue
-                file = file and (compose or "." in (rest or ""))
+                file = file and (compose or "." in (rest or "").rstrip("."))
                 target = secret_path_target(tree, directories, holding, root, written, rest)
                 if not target:
                     continue
