@@ -446,12 +446,12 @@ live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remo
 only copy of the branch. A clone removed with its branch and no merged pull request instead needs
 `git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
 `git -C <clone> fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
-remote checks, delete, and confirmation above first. Where the checks hold, the orchestrator then deletes the
-clone's exact directory, per `repo-worktree` "Listing and Cleanup", and removes its recorded name
-from the claim comments. A clone removed with its branch has its release recorded once the
-directory is gone. Where any check fails, the clone is left exactly as it stands and the group is stopped for the maintainer per "Raising a Blocked Question". The one
-exception is a dead worker's clone failing only the is-ancestor check, which takes the retire-alone
-checks instead.
+remote checks, delete, and confirmation above first. Where the checks hold, the orchestrator then
+deletes the clone's exact directory, per `repo-worktree` "Listing and Cleanup". It also removes the
+recorded name from the claim comments. Such a clone's release is recorded once the directory is
+gone. Where any check fails, the clone is left exactly as it stands and the group is stopped for
+the maintainer per "Raising a Blocked Question". The one exception is a dead worker's clone failing
+only the is-ancestor check, which takes the retire-alone checks instead.
 
 ### Choosing the Worker's Model Tier
 
@@ -542,8 +542,8 @@ rather than a decision.
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
   clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
-  one branch. It is retired per "Cleanup Is the Orchestrator's", once the maintainer has pushed
-  its branch. Only then dispatch. This is the
+  one branch. It is retired per "Cleanup Is the Orchestrator's", once the remote holds its
+  branch. Only then dispatch. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
@@ -769,8 +769,9 @@ subagents and holds only what they return.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a clean tree with
    `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
-   standalone clone, which is retired per "Cleanup Is the Orchestrator's" instead. Leave a dirty
-   one exactly as it stands, keep its group parked, and name it in the report. Only the
+   standalone clone, which takes the retire-alone checks of "Cleanup Is the Orchestrator's"
+   instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
+   group parked, and name it in the report. Only the
    maintainer disposes of another task's uncommitted work.
 3. **Dispatch the group workers** per "Dispatching a Worker", each brief built from the group's
    line. Each brief also states the park duty below and the comment rule above. A group worker
@@ -824,8 +825,9 @@ leaves the work findable.
 3. **Comment the decision issue on each pull request it blocks.** The comment on the promotion is
    what the promotion worker reads, per "Promoting".
 4. **Comment the state on the group's issue.** It says what is done and names the branch and pull
-   request. It says whether the worktree was left standing, what remains, and the `decision` issue
-   it waits on. The comment is complete enough for a worker with no other context to resume from.
+   request. It says whether the worktree was left standing, and for a standalone clone whether the
+   remote lacks any of its branch. It says what remains, and the `decision` issue it waits on. The
+   comment is complete enough for a worker with no other context to resume from.
 5. **Record the park in the group's claim comment**, naming the `decision` issue and keeping the
    comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
