@@ -3806,6 +3806,18 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
+                "a workspace file is read, and a bind or mount source names no file",
+                {
+                    "App.code-workspace": '{"settings": {"python.envFile": "${workspaceFolder}/secrets/App"}}\n',
+                    "deploy/compose.yml": "services:\n  a:\n    volumes:\n      - ./.secrets/Prod_Certs:/certs:ro\n",
+                    ".devcontainer/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Api_Certs,target=/c,type=bind"]}\n'
+                    ),
+                },
+                ["secrets/App (named in App.code-workspace)"],
+                ["App.code-workspace"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (
@@ -4008,11 +4020,11 @@ class SecretStemCase(unittest.TestCase):
                 [".vscode/launch.json", "compose.yml"],
             ),
             (
-                "a short-syntax mount stops at its colon, and a comment, interpolation, and a glob are no name",
+                "a secret file is judged, and a comment, interpolation, and a glob are no name",
                 {
                     "compose.yml": (
-                        "services:\n  app:\n    volumes:\n      - ./.secrets/App_Token.txt:/run/secrets/app_token:ro\n"
-                        "      # put the token in .secrets/web_token.\n      - ./.secrets/${ENV}_db_password\n"
+                        "secrets:\n  t:\n    file: ./.secrets/App_Token.txt\nservices:\n  app:\n    volumes:\n"
+                        "      # put the token in .secrets/web_token.\n      - ./.secrets/${ENV}_db_password:/p\n"
                     ),
                     ".vscode/settings.json": '{"files.exclude": {".secrets/*": true}}\n',
                 },

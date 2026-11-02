@@ -396,7 +396,8 @@ ENV_SECRET_TEMPLATE = ".example"
 SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
 COMPOSE_FILE = re.compile(r"(?:docker-)?compose(?:[.-][\w-]+)*\.ya?ml")
 EDITOR_CONFIG = re.compile(
-    r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json)"
+    r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json"
+    r"|[^/]+\.code-workspace)"
 )
 SECRET_REFERENCE = re.compile(
     r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
@@ -591,33 +592,35 @@ ComposeLoader.add_constructor("!override", _compose_tag)
 
 
 def compose_host_paths(document):
-    """The paths a compose document resolves on the host: secret and config files, env files, binds, builds.
+    """Each path a compose document resolves on the host, and whether it is always a file.
 
+    Secret, config, and env files are files. A bind source or a build context may be a directory.
     A short-syntax volume source is a path only where it opens on . or /, since any other is a volume name.
     """
     if not isinstance(document, dict):
         return []
-    paths = []
+    files, others = [], []
     for section in ("secrets", "configs"):
         entries = document.get(section)
         for entry in entries.values() if isinstance(entries, dict) else []:
-            paths.append(entry.get("file") if isinstance(entry, dict) else None)
+            files.append(entry.get("file") if isinstance(entry, dict) else None)
     services = document.get("services")
     for service in services.values() if isinstance(services, dict) else []:
         if not isinstance(service, dict):
             continue
         env = service.get("env_file")
         for item in env if isinstance(env, list) else [env]:
-            paths.append(item.get("path") if isinstance(item, dict) else item)
+            files.append(item.get("path") if isinstance(item, dict) else item)
         volumes = service.get("volumes")
         for volume in volumes if isinstance(volumes, list) else []:
             if isinstance(volume, str) and volume.startswith((".", "/")):
-                paths.append(volume.split(":", 1)[0])
+                others.append(volume.split(":", 1)[0])
             elif isinstance(volume, dict) and volume.get("type") == "bind":
-                paths.append(volume.get("source"))
+                others.append(volume.get("source"))
         build = service.get("build")
-        paths.append(build.get("context") if isinstance(build, dict) else build)
-    return [path for path in paths if isinstance(path, str)]
+        others.append(build.get("context") if isinstance(build, dict) else build)
+    paired = [(path, True) for path in files] + [(path, False) for path in others]
+    return [(path, file) for path, file in paired if isinstance(path, str)]
 
 
 def secret_path_target(tree, directories, holding, root, written, rest):
@@ -655,7 +658,8 @@ def named_secret_signals(tree, read_text, directories, holding):
     launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
     point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
     no signal once the tree or that file names a .secrets directory. Such a line is left behind
-    after the move, to guard old checkouts.
+    after the move, to guard old checkouts. A bind or mount source may be a directory, so it reports
+    the folder but judges no file name.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text. A compose file that does not parse, such as a template,
@@ -694,19 +698,27 @@ def named_secret_signals(tree, read_text, directories, holding):
             if compose:
                 root = directory
                 document = _yaml(text, loader=ComposeLoader)[0]
-                found = [SECRET_PATH.fullmatch(p.strip()) for p in compose_host_paths(document)]
+                found = [
+                    (SECRET_PATH.fullmatch(value.strip()), file)
+                    for value, file in compose_host_paths(document)
+                ]
             else:
                 root = editor.group(1).rstrip("/")
-                live = EDITOR_COMMENT.sub("", text)
-                found = list(SECRET_REFERENCE.finditer(live.replace("\\\\", "/")))
-            for match in filter(None, found):
+                live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
+                found = [
+                    (match, not live[: match.start()].endswith("source="))
+                    for match in SECRET_REFERENCE.finditer(live)
+                ]
+            for match, file in found:
+                if not match:
+                    continue
                 written, folder, rest = match.group(1, 2, 3)
                 target = secret_path_target(tree, directories, holding, root, written, rest)
                 if not target:
                     continue
                 if folder == "secrets":
                     bare.add(path)
-                if target[1] and secret_name_breaks(posixpath.basename(target[1]), True):
+                if file and target[1] and secret_name_breaks(posixpath.basename(target[1]), True):
                     named.setdefault(target[1], set()).add(path)
     listed = [f"{p} (named in {', '.join(sorted(f))})" for p, f in sorted(named.items())]
     return sorted(bare), listed, unread
