@@ -47,7 +47,7 @@ Agent-authored text illustrates with data the agent constructed, never with data
 
 ## Git and Commit Rules
 
-The fleet's mechanical git rules follow. Default to staging rather than committing, and stage by explicit path only, never with a blanket add. Commit means commit and push. Every commit is signed and carries the committer's own verified GitHub `noreply` identity. Never force push. A history rewrite re-identifies only the commits it touches that aren't yours. And destructive git commands run only on explicit instruction.
+The fleet's mechanical git rules follow. Default to staging rather than committing, and stage by explicit path only, never with a blanket add. Commit means commit and push. Every commit is signed and carries the committer's own verified GitHub `noreply` identity. Never force push. A history rewrite re-identifies only the commits it touches that aren't yours. And destructive git commands run only on explicit instruction. The `git-commit-conventions` Skill names the narrow cases. One is `git branch -D` on a squash-merged task branch. Another is a `backlog-burndown` worker whose abandon message states the grant, discarding the uncommitted edits in its own linked worktree.
 
 This is packaged as the `git-commit-conventions` Skill at
 `.agents/skills/git-commit-conventions/SKILL.md` in the hub. That path is not a repo-relative link,
@@ -92,7 +92,11 @@ already cut, and wrapper-repo upstream-version tracking.
 The registry `workflowModel` field is `release` (the default) or `operational`. **Operational**
 repos track a live service's running state rather than shipping versioned units of delivery.
 They hold live-service config such as Home Assistant, ESPHome, Vantage, and home automation. Commits go
-directly to `develop`, and CI runs on the push as advisory feedback only. A PR still exists for a
+directly to `develop`, and CI runs on the push as advisory feedback only. A direct push names
+the issues it fixes in one `Closes on promotion:` line in its commit message, such as
+`Closes on promotion: #N, #M`. The promotion pull request carrying that push takes a closing
+keyword in its body for each issue the line names. Its body takes no closing keyword for a push
+without that line. A PR still exists for a
 change worth reviewing, and the `main` promotion gate is unchanged. Release happens only by manual
 dispatch.
 
