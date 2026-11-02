@@ -3778,6 +3778,16 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
+                "the deprecated and file workspace variables root a path, and a composer.yml is no compose file",
+                {
+                    ".vscode/launch.json": '{"envFile": "${workspaceRoot}/secrets/app.env"}\n',
+                    ".vscode/tasks.json": '{"command": "cat ${fileWorkspaceFolder}/.secrets/Api_Token"}\n',
+                    "composer.yml": "secrets:\n  s:\n    file: ./secrets/Db_Password\n",
+                },
+                [".secrets/Api_Token (named in .vscode/tasks.json)"],
+                [".vscode/launch.json"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (
@@ -4053,7 +4063,7 @@ class SecretStemCase(unittest.TestCase):
                 (
                     "DRIFT",
                     (
-                        "runtime-secrets: could not read or parse 1 file(s) to look for a bare "
+                        "runtime-secrets: could not read 1 file(s) to look for a bare "
                         "secrets/ directory or a named secret file, verify by hand: .gitignore"
                     ),
                 )
@@ -4071,11 +4081,14 @@ class SecretStemCase(unittest.TestCase):
 
         self.assertEqual((got, read), ([], []))
 
-    def test_a_compose_file_that_does_not_parse_is_undecided(self) -> None:
-        got = audit.secret_stem_findings({"compose.yml"}, {"compose.yml": "services: [\n"}.get)
+    def test_a_compose_file_that_does_not_parse_is_no_signal(self) -> None:
+        """A template such as a Jinja compose file never parses, so reporting it would never clear."""
+        texts = {
+            "compose.yml": "services: [\n",
+            "deploy/docker-compose.yml": "image: {{ image }}\n",
+        }
 
-        self.assertEqual(len(got), 1, got)
-        self.assertTrue(got[0][1].endswith("verify by hand: compose.yml"), got)
+        self.assertEqual(audit.secret_stem_findings(set(texts), texts.get), [])
 
 
 class DeclaredTypesCase(unittest.TestCase):

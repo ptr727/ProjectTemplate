@@ -394,12 +394,12 @@ ENV_SECRET_FIELD = r"[a-z0-9]+(?:-+[a-z0-9]+)*"
 ENV_SECRET_NAME = re.compile(rf"{ENV_SECRET_FIELD}(?:_{ENV_SECRET_FIELD})*(?:\.[a-z0-9]+)?")
 ENV_SECRET_TEMPLATE = ".example"
 SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
-COMPOSE_FILE = re.compile(r"(?:docker-)?compose[^/]*\.ya?ml")
+COMPOSE_FILE = re.compile(r"(?:docker-)?compose(?:[.-][\w-]+)*\.ya?ml")
 EDITOR_CONFIG = re.compile(
     r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json)"
 )
 SECRET_REFERENCE = re.compile(
-    r"(?<![^\s\"'=:,\[(])\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder)\}/"
+    r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
     r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
 SECRET_PATH = re.compile(r"(?:\./)?((?:[\w.-]+/)*(\.?secrets))(?:/(.*))?")
@@ -589,14 +589,6 @@ ComposeLoader.add_constructor("!reset", _compose_tag)
 ComposeLoader.add_constructor("!override", _compose_tag)
 
 
-def compose_document(text):
-    """`(document, True)` for a compose file's text, or `(None, False)` where it does not parse."""
-    try:
-        return yaml.load(text, Loader=ComposeLoader), True
-    except yaml.YAMLError:
-        return None, False
-
-
 def compose_host_paths(document):
     """The paths a compose document resolves on the host: secret and config files, env files, binds, builds.
 
@@ -665,7 +657,8 @@ def named_secret_signals(tree, read_text, directories, holding):
     after the move, to guard old checkouts.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
-    is each file read that returned no text or did not parse.
+    is each file read that returned no text. A compose file that does not parse, such as a template,
+    is no signal.
     """
     bare, named, unread = set(), {}, []
     moved = any(".secrets" in path.split("/")[:-1] for path in tree)
@@ -677,8 +670,7 @@ def named_secret_signals(tree, read_text, directories, holding):
         if not (gitignore or compose or editor) or (gitignore and moved):
             continue
         text = read_text(path)
-        document, parsed = compose_document(text) if compose and text is not None else (None, True)
-        if text is None or not parsed:
+        if text is None:
             unread.append(path)
         elif gitignore:
             lines = text.splitlines()
@@ -698,6 +690,7 @@ def named_secret_signals(tree, read_text, directories, holding):
         else:
             if compose:
                 root = directory
+                document = _yaml(text, loader=ComposeLoader)[0]
                 found = [SECRET_PATH.fullmatch(p.strip()) for p in compose_host_paths(document)]
             else:
                 root = editor.group(1).rstrip("/")
@@ -779,7 +772,7 @@ def secret_stem_findings(tree, read_text=None):
             (
                 "DRIFT",
                 (
-                    f"runtime-secrets: could not read or parse {len(unread)} file(s) to look for a bare "
+                    f"runtime-secrets: could not read {len(unread)} file(s) to look for a bare "
                     f"secrets/ directory or a named secret file, verify by hand: {capped_paths(unread)}"
                 ),
             )
@@ -1128,11 +1121,13 @@ def workspace_cspell_words(text):
     )
 
 
-def _yaml(text, compose=False):
+def _yaml(text, compose=False, loader=yaml.SafeLoader):
     """`(document, True)`, the node tree with `compose`, or `(None, False)` where `text` does not parse."""
     try:
         return (
-            yaml.compose(text, Loader=yaml.SafeLoader) if compose else yaml.safe_load(text)
+            yaml.compose(text, Loader=yaml.SafeLoader)
+            if compose
+            else yaml.load(text, Loader=loader)
         ), True
     except yaml.YAMLError:
         return None, False
