@@ -535,8 +535,8 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether the
-  remote lacks any of its branch, and that pushing the branch is the maintainer's. That is
+  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether its
+  tip equals the remote tip, and that pushing the branch is the maintainer's. That is
   because what becomes of it is part of what is being asked, rather than something to settle while
   waiting.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
@@ -544,8 +544,8 @@ rather than a decision.
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
   clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
-  one branch. It is retired per "Cleanup Is the Orchestrator's", once the remote holds its
-  branch. Only then dispatch. This is the
+  one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
+  tip. Only then dispatch. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
@@ -827,8 +827,8 @@ leaves the work findable.
 3. **Comment the decision issue on each pull request it blocks.** The comment on the promotion is
    what the promotion worker reads, per "Promoting".
 4. **Comment the state on the group's issue.** It says what is done and names the branch and pull
-   request. It says whether the worktree was left standing, and for a standalone clone whether the
-   remote lacks any of its branch. It says what remains, and the `decision` issue it waits on. The
+   request. It says whether the worktree was left standing, and for a standalone clone whether its
+   tip equals the remote tip. It says what remains, and the `decision` issue it waits on. The
    comment is complete enough for a worker with no other context to resume from.
 5. **Record the park in the group's claim comment**, naming the `decision` issue and keeping the
    comment's `**Backlog burndown claim` opening. The group keeps
