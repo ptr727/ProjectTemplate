@@ -1900,7 +1900,10 @@ class TestCheckShapes(unittest.TestCase):
         self.assertEqual(["someone", "github-actions"], [n["poster"] for n in nodes])
 
     def test_a_hosted_reviewer_s_check_still_settling_is_a_review_running(self) -> None:
-        """Matched by its poster or by its reviewer's vocabulary name, stuck or not, never once finished."""
+        """Matched by its poster or by its reviewer's vocabulary name, stuck or not.
+
+        A hosted check that passed or failed is finished, so it never holds.
+        """
         now = datetime.now(UTC)
         login = pr_review_rounds.CODERABBIT_LOGIN
         cases: tuple[tuple[dict, list[str]], ...] = (
@@ -1910,6 +1913,8 @@ class TestCheckShapes(unittest.TestCase):
             (check(name="Qodo", status="QUEUED", conclusion="", started=EARLY), ["Qodo"]),
             (check(name="Qodo", status="WAITING", conclusion="", started=EARLY), ["Qodo"]),
             (status_context("CodeRabbit", "SUCCESS"), []),
+            (status_context("CodeRabbit", "ERROR"), []),
+            (check(name="Qodo", conclusion="FAILURE"), []),
             (status_context("ci/external", "PENDING"), []),
             (check(status="IN_PROGRESS", conclusion=""), []),
         )

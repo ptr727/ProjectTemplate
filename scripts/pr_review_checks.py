@@ -271,8 +271,9 @@ def hosted_reviews_running(
 ) -> list[str]:
     """The name of each hosted reviewer's check on the head that has neither passed nor failed.
 
-    A stuck one counts too, since its review has not posted either way. A check is a reviewer's where that reviewer's app or login posted it, or where its name is the
-    reviewer's vocabulary name. A reviewer whose newest output is a rate limit posted since the
+    A stuck one counts too, since its review has not posted either way. A check is a reviewer's
+    where that reviewer's app or login posted it, or where its name is the reviewer's vocabulary
+    name. A reviewer whose newest output is a rate limit posted since the
     check began posts no review, so its check holds nothing.
     """
     return [
@@ -298,7 +299,8 @@ def held_checks_open(
     long or gated is the exception, since either can still clear. Short of that, a workflow run on the
     head that has not completed holds, a gated one included. A run's later jobs enter the rollup
     only as their `needs:` finish, so a green rollup proves nothing while one is open. A hosted
-    reviewer's check still settling holds next, since its findings owe the gate. A CLEAN,
+    reviewer's check that has neither passed nor failed holds next, a stuck one included, since
+    its findings owe the gate. A CLEAN,
     UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
     hold it. Otherwise a required check still settling holds, as does any settling check while no
     required check has posted. A rollup with no check it can read holds while the merge
