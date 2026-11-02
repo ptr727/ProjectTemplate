@@ -277,8 +277,11 @@ for, and it binds harder than any throughput target.
   branch reads to every later round as a live claim. Where the grown set enters the hub's
   `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue,
   as though ranking it now. A group that hold would rank continues only on a brief carrying the
-  no-merge line from "What Invoking This Skill Authorizes". A group it would hold is stopped for
-  the maintainer per "Raising a Blocked Question". **Update the claim comment whenever the
+  no-merge line from "What Invoking This Skill Authorizes". Attended, a group it would hold is
+  stopped for the maintainer per "Raising a Blocked Question". An away-mode run holds such a group
+  rather than parking it, and files no `decision` for it. Its worker keeps its work per "Parking
+  Instead of Asking" step 1 and ends, and its claim stands. The run's report names it as needing
+  the maintainer present, per "Ending an Away Run". **Update the claim comment whenever the
   adjudication changes what a group holds**, in either direction. Otherwise the durable record
   drifts from the real claim it exists to report. A group told to abandon its branch keeps its claim
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
@@ -391,12 +394,13 @@ lets a command discard work only on the developer's explicit instruction. The ma
 for this one case through this skill. It reaches the orchestrator as the maintainer's own
 invocation, but a worker only as another agent's message. So a worker told to
 abandon its branch reports its worktree path and ends without discarding anything. The
-orchestrator then confirms two things. A live `git worktree list --porcelain` lists that path as a
-linked worktree, an entry other than the first, whose `branch` line names the claimed branch. And the
-dispatch mechanism reports that the worker has ended. Where both hold, it runs
-`git -C <path> reset --hard` and then `git -C <path> clean -fd`, and discards nothing in any other
-tree. Where either fails, nothing is discarded and the group is stopped for the maintainer per
-"Raising a Blocked Question". The branch's commits stay for the branch check below.
+orchestrator waits until the dispatch mechanism reports that the worker has ended, per "Bounding
+the Wait on a Worker". It then reads a live `git worktree list --porcelain` for a linked worktree,
+an entry other than the first, whose `branch` line names the claimed branch. Where one exists, it
+runs `git -C <path> reset --hard` and then `git -C <path> clean -fd`, `<path>` being that entry's
+`worktree` line. It discards nothing in any other tree. Where none exists, nothing is discarded
+and the group is stopped for the maintainer per "Raising a Blocked Question". The branch's commits
+stay for the branch check below.
 
 An abandoned group, and a dead worker's clean tree, have no merged pull request for
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
@@ -407,6 +411,7 @@ Where both hold, the worktree and local branch are removed by hand, since `clean
 The removal is `git worktree remove <exact-path>`, then `git update-ref -d refs/heads/<exact-branch> <tip>`.
 That delete refuses only where the branch has moved off the tip the is-ancestor check judged, so it discards nothing that check did not clear.
 `git branch -d` would not agree with that check, since it judges a branch with no upstream against `HEAD`, and the fetch does not advance local develop.
+Where `git config --get-regexp '^branch\.<exact-branch>\.'` prints anything, `git config --remove-section branch.<exact-branch>` then removes the tracking `git branch -d` would have removed.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
 It edits the group's claim comment, and the issue returns to the next round's ranking.
