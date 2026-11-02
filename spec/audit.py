@@ -403,6 +403,7 @@ SECRET_REFERENCE = re.compile(
     r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
     r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
+WORKSPACE_FOLDER = re.compile(r'"folders"\s*:\s*\[\s*\{[^}]*?"path"\s*:\s*"([^"]*)"')
 EDITOR_COMMENT = re.compile(r"(?:^|(?<=\s))//.*$", re.MULTILINE)
 SECRET_PATH = re.compile(r"(?:\./)?((?:[\w.-]+/)*(\.?secrets))(?:/(.*))?")
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
@@ -658,9 +659,9 @@ def named_secret_signals(tree, read_text, directories, holding):
     launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
     point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
     no signal once the tree or that file names a .secrets directory. Such a line is left behind
-    after the move, to guard old checkouts. A compose bind source or build context, and any devcontainer
-    path, which is mostly a mount or a command, may be a directory. Each reports the folder but judges
-    no file name.
+    after the move, to guard old checkouts. A compose bind source or build context, any devcontainer
+    path, and an editor path with no extension may each be a directory. Each reports the folder but
+    judges no file name. A .code-workspace file's paths resolve against its first listed folder.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text. A compose file that does not parse, such as a template,
@@ -704,14 +705,20 @@ def named_secret_signals(tree, read_text, directories, holding):
                     for value, file in compose_host_paths(document)
                 ]
             else:
-                root = editor.group(1).rstrip("/")
                 live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
+                root = editor.group(1).rstrip("/")
+                listing = (
+                    WORKSPACE_FOLDER.search(live) if path.endswith(".code-workspace") else None
+                )
+                root = posixpath.normpath(posixpath.join(root, listing[1])) if listing else root
                 file = ".devcontainer" not in path
-                found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
+                matches = [] if root.startswith("..") else SECRET_REFERENCE.finditer(live)
+                found = [(match, file) for match in matches]
             for match, file in found:
                 if not match:
                     continue
                 written, folder, rest = match.group(1, 2, 3)
+                file = file and (compose or "." in (rest or ""))
                 target = secret_path_target(tree, directories, holding, root, written, rest)
                 if not target:
                     continue

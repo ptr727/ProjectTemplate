@@ -3781,10 +3781,10 @@ class SecretStemCase(unittest.TestCase):
                 "the deprecated and file workspace variables root a path, and a composer.yml is no compose file",
                 {
                     ".vscode/launch.json": '{"envFile": "${workspaceRoot}/secrets/app.env"}\n',
-                    ".vscode/tasks.json": '{"command": "cat ${fileWorkspaceFolder}/.secrets/Api_Token"}\n',
+                    ".vscode/tasks.json": '{"command": "cat ${fileWorkspaceFolder}/.secrets/Api_Token.txt"}\n',
                     "composer.yml": "secrets:\n  s:\n    file: ./secrets/Db_Password\n",
                 },
-                [".secrets/Api_Token (named in .vscode/tasks.json)"],
+                [".secrets/Api_Token.txt (named in .vscode/tasks.json)"],
                 [".vscode/launch.json"],
             ),
             (
@@ -3808,7 +3808,7 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a workspace file is read, and a bind or mount source names no file",
                 {
-                    "App.code-workspace": '{"settings": {"python.envFile": "${workspaceFolder}/secrets/App"}}\n',
+                    "App.code-workspace": '{"settings": {"python.envFile": "${workspaceFolder}/secrets/App.env"}}\n',
                     "deploy/compose.yml": "services:\n  a:\n    volumes:\n      - ./.secrets/Prod_Certs:/certs:ro\n",
                     ".devcontainer/devcontainer.json": (
                         '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Api_Certs,target=/c,type=bind",'
@@ -3818,8 +3818,22 @@ class SecretStemCase(unittest.TestCase):
                         ' "postCreateCommand": "mkdir -p ${containerWorkspaceFolder}/.secrets/Tls_Certs"}\n'
                     ),
                 },
-                ["secrets/App (named in App.code-workspace)"],
+                ["secrets/App.env (named in App.code-workspace)"],
                 ["App.code-workspace"],
+            ),
+            (
+                "a workspace file resolves against its listed folder, and an editor bind with no extension names no file",
+                {
+                    "App.code-workspace": (
+                        '{"folders": [{"path": "src"}], "settings": {"x": "${workspaceFolder}/secrets/manager.py"}}\n'
+                    ),
+                    "src/secrets/manager.py": "",
+                    "src/secrets/__init__.py": "",
+                    ".vscode/tasks.json": '{"command": "docker run -v ${workspaceFolder}/.secrets/Prod_Certs:/certs app"}\n',
+                    ".secrets/README.md": "",
+                },
+                [],
+                [],
             ),
             (
                 "a compose override file carrying !reset is read",
@@ -3902,7 +3916,7 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "an untracked file a .secrets path names is judged, a templated one once, and a cwd-relative one not",
+                "an untracked file a .secrets path names is judged where it has an extension, a templated one once",
                 {
                     ".vscode/launch.json": (
                         '["${workspaceFolder}/.secrets/Api_Token", "${workspaceFolder}/.secrets/web_token.txt",'
@@ -3911,7 +3925,6 @@ class SecretStemCase(unittest.TestCase):
                     ".secrets/mail_relay.example": "",
                 },
                 [
-                    ".secrets/Api_Token (named in .vscode/launch.json)",
                     ".secrets/web_token.txt (named in .vscode/launch.json)",
                 ],
                 [],
@@ -4017,10 +4030,10 @@ class SecretStemCase(unittest.TestCase):
             (
                 "one untracked name two files mention counts once",
                 {
-                    "compose.yml": "secrets:\n  s:\n    file: ./secrets/App_Token\n",
-                    ".vscode/launch.json": '["${workspaceFolder}/secrets/App_Token"]\n',
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets/App_Token.txt\n",
+                    ".vscode/launch.json": '["${workspaceFolder}/secrets/App_Token.txt"]\n',
                 },
-                ["secrets/App_Token (named in .vscode/launch.json, compose.yml)"],
+                ["secrets/App_Token.txt (named in .vscode/launch.json, compose.yml)"],
                 [".vscode/launch.json", "compose.yml"],
             ),
             (
@@ -4044,10 +4057,10 @@ class SecretStemCase(unittest.TestCase):
                     ),
                     ".devcontainer.json": '{"x": "${containerWorkspaceFolder}/.secrets/Api_Key"}\n',
                     "deploy/compose.yaml": "env: $(pwd)/.secrets/Mail_Token\n",
-                    ".vscode/launch.json": '{"args": ["${workspaceFolder}\\\\.secrets\\\\Web_Token"]}\n',
+                    ".vscode/launch.json": '{"args": ["${workspaceFolder}\\\\.secrets\\\\Web_Token.txt"]}\n',
                 },
                 [
-                    ".secrets/Web_Token (named in .vscode/launch.json)",
+                    ".secrets/Web_Token.txt (named in .vscode/launch.json)",
                 ],
                 [".devcontainer/app/devcontainer.json"],
             ),
