@@ -2060,7 +2060,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(git_roots) > 1:
         return refuse("error-many-repositories", roots=quoted(git_roots))
     first, in_git = Path(scan_paths[0]), bool(git_roots)
-    scan_root = Path(git_roots.pop()) if git_roots else first if first.is_dir() else first.parent
+    scan_root = Path(git_roots.pop()) if git_roots else lookup_start(first)
     try:
         config_for(str(scan_root))
     except OverrideError as exc:

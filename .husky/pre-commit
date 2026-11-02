@@ -57,9 +57,9 @@ fi
 git diff --cached --name-only --diff-filter=ACMRT -z >/dev/null
 # shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
 git diff --cached --name-only --diff-filter=ACMRT -z |
-    xargs -0 sh -c 'for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
+    xargs -0 sh -c 'base=$1; shift; for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
         [ "$#" -eq 0 ] || exec uv run --no-project --script .github/actions/prose-gate/prose_lint.py \
-            --skip-generated --diff "$0" -- "$@"' "$base"
+            --skip-generated --diff "$base" -- "$@"' sh "$base"
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.

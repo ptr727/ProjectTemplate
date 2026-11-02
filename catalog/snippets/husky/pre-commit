@@ -52,7 +52,7 @@ fi
 git diff --cached --name-only --diff-filter=ACMRT -z >/dev/null || exit 1
 # shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
 git diff --cached --name-only --diff-filter=ACMRT -z |
-    xargs -0 sh -c 'for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
-        [ "$#" -eq 0 ] || exec uv run --no-project python "$0" .github/actions/prose-gate/prose_lint.py \
-            --skip-generated --diff HEAD -- "$@"' "$hub_fetch_run" || exit 1
+    xargs -0 sh -c 'fetch=$1; shift; for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
+        [ "$#" -eq 0 ] || exec uv run --no-project python "$fetch" .github/actions/prose-gate/prose_lint.py \
+            --skip-generated --diff HEAD -- "$@"' sh "$hub_fetch_run" || exit 1
 run_py "$hub_fetch_run" .github/actions/repo-gate/repo_gate.py --check eol || exit 1
