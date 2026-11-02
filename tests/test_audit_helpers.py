@@ -3657,6 +3657,11 @@ class SecretStemCase(unittest.TestCase):
                 },
             ),
             (
+                "a .txt on a single credential in a .secrets directory breaks",
+                {".secrets/app_token.txt.example", "deploy/.secrets/api_key.TXT"},
+                {".secrets/app_token.txt.example", "deploy/.secrets/api_key.TXT"},
+            ),
+            (
                 "a badly separated name, or a capitalized .env file elsewhere, breaks",
                 {
                     ".secrets/app_-web.env",
@@ -3701,6 +3706,102 @@ class SecretStemCase(unittest.TestCase):
     def test_unreadable_tree_reports_nothing(self) -> None:
         self.assertEqual(
             audit.secret_stem_findings(None), [], "an unreadable tree reports nothing here"
+        )
+
+    def test_a_bare_secrets_directory_is_read_from_the_files_naming_it(self) -> None:
+        """The directory is ignored by design, so a .gitignore line and a config path are the signals."""
+        bare = (
+            'runtime-secrets: {} tracked file(s) name a bare secrets/ directory, which GOVERNANCE.md "Repo-Scoped '
+            'Secrets" rules out. Rename it .secrets/ and update each: {}'
+        )
+        cases: list[tuple[str, dict[str, str], list[str], list[str]]] = [
+            (
+                "the issue's constructed case reports the directory and the .txt it names",
+                {
+                    ".gitignore": "secrets/\n",
+                    ".vscode/launch.json": '{"args": ["--token-file=${workspaceFolder}/secrets/app_token.txt"]}\n',
+                },
+                ["secrets/app_token.txt (named in .vscode/launch.json)"],
+                [".gitignore", ".vscode/launch.json"],
+            ),
+            (
+                "each bare ignore pattern names the directory",
+                {
+                    ".gitignore": "/secrets\n",
+                    "deploy/.gitignore": "**/secrets/\n",
+                    "web/.gitignore": "secrets/*\n!secrets/*.example\n",
+                },
+                [],
+                [".gitignore", "deploy/.gitignore", "web/.gitignore"],
+            ),
+            (
+                "a compose file naming one reports it beside its directory",
+                {
+                    "deploy/compose.yml": "secrets:\n  db_password:\n    file: ./secrets/db_password\n"
+                },
+                [],
+                ["deploy/compose.yml"],
+            ),
+            (
+                "a .secrets path, a mount point, a comment, a negation, and a GitHub secret are not a bare directory",
+                {
+                    ".gitignore": "# secrets/\n**/.secrets/*\n!secrets/x\nsecrets.json\n",
+                    "docker-compose.yml": "secrets:\n  - source: db_password\n    target: /run/secrets/db_password\n",
+                    ".vscode/tasks.json": '{"env": {"TOKEN": "${{ secrets.TOKEN }}", "F": "${workspaceFolder}/.secrets/db_password"}}\n',
+                },
+                [],
+                [],
+            ),
+            (
+                "an untracked file a .secrets path names is judged, and a templated one is not judged twice",
+                {
+                    ".vscode/launch.json": '["${workspaceFolder}/.secrets/Api_Token", "./.secrets/web_token.txt", "./.secrets/mail_relay"]\n',
+                },
+                [
+                    ".secrets/Api_Token (named in .vscode/launch.json)",
+                    ".secrets/web_token.txt (named in .vscode/launch.json)",
+                ],
+                [],
+            ),
+        ]
+        for label, texts, named, naming in cases:
+            with self.subTest(label):
+                tree = set(texts) | {".secrets/mail_relay.example"}
+                got = audit.secret_stem_findings(tree, texts.get)
+                stems = [t for _, t in got if " env or secret file(s) " in t]
+                self.assertEqual(len(stems), 1 if named else 0, got)
+                for path in named:
+                    self.assertIn(path, stems[0])
+                want = [bare.format(len(naming), ", ".join(naming))] if naming else []
+                self.assertEqual([t for _, t in got if "bare secrets/" in t], want)
+
+    def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
+        """A compose path is relative to its own directory, and one climbing out of the repo is no signal."""
+        texts = {
+            "deploy/compose.yml": "file: ./.secrets/web_token.txt\n",
+            "compose.yml": "file: ../secrets/Db_Password\n",
+        }
+        tree = set(texts) | {"deploy/.secrets/web_token.txt.example"}
+
+        got = audit.secret_stem_findings(tree, texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(got[0][1].endswith(": deploy/.secrets/web_token.txt.example"), got)
+
+    def test_a_signal_file_read_with_no_text_is_undecided(self) -> None:
+        got = audit.secret_stem_findings({".gitignore", "README.md"}, lambda path: None)
+
+        self.assertEqual(
+            got,
+            [
+                (
+                    "DRIFT",
+                    (
+                        "runtime-secrets: could not read 1 file(s) to look for a bare secrets/ "
+                        "directory or a named secret file, verify by hand: .gitignore"
+                    ),
+                )
+            ],
         )
 
 
