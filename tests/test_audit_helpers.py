@@ -3844,6 +3844,16 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
+                "a floating ignore line is silenced only by a code directory below its own prefix",
+                {
+                    ".gitignore": "deploy/**/secrets/\n",
+                    "deploy/app/compose.yml": "",
+                    "src/app/secrets/manager.py": "",
+                },
+                [],
+                [".gitignore"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (
