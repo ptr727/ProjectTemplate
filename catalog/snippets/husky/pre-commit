@@ -48,7 +48,7 @@ fi
 # The run_py function is out of reach of xargs, so uv chooses the interpreter, which hub_fetch_run.py needs anyway.
 # The pull request gate reads every line the branch changes against its base.
 # shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
-git diff --cached --name-only --diff-filter=ACMR -z |
+git diff --cached --name-only --diff-filter=ACMRT -z |
     xargs -0 sh -c 'for p do if [ -f "$p" ]; then printf "%s\0" "$p"; fi; done' sh |
     xargs -0 -r uv run --no-project python "$hub_fetch_run" .github/actions/prose-gate/prose_lint.py \
         --skip-generated --diff HEAD -- || exit 1

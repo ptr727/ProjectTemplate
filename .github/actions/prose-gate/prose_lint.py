@@ -442,9 +442,14 @@ GIT_LOCATION = frozenset(
 )
 
 
+def git_env() -> dict[str, str]:
+    """This process's environment without the variables that tell git which repository to use."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
+
+
 def checkout_provenance(script: Path) -> str:
     """The commit describing this file, `-dirty` where edited, unknown where git tracks it not."""
-    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
+    env = git_env()
     where = ("-C", str(script.parent))
     if git_text(*where, "ls-files", "--error-unmatch", "--", str(script), env=env) is None:
         return "unknown"
@@ -500,8 +505,7 @@ def repo_root(path: Path) -> str:
     starts in as the top level. So the lookup drops the location variables, as provenance does.
     """
     start = path if path.is_dir() else path.parent
-    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
-    return (git_text("-C", str(start), "rev-parse", "--show-toplevel", env=env) or "").strip()
+    return (git_text("-C", str(start), "rev-parse", "--show-toplevel", env=git_env()) or "").strip()
 
 
 def tracked_paths(root: Path) -> list[Path] | None:
@@ -2046,7 +2050,8 @@ def main(argv: list[str] | None = None) -> int:
     # Anything that is not a file or a directory, a FIFO or a socket included, is refused.
     if unusable := [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]:
         return refuse("error-not-a-path", paths=quoted(unusable))
-    git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
+    starts = {Path(p) if Path(p).is_dir() else Path(p).parent for p in scan_paths}
+    git_roots = {found for found in map(repo_root, starts) if found}
     if len(git_roots) > 1:
         return refuse("error-many-repositories", roots=quoted(git_roots))
     first, in_git = Path(scan_paths[0]), bool(git_roots)

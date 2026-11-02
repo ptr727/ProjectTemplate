@@ -6994,6 +6994,19 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertNotIn("more than one repository", self.err.getvalue())
 
+    def test_a_hook_naming_many_files_looks_up_each_directory_once(self) -> None:
+        """A commit staging hundreds of files names each, and each lookup starts a git process."""
+        root = self.repo()
+        (root / "a").mkdir()
+        for name in ("one.md", "two.md", "three.md"):
+            (root / "a" / name).write_text("# Doc\n\nA clean line.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        with mock.patch.object(prose_lint, "repo_root", wraps=prose_lint.repo_root) as lookup:
+            self.assertEqual(
+                0, self.run_in(root, "--diff", "HEAD", "--", "a/one.md", "a/two.md", "a/three.md")
+            )
+        self.assertEqual(1, lookup.call_count)
+
     def test_a_binary_file_is_not_read_because_it_is_untracked(self) -> None:
         """The text test decides what the rules can read, and it is applied to both sources."""
         root = self.repo()

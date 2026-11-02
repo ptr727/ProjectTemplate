@@ -53,7 +53,7 @@ if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
     base=MERGE_HEAD
 fi
 # shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
-git diff --cached --name-only --diff-filter=ACMR -z |
+git diff --cached --name-only --diff-filter=ACMRT -z |
     xargs -0 sh -c 'for p do if [ -f "$p" ]; then printf "%s\0" "$p"; fi; done' sh |
     xargs -0 -r uv run --no-project --script .github/actions/prose-gate/prose_lint.py \
         --skip-generated --diff "$base" --
