@@ -992,9 +992,9 @@ def check_interface(path, contract, text):
         and events - {"pull_request"}
         and (matches[key][2] if key in matches else value) == name
     ]
-    on_pr = set(names.values()) | {m[1] for m in matches.values()}
     # An expression naming the check on every event is already its job's off-PR finding where another event triggers the workflow.
-    if name and name not in gated and name not in names.values() and not (off_pr and name in on_pr):
+    every_event = any(m[1] == name for m in matches.values())
+    if name and name not in gated and name not in names.values() and not (off_pr and every_event):
         findings.append(
             (
                 "DRIFT",
