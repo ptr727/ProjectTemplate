@@ -1892,6 +1892,93 @@ class TestCheckShapes(unittest.TestCase):
         self.assertIn("headRefOid baseRefName state mergeable", query)
         self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", query)
         self.assertIn("context state createdAt isRequired(pullRequestNumber:$n)", query)
+        self.assertIn("isRequired(pullRequestNumber:$n) creator{ login } }", query)
+
+    def test_each_check_names_the_app_or_login_that_posted_it(self) -> None:
+        posted = {**status_context("CodeRabbit", state="PENDING"), "creator": {"login": "someone"}}
+        nodes = pr_review_checks.check_nodes(payload([review()], checks=[posted, check()]))
+        self.assertEqual(["someone", "github-actions"], [n["poster"] for n in nodes])
+
+    def test_a_hosted_reviewer_s_check_still_settling_is_a_review_running(self) -> None:
+        """Matched by its poster or by its reviewer's vocabulary name, stuck or not.
+
+        A hosted check that passed or failed is finished, so it never holds.
+        """
+        now = datetime.now(UTC)
+        login = pr_review_rounds.CODERABBIT_LOGIN
+        cases: tuple[tuple[dict, list[str]], ...] = (
+            ({**status_context("review", "PENDING"), "creator": {"login": login}}, ["review"]),
+            (status_context("CodeRabbit", "PENDING"), ["CodeRabbit"]),
+            (check(name="Qodo", status="IN_PROGRESS", conclusion="", slug="x"), ["Qodo"]),
+            (check(name="Qodo", status="QUEUED", conclusion="", started=EARLY), ["Qodo"]),
+            (check(name="Qodo", status="WAITING", conclusion="", started=EARLY), ["Qodo"]),
+            (status_context("CodeRabbit", "SUCCESS"), []),
+            (status_context("CodeRabbit", "ERROR"), []),
+            (check(name="Qodo", conclusion="FAILURE"), []),
+            (status_context("ci/external", "PENDING"), []),
+            (check(status="IN_PROGRESS", conclusion=""), []),
+        )
+        for node, want in cases:
+            with self.subTest(node=node):
+                pr = payload([review()], checks=[node])
+                nodes = pr_review_checks.check_nodes(pr)
+                got = pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 1800)
+                self.assertEqual(want, got)
+
+    def test_a_rate_limited_hosted_reviewer_s_check_holds_nothing(self) -> None:
+        """CodeRabbit posts no review once it is rate limited, so its pending status is not one.
+
+        A limit posted before the check began is one CodeRabbit has moved past, so it still holds.
+        One edited into its summary comment since the check began clears it like a new one.
+        """
+        now = datetime.now(UTC)
+        cases: tuple[tuple[str, str | None, str, list[str]], ...] = (
+            (LATE, None, EARLY, []),
+            (EARLY, None, LATE, ["CodeRabbit"]),
+            (EARLY, LATE, LATE, []),
+        )
+        for limit_at, edited_at, check_at, want in cases:
+            with self.subTest(limit_at=limit_at, edited_at=edited_at):
+                limited = comment(
+                    login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT, at=limit_at
+                )
+                if edited_at:
+                    limited["updatedAt"] = edited_at
+                running = status_context("CodeRabbit", "PENDING", created=check_at)
+                pr = payload([review()], comments=[limited], checks=[running])
+                nodes = pr_review_checks.check_nodes(pr)
+                got = pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 10**9)
+                self.assertEqual(want, got)
+
+    def test_another_comment_s_late_edit_does_not_date_an_older_rate_limit(self) -> None:
+        """A summary comment edited as a review starts lends its edit time to no other comment."""
+        login = pr_review_rounds.CODERABBIT_LOGIN
+        summary = {**comment(login=login, body="Walkthrough", at="2026-08-02T09:00:00Z")}
+        summary["updatedAt"] = "2026-08-02T12:00:00Z"
+        limited = comment(login=login, body=RATE_LIMITED_REPLY_COMMENT, at=EARLY)
+        running = status_context("CodeRabbit", "PENDING", created=LATE)
+        pr = payload([review()], comments=[summary, limited], checks=[running])
+        nodes = pr_review_checks.check_nodes(pr)
+        now = datetime.now(UTC)
+        got = pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 10**9)
+        self.assertEqual(["CodeRabbit"], got)
+
+    def test_every_check_neither_passed_nor_failed_is_pending(self) -> None:
+        now = datetime.now(UTC)
+        nodes = pr_review_checks.check_nodes(
+            payload(
+                [review()],
+                checks=[
+                    status_context("CodeRabbit", "PENDING"),
+                    check(name="queued", status="QUEUED", conclusion="", started=real_ago(900)),
+                    check(name="failed", conclusion="FAILURE"),
+                    check(name="passed"),
+                ],
+            )
+        )
+        unfinished = pr_review_checks.UNFINISHED
+        found = pr_review_checks.checks_settling(nodes, now, 300, 1800, unfinished)
+        self.assertEqual(["CodeRabbit", "queued"], [n["name"] for n in found])
 
     def test_a_status_context_reads_its_own_required_flag(self) -> None:
         optional = {**status_context("ci/external", state="PENDING"), "isRequired": False}
@@ -2433,6 +2520,16 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn(f"VERDICT WITH NO COUNTED FINDING key={item.key}", out)
                 self.assertEqual(code == 50, "status=VERDICT_NAMES_UNCOUNTED_FINDINGS" in out)
                 self.assertEqual(code == 0, "acknowledged as declined" in out)
+
+    def test_a_qodo_finding_s_remedy_asks_qodo_to_dismiss_it_by_its_number(self) -> None:
+        """Only Qodo's badge closes its finding, and a resolved thread or a reply adds none."""
+        qodo = comment(login=pr_review_rounds.QODO_LOGIN, body=qodo_review_body())
+        pr = payload([review()], files=["a.py"], comments=[qodo])
+        self.status(pr)
+        out = self.out.getvalue()
+        self.assertIn("QODO OPEN FINDING key=", out)
+        self.assertIn(f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss finding 1", out)
+        self.assertNotIn("answer it in the PR conversation quoting", out)
 
     def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
         missed = (
@@ -4585,6 +4682,36 @@ class TestCli(GqlCase):
                 with mock.patch.object(pr_review.time, "sleep") as slept:
                     self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
                 slept.assert_not_called()
+
+    def test_a_hosted_review_still_running_holds_an_attested_head_on_any_merge(self) -> None:
+        """A CodeRabbit review of the head still running owes its findings, so `merge` waits."""
+        reviewing = status_context("CodeRabbit", "PENDING", created=real_ago(60))
+        for merge in ("CLEAN", "UNSTABLE", "HAS_HOOKS"):
+            with self.subTest(merge=merge):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = self.into(
+                    payload([review(oid=OLD)], merge=merge, checks=[reviewing]), attest=True
+                )
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+                self.assertIn("(reviewing: CodeRabbit)", self.out.getvalue())
+
+    def test_a_rate_limited_hosted_review_does_not_hold_an_attested_head(self) -> None:
+        reviewing = status_context("CodeRabbit", "PENDING", created=real_ago(60))
+        pr = self.into(
+            payload([review(oid=OLD)], merge="UNSTABLE", checks=[reviewing]), attest=True
+        )
+        limited = comment(
+            login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT, at=real_ago(30)
+        )
+        pr["comments"]["nodes"].append(limited)
+        self.answer(pr)
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with mock.patch.object(pr_review.time, "sleep"):
+            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
 
     def test_the_held_poll_reads_the_narrow_query_and_the_verdict_the_full_one(self) -> None:
         """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`.
@@ -7059,6 +7186,7 @@ class TestContract(unittest.TestCase):
         self.assertIn("headRefOid baseRefName state mergeable mergeStateStatus", poll)
         self.assertIn("conclusion startedAt isRequired(pullRequestNumber:$n)", poll)
         self.assertIn("authorAssociation createdAt body", poll)
+        self.assertIn("body isMinimized updatedAt }", poll)
 
 
 class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):

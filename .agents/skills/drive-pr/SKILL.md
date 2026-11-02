@@ -119,7 +119,12 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    body lists is one. A no-thread finding on an earlier round is one too, since `FINDINGS WITH NO
    THREAD` reads the head's round alone. Dispose of them before running `merge`. A finding no
    thread carries and a part under `REVIEWER OUTPUT NOTED` still refuse it until each carries the
-   `--ack` record pr-review-conduct "Answering a suppressed finding" states. It squash-merges only an open pull request into `develop`, headed in
+   `--ack` record pr-review-conduct "Answering a suppressed finding" states. A `qodo_open`
+   finding refuses it the same way, even where Qodo also opened a thread for it, since resolving
+   that thread answers nothing. For a disproved one, that comment's body mentions the Qodo login
+   the digest's remedy line names. It asks Qodo to dismiss the finding by the number the remedy
+   line gives, with the reason. That answer is the redrive an `UNTHREADED_FINDINGS` line naming
+   `qodo_open` owes, rather than a blocked merge for the maintainer. It squash-merges only an open pull request into `develop`, headed in
    that same repository on a branch that is not permanent. The merge is pinned to the head the gate
    read and confirmed by reading it back.
    Every run ends on one `next=` line, and the drive follows it rather than reading each status
@@ -135,8 +140,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    - `next=redrive` is a refusal that merged nothing and that this seat can clear. Do what its
      `status=` lines name, per step 3 and pr-review-conduct, giving each finding they count an
      outcome per "Disposing of Every Finding". A check still running clears by waiting for it,
-     with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. Then run `merge`
-     once more.
+     with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. A hosted
+     reviewer's review still running on the head is such a check, refused as `CHECKS_PENDING`.
+     Then run `merge` once more.
    - `next=retry` is a read that did not answer, or a merge `gh` refused on an unchanged head. Run
      `merge` once more as it is.
    - `next=maintainer` is a line no action of this seat can change, or a merge whose `cleanup`
@@ -144,7 +150,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 
    One rerun after `redrive` or `retry` is the bound. Report what still stands then to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
-   outcome. The maintainer can then merge it by hand. A refusal this seat reports is never routed
+   outcome. Name each check the refusal's `pending=` line lists too, since a pull request with a
+   check or a review still running is not finished. The maintainer can then merge it by hand. A refusal this seat reports is never routed
    around, and it hands the maintainer no command to run instead.
    A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under

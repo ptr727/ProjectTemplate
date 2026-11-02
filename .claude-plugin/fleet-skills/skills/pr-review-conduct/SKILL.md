@@ -64,6 +64,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    and Qodo are advisory. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
    names Copilot the incumbent and says no candidate is a required reviewer. An advisory
    reviewer's absence blocks nothing, while its findings owe item 3 exactly as Copilot's do.
+   A review of the head it has started and not finished is not an absence. While a CodeRabbit
+   or Qodo check on the head has neither passed nor failed, `merge` refuses as `CHECKS_PENDING`,
+   whatever the merge state reads. `wait` holds an attested head then too. A reviewer whose newest
+   output is a rate limit posted since the check began posts no review, so its check holds
+   nothing.
    `pr_review.py`'s `review_on_head` names Copilot's own coverage specifically, not "no review of
    any kind covers this head". An advisory reviewer carrying the exact head under
    `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is
@@ -139,6 +144,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    to decline one with evidence rather than a reason to leave it unanswered. Qodo's own
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
+   That badge is the only thing that closes a Qodo finding on Qodo's side, and `qodo_open`
+   counts the findings without it. Resolving a thread Qodo opened for the finding, or answering
+   it in the conversation, adds no badge. Qodo marks a fixed finding `Resolved` itself, and a
+   disproved one `Dismissed` only when asked. So answer a disproved one with a comment that
+   mentions the Qodo login the digest's remedy line names. It asks Qodo to dismiss that finding
+   by the number the remedy line gives, with the reason.
+   Posted as the `--ack` comment "Answering a suppressed finding" states, the one write also
+   answers `merge`.
    A Copilot round states its own count of open findings, which the digest reads as
    `overview=T/M` beside the number of review threads that round opened. The digest's
    `FINDINGS WITH NO THREAD` block counts the findings the round names that no open entry links

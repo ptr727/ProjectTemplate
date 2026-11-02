@@ -25,11 +25,13 @@ import argparse
 import contextlib
 import io
 import sys
+from datetime import UTC, datetime
 from typing import TextIO
 
 import pr_cleanup
 import pr_review as core
 import pr_review_answers as answers
+from pr_review_checks import UNFINISHED, check_nodes, checks_settling
 
 GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
@@ -87,8 +89,8 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
     """The head one fresh read shows, and each gate item `wait`'s 0 leaves undecided that it fails.
 
     `pr_review_answers.unmet` decides the items off the fields the digest builds, so a refusal
-    names what the driver was shown. The threads are walked to the end, since the digest reads one
-    page.
+    names what the driver was shown. A hosted review still running is read off the payload itself.
+    The threads are walked to the end, since the digest reads one page.
     """
     pr = core.full_read(owner, repo, num)
     built: list[tuple[str, object]] = []
@@ -113,12 +115,31 @@ def merge_call(target: str, num: int, head: str) -> int | None:
     return None if unrun else proc.returncode
 
 
+def pending(owner: str, repo: str, num: int) -> str:
+    """`pending=` and each check on the head that has neither passed nor failed, from a fresh read."""
+    try:
+        nodes = check_nodes(core.gql(core.Q_HELD, owner, repo, num))
+    except SystemExit as exc:
+        return f"pending=UNREAD the checks read did not answer: {exc}"
+    now = datetime.now(UTC)
+    found = checks_settling(nodes, now, core.CHECK_GRACE, core.CHECK_STALL, UNFINISHED)
+    return f"pending={', '.join(n.get('name') or 'unnamed' for n in found) or 'none'}"
+
+
 def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
-    """`gated_merge`, then one `next=<route>` line its status lines decide, and its exit."""
+    """`gated_merge` inside the write scope, then one `next=<route>` line, and its exit.
+
+    A refusal routed to `redrive` or the maintainer prints `pending=` first, naming what still runs.
+    """
     tee = Tee(sys.stdout)
     with contextlib.redirect_stdout(tee):
-        code = gated_merge(owner, repo, num, cleanup, checkout)
-    print(f"next={answers.route(code, cleanup, tee.text.getvalue())}")
+        refused = pr_cleanup.cleanup_scope(owner, repo, "merged")
+        code = gated_merge(owner, repo, num, cleanup, checkout) if refused is None else refused
+    text = tee.text.getvalue()
+    route = answers.route(code, cleanup, text)
+    if refused is None and route in ("redrive", "maintainer") and "status=MERGED " not in text:
+        print(pending(owner, repo, num))
+    print(f"next={route}")
     return code
 
 
@@ -130,8 +151,6 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
     the gate ends `wait` with a message, which reads as unread here rather than refused. A merge
     that landed can read OPEN for a moment, so the read back is retried on `cleanup`'s delays.
     """
-    if (refused := pr_cleanup.cleanup_scope(owner, repo, "merged")) is not None:
-        return refused
     target = f"{owner}/{repo}"
     try:
         if cleanup and checkout is not None:
