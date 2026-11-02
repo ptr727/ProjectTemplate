@@ -353,7 +353,7 @@ jobs:
       # Each Python step sets UV_PYTHON to the resolved interpreter instead, which every uv call in it reads.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
 
@@ -720,7 +720,7 @@ jobs:
       # A root the undeclared default skips still sets uv up, so an empty cache is a normal outcome rather than an error at post-job save.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true'
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}
           ignore-nothing-to-cache: true
