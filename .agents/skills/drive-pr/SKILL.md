@@ -116,37 +116,36 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    primary clone. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
    own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
    code reads stay this seat's per pr-review-conduct's Merge Gate. A finding the pull request's
-   body lists is one, and so is a part printed under `REVIEWER OUTPUT NOTED`. A no-thread finding
-   on an earlier round is one too, since `FINDINGS WITH NO THREAD` reads the head's round alone.
-   Dispose of them before running `merge`, although a noted part still refuses it, as below. It squash-merges only an open pull request into `develop`, headed in
+   body lists is one. A no-thread finding on an earlier round is one too, since `FINDINGS WITH NO
+   THREAD` reads the head's round alone. Dispose of them before running `merge`. A finding no
+   thread carries and a part under `REVIEWER OUTPUT NOTED` still refuse it until each carries the
+   `--ack` record pr-review-conduct "Answering a suppressed finding" states. It squash-merges only an open pull request into `develop`, headed in
    that same repository on a branch that is not permanent. The merge is pinned to the head the gate
    read and confirmed by reading it back.
-   Exit `0` is merged and cleaned up. A `status=MERGED` line before a non-zero exit means only the
-   cleanup stopped, which stops and reports the same as `cleanup`.
-   Check the lines below next, since each can mean the merge landed. A `status=MERGE_NOT_CONFIRMED`
-   line at exit `2` is read back with `gh pr view <number> --repo <owner>/<repo> --json state`.
-   `MERGED` means run the `cleanup` command below and report the merge as below, and `OPEN` means
-   treat it as a refusal. Only a
-   read that still cannot answer is reported, saying the merge may have landed. A `status=REFUSED`
-   line reading `MERGED, not OPEN` means the pull request already merged, by hand or by a peer.
-   So does a `status=PEER_MERGED` line. For either, run the `cleanup` command below. Report each
-   of these merges as one this run cannot vouch for, since the head that merged may be one the gate
-   never read.
-   Any other non-zero exit is a refusal that merged nothing. Do what its `status=` lines name, per
-   step 3 and pr-review-conduct, and give each finding they count an outcome per "Disposing of
-   Every Finding". A `status=MERGE_NOT_CLEAN` line reading `BLOCKED` while a check still runs
-   clears by waiting for it, with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`.
-   After clearing whatever lines this seat can clear, run `merge` once more on this pull request. Report what still stands to the
+   Every run ends on one `next=` line, and the drive follows it rather than reading each status
+   line's route here. The hub's `scripts/README.md` "`pr_merge.py`" gives each route in full.
+
+   - `next=done` is merged and cleaned up.
+   - `next=cleanup` is a merge that landed with its cleanup still owed. Run the `cleanup` command
+     below. Report a pull request another hand merged as a merge this run cannot vouch for. The
+     head that merged may be one the gate never read.
+   - `next=readback` is a merge that may have landed. Read it back with `gh pr view <number> --repo
+     <owner>/<repo> --json state`. `MERGED` means run `cleanup`, and `OPEN` means treat it as
+     `redrive`. Only a read that still cannot answer is reported, saying the merge may have landed.
+   - `next=redrive` is a refusal that merged nothing and that this seat can clear. Do what its
+     `status=` lines name, per step 3 and pr-review-conduct, giving each finding they count an
+     outcome per "Disposing of Every Finding". A check still running clears by waiting for it,
+     with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. Then run `merge`
+     once more.
+   - `next=retry` is a read that did not answer, or a merge `gh` refused on an unchanged head. Run
+     `merge` once more as it is.
+   - `next=maintainer` is a line no action of this seat can change, or a merge whose `cleanup`
+     stopped. Report it without a rerun.
+
+   One rerun after `redrive` or `retry` is the bound. Report what still stands then to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
-   outcome. The maintainer can then merge it by hand. A line no action of this seat can change
-   is reported without the rerun. Such lines include `status=OUTPUT_NOTED` and `status=COUNT_UNREAD`.
-   So is the gate's exit `50` printing `status=VERDICT_NAMES_UNCOUNTED_FINDINGS`, which repeats on
-   its head after the answer. So is its exit `41` on a quota state, or on a refusal item 2 names no
-   way to clear. pr-review-conduct's Merge Gate item 2 sends those to the maintainer. A
-   file-count refusal and a transient error clear as item 2 says.
-   They also include a `status=UNTHREADED_FINDINGS` line holding an every-round count, such as
-   `suppressed`. A refusal this seat reports is
-   never routed around, and it hands the maintainer no command to run instead.
+   outcome. The maintainer can then merge it by hand. A refusal this seat reports is never routed
+   around, and it hands the maintainer no command to run instead.
    A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
    another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
