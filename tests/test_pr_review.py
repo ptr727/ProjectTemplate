@@ -1943,6 +1943,19 @@ class TestCheckShapes(unittest.TestCase):
                 got = pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 10**9)
                 self.assertEqual(want, got)
 
+    def test_another_comment_s_late_edit_does_not_date_an_older_rate_limit(self) -> None:
+        """A summary comment edited as a review starts lends its edit time to no other comment."""
+        login = pr_review_rounds.CODERABBIT_LOGIN
+        summary = {**comment(login=login, body="Walkthrough", at="2026-08-02T09:00:00Z")}
+        summary["updatedAt"] = "2026-08-02T12:00:00Z"
+        limited = comment(login=login, body=RATE_LIMITED_REPLY_COMMENT, at=EARLY)
+        running = status_context("CodeRabbit", "PENDING", created=LATE)
+        pr = payload([review()], comments=[summary, limited], checks=[running])
+        nodes = pr_review_checks.check_nodes(pr)
+        now = datetime.now(UTC)
+        got = pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 10**9)
+        self.assertEqual(["CodeRabbit"], got)
+
     def test_every_check_neither_passed_nor_failed_is_pending(self) -> None:
         now = datetime.now(UTC)
         nodes = pr_review_checks.check_nodes(

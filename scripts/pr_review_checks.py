@@ -255,12 +255,15 @@ def limited_since(pr: dict, login: str, since: str) -> bool:
     """True where `login`'s newest output is its rate limit and posted or edited since `since`.
 
     A limit older than the check is one the reviewer has since moved past, so it clears nothing.
-    An edit counts, since CodeRabbit rewrites its one summary comment in place.
+    An edit counts, since CodeRabbit rewrites its one summary comment in place. The newest output
+    is picked as `rate_limited_by` picks it, so the edit read is the limit's own.
     """
     nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
-    stamps = (n.get("updatedAt") or n.get("createdAt") or n.get("submittedAt") for n in nodes)
-    newest = max((s or "" for s in stamps), default="")
-    return rate_limited_by(pr, login) is not None and newest >= since
+    if not nodes or rate_limited_by(pr, login) is None:
+        return False
+    newest = max(nodes, key=lambda n: n.get("createdAt") or n.get("submittedAt") or "")
+    edited = newest.get("updatedAt") or newest.get("createdAt") or newest.get("submittedAt")
+    return (edited or "") >= since
 
 
 def hosted_reviews_running(
