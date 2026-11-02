@@ -494,9 +494,14 @@ def printable(line: str) -> str:
 
 
 def repo_root(path: Path) -> str:
-    """The repository top level containing `path`, or '' when git cannot say."""
+    """The repository top level containing `path`, or '' when git cannot say.
+
+    A hook in a linked worktree inherits `GIT_DIR`, under which git reports whatever directory it
+    starts in as the top level. So the lookup drops the location variables, as provenance does.
+    """
     start = path if path.is_dir() else path.parent
-    return (git_text("-C", str(start), "rev-parse", "--show-toplevel") or "").strip()
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
+    return (git_text("-C", str(start), "rev-parse", "--show-toplevel", env=env) or "").strip()
 
 
 def tracked_paths(root: Path) -> list[Path] | None:
@@ -532,9 +537,16 @@ def shallow_checkout(root: Path) -> bool:
 
 
 def discover(
-    paths: list[str], excludes: tuple[str, ...] = (), root: Path | None = None
+    paths: list[str],
+    excludes: tuple[str, ...] = (),
+    root: Path | None = None,
+    skip_generated: bool = False,
 ) -> list[Path]:
-    """Every authored text file under the paths, scoped by git where git can describe the tree."""
+    """Every authored text file under the paths, scoped by git where git can describe the tree.
+
+    A named file is read even inside a generated tree, unless `skip_generated` drops it there as a
+    wider scan does. A hook naming a commit's paths sets it, so it keeps no copy of the tree list.
+    """
     found: list[tuple[Path, str]] = []
     for raw in paths:
         p = Path(raw)
@@ -542,7 +554,9 @@ def discover(
         anchor = root if root is not None else Path(repo_root(base) or base)
         trees = config_for(str(anchor)).exempt["generated_trees"]
         if p.is_file():
-            found.append((p, repo_key(p, anchor)))
+            key = repo_key(p, anchor)
+            if not skip_generated or trees.isdisjoint(Path(key).parts):
+                found.append((p, key))
             continue
         candidates = tracked_paths(base)
         # Whether git can describe a tree is settled by asking git, never by its answer's size.
@@ -2043,7 +2057,7 @@ def main(argv: list[str] | None = None) -> int:
         return refuse("error-override", path=scan_root / OVERRIDE_NAME, why=exc)
     stand_downs(rules, a, scan_root, in_git)
 
-    files = discover(scan_paths, tuple(a.exclude), scan_root)
+    files = discover(scan_paths, tuple(a.exclude), scan_root, a.skip_generated)
     keys = {f: repo_key(f, scan_root) for f in files}
     if a.list_files:
         for f in files:

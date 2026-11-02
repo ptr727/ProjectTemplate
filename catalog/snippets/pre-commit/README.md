@@ -20,9 +20,8 @@ the Husky.Net shape judges all of them. That set-aside covers tracked files only
 reads the paths `pre-commit` passes it rather than scanning `.`, which keeps an untracked file out
 of the check. Those are the staged paths, or the conflicted ones while a merge is in progress.
 `require_serial` keeps `pre-commit` from running the gate in parallel batches, each of which would
-fetch it again. A path named that way is judged even inside a generated tree. So the
-hook's `exclude` mirrors the gate's default `generated_trees`, and a repo adding to that list adds
-the same names there. The pull request gate reads every line the branch changes against its base. A repo with no Python drops the `ruff-format`,
+fetch it again. `--skip-generated` passes over a named path inside a generated tree, as a whole-tree
+scan does. So the hook reads the gate's `generated_trees` rather than keeping a copy of it. The pull request gate reads every line the branch changes against its base. A repo with no Python drops the `ruff-format`,
 `ruff-check` and `type-check` hooks and keeps the doc gates.
 That is what a Docker, config, or docs repo wires.
 

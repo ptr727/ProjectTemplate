@@ -6938,6 +6938,62 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         (root / "reports" / "audit.md").write_text(self.BAIT, encoding="utf-8")
         self.assertEqual(0, self.run_in(root, "."))
 
+    def test_a_hook_naming_a_staged_file_in_a_generated_tree_passes(self) -> None:
+        """A commit staging a report names it, and the hook must not read what a sweep skips.
+
+        Read as named, the file reports its bait. The same file under `--skip-generated` is dropped,
+        so a hook keeps no copy of `generated_trees` to stay out of that tree.
+        """
+        root = self.repo()
+        (root / "reports" / "run").mkdir(parents=True)
+        (root / "reports" / "run" / "audit.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        named = ("--diff", "HEAD", "--", "reports/run/audit.md")
+        self.assertEqual(1, self.run_in(root, *named))
+        self.assertEqual(0, self.run_in(root, "--skip-generated", *named))
+
+    def test_skip_generated_reads_the_trees_the_repository_declares(self) -> None:
+        """The repository's own `generated_trees` entry is honored, and an authored file is read."""
+        root = self.repo()
+        (root / ".prose-gate.json").write_text('{"generated_trees": ["out"]}\n', encoding="utf-8")
+        (root / "out").mkdir()
+        (root / "out" / "page.md").write_text(self.BAIT, encoding="utf-8")
+        (root / "NEW.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        argv = ("--skip-generated", "--diff", "HEAD", "--")
+        self.assertEqual(0, self.run_in(root, *argv, "out/page.md"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(1, self.run_in(root, *argv, "out/page.md", "NEW.md"))
+        self.assertIn("NEW.md:3: dupword", out.getvalue())
+        self.assertNotIn("out/page.md", out.getvalue())
+
+    def test_a_hook_naming_its_staged_paths_leaves_an_untracked_file_unread(self) -> None:
+        """An untracked scratch file refused every commit while the hook scanned the whole tree."""
+        root = self.repo()
+        (root / "note.md").write_text(self.BAIT, encoding="utf-8")
+        (root / "DOC.md").write_text("# Doc\n\nA clean line, edited.\n", encoding="utf-8")
+        self.git(root, "add", "DOC.md")
+        self.assertEqual(1, self.run_in(root, ".", "--diff", "HEAD"))
+        self.assertEqual(0, self.run_in(root, "--skip-generated", "--diff", "HEAD", "--", "DOC.md"))
+
+    def test_a_hook_in_a_linked_worktree_names_paths_from_several_directories(self) -> None:
+        """Git hands such a hook `GIT_DIR`, and under it each named directory read as its own top.
+
+        So two staged files in two directories were refused as spanning two repositories.
+        """
+        root = self.repo()
+        (root / "a").mkdir()
+        (root / "b").mkdir()
+        (root / "a" / "one.md").write_text(self.BAIT, encoding="utf-8")
+        (root / "b" / "two.md").write_text("# Two\n\nA clean line.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(root / ".git")}):
+            self.assertEqual(str(root.resolve()), prose_lint.repo_root(root / "a" / "one.md"))
+            code = self.run_in(root, "--diff", "HEAD", "--", "a/one.md", "b/two.md")
+        self.assertEqual(1, code)
+        self.assertNotIn("more than one repository", self.err.getvalue())
+
     def test_a_binary_file_is_not_read_because_it_is_untracked(self) -> None:
         """The text test decides what the rules can read, and it is applied to both sources."""
         root = self.repo()

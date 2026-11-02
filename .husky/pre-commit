@@ -42,14 +42,21 @@ fi
 # The base is HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
 # A rule is applied as a file is next edited rather than swept across the tree.
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.15.
-# The scope is the working tree rather than the index.
-# A partially staged file is therefore judged on all of its edits, not only the staged ones.
+# The gate reads the paths this commit stages, so an unrelated untracked file cannot refuse it.
+# It reads their working-tree content, so a partially staged file is judged on all of its edits.
+# A path that is no longer a file is dropped, since the gate refuses a submodule or a deleted path.
+# An empty list skips the gate, which given no path would scan the whole tree.
+# `--skip-generated` passes over a staged file in a generated tree, as a whole-tree scan does.
 # The pull request gate reads every line the branch changes against its base.
 base=HEAD
 if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
     base=MERGE_HEAD
 fi
-uv run --no-project --script .github/actions/prose-gate/prose_lint.py . --diff "$base"
+# shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
+git diff --cached --name-only --diff-filter=ACMR -z |
+    xargs -0 sh -c 'for p do if [ -f "$p" ]; then printf "%s\0" "$p"; fi; done' sh |
+    xargs -0 -r uv run --no-project --script .github/actions/prose-gate/prose_lint.py \
+        --skip-generated --diff "$base" --
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.
