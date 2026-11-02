@@ -3788,6 +3788,19 @@ class SecretStemCase(unittest.TestCase):
                 [".vscode/launch.json"],
             ),
             (
+                "an editor comment line is no path, and an anchored ignore line takes the same refusals",
+                {
+                    ".devcontainer/devcontainer.json": (
+                        '{\n  // "mounts": ["source=${localWorkspaceFolder}/secrets/Api_Key,target=/k,type=bind"]\n}\n'
+                    ),
+                    ".vscode/launch.json": '{\n  // "envFile": "${workspaceFolder}/secrets/app.env"\n}\n',
+                    ".gitignore": "legacy/secrets/\n/tools/secrets\n",
+                    "tools/secrets": "",
+                },
+                [],
+                [],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (

@@ -658,7 +658,7 @@ def named_secret_signals(tree, read_text, directories, holding):
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text. A compose file that does not parse, such as a template,
-    is no signal.
+    is no signal, and neither is an editor file's // comment line.
     """
     bare, named, unread = set(), {}, []
     moved = any(".secrets" in path.split("/")[:-1] for path in tree)
@@ -682,10 +682,12 @@ def named_secret_signals(tree, read_text, directories, holding):
                     continue
                 folder, anchored = found
                 if anchored:
-                    code = posixpath.join(directory, folder) in holding
+                    signal = secret_path_target(tree, directories, holding, directory, folder, None)
                 else:
-                    code = any(not directory or h.startswith(f"{directory}/") for h in holding)
-                if not code:
+                    signal = not any(
+                        not directory or h.startswith(f"{directory}/") for h in holding
+                    )
+                if signal:
                     bare.add(path)
         else:
             if compose:
@@ -694,7 +696,10 @@ def named_secret_signals(tree, read_text, directories, holding):
                 found = [SECRET_PATH.fullmatch(p.strip()) for p in compose_host_paths(document)]
             else:
                 root = editor.group(1).rstrip("/")
-                found = list(SECRET_REFERENCE.finditer(text.replace("\\\\", "/")))
+                live = "\n".join(
+                    row for row in text.splitlines() if not row.lstrip().startswith("//")
+                )
+                found = list(SECRET_REFERENCE.finditer(live.replace("\\\\", "/")))
             for match in filter(None, found):
                 written, folder, rest = match.group(1, 2, 3)
                 target = secret_path_target(tree, directories, holding, root, written, rest)
