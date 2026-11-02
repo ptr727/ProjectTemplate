@@ -9,7 +9,7 @@ description: >-
   backlog looks small enough to work by hand, because two agents editing one prose-heavy file
   conflict late. Drives only the session's own repository, never a fleet-wide sweep. Attended, it
   never merges main, which is merge-and-release's. Also use it whenever the maintainer is away, or
-  asked to run unattended or overnight or to work all that needs no decision: its away mode parks a
+  asked to run unattended or overnight or to work all that needs no decision. Its away mode parks a
   group meeting a question and merges only as far as the scope named at invocation. Run
   `decision-triage` first, while the maintainer is present.
 ---
