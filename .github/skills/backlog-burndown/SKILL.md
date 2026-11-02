@@ -275,10 +275,10 @@ for, and it binds harder than any throughput target.
   abandons its branch per "Cleanup Is the Orchestrator's". Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
   branch reads to every later round as a live claim. Where the grown set enters the hub's
-  `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue,
-  as though ranking it now. A group that hold would rank continues only on a brief carrying the
-  no-merge line from "What Invoking This Skill Authorizes". A group it would hold is stopped for
-  the maintainer per "Raising a Blocked Question". **Update the claim comment whenever the
+  `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue.
+  Attended, a group whose issue has an approval recorded continues only on a brief carrying the
+  no-merge line from "What Invoking This Skill Authorizes". Every other such group, and each one in
+  an away-mode run, is stopped for the maintainer per "Raising a Blocked Question". **Update the claim comment whenever the
   adjudication changes what a group holds**, in either direction. Otherwise the durable record
   drifts from the real claim it exists to report. A group told to abandon its branch keeps its claim
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
