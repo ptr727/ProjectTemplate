@@ -192,6 +192,14 @@ INTERFACE_CASES = [
         1,
     ),
     (
+        "two literal check names on a workflow a dispatch also triggers, one finding each",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK
+        + PR_CHECK.replace("check-workflow-status:", "extra:"),
+        PR_CONTRACT,
+        2,
+    ),
+    (
         "an expression falling back to the check name beside a gated one",
         PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
         + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
