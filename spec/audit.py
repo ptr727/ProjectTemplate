@@ -537,12 +537,21 @@ def named_secret_signals(tree, read_text):
     The files read are each .gitignore and each compose or editor config file. A path they name is
     repo-relative, against a compose file's own directory or the editor's workspace root. So an
     absolute one such as /run/secrets/<name>, a container mount point, is no signal. Neither is a
-    path to a tracked file, which shows its directory is not ignored.
+    path into a directory tracking more than its own files and templates, which is not ignored.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
-    named secret file the tree lacks whose name breaks the rule, with the file naming it. The third
+    named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text.
     """
-    bare, named, unread = set(), set(), []
+    bare, named, unread = set(), {}, []
+    holding = set()
+    for path in tree:
+        directory, name = posixpath.split(path)
+        segments = path.split("/")
+        for at, segment in enumerate(segments[:-1]):
+            folder = "/".join(segments[: at + 1])
+            own = name in SECRETS_DIRECTORY_EXEMPT or name.endswith(ENV_SECRET_TEMPLATE)
+            if segment in ("secrets", ".secrets") and (folder != directory or not own):
+                holding.add(folder)
     for path in sorted(tree):
         directory, name = posixpath.split(path)
         gitignore = name == ".gitignore"
@@ -561,23 +570,24 @@ def named_secret_signals(tree, read_text):
             if editor:
                 text = text.replace("\\\\", "/")
             for match in SECRET_REFERENCE.finditer(text):
-                written, folder, rest = match.groups()
+                written, folder, rest = (group.rstrip(".") for group in match.groups())
                 resolved = posixpath.normpath(posixpath.join(root, written))
-                if resolved.startswith("../") or resolved in tree:
+                within = posixpath.normpath(posixpath.join(root, written[: -len(rest) - 1]))
+                if within.startswith("../") or within in holding:
                     continue
                 if folder == "secrets":
                     bare.add(path)
-                rest = rest.rstrip(".")
                 if (
                     not SECRET_FILE_NAME.fullmatch(rest)
                     or rest in SECRETS_DIRECTORY_EXEMPT
-                    or resolved.rstrip(".") + ENV_SECRET_TEMPLATE in tree
+                    or resolved in tree
+                    or resolved + ENV_SECRET_TEMPLATE in tree
                 ):
                     continue
-                written = written.rstrip(".")
                 if secret_name_breaks(rest, True):
-                    named.add(f"{written} (named in {path})")
-    return sorted(bare), sorted(named), unread
+                    named.setdefault(resolved, set()).add(path)
+    listed = [f"{p} (named in {', '.join(sorted(f))})" for p, f in sorted(named.items())]
+    return sorted(bare), listed, unread
 
 
 def secret_stem_findings(tree, read_text=None):

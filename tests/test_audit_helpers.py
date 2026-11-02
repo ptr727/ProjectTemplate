@@ -3775,17 +3775,32 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a compose file under .devcontainer resolves against its own directory",
                 {".devcontainer/docker-compose.yml": "file: ../secrets/app_token.txt\n"},
-                ["../secrets/app_token.txt (named in .devcontainer/docker-compose.yml)"],
+                ["secrets/app_token.txt (named in .devcontainer/docker-compose.yml)"],
                 [".devcontainer/docker-compose.yml"],
             ),
             (
-                "a path to a tracked file is not a bare directory",
+                "a path into a directory tracking code is not a bare directory",
                 {
-                    ".vscode/launch.json": '{"program": "${workspaceFolder}/src/app/secrets/manager.py"}\n',
+                    ".vscode/launch.json": (
+                        '{"program": "${workspaceFolder}/src/app/secrets/manager.py",'
+                        ' "cwd": "${workspaceFolder}/src/app/secrets/tools"}\n'
+                    ),
+                    ".vscode/settings.json": '{"files.exclude": {"src/app/secrets/*.pyc": true}}\n',
+                    "compose.yml": "# see src/app/secrets/manager.py.\n",
                     "src/app/secrets/manager.py": "",
+                    "src/app/secrets/tools/run.py": "",
                 },
                 [],
                 [],
+            ),
+            (
+                "one untracked name two files mention counts once",
+                {
+                    "compose.yml": "file: ./secrets/App_Token\n",
+                    ".vscode/launch.json": '["${workspaceFolder}/secrets/App_Token"]\n',
+                },
+                ["secrets/App_Token (named in .vscode/launch.json, compose.yml)"],
+                [".vscode/launch.json", "compose.yml"],
             ),
             (
                 "a short-syntax mount stops at its colon, and punctuation, interpolation, and a glob are no name",
@@ -3812,7 +3827,7 @@ class SecretStemCase(unittest.TestCase):
                 },
                 [
                     ".secrets/Api_Key (named in .devcontainer.json)",
-                    ".secrets/Mail_Token (named in deploy/compose.yaml)",
+                    "deploy/.secrets/Mail_Token (named in deploy/compose.yaml)",
                     ".secrets/Web_Token (named in .vscode/launch.json)",
                 ],
                 [".devcontainer/app/devcontainer.json"],
