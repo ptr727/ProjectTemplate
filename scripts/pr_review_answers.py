@@ -18,10 +18,17 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 import pr_review_copilot as adapter
-from pr_review_checks import MERGE_UNGATED
+from pr_review_checks import (
+    CHECK_GRACE,
+    CHECK_STALL,
+    MERGE_UNGATED,
+    check_nodes,
+    hosted_reviews_running,
+)
 from pr_review_rounds import (
     CARRIED_PARTIAL,
     CODERABBIT_LOGIN,
@@ -234,6 +241,11 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
         found.append(("REVIEWER_LOGIN_DRIFT", f"{drifted[0]}, which only a login change clears"))
     if (state := pr.get("mergeStateStatus")) not in MERGE_UNGATED:
         found.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not a finished one"))
+    now = datetime.now(UTC)
+    if running := hosted_reviews_running(pr, check_nodes(pr), now, CHECK_GRACE, CHECK_STALL):
+        found.append(
+            ("CHECKS_PENDING", f"a hosted review of the head is running: {', '.join(running)}")
+        )
     return found
 
 
@@ -275,15 +287,19 @@ def unthreaded_lines(pr: dict, owner: str, repo: str, num: int) -> list[str]:
         if answer_of(item, acks):
             lines.append(f"  {label}")
             continue
-        own = (
-            "spot-verify Qodo's own badge against `gh pr diff` rather than trusting it outright, "
-            if item.kind == "qodo_open"
-            else ""
-        )
-        lines.append(
-            f"  {label}: no thread to resolve, {own}answer it in the PR conversation quoting the "
-            f"finding, with {hint}"
-        )
+        if item.kind == "qodo_open":
+            number = m[1] if (m := re.match(r"(\d+)\.", item.text)) else "<number>"
+            lines.append(
+                f"  {label}: only Qodo's own badge clears it on Qodo's side, and resolving its thread "
+                "or answering in the conversation adds none. A fixed finding Qodo marks Resolved "
+                f"itself. For a disproved one, answer with {hint}, its body mentioning Qodo and "
+                f"asking it to dismiss finding {number} by that number, with the reason"
+            )
+        else:
+            lines.append(
+                f"  {label}: no thread to resolve, answer it in the PR conversation quoting the "
+                f"finding, with {hint}"
+            )
         lines += [f"    {ln}" for ln in item.text.splitlines() if ln.strip()]
     return lines
 

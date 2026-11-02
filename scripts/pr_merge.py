@@ -25,11 +25,13 @@ import argparse
 import contextlib
 import io
 import sys
+from datetime import UTC, datetime
 from typing import TextIO
 
 import pr_cleanup
 import pr_review as core
 import pr_review_answers as answers
+from pr_review_checks import check_nodes, checks_pending
 
 GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
@@ -113,6 +115,16 @@ def merge_call(target: str, num: int, head: str) -> int | None:
     return None if unrun else proc.returncode
 
 
+def pending(owner: str, repo: str, num: int) -> str:
+    """`pending=` and each check on the head that has neither passed nor failed, from a fresh read."""
+    try:
+        nodes = check_nodes(core.gql(core.Q_HELD, owner, repo, num))
+    except SystemExit as exc:
+        return f"pending=UNREAD the checks read did not answer: {exc}"
+    names = checks_pending(nodes, datetime.now(UTC), core.CHECK_GRACE, core.CHECK_STALL)
+    return f"pending={', '.join(names) or 'none'}"
+
+
 def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
     """`gated_merge`, then one `next=<route>` line its status lines decide, and its exit."""
     tee = Tee(sys.stdout)
@@ -127,8 +139,9 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
 
     The gate's short `GATE_TIMEOUT` absorbs a merge state still settling where `wait` polls checks,
     on a head an attested local pass covers. A failed read inside
-    the gate ends `wait` with a message, which reads as unread here rather than refused. A merge
-    that landed can read OPEN for a moment, so the read back is retried on `cleanup`'s delays.
+    the gate ends `wait` with a message, which reads as unread here rather than refused. A gate
+    not met prints `pending=` with each check still running, so a refusal handed on names them. A
+    merge that landed can read OPEN for a moment, so the read back is retried on `cleanup`'s delays.
     """
     if (refused := pr_cleanup.cleanup_scope(owner, repo, "merged")) is not None:
         return refused
@@ -155,6 +168,7 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
         return 2
     if code != 0:
         print(f"note: nothing was merged, since the Merge Gate read above exited {code}")
+        print(pending(owner, repo, num))
         return code
     if after is None:
         return 1
@@ -167,6 +181,7 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
     for status, why in unmet:
         print(f"status={status} nothing was merged into {target} #{num}: {why}")
     if unmet:
+        print(pending(owner, repo, num))
         return 1
     answered = merge_call(target, num, head)
     try:

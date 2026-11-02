@@ -31,6 +31,7 @@ MOVED = "b" * 40
 SQUASH = "c" * 40
 REAL_GATE = pr_merge.gate
 REAL_UNMET = pr_merge.unmet_items
+REAL_PENDING = pr_merge.pending
 
 
 def target(**overrides: object) -> dict:
@@ -70,6 +71,9 @@ class MergeCase(unittest.TestCase):
         self.gate = self.enterContext(mock.patch.object(pr_merge, "gate", return_value=0))
         self.unmet = self.enterContext(
             mock.patch.object(pr_merge, "unmet_items", return_value=(HEAD, []))
+        )
+        self.pending = self.enterContext(
+            mock.patch.object(pr_merge, "pending", return_value="pending=none")
         )
         self.cleanup = self.enterContext(
             mock.patch.object(pr_merge.pr_cleanup, "cleanup", return_value=0)
@@ -209,6 +213,7 @@ class TestGate(MergeCase):
                 self.gate.return_value = code
                 self.assertEqual(code, self.run_merge(target()))
                 self.assertIn(f"Merge Gate read above exited {code}", self.out.getvalue())
+                self.assertIn("pending=none\nnext=", self.out.getvalue())
                 self.assert_not_merged()
 
     def test_a_gate_read_that_ends_the_run_is_unread(self) -> None:
@@ -667,6 +672,36 @@ class TestUnmetItems(MergeCase):
                 self.assertFalse(any(item.startswith(unwanted) for item in unmet), unmet)
                 if want is not None:
                     self.assertTrue(any(item.startswith(want) for item in unmet), unmet)
+
+    def test_a_hosted_review_still_running_on_the_head_is_unmet(self) -> None:
+        """An UNSTABLE merge passes the state item, so the running review is read on its own."""
+        reviewing = fixtures.status_context("CodeRabbit", "PENDING")
+        self.assertEqual(
+            ["CHECKS_PENDING a hosted review of the head is running: CodeRabbit"],
+            self.unmet_on(self.clean(merge="UNSTABLE", checks=[reviewing])),
+        )
+        limited = fixtures.comment(
+            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN, body=fixtures.RATE_LIMITED_COMMENT
+        )
+        quiet = self.clean(merge="UNSTABLE", checks=[reviewing], comments=[limited])
+        self.assertEqual([], self.unmet_on(quiet))
+
+    def test_an_unmet_item_prints_each_check_still_pending(self) -> None:
+        self.unmet.return_value = (HEAD, [("UNTHREADED_FINDINGS", "qodo_open=1")])
+        self.pending.return_value = "pending=CodeRabbit"
+        self.assertEqual(1, self.run_merge(target(), target()))
+        self.assertIn("qodo_open=1\npending=CodeRabbit\nnext=redrive", self.out.getvalue())
+        self.assert_not_merged()
+
+    def test_pending_names_each_check_neither_passed_nor_failed_or_says_it_is_unread(self) -> None:
+        checks = [fixtures.status_context("CodeRabbit", "PENDING"), fixtures.check(name="ok")]
+        with mock.patch.object(pr_review, "gql", return_value=fixtures.payload([], checks=checks)):
+            self.assertEqual("pending=CodeRabbit", REAL_PENDING("example", "repo", 123))
+        with mock.patch.object(pr_review, "gql", return_value=fixtures.payload([], checks=[])):
+            self.assertEqual("pending=none", REAL_PENDING("example", "repo", 123))
+        with mock.patch.object(pr_review, "gql", side_effect=SystemExit("gh graphql failed")):
+            got = REAL_PENDING("example", "repo", 123)
+        self.assertEqual("pending=UNREAD the checks read did not answer: gh graphql failed", got)
 
     def test_a_pending_review_request_is_unmet(self) -> None:
         self.assertEqual(

@@ -167,10 +167,11 @@ Subcommands
            required check unregistered only under unread rules, a `CHECKS TRUNCATED` rollup, a
            DRAFT merge, or a pull request not open.
            30 = still pending at the timeout. On a held head it is any hold
-           `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
-           open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
-           says an unmet required check may sit in its unread part. It is also a round past
-           --min-rounds not yet landed.
+           `status=CHECKS_PENDING` names, a required check still settling, a workflow run still
+           open, and a CodeRabbit or Qodo check still settling on any merge state among them, the
+           last unless that reviewer's newest output is its rate limit. Where the rollup holds a
+           type this cannot read, a BLOCKED hold's note says an unmet required check may sit in
+           its unread part. It is also a round past --min-rounds not yet landed.
            40 = no Copilot review covers the head, in any of these cases:
            - The reviewer answered outside a formal review.
            - The request returned success and recorded nothing on the pull request.
@@ -252,6 +253,7 @@ from pr_review_checks import (
     checks_settling,
     checks_stuck,
     held_checks_open,
+    hosted_reviews_running,
     runs_open,
 )
 from pr_review_copilot import has_prose
@@ -389,7 +391,7 @@ HELD_FIELDS = """
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
-        ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
+        ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) creator{ login } }
       }}}
       checkSuites(last:50){ nodes{ databaseId status app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
     }}}
@@ -1759,6 +1761,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             )
             return 46
         runs = runs_open(final)
+        hosted = hosted_reviews_running(final, checks, now, a.check_grace, a.check_stall)
         if covered and held_checks_open(
             final,
             checks,
@@ -1770,11 +1773,12 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
                 "timeout a check had not concluded, none this can read had posted, a workflow run on the head "
-                "had not completed, a check the base branch requires had not registered or came "
-                "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
-                "wait again, or read the checks above"
+                "had not completed, a hosted reviewer was still reviewing it, a check the base "
+                "branch requires had not registered or came from another app, or the merge was "
+                "still UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
                 + _unmet_note(final, required_for(final, owner, repo), checks)
                 + (f" (not completed: {', '.join(runs)})" if runs else "")
+                + (f" (reviewing: {', '.join(hosted)})" if hosted else "")
             )
             return 30
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.

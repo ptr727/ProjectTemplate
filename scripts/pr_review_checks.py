@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pr_review_rounds import commit_oid, page_flag
+from pr_review_rounds import CODERABBIT_LOGIN, QODO_LOGIN, commit_oid, page_flag, rate_limited_by
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
 # A StatusContext's PENDING means the opposite, so `check_nodes` translates it away.
@@ -23,6 +23,8 @@ NOT_POSTED = frozenset({"EXPECTED"})
 CHECK_OK = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 
 MERGE_UNGATED = frozenset({"CLEAN", "UNSTABLE", "HAS_HOOKS"})
+
+HOSTED_REVIEWERS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
 
 WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 
@@ -64,8 +66,9 @@ def check_nodes(pr: dict) -> list[dict]:
     """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
 
     A readable node also carries `required`, false only where the rollup marks `isRequired: false`,
-    and a CheckRun carries `app_id`, matched against a rule's `integration_id`. A node of an
-    unrecognized union member has empty values and an `unreadable` key naming its type.
+    and `poster`, the app or login that posted it. A CheckRun carries `app_id`, matched against a
+    rule's `integration_id`. A node of an unrecognized union member has empty values and an
+    `unreadable` key naming its type.
 
     A CheckRun and a StatusContext spell every field differently, so both are normalized here. Runs
     group by workflow and name, or by app and name where the suite has no workflow run. An
@@ -120,6 +123,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "since": n.get("startedAt") or "",
                     "required": n.get("isRequired") is not False,
                     "app_id": (suite.get("app") or {}).get("databaseId"),
+                    "poster": (suite.get("app") or {}).get("slug") or "",
                     "stale": n.get("status") == "IN_PROGRESS"
                     and suite.get("status") == "COMPLETED",
                     "run": (suite.get("workflowRun") or {}).get("databaseId"),
@@ -135,6 +139,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "conclusion": state,
                     "since": n.get("createdAt") or "",
                     "required": n.get("isRequired") is not False,
+                    "poster": (n.get("creator") or {}).get("login") or "",
                 }
             )
         else:
@@ -228,6 +233,36 @@ def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float
     ]
 
 
+def checks_pending(nodes: list[dict], now: datetime, grace: float, stall: float) -> list[str]:
+    """The name of each check on the head that has neither passed nor failed, stuck ones included."""
+    return [
+        n.get("name") or "unnamed"
+        for n in nodes
+        if not n.get("unreadable")
+        and (n.get("conclusion") or "") not in CHECK_OK
+        and check_shape(n, now, grace, stall) != "FAILED"
+    ]
+
+
+def hosted_reviews_running(
+    pr: dict, nodes: list[dict], now: datetime, grace: float, stall: float
+) -> list[str]:
+    """The name of each hosted reviewer's check still settling on the head, so its review is running.
+
+    A check is a reviewer's where that reviewer's app or login posted it, or where its name is the
+    reviewer's vocabulary name. A reviewer whose newest output is its rate limit posts no review,
+    so its check holds nothing.
+    """
+    return [
+        n.get("name") or login
+        for n in checks_settling(nodes, now, grace, stall)
+        for name, login in HOSTED_REVIEWERS.items()
+        if (n.get("poster") or "").removesuffix("[bot]") == login
+        or (n.get("name") or "").casefold() == name
+        if rate_limited_by(pr, login) is None
+    ]
+
+
 def held_checks_open(
     pr: dict,
     nodes: list[dict],
@@ -241,7 +276,8 @@ def held_checks_open(
     A BLOCKED merge with a stuck required check has its exit 44 decided already. A check running
     long or gated is the exception, since either can still clear. Short of that, a workflow run on the
     head that has not completed holds, a gated one included. A run's later jobs enter the rollup
-    only as their `needs:` finish, so a green rollup proves nothing while one is open. A CLEAN,
+    only as their `needs:` finish, so a green rollup proves nothing while one is open. A hosted
+    reviewer's check still settling holds next, since its findings owe the gate. A CLEAN,
     UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
     hold it. Otherwise a required check still settling holds, as does any settling check while no
     required check has posted. A rollup with no check it can read holds while the merge
@@ -261,7 +297,7 @@ def held_checks_open(
         for n, shape in checks_stuck(nodes, now, grace, stall)
     ):
         return False
-    if runs_open(pr):
+    if runs_open(pr) or hosted_reviews_running(pr, nodes, now, grace, stall):
         return True
     if merge in MERGE_UNGATED:
         return False
