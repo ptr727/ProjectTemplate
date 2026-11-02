@@ -2847,12 +2847,6 @@ class TestNullNodes(unittest.TestCase):
         pr["comments"]["nodes"].insert(0, None)
         return pr
 
-    def test_null_node_names_the_connection_holding_one(self) -> None:
-        pr = payload([review()], [thread("T1")])
-        self.assertIsNone(pr_review_rounds.null_node(pr))
-        pr["reviewThreads"]["nodes"][0]["comments"]["nodes"].append(None)
-        self.assertEqual("reviewThreads.nodes.comments", pr_review_rounds.null_node(pr))
-
     def test_a_query_is_read_again_past_a_null_node(self) -> None:
         clean = payload([review()], comments=[comment(at=EARLY)])
         reads = [self.body(self.holding_null()), self.body(clean)]

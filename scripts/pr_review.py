@@ -280,7 +280,6 @@ from pr_review_rounds import (
     newest_first,
     newest_of,
     newest_request_event,
-    null_node,
     open_threads,
     polled_past,
     possible_quota,
@@ -495,25 +494,25 @@ def gh_graphql(query: str, **variables) -> dict:
 
     The transport raises `GraphQLError` and never exits, so a failed read prints its detail and
     ends the run at exit 1. Only an error set made of `workflowRun` paths is tolerated. A response
-    holding a null node ends the run too, and only that case is retried first. A query is read
-    again on `READ_RETRY_DELAYS`, and a mutation is never sent twice.
+    holding a null node ends the run too, after a query is read again on `READ_RETRY_DELAYS`. A
+    mutation is never sent twice.
     """
 
-    def send() -> shared.Response:
+    def send() -> shared.Response | shared.NullNodeError:
         try:
             return shared.request(query, variables, tolerate=_is_workflow_run_error)
+        except shared.NullNodeError as exc:
+            return exc
         except shared.GraphQLError as exc:
             sys.stderr.write(exc.detail)
             raise SystemExit(str(exc)) from exc
 
     reads = query.lstrip().startswith("query")
     delays = READ_RETRY_DELAYS if reads else ()
-    response = backoff(send(), send, lambda r: null_node(r.data) is not None, delays=delays)
-    if (where := null_node(response.data)) is not None:
-        raise SystemExit(
-            f"gh graphql returned a null node GitHub could not resolve under {where}, so the "
-            "response is unread" + ("" if reads else ", though the write it answers was sent")
-        )
+    response = backoff(send(), send, lambda r: isinstance(r, shared.NullNodeError), delays=delays)
+    if isinstance(response, shared.NullNodeError):
+        sent = "" if reads else ", though the write it answers was sent"
+        raise SystemExit(f"{response}, so the response is unread{sent}")
     data = response.data
     if response.tolerated:
         sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")

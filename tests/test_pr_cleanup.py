@@ -309,6 +309,7 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
             {"head_answer": {"heads": {"pageInfo": page, "nodes": ["#9"]}}},
             {"head_answer": {"heads": {"pageInfo": {"hasNextPage": True}, "nodes": []}}},
             {"base_answer": bad},
+            {"base_answer": pr_cleanup.shared.NullNodeError("repository.bases.nodes")},
             {"base_answer": {"bases": {"totalCount": "0", "nodes": []}}},
         ]
         for answer in malformed:
@@ -1017,6 +1018,7 @@ class TestCleanupSweep(LocalCleanupCase):
         super().setUp()
         self.merged_prs: dict[str, list[dict]] = {}
         self.failing: set[str] = set()
+        self.failure = pr_cleanup.shared.GraphQLError("gh graphql reported errors")
 
     def age(self, path: str, hours: float) -> None:
         """Set every file the sweep reads the age from to `hours` ago."""
@@ -1055,7 +1057,7 @@ class TestCleanupSweep(LocalCleanupCase):
                 return pr_cleanup.shared.Response({"repository": head}, [])
             if query == pr_cleanup.Q_SWEEP_MERGED:
                 if variables["b"] in self.failing:
-                    raise pr_cleanup.shared.GraphQLError("gh graphql reported errors")
+                    raise self.failure
                 nodes = self.merged_prs.get(variables["b"], [])
                 page = {"merged": {"totalCount": len(nodes), "nodes": nodes}}
                 return pr_cleanup.shared.Response({"repository": page}, [])
@@ -1165,6 +1167,19 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertEqual(2, self.sweep("--apply"))
         out = self.out.getvalue()
         self.assertLess(out.index("unread worktree"), out.index("removed worktree"))
+        self.assertNotIn(made["merged"], self.listed())
+        self.assertIn(early, self.listed())
+
+    def test_a_null_merged_node_reads_as_unread_and_exits_2(self) -> None:
+        made = self.scenario()
+        early, _ = self.worktree("aa-failing")
+        self.age(early, 48)
+        self.failing.add("aa-failing")
+        self.failure = pr_cleanup.shared.NullNodeError("repository.merged.nodes")
+        tip = run_git(self.primary, "rev-parse", CLEANUP_BRANCH)
+        self.wire_sweep(remote_tip=tip)
+        self.assertEqual(2, self.sweep("--apply"))
+        self.assertIn("unread worktree", self.out.getvalue())
         self.assertNotIn(made["merged"], self.listed())
         self.assertIn(early, self.listed())
 
