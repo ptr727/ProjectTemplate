@@ -7,11 +7,11 @@ description: >-
   asking, ask the user anything or offer more work (a closing "want me to...?" included), or file a
   question as an issue instead of asking it. Use it also whenever blocked on a decision or
   authorization only the user can give, writing a handoff, waiting on a fix in another repository,
-  or holding a lesson from an incident or a repeated correction that a future session must honor.
-  Not general background, which AGENTS.md "Context and Delegation Discipline" already is. Where a
-  sibling skill owns the moment, it wins: git-commit-conventions for committing, pr-review-conduct
-  for review and merge claims, local-strict-review for the passes a push owes, comment-and-doc-style
-  for prose.
+  or holding a lesson from an incident, a wrong answer, or a repeated correction that a future
+  session must honor. Not general background, which AGENTS.md "Context and Delegation Discipline"
+  already is. Where a sibling skill owns the moment, it wins: git-commit-conventions for committing,
+  pr-review-conduct for review and merge claims, local-strict-review for the passes a push owes,
+  comment-and-doc-style for prose.
 ---
 
 # Agent Conduct

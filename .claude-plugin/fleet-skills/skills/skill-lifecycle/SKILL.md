@@ -1,17 +1,17 @@
 ---
 name: skill-lifecycle
 description: >-
-  Governs the lifecycle of the fleet's own skills in ptr727/ProjectTemplate: creating, changing,
-  splitting, and retiring a skill under .agents/skills/, the source-versus-generated split with
-  .github/skills/ and .claude-plugin/, the regenerate and --check semantics of scripts/build_dist.py
-  and the include regions it fills from a rule's home, the install and stamp semantics of
-  scripts/skills_install.py, the doc-packaging pattern, and the trigger-description conventions and
-  length cap. Use this whenever about to create, edit, move, or delete anything under
-  .agents/skills/, .github/skills/, or .claude-plugin/, whenever packaging a doc or a doc section as
-  a skill, and whenever deciding whether a topic deserves a skill at all. Triggers even when the
-  edit looks trivial, such as fixing a typo in one SKILL.md, because a source change with no
-  build_dist.py run desyncs the generated trees, and CI fails the pull request on that. Hub-context
-  only, since .agents/skills/ exists only in the hub.
+  Governs the lifecycle of the fleet's own skills in ptr727/ProjectTemplate. It covers creating,
+  changing, splitting, and retiring a skill under .agents/skills/, and the source-versus-generated
+  split with .github/skills/ and .claude-plugin/. It covers scripts/build_dist.py's regenerate and
+  --check semantics and the include regions it fills from a rule's home. It covers
+  scripts/skills_install.py's install and stamp semantics, the doc-packaging pattern, and the
+  trigger-description conventions and length cap. Use this whenever about to create, edit, move, or
+  delete anything under .agents/skills/, .github/skills/, or .claude-plugin/. Use it also whenever
+  packaging a doc or a doc section as a skill, and whenever deciding whether a topic deserves a
+  skill. Triggers even when the edit looks trivial, such as fixing a typo in one SKILL.md. A source
+  change with no build_dist.py run desyncs the generated trees, and CI fails the pull request.
+  Hub-context only, since .agents/skills/ exists only in the hub.
 ---
 
 # Skill Lifecycle

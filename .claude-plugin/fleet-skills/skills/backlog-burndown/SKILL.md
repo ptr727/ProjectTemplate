@@ -4,14 +4,14 @@ description: >-
   Burns a ptr727/ProjectTemplate fleet repository's issue backlog down by rounds: rank the open
   issues, group them so no two groups touch the same file, dispatch one subagent per group to drive
   its own feature -> develop PR, open at most one develop -> main promotion PR per round, then
-  re-rank. Use this whenever asked to work, burn down, clear, or cull the backlog, or to run issues
-  in parallel until gone, rather than to fix one named issue. Triggers even when the backlog looks
-  small enough to work by hand, because two agents editing one prose-heavy file conflict late.
-  Drives only the session's own repository, never a fleet-wide sweep. Attended, it never merges
-  main, which is merge-and-release's. Also use it whenever the maintainer is away, or asked to run
-  unattended or overnight or to work all that needs no decision: its away mode parks a group meeting
-  a question and merges only as far as the scope named at invocation. Run `decision-triage` first,
-  while the maintainer is present.
+  re-rank. Use this whenever asked to work, burn down, clear, resolve, or cull the backlog, or to
+  run issues in parallel until gone, rather than to fix one named issue. Triggers even when the
+  backlog looks small enough to work by hand, because two agents editing one prose-heavy file
+  conflict late. Drives only the session's own repository, never a fleet-wide sweep. Attended, it
+  never merges main, which is merge-and-release's. Also use it whenever the maintainer is away, or
+  asked to run unattended or overnight or to work all that needs no decision: its away mode parks a
+  group meeting a question and merges only as far as the scope named at invocation. Run
+  `decision-triage` first, while the maintainer is present.
 ---
 
 # Backlog Burndown
