@@ -2986,7 +2986,8 @@ class IntentAdvisoryCase(unittest.TestCase):
     def test_a_copy_matching_the_hub_file_at_path_is_current(self) -> None:
         unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
         texts = {"DOC.md": "the doc", "widget.json": "same"}
-        for down, want in (("same", None), ("x", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))):
+        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        for down, want in (("same", None), ("x", trailing)):
             with self.subTest(down=down), self.patched(texts):
                 got = audit.intent_trail("o/r", "main", "widget.json", unit, down, "widget.json")
             self.assertEqual(got, want)

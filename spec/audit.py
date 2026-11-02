@@ -274,7 +274,7 @@ def quote_note(note):
 
 
 def spanned_notes(entry, cid, pattern, what):
-    """`(findings, [(note, matches)])` over the driftNotes naming (cid), each note's `pattern` matches.
+    """`(findings, [matches])` over the driftNotes naming (cid), one list of `pattern` matches per note.
 
     A note matching nothing clears nothing, so it is reported, `what` naming the span it lacks.
     """
@@ -291,7 +291,7 @@ def spanned_notes(entry, cid, pattern, what):
                     ),
                 )
             )
-        spanned.append((note, matches))
+        spanned.append(matches)
     return findings, spanned
 
 
@@ -468,7 +468,7 @@ def file_naming_findings(entry, blobs, read_text):
     findings, spanned = spanned_notes(entry, FILE_NAMING_ID, CODE_SPAN, "path")
     reported = set(broken) | {path for path, _ in undecided}
     exempt = set()
-    for _, paths in spanned:
+    for paths in spanned:
         stale = [p for p in paths if p not in reported]
         if stale:
             findings.append(
@@ -1535,7 +1535,7 @@ def baseline_file_findings(slug, ground, path, alternatives, item):
 
 
 def intent_trail(slug, ground, path, item, down_text, found):
-    """`(repo_date, hub_date, hub_sha)` where a copy possibly trails its intent canonical, else None.
+    """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
@@ -1557,7 +1557,7 @@ def intent_trail(slug, ground, path, item, down_text, found):
     hub_date, hub_sha = hub_change
     if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
         return None
-    return repo_date, hub_date, hub_sha
+    return canonical_rel, (repo_date, hub_date, hub_sha)
 
 
 INTENT_ID = "files.intent"
@@ -1572,7 +1572,7 @@ def intent_findings(entry, ground, trails):
     """
     out, spanned = spanned_notes(entry, INTENT_ID, INTENT_ACK, "`<path>@<sha>` acknowledgement")
     acks = {}
-    for _, pairs in spanned:
+    for pairs in spanned:
         for path, sha in pairs:
             acks.setdefault(path, set()).add(sha)
     used = set()
@@ -2031,7 +2031,7 @@ def check_files_intent(run):
         found = run.found[path]
         trail = intent_trail(run.slug, run.ground, path, item, run.content[path], found)
         if trail is not None:
-            trails[found] = (intent_ref(item, path)[0], trail)
+            trails[found] = trail
     return intent_findings(run.entry, run.ground, trails)
 
 
