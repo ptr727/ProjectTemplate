@@ -631,7 +631,11 @@ class CarrySectionTests(unittest.TestCase):
         target = "# T\n\nThe rule text.\n\n## Other\n\nLocal.\n"
         self.assertEqual(self._unit(hub, target, ["New Name"]).missing, ["New Name"])
 
-    def test_apply_plans_writes_nothing_when_a_later_insertion_fails(self) -> None:
+    def test_plan_sections_refuses_an_insertion_into_an_unclosed_fence_and_names_it(self) -> None:
+        """Refused while planning, so `check-sections` reports what `apply-sections` would refuse.
+
+        The message names the open fence, not the section the fence hid.
+        """
         hub = "# T\n\n## A\n\nHub.\n\n## B\n\nb\n"
         fenced = "# T\n\n## A\n\nOld.\n\n```\nunclosed fence\n"
         with tempfile.TemporaryDirectory() as temp:
@@ -644,13 +648,40 @@ class CarrySectionTests(unittest.TestCase):
             ):
                 (root / "hub" / name).write_bytes(hub.encode("utf-8"))
                 (root / "target" / name).write_bytes(target_text.encode("utf-8"))
-            plans = carry.plan_sections(
-                root / "hub", root / "target", [("AGENTS.md", ["A"]), ("GOVERNANCE.md", ["A", "B"])]
-            )
             before = (root / "target" / "AGENTS.md").read_bytes()
-            with self.assertRaises(carry.CarryError):
-                carry.apply_plans(root / "target", plans)
+            with self.assertRaisesRegex(
+                carry.CarryError,
+                r"^GOVERNANCE\.md section 'B' would be inserted inside the code fence the target"
+                r" leaves open at line 7, so its heading would read as code",
+            ):
+                carry.plan_sections(
+                    root / "hub",
+                    root / "target",
+                    [("AGENTS.md", ["A"]), ("GOVERNANCE.md", ["A", "B"])],
+                )
             self.assertEqual((root / "target" / "AGENTS.md").read_bytes(), before)
+
+    def test_insert_sections_names_the_open_fence_a_fence_in_the_hub_region_closes(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\n```text\nx\n```\n")
+        target = carry.split_lines("# T\n\n## A\n\n```\nopen\n")
+
+        with self.assertRaisesRegex(
+            carry.CarryError,
+            r"^AGENTS\.md section 'B' would be inserted inside the code fence the target"
+            r" leaves open at line 5, so its heading would read as code",
+        ):
+            carry.insert_sections(target, hub, ["B"], "AGENTS.md")
+
+    def test_insert_sections_refuses_a_heading_that_lands_inside_another_block(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
+        target = carry.split_lines("# T\n\n## A\n\n<!-- an open comment\n")
+
+        with self.assertRaisesRegex(
+            carry.CarryError,
+            r"^AGENTS\.md section 'B' would be inserted at line 7,"
+            r" where its heading does not read as a level-two heading$",
+        ):
+            carry.insert_sections(target, hub, ["B"], "AGENTS.md")
 
     def test_plan_record_reports_the_missing_sections_beside_the_stale_ones(self) -> None:
         hub = "# T\n\n## Fleet Bootstrap\n\nHub.\n\n## Release Model\n\nHub only.\n"
