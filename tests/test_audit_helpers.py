@@ -211,6 +211,16 @@ INTERFACE_CASES = [
         1,
     ),
     (
+        "an expression falling back to the check name with no gated job, both findings",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || '" + PR_CHECK_NAME + "' }}",
+        ),
+        PR_CONTRACT,
+        2,
+    ),
+    (
         "an expression yielding the check name on every event",
         PR_HEAD
         + PR_CHECK.replace(
@@ -660,7 +670,7 @@ class CheckInterfaceCase(unittest.TestCase):
             with self.subTest(label):
                 self.assertEqual(len(audit.check_interface("wf", contract, text)), want)
 
-    def test_the_every_event_finding_names_the_job_beside_a_gated_one(self) -> None:
+    def test_the_off_pull_request_finding_names_the_job_beside_a_gated_one(self) -> None:
         text = (
             PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
             + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)

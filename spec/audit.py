@@ -990,8 +990,8 @@ def check_interface(path, contract, text):
                 f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
             )
         )
-    elif name and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}:
-        # Each job is its own finding, since one gated job never excuses another yielding the name off a pull_request run.
+    if name and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}:
+        # Each job is its own finding, since neither a gated job nor a missing one excuses another yielding the name off a pull_request run.
         for key, value in names.items():
             if (matches[key][2] if key in matches else value) == name:
                 findings.append(
