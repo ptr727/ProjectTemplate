@@ -185,6 +185,28 @@ class TestTheHookReadsOnlyWhatTheCommitStages(HookCase):
         result = self.commit()
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    def test_a_path_staged_and_then_removed_is_left_out_of_the_list(self) -> None:
+        """The gate refuses a path that is not a file, so the hook drops it rather than failing."""
+        self.write("gone.py", "value = 3\n")
+        self.git("add", "gone.py")
+        (self.root / "gone.py").unlink()
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "tool.py")
+        result = self.commit()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_a_symlink_replaced_by_a_file_is_read(self) -> None:
+        """A typechange is staged content too, so a finding in it is refused."""
+        (self.root / "link.py").symlink_to("tool.py")
+        self.git("add", "link.py")
+        self.git("commit", "-q", "--no-verify", "-m", "link")
+        (self.root / "link.py").unlink()
+        self.write("link.py", COMMENT + "value = 2\n")
+        self.git("add", "link.py")
+        result = self.commit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("link.py:1: comment-added", result.stdout + result.stderr)
+
     def test_a_staged_finding_is_still_refused_and_the_untracked_one_is_not_named(self) -> None:
         self.write("feature.py", COMMENT + "value = 2\n")
         self.git("add", "feature.py")

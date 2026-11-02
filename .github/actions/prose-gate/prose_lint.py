@@ -498,13 +498,18 @@ def printable(line: str) -> str:
     return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
+def lookup_start(path: Path) -> Path:
+    """The directory a git lookup for `path` starts in, the path itself or the file's directory."""
+    return path if path.is_dir() else path.parent
+
+
 def repo_root(path: Path) -> str:
     """The repository top level containing `path`, or '' when git cannot say.
 
     A hook in a linked worktree inherits `GIT_DIR`, under which git reports whatever directory it
     starts in as the top level. So the lookup drops the location variables, as provenance does.
     """
-    start = path if path.is_dir() else path.parent
+    start = lookup_start(path)
     return (git_text("-C", str(start), "rev-parse", "--show-toplevel", env=git_env()) or "").strip()
 
 
@@ -2050,7 +2055,7 @@ def main(argv: list[str] | None = None) -> int:
     # Anything that is not a file or a directory, a FIFO or a socket included, is refused.
     if unusable := [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]:
         return refuse("error-not-a-path", paths=quoted(unusable))
-    starts = {Path(p) if Path(p).is_dir() else Path(p).parent for p in scan_paths}
+    starts = {lookup_start(Path(p)) for p in scan_paths}
     git_roots = {found for found in map(repo_root, starts) if found}
     if len(git_roots) > 1:
         return refuse("error-many-repositories", roots=quoted(git_roots))
