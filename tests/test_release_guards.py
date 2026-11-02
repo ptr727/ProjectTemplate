@@ -836,17 +836,28 @@ class ReleaseGuardCase(unittest.TestCase):
         """No Dependabot scan reads a pin quoted in a document, so a literal there only goes stale.
 
         A snippet keeps a literal minimum known-good pin instead, since the pin gate scans it.
+        The scan reads every hub reference, so one that drops its tag comment is still judged.
         """
+        ref = re.compile(r"ptr727/ProjectTemplate/\.github/workflows/[\w-]+\.yml@(.*)")
         doc = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
-        pins = [m.group(0) for block in yaml_blocks(doc) for m in HUB_PIN.finditer(block)]
+        blocks = yaml_blocks(doc)
+        pins = [tail for block in blocks for tail in ref.findall(block)]
         self.assertTrue(pins)
         for pin in pins:
             with self.subTest(pin):
-                self.assertTrue(pin.endswith("@<hub-main-commit-sha> # <release-tag>"))
-        for snippet in sorted((REPO / "catalog/snippets/workflows").glob("*.yml")):
-            for match in HUB_PIN.finditer(snippet.read_text(encoding="utf-8")):
-                with self.subTest(snippet.name):
-                    self.assertRegex(match.group(0), r"@[0-9a-f]{40} # \d+\.\d+\.\d+$")
+                self.assertEqual("<hub-main-commit-sha> # <release-tag>", pin)
+        snippets = sorted((REPO / "catalog/snippets/workflows").glob("*.yml"))
+        literal = [
+            (s.name, tail) for s in snippets for tail in ref.findall(s.read_text(encoding="utf-8"))
+        ]
+        self.assertTrue(literal)
+        for name, pin in literal:
+            with self.subTest(name):
+                self.assertRegex(pin, r"^[0-9a-f]{40} # \d+\.\d+\.\d+$")
+        merge_bot = (REPO / "catalog/snippets/workflows/merge-bot-pull-request.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(documented(merge_bot), blocks)
 
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
