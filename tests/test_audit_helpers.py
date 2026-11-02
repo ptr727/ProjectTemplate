@@ -3805,9 +3805,12 @@ class SecretStemCase(unittest.TestCase):
                 ["compose.yml", "secrets/prod/db_password.txt.example"],
             ),
             (
-                "a code directory named secrets is no signal from its template or an anchored .gitignore line",
+                "a code directory named secrets is no signal from its template or a .gitignore line",
                 {
-                    ".gitignore": "src/app/secrets/__pycache__/\n",
+                    ".gitignore": (
+                        "src/app/secrets/__pycache__/\n**/secrets/__pycache__/\nsrc/**/secrets/__pycache__/\n"
+                        "secrets/\n"
+                    ),
                     "src/app/secrets/manager.py": "",
                     "src/app/secrets/config.toml.example": "",
                 },
@@ -3815,11 +3818,13 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "a relative editor path depends on a task's cwd, so it names no file",
+                "a path relative to a task's cwd names no file, and a workflow is no compose file",
                 {
                     ".vscode/tasks.json": (
-                        '{"options": {"cwd": "${workspaceFolder}/deploy"}, "command": "cat ./.secrets/api_token.txt"}\n'
+                        '{"options": {"cwd": "${workspaceFolder}/deploy"},'
+                        ' "command": "cat ./.secrets/api_token.txt $PWD/.secrets/api_token.txt"}\n'
                     ),
+                    ".github/workflows/docker-compose.yml": "run: echo x > ./secrets/app_token.txt\n",
                     "deploy/.secrets/api_token.txt.example": "",
                 },
                 ["deploy/.secrets/api_token.txt.example"],
@@ -3878,7 +3883,7 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "the devcontainer and shell workspace variables and a Windows path are read",
+                "the devcontainer workspace variables and a Windows path are read, and a shell cwd is not",
                 {
                     ".devcontainer/app/devcontainer.json": (
                         '{"mounts": ["source=${localWorkspaceFolder}/secrets/app_token,'
@@ -3890,7 +3895,6 @@ class SecretStemCase(unittest.TestCase):
                 },
                 [
                     ".secrets/Api_Key (named in .devcontainer.json)",
-                    "deploy/.secrets/Mail_Token (named in deploy/compose.yaml)",
                     ".secrets/Web_Token (named in .vscode/launch.json)",
                 ],
                 [".devcontainer/app/devcontainer.json"],

@@ -399,8 +399,8 @@ EDITOR_CONFIG = re.compile(
     r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json)"
 )
 SECRET_REFERENCE = re.compile(
-    r"(?<![^\s\"'=:,\[(])(\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder|PWD)\}/"
-    r"|\$\(pwd\)/|\$PWD/|\./)?((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
+    r"(?<![^\s\"'=:,\[(])(\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder)\}/|\./)?"
+    r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
@@ -524,23 +524,33 @@ def secret_name_breaks(name, in_secrets):
 
 
 def ignored_secrets_folder(line):
-    """The folder one .gitignore line ignores as a bare secrets directory, "" for one at any depth, or None."""
+    """The secrets folder one .gitignore line ignores whole and whether the line is anchored, or None.
+
+    A line naming a path past the folder, such as secrets/__pycache__/, ignores only that path.
+    """
     pattern = line.strip()
     if not pattern or pattern.startswith(("#", "!")):
         return None
     body = pattern.rstrip("/")
-    while body.startswith("**/"):
-        body = body[3:]
     segments = body.lstrip("/").split("/")
     if "secrets" not in segments:
         return None
-    folder = "/".join(segments[: segments.index("secrets") + 1])
-    return "" if "/" not in body or any(c in folder for c in "*?[") else folder
+    at = segments.index("secrets")
+    after = segments[at + 1 :]
+    if len(after) > 1 or (after and "*" not in after[0]):
+        return None
+    folder = "/".join(segments[: at + 1])
+    floating = body.startswith("**/") or "/" not in body or any(c in folder for c in "*?[")
+    return folder, not floating
 
 
 def secret_folders(tree):
-    """Each tracked directory, and each one named secrets that tracks more than its own files and templates."""
-    directories, holding = set(), set()
+    """Each tracked directory, each secrets one tracking more than its own files, and each file a bare one holds.
+
+    A secrets directory's own files are its README.md, .gitignore, .gitkeep, and .example templates.
+    A held file is one of those other than README.md, in a secrets directory that is not code.
+    """
+    directories, holding, owned = set(), set(), {}
     for path in tree:
         segments = path.split("/")
         name = segments[-1]
@@ -550,7 +560,10 @@ def secret_folders(tree):
             directories.add(folder)
             if segments[at - 1] == "secrets" and not own:
                 holding.add(folder)
-    return directories, holding
+            elif segments[at - 1] == "secrets" and name != "README.md":
+                owned.setdefault(path, []).append(folder)
+    held = {path for path, folders in owned.items() if any(f not in holding for f in folders)}
+    return directories, holding, held
 
 
 def named_secret_signals(tree, read_text, directories, holding):
@@ -569,7 +582,7 @@ def named_secret_signals(tree, read_text, directories, holding):
     for path in sorted(tree):
         directory, name = posixpath.split(path)
         gitignore = name == ".gitignore"
-        compose = COMPOSE_FILE.fullmatch(name)
+        compose = COMPOSE_FILE.fullmatch(name) and not path.startswith(".github/workflows/")
         editor = None if compose else EDITOR_CONFIG.fullmatch(path)
         if not (gitignore or compose or editor):
             continue
@@ -578,8 +591,15 @@ def named_secret_signals(tree, read_text, directories, holding):
             unread.append(path)
         elif gitignore:
             for line in text.splitlines():
-                folder = ignored_secrets_folder(line)
-                if folder == "" or (folder and posixpath.join(directory, folder) not in holding):
+                found = ignored_secrets_folder(line)
+                if not found:
+                    continue
+                folder, anchored = found
+                if anchored:
+                    code = posixpath.join(directory, folder) in holding
+                else:
+                    code = any(not directory or h.startswith(f"{directory}/") for h in holding)
+                if not code:
                     bare.add(path)
         else:
             root = directory if compose else editor.group(1).rstrip("/")
@@ -628,21 +648,15 @@ def secret_stem_findings(tree, read_text=None):
     """
     if tree is None:
         return []
-    broken, held = [], []
-    directories, holding = secret_folders(tree)
+    broken = []
+    directories, holding, held = secret_folders(tree)
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        own = name in (".gitignore", ".gitkeep") or name.endswith(ENV_SECRET_TEMPLATE)
-        folders = [
-            "/".join(segments[:at])
-            for at in range(1, len(segments))
-            if segments[at - 1] == "secrets"
-        ]
-        if own and any(folder not in holding for folder in folders):
-            held.append(path)
         in_secrets = segments[-2:-1] == [".secrets"] or (
-            own and segments[-2:-1] == ["secrets"] and posixpath.dirname(path) not in holding
+            path in held
+            and segments[-2:-1] == ["secrets"]
+            and posixpath.dirname(path) not in holding
         )
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
