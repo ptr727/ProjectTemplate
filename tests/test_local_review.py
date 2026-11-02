@@ -14,6 +14,7 @@ Run as `python3 tests/test_local_review.py`, or under
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -107,6 +108,26 @@ class RepoCase(unittest.TestCase):
         t = target or self.target
         base, digest, _ = local_review.current_state(t, self.tmp)
         return local_review.write_pass(self.tmp, t, base, digest, reviewer, findings)
+
+    def write_report(self, findings: list[str], digest: str | None = None) -> Path:
+        """Write a report as a reviewer would, over the current content unless told otherwise."""
+        current = self.digest()
+        path = local_review.report_path(self.tmp, current)
+        header = f"{local_review.REPORT_HEADER}{digest or current}"
+        path.write_text("\n".join([header, *findings]) + "\n", encoding="utf-8")
+        return path
+
+    def record_cli(self, reviewed: str, report: Path) -> list[str]:
+        """The argv recording an agent-skill pass over `reviewed` from `report`."""
+        return [
+            "record",
+            "--reviewer",
+            "agent-skill",
+            "--expect-digest",
+            reviewed,
+            "--report",
+            str(report),
+        ]
 
     def commit_all(self, message: str) -> None:
         run(self.tmp, "add", "-A")
@@ -907,11 +928,9 @@ class ReceiptCase(RepoCase):
         """
         (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
         reviewed = self.digest()
+        report = self.write_report([])
         (self.tmp / "a.py").write_text("something else entirely\n", encoding="utf-8")
-        self.assertEqual(
-            self.main_quiet(["record", "--reviewer", "agent-skill", "--expect-digest", reviewed]),
-            2,
-        )
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 2)
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
 
     def test_a_receipt_naming_another_target_gets_no_paste_ready_remedy(self) -> None:
@@ -954,10 +973,11 @@ class ReceiptCase(RepoCase):
         digest = self.digest()
         self.assertIn("--expect-digest", printed)
         self.assertIn(digest, printed, "the remedy carries an abbreviated digest, so it will fail")
+        self.write_report(["a.py:1 one finding"])
         # Run the printed command verbatim.
         # Repairing it here, by dropping or filling a placeholder, would hide the defect.
         line = next(l for l in printed.splitlines() if "local_review.py record" in l)
-        argv = line.split()[2:]
+        argv = shlex.split(line)[2:]
         self.assertNotIn("<n>", argv, "the printed command carries a placeholder, so it cannot run")
         self.assertEqual(self.main_quiet(argv), 0, f"the printed command failed: {argv}")
         self.assertEqual(self.main_quiet(["check", "--target", self.target]), 0)
@@ -1032,38 +1052,107 @@ class ReceiptCase(RepoCase):
             local_review.main(["record", "--reviewer", "agent-skill"])
         self.assertNotEqual(caught.exception.code, 0)
 
-    def test_a_negative_finding_count_is_refused(self) -> None:
-        """It would otherwise land in the receipt and mean nothing to whoever reads it."""
+    def test_a_typed_finding_count_is_not_accepted(self) -> None:
+        """A typed count binds the record to nothing the reviewer produced, so the flag is gone."""
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
-        self.assertEqual(
-            self.main_quiet(
-                [
-                    "record",
-                    "--reviewer",
-                    "agent-skill",
-                    "--findings",
-                    "-1",
-                    "--expect-digest",
-                    self.digest(),
-                ]
-            ),
-            2,
-        )
+        report = self.write_report([])
+        argv = [*self.record_cli(self.digest(), report), "--findings", "0"]
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            local_review.main(argv)
+        self.assertNotEqual(caught.exception.code, 0)
+
+    def test_record_requires_a_report(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+            local_review.main(["record", "--reviewer", "agent-skill", "--expect-digest", "x"])
+        self.assertNotEqual(caught.exception.code, 0)
 
     def test_record_accepts_the_digest_the_review_saw(self) -> None:
         (self.tmp / "a.py").write_text("reviewed content\n", encoding="utf-8")
         reviewed = self.digest()
-        self.assertEqual(
-            self.main_quiet(["record", "--reviewer", "agent-skill", "--expect-digest", reviewed]),
-            0,
-        )
+        report = self.write_report([])
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 0)
+
+    def test_record_refuses_a_report_nobody_wrote(self) -> None:
+        """The failure this guards: a driver recording before its reviewer has reported."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        reviewed = self.digest()
+        absent = local_review.report_path(self.tmp, reviewed)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(local_review.main(self.record_cli(reviewed, absent)), 2)
+        self.assertIn("no report", err.getvalue())
+        self.assertFalse(local_review.receipt_path(self.tmp).exists())
+
+    def test_record_refuses_a_report_written_for_another_digest(self) -> None:
+        """A report over earlier content says nothing about what is being recorded now."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        reviewed = self.digest()
+        report = self.write_report([], digest="0" * 64)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(local_review.main(self.record_cli(reviewed, report)), 2)
+        self.assertIn("written for 000000000000", err.getvalue())
+        self.assertFalse(local_review.receipt_path(self.tmp).exists())
+
+    def test_record_refuses_a_report_with_no_digest_line(self) -> None:
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        reviewed = self.digest()
+        report = local_review.report_path(self.tmp, reviewed)
+        report.write_text("a.py:1 a finding with no header above it\n", encoding="utf-8")
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 2)
+        self.assertFalse(local_review.receipt_path(self.tmp).exists())
+
+    def test_record_derives_the_count_and_stores_the_report_hash(self) -> None:
+        """Blank lines count as nothing, and every other line after the header is one finding."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        reviewed = self.digest()
+        report = self.write_report(["a.py:1 first", "", "a.py:1 second", "   ", "a.py:1 third"])
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 0)
+        receipt, problems = local_review.read_receipt(self.tmp)
+        self.assertEqual(problems, [])
+        assert receipt is not None
+        entry = receipt["passes"][0]
+        self.assertEqual(entry["findings"], 3)
+        self.assertEqual(entry["reportSha256"], hashlib.sha256(report.read_bytes()).hexdigest())
+
+    def test_a_header_only_report_records_no_findings(self) -> None:
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        reviewed = self.digest()
+        report = self.write_report([])
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 0)
+        receipt, _ = local_review.read_receipt(self.tmp)
+        assert receipt is not None
+        self.assertEqual(receipt["passes"][0]["findings"], 0)
+
+    def test_status_names_a_report_path_outside_the_work_tree(self) -> None:
+        """A report written into the tree would be untracked content, moving the digest it names."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(local_review.main(["status", "--target", self.target]), 0)
+        data = json.loads(buf.getvalue())
+        path = Path(data["reportPath"])
+        self.assertEqual(path, local_review.report_path(self.tmp, data["contentDigest"]))
+        self.assertEqual(path.parent, local_review.git_dir(self.tmp))
+        path.write_text(f"{local_review.REPORT_HEADER}{data['contentDigest']}\n", encoding="utf-8")
+        self.assertEqual(self.digest(), data["contentDigest"])
+
+    def test_record_prunes_reports_over_other_content(self) -> None:
+        (self.tmp / "a.py").write_text("first\n", encoding="utf-8")
+        earlier = self.write_report([])
+        (self.tmp / "a.py").write_text("second\n", encoding="utf-8")
+        reviewed = self.digest()
+        report = self.write_report([])
+        self.assertNotEqual(earlier, report)
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 0)
+        self.assertFalse(earlier.exists())
+        self.assertTrue(report.exists())
 
     def test_record_will_not_forge_a_headless_backend(self) -> None:
         """Recording one by hand bypasses the completion check that makes its pass mean anything."""
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
-        self.assertEqual(
-            self.main_quiet(["record", "--reviewer", "coderabbit-cli", "--expect-digest", "x"]), 2
-        )
+        argv = ["record", "--reviewer", "coderabbit-cli", "--expect-digest", "x", "--report", "x"]
+        self.assertEqual(self.main_quiet(argv), 2)
 
     def test_concurrent_records_do_not_drop_a_pass(self) -> None:
         """Accumulation is a read, a merge, and a replace, so it needs more than an atomic write."""
@@ -1377,7 +1466,17 @@ class ExitCodeCase(RepoCase):
         """2 says the check did not run, which a gate must not read as either verdict."""
         self.assertEqual(
             self.main_quiet(
-                ["record", "--reviewer", "nope", "--target", self.target, "--expect-digest", "x"]
+                [
+                    "record",
+                    "--reviewer",
+                    "nope",
+                    "--target",
+                    self.target,
+                    "--expect-digest",
+                    "x",
+                    "--report",
+                    "x",
+                ]
             ),
             2,
         )
@@ -1434,19 +1533,10 @@ class ExitCodeCase(RepoCase):
 
     def test_record_reports_what_it_recorded(self) -> None:
         (self.tmp / "new.py").write_text("print('x')\n", encoding="utf-8")
+        report = self.write_report(["new.py:1 first", "new.py:1 second"])
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = local_review.main(
-                [
-                    "record",
-                    "--reviewer",
-                    "agent-skill",
-                    "--findings",
-                    "2",
-                    "--expect-digest",
-                    self.digest(),
-                ]
-            )
+            code = local_review.main(self.record_cli(self.digest(), report))
         self.assertEqual(code, 0)
         self.assertIn("agent-skill", buf.getvalue())
         receipt, problems = local_review.read_receipt(self.tmp)

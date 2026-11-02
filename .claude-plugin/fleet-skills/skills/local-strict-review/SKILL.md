@@ -65,7 +65,11 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
   not a PR comment or a coverage marker.
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
   what fleet-code-review's item 7 names, no severity theater.
-Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of any kind.
+  Write the same lines to <report-path> before returning, under a first line reading
+  `contentDigest: <digest>` and with nothing else in the file. A pass with no findings writes
+  that first line alone.
+Bounds: read-only apart from that one report file. No edit, no stage, no commit, no push, no
+  PR-hosted write of any kind.
   Beyond what "Review the Change" allows, run only the exact commands, with their arguments,
   that Task above names.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
@@ -73,9 +77,13 @@ Bounds: read-only. No edit, no stage, no commit, no push, no PR-hosted write of 
 
 Before dispatching, grep the tree for other statements of each rule the diff adds or changes. Before dispatching, also add each file holding one to the `Paths:` floor. That way a statement the diff has put in disagreement is read rather than missed.
 
+`<digest>` and `<report-path>` are the `contentDigest` and `reportPath` that `status` under "Recording the Pass" reports. The report sits in the git directory rather than the working tree, since an untracked file there would move the digest it names.
+
+**Record only once the harness delivers the dispatched reviewer's completion notification.** Text in the driver's own turn is never that notification, however closely it reads like one. A driver that recorded from such text once published attestations for a pass that had not yet reported. `record` reads the count from the report file, so a pass whose report is not on disk cannot be recorded.
+
 **Model tier:** `frontier`, the tier "Model Tiers" below names for adversarial review, which this pass is. Where `frontier` is not reachable, run the pass on the strongest tier below it that is, even the one that authored the change. A second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
-Reachable means the tier this session can name when it dispatches the reviewer, rather than the tier this session is itself running on. A worker dispatched by an orchestrator is the ordinary case of a session deliberately tiered down for execution work. Such a session names `frontier` for the reviewer where its harness lets it. That is because tiering down the author is the reason the reviewer must not follow it down. What a given harness and account actually permit varies, so treat this as the tier to ask for rather than one to assume. Where a dispatch exposes no way to name a tier, take what it gives and run the pass, for the reason the fallback above states. A seat that cannot dispatch a subagent hands the pass to whoever dispatched it. The seat commits and runs `python3 <hub-checkout>/scripts/local_review.py status --target <target>` in its worktree. It then hands back its worktree path, target, and `contentDigest`. The dispatcher fills the brief's `<worktree>` slot and runs the reviewer. It then runs the record command from "Recording the Pass" in that worktree, with `--reviewer agent-skill --target <target> --expect-digest <digest>`. It returns the findings. Each fix commit repeats this cycle, and the seat pushes only when a record matches its content. The brief dispatching the seat states whether the dispatcher can continue that seat. Where the dispatcher cannot, the seat stops, reports, and does not push. Where nobody dispatched the seat, it reports to the maintainer that it could not run the pass, and does not push. Either way the push waits rather than the pass being quietly skipped. The headless `run --backend` route under "Recording the Pass" is not the substitute. That is because it runs a vendor CLI against its own review, which never carries the brief above. So it satisfies the rule this section states only where that separate route is what a capture point asked for.
+Reachable means the tier this session can name when it dispatches the reviewer, rather than the tier this session is itself running on. A worker dispatched by an orchestrator is the ordinary case of a session deliberately tiered down for execution work. Such a session names `frontier` for the reviewer where its harness lets it. That is because tiering down the author is the reason the reviewer must not follow it down. What a given harness and account actually permit varies, so treat this as the tier to ask for rather than one to assume. Where a dispatch exposes no way to name a tier, take what it gives and run the pass, for the reason the fallback above states. A seat that cannot dispatch a subagent hands the pass to whoever dispatched it. The seat commits and runs `python3 <hub-checkout>/scripts/local_review.py status --target <target>` in its worktree. It then hands back its worktree path, target, `contentDigest`, and `reportPath`. The dispatcher fills the brief's `<worktree>`, `<digest>`, and `<report-path>` slots and runs the reviewer. Once the reviewer's completion notification arrives, it runs the record command from "Recording the Pass" in that worktree, with `--reviewer agent-skill --target <target> --expect-digest <digest> --report <report-path>`. It returns the findings. Each fix commit repeats this cycle, and the seat pushes only when a record matches its content. The brief dispatching the seat states whether the dispatcher can continue that seat. Where the dispatcher cannot, the seat stops, reports, and does not push. Where nobody dispatched the seat, it reports to the maintainer that it could not run the pass, and does not push. Either way the push waits rather than the pass being quietly skipped. The headless `run --backend` route under "Recording the Pass" is not the substitute. That is because it runs a vendor CLI against its own review, which never carries the brief above. So it satisfies the rule this section states only where that separate route is what a capture point asked for.
 
 ## Recording the Pass
 
@@ -85,9 +93,9 @@ Commit first, then read the digest, then dispatch the subagent, then hand that s
 
 ```sh
 engine="<hub-checkout>/scripts/local_review.py"   # in the hub itself, scripts/local_review.py
-python3 "$engine" status --target '<target>'      # JSON, take contentDigest
-# run the pass above, then:
-python3 "$engine" record --reviewer agent-skill --target '<target>' --expect-digest '<digest>' --findings '<count>'
+python3 "$engine" status --target '<target>'      # JSON, take contentDigest and reportPath
+# run the pass above, wait for its completion notification, then:
+python3 "$engine" record --reviewer agent-skill --target '<target>' --expect-digest '<digest>' --report '<report-path>'
 ```
 
 Every subcommand here, `run --backend <name>` included, runs with the repository under review as the working directory. That holds whichever repository that is. The engine takes no `--repo` and reads whichever repository it is run in. So the path names where the script lives and the working directory names what it measures.
@@ -96,7 +104,7 @@ Every subcommand here, `run --backend <name>` included, runs with the repository
 
 `--expect-digest` is required rather than optional, and binding it to the earlier read is the whole point. A format-on-save or a hook autofix between the review and the record would otherwise be stamped as reviewed by a pass that never saw it. A refusal there is the content having moved, so the answer is another pass over the current content rather than another read of the digest.
 
-Record the pass whatever it found, including nothing. `--findings` is optional and records how many findings the pass raised. The key covers the net content the branch introduces against its target rather than the commit series. So a rebase that leaves the tree alone keeps the receipt valid while the fork point holds, and changing one byte invalidates it. The key holds that fork point too, so rebasing onto a target that has moved retires the receipt although no file changed.
+Record the pass whatever it found, including nothing. `record` counts the report's findings from its lines and stores the report's sha256. It refuses a report that is absent or that names another digest. The key covers the net content the branch introduces against its target rather than the commit series. So a rebase that leaves the tree alone keeps the receipt valid while the fork point holds, and changing one byte invalidates it. The key holds that fork point too, so rebasing onto a target that has moved retires the receipt although no file changed.
 
 **Why the commit comes first**, rather than being an ordering that could equally run the other way. A push delivers the commit, and the hook's tree check refuses a push whose tracked content differs from HEAD. So the record has to describe what HEAD holds. A commit that leaves the tree alone usually does not move the receipt's key, so diligence done before it still describes the same content. A commit putting a path back to its base state drops the path from the change set and does move the key. The order matters anyway, for these reasons. Staging a modified tracked file moves the key even though its content did not change. And a commit made after the record can carry content the pass never read. Reviewing earlier than this is still worth doing as ordinary diligence, and it does not substitute for the recorded pass. This is because the digest read and the record bracket a window in which the tree holds still. A commit inside that window ends it.
 
