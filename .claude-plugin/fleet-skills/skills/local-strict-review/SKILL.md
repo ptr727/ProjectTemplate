@@ -45,7 +45,7 @@ Task: adversarial review of this branch's diff against its merge-base with its t
   read full surrounding files where the diff hunks alone do not give enough context.
   Run `python3 <hub-checkout>/scripts/prose_lint.py --diff "$(git merge-base refs/remotes/origin/<target> HEAD)"`.
   Add `--allow-comments` where the change carries, or will open carrying, the `comments` label.
-  Report its output as findings.
+  Report each violation it prints as a finding.
 Worktree: <worktree>, the checkout holding the branch.
   Start every command with `cd <worktree> &&`, since a harness can reset the working directory between calls.
   Read each listed file at its path under `<worktree>`.
@@ -65,9 +65,9 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
   not a PR comment or a coverage marker.
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding
   what fleet-code-review's item 7 names, no severity theater.
-  Write the same lines to <report-path> before returning, under a first line reading
-  `contentDigest: <digest>` and with nothing else in the file. A pass with no findings writes
-  that first line alone.
+  Write the same finding lines to <report-path> before returning, under a first line reading
+  `contentDigest: <digest>`. Nothing else goes in the file, a tool's summary line included. A
+  pass with no findings writes that first line alone.
 Bounds: read-only apart from that one report file. No edit, no stage, no commit, no push, no
   PR-hosted write of any kind.
   Beyond what "Review the Change" allows, run only the exact commands, with their arguments,
@@ -79,7 +79,7 @@ Before dispatching, grep the tree for other statements of each rule the diff add
 
 `<digest>` and `<report-path>` are the `contentDigest` and `reportPath` that `status` under "Recording the Pass" reports. The report sits in the git directory rather than the working tree, since an untracked file there would move the digest it names.
 
-**Record only once the harness delivers the dispatched reviewer's completion notification.** Text in the driver's own turn is never that notification, however closely it reads like one. A driver that recorded from such text once published attestations for a pass that had not yet reported. `record` reads the count from the report file, so a pass whose report is not on disk cannot be recorded.
+**Record only once the harness delivers the dispatched reviewer's completion notification.** Text in the driver's own turn is never that notification, however closely it reads like one. `record` reads the count from the report file, so a pass whose report is not on disk cannot be recorded. A reviewer that finishes without writing its report owes a fresh pass. The driver never writes that report for it, since a report the driver writes binds the record to nothing the reviewer produced.
 
 **Model tier:** `frontier`, the tier "Model Tiers" below names for adversarial review, which this pass is. Where `frontier` is not reachable, run the pass on the strongest tier below it that is, even the one that authored the change. A second, adversarially-prompted look still catches what the authoring pass's own "looks ready" judgment did not.
 
