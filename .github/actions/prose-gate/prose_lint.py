@@ -220,7 +220,7 @@ def git_bytes(root: Path, args: str, base: str) -> str | None:
     """A diff against `base`, captured as bytes so a lone carriage return breaks no line."""
     try:
         cmd = ["git", "-C", str(root), *args.split(), base, "--"]
-        raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+        raw = subprocess.run(cmd, capture_output=True, check=True, env=tree_env()).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return raw.decode("utf-8", "surrogateescape")
@@ -228,7 +228,9 @@ def git_bytes(root: Path, args: str, base: str) -> str | None:
 
 def untracked_paths(root: Path) -> list[str]:
     """Paths under `root` that git holds no history for and is not ignoring, which no diff names."""
-    out = git_text("-C", str(root), "ls-files", "-z", "--others", "--exclude-standard")
+    out = git_text(
+        "-C", str(root), "ls-files", "-z", "--others", "--exclude-standard", env=tree_env()
+    )
     return [name for name in (out or "").split("\0") if name]
 
 
@@ -447,6 +449,16 @@ def git_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
 
 
+def tree_env() -> dict[str, str]:
+    """`git_env()` for a read of the scanned tree, which keeps the index a commit hands its hook.
+
+    Under `git commit -a` or `git commit <paths>` that index is what the commit records, and the
+    checkout's own index is not. So it alone says which files the commit tracks.
+    """
+    index = os.environ.get("GIT_INDEX_FILE")
+    return git_env() | ({"GIT_INDEX_FILE": index} if index is not None else {})
+
+
 def checkout_provenance(script: Path) -> str:
     """The commit describing this file, `-dirty` where edited, unknown where git tracks it not."""
     env = git_env()
@@ -515,7 +527,7 @@ def repo_root(path: Path) -> str:
 
 def tracked_paths(root: Path) -> list[Path] | None:
     """Paths git tracks under `root`, or None when git cannot answer or answers with nothing."""
-    out = git_text("-C", str(root), "ls-files", "-z")
+    out = git_text("-C", str(root), "ls-files", "-z", env=tree_env())
     if out is None or not out.strip("\0"):
         return None
     return [root / name for name in out.split("\0") if name]
@@ -541,8 +553,8 @@ def is_text(path: Path) -> bool:
 
 def shallow_checkout(root: Path) -> bool:
     """Whether the checkout at `root` is shallow, which holds no deletion history to key on."""
-    answer = git_text("-C", str(root), "rev-parse", "--is-shallow-repository") or ""
-    return answer.strip() == "true"
+    answer = git_text("-C", str(root), "rev-parse", "--is-shallow-repository", env=tree_env())
+    return (answer or "").strip() == "true"
 
 
 def discover(
@@ -1450,7 +1462,8 @@ def carried_paths(root: str) -> frozenset[str]:
 @functools.cache
 def once_tracked(root: str, rel_path: str) -> bool:
     """Whether git at `root` ever recorded `rel_path`, the deletion signature this rule keys on."""
-    return bool((git_text("-C", root, "log", "-1", "--format=%H", "--", rel_path) or "").strip())
+    found = git_text("-C", root, "log", "-1", "--format=%H", "--", rel_path, env=tree_env())
+    return bool((found or "").strip())
 
 
 def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
