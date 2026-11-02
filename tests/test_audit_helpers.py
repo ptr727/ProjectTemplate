@@ -2992,6 +2992,21 @@ class IntentAdvisoryCase(unittest.TestCase):
                 got = audit.intent_trail("o/r", "main", "widget.json", unit, down, "widget.json")
             self.assertEqual(got, want)
 
+    def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
+        asked: list[tuple[str, str | None]] = []
+
+        def change(rel: str, anchor: str | None = None) -> tuple[str, str]:
+            asked.append((rel, anchor))
+            return HUB_CHANGE
+
+        unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
+        with (
+            self.patched({"DOC.md": "the doc"}),
+            mock.patch.object(audit, "hub_last_change", change),
+        ):
+            audit.intent_trail("o/r", "main", "widget.json", unit, "x", "widget.json")
+        self.assertEqual(asked, [("DOC.md", "widget")])
+
     def test_a_reference_unit_ignores_the_hub_file_at_path(self) -> None:
         unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
         with self.patched({"snip/w.yml": "snippet", "w.yml": "same"}):
@@ -4821,6 +4836,10 @@ class RegistryCase(unittest.TestCase):
         )
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
+
+    def test_files_intent_runs_after_the_baseline_read(self) -> None:
+        order = [c["id"] for c in audit.registered_checks()]
+        self.assertGreater(order.index("files.intent"), order.index("files.presence"))
 
     def test_only_these_checks_skip_the_hub(self) -> None:
         skipped = {c["id"] for c in audit.registered_checks() if not c["hub"]}

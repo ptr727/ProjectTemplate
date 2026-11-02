@@ -223,7 +223,7 @@ def extract_section(text, heading):
 
 
 def heading_slug(text):
-    """The anchor GitHub derives from a heading's text: lowercased, punctuation other than `-` dropped, each space a `-`."""
+    """The anchor GitHub derives from a heading's text: lowercased, punctuation other than `-` and `_` dropped, each space a `-`."""
     return re.sub(r"[^\w\- ]", "", text.lower()).replace(" ", "-")
 
 
