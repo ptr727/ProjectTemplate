@@ -972,30 +972,34 @@ def check_interface(path, contract, text):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    nodes = (_mapping(job).get("name") for job in jobs.values())
-    values = [n.value for n in nodes if isinstance(n, yaml.ScalarNode)]
-    matches = [m for v in values if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))]
-    gated = {m[1] for m in matches if m[1] != m[2]}
-    # Each job is read on its own, so one gated job never excuses another posting the name off a pull request run.
-    ungated = set(values) | {m[2] for m in matches}
-    if name and name not in gated and name not in values:
+    names = {
+        key: node.value
+        for key, job in jobs.items()
+        if isinstance(node := _mapping(job).get("name"), yaml.ScalarNode)
+    }
+    matches = {
+        key: m
+        for key, v in names.items()
+        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))
+    }
+    gated = {m[1] for m in matches.values() if m[1] != m[2]}
+    if name and name not in gated and name not in names.values():
         findings.append(
             (
                 "DRIFT",
                 f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
             )
         )
-    elif (
-        name
-        and name in ungated
-        and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}
-    ):
-        findings.append(
-            (
-                "DRIFT",
-                f"interface: {path} names its job '{name}' on every event, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
-            )
-        )
+    elif name and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}:
+        # Each job is its own finding, since one gated job never excuses another yielding the name off a pull_request run.
+        for key, value in names.items():
+            if (matches[key][2] if key in matches else value) == name:
+                findings.append(
+                    (
+                        "DRIFT",
+                        f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
+                    )
+                )
     tok = contract.get("artifactNameToken")
     if tok and tok not in code_view(root):
         findings.append(

@@ -652,6 +652,17 @@ class CheckInterfaceCase(unittest.TestCase):
             with self.subTest(label):
                 self.assertEqual(len(audit.check_interface("wf", contract, text)), want)
 
+    def test_the_every_event_finding_names_the_job_beside_a_gated_one(self) -> None:
+        text = (
+            PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+            + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
+            + PR_CHECK.replace("check-workflow-status:", "extra:")
+        )
+        [(kind, message)] = audit.check_interface("wf", PR_CONTRACT, text)
+        self.assertEqual(kind, "DRIFT")
+        self.assertIn("job 'extra'", message)
+        self.assertNotIn("check-workflow-status", message)
+
 
 class ShippedPullRequestStubCase(unittest.TestCase):
     """Every pull request stub the hub ships passes the contract spec/files.json gives a carried one."""
