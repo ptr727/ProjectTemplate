@@ -403,6 +403,7 @@ SECRET_REFERENCE = re.compile(
     r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
+COMPOSE_FILE_KEY = re.compile(r"\s*file:\s*")
 PATHS_SHOWN = 5
 
 
@@ -524,9 +525,10 @@ def secret_name_breaks(name, in_secrets):
 
 
 def ignored_secrets_folder(line):
-    """The secrets folder one .gitignore line ignores whole and whether the line is anchored, or None.
+    """The secrets folder one .gitignore line ignores, itself or its files by glob, and whether it is anchored.
 
-    A line naming a path past the folder, such as secrets/__pycache__/, ignores only that path.
+    None where the line ignores no such folder. A line naming a plain path past the folder, such as
+    secrets/__pycache__/, ignores only that path.
     """
     pattern = line.strip()
     if not pattern or pattern.startswith(("#", "!")):
@@ -537,7 +539,7 @@ def ignored_secrets_folder(line):
         return None
     at = segments.index("secrets")
     after = segments[at + 1 :]
-    if len(after) > 1 or (after and "*" not in after[0]):
+    if any("*" not in segment for segment in after):
         return None
     folder = "/".join(segments[: at + 1])
     floating = body.startswith("**/") or "/" not in body or any(c in folder for c in "*?[")
@@ -547,14 +549,19 @@ def ignored_secrets_folder(line):
 def secret_folders(tree):
     """Each tracked directory, each secrets one tracking more than its own files, and each file a bare one holds.
 
-    A secrets directory's own files are its README.md, .gitignore, .gitkeep, and .example templates.
+    A secrets directory's own files are its README.md, .gitignore, .gitkeep, and .example templates,
+    and each file beside its own template.
     A held file is one of those other than README.md, in a secrets directory that is not code.
     """
     directories, holding, owned = set(), set(), {}
     for path in tree:
         segments = path.split("/")
         name = segments[-1]
-        own = name in SECRETS_DIRECTORY_EXEMPT or name.endswith(ENV_SECRET_TEMPLATE)
+        own = (
+            name in SECRETS_DIRECTORY_EXEMPT
+            or name.endswith(ENV_SECRET_TEMPLATE)
+            or path + ENV_SECRET_TEMPLATE in tree
+        )
         for at in range(1, len(segments)):
             folder = "/".join(segments[:at])
             directories.add(folder)
@@ -573,7 +580,9 @@ def named_secret_signals(tree, read_text, directories, holding):
     repo-relative, against a compose file's own directory or the editor's workspace root. So an
     absolute one such as /run/secrets/<name>, a container mount point, is no signal. Neither is a
     path into a secrets directory in `holding`, which is not ignored, or below a directory the tree
-    lacks. A relative editor path depends on a launch's working directory, so it names no file.
+    lacks. A path counts only where a ./, ../, or workspace variable marks it as one, or as a compose
+    file: value, so a Vault path or prose naming secrets/ is none. A relative editor path depends on
+    a launch's working directory, so it names no file.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text.
@@ -607,7 +616,9 @@ def named_secret_signals(tree, read_text, directories, holding):
                 text = text.replace("\\\\", "/")
             for match in SECRET_REFERENCE.finditer(text):
                 prefix, written, folder, rest = match.groups()
-                if rest is None and not prefix:
+                line = text[text.rfind("\n", 0, match.start()) + 1 : match.start()]
+                keyed = compose and COMPOSE_FILE_KEY.fullmatch(line)
+                if not (prefix or written.startswith("../") or keyed):
                     continue
                 rest = (rest or "").rstrip(".")
                 within = posixpath.normpath(posixpath.join(root, written))

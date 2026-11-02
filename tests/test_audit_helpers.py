@@ -3729,9 +3729,30 @@ class SecretStemCase(unittest.TestCase):
                     ".gitignore": "/secrets\n",
                     "deploy/.gitignore": "**/secrets/\n",
                     "web/.gitignore": "secrets/*\n!secrets/*.example\n",
+                    "ops/.gitignore": "secrets/**/*\n!secrets/**/*.example\n",
                 },
                 [],
-                [".gitignore", "deploy/.gitignore", "web/.gitignore"],
+                [".gitignore", "deploy/.gitignore", "ops/.gitignore", "web/.gitignore"],
+            ),
+            (
+                "an unmarked secrets/ token is no path, and an unmarked compose file: value is one",
+                {
+                    "compose.yml": "# Docker secrets/configs are mounted read-only\nVAULT_KV_PATH: secrets/data/app\n",
+                    ".vscode/launch.json": '{"env": {"VAULT_PATH": "secrets/myapp"}}\n',
+                    "deploy/compose.yml": "secrets:\n  db:\n    file: secrets/Db_Password\n",
+                },
+                ["deploy/secrets/Db_Password (named in deploy/compose.yml)"],
+                ["deploy/compose.yml"],
+            ),
+            (
+                "a committed credential beside its template does not make the directory code",
+                {
+                    "secrets/README.md": "",
+                    "secrets/db_password.example": "",
+                    "secrets/db_password": "",
+                },
+                [],
+                ["secrets/db_password", "secrets/db_password.example"],
             ),
             (
                 "a compose file naming one reports it beside its directory",
