@@ -972,29 +972,40 @@ def check_interface(path, contract, text):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    nodes = (_mapping(job).get("name") for job in jobs.values())
-    values = [n.value for n in nodes if isinstance(n, yaml.ScalarNode)]
-    gated = {
-        m[1]
-        for v in values
-        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v))) and m[1] != m[2]
+    names = {
+        key: node.value
+        for key, job in jobs.items()
+        if isinstance(node := _mapping(job).get("name"), yaml.ScalarNode)
     }
-    if name and name not in gated and name not in values:
+    matches = {
+        key: m
+        for key, v in names.items()
+        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))
+    }
+    gated = {m[1] for m in matches.values() if m[1] != m[2]}
+    # Each job is its own finding, since neither a gated job nor a missing one excuses another yielding the name off a pull_request run.
+    events = workflow_events(_plain(root) if root is not None else None)
+    off_pr = [
+        key
+        for key, value in names.items()
+        if name
+        and events - {"pull_request"}
+        and (matches[key][2] if key in matches else value) == name
+    ]
+    # An expression naming the check on every event is already its job's off-PR finding where another event triggers the workflow.
+    every_event = any(m[1] == m[2] == name for m in matches.values())
+    if name and name not in gated and name not in names.values() and not (off_pr and every_event):
         findings.append(
             (
                 "DRIFT",
                 f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
             )
         )
-    elif (
-        name
-        and name not in gated
-        and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}
-    ):
+    for key in off_pr:
         findings.append(
             (
                 "DRIFT",
-                f"interface: {path} names its job '{name}' on every event, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
+                f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
             )
         )
     tok = contract.get("artifactNameToken")

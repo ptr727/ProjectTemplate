@@ -184,6 +184,71 @@ INTERFACE_CASES = [
         1,
     ),
     (
+        "a literal check name beside a gated one, on a workflow a dispatch also triggers",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
+        + PR_CHECK.replace("check-workflow-status:", "extra:"),
+        PR_CONTRACT,
+        1,
+    ),
+    (
+        "two literal check names on a workflow a dispatch also triggers, one finding each",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK
+        + PR_CHECK.replace("check-workflow-status:", "extra:"),
+        PR_CONTRACT,
+        2,
+    ),
+    (
+        "an expression falling back to the check name beside a gated one",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
+        + PR_CHECK.replace("check-workflow-status:", "extra:").replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || '" + PR_CHECK_NAME + "' }}",
+        ),
+        PR_CONTRACT,
+        1,
+    ),
+    (
+        "an expression falling back to the check name with no gated job, both findings",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || '" + PR_CHECK_NAME + "' }}",
+        ),
+        PR_CONTRACT,
+        2,
+    ),
+    (
+        "an expression falling back to the check name beside one naming another job on every event",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || '" + PR_CHECK_NAME + "' }}",
+        )
+        + PR_CHECK.replace("check-workflow-status:", "extra:").replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || 'Other job' }}",
+        ),
+        PR_CONTRACT,
+        2,
+    ),
+    (
+        "an expression yielding the check name on every event, on a workflow a dispatch also triggers",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && '"
+            + PR_CHECK_NAME
+            + "' || '"
+            + PR_CHECK_NAME
+            + "' }}",
+        ),
+        PR_CONTRACT,
+        1,
+    ),
+    (
         "an expression yielding the check name on every event",
         PR_HEAD
         + PR_CHECK.replace(
@@ -632,6 +697,29 @@ class CheckInterfaceCase(unittest.TestCase):
         for label, text, contract, want in INTERFACE_CASES:
             with self.subTest(label):
                 self.assertEqual(len(audit.check_interface("wf", contract, text)), want)
+
+    def test_the_off_pull_request_finding_names_the_job_beside_a_gated_one(self) -> None:
+        text = (
+            PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+            + PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)
+            + PR_CHECK.replace("check-workflow-status:", "extra:")
+        )
+        [(kind, message)] = audit.check_interface("wf", PR_CONTRACT, text)
+        self.assertEqual(kind, "DRIFT")
+        self.assertIn("job 'extra'", message)
+        self.assertNotIn("check-workflow-status", message)
+
+    def test_an_every_event_expression_on_a_dispatch_workflow_is_its_job_finding(self) -> None:
+        both = "' || '" + PR_CHECK_NAME + "' }}"
+        text = PR_HEAD.replace(
+            "on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n"
+        ) + PR_CHECK.replace(
+            PR_CHECK_NAME, PR_ONLY_EXPRESSION.replace("' || 'Check workflow status job' }}", both)
+        )
+        [(kind, message)] = audit.check_interface("wf", PR_CONTRACT, text)
+        self.assertEqual(kind, "DRIFT")
+        self.assertIn("job 'check-workflow-status'", message)
+        self.assertIn("on a run other than pull_request", message)
 
 
 class ShippedPullRequestStubCase(unittest.TestCase):
