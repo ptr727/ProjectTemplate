@@ -28,6 +28,13 @@ REPO = Path(__file__).resolve().parents[1]
 
 SHELL_LABELS = ("bash", "sh", "shell")
 
+HUB_PIN = re.compile(r"(ptr727/ProjectTemplate/\.github/workflows/[\w-]+\.yml)@\S+ # \S+")
+
+
+def documented(snippet: str) -> str:
+    """`snippet` as docs/reusable-workflows.md quotes it, every hub pin the placeholder an adopter resolves."""
+    return HUB_PIN.sub(r"\1@<hub-main-commit-sha> # <release-tag>", snippet)
+
 
 class FencedBlock(NamedTuple):
     """One fenced code block: the 1-based line its opener sits on, its label, and its body."""
@@ -417,7 +424,7 @@ class ReleaseGuardCase(unittest.TestCase):
         self.assertEqual("-7", suffix_for("push", "refs/heads/develop", "ptr727-codegen[bot]"))
         blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
         stub_name = stub.splitlines()[0]
-        self.assertIn(stub, [block for block in blocks if block.startswith(stub_name)])
+        self.assertIn(documented(stub), [block for block in blocks if block.startswith(stub_name)])
 
         bot = {"login": "ptr727-codegen[bot]"}
         middle = "e" * 40
@@ -811,18 +818,35 @@ class ReleaseGuardCase(unittest.TestCase):
                 self.assertIn("  pull_request:\n", trigger + "\n")
                 self.assertNotRegex(trigger, r"(?m)^  pull_request:\n    ")
 
-    def test_smoke_caller_stub_is_its_snippet_byte_for_byte(self) -> None:
-        """The documented release-with-smoke stub is the catalog snippet, so the two cannot drift."""
+    def test_smoke_caller_stub_is_its_snippet_but_for_its_pins(self) -> None:
+        """The documented release-with-smoke stub is the catalog snippet with its hub pins as placeholders, so the two cannot drift."""
         stub = (REPO / "catalog/snippets/workflows/test-pull-request-smoke.yml").read_text(
             encoding="utf-8"
         )
         blocks = yaml_blocks((REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8"))
-        self.assertIn(stub, blocks)
+        self.assertNotEqual(stub, documented(stub))
+        self.assertIn(documented(stub), blocks)
         self.assertIn("smoke: true", stub)
         self.assertIn(
             "    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.release == 'true'\n",
             stub,
         )
+
+    def test_documented_hub_pins_are_placeholders_and_snippet_pins_are_literal(self) -> None:
+        """No Dependabot scan reads a pin quoted in a document, so a literal there only goes stale.
+
+        A snippet keeps a literal minimum known-good pin instead, since the pin gate scans it.
+        """
+        doc = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
+        pins = [m.group(0) for block in yaml_blocks(doc) for m in HUB_PIN.finditer(block)]
+        self.assertTrue(pins)
+        for pin in pins:
+            with self.subTest(pin):
+                self.assertTrue(pin.endswith("@<hub-main-commit-sha> # <release-tag>"))
+        for snippet in sorted((REPO / "catalog/snippets/workflows").glob("*.yml")):
+            for match in HUB_PIN.finditer(snippet.read_text(encoding="utf-8")):
+                with self.subTest(snippet.name):
+                    self.assertRegex(match.group(0), r"@[0-9a-f]{40} # \d+\.\d+\.\d+$")
 
     def test_release_asset_hook_upload_stays_with_the_task(self) -> None:
         workflow = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")

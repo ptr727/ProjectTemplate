@@ -66,6 +66,8 @@ A downstream pull request may pin a hub feature-branch SHA to test a hub change 
 
 The sequencing consequence is that a hub task lands on `develop`, promotes to `main`, and is released before any downstream carries a bumpable pin. The catalog snippet for a caller stub therefore lands one release after the task it names. That is because a snippet under `catalog/snippets/workflows/` is scanned by the same pin gate and cannot carry a placeholder SHA. The [Rollout][rollout] section carries that ordering as checkboxes per stage.
 
+A stub in this document pins `@<hub-main-commit-sha> # <release-tag>`, never a literal. No Dependabot scan reads a pin quoted in a document or a snippet, so a literal there only goes stale. A catalog snippet keeps a literal minimum known-good pin, a release carrying every input the snippet passes. That pin moves when the task's interface changes, not with each release. An adopter therefore resolves every hub pin to the latest release before committing the stub, and Dependabot bumps it from there. `gh release view --repo ptr727/ProjectTemplate --json tagName --jq .tagName` names that release. `gh api repos/ptr727/ProjectTemplate/commits/<release-tag> --jq .sha` names the `main` commit its tag points at.
+
 ### Secrets and Permissions
 
 Every hub task declares the secrets it needs by name under `on.workflow_call.secrets`, and a caller maps each one explicitly. Most are `required: true`. A mechanism's secret is `required: false` where the task treats it as one of several opt-in targets, such as `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` in `build-release-task.yml`. A package-registry credential is not among them, since `NUGET_USERNAME` and the PyPI OIDC exchange are read by the caller stub's own `publish-nuget` / `publish-pypi` job. They are not passed into the task, per [Adopting the Release Chain][adopting-the-release-chain]. The same names are `required: true` in a task built around that one mechanism instead, such as `DOCKER_HUB_USERNAME`/`DOCKER_HUB_ACCESS_TOKEN` in `build-docker-task.yml`. Whether `secrets: inherit` is used is decided by the call's own boundary, not by the fleet's preference. [GitHub documents the keyword][gh-reusing-workflows] for a caller in the same organization or enterprise as the called workflow, and the fleet is a personal account. So a cross-repository call to a hub task names each secret it passes, and `inherit` is never used on one. A call whose job needs none passes no `secrets:` key, which is what the [Adopting the Gates][adopting-the-gates] `validate` stub does. A call by local path stays inside one repository. There the caller's own secret store is the one the called workflow reads, so `inherit` is available. Availability is not a reason to use it, and this repository's own local-path calls name their secrets or pass none. Both shapes run in the fleet today. One repo carries a local-path `inherit` call beside a cross-repository call that names its secrets. Another proves an inherited value reaches a publishing task that authenticates from it. The declared names are the ones [`spec/secrets.json`][secrets] already declares for the mechanism the task implements, so the secret audit and the workflow agree by construction. An environment-scoped secret is the exception. `spec/secrets.json` declares none of `DEPLOY_SSH_PRIVATE_KEY` and the `SITE_AUTH_TOKEN_ID`/`SITE_AUTH_TOKEN` pair beside it. That is because each lives in a GitHub Environment rather than the repository store. It is also because no hub audit or configuration tool inventories the secrets an environment holds, per the `deploy-ssh` mechanism note in `spec/secrets.json`. The deploy task itself fails its run when one it needs is missing or empty, which is a runtime check rather than an audit.
@@ -168,7 +170,7 @@ The remaining repos are one checkbox each below. The sweep list is every catalog
 - [x] aiopurpleair: adopted on `develop` in ptr727/aiopurpleair#109 at `c9d889e`, merged 2026-09-10 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] homeassistant-purpleair: adopted on `develop` in ptr727/homeassistant-purpleair#441 at `9cae4e1`. The pull request was merged 2026-10-11 and promoted to `main`, its ground-truth branch, in ptr727/homeassistant-purpleair#444 at `c92a9b8`, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] Financial-Modeling: adopted on `develop` in ptr727/Financial-Modeling#115 at `f6882cf`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
-- [ ] PlexCleaner: Its `test-pull-request.yml` still calls its own `validate-task.yml` rather than the hub's. Its Python is a stdlib-only tooling subtree with no tests yet, which it owes before it names that subtree in `python-directories`.
+- [x] PlexCleaner: adopted on `develop` in ptr727/PlexCleaner#1064 at `84fd00e`. The pull request was merged 2026-10-29 and promoted to `main`, its ground-truth branch, in ptr727/PlexCleaner#1098 at `1876563`, where `test-pull-request.yml` calls `validate-task.yml` by pin. The same change added a `RegressionTests/tests/` suite, and both validator callers name `RegressionTests` in `python-directories`.
 - [ ] ESPHome-NonRoot: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
 - [x] VSCode-Server-DotNetCore: adopted on `develop` in ptr727/VSCode-Server-DotNetCore#129 at `ca46db7`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] NxWitness: adopted on `develop` in ptr727/NxWitness#592 at `3c0ea13`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
@@ -250,7 +252,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
 
 ## Adopting the Merge-Bot
 
-A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below and deletes nothing else. The stub is the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` byte for byte. The pin is the release that first carried the task, and Dependabot bumps it from there. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair. A repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`. That input deletes the head of a merged in-repo Dependabot or App pull request from the `closed` event. The delete is a lease-guarded push, so it removes the branch only while its tip still equals the merged head. It never deletes a head named `main` or `develop`. It takes effect once the stub's pin reaches a release carrying the delete job, because an older pin ignores `closed`.
+A downstream repo replaces the whole of its `.github/workflows/merge-bot-pull-request.yml` with the stub below and deletes nothing else. The stub is the catalog snippet `catalog/snippets/workflows/merge-bot-pull-request.yml` byte for byte except its pin line, which adoption resolves to the latest release per [Pinning][pinning]. Its App-signed pull requests keep merging by the built-in rules (`codegen-main` to `main`, `codegen-develop` to `develop`, `upstream-version-main` to `main`, `upstream-version-develop` to `develop`). A repo with a tracker outside those pairs adds one `rules` entry per pair. A repo that keeps its repository-wide branch auto-delete off and still wants bot branches gone sets `delete-branch: true`. That input deletes the head of a merged in-repo Dependabot or App pull request from the `closed` event. The delete is a lease-guarded push, so it removes the branch only while its tip still equals the merged head. It never deletes a head named `main` or `develop`. It takes effect once the stub's pin reaches a release carrying the delete job, because an older pin ignores `closed`.
 
 ```yaml
 name: Merge bot pull request action
@@ -273,7 +275,7 @@ jobs:
 
   merge-bot:
     name: Merge bot pull request job
-    uses: ptr727/ProjectTemplate/.github/workflows/merge-bot-task.yml@20616e0a70613ad8727d567990f5d0e082f5275c # 2.0.338
+    uses: ptr727/ProjectTemplate/.github/workflows/merge-bot-task.yml@<hub-main-commit-sha> # <release-tag>
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
@@ -296,7 +298,7 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 ## Adopting the Gates
 
-A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes. It also deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below is the [release-with-smoke caller snippet][smoke-caller-snippet] byte for byte, pinned the same way. A downstream repo carries it as `.github/workflows/test-pull-request.yml`, since the catalog file takes another name only because the no-build snippet holds that one. A downstream `publish-release.yml` reaches the same `validate-task.yml` by a released pin for its `validate` job. The hub workflow uses its local task path instead.
+A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes. It also deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape. The release-with-smoke shape below is the [release-with-smoke caller snippet][smoke-caller-snippet] byte for byte except its pin lines. Adoption resolves each shape's pins to the latest release per [Pinning][pinning]. A downstream repo carries it as `.github/workflows/test-pull-request.yml`, since the catalog file takes another name only because the no-build snippet holds that one. A downstream `publish-release.yml` reaches the same `validate-task.yml` by a released pin for its `validate` job. The hub workflow uses its local task path instead.
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles. In that shape a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance). In that shape a `pull_request` runs it pre-merge and actionable. A release-model repo with no build target keeps only the stub's `pull_request` and `workflow_dispatch` triggers. It has no direct-commit allowance to keep advisory. It also drops the stub's `workflow-model` input, since `release` is the default.
 
@@ -356,7 +358,7 @@ jobs:
   # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
   validate:
     name: Validate sources job
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
 
@@ -365,7 +367,7 @@ jobs:
     name: Smoke build job
     needs: [changes]
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.release == 'true'
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
     # A Docker repo maps DOCKER_HUB_USERNAME and DOCKER_HUB_ACCESS_TOKEN by name here.
@@ -528,7 +530,7 @@ The `get-version` example passes no `ref`, so the task versions the triggering c
 
 ## Adopting the Release Chain
 
-A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml`. The stub reaches the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and its own fixed `enable_*` set. That set is the one its `publish-release.yml` passes. The `changes` paths filter in `test-pull-request.yml` decides only whether the smoke job runs. A multi-target caller that wires filter outputs into `enable_*` inputs and adds a dispatch bypass must also force them on. A dispatch run has no pull request diff, so the outputs can leave every target disabled. The full shape below is the catalog snippet [`publish-release.yml`][release-caller-snippet] byte for byte, pinned to a release carrying the current task interface. Dependabot bumps it from there ([Pinning][pinning]). The task declares no job-level `permissions:` of its own. That is because a called job's block is validated against the caller's grant before its `if:` runs. It is also because the block would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with. That is `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run. Those scopes cover the release upload, the artifact cleanup, and the [`WORKFLOW.md`][workflow] D4.7 publisher dispatch and self-cancel. The caller grants nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
+A downstream repo replaces its carried release orchestrator and per-target leaf tasks with a caller stub in its own `publish-release.yml`. The stub reaches the hub tasks by pin. `test-pull-request.yml`'s smoke job calls `build-release-task.yml` the same way, with `smoke: true` and its own fixed `enable_*` set. That set is the one its `publish-release.yml` passes. The `changes` paths filter in `test-pull-request.yml` decides only whether the smoke job runs. A multi-target caller that wires filter outputs into `enable_*` inputs and adds a dispatch bypass must also force them on. A dispatch run has no pull request diff, so the outputs can leave every target disabled. The full shape below is the catalog snippet [`publish-release.yml`][release-caller-snippet] byte for byte except its pin lines, which adoption resolves to the latest release per [Pinning][pinning]. The task declares no job-level `permissions:` of its own. That is because a called job's block is validated against the caller's grant before its `if:` runs. It is also because the block would fail a caller that does not grant it at startup. The caller therefore grants only what its enabled paths write with. That is `contents: write` and `actions: write` when it sets `github: true` on a non-smoke run. Those scopes cover the release upload, the artifact cleanup, and the [`WORKFLOW.md`][workflow] D4.7 publisher dispatch and self-cancel. The caller grants nothing beyond `contents: read` on a build-only or smoke run, where a Dependabot pull request holds a read-only token. No call to this task ever needs `id-token: write`, because neither package push happens inside it, for the reason the next paragraph gives.
 
 Neither package push runs inside the hub task, and that is a constraint rather than a preference. NuGet.org and PyPI trusted publishing both validate the OIDC token's `job_workflow_ref` claim against the repository that owns the package. That claim names the workflow file the job actually ran from. A job running from a hub task therefore carries `ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<sha>`. So the token exchange is rejected, NuGet.org answering `HTTP 401` with `does not start with <owner>/<repo>/.github/workflows/` and PyPI rejecting the same shape under its own code. A caller hook does not avoid it, since a composite action runs inside the hub's job and leaves the claim unchanged. The hub task instead builds the package and uploads it as `nuget-build-<branch>` or `pypi-build-<branch>`. The caller stub's own `publish-nuget` or `publish-pypi` job downloads that artifact and pushes, so the claim names the publishing repository. A smoke build never reaches either push, which is why a pull request cannot catch this and the first real release is where it surfaces.
 
@@ -568,7 +570,7 @@ jobs:
   # Single source of the release-gate decision (publish or not, stable or not), reused by every job below.
   plan:
     name: Plan release job
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-plan-task.yml@<hub-main-commit-sha> # <release-tag>
     with:
       event_name: ${{ github.event_name }}
       actor: ${{ github.actor }}
@@ -579,7 +581,7 @@ jobs:
     name: Validate job
     needs: [plan]
     if: ${{ needs.plan.outputs.publish == 'true' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
+    uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
     secrets:
@@ -591,7 +593,7 @@ jobs:
     name: Publish project release job
     needs: [plan, validate]
     if: ${{ needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' }}
-    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
+    uses: ptr727/ProjectTemplate/.github/workflows/build-release-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: write
       actions: write
@@ -714,7 +716,7 @@ No `publish-release-task.yml` ships alongside `build-release-task.yml`. The jobs
 
 ## Adopting the Type-Specific Tasks
 
-Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`. The codegen pin below is filled in, `0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352`, since `run-periodic-codegen-pull-request.yml` now has a catalog snippet, the same per-repo shape it carries today. The other three pins stay the placeholder `<sha>` and `<tag>`. `publish-docker-readme-task.yml` and `check-upstream-version-task.yml` are each a job embedded in a repo's own workflow. Neither is a standalone top-level caller with a snippet of its own. And `deploy-site.yml` carries no manifest-wide snippet by design, since each site's own shape varies around the shared `deploy` job. This section stays the adoption reference for those three until a follow-on catalog change lands, per [Pinning](#pinning).
+Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`. Each stub below pins the placeholder per [Pinning][pinning]. Only the codegen task has a catalog snippet, `run-periodic-codegen-pull-request.yml`, the same per-repo shape it carries today. `publish-docker-readme-task.yml` and `check-upstream-version-task.yml` are each a job embedded in a repo's own workflow. Neither is a standalone top-level caller with a snippet of its own. And `deploy-site.yml` carries no manifest-wide snippet by design, since each site's own shape varies around the shared `deploy` job. This section stays the adoption reference for those three until a follow-on catalog change lands, per [Pinning](#pinning).
 
 `build-datebadge-task.yml` is retired rather than hosted. TODO.md "Delete the retired `byob.yarr.is` last-build badge" already settles that the badge service is deprecated and the badge is deleted rather than replaced. So no repo adopts a caller stub for it and KiCadLibrary's deletion is that same cleanup, not a migration to a hub task.
 
@@ -725,7 +727,7 @@ Stage 5 hosts four more tasks: `publish-docker-readme-task.yml`, `check-upstream
     name: Publish Docker Hub readme job
     permissions:
       contents: read
-    uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/publish-docker-readme-task.yml@<hub-main-commit-sha> # <release-tag>
     with:
       ref: ${{ github.sha }}
       branch: ${{ github.ref_name }}
@@ -741,7 +743,7 @@ The caller grants `contents: read` explicitly. This is because the task's own jo
 ```yaml
   check-upstream-version:
     name: Check upstream version job
-    uses: ptr727/ProjectTemplate/.github/workflows/check-upstream-version-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/check-upstream-version-task.yml@<hub-main-commit-sha> # <release-tag>
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
@@ -765,7 +767,7 @@ A hook, not a fixed path convention, is still the better contract even at two sc
     needs: [validate]
     permissions:
       contents: read
-    uses: ptr727/ProjectTemplate/.github/workflows/deploy-site-task.yml@<sha> # <tag>
+    uses: ptr727/ProjectTemplate/.github/workflows/deploy-site-task.yml@<hub-main-commit-sha> # <release-tag>
     with:
       environment: ${{ inputs.environment }}
     secrets:
@@ -777,7 +779,7 @@ A hook, not a fixed path convention, is still the better contract even at two sc
 ```yaml
   run-codegen:
     name: Run codegen and pull request job
-    uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@0b07a59d7c65d07d8df275a96deaf2e06cbefd51 # 2.0.352
+    uses: ptr727/ProjectTemplate/.github/workflows/run-codegen-pull-request-task.yml@<hub-main-commit-sha> # <release-tag>
     secrets:
       CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
       CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
