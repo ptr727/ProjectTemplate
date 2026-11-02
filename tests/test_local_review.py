@@ -1313,6 +1313,20 @@ class ReceiptCase(RepoCase):
         )
         self.assertTrue(any("receiptVersion" in p for p in problems))
 
+    def test_a_receipt_holding_a_typed_count_no_longer_covers(self) -> None:
+        """Version 1 recorded a count the caller typed, bound to no report the reviewer wrote."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        base, digest, _ = local_review.current_state(self.target, self.tmp)
+        legacy = {
+            "receiptVersion": 1,
+            "target": self.target,
+            "mergeBase": base,
+            "contentDigest": digest,
+            "passes": [{"reviewer": "agent-skill", "recordedUtc": "x", "findings": 0}],
+        }
+        local_review.receipt_path(self.tmp).write_text(json.dumps(legacy), encoding="utf-8")
+        self.assertEqual(self.main_quiet(["check", "--target", self.target]), 1)
+
     def test_the_receipt_lives_outside_the_working_tree(self) -> None:
         """So it can never be committed by accident and needs no .gitignore entry."""
         path = local_review.receipt_path(self.tmp)

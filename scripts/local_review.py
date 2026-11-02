@@ -130,7 +130,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import GIT_LOCATION_VARS
 
-RECEIPT_VERSION = 1
+RECEIPT_VERSION = 2
 RECEIPT_NAME = "local-review-receipt.json"
 # Kept in the git directory rather than the working tree, so staging the tree does not stage these.
 STAGING_INDEX_PREFIX = "local-review-index."
