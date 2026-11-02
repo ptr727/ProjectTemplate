@@ -3,15 +3,15 @@ name: drive-pr
 description: >-
   Drives a ptr727/ProjectTemplate fleet pull request through its review loop, feature branch into
   develop and, when asked, on to a mergeable develop -> main promotion PR, disposing of every
-  reviewer finding under pr-review-conduct's outcomes and escalating to whoever dispatched it where
-  its seat cannot reach the maintainer. Use this whenever asked to drive, land, take, chase, or push
-  a PR toward develop or main, or to run the review loop hands off. When the request does not say
-  how far ("drive this PR", "land it"), ask once whether the target is develop or a mergeable main
-  promotion PR, rather than guessing. Triggers even when only one PR is named, because a
-  promotion-PR finding routinely needs its own feature -> develop fix cycle, and stopping at the
-  first one is the early exit this skill prevents. Ends at develop merged, or at a promotion PR
-  meeting every Merge Gate item but the maintainer's permission to merge. It never merges main,
-  which is merge-and-release, its own go-ahead.
+  reviewer finding under pr-review-conduct's outcomes and escalating to whoever dispatched the drive
+  where its seat cannot reach the maintainer. Use this whenever asked to drive, land, take, chase,
+  or push a PR toward develop or main, or to run the review loop hands off. When the request does
+  not say how far ("drive this PR", "land it"), ask once whether the target is develop or a
+  mergeable main promotion PR, rather than guessing. Triggers even when only one PR is named,
+  because a promotion-PR finding routinely needs its own feature -> develop fix cycle, and stopping
+  at the first one is the early exit this skill prevents. Ends at develop merged, or at a promotion
+  PR meeting every Merge Gate item but the maintainer's permission to merge. It never merges main,
+  which is merge-and-release's, its own go-ahead.
 ---
 
 # Drive PR
