@@ -38,6 +38,18 @@ class RequestCase(unittest.TestCase):
             with self.subTest(label=label), self.assertRaises(gh_graphql.GraphQLError):
                 gh_graphql.request("q", {}, run=run)
 
+    def test_a_null_node_raises_naming_where_it_sat(self) -> None:
+        data = {"repo": {"issues": {"nodes": [{"labels": {"nodes": [None, {"name": "x"}]}}]}}}
+        with self.assertRaises(gh_graphql.NullNodeError) as caught:
+            gh_graphql.request("q", {}, run=answering(0, {"data": data}))
+        self.assertIsInstance(caught.exception, gh_graphql.GraphQLError)
+        self.assertEqual("repo.issues.nodes.labels", caught.exception.where)
+
+    def test_a_response_without_a_null_node_has_none_to_name(self) -> None:
+        data = {"a": {"nodes": [{"b": {"nodes": []}}]}, "c": [1, None]}
+        self.assertIsNone(gh_graphql.null_node(data))
+        self.assertEqual("nodes", gh_graphql.null_node({"nodes": [None]}))
+
     def test_a_failed_launch_raises_graphql_error(self) -> None:
         with (
             unittest.mock.patch("subprocess.run", side_effect=OSError("no gh")),

@@ -206,7 +206,7 @@ def branch_users(owner: str, repo: str, branch: str) -> list[str]:
     total = found.get("totalCount") if isinstance(found, dict) else None
     if not isinstance(nodes, list) or not isinstance(total, int):
         raise CleanupUnread(f"the open pull request read returned no bases list: {found!r}"[:400])
-    users += [f"#{n.get('number')} (base)" for n in nodes if isinstance(n, dict)]
+    users += [f"#{n.get('number')} (base)" for n in nodes]
     if total > len(nodes):
         users.append(f"{total - len(nodes)} more with the branch as base")
     return users
@@ -868,8 +868,7 @@ class CleanupSweep:
         matches = [
             n
             for n in nodes
-            if isinstance(n, dict)
-            and in_repository(n, self.owner, self.repo)
+            if in_repository(n, self.owner, self.repo)
             and (
                 n.get("headRefOid") == tip
                 or cleanup_behind(self.primary, tip, n.get("headRefOid") or "")

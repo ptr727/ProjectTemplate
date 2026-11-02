@@ -795,6 +795,29 @@ class CurrentCase(unittest.TestCase):
         self.assertEqual(run(fake, "current", "--repo", "o/r", "--track", "lane")[0], 1)
 
 
+class NullLabelNodeCase(unittest.TestCase):
+    """A null label node reports as a read that did not run, where it once raised TypeError."""
+
+    def test_a_null_label_node_is_an_execution_failure(self) -> None:
+        body = {
+            "repository": {
+                "hasIssuesEnabled": True,
+                "issues": {
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    "nodes": [{"number": 1, "labels": {"nodes": [None, {"name": "handoff"}]}}],
+                },
+            }
+        }
+        with (
+            unittest.mock.patch.object(
+                handoff, "gh_runner", lambda argv: (0, json.dumps({"data": body}), "")
+            ),
+            self.assertRaises(handoff.Execution) as caught,
+        ):
+            handoff.labeled("o/r", "OPEN", 10, "open handoffs")
+        self.assertIn("null node", str(caught.exception))
+
+
 class ExitCodeCase(unittest.TestCase):
     """A finding and the check not having run never share a code."""
 
