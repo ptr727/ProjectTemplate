@@ -298,7 +298,7 @@ Two copies today filter Dependabot by ecosystem and semver tier before merging. 
 
 A downstream repo replaces its own `validate-task.yml` job bodies and its `test-pull-request.yml`'s inline lint job with one of the two stub shapes. It also deletes the copy of `validate-task.yml` per the `retire` disposition in `spec/divergences.json`. The [no-build caller snippet][no-build-caller-snippet] is the complete no-build shape and carries an adoptable released pin. The catalog snapshot stays at that bootstrap pin as later releases ship. After adoption, the first downstream Dependabot run advances the pin in `.github/workflows/test-pull-request.yml`. The release-with-smoke shape below is the [release-with-smoke caller snippet][smoke-caller-snippet] byte for byte, pinned the same way. A downstream repo carries it as `.github/workflows/test-pull-request.yml`, since the catalog file takes another name only because the no-build snippet holds that one. A downstream `publish-release.yml` reaches the same `validate-task.yml` by a released pin for its `validate` job. The hub workflow uses its local task path instead.
 
-**No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles. In that shape a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance). In that shape a `pull_request` to `main` or `develop` runs it pre-merge and actionable. A release-model repo with no build target takes the same stub with a `pull_request: branches: [main, develop]` trigger instead, since it has no direct-commit allowance to keep advisory. It also drops the stub's `workflow-model` input, since `release` is the default.
+**No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles. In that shape a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance). In that shape a `pull_request` runs it pre-merge and actionable. A release-model repo with no build target keeps only the stub's `pull_request` and `workflow_dispatch` triggers. It has no direct-commit allowance to keep advisory. It also drops the stub's `workflow-model` input, since `release` is the default.
 
 An operational repo also names its model in the `workflow-model` input, which defaults to `release`. On that default the prose gate's `comment-added` rule stands down on a `develop -> main` promotion, since each promoted line was reviewed on its own pull request. An operational repo may commit to `develop` directly, so its promotion can be the first review those lines get, and the rule runs there:
 
@@ -316,7 +316,6 @@ name: Test pull request action
 
 on:
   pull_request:
-    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
@@ -386,8 +385,10 @@ jobs:
       branch: ${{ github.base_ref || github.ref_name }}
 
   # Treats a skipped smoke-build (an unchanged target) as pass, and blocks on failure or cancelled (D1.5, D7.4).
+  # Only a pull_request run takes the ruleset-bound name.
+  # So a dispatch on a pull request's head cannot post the required check without that pull request's gates.
   check-workflow-status:
-    name: Check pull request workflow status job
+    name: ${{ github.event_name == 'pull_request' && 'Check pull request workflow status job' || 'Check workflow status job' }}
     runs-on: ubuntu-latest
     needs: [changes, validate, smoke-build]
     if: always()
@@ -408,6 +409,14 @@ jobs:
             exit 1
           fi
 ```
+
+Both stub shapes share two trigger rules. The `pull_request` trigger names no base branch. A retarget fires the `edited` activity type, which the default types omit. So a base filter strands a stacked pull request retargeted onto `develop` at "Expected, waiting for status to be reported". The aggregator's `name:` is an expression yielding the ruleset-bound name only on a `pull_request` run, per [WORKFLOW.md][workflow] D1.5. A `workflow_dispatch` run, and the no-build shape's push to `develop`, report `Check workflow status job` instead. So a run on a pull request's head that skipped that pull request's gates cannot post its required check. The audit's `interface` check reports a literal aggregator name in a stub that any other event also triggers.
+
+The task expects three things of the repository it gates, and each one fails quietly where it is missing:
+
+- **A mypy target.** The `Type check Python step` passes mypy no path where the config it reads sits in the directory it checks. So a `[tool.mypy]` section there declares `files`, `packages`, or `modules`. Without one mypy exits 2 with "Missing target module, package, files, or command", which reads as a broken task rather than a missing declaration. A project usually names `files = ["src"]`, and a lint-only directory `files = ["."]`.
+- **One type checker.** The step runs mypy wherever mypy is configured and pyright only where it is not. A repo that runs both today keeps the second as a step in its own `validate` hook. Adopting without that hook drops the second checker while the job stays green.
+- **A `pull_request` trigger for the prose gate.** The `Read comments label step`, the `Resolve prose base step`, and the `Check prose step` run only on a `pull_request` event, since a diff-scoped gate diffs against the pull request's base. A push or dispatch run skips them, while the repo gate beside them still runs. So a direct commit to `develop` reaches the prose gate only in the pull request that promotes it.
 
 A repo that vendors a theme or imports content it does not author excludes it from the Markdown lint rather than fixing it. `.markdownlint-cli2.jsonc` is declared `"fidelity": "verbatim", "whole": true` in `spec/files.json`, so the root config is not locally editable. The exclusion therefore goes in a nested `.markdownlint-cli2.jsonc` inside the excluded directory. `markdownlint-cli2` applies a nested config to the directory it sits in and to every subdirectory below it. So the exclusion holds for a bare local run and for the CI step alike. A nested config's `ignores` patterns resolve against the directory holding it rather than against the repo root. Blog is one of the two repositories owed this, `Financial-Modeling` being the other, and neither has adopted it. Blog excludes `content/**` and `themes/*/**` through the CI input below and nothing else. Its root config also predates the `globs` key. So a bare local run there exits on a usage error rather than linting anything until that re-vendor lands. Migrating it means the re-vendor plus one file per excluded tree. `content/`, its imported WordPress archive, takes the whole subtree:
 
@@ -476,7 +485,7 @@ The default is `["3.13"]`, so a caller naming nothing runs the single leg this j
 
 Quote each entry, and give each one a version. The `Build test matrix job` runs first on every call and refuses an array holding an entry with no non-whitespace character. Such a value would otherwise run green on an interpreter nobody chose. That is because `setup-uv` trims what it reads and then reads an empty input as an absent one. A caller reaches that by interpolating an unset value of its own, or by leaving a stray space beside it. The job also refuses an unquoted entry, since `fromJSON` admits a JSON array of numbers. Some of those numbers `uv` resolves to a real interpreter, `'[3]'` among them, so an unquoted entry is a second silent pass. The job refuses an empty array, a non-array, and concatenated JSON values, each with a named cause. The `unit-test` job and its `Run Python tests step` never see a bad `python-versions`.
 
-Two things are deliberately outside the `python-versions` input. A caller carrying a .NET test project as well repeats that half of the job once per leg. The matrix is on the job rather than on its Python steps. So naming a second version there buys runner minutes rather than a second measurement. And the `lint` job stays on the one interpreter the task pins, which costs a repo two different things. Its type check is performed at that interpreter. `mypy` and `pyright` each default their target to the one they run under. That holds where the repo's own `[tool.mypy]` or `[tool.pyright]` section does not name a version. Meanwhile `ruff` takes its target from `requires-python` where the `pyproject.toml` declares a `[project]` table and from its own default where it does not. That much a repo settles in its own configuration. What it cannot settle there is a lockfile. A repo carrying a `uv.lock` whose `requires-python` floor is above the pinned interpreter fails the `Sync Python dependencies step` outright. No value of `python-versions` moves that job. A declared pip directory is the one exception. Its requirements install there under the first interpreter `python-versions` names, since a type check against them has to resolve them first.
+A caller carrying a .NET test project as well repeats that half of the job once per leg. The matrix is on the job rather than on its Python steps. So naming a second version there buys runner minutes rather than a second measurement. The `lint` job runs once, and its Python steps run under the first interpreter `python-versions` names. So a `uv.lock` whose `requires-python` floor is above the default still syncs there. The prose and repo gates beside them stay on 3.13, the floor the hub's own scripts declare. Its type check is performed at that interpreter alone. `mypy` and `pyright` each default their target to the one they run under. That holds where the repo's own `[tool.mypy]` or `[tool.pyright]` section does not name a version. Meanwhile `ruff` takes its target from `requires-python` where the `pyproject.toml` declares a `[project]` table and from its own default where it does not. A repo testing several interpreters settles the type-check target in its own configuration. The `lint` job refuses a `python-versions` value whose first entry is not a quoted version string, with a named cause.
 
 A repo whose pytest legs differ by dependency versions names them in `test-matrix`, a JSON array of objects, one leg per entry. It replaces the `python-versions` legs. Each entry needs a string `label` naming the leg and its Codecov flag. It may carry a `python-version`, defaulting to the first `python-versions` entry. Any other key is the repo's own, passed through to its hook.
 

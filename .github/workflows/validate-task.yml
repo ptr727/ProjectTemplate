@@ -4,7 +4,7 @@ name: Validate task
 # The jobs are test-matrix, lint, unit-test, and validate.
 # The test-matrix job checks the python-versions and test-matrix inputs and builds the unit-test matrix.
 # The lint job is the fleet doc-lint block plus language lint, by tree detection.
-# For Python it lints the declared directories, and it also runs the prose gate and the repo gate.
+# For Python it lints the declared directories, and it also runs the repo gate, and the prose gate on a pull_request event.
 # The unit-test job is a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory.
 # It runs once per interpreter the python-versions input names, or once per test-matrix leg.
 # The validate job is the validate hook, a repo's own domain checks.
@@ -36,7 +36,7 @@ on:
         required: false
         type: string
         default: ''
-      # Built into the unit-test matrix by the test-matrix job, and read raw by its python-versions check and the lint job's Sync Python dependencies step.
+      # Built into the unit-test matrix by the test-matrix job, and read raw by its python-versions check and the lint job's Resolve lint Python version step.
       python-versions:
         description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
@@ -289,7 +289,33 @@ jobs:
       # The severity and verbosity flags match the fleet's canonical invocation, per CODESTYLE.md and PhotoCleaner's own gate.
       - name: Check C# style step
         if: hashFiles('**/*.csproj') != ''
-        run: dotnet format style --verify-no-changes --severity=info --verbosity=detailed
+        run: |
+          set -Eeuo pipefail
+          # Both dotnet format and dotnet test resolve a lone solution or project from the working directory, and fail where the root holds none.
+          # A root holding one keeps that bare call.
+          # Otherwise each tracked project matching the first argument is named.
+          # With a second argument of solutions, each tracked solution is named instead wherever the tree holds one.
+          dotnet_workspaces() {
+            local solutions=
+            if [ -z "$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')" ]; then
+              if [ "${2:-}" = solutions ]; then
+                solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+              fi
+              if [ -n "$solutions" ]; then
+                printf '%s\n' "$solutions"
+              else
+                git ls-files -- "$1"
+              fi
+            fi
+          }
+          workspaces=$(dotnet_workspaces ':(glob)**/*.csproj' solutions)
+          if [ -z "$workspaces" ]; then
+            dotnet format style --verify-no-changes --severity=info --verbosity=detailed
+          fi
+          while IFS= read -r workspace; do
+            [ -n "$workspace" ] || continue
+            dotnet format style "$workspace" --verify-no-changes --severity=info --verbosity=detailed < /dev/null
+          done <<< "$workspaces"
 
       - name: Resolve Python directories step
         id: python
@@ -305,9 +331,26 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: $/.github/actions/python-tool-pins
 
+      # The job's Python steps run under the first interpreter the caller names, so a uv.lock whose floor is above the default still syncs.
+      # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
+      - name: Resolve lint Python version step
+        id: lint-python
+        if: steps.python.outputs.any == 'true'
+        env:
+          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+        run: |
+          set -Eeuo pipefail
+          if ! version=$(jq -er -s 'if length == 1 and (.[0] | type == "array" and length > 0 and (.[0] | type == "string" and test("\\S"))) then .[0][0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
+            echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry is the interpreter the lint job runs under."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       # The other uvx tools run @latest, since a `uvx <tool>@<ver>` literal in a run: line is nothing Dependabot tracks and would silently go stale.
       # The setup-uv SHA here is Dependabot-tracked.
-      # This step and the one above are the one place the fleet's uvx tools are pinned or floated, decided here.
+      # This step and the Read Python tool pins step are the one place the fleet's uvx tools are pinned or floated, decided here.
+      # The job-wide interpreter stays at the floor the hub's own uv scripts declare, since the prose and repo gates below run under it.
+      # Each Python step sets UV_PYTHON to the resolved interpreter instead, which every uv call in it reads.
       - name: Setup uv step
         if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -315,12 +358,10 @@ jobs:
           python-version: "3.13"
 
       # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
-      # They install under the first interpreter the caller names, since they need not resolve under the one this job pins.
-      # UV_PYTHON is what every uv call below reads for that first interpreter the caller names.
       - name: Sync Python dependencies step
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
@@ -328,9 +369,6 @@ jobs:
           # One resolve over the collected requirements files, since the glob sorts the base file last.
           # A per-file install would let its pins downgrade what the test file just resolved.
           install_requirements() {
-            if [ -n "${PIP_PYTHON:-}" ]; then
-              export UV_PYTHON="$PIP_PYTHON"
-            fi
             uv venv
             local requirement_args=()
             local file
@@ -347,11 +385,6 @@ jobs:
             if [ "$kind" = uv ]; then
               (cd "$dir" && uv sync --all-groups --frozen) < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ]; then
-              # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
-              if ! PIP_PYTHON=$(jq -er -s 'if length == 1 and (.[0] | type == "array" and length > 0 and (.[0] | type == "string" and test("\\S"))) then .[0][0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
-                echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry installs the declared pip directory $dir."
-                exit 1
-              fi
               (cd "$dir" && install_requirements) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
@@ -361,6 +394,7 @@ jobs:
       - name: Lint Python step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
           RUFF_VERSION: ${{ steps.pins.outputs.ruff }}
@@ -381,6 +415,7 @@ jobs:
       - name: Check Python formatting step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
           RUFF_VERSION: ${{ steps.pins.outputs.ruff }}
@@ -409,6 +444,7 @@ jobs:
       - name: Type check Python step
         if: steps.python.outputs.any == 'true'
         env:
+          UV_PYTHON: ${{ steps.lint-python.outputs.version }}
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
         run: |
@@ -625,7 +661,32 @@ jobs:
         run: |
           set -Eeuo pipefail
           rm -rf ./coverage
-          dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage
+          # Both dotnet format and dotnet test resolve a lone solution or project from the working directory, and fail where the root holds none.
+          # A root holding one keeps that bare call.
+          # Otherwise each tracked project matching the first argument is named.
+          # With a second argument of solutions, each tracked solution is named instead wherever the tree holds one.
+          dotnet_workspaces() {
+            local solutions=
+            if [ -z "$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')" ]; then
+              if [ "${2:-}" = solutions ]; then
+                solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+              fi
+              if [ -n "$solutions" ]; then
+                printf '%s\n' "$solutions"
+              else
+                git ls-files -- "$1"
+              fi
+            fi
+          }
+          # A solution holding no test project fails dotnet test with no test projects found, so the tests are named one project at a time.
+          workspaces=$(dotnet_workspaces ':(glob)**/*Tests*.csproj')
+          if [ -z "$workspaces" ]; then
+            dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage
+          fi
+          while IFS= read -r workspace; do
+            [ -n "$workspace" ] || continue
+            dotnet test --project "$workspace" --coverage --coverage-output-format cobertura --results-directory ./coverage < /dev/null
+          done <<< "$workspaces"
           written=0
           for report in ./coverage/*.cobertura.xml; do
             [ -e "$report" ] || continue

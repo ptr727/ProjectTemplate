@@ -365,21 +365,26 @@ def opened_by(pr: dict, node: dict) -> list[dict]:
     ]
 
 
-def shape_hold(pr: dict) -> tuple[str, list[adapter.Unplaced], bool] | None:
+def shape_hold(pr: dict, oid: str = "") -> tuple[str, list[adapter.Unplaced], bool] | None:
     """The parts the head's rounds leave unplaced, their fingerprint, and whether it is answered.
 
     None where those rounds place every part. A trusted comment is what answers a fingerprint.
+    Passed `oid`, it reads the rounds on that commit instead, as the hold stood while it was the head.
     """
-    parts = list(dict.fromkeys(p for node in head_reviews(pr) for p in reading(node).unplaced))
+    nodes = head_reviews({**pr, "headRefOid": oid}) if oid else head_reviews(pr)
+    parts = list(dict.fromkeys(p for node in nodes for p in reading(node).unplaced))
     if not parts:
         return None
     fp = adapter.fingerprint(parts)
-    marker = ACK_MARKER.format(fp)
-    acked = any(
-        marker in lines and any(ln.strip() not in ("", marker) for ln in body.splitlines())
-        for body, lines in trusted_comments(pr)
-    )
+    acked = any(ACK_MARKER.format(fp) in lines for lines in answering_comments(pr))
     return fp, parts, acked
+
+
+def answering_comments(pr: dict) -> Iterator[list[str]]:
+    """The HTML lines of each trusted comment that also carries prose outside code, not a marker alone."""
+    for body, lines in trusted_comments(pr):
+        if adapter.has_prose(body):
+            yield lines
 
 
 def trusted_comments(pr: dict) -> Iterator[tuple[str, list[str]]]:
@@ -519,8 +524,10 @@ def qodo_comments_blind(pr: dict) -> bool:
     )
 
 
-def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.Section]], str]:
-    """Each section of `kind` in this login's rounds, with where it was raised, and the field.
+def collected(
+    pr: dict, login: str, kind: str
+) -> tuple[list[tuple[str, adapter.Section, str]], str]:
+    """Each section of `kind` in this login's rounds, where it was raised, its round, and the field.
 
     Every round rather than the head's, since an unanswered finding survives a push. The field
     reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut. A tally
@@ -537,10 +544,11 @@ def collected(pr: dict, login: str, kind: str) -> tuple[list[tuple[str, adapter.
             if oid == head
             else f"raised on {oid[:8]}, earlier round"
         )
-        found += [(where, s) for s in reading(node, login).sections if s.kind == kind]
+        rid = node.get("id") or oid
+        found += [(where, s, rid) for s in reading(node, login).sections if s.kind == kind]
 
     def tally(on: bool | None) -> str:
-        n = adapter.total(s.findings for w, s in found if on is None or (w == "on head") == on)
+        n = adapter.total(s.findings for w, s, _ in found if on is None or (w == "on head") == on)
         return "?" if n is None else str(n)
 
     mark = "+" if reviews_truncated(pr) else ""

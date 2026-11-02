@@ -455,6 +455,40 @@ jobs:
           echo "::error::Run $GITHUB_RUN_ID was not cancelled within 300s; failing so no release or package push follows."
           exit 1
 
+      # Left unset, make_latest flags whichever release publishes last, so a re-run of an older version would take Latest from a newer one.
+      # A prerelease never takes the flag, and a main release takes it only where its version sorts at or above the current Latest release's tag.
+      # A repository with no Latest release yet answers 404, which leaves this release to take the flag.
+      - name: Decide latest release step
+        id: latest
+        if: ${{ steps.release-exists.outputs.exists == 'false' || github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
+          TAG: ${{ needs.get-version.outputs.SemVer2 }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$BRANCH" != "main" ]]; then
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          error_file=$(mktemp)
+          if current=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> "$error_file"); then
+            highest=$(printf '%s\n%s\n' "${current#v}" "${TAG#v}" | sort -V | tail -n 1)
+            if [[ "$highest" == "${TAG#v}" ]]; then
+              make_latest=true
+            else
+              make_latest=false
+              echo "::notice::Release $TAG sorts below the current Latest release $current, so it leaves the Latest flag there."
+            fi
+          elif grep -q 'HTTP 404' "$error_file"; then
+            make_latest=true
+          else
+            cat "$error_file" >&2
+            echo "::error::Could not read the current Latest release, so this run cannot tell whether $TAG may take the flag."
+            exit 1
+          fi
+          echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
+
       # The target_commitish input must be set explicitly, or GitHub's REST API tags the release on the default branch.
       # Pin it to GitCommitId so the tag is on the exact built commit, consistent with the SemVer2 tag and artifacts.
       # Skip when the release already exists, but always let a manual workflow_dispatch through to refresh it.
@@ -470,6 +504,7 @@ jobs:
           tag_name: ${{ needs.get-version.outputs.SemVer2 }}
           target_commitish: ${{ needs.get-version.outputs.GitCommitId }}
           prerelease: ${{ inputs.branch != 'main' }}
+          make_latest: ${{ steps.latest.outputs.make_latest }}
           fail_on_unmatched_files: ${{ inputs.expect_release_assets }}
           files: |
             LICENSE

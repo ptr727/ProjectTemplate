@@ -22,22 +22,32 @@ the gate's, nothing merged.
 from __future__ import annotations
 
 import argparse
-import re
+import contextlib
+import io
+import sys
+from typing import TextIO
 
 import pr_cleanup
 import pr_review as core
-import pr_review_digest
-from pr_review_checks import MERGE_UNGATED
+import pr_review_answers as answers
 
 GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
 UNRUN = "gh could not be run or did not finish"
-MET_COVERAGE = ("full", "table", "carried:table", "local")
-UNTHREADED = ("suppressed", "previously_missed", "cr_outside_diff", "qodo_open")
-NOTED = pr_review_digest.NOTED
-COUNTED = (*UNTHREADED, "overview", pr_review_digest.NO_THREAD, NOTED)
-# The digest builds these as None where the source they count is absent from the pull request.
-ABSENT = ("previously_missed", "cr_outside_diff", "qodo_open")
+
+
+class Tee(io.TextIOBase):
+    """Standard output passed through as written, with its text kept for the route."""
+
+    def __init__(self, out: TextIO) -> None:
+        self.out, self.text = out, io.StringIO()
+
+    def write(self, s: str) -> int:
+        self.text.write(s)
+        return self.out.write(s)
+
+    def flush(self) -> None:
+        self.out.flush()
 
 
 def ready(owner: str, repo: str, num: int) -> dict | None:
@@ -68,62 +78,22 @@ def ready(owner: str, repo: str, num: int) -> dict | None:
 
 def gate(owner: str, repo: str, num: int) -> int:
     """`wait`'s exit on the pull request, reading the gate as it stands and requesting nothing."""
-    a = argparse.Namespace(
-        number=num,
-        timeout=GATE_TIMEOUT,
-        min_rounds=0,
-        check_grace=core.CHECK_GRACE,
-        check_stall=core.CHECK_STALL,
-        ignore_quota_signal=False,
-        request=False,
-    )
+    a = argparse.Namespace(number=num, timeout=GATE_TIMEOUT, min_rounds=0, request=False)
+    a.check_grace, a.check_stall, a.ignore_quota_signal = core.CHECK_GRACE, core.CHECK_STALL, False
     return core.run_wait(owner, repo, a, may_request=False)
 
 
 def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, str]]]:
     """The head one fresh read shows, and each gate item `wait`'s 0 leaves undecided that it fails.
 
-    The coverage and the counts are the fields the digest builds, so a refusal names what the
-    driver was shown. A count not built, holding no number, or cut short by a window refuses
-    rather than reading as zero. The threads are walked to the end, since the digest reads one page.
+    `pr_review_answers.unmet` decides the items off the fields the digest builds, so a refusal
+    names what the driver was shown. The threads are walked to the end, since the digest reads one
+    page.
     """
     pr = core.full_read(owner, repo, num)
     built: list[tuple[str, object]] = []
     core.digest(owner, repo, num, pr=pr, fields_out=built)
-    fields = dict(built)
-    unmet, unread = [], []
-    counts: list[str] = []
-    noted: list[str] = []
-    if (cover := fields.get("coverage")) not in MET_COVERAGE:
-        unmet.append(
-            ("COVERAGE_NOT_SHOWN", f"the digest reads coverage={cover}, so item 2 is unmet")
-        )
-    if opened := core.open_on_head(owner, repo, num, pr):
-        unmet.append(("THREADS_UNRESOLVED", f"{len(opened)} review thread(s) are unresolved"))
-    if (shapes := fields.get("shapes")) == "HELD":
-        unmet.append(("UNPLACED_PARTS_UNACKNOWLEDGED", "shapes=HELD owes item 4 an acknowledgment"))
-    elif shapes not in ("ok", "NOTED", "ACKNOWLEDGED"):
-        unread.append(f"shapes={shapes}")
-    if (asked := fields.get("requested")) != "no":
-        unmet.append(("REVIEW_PENDING", f"the digest reads requested={asked}"))
-    for key in COUNTED:
-        absent = key in ABSENT or (key == "overview" and fields.get("review_on_head") != "yes")
-        value = "0" if absent and key in fields and fields[key] is None else fields.get(key, "")
-        if not (m := re.match(r"(\d+)(/\d+)?( |$)", str(value))):
-            unread.append(f"{key}={value}" if value != "" else f"{key} (not built)")
-        elif key != "overview" and m[1] != "0":
-            (noted if key == NOTED else counts).append(f"{key}={value}")
-    if unread:
-        unmet.append(
-            ("COUNT_UNREAD", f"the digest holds no readable count for {', '.join(unread)}")
-        )
-    if counts:
-        unmet.append(("UNTHREADED_FINDINGS", f"the digest reads {', '.join(counts)}"))
-    if noted:
-        unmet.append(("OUTPUT_NOTED", f"the digest reads {noted[0]}, which item 4 reads by hand"))
-    if (state := pr.get("mergeStateStatus")) not in MERGE_UNGATED:
-        unmet.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not a finished one"))
-    return pr["headRefOid"], unmet
+    return pr["headRefOid"], answers.unmet(pr, dict(built), core.open_on_head(owner, repo, num, pr))
 
 
 def merge_call(target: str, num: int, head: str) -> int | None:
@@ -144,6 +114,15 @@ def merge_call(target: str, num: int, head: str) -> int | None:
 
 
 def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
+    """`gated_merge`, then one `next=<route>` line its status lines decide, and its exit."""
+    tee = Tee(sys.stdout)
+    with contextlib.redirect_stdout(tee):
+        code = gated_merge(owner, repo, num, cleanup, checkout)
+    print(f"next={answers.route(code, cleanup, tee.text.getvalue())}")
+    return code
+
+
+def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
     """Gate, merge, and confirm pull request `num`, then clean it up where asked.
 
     The gate's short `GATE_TIMEOUT` absorbs a merge state still settling where `wait` polls checks,

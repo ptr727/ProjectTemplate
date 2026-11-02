@@ -23,6 +23,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_merge
 import pr_review
+import pr_review_answers as answers
 import test_pr_review as fixtures
 
 HEAD = fixtures.HEAD
@@ -457,23 +458,169 @@ class TestUnmetItems(MergeCase):
                 unmet = self.unmet_on(pr)
                 self.assertTrue(any(want in item for item in unmet), unmet)
 
-    def test_a_finding_on_an_earlier_round_is_unmet_whatever_answered_it(self) -> None:
+    def earlier(self, label: str, rid: str = "PRR_old", finding: str = "Guard the write.") -> dict:
+        """A Copilot round on an earlier commit collapsing one finding under `label`."""
+        section = (
+            f"{fixtures.OVERVIEW}\n<details>\n<summary><strong>{label}</strong></summary>\n\n"
+            f"In code that has not changed since last review\n\n[P2] {finding}\n</details>"
+        )
+        return fixtures.review(oid=fixtures.OLD, body=section, rid=rid)
+
+    def answer(
+        self, pr: dict, kinds: tuple[str, ...], outcome: str = "declined", **overrides: Any
+    ) -> dict:
+        """A trusted comment acknowledging every item under `kinds` with `outcome`."""
+        marks = [
+            answers.FINDING_ACK.format(item.key, outcome)
+            for item in answers.items(pr)
+            if item.kind in kinds
+        ]
+        self.assertTrue(marks, kinds)
+        body = "Declined: the guard sits upstream of the write.\n\n" + "\n".join(marks)
+        return {**fixtures.ack("0" * 12, "OWNER", text=body), **overrides}
+
+    def with_comments(self, pr: dict, *comments: dict) -> dict:
+        nodes = [*((pr.get("comments") or {}).get("nodes") or []), *comments]
+        return {**pr, "comments": {**(pr.get("comments") or {}), "nodes": nodes}}
+
+    def test_a_finding_on_an_earlier_round_is_unmet_until_acknowledged(self) -> None:
         for label, kind in (
             ("Comments suppressed due to low confidence (1)", "suppressed"),
             ("1 previously missed issue", "previously_missed"),
         ):
-            section = (
-                f"{fixtures.OVERVIEW}\n<details>\n<summary><strong>{label}</strong></summary>\n\n"
-                "In code that has not changed since last review\n\n"
-                "[P2] Guard the write.\n</details>"
-            )
-            earlier = fixtures.review(oid=fixtures.OLD, body=section, rid="PRR_old")
-            pr = fixtures.payload([earlier, fixtures.review(body=self.CLEAN)], files=["a.py"])
+            reviews = [self.earlier(label), fixtures.review(body=self.CLEAN)]
+            pr = fixtures.payload(reviews, files=["a.py"])
+            unmet = f"UNTHREADED_FINDINGS the digest reads {kind}=1 (on_head=0 earlier=1)"
             with self.subTest(kind):
-                self.assertIn(
-                    f"UNTHREADED_FINDINGS the digest reads {kind}=1 (on_head=0 earlier=1)",
-                    self.unmet_on(pr),
+                self.assertIn(unmet, self.unmet_on(pr)[0])
+                self.assertEqual(
+                    [], self.unmet_on(self.with_comments(pr, self.answer(pr, (kind,))))
                 )
+
+    def test_an_acknowledgment_answers_only_where_it_is_trusted_written_and_known(self) -> None:
+        reviews = [self.earlier("1 previously missed issue"), fixtures.review(body=self.CLEAN)]
+        pr = fixtures.payload(reviews, files=["a.py"])
+        good = self.answer(pr, ("previously_missed",))
+        marker_only = "\n".join(ln for ln in good["body"].splitlines() if ln.startswith("<!--"))
+        for label, comment in (
+            ("untrusted", {**good, "authorAssociation": "NONE"}),
+            ("hidden", {**good, "isMinimized": True}),
+            ("no written outcome", {**good, "body": marker_only}),
+            ("unknown outcome", self.answer(pr, ("previously_missed",), outcome="ignored")),
+            ("quoted in code", {**good, "body": good["body"].replace("<!--", "`<!--")}),
+            ("outcome only in a fence", {**good, "body": f"```\nDeclined.\n```\n\n{marker_only}"}),
+        ):
+            with self.subTest(label):
+                unmet = self.unmet_on(self.with_comments(pr, comment))
+                self.assertTrue(any(i.startswith("UNTHREADED_FINDINGS") for i in unmet), unmet)
+
+    def test_one_answered_item_leaves_another_under_the_same_count_unmet(self) -> None:
+        label = "Comments suppressed due to low confidence (1)"
+        first = self.earlier(label)
+        second = self.earlier(label, rid="PRR_older", finding="Bound the retry.")
+        pr = fixtures.payload([first, fixtures.review(body=self.CLEAN)], files=["a.py"])
+        answered = self.answer(pr, ("suppressed",))
+        both = fixtures.payload(
+            [second, first, fixtures.review(body=self.CLEAN)], files=["a.py"], comments=[answered]
+        )
+        self.assertTrue(any("suppressed=2" in item for item in self.unmet_on(both)))
+
+    def test_a_new_round_raising_the_same_text_owes_a_new_answer(self) -> None:
+        label = "1 previously missed issue"
+        keys = {
+            answers.items(fixtures.payload([self.earlier(label, rid=rid)]))[0].key
+            for rid in ("PRR_a", "PRR_b")
+        }
+        self.assertEqual(2, len(keys))
+
+    def test_each_count_no_thread_carries_is_met_once_every_item_is_acknowledged(self) -> None:
+        coderabbit = fixtures.review(
+            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
+            body=fixtures.cr_outside_diff_body(),
+            rid="PRR_two",
+        )
+        qodo = {
+            **fixtures.comment(
+                login=fixtures.pr_review_rounds.QODO_LOGIN, body=fixtures.qodo_review_body()
+            ),
+            "id": "IC_qodo",
+        }
+        odd = "## Pull request overview\n\nThe change is narrow.\n"
+        noted = fixtures.review(oid=fixtures.OLD, body=odd, rid="PRR_odd")
+        unthreaded = fixtures.review(body=fixtures.overview_v2())
+        for label, reviews, comments, kinds in (
+            (
+                "outside diff",
+                [fixtures.review(body=self.CLEAN), coderabbit],
+                [],
+                ("cr_outside_diff",),
+            ),
+            ("qodo", [fixtures.review(body=self.CLEAN)], [qodo], ("qodo_open",)),
+            ("noted", [noted, fixtures.review(body=self.CLEAN)], [], (answers.NOTED,)),
+            ("unthreaded", [unthreaded], [], (answers.NO_THREAD,)),
+        ):
+            with self.subTest(label):
+                pr = fixtures.payload(reviews, files=["a.py"], comments=comments)
+                self.assertTrue(self.unmet_on(pr))
+                answered = self.with_comments(pr, self.answer(pr, kinds))
+                left = [i for i in self.unmet_on(answered) if not i.startswith("COUNT_UNREAD")]
+                self.assertEqual([], left)
+
+    def test_a_key_moves_with_the_round_and_the_text_it_names(self) -> None:
+        """Two rounds on one commit, or a Qodo entry edited in place, never share an answer."""
+        odd = "## Pull request overview\n\nThe change is narrow.\n"
+        rounds = [
+            fixtures.review(oid=fixtures.OLD, body=odd, rid=rid) for rid in ("PRR_a", "PRR_b")
+        ]
+        notes = [i.key for i in answers.items(fixtures.payload(rounds)) if i.kind == answers.NOTED]
+        self.assertEqual(2, len(set(notes)))
+        login = fixtures.pr_review_rounds.QODO_LOGIN
+        qodo = [
+            answers.items(
+                fixtures.payload(
+                    [], comments=[{**fixtures.comment(login=login, body=body), "id": "IC_q"}]
+                )
+            )
+            for body in (
+                fixtures.qodo_review_body(),
+                fixtures.qodo_review_body().replace("does not describe", "hides"),
+            )
+        ]
+        self.assertTrue(qodo[0])
+        self.assertNotEqual([i.key for i in qodo[0]], [i.key for i in qodo[1]])
+
+    def test_a_no_thread_block_s_key_moves_with_what_it_counts(self) -> None:
+        def key(text: str) -> str:
+            pr = fixtures.payload([fixtures.review(body=text)], files=["a.py"])
+            return next(i.key for i in answers.items(pr) if i.kind == answers.NO_THREAD)
+
+        self.assertNotEqual(
+            key(fixtures.overview_v2()), key(fixtures.overview_v2(open_count="3 open findings"))
+        )
+
+    def test_a_login_drift_takes_no_answer(self) -> None:
+        drifted = fixtures.review(login="copilot-pull-request-reviewer-v2", rid="PRR_d")
+        pr = fixtures.payload([drifted, fixtures.review(body=self.CLEAN)], files=["a.py"])
+        (drift,) = [i for i in answers.items(pr) if i.where == answers.DRIFT]
+        self.assertEqual(
+            ([], f"'declined' does not answer {drift.key}, which takes none while it stands"),
+            answers.ack_lines(pr, [f"{drift.key}=declined"]),
+        )
+        mark = answers.FINDING_ACK.format(drift.key, "declined")
+        written = fixtures.ack("0" * 12, "OWNER", text=f"Declined.\n\n{mark}")
+        unmet = self.unmet_on(self.with_comments(pr, written))
+        self.assertTrue(any(i.startswith("REVIEWER_LOGIN_DRIFT") for i in unmet), unmet)
+        self.assertFalse(any(i.startswith("OUTPUT_NOTED") for i in unmet), unmet)
+        self.assertEqual("", answers.mark(drift, {}))
+
+    def test_a_noted_part_its_own_round_acknowledged_on_its_head_is_answered(self) -> None:
+        """A fix push turns an acknowledged head hold into noted output, already answered."""
+        earlier = fixtures.review(oid=fixtures.OLD, body=fixtures.unplaced("Earlier."), rid="PRR_o")
+        pr = fixtures.payload([earlier, fixtures.review(body=self.CLEAN)], files=["a.py"])
+        hold = fixtures.pr_review_rounds.shape_hold(pr, fixtures.OLD)
+        assert hold is not None
+        self.assertTrue(any(i.startswith("OUTPUT_NOTED") for i in self.unmet_on(pr)))
+        self.assertEqual([], self.unmet_on(self.with_comments(pr, fixtures.ack(hold[0], "OWNER"))))
 
     def test_a_count_the_digest_did_not_build_is_unmet_rather_than_zero(self) -> None:
         real = pr_review.digest
@@ -589,6 +736,126 @@ class TestUnmetItems(MergeCase):
         self.assertIn("status=HEAD_MOVED #123 on example/repo reads OPEN", self.out.getvalue())
         self.assertIn(f"reads OPEN at {MOVED}", self.out.getvalue())
         self.cleanup.assert_not_called()
+
+
+# Every status line `merge` or `wait`'s gate prints, pinned to the route `next=` names for it.
+ROUTED = {
+    **dict.fromkeys(("MERGE_NOT_CONFIRMED",), "readback"),
+    **dict.fromkeys(("PEER_MERGED",), "cleanup"),
+    **dict.fromkeys(("UNREAD", "MERGE_REFUSED"), "retry"),
+    **dict.fromkeys(
+        (
+            "HEAD_MOVED",
+            "BAD_CHECKOUT",
+            "THREADS_UNRESOLVED",
+            "UNPLACED_PARTS_UNACKNOWLEDGED",
+            "REVIEW_PENDING",
+            "UNTHREADED_FINDINGS",
+            "OUTPUT_NOTED",
+            "MERGE_NOT_CLEAN",
+            "VERDICT_NAMES_UNCOUNTED_FINDINGS",
+            "AWAITING_LOCAL_PASS",
+            "PENDING",
+            "CHECKS_PENDING",
+            "CHECKS_NOT_MERGEABLE",
+            "CHECKS_MISSING",
+            "COPILOT_ERROR_TRANSIENT",
+        ),
+        "redrive",
+    ),
+    **dict.fromkeys(
+        (
+            "REFUSED",
+            "REVIEW_IS_A_REFUSAL",
+            "OUT_OF_SCOPE",
+            "COVERAGE_NOT_SHOWN",
+            "COUNT_UNREAD",
+            "COVERAGE_IS_PARTIAL",
+            "COPILOT_QUOTA_EXHAUSTED",
+            "COPILOT_QUOTA_EXHAUSTED_REPO_WIDE",
+            "COPILOT_ERROR_POSSIBLE_QUOTA",
+            "REVIEW_EXCLUDED_FILES_ONLY",
+            "ANSWERED_OUTSIDE_REVIEW",
+            "REQUEST_NOT_RECORDED",
+            "REVIEWER_LOGIN_DRIFT",
+        ),
+        "maintainer",
+    ),
+}
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+
+
+class TestRoutes(MergeCase):
+    """`merge` ends on one `next=` line, decided by the table beside its status lines."""
+
+    def printed(self, name: str) -> set[str]:
+        """Every literal status name `name` prints, where the gate and `merge` both print them."""
+        source = (SCRIPTS / name).read_text(encoding="utf-8")
+        return set(re.findall(r"status=([A-Z][A-Z_]+)", source)) - {"MERGED"}
+
+    def test_every_status_line_is_pinned_to_its_route(self) -> None:
+        names = set().union(
+            *(self.printed(n) for n in ("pr_merge.py", "pr_review.py", "pr_review_answers.py"))
+        )
+        unmet = {status for status, _ in answers.unmet(fixtures.payload([]), {}, [{}])}
+        names |= unmet | {"BAD_CHECKOUT", "OUT_OF_SCOPE"}
+        names -= {
+            "COMMENTED",
+            "REPLIED",
+            "REPLIED_AND_RESOLVED",
+            "DESCRIPTION_CONTRADICTS_ITS_BRANCH",
+        }
+        names -= {"NOTHING_WAS_READ"}
+        self.assertLessEqual(names, set(ROUTED), names - set(ROUTED))
+        for status, want in ROUTED.items():
+            with self.subTest(status):
+                self.assertEqual(want, answers.route(1, False, f"status={status} why\n"))
+
+    def test_a_run_naming_several_takes_what_this_seat_clears_first(self) -> None:
+        text = "status=COUNT_UNREAD a\nstatus=THREADS_UNRESOLVED b\nstatus=UNREAD c\n"
+        self.assertEqual("redrive", answers.route(1, False, text))
+        self.assertEqual("retry", answers.route(1, False, "status=COUNT_UNREAD a\nstatus=UNREAD c"))
+
+    def test_a_run_printing_no_status_line_goes_to_the_maintainer(self) -> None:
+        self.assertEqual(
+            "maintainer", answers.route(50, False, "repo=o/r pr=1\n  status=PENDING\n")
+        )
+
+    def test_a_confirmed_merge_routes_on_whether_cleanup_ran_clean(self) -> None:
+        merged = "status=MERGED pr=1 head=a merge_commit=b, confirmed on read back\n"
+        for code, cleanup, want in (
+            (0, True, "done"),
+            (0, False, "cleanup"),
+            (1, True, "maintainer"),
+        ):
+            with self.subTest(code=code, cleanup=cleanup):
+                self.assertEqual(want, answers.route(code, cleanup, merged + "status=X y\n"))
+
+    def test_a_refusal_naming_only_an_earlier_merge_owes_cleanup(self) -> None:
+        self.assertEqual(1, self.run_merge(MERGED))
+        self.assertEqual("next=cleanup", self.out.getvalue().splitlines()[-1])
+        self.out.seek(0)
+        self.out.truncate()
+        self.assertEqual(1, self.run_merge({**MERGED, "isDraft": True}))
+        self.assertEqual("next=maintainer", self.out.getvalue().splitlines()[-1])
+
+    def test_the_route_follows_the_gate_s_own_status_line(self) -> None:
+        def verdict(*_: object) -> int:
+            print("status=VERDICT_NAMES_UNCOUNTED_FINDINGS the round covering the head opens on")
+            return 50
+
+        self.gate.side_effect = verdict
+        self.assertEqual(50, self.run_merge(target()))
+        self.assertEqual("next=redrive", self.out.getvalue().splitlines()[-1])
+        self.assert_not_merged()
+
+    def test_a_confirmed_merge_without_cleanup_names_cleanup(self) -> None:
+        self.assertEqual(0, self.run_merge(target(), target(), MERGED))
+        self.assertEqual("next=cleanup", self.out.getvalue().splitlines()[-1])
+        self.out.seek(0)
+        self.out.truncate()
+        self.assertEqual(0, self.run_merge(target(), target(), MERGED, extra=("--cleanup",)))
+        self.assertEqual("next=done", self.out.getvalue().splitlines()[-1])
 
 
 class TestCleanup(MergeCase):

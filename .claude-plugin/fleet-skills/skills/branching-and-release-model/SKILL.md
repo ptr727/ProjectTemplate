@@ -133,6 +133,10 @@ stays the same:
   bless a known-good snapshot. The `develop` ruleset drops the PR and status-check gate, so direct
   signed pushes are allowed (force-push, deletion, and unsigned commits are still blocked). CI
   runs on the push as **advisory** feedback that never rejects a commit.
+- **A direct push names the issues it fixes in its commit message**, as one line such as
+  `Closes on promotion: #N, #M`. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
+  PR carrying the push puts a closing keyword in its own body for each issue the line names, per the
+  closing-keyword bullet above. Its body takes no closing keyword for a push without the line.
 - **A PR into `develop` stays available, and CI runs on it, reported but not required.** Dropping
   the requirement permits the direct push. It does not withdraw the pull request, so a change worth
   reviewing takes one and both paths into `develop` are legitimate.

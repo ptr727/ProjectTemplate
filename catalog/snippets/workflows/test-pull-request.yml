@@ -2,13 +2,12 @@ name: Test pull request action
 
 # Thin caller: the gate is the hub's reusable validate-task.yml, which every fleet repo reaches rather than carries.
 # Operational trigger shape (WORKFLOW.md "Branch Model"): a push to develop runs CI advisory.
-# A pull_request to main or develop runs it pre-merge and actionable.
+# A pull_request runs it pre-merge and actionable.
 # That is what makes D1.2 hold on this model too.
 on:
   push:
     branches: [develop]
   pull_request:
-    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:
@@ -30,8 +29,10 @@ jobs:
 
   # GitHub Actions does not support required status checks on conditional jobs, so a single always-run aggregator gates the merge.
   # Its name is the ruleset-bound required status-check context: rename it and the ruleset context together.
+  # Only a pull_request run takes that name.
+  # So a push or dispatch run on a pull request's head cannot post the required check without that pull request's gates.
   check-workflow-status:
-    name: Check pull request workflow status job
+    name: ${{ github.event_name == 'pull_request' && 'Check pull request workflow status job' || 'Check workflow status job' }}
     runs-on: ubuntu-latest
     needs: [validate]
     if: always()
