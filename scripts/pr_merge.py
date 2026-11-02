@@ -31,7 +31,7 @@ from typing import TextIO
 import pr_cleanup
 import pr_review as core
 import pr_review_answers as answers
-from pr_review_checks import check_nodes, checks_pending
+from pr_review_checks import UNFINISHED, check_nodes, checks_settling
 
 GATE_TIMEOUT = 60
 MERGE_TIMEOUT = 120
@@ -89,8 +89,8 @@ def unmet_items(owner: str, repo: str, num: int) -> tuple[str, list[tuple[str, s
     """The head one fresh read shows, and each gate item `wait`'s 0 leaves undecided that it fails.
 
     `pr_review_answers.unmet` decides the items off the fields the digest builds, so a refusal
-    names what the driver was shown. The threads are walked to the end, since the digest reads one
-    page.
+    names what the driver was shown. A hosted review still running is read off the payload itself.
+    The threads are walked to the end, since the digest reads one page.
     """
     pr = core.full_read(owner, repo, num)
     built: list[tuple[str, object]] = []
@@ -121,16 +121,25 @@ def pending(owner: str, repo: str, num: int) -> str:
         nodes = check_nodes(core.gql(core.Q_HELD, owner, repo, num))
     except SystemExit as exc:
         return f"pending=UNREAD the checks read did not answer: {exc}"
-    names = checks_pending(nodes, datetime.now(UTC), core.CHECK_GRACE, core.CHECK_STALL)
-    return f"pending={', '.join(names) or 'none'}"
+    now = datetime.now(UTC)
+    found = checks_settling(nodes, now, core.CHECK_GRACE, core.CHECK_STALL, UNFINISHED)
+    return f"pending={', '.join(n.get('name') or 'unnamed' for n in found) or 'none'}"
 
 
 def merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | None) -> int:
-    """`gated_merge`, then one `next=<route>` line its status lines decide, and its exit."""
+    """`gated_merge` inside the write scope, then one `next=<route>` line, and its exit.
+
+    A refusal routed to `redrive` or the maintainer prints `pending=` first, naming what still runs.
+    """
     tee = Tee(sys.stdout)
     with contextlib.redirect_stdout(tee):
-        code = gated_merge(owner, repo, num, cleanup, checkout)
-    print(f"next={answers.route(code, cleanup, tee.text.getvalue())}")
+        refused = pr_cleanup.cleanup_scope(owner, repo, "merged")
+        code = gated_merge(owner, repo, num, cleanup, checkout) if refused is None else refused
+    text = tee.text.getvalue()
+    route = answers.route(code, cleanup, text)
+    if refused is None and route in ("redrive", "maintainer") and "status=MERGED " not in text:
+        print(pending(owner, repo, num))
+    print(f"next={route}")
     return code
 
 
@@ -139,12 +148,9 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
 
     The gate's short `GATE_TIMEOUT` absorbs a merge state still settling where `wait` polls checks,
     on a head an attested local pass covers. A failed read inside
-    the gate ends `wait` with a message, which reads as unread here rather than refused. A gate
-    not met prints `pending=` with each check still running, so a refusal handed on names them. A
-    merge that landed can read OPEN for a moment, so the read back is retried on `cleanup`'s delays.
+    the gate ends `wait` with a message, which reads as unread here rather than refused. A merge
+    that landed can read OPEN for a moment, so the read back is retried on `cleanup`'s delays.
     """
-    if (refused := pr_cleanup.cleanup_scope(owner, repo, "merged")) is not None:
-        return refused
     target = f"{owner}/{repo}"
     try:
         if cleanup and checkout is not None:
@@ -168,7 +174,6 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
         return 2
     if code != 0:
         print(f"note: nothing was merged, since the Merge Gate read above exited {code}")
-        print(pending(owner, repo, num))
         return code
     if after is None:
         return 1
@@ -181,7 +186,6 @@ def gated_merge(owner: str, repo: str, num: int, cleanup: bool, checkout: str | 
     for status, why in unmet:
         print(f"status={status} nothing was merged into {target} #{num}: {why}")
     if unmet:
-        print(pending(owner, repo, num))
         return 1
     answered = merge_call(target, num, head)
     try:

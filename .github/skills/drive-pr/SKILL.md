@@ -120,9 +120,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    THREAD` reads the head's round alone. Dispose of them before running `merge`. A finding no
    thread carries and a part under `REVIEWER OUTPUT NOTED` still refuse it until each carries the
    `--ack` record pr-review-conduct "Answering a suppressed finding" states. A `qodo_open`
-   finding is one, and resolving its thread answers nothing. For a disproved one, that comment's
-   body mentions Qodo. It asks Qodo to dismiss the finding by the number its findings comment
-   gives, with the reason. That answer is the redrive an `UNTHREADED_FINDINGS` line naming
+   finding refuses it the same way, even where Qodo also opened a thread for it, since resolving
+   that thread answers nothing. For a disproved one, that comment's body mentions the Qodo login
+   the digest's remedy line names. It asks Qodo to dismiss the finding by the number the remedy
+   line gives, with the reason. That answer is the redrive an `UNTHREADED_FINDINGS` line naming
    `qodo_open` owes, rather than a blocked merge for the maintainer. It squash-merges only an open pull request into `develop`, headed in
    that same repository on a branch that is not permanent. The merge is pinned to the head the gate
    read and confirmed by reading it back.

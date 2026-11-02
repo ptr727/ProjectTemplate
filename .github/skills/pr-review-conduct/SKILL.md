@@ -144,10 +144,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
    That badge is the only thing that closes a Qodo finding on Qodo's side, and `qodo_open`
-   counts the findings without it. Resolving the finding's thread or answering it in the
-   conversation adds no badge. Qodo marks a fixed finding `Resolved` itself, and a disproved one
-   `Dismissed` only when asked. So answer a disproved one with a comment that mentions Qodo.
-   It asks Qodo to dismiss that finding by the number its findings comment gives, with the reason.
+   counts the findings without it. Resolving a thread Qodo opened for the finding, or answering
+   it in the conversation, adds no badge. Qodo marks a fixed finding `Resolved` itself, and a
+   disproved one `Dismissed` only when asked. So answer a disproved one with a comment that
+   mentions the Qodo login the digest's remedy line names. It asks Qodo to dismiss that finding
+   by the number the remedy line gives, with the reason.
    Posted as the `--ack` comment "Answering a suppressed finding" states, the one write also
    answers `merge`.
    A Copilot round states its own count of open findings, which the digest reads as

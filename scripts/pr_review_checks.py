@@ -10,7 +10,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pr_review_rounds import CODERABBIT_LOGIN, QODO_LOGIN, commit_oid, page_flag, rate_limited_by
+import pr_review_copilot as adapter
+from pr_review_rounds import (
+    OTHER_REVIEWERS,
+    commit_oid,
+    page_flag,
+    rate_limited_by,
+    reviewer_nodes,
+)
 
 # A check dispatched to a runner and not begun, in the spellings a CheckRun carries.
 # A StatusContext's PENDING means the opposite, so `check_nodes` translates it away.
@@ -24,7 +31,9 @@ CHECK_OK = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 
 MERGE_UNGATED = frozenset({"CLEAN", "UNSTABLE", "HAS_HOOKS"})
 
-HOSTED_REVIEWERS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
+HOSTED_REVIEWERS = {adapter.LOGINS[login]: login for login in OTHER_REVIEWERS}
+
+UNFINISHED = frozenset({"", "RUNNING_LONG", "NOT_POSTED", "NOT_PICKED_UP", "GATED", "STALE_RECORD"})
 
 WORKFLOW_KEYS_UNAVAILABLE = "workflowKeysUnavailable"
 
@@ -222,26 +231,34 @@ def checks_stuck(
     ]
 
 
-def checks_settling(nodes: list[dict], now: datetime, grace: float, stall: float) -> list[dict]:
-    """Every check still on its way to a conclusion that waiting can reach."""
+def checks_settling(
+    nodes: list[dict],
+    now: datetime,
+    grace: float,
+    stall: float,
+    shapes: frozenset[str] = frozenset({"", "RUNNING_LONG"}),
+) -> list[dict]:
+    """Every check still on its way to a conclusion that waiting can reach.
+
+    `shapes` widens that to other unfinished shapes, `UNFINISHED` naming every one short of failed.
+    """
     return [
         n
         for n in nodes
         if not n.get("unreadable")
-        and check_shape(n, now, grace, stall) in ("", "RUNNING_LONG")
+        and check_shape(n, now, grace, stall) in shapes
         and (n.get("conclusion") or "") not in CHECK_OK
     ]
 
 
-def checks_pending(nodes: list[dict], now: datetime, grace: float, stall: float) -> list[str]:
-    """The name of each check on the head that has neither passed nor failed, stuck ones included."""
-    return [
-        n.get("name") or "unnamed"
-        for n in nodes
-        if not n.get("unreadable")
-        and (n.get("conclusion") or "") not in CHECK_OK
-        and check_shape(n, now, grace, stall) != "FAILED"
-    ]
+def limited_since(pr: dict, login: str, since: str) -> bool:
+    """True where `login`'s newest output is its rate limit and posted no earlier than `since`.
+
+    A limit older than the check is one the reviewer has since moved past, so it clears nothing.
+    """
+    nodes = reviewer_nodes(pr, "comments", login) + reviewer_nodes(pr, "reviews", login)
+    newest = max((n.get("createdAt") or n.get("submittedAt") or "" for n in nodes), default="")
+    return rate_limited_by(pr, login) is not None and newest >= since
 
 
 def hosted_reviews_running(
@@ -250,16 +267,15 @@ def hosted_reviews_running(
     """The name of each hosted reviewer's check still settling on the head, so its review is running.
 
     A check is a reviewer's where that reviewer's app or login posted it, or where its name is the
-    reviewer's vocabulary name. A reviewer whose newest output is its rate limit posts no review,
-    so its check holds nothing.
+    reviewer's vocabulary name. A reviewer whose newest output is a rate limit posted since the
+    check began posts no review, so its check holds nothing.
     """
     return [
         n.get("name") or login
         for n in checks_settling(nodes, now, grace, stall)
         for name, login in HOSTED_REVIEWERS.items()
-        if (n.get("poster") or "").removesuffix("[bot]") == login
-        or (n.get("name") or "").casefold() == name
-        if rate_limited_by(pr, login) is None
+        if n.get("poster") == login or (n.get("name") or "").casefold() == name
+        if not limited_since(pr, login, n.get("since") or "")
     ]
 
 

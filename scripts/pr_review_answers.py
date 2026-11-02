@@ -209,7 +209,8 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
     """Each Merge Gate item `wait`'s 0 leaves undecided that `fields` and `opened` read unmet.
 
     `fields` is the digest's, and `opened` every unresolved thread. A count every item under which
-    an acknowledgment answers is met. Shapes no value here names are unread rather than met.
+    an acknowledgment answers is met. Shapes no value here names are unread rather than met. A
+    hosted review still running is read off `pr`'s rollup at the current time instead.
     """
     found: list[tuple[str, str]] = []
     counts, notes, unread = unanswered(pr, fields)
@@ -290,10 +291,11 @@ def unthreaded_lines(pr: dict, owner: str, repo: str, num: int) -> list[str]:
         if item.kind == "qodo_open":
             number = m[1] if (m := re.match(r"(\d+)\.", item.text)) else "<number>"
             lines.append(
-                f"  {label}: only Qodo's own badge clears it on Qodo's side, and resolving its thread "
+                f"  {label}: only Qodo's own badge clears it on Qodo's side, and resolving a thread "
                 "or answering in the conversation adds none. A fixed finding Qodo marks Resolved "
-                f"itself. For a disproved one, answer with {hint}, its body mentioning Qodo and "
-                f"asking it to dismiss finding {number} by that number, with the reason"
+                f"itself. For a disproved one, answer with {hint}, its body mentioning "
+                f"@{QODO_LOGIN} and asking it to dismiss finding {number} by that number, with "
+                "the reason"
             )
         else:
             lines.append(

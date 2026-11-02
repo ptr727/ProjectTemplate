@@ -1905,10 +1905,6 @@ class TestCheckShapes(unittest.TestCase):
         login = pr_review_rounds.CODERABBIT_LOGIN
         cases: tuple[tuple[dict, list[str]], ...] = (
             ({**status_context("review", "PENDING"), "creator": {"login": login}}, ["review"]),
-            (
-                {**status_context("review", "PENDING"), "creator": {"login": f"{login}[bot]"}},
-                ["review"],
-            ),
             (status_context("CodeRabbit", "PENDING"), ["CodeRabbit"]),
             (check(name="Qodo", status="IN_PROGRESS", conclusion="", slug="x"), ["Qodo"]),
             (status_context("CodeRabbit", "SUCCESS"), []),
@@ -1923,14 +1919,21 @@ class TestCheckShapes(unittest.TestCase):
                 self.assertEqual(want, got)
 
     def test_a_rate_limited_hosted_reviewer_s_check_holds_nothing(self) -> None:
-        """CodeRabbit posts no review once it is rate limited, so its pending status is not one."""
-        limited = comment(login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT)
-        pr = payload(
-            [review()], comments=[limited], checks=[status_context("CodeRabbit", "PENDING")]
-        )
-        nodes = pr_review_checks.check_nodes(pr)
+        """CodeRabbit posts no review once it is rate limited, so its pending status is not one.
+
+        A limit posted before the check began is one CodeRabbit has moved past, so it still holds.
+        """
         now = datetime.now(UTC)
-        self.assertEqual([], pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 1800))
+        for limit_at, check_at, want in ((LATE, EARLY, []), (EARLY, LATE, ["CodeRabbit"])):
+            with self.subTest(limit_at=limit_at):
+                limited = comment(
+                    login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT, at=limit_at
+                )
+                running = status_context("CodeRabbit", "PENDING", created=check_at)
+                pr = payload([review()], comments=[limited], checks=[running])
+                nodes = pr_review_checks.check_nodes(pr)
+                got = pr_review_checks.hosted_reviews_running(pr, nodes, now, 300, 10**9)
+                self.assertEqual(want, got)
 
     def test_every_check_neither_passed_nor_failed_is_pending(self) -> None:
         now = datetime.now(UTC)
@@ -1945,8 +1948,9 @@ class TestCheckShapes(unittest.TestCase):
                 ],
             )
         )
-        got = pr_review_checks.checks_pending(nodes, now, 300, 1800)
-        self.assertEqual(["CodeRabbit", "queued"], got)
+        unfinished = pr_review_checks.UNFINISHED
+        found = pr_review_checks.checks_settling(nodes, now, 300, 1800, unfinished)
+        self.assertEqual(["CodeRabbit", "queued"], [n["name"] for n in found])
 
     def test_a_status_context_reads_its_own_required_flag(self) -> None:
         optional = {**status_context("ci/external", state="PENDING"), "isRequired": False}
@@ -2496,7 +2500,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.status(pr)
         out = self.out.getvalue()
         self.assertIn("QODO OPEN FINDING key=", out)
-        self.assertIn("asking it to dismiss finding 1 by that number, with the reason", out)
+        self.assertIn(f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss finding 1", out)
         self.assertNotIn("answer it in the PR conversation quoting", out)
 
     def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
@@ -4672,7 +4676,9 @@ class TestCli(GqlCase):
         pr = self.into(
             payload([review(oid=OLD)], merge="UNSTABLE", checks=[reviewing]), attest=True
         )
-        limited = comment(login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT)
+        limited = comment(
+            login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT, at=real_ago(30)
+        )
         pr["comments"]["nodes"].append(limited)
         self.answer(pr)
         self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])

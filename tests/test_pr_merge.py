@@ -681,10 +681,22 @@ class TestUnmetItems(MergeCase):
             self.unmet_on(self.clean(merge="UNSTABLE", checks=[reviewing])),
         )
         limited = fixtures.comment(
-            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN, body=fixtures.RATE_LIMITED_COMMENT
+            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
+            body=fixtures.RATE_LIMITED_COMMENT,
+            at=fixtures.real_ago(30),
         )
         quiet = self.clean(merge="UNSTABLE", checks=[reviewing], comments=[limited])
         self.assertEqual([], self.unmet_on(quiet))
+
+    def test_a_refusal_handed_on_prints_pending_and_one_out_of_scope_reads_nothing(self) -> None:
+        self.assertEqual(1, self.run_merge(target(isDraft=True)))
+        self.assertIn("it is a draft\npending=none\nnext=maintainer", self.out.getvalue())
+        self.out.seek(0)
+        self.out.truncate()
+        self.registry.return_value = ("other", {"repo"})
+        self.run_merge(target())
+        self.assertNotIn("pending=", self.out.getvalue())
+        self.pending.assert_called_once()
 
     def test_an_unmet_item_prints_each_check_still_pending(self) -> None:
         self.unmet.return_value = (HEAD, [("UNTHREADED_FINDINGS", "qodo_open=1")])
