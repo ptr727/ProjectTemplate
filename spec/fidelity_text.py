@@ -180,7 +180,7 @@ def link_targets(text):
 
 
 def sections(text):
-    """`(heading, end)` for each level-two region of `text`, in order, the one place a region's extent is decided.
+    """`(heading, end)` for each level-two region of `text`, in order, the one place a level-two region's extent is decided.
 
     The heading line is inside the region and the next level-two heading ends it. `end` is that
     heading's line, or None for a region that runs to the end of the document, so `lines[h.line:end]`
@@ -193,8 +193,8 @@ def sections(text):
 def section_key(name):
     """The lookup key for a section name: stripped, then lowercased.
 
-    ASCII-level folding is intended rather than `casefold()`, since fleet headings are ASCII and the
-    two agree on ASCII input.
+    `lower()` rather than `casefold()` is intended, since fleet headings are ASCII and the two agree
+    there.
     """
     return name.strip().lower()
 

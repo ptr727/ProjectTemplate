@@ -273,6 +273,28 @@ def quote_note(note):
     return f'"{note[:70]}{"..." if len(note) > 70 else ""}"'
 
 
+def spanned_notes(entry, cid, pattern, what):
+    """`(findings, [(note, matches)])` over the driftNotes naming (cid), each note's `pattern` matches.
+
+    A note matching nothing clears nothing, so it is reported, `what` naming the span it lacks.
+    """
+    findings, spanned = [], []
+    for note in notes_naming(entry, cid):
+        matches = pattern.findall(note)
+        if not matches:
+            findings.append(
+                (
+                    "DRIFT",
+                    (
+                        f"registry: a driftNote naming ({cid}) names no {what} as a code span, so it "
+                        f"clears nothing. Name each {what}, or delete the note: {quote_note(note)}"
+                    ),
+                )
+            )
+        spanned.append((note, matches))
+    return findings, spanned
+
+
 def python_type_findings(entry, tree):
     """The discovery advisory for tracked `.py` files while the registry's `types` omits 'python'.
 
@@ -393,7 +415,6 @@ def file_naming_findings(entry, blobs, read_text):
     """
     if blobs is None:
         return []
-    exempt_notes = notes_naming(entry, FILE_NAMING_ID)
     python_stems = {}
     for path in blobs:
         directory, name = posixpath.split(path)
@@ -444,22 +465,10 @@ def file_naming_findings(entry, blobs, read_text):
         else:
             undecided.append((path, "an executable with no shebang"))
     rule = 'CODESTYLE.md "Script and Utility File Names"'
-    findings = []
+    findings, spanned = spanned_notes(entry, FILE_NAMING_ID, CODE_SPAN, "path")
     reported = set(broken) | {path for path, _ in undecided}
     exempt = set()
-    for note in exempt_notes:
-        paths = CODE_SPAN.findall(note)
-        quoted = quote_note(note)
-        if not paths:
-            findings.append(
-                (
-                    "DRIFT",
-                    (
-                        f"registry: a driftNote naming ({FILE_NAMING_ID}) names no path as a code "
-                        f"span, so it exempts nothing. Name each exempt path, or delete the note: {quoted}"
-                    ),
-                )
-            )
+    for _, paths in spanned:
         stale = [p for p in paths if p not in reported]
         if stale:
             findings.append(
@@ -1433,53 +1442,39 @@ def git_blob_in_file_history(rel_path, blob_sha, rev=None):
 
 
 @functools.cache
-def hub_last_change(rel_path):
-    """The hub checkout's most recent EFFECTIVE change to rel_path, as (iso_date, short_sha), or None if untracked."""
-    change = _last_effective_change(_git_revisions(rel_path))
+def hub_last_change(rel_path, anchor=None):
+    """The hub's most recent EFFECTIVE change to rel_path, as (iso_date, short_sha), or None if untracked.
+
+    With `anchor`, each revision is narrowed to the region that anchor names, so an edit elsewhere
+    in the file does not date it. A revision lacking the region counts as a change, so the region
+    dates from when it appeared. An anchor naming no heading in the current canonical dates the
+    whole file.
+    """
+    revisions = _git_revisions(rel_path)
+    current = revisions[0][2] if revisions else None
+    if anchor and current is not None and extract_anchored(current, anchor) is not None:
+        revisions = [
+            (d, s, None if t is None else extract_anchored(t, anchor)) for d, s, t in revisions
+        ]
+    change = _last_effective_change(revisions)
     if change is None:
         return None
     date, sha = change
     return date, sha[:7]
 
 
-@functools.cache
-def intent_last_change(rel_path, anchor=None):
-    """hub_last_change() scoped to the region `anchor` names, so an edit elsewhere in the file does not date it.
-
-    Each revision is narrowed to that region the way check_verbatim narrows a section's history.
-    An anchor naming no heading in the current canonical dates the whole file instead.
-    """
-    revisions = _git_revisions(rel_path) if anchor else []
-    current = revisions[0][2] if revisions else None
-    if current is None or extract_anchored(current, anchor) is None:
-        return hub_last_change(rel_path)
-    scoped = [(d, s, None if t is None else extract_anchored(t, anchor)) for d, s, t in revisions]
-    date, sha = _last_effective_change(scoped)
-    return date, sha[:7]
-
-
-def intent_anchor(item):
-    """The `#anchor` of an intent unit's intentRef, or None where it names none or a `reference` outranks it."""
-    if item.get("reference"):
-        return None
-    intent = item.get("intentRef")
-    if not isinstance(intent, str) or "#" not in intent:
-        return None
-    return intent.split("#", 1)[1] or None
-
-
-def intent_canonical_rel(item, path):
-    """The hub path an intent unit's copy is judged against for staleness."""
+def intent_ref(item, path):
+    """`(canonical, anchor)`: the hub path an intent unit's copy is judged against, and its intentRef's `#anchor` or None."""
     # Validation in spec/validate.py shape-checks these fields, but this engine runs standalone and does not invoke it first.
     ref = item.get("reference")
     if isinstance(ref, str) and ref:
-        return ref
+        return ref, None
     intent = item.get("intentRef")
     if isinstance(intent, str) and intent:
-        canonical = intent.split("#", 1)[0]
+        canonical, _, anchor = intent.partition("#")
         if canonical:
-            return canonical
-    return path
+            return canonical, anchor or None
+    return path, None
 
 
 def declared_alternatives(baseline):
@@ -1539,15 +1534,15 @@ def baseline_file_findings(slug, ground, path, alternatives, item):
     return found, content, contents_text(content), []
 
 
-def intent_trail(slug, ground, path, item, down_text, found=None):
+def intent_trail(slug, ground, path, item, down_text, found):
     """`(repo_date, hub_date, hub_sha)` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
-    `found` is the path the copy was read at, `path` where it is None.
+    `found` is the path the copy was read at, a declared alternative included.
     """
-    canonical_rel = intent_canonical_rel(item, path)
-    hub_change = intent_last_change(canonical_rel, intent_anchor(item))
+    canonical_rel, anchor = intent_ref(item, path)
+    hub_change = hub_last_change(canonical_rel, anchor)
     if hub_change is None:
         return None
     if down_text is not None:
@@ -1555,7 +1550,7 @@ def intent_trail(slug, ground, path, item, down_text, found=None):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
-    commits = gh(f"repos/{slug}/commits?path={found or path}&sha={ground}&per_page=1")
+    commits = gh(f"repos/{slug}/commits?path={found}&sha={ground}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
@@ -1575,19 +1570,9 @@ def intent_findings(entry, ground, trails):
     A driftNote naming (files.intent) acknowledges a copy verified against the canonical change the
     advisory cites, as `` `<path>@<sha>` ``. It clears that copy until the canonical changes again.
     """
-    out, acks = [], {}
-    for note in notes_naming(entry, INTENT_ID):
-        pairs = INTENT_ACK.findall(note)
-        if not pairs:
-            out.append(
-                (
-                    "DRIFT",
-                    (
-                        f"registry: a driftNote naming ({INTENT_ID}) acknowledges no `<path>@<sha>` "
-                        f"code span, so it clears nothing. Name each copy, or delete the note: {quote_note(note)}"
-                    ),
-                )
-            )
+    out, spanned = spanned_notes(entry, INTENT_ID, INTENT_ACK, "`<path>@<sha>` acknowledgement")
+    acks = {}
+    for _, pairs in spanned:
         for path, sha in pairs:
             acks.setdefault(path, set()).add(sha)
     used = set()
@@ -2043,10 +2028,10 @@ def check_files_intent(run):
     for path, (item, _, _) in run.baseline.items():
         if path not in run.content or (item or {}).get("fidelity") != "intent":
             continue
-        found = run.found.get(path, path)
+        found = run.found[path]
         trail = intent_trail(run.slug, run.ground, path, item, run.content[path], found)
         if trail is not None:
-            trails[found] = (intent_canonical_rel(item, path), trail)
+            trails[found] = (intent_ref(item, path)[0], trail)
     return intent_findings(run.entry, run.ground, trails)
 
 

@@ -2967,6 +2967,7 @@ def intent_run(baseline: dict[str, Any], content: dict[str, str], notes: list[st
     run = audit.Run({"name": "Widget", "driftNotes": notes}, {}, "o/r", "main", {}, None, None)
     run.__dict__["baseline"] = {p: (item, set(), set()) for p, item in baseline.items()}
     run.content.update(content)
+    run.found.update({p: p for p in content})
     return run
 
 
@@ -2976,7 +2977,7 @@ class IntentAdvisoryCase(unittest.TestCase):
     def patched(self, texts: dict[str, str], commit: Any = OLD_COMMIT) -> contextlib.ExitStack:
         stack = contextlib.ExitStack()
         stack.enter_context(
-            mock.patch.object(audit, "intent_last_change", lambda rel, anchor=None: HUB_CHANGE)
+            mock.patch.object(audit, "hub_last_change", lambda rel, anchor=None: HUB_CHANGE)
         )
         stack.enter_context(mock.patch.object(audit, "canonical_current_text", texts.get))
         stack.enter_context(mock.patch.object(audit, "gh", lambda ep, ok404=False: commit))
@@ -2987,19 +2988,19 @@ class IntentAdvisoryCase(unittest.TestCase):
         texts = {"DOC.md": "the doc", "widget.json": "same"}
         for down, want in (("same", None), ("x", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))):
             with self.subTest(down=down), self.patched(texts):
-                got = audit.intent_trail("o/r", "main", "widget.json", unit, down)
+                got = audit.intent_trail("o/r", "main", "widget.json", unit, down, "widget.json")
             self.assertEqual(got, want)
 
     def test_a_reference_unit_ignores_the_hub_file_at_path(self) -> None:
         unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
         with self.patched({"snip/w.yml": "snippet", "w.yml": "same"}):
-            self.assertIsNotNone(audit.intent_trail("o/r", "main", "w.yml", unit, "same"))
+            self.assertIsNotNone(audit.intent_trail("o/r", "main", "w.yml", unit, "same", "w.yml"))
 
     def test_a_copy_newer_than_the_canonical_is_current(self) -> None:
         unit = {"path": "w.json", "fidelity": "intent", "intentRef": "DOC.md"}
         newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
         with self.patched({"DOC.md": "canonical"}, newer):
-            self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x"))
+            self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x", "w.json"))
 
     def test_the_trail_reads_the_alternative_it_was_found_at(self) -> None:
         asked: list[str] = []
@@ -3058,16 +3059,17 @@ class IntentAdvisoryCase(unittest.TestCase):
             ({"intentRef": "GOVERNANCE.md#line-endings"}, "line-endings"),
             ({"intentRef": "GOVERNANCE.md"}, None),
             ({"intentRef": "GOVERNANCE.md#"}, None),
+            ({"intentRef": "#line-endings"}, None),
             ({"reference": "snip/w.yml", "intentRef": "WORKFLOW.md#d3"}, None),
             ({}, None),
         ]
         for item, want in cases:
             with self.subTest(item=item):
-                self.assertEqual(audit.intent_anchor(item), want)
+                self.assertEqual(audit.intent_ref(item, "w.json")[1], want)
 
 
 class AnchoredLastChangeCase(unittest.TestCase):
-    """intent_last_change dates an anchored intentRef by its section, against a temporary git history."""
+    """hub_last_change dates an anchored intentRef by its section, over constructed revisions."""
 
     def test_an_edit_outside_the_anchored_section_does_not_date_it(self) -> None:
         doc = "# Doc\n\n## Rules\n\n### Line Endings\n\n{le}\n\n### Other\n\n{other}\n"
@@ -3084,12 +3086,10 @@ class AnchoredLastChangeCase(unittest.TestCase):
         ]
         for label, anchor, want in cases:
             with self.subTest(label):
-                audit.intent_last_change.cache_clear()
                 audit.hub_last_change.cache_clear()
-                self.addCleanup(audit.intent_last_change.cache_clear)
                 self.addCleanup(audit.hub_last_change.cache_clear)
                 with mock.patch.object(audit, "_git_revisions", lambda rel: revisions):
-                    self.assertEqual(audit.intent_last_change("DOC.md", anchor), want)
+                    self.assertEqual(audit.hub_last_change("DOC.md", anchor), want)
 
     def test_a_section_new_in_history_dates_from_its_introduction(self) -> None:
         revisions = [
@@ -3097,18 +3097,17 @@ class AnchoredLastChangeCase(unittest.TestCase):
             ("2021-01-01T00:00:00+00:00", "b" * 40, "## A\n\n### Line Endings\n\nlf\n"),
             ("2020-01-01T00:00:00+00:00", "a" * 40, "## A\n"),
         ]
-        audit.intent_last_change.cache_clear()
-        self.addCleanup(audit.intent_last_change.cache_clear)
+        audit.hub_last_change.cache_clear()
+        self.addCleanup(audit.hub_last_change.cache_clear)
         with mock.patch.object(audit, "_git_revisions", lambda rel: revisions):
-            got = audit.intent_last_change("DOC.md", "line-endings")
+            got = audit.hub_last_change("DOC.md", "line-endings")
         self.assertEqual(got, ("2021-01-01T00:00:00+00:00", "bbbbbbb"))
 
     def test_every_anchored_intent_ref_resolves_in_the_hub(self) -> None:
         for item in audit.load("spec/files.json")["baseline"]:
-            anchor = audit.intent_anchor(item)
+            rel, anchor = audit.intent_ref(item, item["path"])
             if anchor is None:
                 continue
-            rel = audit.intent_canonical_rel(item, item["path"])
             with self.subTest(path=item["path"], intentRef=item["intentRef"]):
                 text = (audit.ROOT / rel).read_text(encoding="utf-8")
                 self.assertIsNotNone(audit.extract_anchored(text, anchor))
@@ -4740,9 +4739,9 @@ class MembershipFindingsCase(unittest.TestCase):
 
 
 class IntentCanonicalRelCase(unittest.TestCase):
-    """Holds the intent_canonical_rel resolution check."""
+    """Holds the intent_ref canonical resolution check."""
 
-    def test_intent_canonical_rel(self) -> None:
+    def test_intent_ref_canonical(self) -> None:
         canonical_cases = [
             (
                 "no reference or intentRef falls back to the file's own path",
@@ -4795,7 +4794,7 @@ class IntentCanonicalRelCase(unittest.TestCase):
         ]
         for label, item, path, want in canonical_cases:
             with self.subTest(label):
-                self.assertEqual(audit.intent_canonical_rel(item, path), want)
+                self.assertEqual(audit.intent_ref(item, path)[0], want)
 
 
 class RegistryCase(unittest.TestCase):
