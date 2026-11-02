@@ -783,9 +783,10 @@ def unparsed_insertion(lines: list[str], at: int, section: str, path: str) -> Ca
 
     A target whose last region leaves a code fence open runs that fence to the end of the file.
     So a heading appended after it reads as code, and the refusal names the fence rather than the section it hid.
+    The fence is read from the text ahead of the insertion, since a fence in the inserted region can close it.
     """
-    for block in fidelity_text_module().code_blocks("".join(lines)):
-        if block.fenced and not block.closed and block.start < at < block.end:
+    for block in fidelity_text_module().code_blocks("".join(lines[:at])):
+        if block.fenced and not block.closed and block.end == at:
             return CarryError(
                 f"{path} section '{section}' would be inserted inside the code fence the target"
                 f" leaves open at line {block.start + 1}, so its heading would read as code."

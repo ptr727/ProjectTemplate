@@ -661,6 +661,17 @@ class CarrySectionTests(unittest.TestCase):
                 )
             self.assertEqual((root / "target" / "AGENTS.md").read_bytes(), before)
 
+    def test_insert_sections_names_the_open_fence_a_fence_in_the_hub_region_closes(self) -> None:
+        hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\n```text\nx\n```\n")
+        target = carry.split_lines("# T\n\n## A\n\n```\nopen\n")
+
+        with self.assertRaisesRegex(
+            carry.CarryError,
+            r"^AGENTS\.md section 'B' would be inserted inside the code fence the target"
+            r" leaves open at line 5, so its heading would read as code",
+        ):
+            carry.insert_sections(target, hub, ["B"], "AGENTS.md")
+
     def test_insert_sections_refuses_a_heading_that_lands_inside_another_block(self) -> None:
         hub = carry.split_lines("# T\n\n## A\n\na\n\n## B\n\nb\n")
         target = carry.split_lines("# T\n\n## A\n\n<!-- an open comment\n")
