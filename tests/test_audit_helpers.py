@@ -3793,9 +3793,14 @@ class SecretStemCase(unittest.TestCase):
                     ".devcontainer/devcontainer.json": (
                         '{\n  // "mounts": ["source=${localWorkspaceFolder}/secrets/Api_Key,target=/k,type=bind"]\n}\n'
                     ),
-                    ".vscode/launch.json": '{\n  // "envFile": "${workspaceFolder}/secrets/app.env"\n}\n',
+                    ".vscode/launch.json": (
+                        '{\n  // "envFile": "${workspaceFolder}/secrets/app.env"\n'
+                        '  "envFile": "${workspaceFolder}/.secrets/app.env" // was ${workspaceFolder}/secrets/app.env\n'
+                        '  "url": "http://localhost/${workspaceFolder}/secrets/x"\n}\n'
+                    ),
                     ".gitignore": "legacy/secrets/\n/tools/secrets\n",
                     "tools/secrets": "",
+                    ".secrets/app.env.example": "",
                 },
                 [],
                 [],

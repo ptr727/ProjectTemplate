@@ -402,6 +402,7 @@ SECRET_REFERENCE = re.compile(
     r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
     r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
+EDITOR_COMMENT = re.compile(r"(?:^|(?<=\s))//.*$", re.MULTILINE)
 SECRET_PATH = re.compile(r"(?:\./)?((?:[\w.-]+/)*(\.?secrets))(?:/(.*))?")
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
@@ -658,7 +659,7 @@ def named_secret_signals(tree, read_text, directories, holding):
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text. A compose file that does not parse, such as a template,
-    is no signal, and neither is an editor file's // comment line.
+    is no signal. Neither is an editor file's // comment, whether it opens a line or follows a space.
     """
     bare, named, unread = set(), {}, []
     moved = any(".secrets" in path.split("/")[:-1] for path in tree)
@@ -696,9 +697,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                 found = [SECRET_PATH.fullmatch(p.strip()) for p in compose_host_paths(document)]
             else:
                 root = editor.group(1).rstrip("/")
-                live = "\n".join(
-                    row for row in text.splitlines() if not row.lstrip().startswith("//")
-                )
+                live = EDITOR_COMMENT.sub("", text)
                 found = list(SECRET_REFERENCE.finditer(live.replace("\\\\", "/")))
             for match in filter(None, found):
                 written, folder, rest = match.group(1, 2, 3)
