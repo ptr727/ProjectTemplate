@@ -31,12 +31,8 @@ COMMENT = "# The value is read once, since the second read can disagree.\n"
 
 @unittest.skipUnless(sys.platform == "linux", "runs a POSIX shell hook with executable stubs")
 @unittest.skipUnless(shutil.which("uv"), "the hook runs the prose gate through uv")
-class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
-    """A merge of develop brings in lines the branch never wrote, and the hook must not read them.
-
-    Measured against `HEAD`, every line develop gained since the fork reads as added. So a comment
-    another pull request already landed trips `comment-added` on a merge that adds none.
-    """
+class HookCase(unittest.TestCase):
+    """A throwaway repository carrying the hook and the gate, with one base commit."""
 
     def setUp(self) -> None:
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
@@ -76,20 +72,8 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-q", "--no-verify", "-m", "base")
 
-        self.git("checkout", "-q", "-b", "feature")
-        self.write("conflict.py", "VALUE = 'feature'\n")
-        self.git("commit", "-q", "--no-verify", "-am", "feature side")
-
-        self.git("checkout", "-q", "develop")
-        self.write("tool.py", COMMENT + "value = 1\n")
-        self.write("conflict.py", "VALUE = 'develop'\n")
-        self.git("commit", "-q", "--no-verify", "-am", "develop side, comment landed by its own PR")
-
-        self.git("checkout", "-q", "feature")
-        merge = self.run_git("merge", "develop")
-        self.assertNotEqual(0, merge.returncode, "the fixture needs a conflicted merge")
-
     def write(self, name: str, text: str) -> None:
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
         (self.root / name).write_text(text, encoding="utf-8")
 
     def run_git(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -108,6 +92,29 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         result = self.run_git(*args)
         if result.returncode != 0:
             raise AssertionError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+
+
+class TestTheHookDiffsAMergeAgainstItsMergedInParent(HookCase):
+    """A merge of develop brings in lines the branch never wrote, and the hook must not read them.
+
+    Measured against `HEAD`, every line develop gained since the fork reads as added. So a comment
+    another pull request already landed trips `comment-added` on a merge that adds none.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.git("checkout", "-q", "-b", "feature")
+        self.write("conflict.py", "VALUE = 'feature'\n")
+        self.git("commit", "-q", "--no-verify", "-am", "feature side")
+
+        self.git("checkout", "-q", "develop")
+        self.write("tool.py", COMMENT + "value = 1\n")
+        self.write("conflict.py", "VALUE = 'develop'\n")
+        self.git("commit", "-q", "--no-verify", "-am", "develop side, comment landed by its own PR")
+
+        self.git("checkout", "-q", "feature")
+        merge = self.run_git("merge", "develop")
+        self.assertNotEqual(0, merge.returncode, "the fixture needs a conflicted merge")
 
     def commit_resolution(self, resolved: str) -> subprocess.CompletedProcess[str]:
         self.write("conflict.py", resolved)
@@ -146,6 +153,45 @@ class TestTheHookDiffsAMergeAgainstItsMergedInParent(unittest.TestCase):
         result = self.run_git("commit", "-m", "feature comment")
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn("feature.py:1: comment-added", result.stdout + result.stderr)
+
+
+class TestTheHookReadsOnlyWhatTheCommitStages(HookCase):
+    """An untracked scratch file is no part of a commit, so it cannot refuse one.
+
+    The hook once scanned the whole working tree, untracked files in full. So a stray note with a
+    comment refused every commit in the clone, whatever the commit touched.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("note.py", COMMENT + "scratch = 1\n")
+
+    def commit(self) -> subprocess.CompletedProcess[str]:
+        return self.run_git("commit", "-m", "change")
+
+    def test_a_deletion_beside_an_untracked_finding_passes(self) -> None:
+        """A commit staging no file it can read skips the gate rather than scanning the tree."""
+        self.git("rm", "-q", "conflict.py")
+        result = self.commit()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_an_edit_beside_an_untracked_finding_passes_and_a_staged_report_is_skipped(
+        self,
+    ) -> None:
+        """The edit is read, the report under the generated tree is not, and the note is not."""
+        self.write("tool.py", "value = 2\n")
+        self.write("reports/run/audit.md", "# Audit\n\nA line with " + "the " + "the word.\n")
+        self.git("add", "tool.py", "reports/run/audit.md")
+        result = self.commit()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_a_staged_finding_is_still_refused_and_the_untracked_one_is_not_named(self) -> None:
+        self.write("feature.py", COMMENT + "value = 2\n")
+        self.git("add", "feature.py")
+        result = self.commit()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("feature.py:1: comment-added", result.stdout + result.stderr)
+        self.assertNotIn("note.py", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
