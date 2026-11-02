@@ -174,6 +174,7 @@ The round's report names it as stopped.
 That release is recorded in the group's claim comment before the issue is ranked again.
 A group an away-mode run parked is a stopped group, and its claim comment names the `decision` issue it waits on.
 It is ranked again once that issue is closed with an answer, as a resuming group, and "Away Mode" says when its release is recorded.
+That answer never lifts the away-mode hold above on an edit under `host-setup/agent-safety/`. Such a group resumes only in an attended run, and the round's report names it as held.
 
 An issue already fixed on develop is counted and not ranked until a promotion closes it. A
 merged feature pull request leaves its issue open, per "Grouping and File Claims" on closing
@@ -312,8 +313,12 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   with or without its branch, or leaves that tree untouched for the maintainer. It never passes
   the tree on, for the same reason.
 - **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
-  clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So the path the
-  worker reports is the only way "Cleanup Is the Orchestrator's" can find it.
+  clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So a worker
+  choosing that fallback records the clone's directory name, `<Repo>-<task-slug>`, on each of its
+  group's claim comments before cloning. Each edit keeps the comment's `**Backlog burndown claim`
+  opening. The brief says so, and names the temporary root the clone goes under. The comment
+  carries the name rather than the path, since the path can name the local account. The recorded
+  name is the only way "Cleanup Is the Orchestrator's" can find a dead worker's clone.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself, with
@@ -369,7 +374,7 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone at the path the worker reported is clean and its branch tip is the pull request's `headRefOid`.
+The orchestrator confirms the clone the worker reported or recorded is clean and its branch tip is the pull request's `headRefOid`.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
 The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
@@ -395,9 +400,10 @@ orchestrator waits until the dispatch mechanism reports that the worker has ende
 the Wait on a Worker". It then reads a live `git worktree list --porcelain` for a linked worktree,
 an entry other than the first, whose `branch` line names the claimed branch. Where one exists, it
 runs `git -C <path> reset --hard` and then `git -C <path> clean -fd`, `<path>` being that entry's
-`worktree` line. It discards nothing in any other tree. Where none exists, nothing is discarded
-and the group is stopped for the maintainer per "Raising a Blocked Question". The branch's commits
-stay for the branch check below.
+`worktree` line. It discards nothing in any other tree. Where none exists and the worker reported
+or recorded no standalone clone, nothing is discarded and the group is stopped for the maintainer
+per "Raising a Blocked Question". A standalone clone follows the clone paragraph below. The
+branch's commits stay for the branch check below.
 
 An abandoned group, and a dead worker's clean tree, have no merged pull request for
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
@@ -428,6 +434,26 @@ That stop is per "Raising a Blocked Question", since past that point removal dis
 A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
 Where a pushed branch still heads or bases an open pull request, what goes to the maintainer names that pull request.
 A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
+
+**A standalone clone holds its branch alone**, since the base clone does not register it. So the
+base-clone commands above do not reach it, and deleting the clone deletes its local branch too.
+The orchestrator finds it under the temporary root the brief named, by the recorded name. A later
+run that named another root cannot find it, so its group goes to the maintainer. The
+abandoned-worker discard above does not run there, so a dirty abandoned clone goes to the
+maintainer.
+The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
+A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
+live with `git -C <clone> ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
+only copy of the branch. A clone removed with its branch and no merged pull request instead needs
+`git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
+`git -C <clone> fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
+remote checks, delete, and confirmation above first. Where the checks hold, the orchestrator then
+deletes the clone's exact directory, per `repo-worktree` "Listing and Cleanup". It also removes the
+recorded name from the claim comments. A clone removed with its branch and no merged pull request
+has its release recorded once the directory is gone. A clone retired alone keeps its claim. Where
+any check fails, the clone is left exactly as it stands and the group is stopped for
+the maintainer per "Raising a Blocked Question". The one exception is a dead worker's clone failing
+only the is-ancestor check, which takes the retire-alone checks instead.
 
 ### Choosing the Worker's Model Tier
 
@@ -469,9 +495,11 @@ comes from the dispatch mechanism itself, which knows whether the subagent it st
 running. Nothing about the worktree is acted on while the answer is "still running", however long
 that is. Waiting costs a round's latency and guessing costs another task's uncommitted work.
 
-Once the worker is confirmed gone, its worktree decides what follows. **A clean one** is cleaned up
-as an abandoned group's is, per "Cleanup Is the Orchestrator's". That procedure confirms the branch
-carries no commit that is not already on develop before anything is removed. A worker that
+Once the worker is confirmed gone, its worktree decides what follows. A standalone clone recorded
+on the claim comment is that worktree, retired or removed per "Cleanup Is the Orchestrator's".
+Where that fails, the group stops there and no fresh worker is dispatched.
+**A clean one** is cleaned up as an abandoned group's is, per "Cleanup Is the Orchestrator's".
+That procedure confirms the branch carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
 So that check is what separates the two. It holds, and once that procedure releases the claim,
 the issue returns to the next round's ranking to be dispatched on a new branch. It
@@ -507,13 +535,18 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work. That is because what becomes of it is part
-  of what is being asked, rather than something to settle while waiting.
+  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether its
+  tip equals the remote tip, and that pushing the branch is the maintainer's. That is
+  because what becomes of it is part of what is being asked, rather than something to settle while
+  waiting.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
   branch already checked out somewhere, per `repo-worktree`. So a fresh worker cannot take the
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
-  clean. Otherwise apply what the answer said about its uncommitted work, then remove it. Only then
-  dispatch. This is the same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
+  clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
+  standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
+  one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
+  tip. Only then dispatch. This is the
+  same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
 ## The Promotion Boundary
@@ -737,9 +770,11 @@ subagents and holds only what they return.
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a clean tree with
-   `git worktree remove <exact-path>`, leaving its branch standing. Leave a dirty one exactly as it
-   stands, keep its group parked, and name it in the report. Only the maintainer disposes of another
-   task's uncommitted work.
+   `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
+   standalone clone, which takes the retire-alone checks of "Cleanup Is the Orchestrator's"
+   instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
+   group parked, and name it in the report. Only the
+   maintainer disposes of another task's uncommitted work.
 3. **Dispatch the group workers** per "Dispatching a Worker", each brief built from the group's
    line. Each brief also states the park duty below and the comment rule above. A group worker
    drives to develop and ends there, whatever the scope.
@@ -792,14 +827,15 @@ leaves the work findable.
 3. **Comment the decision issue on each pull request it blocks.** The comment on the promotion is
    what the promotion worker reads, per "Promoting".
 4. **Comment the state on the group's issue.** It says what is done and names the branch and pull
-   request. It says whether the worktree was left standing, what remains, and the `decision` issue
-   it waits on. The comment is complete enough for a worker with no other context to resume from.
+   request. It says whether the worktree was left standing, and for a standalone clone whether its
+   tip equals the remote tip. It says what remains, and the `decision` issue it waits on. The
+   comment is complete enough for a worker with no other context to resume from.
 5. **Record the park in the group's claim comment**, naming the `decision` issue and keeping the
    comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
-answer, the planner returns the group as resuming. The worker it dispatches follows the answer. It
+answer, the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
 ends the work with nothing to merge, it records the release, stating that the answer ended the work with nothing to merge. It
 also closes any pull request the answer retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
