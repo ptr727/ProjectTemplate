@@ -145,6 +145,14 @@ class TestRefusal(unittest.TestCase):
         found = adapter.read(f"{MARKER}\n\nCopilot was not able to review this pull request.\n")
         self.assertEqual("unknown", found.refusal)
 
+    def test_the_wording_in_a_code_span_opening_the_body_is_not_a_refusal(self) -> None:
+        found = adapter.read("`unable to review` is the phrase this reads.\n")
+        self.assertEqual("none", found.refusal)
+
+    def test_a_refusal_in_emphasis_is_still_read(self) -> None:
+        found = adapter.read("**Copilot** wasn't able to *review* this pull request.\n")
+        self.assertEqual("unknown", found.refusal)
+
 
 class TestCoverage(unittest.TestCase):
     def test_the_marker_states_full_partial_or_an_unbelievable_pair(self) -> None:
@@ -797,6 +805,41 @@ class TestUnplaced(unittest.TestCase):
         )
         (part,) = adapter.read(body(sections=odd)).unplaced
         self.assertIn("### Inner", part.text)
+
+
+class TestHasProse(unittest.TestCase):
+    """Prose is text outside code and raw HTML, so a marker never rides on a body of code alone."""
+
+    def test_a_body_of_code_or_html_alone_has_none(self) -> None:
+        for text in (
+            "`Fixed in abc`",
+            "`one` `two`",
+            "# `Fixed`",
+            "- `Fixed in abc`",
+            "> `Fixed in abc`",
+            "| `a` |\n| --- |\n| `b` |",
+            "[`abc`](https://example.com/abc)",
+            "<b></b>",
+            "```\nFixed in abc\n```",
+            "    Fixed in abc",
+            "<!-- marker -->",
+            " \n\n ",
+            "",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(adapter.has_prose(text))
+
+    def test_text_beside_code_or_html_has_some(self) -> None:
+        for text in (
+            "Fixed in `abc`.",
+            "`abc` fixes it.",
+            "<b>Fixed</b> in `abc`",
+            "[Fixed in abc](https://example.com/abc)",
+            "`Fixed in abc`\n\nThe check now reads the head.",
+            "```\ncode\n```\n\nFixed.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(adapter.has_prose(text))
 
 
 class TestOtherReviewers(unittest.TestCase):
