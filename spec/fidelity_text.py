@@ -180,7 +180,7 @@ def link_targets(text):
 
 
 def sections(text):
-    """`(heading, end)` for each level-two region of `text`, in order, the one place a region's extent is decided.
+    """`(heading, end)` for each level-two region of `text`, in order, the one place a level-two region's extent is decided.
 
     The heading line is inside the region and the next level-two heading ends it. `end` is that
     heading's line, or None for a region that runs to the end of the document, so `lines[h.line:end]`
@@ -191,7 +191,11 @@ def sections(text):
 
 
 def section_key(name):
-    """The lookup key for a section name: stripped, then case-folded."""
+    """The lookup key for a section name: stripped, then lowercased.
+
+    `lower()` rather than `casefold()` is intended, since fleet headings are ASCII and the two agree
+    there.
+    """
     return name.strip().lower()
 
 
@@ -216,6 +220,26 @@ def extract_section(text, heading):
     if span is None:
         return None
     return "\n".join(base.split("\n")[span[0] : span[1]])
+
+
+def heading_slug(text):
+    """The anchor GitHub derives from a heading's text: lowercased, punctuation other than `-` and `_` dropped, each space a `-`."""
+    return re.sub(r"[^\w\- ]", "", text.lower()).replace(" ", "-")
+
+
+def extract_anchored(text, anchor):
+    """The normalized region of the first heading at any level whose slug is `anchor`, or None.
+
+    The region runs from that heading line up to the next heading at its level or above. A
+    duplicate heading's `-1` suffix is not modeled, so `anchor` names the first heading it slugs to.
+    """
+    base = normalize(text)
+    found = headings(base)
+    for i, h in enumerate(found):
+        if heading_slug(h.text) == anchor:
+            end = next((n.line for n in found[i + 1 :] if n.level <= h.level), None)
+            return "\n".join(base.split("\n")[h.line : end])
+    return None
 
 
 def strip_sections(text, names, keep_pins=False):

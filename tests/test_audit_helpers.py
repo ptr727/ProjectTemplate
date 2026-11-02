@@ -2934,32 +2934,18 @@ class GroundTruthCase(unittest.TestCase):
                 )
 
     def test_baseline_file_findings_only_the_alternative(self) -> None:
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
-            mock.patch.object(audit, "gh", holding(".codecov.yml")),
-        ):
-            alt_content, _, alt_findings = audit.baseline_file_findings(
-                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT, False
+        with mock.patch.object(audit, "gh", holding(".codecov.yml")):
+            found, alt_content, _, alt_findings = audit.baseline_file_findings(
+                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT
             )
-        stale_at_alt = [t for lvl, t in alt_findings if lvl == "DRIFT" and ".codecov.yml" in t]
-        self.assertTrue(
-            alt_content is not None and len(alt_findings) == 1 and len(stale_at_alt) == 1,
-            f"baseline_file_findings, only the alternative -> {alt_findings}",
-        )
+        self.assertEqual(found, ".codecov.yml")
+        self.assertIsNotNone(alt_content)
+        self.assertEqual(alt_findings, [])
 
     def test_baseline_file_findings_neither(self) -> None:
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
-            mock.patch.object(audit, "gh", holding()),
-        ):
-            _, _, none_findings = audit.baseline_file_findings(
-                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT, False
+        with mock.patch.object(audit, "gh", holding()):
+            _, _, _, none_findings = audit.baseline_file_findings(
+                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT
             )
         want_none = [
             (
@@ -2971,62 +2957,203 @@ class GroundTruthCase(unittest.TestCase):
             none_findings, want_none, f"baseline_file_findings, neither -> {none_findings}"
         )
 
-    def test_intent_staleness_skips_a_copy_matching_the_hub_file_at_path(self) -> None:
+
+HUB_CHANGE = ("2020-01-01T00:00:00+00:00", "abc1234")
+OLD_COMMIT = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+
+
+def intent_run(baseline: dict[str, Any], content: dict[str, str], notes: list[str]) -> Any:
+    """A non-hub Run holding `content` as read, for check_files_intent."""
+    run = audit.Run({"name": "Widget", "driftNotes": notes}, {}, "o/r", "main", {}, None, None)
+    run.__dict__["baseline"] = {p: (item, set(), set()) for p, item in baseline.items()}
+    run.content.update(content)
+    run.found.update({p: p for p in content})
+    return run
+
+
+class IntentAdvisoryCase(unittest.TestCase):
+    """The files.intent advisory: when a copy reads as trailing, and how a driftNote acknowledges it."""
+
+    def patched(self, texts: dict[str, str], commit: Any = OLD_COMMIT) -> contextlib.ExitStack:
+        stack = contextlib.ExitStack()
+        stack.enter_context(
+            mock.patch.object(audit, "hub_last_change", lambda rel, anchor=None: HUB_CHANGE)
+        )
+        stack.enter_context(mock.patch.object(audit, "canonical_current_text", texts.get))
+        stack.enter_context(mock.patch.object(audit, "gh", lambda ep, ok404=False: commit))
+        return stack
+
+    def test_a_copy_matching_the_hub_file_at_path_is_current(self) -> None:
         unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
         texts = {"DOC.md": "the doc", "widget.json": "same"}
-        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
-        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
-        for held, want in (
-            (content, 0),
-            ({**content, "content": base64.b64encode(b"x").decode()}, 1),
-        ):
-            with (
-                mock.patch.object(
-                    audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-                ),
-                mock.patch.object(audit, "canonical_current_text", texts.get),
-                mock.patch.object(
-                    audit,
-                    "gh",
-                    lambda ep, ok404=False, held=held: commit if "commits" in ep else held,
-                ),
-            ):
-                _, _, findings = audit.baseline_file_findings(
-                    "o/r", "main", "widget.json", [], unit, False
-                )
-            self.assertEqual(len(findings), want, f"intentRef unit, held={held} -> {findings}")
+        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        for down, want in (("same", None), ("x", trailing)):
+            with self.subTest(down=down), self.patched(texts):
+                got = audit.intent_trail("o/r", "main", "widget.json", unit, down, "widget.json")
+            self.assertEqual(got, want)
 
-    def test_intent_staleness_reference_unit_ignores_the_hub_file_at_path(self) -> None:
+    def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
+        asked: list[tuple[str, str | None]] = []
+
+        def change(rel: str, anchor: str | None = None) -> tuple[str, str]:
+            asked.append((rel, anchor))
+            return HUB_CHANGE
+
+        unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
+        with (
+            self.patched({"DOC.md": "the doc"}),
+            mock.patch.object(audit, "hub_last_change", change),
+        ):
+            audit.intent_trail("o/r", "main", "widget.json", unit, "x", "widget.json")
+        self.assertEqual(asked, [("DOC.md", "widget")])
+
+    def test_a_reference_unit_ignores_the_hub_file_at_path(self) -> None:
         unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
-        texts = {"snip/w.yml": "snippet", "w.yml": "same"}
-        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
-        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", texts.get),
-            mock.patch.object(
-                audit, "gh", lambda ep, ok404=False: commit if "commits" in ep else content
-            ),
-        ):
-            _, _, findings = audit.baseline_file_findings("o/r", "main", "w.yml", [], unit, False)
-        self.assertEqual(len(findings), 1, f"reference unit -> {findings}")
+        with self.patched({"snip/w.yml": "snippet", "w.yml": "same"}):
+            self.assertIsNotNone(audit.intent_trail("o/r", "main", "w.yml", unit, "same", "w.yml"))
 
-    def test_intent_staleness_message_names_the_intent_canonical(self) -> None:
-        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
-            mock.patch.object(audit, "gh", lambda ep, ok404=False: commit),
-        ):
-            findings = audit.check_intent_staleness(
-                "o/r", "main", "w.json", "DOC.md", "x", "w.json"
-            )
+    def test_a_copy_newer_than_the_canonical_is_current(self) -> None:
+        unit = {"path": "w.json", "fidelity": "intent", "intentRef": "DOC.md"}
+        newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
+        with self.patched({"DOC.md": "canonical"}, newer):
+            self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x", "w.json"))
+
+    def test_the_trail_reads_the_alternative_it_was_found_at(self) -> None:
+        asked: list[str] = []
+
+        def fake(ep: str, ok404: bool = False) -> Any:
+            asked.append(ep)
+            return OLD_COMMIT
+
+        with self.patched({"WORKFLOW.md": "canonical"}), mock.patch.object(audit, "gh", fake):
+            audit.intent_trail("o/r", "main", "codecov.yml", BASELINE_UNIT, "x", ".codecov.yml")
+        self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+
+    def test_the_finding_names_the_intent_canonical(self) -> None:
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        findings = audit.intent_findings({}, "main", trails)
         self.assertEqual(len(findings), 1)
         self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
+
+    def test_an_acknowledgement_clears_the_change_it_names_and_no_other(self) -> None:
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        cases = [
+            ("the cited sha", "Verified `w.json@abc1234`, nothing to adopt (files.intent).", 0, 0),
+            ("a full sha", "Verified `w.json@abc1234" + "0" * 33 + "` (files.intent).", 0, 0),
+            ("an older sha", "Verified `w.json@def5678` (files.intent).", 1, 1),
+            ("another path", "Verified `x.json@abc1234` (files.intent).", 1, 1),
+            ("no code span", "Verified w.json, nothing to adopt (files.intent).", 1, 1),
+            ("no check id", "Verified `w.json@abc1234`.", 1, 0),
+        ]
+        for label, note, advisories, registry in cases:
+            with self.subTest(label):
+                findings = audit.intent_findings({"driftNotes": [note]}, "main", trails)
+                got = [t for _, t in findings]
+                self.assertEqual(sum(t.startswith("intent:") for t in got), advisories, got)
+                self.assertEqual(sum(t.startswith("registry:") for t in got), registry, got)
+
+    def test_an_acknowledgement_of_a_current_copy_is_stale(self) -> None:
+        findings = audit.intent_findings(
+            {"driftNotes": ["`w.json@abc1234` (files.intent)"]}, "main", {}
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("acknowledges 1 copy(ies) the advisory does not report", findings[0][1])
+
+    def test_check_files_intent_reads_only_intent_units_it_read(self) -> None:
+        intent = {"path": "w.json", "fidelity": "intent", "intentRef": "DOC.md"}
+        run = intent_run(
+            {"w.json": intent, "unread.json": intent, "AGENTS.md": None},
+            {"w.json": "x", "AGENTS.md": "x"},
+            [],
+        )
+        with self.patched({"DOC.md": "canonical"}):
+            findings = audit.check_files_intent(run)
+        self.assertEqual([t.split(" ", 2)[1] for _, t in findings], ["w.json"])
+
+    def test_check_files_intent_keys_a_copy_by_the_alternative_it_was_read_at(self) -> None:
+        asked: list[str] = []
+
+        def fake(ep: str, ok404: bool = False) -> Any:
+            asked.append(ep)
+            return OLD_COMMIT
+
+        for notes, want in (
+            ([], [".codecov.yml"]),
+            (["`.codecov.yml@abc1234` (files.intent)"], []),
+        ):
+            run = intent_run({"codecov.yml": BASELINE_UNIT}, {"codecov.yml": "x"}, notes)
+            run.found["codecov.yml"] = ".codecov.yml"
+            asked.clear()
+            with (
+                self.subTest(notes=notes),
+                self.patched({"WORKFLOW.md": "canonical"}),
+                mock.patch.object(audit, "gh", fake),
+            ):
+                findings = audit.check_files_intent(run)
+            self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+            self.assertEqual([t.split(" ", 2)[1] for _, t in findings], want)
+
+    def test_the_anchor_is_read_only_from_an_intent_ref(self) -> None:
+        cases = [
+            ({"intentRef": "GOVERNANCE.md#line-endings"}, "line-endings"),
+            ({"intentRef": "GOVERNANCE.md"}, None),
+            ({"intentRef": "GOVERNANCE.md#"}, None),
+            ({"intentRef": "#line-endings"}, None),
+            ({"reference": "snip/w.yml", "intentRef": "WORKFLOW.md#d3"}, None),
+            ({}, None),
+        ]
+        for item, want in cases:
+            with self.subTest(item=item):
+                self.assertEqual(audit.intent_ref(item, "w.json")[1], want)
+
+
+class AnchoredLastChangeCase(unittest.TestCase):
+    """hub_last_change dates an anchored intentRef by its section, over constructed revisions."""
+
+    def test_an_edit_outside_the_anchored_section_does_not_date_it(self) -> None:
+        doc = "# Doc\n\n## Rules\n\n### Line Endings\n\n{le}\n\n### Other\n\n{other}\n"
+        revisions = [
+            ("2022-01-01T00:00:00+00:00", "c" * 40, doc.format(le="lf", other="three")),
+            ("2021-01-01T00:00:00+00:00", "b" * 40, doc.format(le="lf", other="two")),
+            ("2020-01-01T00:00:00+00:00", "a" * 40, doc.format(le="crlf", other="one")),
+        ]
+        cases = [
+            ("the anchored section", "line-endings", ("2021-01-01T00:00:00+00:00", "bbbbbbb")),
+            ("a sibling section", "other", ("2022-01-01T00:00:00+00:00", "ccccccc")),
+            ("an unresolved anchor", "gone", ("2022-01-01T00:00:00+00:00", "ccccccc")),
+            ("no anchor", None, ("2022-01-01T00:00:00+00:00", "ccccccc")),
+        ]
+        for label, anchor, want in cases:
+            with self.subTest(label):
+                audit.hub_last_change.cache_clear()
+                self.addCleanup(audit.hub_last_change.cache_clear)
+                with mock.patch.object(audit, "_git_revisions", lambda rel: revisions):
+                    self.assertEqual(audit.hub_last_change("DOC.md", anchor), want)
+
+    def test_a_section_new_in_history_dates_from_its_introduction(self) -> None:
+        revisions = [
+            ("2022-01-01T00:00:00+00:00", "c" * 40, "## A\n\nintro\n\n### Line Endings\n\nlf\n"),
+            ("2021-01-01T00:00:00+00:00", "b" * 40, "## A\n\n### Line Endings\n\nlf\n"),
+            ("2020-01-01T00:00:00+00:00", "a" * 40, "## A\n"),
+        ]
+        audit.hub_last_change.cache_clear()
+        self.addCleanup(audit.hub_last_change.cache_clear)
+        with mock.patch.object(audit, "_git_revisions", lambda rel: revisions):
+            got = audit.hub_last_change("DOC.md", "line-endings")
+        self.assertEqual(got, ("2021-01-01T00:00:00+00:00", "bbbbbbb"))
+
+    def test_every_anchored_intent_ref_resolves_in_the_hub(self) -> None:
+        for item in audit.load("spec/files.json")["baseline"]:
+            rel, anchor = audit.intent_ref(item, item["path"])
+            if anchor is None:
+                continue
+            with self.subTest(path=item["path"], intentRef=item["intentRef"]):
+                text = (audit.ROOT / rel).read_text(encoding="utf-8")
+                self.assertIsNotNone(audit.extract_anchored(text, anchor))
+
+
+class AlternativesManifestCase(unittest.TestCase):
+    """declared_alternatives against the live manifest."""
 
     def test_declared_alternatives_on_the_live_manifest(self) -> None:
         live_alts = audit.declared_alternatives(audit.load("spec/files.json")["baseline"])
@@ -4651,9 +4778,9 @@ class MembershipFindingsCase(unittest.TestCase):
 
 
 class IntentCanonicalRelCase(unittest.TestCase):
-    """Holds the intent_canonical_rel resolution check."""
+    """Holds the intent_ref canonical resolution check."""
 
-    def test_intent_canonical_rel(self) -> None:
+    def test_intent_ref_canonical(self) -> None:
         canonical_cases = [
             (
                 "no reference or intentRef falls back to the file's own path",
@@ -4706,7 +4833,7 @@ class IntentCanonicalRelCase(unittest.TestCase):
         ]
         for label, item, path, want in canonical_cases:
             with self.subTest(label):
-                self.assertEqual(audit.intent_canonical_rel(item, path), want)
+                self.assertEqual(audit.intent_ref(item, path)[0], want)
 
 
 class RegistryCase(unittest.TestCase):
@@ -4722,7 +4849,6 @@ class RegistryCase(unittest.TestCase):
         named = {audit.check_function(c).__name__ for c in audit.registered_checks()}
         defined = {n for n in vars(audit) if n.startswith("check_") and callable(vars(audit)[n])}
         defined -= {"check_function", "check_interface", "check_verbatim"}
-        defined -= {"check_intent_staleness"}
         self.assertEqual(defined - named, set())
 
     def test_suppression_ids_resolve_against_the_registry(self) -> None:
@@ -4732,11 +4858,27 @@ class RegistryCase(unittest.TestCase):
             audit.is_suppression_id({"types": ["python"]}, "python.directories.declared")
         )
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
+        self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "files.intent"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
+
+    def test_a_repo_check_reading_the_baseline_runs_after_it(self) -> None:
+        checks = list(audit.registered_checks())
+        first_read = next(i for i, c in enumerate(checks) if c["scope"] == "baseline")
+        reads = re.compile(r"run\.(content|found|docs)\b|_readme\(run\)")
+        readers = []
+        for i, check in enumerate(checks):
+            if check["scope"] != "repo":
+                continue
+            if reads.search(inspect.getsource(audit.check_function(check))):
+                readers.append(check["id"])
+                with self.subTest(check["id"]):
+                    self.assertGreater(i, first_read)
+        self.assertIn("files.intent", readers)
 
     def test_only_these_checks_skip_the_hub(self) -> None:
         skipped = {c["id"] for c in audit.registered_checks() if not c["hub"]}
         want = {"sections.undeclared", "carried.template-ref", "tree.verbatim", "hubonly.carried"}
+        want.add("files.intent")
         self.assertEqual(skipped, want)
 
     def test_file_checks_read_their_own_baseline_slots(self) -> None:
