@@ -394,13 +394,15 @@ ENV_SECRET_FIELD = r"[a-z0-9]+(?:-+[a-z0-9]+)*"
 ENV_SECRET_NAME = re.compile(rf"{ENV_SECRET_FIELD}(?:_{ENV_SECRET_FIELD})*(?:\.[a-z0-9]+)?")
 ENV_SECRET_TEMPLATE = ".example"
 SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
-SECRET_REFERENCE_SOURCE = re.compile(
-    r"(?:.*/)?(?:(?:docker-)?compose[^/]*\.ya?ml|\.(?:vscode|devcontainer)/[^/]+\.jsonc?)"
+COMPOSE_FILE = re.compile(r"(?:docker-)?compose[^/]*\.ya?ml")
+EDITOR_CONFIG = re.compile(
+    r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json)"
 )
 SECRET_REFERENCE = re.compile(
-    r"(?<![^\s\"'=:,\[(])(\$\{workspaceFolder\}/|\./)?"
-    r"((?:[\w.-]+/)*(\.?secrets)/([^\s\"'`,;)}\]\\]+))"
+    r"(?<![^\s\"'=:,\[(])(?:\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder|PWD)\}/"
+    r"|\$\(pwd\)/|\$PWD/|\./)?((?:[\w.-]+/)*(\.?secrets)/([^\s\"'`,;:)}\]\\]+))"
 )
+SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
 
 
@@ -534,7 +536,8 @@ def named_secret_signals(tree, read_text):
 
     The files read are each .gitignore and each compose or editor config file. A path they name is
     repo-relative, against a compose file's own directory or the editor's workspace root. So an
-    absolute one such as /run/secrets/<name>, a container mount point, is no signal.
+    absolute one such as /run/secrets/<name>, a container mount point, is no signal. Neither is a
+    path to a tracked file, which shows its directory is not ignored.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the file naming it. The third
     is each file read that returned no text.
@@ -543,7 +546,9 @@ def named_secret_signals(tree, read_text):
     for path in sorted(tree):
         directory, name = posixpath.split(path)
         gitignore = name == ".gitignore"
-        if not gitignore and not SECRET_REFERENCE_SOURCE.fullmatch(path):
+        compose = COMPOSE_FILE.fullmatch(name)
+        editor = None if compose else EDITOR_CONFIG.fullmatch(path)
+        if not (gitignore or compose or editor):
             continue
         text = read_text(path)
         if text is None:
@@ -552,23 +557,24 @@ def named_secret_signals(tree, read_text):
             if any(ignores_bare_secrets(line) for line in text.splitlines()):
                 bare.add(path)
         else:
-            compose = not directory.endswith((".vscode", ".devcontainer"))
-            root = directory if compose else posixpath.dirname(directory)
+            root = directory if compose else editor.group(1).rstrip("/")
+            if editor:
+                text = text.replace("\\\\", "/")
             for match in SECRET_REFERENCE.finditer(text):
-                prefix, written, folder, rest = match.groups()
-                base = "" if prefix and prefix.startswith("$") else root
-                resolved = posixpath.normpath(posixpath.join(base, written))
-                if resolved.startswith("../"):
+                written, folder, rest = match.groups()
+                resolved = posixpath.normpath(posixpath.join(root, written))
+                if resolved.startswith("../") or resolved in tree:
                     continue
                 if folder == "secrets":
                     bare.add(path)
+                rest = rest.rstrip(".")
                 if (
-                    "/" in rest
+                    not SECRET_FILE_NAME.fullmatch(rest)
                     or rest in SECRETS_DIRECTORY_EXEMPT
-                    or resolved in tree
-                    or resolved + ENV_SECRET_TEMPLATE in tree
+                    or resolved.rstrip(".") + ENV_SECRET_TEMPLATE in tree
                 ):
                     continue
+                written = written.rstrip(".")
                 if secret_name_breaks(rest, True):
                     named.add(f"{written} (named in {path})")
     return sorted(bare), sorted(named), unread
@@ -578,18 +584,24 @@ def secret_stem_findings(tree, read_text=None):
     """DRIFT naming each env or secret file whose name breaks CODESTYLE.md's env and secret file rule.
 
     Every tracked file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere
-    whose name opens on no dot. With `read_text`, which returns a path's text or None, the tracked
+    whose name opens on no dot. A bare `secrets/` directory holding its own tracked .gitignore,
+    .gitkeep, or .example template is reported, and each template in it is judged. With `read_text`, which returns a path's text or None, the tracked
     .gitignore, compose, and editor config files are read too. They report a bare `secrets/`
     directory and judge each secret file they name that the tree lacks.
     `tree` is the blob path set, or None when unread, which reports nothing.
     """
     if tree is None:
         return []
-    broken = []
+    broken, held = [], []
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        in_secrets = segments[-2:-1] == [".secrets"]
+        templated = segments[-2:-1] == ["secrets"] and (
+            name in (".gitignore", ".gitkeep") or name.endswith(ENV_SECRET_TEMPLATE)
+        )
+        if templated:
+            held.append(path)
+        in_secrets = templated or segments[-2:-1] == [".secrets"]
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
         folded = name.lower().removesuffix(ENV_SECRET_TEMPLATE)
@@ -599,6 +611,7 @@ def secret_stem_findings(tree, read_text=None):
             broken.append(path)
     bare, named, unread = named_secret_signals(tree, read_text) if read_text else ([], [], [])
     broken += named
+    bare = sorted(set(bare) | set(held))
     findings = []
     if broken:
         findings.append(
@@ -617,9 +630,9 @@ def secret_stem_findings(tree, read_text=None):
             (
                 "DRIFT",
                 (
-                    f"runtime-secrets: {len(bare)} tracked file(s) name a bare secrets/ directory, "
-                    f'which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and '
-                    f"update each: {capped_paths(bare)}"
+                    f"runtime-secrets: {len(bare)} tracked file(s) name or sit in a bare secrets/ "
+                    f'directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it '
+                    f".secrets/ and update each: {capped_paths(bare)}"
                 ),
             )
         )

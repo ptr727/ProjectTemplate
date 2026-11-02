@@ -3681,7 +3681,6 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a file nested below a .secrets directory, a tool-fixed env name, or another file is out of scope",
                 {
-                    "secrets/db-root-password.example",
                     "config/.secrets-notes/Odd-Name",
                     ".secrets/docs/Mixed-Case.md",
                     ".env",
@@ -3711,8 +3710,8 @@ class SecretStemCase(unittest.TestCase):
     def test_a_bare_secrets_directory_is_read_from_the_files_naming_it(self) -> None:
         """The directory is ignored by design, so a .gitignore line and a config path are the signals."""
         bare = (
-            'runtime-secrets: {} tracked file(s) name a bare secrets/ directory, which GOVERNANCE.md "Repo-Scoped '
-            'Secrets" rules out. Rename it .secrets/ and update each: {}'
+            "runtime-secrets: {} tracked file(s) name or sit in a bare secrets/ directory, which "
+            'GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and update each: {}'
         )
         cases: list[tuple[str, dict[str, str], list[str], list[str]]] = [
             (
@@ -3763,6 +3762,61 @@ class SecretStemCase(unittest.TestCase):
                 ],
                 [],
             ),
+            (
+                "a bare directory holding its own .gitignore and templates is reported, and each template judged",
+                {
+                    "secrets/.gitignore": "*\n!*.example\n!README.md\n",
+                    "secrets/README.md": "",
+                    "secrets/Db_Password.example": "",
+                },
+                ["secrets/Db_Password.example"],
+                ["secrets/.gitignore", "secrets/Db_Password.example"],
+            ),
+            (
+                "a compose file under .devcontainer resolves against its own directory",
+                {".devcontainer/docker-compose.yml": "file: ../secrets/app_token.txt\n"},
+                ["../secrets/app_token.txt (named in .devcontainer/docker-compose.yml)"],
+                [".devcontainer/docker-compose.yml"],
+            ),
+            (
+                "a path to a tracked file is not a bare directory",
+                {
+                    ".vscode/launch.json": '{"program": "${workspaceFolder}/src/app/secrets/manager.py"}\n',
+                    "src/app/secrets/manager.py": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a short-syntax mount stops at its colon, and punctuation, interpolation, and a glob are no name",
+                {
+                    "compose.yml": (
+                        "volumes:\n  - ./.secrets/App_Token.txt:/run/secrets/app_token:ro\n"
+                        "# put the token in .secrets/web_token.\n  - ./.secrets/${ENV}_db_password\n"
+                    ),
+                    ".vscode/settings.json": '{"files.exclude": {".secrets/*": true}}\n',
+                },
+                [".secrets/App_Token.txt (named in compose.yml)"],
+                [],
+            ),
+            (
+                "the devcontainer and shell workspace variables and a Windows path are read",
+                {
+                    ".devcontainer/app/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/secrets/app_token,'
+                        'target=/run/secrets/app_token,type=bind"]}\n'
+                    ),
+                    ".devcontainer.json": '{"x": "${containerWorkspaceFolder}/.secrets/Api_Key"}\n',
+                    "deploy/compose.yaml": "env: $(pwd)/.secrets/Mail_Token\n",
+                    ".vscode/launch.json": '{"args": ["${workspaceFolder}\\\\.secrets\\\\Web_Token"]}\n',
+                },
+                [
+                    ".secrets/Api_Key (named in .devcontainer.json)",
+                    ".secrets/Mail_Token (named in deploy/compose.yaml)",
+                    ".secrets/Web_Token (named in .vscode/launch.json)",
+                ],
+                [".devcontainer/app/devcontainer.json"],
+            ),
         ]
         for label, texts, named, naming in cases:
             with self.subTest(label):
@@ -3772,21 +3826,32 @@ class SecretStemCase(unittest.TestCase):
                 self.assertEqual(len(stems), 1 if named else 0, got)
                 for path in named:
                     self.assertIn(path, stems[0])
+                if named:
+                    self.assertTrue(stems[0].startswith(f"runtime-secrets: {len(named)} env"), got)
                 want = [bare.format(len(naming), ", ".join(naming))] if naming else []
                 self.assertEqual([t for _, t in got if "bare secrets/" in t], want)
 
     def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
-        """A compose path is relative to its own directory, and one climbing out of the repo is no signal."""
+        """A compose path is relative to its own directory, an editor's to its workspace, and one leaving the repo is no signal."""
         texts = {
             "deploy/compose.yml": "file: ./.secrets/web_token.txt\n",
             "compose.yml": "file: ../secrets/Db_Password\n",
+            "app/.vscode/launch.json": '["${workspaceFolder}/.secrets/Api_Token"]\n',
         }
-        tree = set(texts) | {"deploy/.secrets/web_token.txt.example"}
+        tree = set(texts) | {
+            "deploy/.secrets/web_token.txt.example",
+            "app/.secrets/Api_Token.example",
+        }
 
         got = audit.secret_stem_findings(tree, texts.get)
 
         self.assertEqual(len(got), 1, got)
-        self.assertTrue(got[0][1].endswith(": deploy/.secrets/web_token.txt.example"), got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": app/.secrets/Api_Token.example, deploy/.secrets/web_token.txt.example"
+            ),
+            got,
+        )
 
     def test_a_signal_file_read_with_no_text_is_undecided(self) -> None:
         got = audit.secret_stem_findings({".gitignore", "README.md"}, lambda path: None)

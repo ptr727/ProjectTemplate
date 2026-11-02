@@ -219,9 +219,9 @@ class AuditRepoNamingCase(unittest.TestCase):
                     "out: secrets/app_token.txt (named in .vscode/launch.json)"
                 ),
                 (
-                    "runtime-secrets: 2 tracked file(s) name a bare secrets/ directory, which "
-                    'GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and update '
-                    "each: .gitignore, .vscode/launch.json"
+                    "runtime-secrets: 2 tracked file(s) name or sit in a bare secrets/ directory, "
+                    'which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and '
+                    "update each: .gitignore, .vscode/launch.json"
                 ),
             ],
         )
