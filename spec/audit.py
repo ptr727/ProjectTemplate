@@ -399,13 +399,14 @@ EDITOR_CONFIG = re.compile(
     r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json"
     r"|[^/]+\.code-workspace)"
 )
+SECRET_FOLDER = r"((?:[\w.-]+/)*(\.?secrets))"
 SECRET_REFERENCE = re.compile(
     r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
-    r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
+    rf"{SECRET_FOLDER}(?:/([^\s\"'`,;:)}}\]\\]*))?(?![\w.-])"
 )
 WORKSPACE_FOLDER = re.compile(r'"folders"\s*:\s*\[\s*\{[^}]*?"path"\s*:\s*"([^"]*)"')
 EDITOR_COMMENT = re.compile(r"(?:^|(?<=\s))//.*$", re.MULTILINE)
-SECRET_PATH = re.compile(r"(?:\./)?((?:[\w.-]+/)*(\.?secrets))(?:/(.*))?")
+SECRET_PATH = re.compile(rf"(?:\./)?{SECRET_FOLDER}(?:/(.*))?")
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
 
@@ -691,9 +692,13 @@ def named_secret_signals(tree, read_text, directories, holding):
                 if anchored:
                     signal = secret_path_target(tree, directories, holding, directory, folder, None)
                 else:
-                    signal = not any(
-                        not directory or h.startswith(f"{directory}/") for h in holding
+                    parts = folder.split("/")
+                    stop = next(
+                        i for i, p in enumerate(parts) if p == "secrets" or set(p) & set("*?[")
                     )
+                    prefix = posixpath.join(directory, *parts[:stop]) if stop else ""
+                    code = any(not directory or h.startswith(f"{directory}/") for h in holding)
+                    signal = not code and (not prefix or prefix in directories)
                 if signal:
                     bare.add(path)
         else:
@@ -718,6 +723,8 @@ def named_secret_signals(tree, read_text, directories, holding):
                 if not match:
                     continue
                 written, folder, rest = match.group(1, 2, 3)
+                if compose and file and rest is None:
+                    continue
                 file = file and (compose or "." in (rest or ""))
                 target = secret_path_target(tree, directories, holding, root, written, rest)
                 if not target:

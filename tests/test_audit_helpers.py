@@ -3798,7 +3798,7 @@ class SecretStemCase(unittest.TestCase):
                         '  "envFile": "${workspaceFolder}/.secrets/app.env" // was ${workspaceFolder}/secrets/app.env\n'
                         '  "url": "http://localhost/${workspaceFolder}/secrets/x"\n}\n'
                     ),
-                    ".gitignore": "legacy/secrets/\n/tools/secrets\n",
+                    ".gitignore": "legacy/secrets/\nlegacy/*/secrets/\n/tools/secrets\n",
                     "tools/secrets": "",
                     ".secrets/app.env.example": "",
                 },
@@ -3831,6 +3831,14 @@ class SecretStemCase(unittest.TestCase):
                     "src/secrets/__init__.py": "",
                     ".vscode/tasks.json": '{"command": "docker run -v ${workspaceFolder}/.secrets/Prod_Certs:/certs app"}\n',
                     ".secrets/README.md": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a compose secret or env file named secrets is a file, not a directory",
+                {
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets\nservices:\n  app:\n    env_file: ./secrets\n",
                 },
                 [],
                 [],
