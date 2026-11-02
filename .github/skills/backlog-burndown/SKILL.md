@@ -179,8 +179,8 @@ An issue already fixed on develop is counted and not ranked until a promotion cl
 merged feature pull request leaves its issue open, per "Grouping and File Claims" on closing
 keywords. So ranking it again dispatches a second fix for finished work. Read the fixed set the way
 "The Promotion Boundary" and "Assembling the Promotion Body" read it, over
-`origin/main..origin/develop`, freshly fetched. That is each pull request's `Closes on promotion:`
-line, and on the operational model each direct push's own line too.
+`origin/main..origin/develop`, freshly fetched. A read that fails there stops the ranking and is
+reported, as it stops the assembly.
 The round's report names each such issue as awaiting promotion.
 
 ## Grouping and File Claims
@@ -582,8 +582,7 @@ gate, stated plainly rather than left for a stalled round to reveal.
 
 ### Assembling the Promotion Body
 
-The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. A squash
-merge's subject carries the **pull request** number rather than the issue number. So its issues take
+The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. The set takes
 two hops. First, for each commit in
 `origin/main..origin/develop`, freshly fetched, read the pull request that merged it into develop:
 
