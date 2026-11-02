@@ -6995,6 +6995,69 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertNotIn("more than one repository", self.err.getvalue())
 
+    def test_a_hook_in_a_linked_worktree_names_a_subdirectory(self) -> None:
+        """Under `GIT_DIR` the named directory was read as the top, so the top's ignores lapsed."""
+        root = self.repo()
+        (root / "sub").mkdir()
+        (root / ".gitignore").write_text("sub/scratch.md\n", encoding="utf-8")
+        (root / "sub" / "a.md").write_text("# A\n\nA clean line.\n", encoding="utf-8")
+        (root / "sub" / "scratch.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "sub")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(root / ".git")}):
+            self.assertEqual([root / "sub" / "a.md"], prose_lint.tracked_paths(root / "sub"))
+            self.assertEqual([], prose_lint.untracked_paths(root / "sub"))
+            self.assertEqual(0, self.run_in(root, "sub"))
+
+    def test_each_scanned_tree_read_answers_for_the_directory_it_names(self) -> None:
+        """An inherited `GIT_DIR` naming another repository, shallow, answers none of these reads."""
+        source = self.repo("source")
+        (source / "ONLY.md").write_text("# Only\n\nA clean line.\n", encoding="utf-8")
+        self.git(source, "add", "-A")
+        self.git(source, "commit", "-qm", "only")
+        self.git(self.tmp, "clone", "-q", "--depth", "1", source.as_uri(), "shallow")
+        root = self.repo()
+        (root / "ROOT.md").write_text("# Root\n\nA clean line.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "root")
+        (root / "DOC.md").write_text(self.BAIT, encoding="utf-8")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.tmp / "shallow" / ".git")}):
+            self.assertEqual([root / "DOC.md", root / "ROOT.md"], prose_lint.tracked_paths(root))
+            self.assertEqual([], prose_lint.untracked_paths(root))
+            self.assertFalse(prose_lint.shallow_checkout(root))
+            self.assertFalse(prose_lint.once_tracked(str(root), "ONLY.md"))
+            self.assertEqual("DOC.md\n", prose_lint.git_bytes(root, "diff --name-only", "HEAD"))
+
+    @unittest.skipUnless(os.name == "posix", "the hook below is written for a POSIX shell")
+    def test_a_commit_naming_paths_keeps_the_index_it_hands_its_hook(self) -> None:
+        """`git commit <paths>` hands the hook the index that commit records, not the checkout's.
+
+        Here the checkout's index has dropped `sub/kept.md`, which an ignore then hides. The
+        commit still records it, so a hook scanning `sub` reads it. Dropping `GIT_INDEX_FILE`
+        with `GIT_DIR` would lose it, and inheriting `GIT_DIR` would read the ignored file too.
+        """
+        root = self.repo()
+        (root / "sub").mkdir()
+        (root / ".gitignore").write_text("sub/kept.md\nsub/scratch.md\n", encoding="utf-8")
+        (root / "sub" / "a.md").write_text("# A\n\nA clean line.\n", encoding="utf-8")
+        (root / "sub" / "kept.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "add", "-f", "sub/kept.md")
+        self.git(root, "commit", "-qm", "sub")
+        tree = self.tmp / "linked"
+        self.git(root, "worktree", "add", "-q", str(tree))
+        (tree / "sub" / "scratch.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(tree, "rm", "-q", "--cached", "sub/kept.md")
+        (tree / "sub" / "a.md").write_text("# A\n\nA clean line, edited.\n", encoding="utf-8")
+        hooks, listed = self.tmp / "hooks", self.tmp / "listed.txt"
+        hooks.mkdir()
+        command = shlex.join([sys.executable, str(PROSE_LINT_SCRIPT), "--list-files", "sub"])
+        hook = hooks / "pre-commit"
+        hook.write_text(f"#!/bin/sh\n{command} > {shlex.quote(str(listed))}\n", encoding="utf-8")
+        hook.chmod(0o755)
+        self.git(tree, "-c", f"core.hooksPath={hooks}", "commit", "-qm", "edit", "sub/a.md")
+        self.assertEqual("sub/a.md\nsub/kept.md\n", listed.read_text(encoding="utf-8"))
+
     def test_a_hook_naming_many_files_looks_up_each_directory_once(self) -> None:
         """A commit staging hundreds of files names each, and each lookup starts a git process."""
         root = self.repo()
