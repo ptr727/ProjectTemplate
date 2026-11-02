@@ -179,9 +179,9 @@ An issue already fixed on develop is counted and not ranked until a promotion cl
 merged feature pull request leaves its issue open, per "Grouping and File Claims" on closing
 keywords. So ranking it again dispatches a second fix for finished work. Read the fixed set the way
 "The Promotion Boundary" and "Assembling the Promotion Body" read it, over
-`origin/main..origin/develop`, freshly fetched. That is each pull request's `Closes on promotion:`
-line, and on the operational model each direct push's commit message as well. The round's
-report names each such issue as awaiting promotion.
+`origin/main..origin/develop`, freshly fetched. A read that fails there stops the ranking and is
+reported, as it stops the assembly.
+The round's report names each such issue as awaiting promotion.
 
 ## Grouping and File Claims
 
@@ -203,16 +203,20 @@ for, and it binds harder than any throughput target.
   body's other issue references are not the same set.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
-  branch that holds it**, before dispatching. The comment writes the branch name in backticks.
+  branch that holds it**, before dispatching. The comment opens with `**Backlog burndown claim`
+  and writes the branch name in backticks. Every edit to it other than a release keeps that
+  opening, a park or an adjudication update included.
   Recording a release, wherever this skill calls for one, edits that comment to open with it.
   The release is written as `**Released (<date>):**` and why the claim holds no files. The claim
   text stays below it. A claim comment opening with `**Released` holds no files.
   The branch name is what lets a later session walk from a worktree it found back to the claim
   explaining it. That is the direction the next bullet actually travels. This lists the open
-  issues where a visible, unreleased comment from an account with write access names a branch:
+  issues where a visible claim comment from an account with write access names a branch. It
+  matches the claim opening, so it skips a released claim and any other comment naming the branch.
+  The command is:
 
   ```sh
-  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | startswith("**Released") | not) and (.body | contains("`<branch>`")))) | .number'
+  gh issue list --state open --limit 1000 --json number,comments --jq '.[] | select(any(.comments[]; (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | startswith("**Backlog burndown claim")) and (.body | contains("`<branch>`")))) | .number'
   ```
 
   Before it runs, `<branch>` is replaced with the name of the branch being looked up, its
@@ -393,7 +397,6 @@ what it exists to establish, that nothing unmerged is being thrown away. Confirm
 carries no commit that is not already on develop, and that its worktree is clean.
 Where every confirmation holds, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read.
 The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`.
-`git branch -d` refuses rather than discards where that check was wrong.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
 It edits the group's claim comment, and the issue returns to the next round's ranking.
@@ -507,8 +510,7 @@ rather than a decision.
 ## The Promotion Boundary
 
 Each round ends with at most one develop -> main promotion pull request, driven to green and left
-for the maintainer. That way it carries a single round rather than accumulating several. This
-section describes the attended run. An away-mode run promotes as its scope states, per "Away Mode".
+for the maintainer. This section describes the attended run. An away-mode run promotes as its scope states, per "Away Mode".
 
 **This section assumes the release workflow model**, where feature work reaches develop through
 squash-merged pull requests and a promotion pull request carries develop to main. A repository
@@ -518,22 +520,22 @@ is wanted there.
 
 That difference changes nothing about how this run's own work is read. Every worker invokes
 `drive-pr` whatever the model. So this run's fixes still arrive as squash-merged feature pull
-requests carrying the `Closes on promotion:` line, and the two hops still read them. What the
-operational model adds is a second kind of commit in the same range. It is a direct push to
-develop that never had a pull request. Its issues are recoverable only from the commit message
-itself. Read both, the pull requests for this run's work and the commit messages for the direct
-pushes, since reading either alone returns a partial set. The range rather than this round is
-still what covers earlier work no promotion has carried.
+requests carrying the `Closes on promotion:` line. The operational model adds a second kind
+of commit in the same range, a direct push to develop that never had a pull request. It names
+the issues it fixes in a `Closes on promotion:` line in its own commit message, per `GOVERNANCE.md`
+"Operational Repositories". The promotion body closes nothing for a push without that line.
+"Assembling the Promotion Body" reads both kinds.
 
-1. **Open it whenever develop is ahead of main**, which `git fetch origin` and then
+1. **Open it whenever develop is ahead of main**, on an operational-model repository only once
+   the maintainer has confirmed one is wanted there. Ahead is what
+   `git fetch origin` and then
    `git rev-list --count origin/main..origin/develop` answers, and this round's own outcome does
    not. Fetch first every time: a stale remote-tracking ref reports zero and the round would report
    nothing to promote while develop carries work. Stop and report a failed fetch rather than
    running `git rev-list` anyway. A round in which every group deferred or parked can still owe a
    promotion pull request. It can owe one for work an earlier round landed and no promotion has yet
    carried. A
-   count of zero is the only case with nothing to promote, and the round reports that instead of
-   attempting one.
+   count of zero means nothing to promote, and the round reports that instead of attempting one.
 2. Drive its review loop per the promotion half of `drive-pr` "The Drive Loop", **with a
    review-round budget set before the first round**. That loop repeats until the promotion pull
    request meets every `pr-review-conduct` Merge Gate item except the maintainer's explicit
@@ -580,13 +582,18 @@ gate, stated plainly rather than left for a stalled round to reveal.
 
 ### Assembling the Promotion Body
 
-The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. Two hops
-are needed rather than one, because nothing in the range names an issue directly. The commits in
-`origin/main..origin/develop` are squash merges whose subjects carry the **pull request** number
-and not the issue number. And this skill deliberately keeps the closing keyword off the feature
-pull request. Read the pull request numbers out of that range, freshly fetched. Then read each of
-those pull requests for its `Closes on promotion:` line. That is the line "Grouping and File
-Claims" requires every feature pull request to carry and every worker brief to ask for.
+The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. The set takes
+two hops. First, for each commit in
+`origin/main..origin/develop`, freshly fetched, read the pull request that merged it into develop:
+
+```sh
+gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at != null and .base.ref == "develop") | .number'
+```
+
+Then read each pull request it prints for its `Closes on promotion:` line. That is the line
+"Grouping and File Claims" requires every feature pull request to carry and every worker brief to
+ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
+line instead. A read that exits non-zero stops the assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
@@ -598,8 +605,9 @@ the opposite error destroys work.
 
 Deriving the set from the range rather than from what this round dispatched is what covers a group
 that deferred or parked, contributing none. It also covers an earlier round's work that no
-promotion has yet carried. A fix landing during the freeze adds its issue to a body already
-written. So amend the body when the fix lands, rather than leaving the issue to be closed by hand. Each amendment replaces
+promotion has yet carried. A fix landing during the freeze changes the range under a body already
+written. So re-read the range when the fix lands. Amend the body where the range calls for a `Fixes`
+line the body lacks, rather than leaving an issue to be closed by hand. Each amendment replaces
 the whole body, and another session may amend it between a read and a write. So build each one
 from a read of the body made immediately before the write, keeping every line that read holds.
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
@@ -777,7 +785,8 @@ leaves the work findable.
 4. **Comment the state on the group's issue.** It says what is done and names the branch and pull
    request. It says whether the worktree was left standing, what remains, and the `decision` issue
    it waits on. The comment is complete enough for a worker with no other context to resume from.
-5. **Record the park in the group's claim comment**, naming the `decision` issue. The group keeps
+5. **Record the park in the group's claim comment**, naming the `decision` issue and keeping the
+   comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
