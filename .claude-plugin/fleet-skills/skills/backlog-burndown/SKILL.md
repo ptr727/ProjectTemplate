@@ -438,22 +438,21 @@ A worker still live, a promotion fix included, keeps its worktree until the next
 **A standalone clone holds its branch alone**, since the base clone does not register it. So the
 base-clone commands above do not reach it, and deleting the clone deletes its local branch too.
 The orchestrator finds it under the temporary root the brief named, by the recorded name. The
-abandoned-worker discard above does not run there. `gh-write-guard` reads a clone as a primary
-checkout and denies both of its commands, so a dirty abandoned clone goes to the maintainer.
+abandoned-worker discard above does not run there, so a dirty abandoned clone goes to the
+maintainer.
 The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
 live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
 only copy of the branch. A clone removed with its branch, as an abandoned group's is, instead needs
 `git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
 `git -C <clone> fetch origin develop`. Where the checks hold, the orchestrator deletes the clone's
-exact directory, per `repo-worktree` "Listing and Cleanup". For a clone removed with its branch, the
+exact directory, per `repo-worktree` "Listing and Cleanup", and strikes its recorded name from the
+claim comments. For a clone removed with its branch, the
 remote delete and the release then follow the abandoned-group steps above. A never-pushed branch's
 release is recorded once the directory is gone. Where any check fails, the clone is left exactly as
 it stands and the group is stopped for the maintainer per "Raising a Blocked Question". The one
 exception is a dead worker's clone failing only the is-ancestor check, which takes the retire-alone
-checks instead. A clone the operating system already reaped has nothing left to lose. It counts as
-retired or removed, in the merged-group check above too. A pushed branch its removal would have
-deleted is reported to the maintainer instead, since no local tip remains to judge it by.
+checks instead.
 
 ### Choosing the Worker's Model Tier
 
@@ -535,16 +534,17 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work, and whether a standalone clone holds
-  commits the remote lacks. That is because what becomes of it is part
-  of what is being asked, rather than something to settle while waiting.
+  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether it
+  holds commits the remote lacks, and that pushing or removing them is the maintainer's. That is
+  because what becomes of it is part of what is being asked, rather than something to settle while
+  waiting.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
   branch already checked out somewhere, per `repo-worktree`. So a fresh worker cannot take the
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
   clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
-  one branch. It is retired per "Cleanup Is the Orchestrator's", which leaves it for the maintainer
-  while it holds work the remote lacks. Only then dispatch. This is the
+  one branch. It is retired per "Cleanup Is the Orchestrator's", once the maintainer has pushed or
+  removed what the remote lacked. Only then dispatch. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
