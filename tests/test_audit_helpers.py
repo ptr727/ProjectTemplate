@@ -3752,14 +3752,77 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "an untracked file a .secrets path names is judged, and a templated one is not judged twice",
+                "an untracked file a .secrets path names is judged, a templated one once, and a cwd-relative one not",
                 {
-                    ".vscode/launch.json": '["${workspaceFolder}/.secrets/Api_Token", "./.secrets/web_token.txt", "./.secrets/mail_relay"]\n',
+                    ".vscode/launch.json": (
+                        '["${workspaceFolder}/.secrets/Api_Token", "${workspaceFolder}/.secrets/web_token.txt",'
+                        ' "${workspaceFolder}/.secrets/mail_relay", "./.secrets/Cwd_Token"]\n'
+                    ),
                 },
                 [
                     ".secrets/Api_Token (named in .vscode/launch.json)",
                     ".secrets/web_token.txt (named in .vscode/launch.json)",
                 ],
+                [],
+            ),
+            (
+                "a URL path or a cloud resource name with a secrets segment is no repo path",
+                {
+                    ".vscode/launch.json": '{"env": {"API": "http://localhost:8080/api/secrets/list"}}\n',
+                    "compose.yml": "DB: projects/my-proj/secrets/db-password/versions/latest\n",
+                },
+                [],
+                [],
+            ),
+            (
+                "a whole-directory mount names the directory, and a secrets: key does not",
+                {
+                    "compose.yml": "secrets:\n  app_token:\n    file: x\nvolumes:\n  - ./secrets:/run/secrets:ro\n",
+                    "deploy/compose.yml": "volumes:\n  - ./secrets/:/run/secrets\n",
+                    ".devcontainer/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/secrets,target=/run/secrets,type=bind"]}\n'
+                    ),
+                },
+                [],
+                [".devcontainer/devcontainer.json", "compose.yml", "deploy/compose.yml"],
+            ),
+            (
+                "a .secrets directory holding a nested template still has a named file judged",
+                {
+                    "compose.yml": "file: ./.secrets/Db_Password\n",
+                    ".secrets/prod/db_password.example": "",
+                },
+                [".secrets/Db_Password (named in compose.yml)"],
+                [],
+            ),
+            (
+                "a nested template in a bare directory holds it",
+                {
+                    "compose.yml": "file: ./secrets/prod/db_password.txt\n",
+                    "secrets/prod/db_password.txt.example": "",
+                },
+                [],
+                ["compose.yml", "secrets/prod/db_password.txt.example"],
+            ),
+            (
+                "a code directory named secrets is no signal from its template or an anchored .gitignore line",
+                {
+                    ".gitignore": "src/app/secrets/__pycache__/\n",
+                    "src/app/secrets/manager.py": "",
+                    "src/app/secrets/config.toml.example": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a relative editor path depends on a task's cwd, so it names no file",
+                {
+                    ".vscode/tasks.json": (
+                        '{"options": {"cwd": "${workspaceFolder}/deploy"}, "command": "cat ./.secrets/api_token.txt"}\n'
+                    ),
+                    "deploy/.secrets/api_token.txt.example": "",
+                },
+                ["deploy/.secrets/api_token.txt.example"],
                 [],
             ),
             (

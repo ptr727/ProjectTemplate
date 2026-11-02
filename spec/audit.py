@@ -399,8 +399,8 @@ EDITOR_CONFIG = re.compile(
     r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json)"
 )
 SECRET_REFERENCE = re.compile(
-    r"(?<![^\s\"'=:,\[(])(?:\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder|PWD)\}/"
-    r"|\$\(pwd\)/|\$PWD/|\./)?((?:[\w.-]+/)*(\.?secrets)/([^\s\"'`,;:)}\]\\]+))"
+    r"(?<![^\s\"'=:,\[(])(\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder|PWD)\}/"
+    r"|\$\(pwd\)/|\$PWD/|\./)?((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
@@ -523,35 +523,49 @@ def secret_name_breaks(name, in_secrets):
     return not ENV_SECRET_NAME.fullmatch(named) or (in_secrets and named.lower().endswith(".txt"))
 
 
-def ignores_bare_secrets(line):
-    """Whether one .gitignore line ignores a directory named secrets, never .secrets."""
+def ignored_secrets_folder(line):
+    """The folder one .gitignore line ignores as a bare secrets directory, "" for one at any depth, or None."""
     pattern = line.strip()
     if not pattern or pattern.startswith(("#", "!")):
-        return False
-    return "secrets" in pattern.split("/")
+        return None
+    body = pattern.rstrip("/")
+    while body.startswith("**/"):
+        body = body[3:]
+    segments = body.lstrip("/").split("/")
+    if "secrets" not in segments:
+        return None
+    folder = "/".join(segments[: segments.index("secrets") + 1])
+    return "" if "/" not in body or any(c in folder for c in "*?[") else folder
 
 
-def named_secret_signals(tree, read_text):
+def secret_folders(tree):
+    """Each tracked directory, and each one named secrets that tracks more than its own files and templates."""
+    directories, holding = set(), set()
+    for path in tree:
+        segments = path.split("/")
+        name = segments[-1]
+        own = name in SECRETS_DIRECTORY_EXEMPT or name.endswith(ENV_SECRET_TEMPLATE)
+        for at in range(1, len(segments)):
+            folder = "/".join(segments[:at])
+            directories.add(folder)
+            if segments[at - 1] == "secrets" and not own:
+                holding.add(folder)
+    return directories, holding
+
+
+def named_secret_signals(tree, read_text, directories, holding):
     """What tracked files say of the secrets directories the tree cannot show, since one is ignored by design.
 
     The files read are each .gitignore and each compose or editor config file. A path they name is
     repo-relative, against a compose file's own directory or the editor's workspace root. So an
     absolute one such as /run/secrets/<name>, a container mount point, is no signal. Neither is a
-    path into a directory tracking more than its own files and templates, which is not ignored.
+    path into a secrets directory in `holding`, which is not ignored, or below a directory the tree
+    lacks. A relative editor path depends on a launch's working directory, so it names no file.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text.
     """
     bare, named, unread = set(), {}, []
-    holding = set()
-    for path in tree:
-        directory, name = posixpath.split(path)
-        segments = path.split("/")
-        for at, segment in enumerate(segments[:-1]):
-            folder = "/".join(segments[: at + 1])
-            own = name in SECRETS_DIRECTORY_EXEMPT or name.endswith(ENV_SECRET_TEMPLATE)
-            if segment in ("secrets", ".secrets") and (folder != directory or not own):
-                holding.add(folder)
     for path in sorted(tree):
         directory, name = posixpath.split(path)
         gitignore = name == ".gitignore"
@@ -563,22 +577,33 @@ def named_secret_signals(tree, read_text):
         if text is None:
             unread.append(path)
         elif gitignore:
-            if any(ignores_bare_secrets(line) for line in text.splitlines()):
-                bare.add(path)
+            for line in text.splitlines():
+                folder = ignored_secrets_folder(line)
+                if folder == "" or (folder and posixpath.join(directory, folder) not in holding):
+                    bare.add(path)
         else:
             root = directory if compose else editor.group(1).rstrip("/")
             if editor:
                 text = text.replace("\\\\", "/")
             for match in SECRET_REFERENCE.finditer(text):
-                written, folder, rest = (group.rstrip(".") for group in match.groups())
-                resolved = posixpath.normpath(posixpath.join(root, written))
-                within = posixpath.normpath(posixpath.join(root, written[: -len(rest) - 1]))
-                if within.startswith("../") or within in holding:
+                prefix, written, folder, rest = match.groups()
+                if rest is None and not prefix:
+                    continue
+                rest = (rest or "").rstrip(".")
+                within = posixpath.normpath(posixpath.join(root, written))
+                parent = posixpath.dirname(within)
+                if (
+                    within.startswith("..")
+                    or within in holding
+                    or (parent and parent not in directories)
+                ):
                     continue
                 if folder == "secrets":
                     bare.add(path)
+                resolved = posixpath.join(within, rest)
                 if (
-                    not SECRET_FILE_NAME.fullmatch(rest)
+                    not (compose or (prefix or "").startswith("$"))
+                    or not SECRET_FILE_NAME.fullmatch(rest)
                     or rest in SECRETS_DIRECTORY_EXEMPT
                     or resolved in tree
                     or resolved + ENV_SECRET_TEMPLATE in tree
@@ -595,7 +620,8 @@ def secret_stem_findings(tree, read_text=None):
 
     Every tracked file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere
     whose name opens on no dot. A bare `secrets/` directory holding its own tracked .gitignore,
-    .gitkeep, or .example template is reported, and each template in it is judged. With `read_text`, which returns a path's text or None, the tracked
+    .gitkeep, or .example template is reported, and each template directly in it is judged.
+    With `read_text`, which returns a path's text or None, the tracked
     .gitignore, compose, and editor config files are read too. They report a bare `secrets/`
     directory and judge each secret file they name that the tree lacks.
     `tree` is the blob path set, or None when unread, which reports nothing.
@@ -603,15 +629,21 @@ def secret_stem_findings(tree, read_text=None):
     if tree is None:
         return []
     broken, held = [], []
+    directories, holding = secret_folders(tree)
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        templated = segments[-2:-1] == ["secrets"] and (
-            name in (".gitignore", ".gitkeep") or name.endswith(ENV_SECRET_TEMPLATE)
-        )
-        if templated:
+        own = name in (".gitignore", ".gitkeep") or name.endswith(ENV_SECRET_TEMPLATE)
+        folders = [
+            "/".join(segments[:at])
+            for at in range(1, len(segments))
+            if segments[at - 1] == "secrets"
+        ]
+        if own and any(folder not in holding for folder in folders):
             held.append(path)
-        in_secrets = templated or segments[-2:-1] == [".secrets"]
+        in_secrets = segments[-2:-1] == [".secrets"] or (
+            own and segments[-2:-1] == ["secrets"] and posixpath.dirname(path) not in holding
+        )
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
         folded = name.lower().removesuffix(ENV_SECRET_TEMPLATE)
@@ -619,7 +651,9 @@ def secret_stem_findings(tree, read_text=None):
             continue
         if secret_name_breaks(name, in_secrets):
             broken.append(path)
-    bare, named, unread = named_secret_signals(tree, read_text) if read_text else ([], [], [])
+    bare, named, unread = ([], [], [])
+    if read_text:
+        bare, named, unread = named_secret_signals(tree, read_text, directories, holding)
     broken += named
     bare = sorted(set(bare) | set(held))
     findings = []
