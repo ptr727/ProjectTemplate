@@ -65,9 +65,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    names Copilot the incumbent and says no candidate is a required reviewer. An advisory
    reviewer's absence blocks nothing, while its findings owe item 3 exactly as Copilot's do.
    A review of the head it has started and not finished is not an absence. While a CodeRabbit
-   or Qodo check on the head is still settling, `merge` refuses as `CHECKS_PENDING`, whatever
-   the merge state reads. `wait` holds an attested head then too. A reviewer whose newest output
-   is its rate limit posts no review, so its check holds nothing.
+   or Qodo check on the head has neither passed nor failed, `merge` refuses as `CHECKS_PENDING`,
+   whatever the merge state reads. `wait` holds an attested head then too. A reviewer whose newest
+   output is a rate limit posted since the check began posts no review, so its check holds
+   nothing.
    `pr_review.py`'s `review_on_head` names Copilot's own coverage specifically, not "no review of
    any kind covers this head". An advisory reviewer carrying the exact head under
    `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is

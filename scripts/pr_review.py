@@ -168,10 +168,11 @@ Subcommands
            DRAFT merge, or a pull request not open.
            30 = still pending at the timeout. On a held head it is any hold
            `status=CHECKS_PENDING` names, a required check still settling, a workflow run still
-           open, and a CodeRabbit or Qodo check still settling on any merge state among them, the
-           last unless that reviewer's newest output is its rate limit. Where the rollup holds a
-           type this cannot read, a BLOCKED hold's note says an unmet required check may sit in
-           its unread part. It is also a round past --min-rounds not yet landed.
+           open, and a CodeRabbit or Qodo check not yet passed or failed on any merge state among
+           them, the last unless that reviewer's newest output is a rate limit since it began.
+           Where the rollup holds a type this cannot read, a BLOCKED hold's note says an unmet
+           required check may sit in its unread part. It is also a round past --min-rounds not
+           yet landed.
            40 = no Copilot review covers the head, in any of these cases:
            - The reviewer answered outside a formal review.
            - The request returned success and recorded nothing on the pull request.

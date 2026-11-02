@@ -269,15 +269,15 @@ def limited_since(pr: dict, login: str, since: str) -> bool:
 def hosted_reviews_running(
     pr: dict, nodes: list[dict], now: datetime, grace: float, stall: float
 ) -> list[str]:
-    """The name of each hosted reviewer's check still settling on the head, so its review is running.
+    """The name of each hosted reviewer's check on the head that has neither passed nor failed.
 
-    A check is a reviewer's where that reviewer's app or login posted it, or where its name is the
+    A stuck one counts too, since its review has not posted either way. A check is a reviewer's where that reviewer's app or login posted it, or where its name is the
     reviewer's vocabulary name. A reviewer whose newest output is a rate limit posted since the
     check began posts no review, so its check holds nothing.
     """
     return [
         n.get("name") or login
-        for n in checks_settling(nodes, now, grace, stall)
+        for n in checks_settling(nodes, now, grace, stall, UNFINISHED)
         for name, login in HOSTED_REVIEWERS.items()
         if n.get("poster") == login or (n.get("name") or "").casefold() == name
         if not limited_since(pr, login, n.get("since") or "")
