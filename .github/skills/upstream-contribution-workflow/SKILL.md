@@ -10,8 +10,8 @@ description: >-
   to contribute, whenever an upstream reviewer requests changes on a PR opened this way, whenever a
   fork-internal iteration PR looks ready to merge or close, whenever the upstream base branch moves
   under a contribution in flight, and whenever choosing an issue or PR template for such a
-  repository. Triggers whatever the target repo's own type or workflow model, whose conventions this
-  skill never assumes match the fleet's.
+  repository. Triggers regardless of the target repo's own type or workflow model, whose conventions
+  this skill never assumes match the fleet's.
 ---
 
 # Upstream Contribution Workflow
