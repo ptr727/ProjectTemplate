@@ -96,7 +96,7 @@ directly to `develop`, and CI runs on the push as advisory feedback only. A dire
 the issues it fixes in one `Closes on promotion:` line in its commit message, such as
 `Closes on promotion: #N, #M`. The promotion pull request carrying that push takes a closing
 keyword in its body for each issue the line names. Its body takes no closing keyword for a push
-without one. A PR still exists for a
+without that line. A PR still exists for a
 change worth reviewing, and the `main` promotion gate is unchanged. Release happens only by manual
 dispatch.
 

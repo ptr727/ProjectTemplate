@@ -280,10 +280,11 @@ for, and it binds harder than any throughput target.
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
   Orchestrator's".
 - **A grown set entering the hub's `host-setup/agent-safety/` takes the hold "Ranking" applies**,
-  whether or not another group holds the file. Without an approval recorded on the issue, the group
-  stops for one per "Raising a Blocked Question", and the worker does not edit there. With
-  one, in an attended run, the orchestrator's answer carries the no-merge line "What Invoking This Skill Authorizes"
-  requires of such a brief.
+  whether or not another group holds the file. The approval it reads is on the issue whose fix
+  needs the edit. Without one, the group stops for it per "Raising a Blocked Question", and the
+  worker does not edit there. With one, in an attended run, the orchestrator's answer carries the
+  no-merge line "What Invoking This Skill Authorizes" requires of such a brief. An away-mode run
+  parks the group either way, since it holds every such edit, approved or not.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -593,11 +594,11 @@ request** number and not the issue number. And this skill deliberately keeps the
 off the feature pull request. Read the pull request numbers out of that range, freshly fetched.
 Then read each of those pull requests for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
-ask for. On an operational-model repository, a commit whose subject names no pull request is a direct
-push. A squash merge appends `(#<number>)`, and a merge commit reads `Merge pull request
-#<number>`. Read a direct push's message for its own line. Walk the range first-parent, with
-`git log --first-parent origin/main..origin/develop`, so a merge commit's own branch commits are not
-read as direct pushes. Reading either kind alone returns a partial set.
+ask for. On an operational-model repository, a commit in the range that no pull request merged
+into develop is a direct push. Read its message for its own line. A commit's merged pull requests
+are read with
+`gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '[.[] | select(.merged_at != null and .base.ref == "develop")] | length'`,
+which prints `0` for a direct push. Reading either kind alone returns a partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
