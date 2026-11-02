@@ -1,7 +1,17 @@
 ---
 name: skill-lifecycle
 description: >-
-  Governs the lifecycle of the fleet's own skills in ptr727/ProjectTemplate. It covers creating, changing, splitting, and retiring a skill under .agents/skills/. It covers the source-versus-generated split with .github/skills/ and .claude-plugin/. It covers the regenerate and --check semantics of scripts/build_dist.py. It covers the include regions that scripts/build_dist.py fills from a rule's home so a skill carries the rule's text without a copy. It covers the install and stamp semantics of scripts/skills_install.py. It covers the doc-packaging pattern that keeps a law doc and its skill in agreement. It covers the trigger-description conventions that make a skill fire. Use this whenever about to create, edit, move, or delete anything under .agents/skills/, .github/skills/, or .claude-plugin/. Use it also whenever packaging a doc or a doc section as a skill, and whenever deciding whether a topic deserves a skill at all. Triggers even when the edit looks trivial, such as fixing a typo in one SKILL.md. That is because the generated distributions desync the moment the source changes without a build_dist.py run. It is also because CI fails the pull request on exactly that. Hub-context only, since .agents/skills/ exists only in the hub.
+  Governs the lifecycle of the fleet's own skills in ptr727/ProjectTemplate. It covers creating,
+  changing, splitting, and retiring a skill under .agents/skills/, and the source-versus-generated
+  split with .github/skills/ and .claude-plugin/. It covers scripts/build_dist.py's regenerate and
+  --check semantics and the include regions it fills from a rule's home. It covers
+  scripts/skills_install.py's install and stamp semantics, the doc-packaging pattern, and the
+  trigger-description conventions and length cap. Use this whenever about to create, edit, move, or
+  delete anything under .agents/skills/, .github/skills/, or .claude-plugin/. Use it also whenever
+  packaging a doc or a doc section as a skill, and whenever deciding whether a topic deserves a
+  skill. Triggers even when the edit looks trivial, such as fixing a typo in one SKILL.md. A source
+  change with no build_dist.py run desyncs the generated trees, and CI fails the pull request.
+  Hub-context only, since .agents/skills/ exists only in the hub.
 ---
 
 # Skill Lifecycle
@@ -25,6 +35,7 @@ The agent most likely to get a skill wrong is the one editing a skill. Before th
   - a declared destination refused by the same path rules a source is held to, or carried by the manifest
   - a `spec/files.json` that cannot be read or parsed while a destination is declared, since a check that cannot run must not wave one through
   - a symlink at or under a skill's own directory
+  - a skill description over `DESCRIPTION_LIMIT`, or frontmatter too malformed to measure one
   - a region that opens inside another or never closes
   - a close marker with no region open
   - a cycle
@@ -45,7 +56,7 @@ A skill surfaces at a trigger moment. A rule that binds every action all the tim
 ## Creating a Skill
 
 1. **Name the directory in kebab-case** and set the frontmatter `name:` to the same string.
-2. **Write the `description:` to carry the trigger**, since it is the only part an agent reads before deciding to load the skill. State what the skill governs, then the concrete moments it applies ("Use this whenever..."). Then state the routine phrasings that precede the failure it guards against ("Triggers even when..."), naming a real incident where one exists. Disambiguate against sibling skills by name, the way `standup-a-repo`, `resync-a-repo`, and `check-this-repo` each state which of them a session is in.
+2. **Write the `description:` to carry the trigger**, since it is the only part an agent reads before deciding to load the skill. State what the skill governs, then the concrete moments it applies ("Use this whenever..."). Then state the routine phrasings that precede the failure it guards against ("Triggers even when..."). Disambiguate against sibling skills by name, the way `standup-a-repo`, `resync-a-repo`, and `check-this-repo` each state which of them a session is in. Keep the parsed description at or under 1024 characters, the Agent Skills limit that `scripts/build_dist.py` holds as `DESCRIPTION_LIMIT`. A loader can truncate a longer one, and the tail it drops is where a description says which sibling wins. So `build_dist.py` refuses a longer one, as exit 2 under `--check`. The incident behind a trigger, and the reasoning behind a "Triggers even when", belong in the body's "Why This Exists".
 3. **Author the body per the `comment-and-doc-style` skill**: LF (the repo default), present tense, ASCII tiers, no semicolon in prose. Name hub paths as plain code spans rather than repo-relative links, because an installed copy resolves no repo path. Say "from a hub checkout" for anything the reader must run.
 4. **Split bulk into `references/`** when the source doc is large: the SKILL.md carries the summary and the binding rules. Each `references/*.md` carries one topic read on demand. That split is the shape `comment-and-doc-style` uses.
 5. **Apply the doc-packaging pattern below in the same change** when the skill packages a law doc or one of its sections.

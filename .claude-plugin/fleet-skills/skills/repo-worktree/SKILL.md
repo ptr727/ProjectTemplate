@@ -1,23 +1,17 @@
 ---
 name: repo-worktree
 description: >-
-  Mandates and mechanizes task isolation in ptr727/ProjectTemplate fleet repos: every task,
-  including a continuation of a prior session's task, creates its own git worktree on its own
-  feature branch before its first file edit, based on the branch work starts on (develop on every
-  fleet workflow model unless the task is explicitly about main-only content, never whichever
-  branch a tool defaulted to), preferring a registered worktree in the fleet layout and using a
-  standalone-clone fallback only when the executor cannot write to either the standard worktree
-  location or its Git metadata, and no available approval route grants access. Also wraps the
-  mechanics:
-  creating a worktree with git worktree add, the fleet layout convention, listing what is in
-  flight, preparing Husky.Net or Python pre-commit hooks in the new tree, and removing a
-  worktree and its branch after merge. Use this whenever about to create or edit files in a
-  fleet repo, whenever starting or resuming a task, whenever the task's branch is already
-  checked out in a shared checkout, and whenever creating, listing, or removing a worktree.
-  Triggers even when the session was launched in the primary checkout or the change looks like
-  a one-line fix, because the primary checkout is the maintainer's own surface and the incident
-  this guards against was two sessions sharing one checkout, each session's blanket add
-  committing the other's uncommitted files.
+  Mandates and mechanizes task isolation in ptr727/ProjectTemplate fleet repos: every task, a
+  continuation included, creates its own git worktree on its own feature branch before its first
+  file edit, based on the branch work starts on (develop unless the task is explicitly about
+  main-only content, never a tool's default), with a standalone-clone fallback only when the
+  executor cannot write the worktree location or its Git metadata and no approval grants it. Also
+  covers the fleet layout, preparing hooks in the new tree, and listing and removing worktrees. Use
+  this whenever about to create or edit files in a fleet repo, whenever starting or resuming a task,
+  whenever the task's branch is already checked out in a shared checkout, and whenever creating,
+  listing, or removing a worktree. Triggers even when the session was launched in the primary
+  checkout or the change looks like a one-line fix, because two sessions sharing one checkout once
+  committed each other's uncommitted files.
 ---
 
 # Repo Worktree

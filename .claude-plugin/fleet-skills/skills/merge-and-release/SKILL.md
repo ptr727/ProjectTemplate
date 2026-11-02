@@ -1,19 +1,16 @@
 ---
 name: merge-and-release
 description: >-
-  Merges a ready develop -> main promotion PR for any ptr727/ProjectTemplate fleet repo and, when
-  asked, dispatches the release, in this hub always refreshing this machine's installed Skills
-  from the newly promoted content as part of that release step, never as a separate ask. Use this
-  whenever asked to merge main, ship a release, cut a release, or finish a promotion once its PR
-  is already green and fully resolved (produced by drive-pr or by hand). When the request does not
-  say how far ("merge main", "ship it"), ask once whether to merge only or merge and release,
-  rather than guessing which the maintainer wants this time. Triggers even when the phrasing is as
-  short as "merge main and release", because that already states the scope and is itself the
-  explicit, current go-ahead this skill acts on without asking again, though it never substitutes
-  for the pr-review-conduct Merge Gate, a promotion PR that is not actually green and fully
-  resolved gets reported and stopped on, not merged. Where a merge or dispatch is actually
-  performed this skill wins over `branching-and-release-model`, which supplies the policy it
-  follows, and a `backlog-burndown` away-mode run invoked with scope main or release is the one
+  Merges a ready develop -> main promotion PR in a ptr727/ProjectTemplate fleet repo and, when
+  asked, dispatches the release, in this hub refreshing this machine's installed Skills as part of
+  that release step. Use this whenever asked to merge main, ship or cut a release, or finish a
+  promotion whose PR is green and fully resolved. When the request does not say how far ("merge
+  main", "ship it"), ask once whether to merge only or merge and release. Triggers even when the
+  phrasing is as short as "merge main and release", because that already states the scope and is
+  itself the explicit, current go-ahead, though never a substitute for the pr-review-conduct Merge
+  Gate: a promotion PR not green and fully resolved is reported, not merged. Where a merge or
+  dispatch is performed this skill wins over `branching-and-release-model`, which supplies the
+  policy, and a `backlog-burndown` away-mode run invoked with scope main or release is the one
   standing go-ahead it accepts in place of asking.
 ---
 

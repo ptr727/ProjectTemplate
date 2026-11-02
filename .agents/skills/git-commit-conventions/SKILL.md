@@ -4,15 +4,14 @@ description: >-
   Governs how an agent stages, commits, signs, and pushes in a ptr727/ProjectTemplate fleet repo:
   default-to-staging vs. explicit commit authorization, why "commit" means commit-and-push, the
   mandatory signed-commit and noreply-identity checks, never force-pushing, how a history rewrite
-  must re-identify a commit that is not the agent's own, and the destructive-git-command ban. Use
-  this whenever about to run git add/commit/push, whenever authorization to commit is ambiguous
-  ("fix this" versus "commit this"), whenever about to configure or verify commit signing or
-  git user.email, whenever a merge conflict or a stale branch tempts a force-push or a hard reset,
-  and whenever rewriting history (filter-repo, an interactive rebase equivalent) touches a commit
-  authored or committed by someone else. Triggers even when the task looks like routine
-  housekeeping, such as "clean up this branch" or "just push it", because a scope-widened commit
-  authorization, an unsigned commit, a fabricated identity, or a force-push are each easy to do by
-  habit and each one is a hard-to-reverse mistake on a shared branch.
+  must re-identify a commit not the agent's own, and the destructive-git-command ban. Use this
+  whenever about to run git add/commit/push, whenever authorization to commit is ambiguous ("fix
+  this" versus "commit this"), whenever about to configure or verify commit signing or git
+  user.email, whenever a merge conflict or a stale branch tempts a force-push or a hard reset, and
+  whenever a history rewrite touches a commit authored or committed by someone else. Triggers even
+  when the task looks like routine housekeeping, such as "clean up this branch" or "just push it",
+  because a scope-widened authorization, an unsigned commit, a fabricated identity, or a force-push
+  is easy to do by habit and hard to reverse on a shared branch.
 ---
 
 # Git Commit Conventions

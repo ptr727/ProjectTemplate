@@ -2,21 +2,16 @@
 name: agent-conduct
 description: >-
   Surfaces the ptr727/ProjectTemplate fleet's conduct rules at the decision moments they are
-  violated. Use this whenever about to design or start implementing a change, whenever
-  about to claim work is done, verified, green, or fixed, whenever about to pick a default,
-  guess an intent, or resolve an ambiguity without asking, whenever work is blocked on a
-  decision or authorization only the user can give, whenever about to ask the
-  user anything or offer them more work, a closing "want me to...?" line included, whenever about
-  to file a question as an issue instead of asking it, whenever writing a handoff, which owes an
-  account of every question parked rather than asked, whenever work here waits on a fix in
-  another repository, and whenever an incident, a wrong answer, or a repeated correction just
-  taught something a future session must honor. Deliberately narrow: the carried AGENTS.md
-  "Context and Delegation Discipline" section is the always-on layer, so do not load this skill
-  as general background.
-  Where a sibling skill owns the moment, it wins: git-commit-conventions for committing,
+  violated. Use this whenever about to claim work is done, verified, green, or fixed, and whenever
+  about to design or start a change, pick a default, guess an intent, resolve an ambiguity without
+  asking, ask the user anything or offer more work (a closing "want me to...?" included), or file a
+  question as an issue instead of asking it. Use it also whenever blocked on a decision or
+  authorization only the user can give, writing a handoff, waiting on a fix in another repository,
+  or holding a lesson from an incident, a wrong answer, or a repeated correction that a future
+  session must honor. Not general background, which AGENTS.md "Context and Delegation Discipline"
+  already is. Where a sibling skill owns the moment, it wins: git-commit-conventions for committing,
   pr-review-conduct for review and merge claims, local-strict-review for the passes a push owes,
-  comment-and-doc-style for prose. The GOVERNANCE.md sections it surfaces keep the full rules,
-  several of them carried here whole as generated includes.
+  comment-and-doc-style for prose.
 ---
 
 # Agent Conduct

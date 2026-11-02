@@ -1,23 +1,17 @@
 ---
 name: local-strict-review
 description: >-
-  Runs a read-only, adversarial review pass against this branch's current diff against its
-  target branch, full file context included, at the `frontier` model tier, before a unit of work
-  is pushed toward a pull request or claimed done. Use this whenever staged, committed, or
-  untracked work is about to be pushed on a PR-bound branch, and whenever
-  `agent-conduct`'s "about to claim work is done, verified, green, or fixed" trigger fires for
-  PR-bound work. Triggers even when the change looks small or the same session already judged its
-  own diff ready, because a self-review pass judging its own diff inherits its own blind spots,
-  the exact gap this skill exists to close before a PR-hosted reviewer closes it instead. Reuses
-  `fleet-code-review`'s "Review the Change" criteria rather than restating them, and owns only this
-  local, pre-PR moment. Once a pull request exists, `pr-review-conduct` and `drive-pr` own
-  triaging and disposing of what a PR-hosted reviewer finds. Also triggers whenever the periodic
-  canonical sweep is worked. That sweep names the carried units whose text has moved past the pass
-  that read them. It also names a bounded slice of those nothing has read at all. This skill
-  triggers there because the content a sweep names reaches a reviewer whole only when a repository carries it
-  for the first time. It also triggers there because reading each named unit's whole text
-  moves that first-carry read into the repository that can act on its findings. Editing such content owes no pass of its
-  own, so a change that moves a unit pushes and merges like any other.
+  Runs a read-only, adversarial review of this branch's current diff against its target branch, with
+  full file context, at the `frontier` model tier, before a unit of work is pushed toward a pull
+  request or claimed done. Use this whenever staged, committed, or untracked work is about to be
+  pushed on a PR-bound branch, and whenever `agent-conduct`'s "about to claim work is done,
+  verified, green, or fixed" trigger fires for PR-bound work. Triggers even when the change looks
+  small or the session already judged its diff ready, because a self-review inherits its own blind
+  spots. Reuses `fleet-code-review`'s "Review the Change" criteria and owns only this local, pre-PR
+  moment. Once a pull request exists, `pr-review-conduct` and `drive-pr` own disposing of what a
+  PR-hosted reviewer finds. Also triggers whenever the periodic canonical sweep is worked, over the
+  carried units it names. Editing such content owes no pass of its own, so a change that moves a
+  unit pushes and merges like any other.
 ---
 
 # Local Strict Review

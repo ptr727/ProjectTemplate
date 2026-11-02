@@ -2,18 +2,16 @@
 name: decision-triage
 description: >-
   Sorts a ptr727/ProjectTemplate fleet repository's open issues into those an agent can fix alone
-  and those that need the maintainer, researches a recommended answer for each question, files
-  each one as a `decision` issue, then puts every question to the maintainer in one sitting and
-  records the answers. Use this whenever asked what needs the maintainer's input, to find the
-  open questions, to get the backlog ready for an unattended run, to clear the decision queue, or
-  to ask everything at once before leaving. Triggers even when the backlog looks like it has no
-  questions in it, because a question no session has filed reads to every later run as ordinary
-  work. An unattended run then either guesses at it or skips it and reports that it needs the
-  maintainer without saying what for. Attended only, since its last step asks the maintainer.
-  It owns the "Needs the Maintainer" criteria, which `backlog-burndown` carries as a generated
-  include. It runs before a `backlog-burndown` away-mode run and does not replace one. It
-  presents the whole queue, where `session-handoff` "The Parked Decision Queue" presents the
-  top of it at a session close.
+  and those that need the maintainer, researches a recommended answer to each question, files it as
+  a `decision` issue, then puts every question to the maintainer in one sitting and records the
+  answers. Use this whenever asked what needs the maintainer's input, to find the open questions, to
+  get the backlog ready for an unattended run, to clear the decision queue, or to ask everything at
+  once before leaving. Triggers even when the backlog looks free of questions, because a question no
+  session has filed reads to every later run as ordinary work, which an unattended run guesses at or
+  skips. Attended only. It owns the "Needs the Maintainer" criteria, which `backlog-burndown`
+  carries as a generated include. It runs before a `backlog-burndown` away-mode run and does not
+  replace one. It presents the whole queue, where `session-handoff` presents the top of it at a
+  session close.
 ---
 
 # Decision Triage

@@ -1,21 +1,17 @@
 ---
 name: pr-review-conduct
 description: >-
-  Governs opening, driving, and merging a pull request review loop in a ptr727/ProjectTemplate fleet
-  repo: requesting a review at its defined moments, triaging findings, replying and resolving
-  threads, and deciding whether a PR is actually mergeable. Use this whenever about to open a PR,
-  immediately after creating one, about to merge a PR, enable auto-merge, ask the maintainer for
-  merge permission, push a fix and move on without re-checking review state, or judge a PR "green"
-  or "clean" from CI or mergeStateStatus alone. Triggers even when the request sounds routine,
-  such as "open a PR," "merge this," or "it's all green, go ahead," because mergeStateStatus:
-  CLEAN can go clean once checks pass and every known thread is resolved, while still saying
-  nothing about whether the review covered the current head SHA, read the full diff, or left a
-  suppressed low-confidence finding, which opens no thread at all, unanswered. Also triggers when
-  a review loop looks stuck (no review landing, findings that keep reappearing) or when deciding a
-  finding is real, false, deferred, or a deliberate decline, or when a review looks missing or
-  skipped. This skill is the contract that `scripts/pr_review.py`, `drive-pr`, and
-  `merge-and-release` implement: running the loop hands-off is `drive-pr` and merging main is
-  `merge-and-release`, each winning for its own action while this skill still binds the gate.
+  Governs a ptr727/ProjectTemplate fleet repo's pull request review loop: requesting reviews,
+  triaging findings, replying to and resolving threads, and deciding whether a PR is actually
+  mergeable. Use this whenever about to open a PR or just after creating one, whenever about to
+  merge, enable auto-merge, or ask for merge permission, whenever about to push a fix without
+  re-checking review state, and whenever judging a PR "green" from CI or mergeStateStatus alone.
+  Triggers even when the request sounds routine ("merge this", "it's all green, go ahead"), because
+  mergeStateStatus: CLEAN says nothing about whether the review covered the current head SHA. Also
+  triggers when a review looks stuck, missing, or skipped, and when judging a finding real, false,
+  deferred, or declined. Running the loop hands-off is `drive-pr` and merging main is
+  `merge-and-release`, each winning for its own action while this skill, the contract they and
+  `scripts/pr_review.py` implement, binds the gate.
 ---
 
 # PR Review Conduct

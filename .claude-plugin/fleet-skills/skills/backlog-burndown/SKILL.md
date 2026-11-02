@@ -1,23 +1,17 @@
 ---
 name: backlog-burndown
 description: >-
-  Burns a ptr727/ProjectTemplate fleet repository's open-issue backlog down by rounds: rank the
-  open issues, group them so no two groups touch the same file, dispatch one subagent per group to
-  drive its own feature -> develop pull request to merge, open at most one develop -> main
-  promotion pull request per round for the maintainer to merge, then re-rank and go again, because
-  every review round files new issues that change what the next round should pick. Use this
-  whenever asked to work the backlog, burn the backlog down, clear the open issues, resolve or
-  cull the backlog, or run issues in parallel until they are gone, and whenever the ask is a
-  standing one rather than a single named issue. Triggers even when the backlog looks small enough
-  to work by hand, because the failure it exists to prevent is two agents editing the same
-  prose-heavy Markdown file in the same round, which surfaces as a merge conflict long after both
-  branches are already deep in review. Drives one repository, the one the session is in, never a
-  fleet-wide sweep. Ends when a re-rank finds nothing left it can act on. Attended, it never merges
-  main, which stays the maintainer's own step through merge-and-release. Also use this whenever
-  the maintainer is away: asked to run unattended, overnight, while the maintainer is away, or to
-  work everything that needs no decision. That is its away mode, which parks a group meeting a
-  question rather than asking it, and merges as far as the scope named at invocation. Run
-  `decision-triage` first, while the maintainer is present, so the away run meets fewer questions.
+  Burns a ptr727/ProjectTemplate fleet repository's issue backlog down by rounds: rank the open
+  issues, group them so no two groups touch the same file, dispatch one subagent per group to drive
+  its own feature -> develop PR, open at most one develop -> main promotion PR per round, then
+  re-rank. Use this whenever asked to work, burn down, clear, resolve, or cull the backlog, or to
+  run issues in parallel until gone, rather than to fix one named issue. Triggers even when the
+  backlog looks small enough to work by hand, because two agents editing one prose-heavy file
+  conflict late. Drives only the session's own repository, never a fleet-wide sweep. Attended, it
+  never merges main, which is merge-and-release's. Also use it whenever the maintainer is away, or
+  asked to run unattended or overnight or to work all that needs no decision. Its away mode parks a
+  group meeting a question and merges only as far as the scope named at invocation. Run
+  `decision-triage` first, while the maintainer is present.
 ---
 
 # Backlog Burndown
