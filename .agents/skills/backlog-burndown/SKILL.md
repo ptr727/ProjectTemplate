@@ -437,7 +437,8 @@ A worker still live, a promotion fix included, keeps its worktree until the next
 
 **A standalone clone holds its branch alone**, since the base clone does not register it. So the
 base-clone commands above do not reach it, and deleting the clone deletes its local branch too.
-The orchestrator finds it under the temporary root the brief named, by the recorded name. The
+The orchestrator finds it under the temporary root the brief named, by the recorded name. A later
+run that named another root cannot find it, so its group goes to the maintainer. The
 abandoned-worker discard above does not run there, so a dirty abandoned clone goes to the
 maintainer.
 The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
@@ -448,8 +449,9 @@ only copy of the branch. A clone removed with its branch and no merged pull requ
 `git -C <clone> fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
 remote checks, delete, and confirmation above first. Where the checks hold, the orchestrator then
 deletes the clone's exact directory, per `repo-worktree` "Listing and Cleanup". It also removes the
-recorded name from the claim comments. Such a clone's release is recorded once the directory is
-gone. Where any check fails, the clone is left exactly as it stands and the group is stopped for
+recorded name from the claim comments. A clone removed with its branch and no merged pull request
+has its release recorded once the directory is gone. A clone retired alone keeps its claim. Where
+any check fails, the clone is left exactly as it stands and the group is stopped for
 the maintainer per "Raising a Blocked Question". The one exception is a dead worker's clone failing
 only the is-ancestor check, which takes the retire-alone checks instead.
 
