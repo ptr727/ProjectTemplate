@@ -743,10 +743,11 @@ def secret_stem_findings(tree, read_text=None):
 
     Every tracked file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere
     whose name opens on no dot. A bare `secrets/` directory holding its own tracked .gitignore,
-    .gitkeep, or .example template is reported, and each template directly in it is judged.
-    With `read_text`, which returns a path's text or None, the tracked
-    .gitignore, compose, and editor config files are read too. They report a bare `secrets/`
-    directory and judge each secret file they name that the tree lacks.
+    .gitkeep, or .example template, or a file beside its own template, is reported. Each file
+    directly in it other than its README.md, .gitignore, and .gitkeep is judged. With `read_text`,
+    which returns a path's text or None, the tracked .gitignore, compose, and editor config files
+    are read too. They report a bare `secrets/` directory and judge each secret file they name that
+    the tree lacks.
     `tree` is the blob path set, or None when unread, which reports nothing.
     """
     if tree is None:
