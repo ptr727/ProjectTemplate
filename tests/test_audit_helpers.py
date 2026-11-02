@@ -4858,6 +4858,7 @@ class RegistryCase(unittest.TestCase):
             audit.is_suppression_id({"types": ["python"]}, "python.directories.declared")
         )
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
+        self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "files.intent"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
 
     def test_files_intent_runs_after_the_baseline_read(self) -> None:
