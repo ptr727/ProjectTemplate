@@ -658,8 +658,9 @@ def named_secret_signals(tree, read_text, directories, holding):
     launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
     point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
     no signal once the tree or that file names a .secrets directory. Such a line is left behind
-    after the move, to guard old checkouts. A bind or mount source may be a directory, so it reports
-    the folder but judges no file name.
+    after the move, to guard old checkouts. A compose bind source or build context, and any devcontainer
+    path, which is mostly a mount or a command, may be a directory. Each reports the folder but judges
+    no file name.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text. A compose file that does not parse, such as a template,
@@ -705,10 +706,8 @@ def named_secret_signals(tree, read_text, directories, holding):
             else:
                 root = editor.group(1).rstrip("/")
                 live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
-                found = [
-                    (match, not live[: match.start()].endswith("source="))
-                    for match in SECRET_REFERENCE.finditer(live)
-                ]
+                file = ".devcontainer" not in path
+                found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
             for match, file in found:
                 if not match:
                     continue

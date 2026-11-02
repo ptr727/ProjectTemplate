@@ -3811,7 +3811,11 @@ class SecretStemCase(unittest.TestCase):
                     "App.code-workspace": '{"settings": {"python.envFile": "${workspaceFolder}/secrets/App"}}\n',
                     "deploy/compose.yml": "services:\n  a:\n    volumes:\n      - ./.secrets/Prod_Certs:/certs:ro\n",
                     ".devcontainer/devcontainer.json": (
-                        '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Api_Certs,target=/c,type=bind"]}\n'
+                        '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Api_Certs,target=/c,type=bind",'
+                        ' {"source": "${localWorkspaceFolder}/.secrets/Prod_Certs", "type": "bind"},'
+                        ' "type=bind,src=${localWorkspaceFolder}/.secrets/Web_Certs,dst=/c"],'
+                        ' "runArgs": ["-v", "${localWorkspaceFolder}/.secrets/Run_Certs:/certs:ro"],'
+                        ' "postCreateCommand": "mkdir -p ${containerWorkspaceFolder}/.secrets/Tls_Certs"}\n'
                     ),
                 },
                 ["secrets/App (named in App.code-workspace)"],
@@ -4032,7 +4036,7 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "the devcontainer workspace variables and a Windows path are read, and a shell cwd is not",
+                "the devcontainer variables root a folder, a Windows path is read, and a shell cwd is not",
                 {
                     ".devcontainer/app/devcontainer.json": (
                         '{"mounts": ["source=${localWorkspaceFolder}/secrets/app_token,'
@@ -4043,7 +4047,6 @@ class SecretStemCase(unittest.TestCase):
                     ".vscode/launch.json": '{"args": ["${workspaceFolder}\\\\.secrets\\\\Web_Token"]}\n',
                 },
                 [
-                    ".secrets/Api_Key (named in .devcontainer.json)",
                     ".secrets/Web_Token (named in .vscode/launch.json)",
                 ],
                 [".devcontainer/app/devcontainer.json"],
