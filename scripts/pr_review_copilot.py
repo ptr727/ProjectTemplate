@@ -309,24 +309,16 @@ def details(tokens: list[Token]) -> list[_Details]:
     return found
 
 
-def inline_text(token: Token) -> str:
-    """The text an inline token renders, code spans included, markup dropped."""
+def inline_text(token: Token, code: bool = True) -> str:
+    """The text an inline token renders, markup dropped, code spans kept unless `code` is False."""
+    kept = ("text", "code_inline") if code else ("text",)
     parts = []
     for child in token.children or []:
-        if child.type in ("text", "code_inline"):
+        if child.type in kept:
             parts.append(child.content)
         elif child.type in ("softbreak", "hardbreak"):
             parts.append(" ")
     return "".join(parts)
-
-
-def prose(token: Token) -> str:
-    """The text an inline token renders outside code spans and raw HTML, breaks read as spaces."""
-    return "".join(
-        c.content if c.type == "text" else " "
-        for c in token.children or []
-        if c.type in ("text", "softbreak", "hardbreak")
-    )
 
 
 def bare(raw: str) -> str:
@@ -394,7 +386,9 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
 
     refusal = "none"
     first = next((t for t in tokens if t.type == "inline"), None)
-    if first is not None and any(p.search(prose(first)) for p in vocab["refusal_openings"]):
+    if first is not None and any(
+        p.search(inline_text(first, code=False)) for p in vocab["refusal_openings"]
+    ):
         refusal = next(
             (k for k, ps in vocab["refusal_kinds"].items() if any(p.search(text) for p in ps)),
             "unknown",
@@ -582,7 +576,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             continue
         if any(a <= line < b for a, b in counted):
             continue
-        said = " ".join(prose(token).split())
+        said = " ".join(inline_text(token, code=False).split())
         m = next((m for p in vocab["coverage_prose"] if (m := p.match(said))), None)
         if m is None:
             continue
@@ -843,7 +837,7 @@ def html_lines(body: str) -> list[str]:
 def has_prose(body: str) -> bool:
     """Whether the body carries written text outside code and raw HTML, such as a marker line."""
     return any(
-        token.type == "inline" and prose(token).strip()
+        token.type == "inline" and inline_text(token, code=False).strip()
         for token in PARSER.parse((body or "").replace("\r\n", "\n"))
     )
 
