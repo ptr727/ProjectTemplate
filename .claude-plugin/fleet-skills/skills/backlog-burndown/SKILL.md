@@ -279,15 +279,6 @@ for, and it binds harder than any throughput target.
   drifts from the real claim it exists to report. A group told to abandon its branch keeps its claim
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
   Orchestrator's".
-- **A grown set entering the hub's `host-setup/agent-safety/` takes the hold "Ranking" applies**,
-  whether or not another group holds the file. The approval it reads is on the issue whose fix
-  needs the edit. Without one, the group stops for it per "Raising a Blocked Question", and the
-  worker does not edit there. With one, in an attended run, the orchestrator's answer carries the
-  no-merge line "What Invoking This Skill Authorizes" requires of such a brief. An away-mode run
-  stops the group either way rather than parking it, since it holds every such edit, approved or
-  not. It files no `decision` issue. It records the stop in the group's claim comment, keeping its
-  opening. Its report names the group as held for the agent-safety tree, needing the maintainer
-  present.
 - **Cap the round at four workers**, whatever the grouping allows.
 
 ## Bounding a Prose Group
@@ -591,9 +582,9 @@ gate, stated plainly rather than left for a stalled round to reveal.
 
 ### Assembling the Promotion Body
 
-The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. A merged
-pull request's commit carries no issue number, since this skill keeps the closing keyword off the
-feature pull request. So its issues take two hops. First, for each commit in
+The body carries one `Fixes #N` per issue whose fix is on develop and not yet on main. A squash
+merge's subject carries the **pull request** number rather than the issue number. So its issues take
+two hops. First, for each commit in
 `origin/main..origin/develop`, freshly fetched, read the pull request that merged it into develop:
 
 ```sh
@@ -602,8 +593,9 @@ gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at !=
 
 Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
-ask for. A commit it prints nothing for is a direct push, which only an operational-model
-repository has. Read that commit's own message for its line instead. Reading either kind alone
+ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
+line instead. A read that exits non-zero stops the assembly and is reported, since its empty output
+would otherwise read as a direct push. Reading either kind alone
 returns a partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
