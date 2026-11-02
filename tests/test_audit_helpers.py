@@ -695,6 +695,18 @@ class CheckInterfaceCase(unittest.TestCase):
         self.assertIn("job 'extra'", message)
         self.assertNotIn("check-workflow-status", message)
 
+    def test_an_every_event_expression_on_a_dispatch_workflow_is_its_job_finding(self) -> None:
+        both = "' || '" + PR_CHECK_NAME + "' }}"
+        text = PR_HEAD.replace(
+            "on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n"
+        ) + PR_CHECK.replace(
+            PR_CHECK_NAME, PR_ONLY_EXPRESSION.replace("' || 'Check workflow status job' }}", both)
+        )
+        [(kind, message)] = audit.check_interface("wf", PR_CONTRACT, text)
+        self.assertEqual(kind, "DRIFT")
+        self.assertIn("job 'check-workflow-status'", message)
+        self.assertIn("on a run other than pull_request", message)
+
 
 class ShippedPullRequestStubCase(unittest.TestCase):
     """Every pull request stub the hub ships passes the contract spec/files.json gives a carried one."""

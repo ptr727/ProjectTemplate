@@ -993,7 +993,7 @@ def check_interface(path, contract, text):
         and (matches[key][2] if key in matches else value) == name
     ]
     # An expression naming the check on every event is already its job's off-PR finding where another event triggers the workflow.
-    every_event = any(m[1] == name for m in matches.values())
+    every_event = any(m[1] == m[2] == name for m in matches.values())
     if name and name not in gated and name not in names.values() and not (off_pr and every_event):
         findings.append(
             (
