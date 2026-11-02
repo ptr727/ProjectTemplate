@@ -274,7 +274,11 @@ for, and it binds harder than any throughput target.
   choose. The loser narrows its change to drop that file, parks until the holder merges, or
   abandons its branch per "Cleanup Is the Orchestrator's". Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
-  branch reads to every later round as a live claim. **Update the claim comment whenever the
+  branch reads to every later round as a live claim. Where the grown set enters the hub's
+  `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue,
+  as though ranking it now. A group that hold would rank continues only on a brief carrying the
+  no-merge line from "What Invoking This Skill Authorizes". A group it would hold is stopped for
+  the maintainer per "Raising a Blocked Question". **Update the claim comment whenever the
   adjudication changes what a group holds**, in either direction. Otherwise the durable record
   drifts from the real claim it exists to report. A group told to abandon its branch keeps its claim
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
@@ -382,30 +386,33 @@ substitute below for one whose has not. Which check that is matters. A squash me
 the feature tip an ancestor of develop. So the substitute would fail on every merged group if it
 were read as covering them. Every disposition in this skill names which of the two it is.
 
-**A worker told to abandon its branch cleans its own tree first.** `git-commit-conventions` lets a
-command discard work only on the developer's explicit instruction. The maintainer gives it for this
-one case through this skill, and it takes effect when the orchestrator tells a worker to abandon. That message states the
-grant, since the worker never reads this skill. On it the worker
-discards its own uncommitted edits in its own linked worktree, and then reports. It runs
-`git -C <its-worktree> reset --hard` and then `git -C <its-worktree> clean -fd`. Only the seat that
-made the edits can tell they are throwaway. Its commits stay for the branch check below, and it discards
-nothing in any other tree.
+**The orchestrator discards an abandoned worker's uncommitted edits.** `git-commit-conventions`
+lets a command discard work only on the developer's explicit instruction. The maintainer gives it
+for this one case through this skill. It reaches the orchestrator as the maintainer's own
+invocation, but a worker only as another agent's message. So a worker told to
+abandon its branch reports its worktree path and ends without discarding anything. The
+orchestrator then confirms two things. A live `git worktree list --porcelain` lists that path as a
+linked worktree, an entry other than the first, whose `branch` line names the claimed branch. And the
+dispatch mechanism reports that the worker has ended. Where both hold, it runs
+`git -C <path> reset --hard` and then `git -C <path> clean -fd`, and discards nothing in any other
+tree. Where either fails, nothing is discarded and the group is stopped for the maintainer per
+"Raising a Blocked Question". The branch's commits stay for the branch check below.
 
 An abandoned group, and a dead worker's clean tree, have no merged pull request for
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
-what it exists to establish, that nothing unmerged is being thrown away. Confirm the branch
-carries no commit that is not already on develop, and that its worktree is clean.
-Where every confirmation holds, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read.
-The removal is `git worktree remove <exact-path>`, then `git branch -d <exact-branch>`.
+what it exists to establish, that nothing unmerged is being thrown away.
+The orchestrator records the local tip with `git rev-parse refs/heads/<exact-branch>`.
+After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` must exit `0`, and the worktree must be clean.
+Where both hold, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read.
+The removal is `git worktree remove <exact-path>`, then `git update-ref -d refs/heads/<exact-branch> <tip>`.
+That delete refuses only where the branch has moved off the tip the is-ancestor check judged, so it discards nothing that check did not clear.
+`git branch -d` would not agree with that check, since it judges a branch with no upstream against `HEAD`, and the fetch does not advance local develop.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
 It edits the group's claim comment, and the issue returns to the next round's ranking.
 Where it was pushed, the orchestrator also deletes the remote branch, since `cleanup` needs a merged pull request to read.
 That is the one remote delete this skill types by hand.
-Before `git worktree remove` runs, it records the local tip with `git rev-parse refs/heads/<exact-branch>`.
-The delete runs only where three checks hold.
-The recorded tip carries no commit develop lacks.
-After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` exits `0`.
+The delete runs only where two more checks hold.
 The remote tip, read live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, equals the recorded tip.
 And no open pull request uses the branch as its head or its base.
 `gh pr list --head <exact-branch> --state open --json number --jq length` prints `0`, and so does the same command with `--base`.
