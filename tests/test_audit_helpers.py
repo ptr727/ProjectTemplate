@@ -3778,6 +3778,31 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
+                "a compose override file carrying !reset is read",
+                {
+                    "compose.override.yml": (
+                        "services:\n  app:\n    ports: !reset []\n    volumes:\n      - ./secrets:/run/secrets\n"
+                    ),
+                },
+                [],
+                ["compose.override.yml"],
+            ),
+            (
+                "a tracked file named secrets is no directory, and a tracked directory is no secret file",
+                {
+                    ".vscode/tasks.json": '{"command": "${workspaceFolder}/scripts/secrets"}\n',
+                    "scripts/secrets": "",
+                    "compose.yml": "services:\n  a:\n    volumes:\n      - ./tools/secrets:/usr/local/bin/secrets:ro\n",
+                    "tools/secrets": "",
+                    ".devcontainer/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Prod_Certs,target=/c,type=bind"]}\n'
+                    ),
+                    ".secrets/Prod_Certs/tls_key.example": "",
+                },
+                [],
+                [],
+            ),
+            (
                 "a .gitignore line left behind after the move to .secrets is no signal",
                 {
                     ".gitignore": "/.secrets/*\n!/.secrets/*.example\n/secrets/\n",
@@ -4034,6 +4059,17 @@ class SecretStemCase(unittest.TestCase):
                 )
             ],
         )
+
+    def test_a_gitignore_is_not_read_once_the_tree_carries_a_secrets_directory(self) -> None:
+        read: list[str] = []
+
+        def read_text(path: str) -> str:
+            read.append(path)
+            return "/secrets/\n"
+
+        got = audit.secret_stem_findings({".gitignore", ".secrets/db_password.example"}, read_text)
+
+        self.assertEqual((got, read), ([], []))
 
     def test_a_compose_file_that_does_not_parse_is_undecided(self) -> None:
         got = audit.secret_stem_findings({"compose.yml"}, {"compose.yml": "services: [\n"}.get)

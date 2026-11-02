@@ -573,6 +573,30 @@ def secret_folders(tree):
     return directories, holding, held
 
 
+class ComposeLoader(yaml.SafeLoader):
+    """The safe loader, plus the !reset and !override tags compose files may carry."""
+
+
+def _compose_tag(loader, node):
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    return loader.construct_scalar(node)
+
+
+ComposeLoader.add_constructor("!reset", _compose_tag)
+ComposeLoader.add_constructor("!override", _compose_tag)
+
+
+def compose_document(text):
+    """`(document, True)` for a compose file's text, or `(None, False)` where it does not parse."""
+    try:
+        return yaml.load(text, Loader=ComposeLoader), True
+    except yaml.YAMLError:
+        return None, False
+
+
 def compose_host_paths(document):
     """The paths a compose document resolves on the host: secret and config files, env files, binds, builds.
 
@@ -606,18 +630,25 @@ def compose_host_paths(document):
 def secret_path_target(tree, directories, holding, root, written, rest):
     """The secrets folder one repo-relative path names and the file it judges there, or None for neither.
 
-    A path climbing out of the repo, into a code directory in `holding`, or below a directory the
-    tree lacks names no folder. The file is None where the path names no plain file name, or one the
-    tree tracks or holds a template of.
+    No folder is named by a path that climbs out of the repo or ends at a tracked file. Nor by one
+    into a code directory in `holding`, or below a directory the tree lacks. The file is None where
+    the path names no plain file name. It is also None for one the tree tracks, templates, or holds
+    as a directory.
     """
     within = posixpath.normpath(posixpath.join(root, written))
     parent = posixpath.dirname(within)
-    if within.startswith("..") or within in holding or (parent and parent not in directories):
+    if (
+        within.startswith("..")
+        or within in tree
+        or within in holding
+        or (parent and parent not in directories)
+    ):
         return None
     rest = (rest or "").rstrip(".")
     resolved = posixpath.join(within, rest)
     plain = SECRET_FILE_NAME.fullmatch(rest) and rest not in SECRETS_DIRECTORY_EXEMPT
-    if not plain or resolved in tree or resolved + ENV_SECRET_TEMPLATE in tree:
+    tracked = resolved in tree or resolved in directories or resolved + ENV_SECRET_TEMPLATE in tree
+    if not plain or tracked:
         return within, None
     return within, resolved
 
@@ -643,15 +674,15 @@ def named_secret_signals(tree, read_text, directories, holding):
         gitignore = name == ".gitignore"
         compose = COMPOSE_FILE.fullmatch(name) and not path.startswith(".github/workflows/")
         editor = None if compose else EDITOR_CONFIG.fullmatch(path)
-        if not (gitignore or compose or editor):
+        if not (gitignore or compose or editor) or (gitignore and moved):
             continue
         text = read_text(path)
-        document, parsed = _yaml(text) if compose and text is not None else (None, True)
+        document, parsed = compose_document(text) if compose and text is not None else (None, True)
         if text is None or not parsed:
             unread.append(path)
         elif gitignore:
             lines = text.splitlines()
-            if moved or any(".secrets" in line.strip().lstrip("!").split("/") for line in lines):
+            if any(".secrets" in line.strip().lstrip("!").split("/") for line in lines):
                 continue
             for line in lines:
                 found = ignored_secrets_folder(line)
