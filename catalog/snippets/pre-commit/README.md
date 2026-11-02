@@ -35,6 +35,8 @@ where that fails. An allow-list permitting only
 `raw.githubusercontent.com` gets an unresolved-commit fallback. These are network calls
 alongside the Docker pulls the VS Code Lint tasks already do. A fetch failure fails the commit
 rather than silently skipping the gate.
+The unresolved-commit fallback reads the prose gate and its data from `main` twice.
+When the two reads differ, it refuses to run a mixed pair, and a re-run is the remedy.
 
 Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
 `pre-commit` itself is never added as a project dependency.

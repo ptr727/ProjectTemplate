@@ -15,6 +15,8 @@ where that fails. An allow-list permitting only
 `raw.githubusercontent.com` gets an unresolved-commit fallback. These are network calls
 alongside the Docker pulls the Lint tasks below already do. A fetch failure fails the commit
 rather than silently skipping the gate.
+The unresolved-commit fallback reads the prose gate and its data from `main` twice.
+When the two reads differ, it refuses to run a mixed pair, and a re-run is the remedy.
 
 This snippet is for a repo that already keeps a .NET tool manifest declaring Husky.Net.
 That is because the hook sources `.husky/_/husky.sh`, a file `dotnet husky install` generates after
