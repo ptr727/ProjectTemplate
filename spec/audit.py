@@ -983,23 +983,31 @@ def check_interface(path, contract, text):
         if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))
     }
     gated = {m[1] for m in matches.values() if m[1] != m[2]}
-    if name and name not in gated and name not in names.values():
+    # Each job is its own finding, since neither a gated job nor a missing one excuses another yielding the name off a pull_request run.
+    events = workflow_events(_plain(root) if root is not None else None)
+    off_pr = [
+        key
+        for key, value in names.items()
+        if name
+        and events - {"pull_request"}
+        and (matches[key][2] if key in matches else value) == name
+    ]
+    on_pr = set(names.values()) | {m[1] for m in matches.values()}
+    # An expression naming the check on every event is already its job's off-PR finding where another event triggers the workflow.
+    if name and name not in gated and name not in names.values() and not (off_pr and name in on_pr):
         findings.append(
             (
                 "DRIFT",
                 f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
             )
         )
-    if name and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}:
-        # Each job is its own finding, since neither a gated job nor a missing one excuses another yielding the name off a pull_request run.
-        for key, value in names.items():
-            if (matches[key][2] if key in matches else value) == name:
-                findings.append(
-                    (
-                        "DRIFT",
-                        f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
-                    )
-                )
+    for key in off_pr:
+        findings.append(
+            (
+                "DRIFT",
+                f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
+            )
+        )
     tok = contract.get("artifactNameToken")
     if tok and tok not in code_view(root):
         findings.append(
