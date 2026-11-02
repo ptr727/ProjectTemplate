@@ -325,12 +325,7 @@ def read_report(path: Path, digest: str) -> tuple[str, int]:
             f"no report at {path}, so no review has reported over this content."
             " Record only once the dispatched reviewer has finished and written it"
         ) from e
-    except OSError as e:
-        raise CannotRun(f"the report at {path} could not be read ({e})") from e
-    try:
-        lines = raw.decode("utf-8-sig").splitlines()
-    except UnicodeDecodeError as e:
-        raise CannotRun(f"the report at {path} is not UTF-8 text ({e})") from e
+    lines = raw.decode("utf-8-sig").splitlines()
     header = lines[0].rstrip() if lines else ""
     if not header.startswith(REPORT_HEADER):
         raise CannotRun(f"the report at {path} does not open with a '{REPORT_HEADER}<digest>' line")
