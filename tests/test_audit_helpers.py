@@ -221,6 +221,20 @@ INTERFACE_CASES = [
         2,
     ),
     (
+        "an expression falling back to the check name beside one naming another job on every event",
+        PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
+        + PR_CHECK.replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || '" + PR_CHECK_NAME + "' }}",
+        )
+        + PR_CHECK.replace("check-workflow-status:", "extra:").replace(
+            PR_CHECK_NAME,
+            "${{ github.event_name == 'pull_request' && 'Other job' || 'Other job' }}",
+        ),
+        PR_CONTRACT,
+        2,
+    ),
+    (
         "an expression yielding the check name on every event, on a workflow a dispatch also triggers",
         PR_HEAD.replace("on: pull_request\n", "on:\n  pull_request:\n  workflow_dispatch:\n")
         + PR_CHECK.replace(
