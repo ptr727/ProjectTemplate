@@ -769,11 +769,32 @@ def insert_sections(
             at = len(out)
         region = render_region(source_lines, source_span, ending, at_end)
         out[at:at] = region
+        if section_span(out, section) is None:
+            raise unparsed_insertion(out, at, section, path)
     if outside_sections(out, sections, path) != original + separator:
         raise CarryError(
             f"post-insert check failed for {path}: text outside the inserted sections changed"
         )
     return out
+
+
+def unparsed_insertion(lines: list[str], at: int, section: str, path: str) -> CarryError:
+    """The refusal for an inserted heading the parser reads as something else, naming the code fence that swallowed it where one did.
+
+    A target whose last region leaves a code fence open runs that fence to the end of the file.
+    So a heading appended after it reads as code, and the refusal names the fence rather than the section it hid.
+    """
+    for block in fidelity_text_module().code_blocks("".join(lines)):
+        if block.fenced and not block.closed and block.start < at < block.end:
+            return CarryError(
+                f"{path} section '{section}' would be inserted inside the code fence the target"
+                f" leaves open at line {block.start + 1}, so its heading would read as code."
+                " Close that fence by hand first"
+            )
+    return CarryError(
+        f"{path} section '{section}' would be inserted at line {at + 1},"
+        " where its heading does not read as a level-two heading"
+    )
 
 
 def assert_sections(
@@ -848,12 +869,13 @@ def decode_text(path: pathlib.Path, rel: str) -> str:
 
 @dataclass(frozen=True)
 class SectionPlan:
-    """One file's re-vendor, decided but not yet written."""
+    """One file's re-vendor, decided and rendered in memory but not yet written."""
 
     path: str
     declared: list[str]
     source_lines: list[str]
-    target_lines: list[str]
+    inserted: list[str]
+    rewritten: list[str]
     stale: list[str]
     missing: list[str]
 
@@ -861,7 +883,7 @@ class SectionPlan:
 def plan_unit(
     hub: pathlib.Path, target: pathlib.Path, path: str, declared: list[str]
 ) -> SectionPlan:
-    """Locate every declared section in both copies and decide which are stale, writing nothing."""
+    """Locate every declared section in both copies, decide which are stale, and render the re-vendor, writing nothing."""
     source_file = relative_root(hub, path)
     target_file = relative_root(target, path)
     if not target_file.is_file():
@@ -901,7 +923,10 @@ def plan_unit(
         guard_governed_drift(path, section, target_region, "target")
         if source_region != target_region:
             stale.append(section)
-    return SectionPlan(path, declared, source_lines, target_lines, stale, missing)
+    inserted = insert_sections(target_lines, source_lines, missing, path)
+    present = [name for name in stale if name not in missing]
+    rewritten = replace_sections(inserted, source_lines, present, path)
+    return SectionPlan(path, declared, source_lines, inserted, rewritten, stale, missing)
 
 
 def plan_record(plan: SectionPlan) -> dict[str, Any]:
@@ -927,26 +952,19 @@ def plan_sections(
 
 
 def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
-    """Insert and re-vendor each plan's regions in memory for every file, then write and assert them one file at a time.
+    """Write and assert each stale plan's rendered file, one file at a time.
 
-    Every refusal, including a failed insertion or splice, is raised before the first file is written.
-    What can still fail afterwards is the write itself or the assertion after it. Each names the
+    Every refusal, including a failed insertion or splice, is raised while planning, before the first file is written.
+    What can still fail here is the write itself or the assertion after it. Each names the
     file it was working on. That is because by then an earlier file may already hold its
     re-vendored content, and the operator has to know which.
     """
-    pending = []
     for plan in plans:
         if not plan.stale:
             continue
-        inserted = insert_sections(plan.target_lines, plan.source_lines, plan.missing, plan.path)
-        present = [name for name in plan.stale if name not in plan.missing]
-        pending.append(
-            (plan, inserted, replace_sections(inserted, plan.source_lines, present, plan.path))
-        )
-    for plan, inserted, rewritten in pending:
         target_file = relative_root(target, plan.path)
         try:
-            target_file.write_bytes("".join(rewritten).encode("utf-8"))
+            target_file.write_bytes("".join(plan.rewritten).encode("utf-8"))
         except OSError as exc:
             raise CarryError(f"cannot write {plan.path}: {exc}") from exc
         print(f"write {plan.path}")
@@ -956,7 +974,7 @@ def apply_plans(target: pathlib.Path, plans: list[SectionPlan]) -> None:
             plan.source_lines,
             plan.stale,
             plan.declared,
-            inserted,
+            plan.inserted,
         )
         print(json.dumps({"path": plan.path, "postApply": True, "stale": []}, sort_keys=True))
 
