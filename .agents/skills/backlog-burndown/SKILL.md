@@ -593,8 +593,7 @@ gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at !=
 Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
-line instead. A read that exits non-zero stops the assembly and is reported, since its empty output
-would otherwise read as a direct push. Reading either kind alone
+line instead. A read that exits non-zero stops the assembly and is reported. Reading either kind alone
 returns a partial set.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
