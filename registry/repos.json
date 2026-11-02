@@ -111,7 +111,7 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "pythonDirectories": ["RegressionTests"],
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config, PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). The subtree has no tests yet and its validator callers pass no python-directories input, both owed on adoption (python.directories.declared). codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
+            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config, PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
             "name": "ESPHome-NonRoot",

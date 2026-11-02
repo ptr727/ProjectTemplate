@@ -1769,6 +1769,7 @@ def main(argv=()):
             headings = {h.text for h in fidelity_text_module().headings(hub_text) if h.level == 2}
             for elt in sections:
                 name = elt.get("name") if isinstance(elt, dict) else elt
+                # Exact, not section_key(), on purpose: the declared name is the verbatim "path > section" disposition label, so it must stay byte-equal to the heading.
                 if isinstance(name, str) and name and name not in headings:
                     errors.append(
                         f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}"
