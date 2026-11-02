@@ -28,7 +28,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 SHELL_LABELS = ("bash", "sh", "shell")
 
-HUB_PIN = re.compile(r"(ptr727/ProjectTemplate/\.github/workflows/[\w-]+\.yml)@\S+ # \S+")
+HUB_PIN = re.compile(r"(ptr727/ProjectTemplate/\.github/workflows/[\w-]+\.yml)@(\S+(?: # \S+)?)")
 
 
 def documented(snippet: str) -> str:
@@ -838,17 +838,18 @@ class ReleaseGuardCase(unittest.TestCase):
         A snippet keeps a literal minimum known-good pin instead, since the pin gate scans it.
         The scan reads every hub reference, so one that drops its tag comment is still judged.
         """
-        ref = re.compile(r"ptr727/ProjectTemplate/\.github/workflows/[\w-]+\.yml@(.*)")
         doc = (REPO / "docs/reusable-workflows.md").read_text(encoding="utf-8")
         blocks = yaml_blocks(doc)
-        pins = [tail for block in blocks for tail in ref.findall(block)]
+        pins = [m.group(2) for block in blocks for m in HUB_PIN.finditer(block)]
         self.assertTrue(pins)
         for pin in pins:
             with self.subTest(pin):
                 self.assertEqual("<hub-main-commit-sha> # <release-tag>", pin)
         snippets = sorted((REPO / "catalog/snippets/workflows").glob("*.yml"))
         literal = [
-            (s.name, tail) for s in snippets for tail in ref.findall(s.read_text(encoding="utf-8"))
+            (s.name, m.group(2))
+            for s in snippets
+            for m in HUB_PIN.finditer(s.read_text(encoding="utf-8"))
         ]
         self.assertTrue(literal)
         for name, pin in literal:
