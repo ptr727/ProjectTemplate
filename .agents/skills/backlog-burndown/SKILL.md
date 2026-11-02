@@ -314,9 +314,11 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   the tree on, for the same reason.
 - **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So a worker
-  choosing that fallback also records the clone's path on its claim comment at once. The brief
-  says so. That path is the only way "Cleanup Is the Orchestrator's" can find the clone, a dead
-  worker's included.
+  choosing that fallback records the clone's directory name, `<Repo>-<task-slug>`, on each of its
+  group's claim comments before cloning. Each edit keeps the comment's `**Backlog burndown claim`
+  opening. The brief says so, and names the temporary root the clone goes under. That root is
+  never posted, since its path can name the local account. The recorded name is the only way
+  "Cleanup Is the Orchestrator's" can find a dead worker's clone.
 - **The worker does no cleanup**, which is this skill's one stated override of `drive-pr`'s
   post-merge cleanup and of `repo-worktree`'s post-merge procedure. Say so in the brief, because
   a worker following either alone will clean up. The worker still performs the merge itself, with
@@ -372,7 +374,7 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone at the path the worker reported or recorded is clean and its branch tip is the pull request's `headRefOid`.
+The orchestrator confirms the clone the worker reported or recorded is clean and its branch tip is the pull request's `headRefOid`.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
 The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
@@ -435,18 +437,23 @@ A worker still live, a promotion fix included, keeps its worktree until the next
 
 **A standalone clone holds its branch alone**, since the base clone does not register it. So the
 base-clone commands above do not reach it, and deleting the clone deletes its local branch too.
-The orchestrator finds it at the path the worker reported or recorded, and runs no discard there.
+The orchestrator finds it under the temporary root the brief named, by the recorded name. The
+abandoned-worker discard above does not run there. `gh-write-guard` reads a clone as a primary
+checkout and denies both of its commands, so a dirty abandoned clone goes to the maintainer.
 The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
 live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
 only copy of the branch. A clone removed with its branch, as an abandoned group's is, instead needs
 `git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
-`git -C <clone> fetch origin develop`. A pushed branch's remote delete and the release then follow
-the abandoned-group steps above. Where the checks hold, the orchestrator deletes the clone's exact
-directory, per `repo-worktree` "Listing and Cleanup". Where any fails, the clone is left exactly as
+`git -C <clone> fetch origin develop`. Where the checks hold, the orchestrator deletes the clone's
+exact directory, per `repo-worktree` "Listing and Cleanup". For a clone removed with its branch, the
+remote delete and the release then follow the abandoned-group steps above. A never-pushed branch's
+release is recorded once the directory is gone. Where any check fails, the clone is left exactly as
 it stands and the group is stopped for the maintainer per "Raising a Blocked Question". The one
-exception is a dead worker's clone failing only the is-ancestor check. It is retired alone instead,
-per "Bounding the Wait on a Worker".
+exception is a dead worker's clone failing only the is-ancestor check, which takes the retire-alone
+checks instead. A clone the operating system already reaped has nothing left to lose. It counts as
+retired or removed, in the merged-group check above too. A pushed branch its removal would have
+deleted is reported to the maintainer instead, since no local tip remains to judge it by.
 
 ### Choosing the Worker's Model Tier
 
@@ -490,6 +497,7 @@ that is. Waiting costs a round's latency and guessing costs another task's uncom
 
 Once the worker is confirmed gone, its worktree decides what follows. A standalone clone recorded
 on the claim comment is that worktree, retired or removed per "Cleanup Is the Orchestrator's".
+Where that fails, the group stops there and no fresh worker is dispatched.
 **A clean one** is cleaned up as an abandoned group's is, per "Cleanup Is the Orchestrator's".
 That procedure confirms the branch carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
@@ -527,14 +535,16 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work. That is because what becomes of it is part
+  prompt whether that worktree holds uncommitted work, and whether a standalone clone holds
+  commits the remote lacks. That is because what becomes of it is part
   of what is being asked, rather than something to settle while waiting.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
   branch already checked out somewhere, per `repo-worktree`. So a fresh worker cannot take the
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
   clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
-  one branch. It is retired per "Cleanup Is the Orchestrator's". Only then dispatch. This is the
+  one branch. It is retired per "Cleanup Is the Orchestrator's", which leaves it for the maintainer
+  while it holds work the remote lacks. Only then dispatch. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
