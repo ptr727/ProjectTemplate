@@ -320,6 +320,15 @@ def inline_text(token: Token) -> str:
     return "".join(parts)
 
 
+def prose(token: Token) -> str:
+    """The text an inline token renders outside code spans and raw HTML, breaks read as spaces."""
+    return "".join(
+        c.content if c.type == "text" else " "
+        for c in token.children or []
+        if c.type in ("text", "softbreak", "hardbreak")
+    )
+
+
 def bare(raw: str) -> str:
     """Text with its format characters, such as a zero-width space, dropped and its ends stripped."""
     return "".join(c for c in raw if unicodedata.category(c) != "Cf").strip()
@@ -385,7 +394,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
 
     refusal = "none"
     first = next((t for t in tokens if t.type == "inline"), None)
-    if first is not None and any(p.search(first.content) for p in vocab["refusal_openings"]):
+    if first is not None and any(p.search(prose(first)) for p in vocab["refusal_openings"]):
         refusal = next(
             (k for k, ps in vocab["refusal_kinds"].items() if any(p.search(text) for p in ps)),
             "unknown",
@@ -573,12 +582,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             continue
         if any(a <= line < b for a, b in counted):
             continue
-        parts = [
-            c.content if c.type == "text" else " "
-            for c in token.children or []
-            if c.type in ("text", "softbreak", "hardbreak")
-        ]
-        said = " ".join("".join(parts).split())
+        said = " ".join(prose(token).split())
         m = next((m for p in vocab["coverage_prose"] if (m := p.match(said))), None)
         if m is None:
             continue
@@ -839,7 +843,7 @@ def html_lines(body: str) -> list[str]:
 def has_prose(body: str) -> bool:
     """Whether the body carries written text outside code and raw HTML, such as a marker line."""
     return any(
-        token.type == "inline" and token.content.strip()
+        token.type == "inline" and prose(token).strip()
         for token in PARSER.parse((body or "").replace("\r\n", "\n"))
     )
 
