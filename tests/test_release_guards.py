@@ -32,7 +32,7 @@ HUB_PIN = re.compile(r"(ptr727/ProjectTemplate/\.github/workflows/[\w-]+\.yml)@\
 
 
 def documented(snippet: str) -> str:
-    """`snippet` as docs/reusable-workflows.md quotes it, every hub pin the placeholder an adopter resolves."""
+    """Return `snippet` as docs/reusable-workflows.md quotes it, each hub pin replaced by the placeholder an adopter resolves."""
     return HUB_PIN.sub(r"\1@<hub-main-commit-sha> # <release-tag>", snippet)
 
 
