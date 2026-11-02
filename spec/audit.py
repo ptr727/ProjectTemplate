@@ -947,6 +947,20 @@ def split_jobs(text):
     }
 
 
+# A job name yielding its first string only on a pull_request run, the shape WORKFLOW.md D1.5 gives a ruleset-bound name.
+# It matches the tight form _strip_unquoted_space gives, which leaves the quoted names intact.
+PR_ONLY_NAME = re.compile(r"\$\{\{github\.event_name=='pull_request'&&'([^']*)'\|\|'([^']*)'\}\}")
+
+
+def workflow_events(doc):
+    """The event names a safe-loaded workflow's `on:` declares, in any of its string, list, or mapping forms."""
+    # PyYAML reads a bare `on` key as the boolean true, per YAML 1.1.
+    on = doc.get("on", doc.get(True)) if isinstance(doc, dict) else None
+    if on is None:
+        return set()
+    return {str(event) for event in on} if isinstance(on, (dict, list)) else {str(on)}
+
+
 def check_interface(path, contract, text):
     """DRIFT where a workflow breaks its fixed contract by name and wiring, never its body (spec/fidelity-model.md)."""
     root, parsed = _yaml(text, compose=True)
@@ -959,12 +973,28 @@ def check_interface(path, contract, text):
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
     nodes = (_mapping(job).get("name") for job in jobs.values())
-    names = {n.value for n in nodes if isinstance(n, yaml.ScalarNode)}
-    if name and name not in names:
+    values = [n.value for n in nodes if isinstance(n, yaml.ScalarNode)]
+    gated = {
+        m[1]
+        for v in values
+        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v))) and m[1] != m[2]
+    }
+    if name and name not in gated and name not in values:
         findings.append(
             (
                 "DRIFT",
-                f"interface: {path} missing the ruleset-bound check name '{name}' as a job name",
+                f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
+            )
+        )
+    elif (
+        name
+        and name not in gated
+        and workflow_events(_plain(root) if root is not None else None) - {"pull_request"}
+    ):
+        findings.append(
+            (
+                "DRIFT",
+                f"interface: {path} names its job '{name}' on every event, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
             )
         )
     tok = contract.get("artifactNameToken")
@@ -1119,9 +1149,7 @@ def _scalar_text(value):
 
 def _schedule_never_publishes(doc):
     """True where `on:` admits a `schedule` and no `push`, and every build-release-task.yml job requires a dispatch."""
-    # PyYAML reads a bare `on` key as the boolean true, per YAML 1.1.
-    on = doc.get("on", doc.get(True))
-    triggers = set(on) if isinstance(on, (dict, list)) else {on}
+    triggers = workflow_events(doc)
     if "schedule" not in triggers or "push" in triggers:
         return False
     release_jobs = 0
