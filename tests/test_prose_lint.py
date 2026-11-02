@@ -1144,23 +1144,6 @@ class TestCommentWrapRule(BaitCase):
     def wrap_flag(self, text: str) -> list[str]:
         return self.kinds(text, {"comment-wrap"}, name="tool.py")
 
-    def test_the_roslyn_lang_marker_is_a_tool_directive(self) -> None:
-        """The .NET analyzers read `// lang=json`, and without it a JSON literal fails JSON002.
-
-        Capitalizing the marker would split a repository's spelling of it, so the rule passes the
-        lowercase form. The prose line is the control, showing the rule does read that line.
-        """
-        literal = '    const string json = """\n        { "index": 0 }\n        """;\n'
-        for marker, expected in (
-            ("// lang=json\n", []),
-            ("// lang=regex\n", []),
-            ("// the fixture is read once\n", ["comment-added", "comment-case"]),
-        ):
-            with self.subTest(marker=marker.strip()):
-                text = "    " + marker + literal
-                found = self.kinds(text, self.COMMENT_RULES, name="t.cs")
-                self.assertEqual(expected, sorted(found))
-
     def test_a_heredoc_apostrophe_does_not_hide_a_later_run_comment(self) -> None:
         """The apostrophe opened a string running to the next quote, hiding the comment between."""
         text = (
@@ -1921,6 +1904,9 @@ class TestCommentWrapRule(BaitCase):
             ("app.ts", "// eslint-disable-next-line no-console\n"),
             ("app.ts", "// prettier-ignore\n"),
             ("settings.jsonc", "// cSpell:ignore exampleword\n"),
+            ("Parse.cs", "// lang=json\n"),
+            ("Parse.cs", "// language=regex\n"),
+            ("Parse.cs", "// lang = json\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
