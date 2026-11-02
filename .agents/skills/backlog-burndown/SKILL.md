@@ -443,7 +443,7 @@ abandoned-worker discard above does not run there, so a dirty abandoned clone go
 maintainer.
 The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
-live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
+live with `git -C <clone> ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
 only copy of the branch. A clone removed with its branch and no merged pull request instead needs
 `git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
 `git -C <clone> fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
