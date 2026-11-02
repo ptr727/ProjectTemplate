@@ -3070,6 +3070,29 @@ class IntentAdvisoryCase(unittest.TestCase):
             findings = audit.check_files_intent(run)
         self.assertEqual([t.split(" ", 2)[1] for _, t in findings], ["w.json"])
 
+    def test_check_files_intent_keys_a_copy_by_the_alternative_it_was_read_at(self) -> None:
+        asked: list[str] = []
+
+        def fake(ep: str, ok404: bool = False) -> Any:
+            asked.append(ep)
+            return OLD_COMMIT
+
+        for notes, want in (
+            ([], [".codecov.yml"]),
+            (["`.codecov.yml@abc1234` (files.intent)"], []),
+        ):
+            run = intent_run({"codecov.yml": BASELINE_UNIT}, {"codecov.yml": "x"}, notes)
+            run.found["codecov.yml"] = ".codecov.yml"
+            asked.clear()
+            with (
+                self.subTest(notes=notes),
+                self.patched({"WORKFLOW.md": "canonical"}),
+                mock.patch.object(audit, "gh", fake),
+            ):
+                findings = audit.check_files_intent(run)
+            self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+            self.assertEqual([t.split(" ", 2)[1] for _, t in findings], want)
+
     def test_the_anchor_is_read_only_from_an_intent_ref(self) -> None:
         cases = [
             ({"intentRef": "GOVERNANCE.md#line-endings"}, "line-endings"),
