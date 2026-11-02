@@ -48,6 +48,8 @@ class RequestCase(unittest.TestCase):
     def test_a_response_without_a_null_node_has_none_to_name(self) -> None:
         data = {"a": {"nodes": [{"b": {"nodes": []}}]}, "c": [1, None]}
         self.assertIsNone(gh_graphql.null_node(data))
+
+    def test_a_bare_nodes_list_holding_a_null_is_named_nodes(self) -> None:
         self.assertEqual("nodes", gh_graphql.null_node({"nodes": [None]}))
 
     def test_a_failed_launch_raises_graphql_error(self) -> None:
