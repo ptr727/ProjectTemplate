@@ -7028,6 +7028,7 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
             self.assertFalse(prose_lint.once_tracked(str(root), "ONLY.md"))
             self.assertEqual("DOC.md\n", prose_lint.git_bytes(root, "diff --name-only", "HEAD"))
 
+    @unittest.skipUnless(os.name == "posix", "the hook below is written for a POSIX shell")
     def test_a_commit_naming_paths_keeps_the_index_it_hands_its_hook(self) -> None:
         """`git commit <paths>` hands the hook the index that commit records, not the checkout's.
 
