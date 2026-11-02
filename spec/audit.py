@@ -399,11 +399,11 @@ EDITOR_CONFIG = re.compile(
     r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json)"
 )
 SECRET_REFERENCE = re.compile(
-    r"(?<![^\s\"'=:,\[(])(\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder)\}/|\./)?"
+    r"(?<![^\s\"'=:,\[(])\$\{(?:workspaceFolder|localWorkspaceFolder|containerWorkspaceFolder)\}/"
     r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
+SECRET_PATH = re.compile(r"(?:\./)?((?:[\w.-]+/)*(\.?secrets))(?:/(.*))?")
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
-COMPOSE_HOST_LINE = re.compile(r"\s*(?:-\s*|(file|env_file|source|context):\s*)[\"']?")
 PATHS_SHOWN = 5
 
 
@@ -573,22 +573,68 @@ def secret_folders(tree):
     return directories, holding, held
 
 
+def compose_host_paths(document):
+    """The paths a compose document resolves on the host: secret and config files, env files, binds, builds.
+
+    A short-syntax volume source is a path only where it opens on . or /, since any other is a volume name.
+    """
+    if not isinstance(document, dict):
+        return []
+    paths = []
+    for section in ("secrets", "configs"):
+        entries = document.get(section)
+        for entry in entries.values() if isinstance(entries, dict) else []:
+            paths.append(entry.get("file") if isinstance(entry, dict) else None)
+    services = document.get("services")
+    for service in services.values() if isinstance(services, dict) else []:
+        if not isinstance(service, dict):
+            continue
+        env = service.get("env_file")
+        for item in env if isinstance(env, list) else [env]:
+            paths.append(item.get("path") if isinstance(item, dict) else item)
+        volumes = service.get("volumes")
+        for volume in volumes if isinstance(volumes, list) else []:
+            if isinstance(volume, str) and volume.startswith((".", "/")):
+                paths.append(volume.split(":", 1)[0])
+            elif isinstance(volume, dict) and volume.get("type") == "bind":
+                paths.append(volume.get("source"))
+        build = service.get("build")
+        paths.append(build.get("context") if isinstance(build, dict) else build)
+    return [path for path in paths if isinstance(path, str)]
+
+
+def secret_path_target(tree, directories, holding, root, written, rest):
+    """The secrets folder one repo-relative path names and the file it judges there, or None for neither.
+
+    A path climbing out of the repo, into a code directory in `holding`, or below a directory the
+    tree lacks names no folder. The file is None where the path names no plain file name, or one the
+    tree tracks or holds a template of.
+    """
+    within = posixpath.normpath(posixpath.join(root, written))
+    parent = posixpath.dirname(within)
+    if within.startswith("..") or within in holding or (parent and parent not in directories):
+        return None
+    rest = (rest or "").rstrip(".")
+    resolved = posixpath.join(within, rest)
+    plain = SECRET_FILE_NAME.fullmatch(rest) and rest not in SECRETS_DIRECTORY_EXEMPT
+    if not plain or resolved in tree or resolved + ENV_SECRET_TEMPLATE in tree:
+        return within, None
+    return within, resolved
+
+
 def named_secret_signals(tree, read_text, directories, holding):
     """What tracked files say of the secrets directories the tree cannot show, since one is ignored by design.
 
-    The files read are each .gitignore and each compose or editor config file. A path they name is
-    repo-relative, against a compose file's own directory or the editor's workspace root. So an
-    absolute one such as /run/secrets/<name>, a container mount point, is no signal. Neither is a
-    path into a secrets directory in `holding`, which is not ignored, or below a directory the tree
-    lacks. A path counts only where a ./, ../, or workspace variable marks it, so a Vault path or
-    prose naming secrets/ is none. A compose path counts only on a line compose resolves on the
-    host. That is a list item, which needs the mark, or a file, env_file, source, or context key.
-    A relative editor path depends on a launch's working directory, so it names no file. A
-    .gitignore line is no signal once the tree or that file names a .secrets directory. Such a
-    line is left behind after the move, to guard old checkouts.
+    The files read are each .gitignore and each compose or editor config file. A compose file is
+    read by its keys, for the paths compose resolves on the host against the file's own directory.
+    An editor file is read for a path a workspace variable roots, since any other depends on a
+    launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
+    point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
+    no signal once the tree or that file names a .secrets directory. Such a line is left behind
+    after the move, to guard old checkouts.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
-    is each file read that returned no text.
+    is each file read that returned no text or did not parse.
     """
     bare, named, unread = set(), {}, []
     moved = any(".secrets" in path.split("/")[:-1] for path in tree)
@@ -600,7 +646,8 @@ def named_secret_signals(tree, read_text, directories, holding):
         if not (gitignore or compose or editor):
             continue
         text = read_text(path)
-        if text is None:
+        document, parsed = _yaml(text) if compose and text is not None else (None, True)
+        if text is None or not parsed:
             unread.append(path)
         elif gitignore:
             lines = text.splitlines()
@@ -618,39 +665,21 @@ def named_secret_signals(tree, read_text, directories, holding):
                 if not code:
                     bare.add(path)
         else:
-            root = directory if compose else editor.group(1).rstrip("/")
-            if editor:
-                text = text.replace("\\\\", "/")
-            for match in SECRET_REFERENCE.finditer(text):
-                prefix, written, folder, rest = match.groups()
-                line = text[text.rfind("\n", 0, match.start()) + 1 : match.start()]
-                host = COMPOSE_HOST_LINE.fullmatch(line) if compose else None
-                if compose and not host:
-                    continue
-                if not (prefix or written.startswith("../") or (host and host.group(1))):
-                    continue
-                rest = (rest or "").rstrip(".")
-                within = posixpath.normpath(posixpath.join(root, written))
-                parent = posixpath.dirname(within)
-                if (
-                    within.startswith("..")
-                    or within in holding
-                    or (parent and parent not in directories)
-                ):
+            if compose:
+                root = directory
+                found = [SECRET_PATH.fullmatch(p.strip()) for p in compose_host_paths(document)]
+            else:
+                root = editor.group(1).rstrip("/")
+                found = list(SECRET_REFERENCE.finditer(text.replace("\\\\", "/")))
+            for match in filter(None, found):
+                written, folder, rest = match.group(1, 2, 3)
+                target = secret_path_target(tree, directories, holding, root, written, rest)
+                if not target:
                     continue
                 if folder == "secrets":
                     bare.add(path)
-                resolved = posixpath.join(within, rest)
-                if (
-                    not (compose or (prefix or "").startswith("$"))
-                    or not SECRET_FILE_NAME.fullmatch(rest)
-                    or rest in SECRETS_DIRECTORY_EXEMPT
-                    or resolved in tree
-                    or resolved + ENV_SECRET_TEMPLATE in tree
-                ):
-                    continue
-                if secret_name_breaks(rest, True):
-                    named.setdefault(resolved, set()).add(path)
+                if target[1] and secret_name_breaks(posixpath.basename(target[1]), True):
+                    named.setdefault(target[1], set()).add(path)
     listed = [f"{p} (named in {', '.join(sorted(f))})" for p, f in sorted(named.items())]
     return sorted(bare), listed, unread
 
@@ -719,7 +748,7 @@ def secret_stem_findings(tree, read_text=None):
             (
                 "DRIFT",
                 (
-                    f"runtime-secrets: could not read {len(unread)} file(s) to look for a bare "
+                    f"runtime-secrets: could not read or parse {len(unread)} file(s) to look for a bare "
                     f"secrets/ directory or a named secret file, verify by hand: {capped_paths(unread)}"
                 ),
             )

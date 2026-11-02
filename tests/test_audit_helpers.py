@@ -3745,6 +3745,39 @@ class SecretStemCase(unittest.TestCase):
                 ["deploy/compose.yml"],
             ),
             (
+                "a long-syntax bind source and an env_file path entry are host paths",
+                {
+                    "compose.yml": (
+                        "services:\n  app:\n    env_file:\n      - path: ./secrets/App.env\n"
+                        "    volumes:\n      - source: ./secrets\n        type: bind\n        target: /s\n"
+                    ),
+                },
+                ["secrets/App.env (named in compose.yml)"],
+                ["compose.yml"],
+            ),
+            (
+                "a .gitignore line beside a code directory named secrets is no signal, anchored or floating",
+                {
+                    "deploy/.gitignore": "/secrets/\n",
+                    "deploy/secrets/run.py": "",
+                    "ops/.gitignore": "secrets/\n",
+                    "ops/lib/secrets/run.py": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a relative editor path is no signal, even into a code directory",
+                {
+                    ".vscode/tasks.json": (
+                        '{"options": {"cwd": "${workspaceFolder}/src"}, "command": "python ./secrets/manager.py"}\n'
+                    ),
+                    "src/secrets/manager.py": "",
+                },
+                [],
+                [],
+            ),
+            (
                 "a .gitignore line left behind after the move to .secrets is no signal",
                 {
                     ".gitignore": "/.secrets/*\n!/.secrets/*.example\n/secrets/\n",
@@ -3761,6 +3794,11 @@ class SecretStemCase(unittest.TestCase):
                     "app/compose.yml": (
                         "services:\n  app:\n    working_dir: /app\n    environment:\n"
                         "      TOKEN_FILE: ./secrets/api_token.txt\n    command: cat ./secrets/x\n"
+                    ),
+                    "web/compose.yml": (
+                        "services:\n  web:\n    working_dir: /app\n    command:\n      - ./secrets/api_token.txt\n"
+                        "    healthcheck:\n      test:\n        - ./secrets/check\n"
+                        "    volumes:\n      - type: volume\n        source: secrets\n        target: /s\n"
                     ),
                 },
                 ["secrets/Db_Password (named in compose.yml)"],
@@ -3821,8 +3859,8 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a whole-directory mount names the directory, and a secrets: key does not",
                 {
-                    "compose.yml": "secrets:\n  app_token:\n    file: x\nvolumes:\n  - ./secrets:/run/secrets:ro\n",
-                    "deploy/compose.yml": "volumes:\n  - ./secrets/:/run/secrets\n",
+                    "compose.yml": "secrets:\n  app_token:\n    file: x\nservices:\n  app:\n    volumes:\n      - ./secrets:/run/secrets:ro\n",
+                    "deploy/compose.yml": "services:\n  app:\n    volumes:\n      - ./secrets/:/run/secrets\n",
                     ".devcontainer/devcontainer.json": (
                         '{"mounts": ["source=${localWorkspaceFolder}/secrets,target=/run/secrets,type=bind"]}\n'
                     ),
@@ -3833,7 +3871,7 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a .secrets directory holding a nested template still has a named file judged",
                 {
-                    "compose.yml": "file: ./.secrets/Db_Password\n",
+                    "compose.yml": "secrets:\n  s:\n    file: ./.secrets/Db_Password\n",
                     ".secrets/prod/db_password.example": "",
                 },
                 [".secrets/Db_Password (named in compose.yml)"],
@@ -3842,7 +3880,7 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a nested template in a bare directory holds it",
                 {
-                    "compose.yml": "file: ./secrets/prod/db_password.txt\n",
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets/prod/db_password.txt\n",
                     "secrets/prod/db_password.txt.example": "",
                 },
                 [],
@@ -3886,7 +3924,9 @@ class SecretStemCase(unittest.TestCase):
             ),
             (
                 "a compose file under .devcontainer resolves against its own directory",
-                {".devcontainer/docker-compose.yml": "file: ../secrets/app_token.txt\n"},
+                {
+                    ".devcontainer/docker-compose.yml": "secrets:\n  s:\n    file: ../secrets/app_token.txt\n"
+                },
                 ["secrets/app_token.txt (named in .devcontainer/docker-compose.yml)"],
                 [".devcontainer/docker-compose.yml"],
             ),
@@ -3908,18 +3948,18 @@ class SecretStemCase(unittest.TestCase):
             (
                 "one untracked name two files mention counts once",
                 {
-                    "compose.yml": "file: ./secrets/App_Token\n",
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets/App_Token\n",
                     ".vscode/launch.json": '["${workspaceFolder}/secrets/App_Token"]\n',
                 },
                 ["secrets/App_Token (named in .vscode/launch.json, compose.yml)"],
                 [".vscode/launch.json", "compose.yml"],
             ),
             (
-                "a short-syntax mount stops at its colon, and punctuation, interpolation, and a glob are no name",
+                "a short-syntax mount stops at its colon, and a comment, interpolation, and a glob are no name",
                 {
                     "compose.yml": (
-                        "volumes:\n  - ./.secrets/App_Token.txt:/run/secrets/app_token:ro\n"
-                        "# put the token in .secrets/web_token.\n  - ./.secrets/${ENV}_db_password\n"
+                        "services:\n  app:\n    volumes:\n      - ./.secrets/App_Token.txt:/run/secrets/app_token:ro\n"
+                        "      # put the token in .secrets/web_token.\n      - ./.secrets/${ENV}_db_password\n"
                     ),
                     ".vscode/settings.json": '{"files.exclude": {".secrets/*": true}}\n',
                 },
@@ -3960,8 +4000,8 @@ class SecretStemCase(unittest.TestCase):
     def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
         """A compose path is relative to its own directory, an editor's to its workspace, and one leaving the repo is no signal."""
         texts = {
-            "deploy/compose.yml": "file: ./.secrets/web_token.txt\n",
-            "compose.yml": "file: ../secrets/Db_Password\n",
+            "deploy/compose.yml": "secrets:\n  s:\n    file: ./.secrets/web_token.txt\n",
+            "compose.yml": "secrets:\n  s:\n    file: ../secrets/Db_Password\n",
             "app/.vscode/launch.json": '["${workspaceFolder}/.secrets/Api_Token"]\n',
         }
         tree = set(texts) | {
@@ -3988,12 +4028,18 @@ class SecretStemCase(unittest.TestCase):
                 (
                     "DRIFT",
                     (
-                        "runtime-secrets: could not read 1 file(s) to look for a bare secrets/ "
-                        "directory or a named secret file, verify by hand: .gitignore"
+                        "runtime-secrets: could not read or parse 1 file(s) to look for a bare "
+                        "secrets/ directory or a named secret file, verify by hand: .gitignore"
                     ),
                 )
             ],
         )
+
+    def test_a_compose_file_that_does_not_parse_is_undecided(self) -> None:
+        got = audit.secret_stem_findings({"compose.yml"}, {"compose.yml": "services: [\n"}.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(got[0][1].endswith("verify by hand: compose.yml"), got)
 
 
 class DeclaredTypesCase(unittest.TestCase):
