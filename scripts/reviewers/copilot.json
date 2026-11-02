@@ -53,6 +53,7 @@
     "outstanding findings:",
     "unresolved review findings:",
     "open review findings:",
+    "open findings:",
     "review findings remain:"
   ],
   "finding_lists": [
@@ -63,6 +64,7 @@
     "outstanding findings:",
     "unresolved review findings:",
     "open review findings:",
+    "open findings:",
     "review findings remain:"
   ],
   "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
