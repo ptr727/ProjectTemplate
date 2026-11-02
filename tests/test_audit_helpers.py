@@ -3745,6 +3745,28 @@ class SecretStemCase(unittest.TestCase):
                 ["deploy/compose.yml"],
             ),
             (
+                "a .gitignore line left behind after the move to .secrets is no signal",
+                {
+                    ".gitignore": "/.secrets/*\n!/.secrets/*.example\n/secrets/\n",
+                    "deploy/.gitignore": "/secrets/\n",
+                    "deploy/.secrets/db_password.example": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a quoted compose file: value is a path, and a container-side value is not",
+                {
+                    "compose.yml": 'secrets:\n  db:\n    file: "secrets/Db_Password"\n',
+                    "app/compose.yml": (
+                        "services:\n  app:\n    working_dir: /app\n    environment:\n"
+                        "      TOKEN_FILE: ./secrets/api_token.txt\n    command: cat ./secrets/x\n"
+                    ),
+                },
+                ["secrets/Db_Password (named in compose.yml)"],
+                ["compose.yml"],
+            ),
+            (
                 "a committed credential beside its template does not make the directory code",
                 {
                     "secrets/README.md": "",
@@ -3779,6 +3801,7 @@ class SecretStemCase(unittest.TestCase):
                         '["${workspaceFolder}/.secrets/Api_Token", "${workspaceFolder}/.secrets/web_token.txt",'
                         ' "${workspaceFolder}/.secrets/mail_relay", "./.secrets/Cwd_Token"]\n'
                     ),
+                    ".secrets/mail_relay.example": "",
                 },
                 [
                     ".secrets/Api_Token (named in .vscode/launch.json)",
@@ -3923,7 +3946,7 @@ class SecretStemCase(unittest.TestCase):
         ]
         for label, texts, named, naming in cases:
             with self.subTest(label):
-                tree = set(texts) | {".secrets/mail_relay.example"}
+                tree = set(texts)
                 got = audit.secret_stem_findings(tree, texts.get)
                 stems = [t for _, t in got if " env or secret file(s) " in t]
                 self.assertEqual(len(stems), 1 if named else 0, got)

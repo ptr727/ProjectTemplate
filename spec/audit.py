@@ -403,7 +403,7 @@ SECRET_REFERENCE = re.compile(
     r"((?:[\w.-]+/)*(\.?secrets))(?:/([^\s\"'`,;:)}\]\\]*))?(?![\w.-])"
 )
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
-COMPOSE_FILE_KEY = re.compile(r"\s*file:\s*")
+COMPOSE_HOST_LINE = re.compile(r"\s*(?:-\s*|(file|env_file|source|context):\s*)[\"']?")
 PATHS_SHOWN = 5
 
 
@@ -580,14 +580,18 @@ def named_secret_signals(tree, read_text, directories, holding):
     repo-relative, against a compose file's own directory or the editor's workspace root. So an
     absolute one such as /run/secrets/<name>, a container mount point, is no signal. Neither is a
     path into a secrets directory in `holding`, which is not ignored, or below a directory the tree
-    lacks. A path counts only where a ./, ../, or workspace variable marks it as one, or as a compose
-    file: value, so a Vault path or prose naming secrets/ is none. A relative editor path depends on
-    a launch's working directory, so it names no file.
+    lacks. A path counts only where a ./, ../, or workspace variable marks it, so a Vault path or
+    prose naming secrets/ is none. A compose path counts only on a line compose resolves on the
+    host. That is a list item, which needs the mark, or a file, env_file, source, or context key.
+    A relative editor path depends on a launch's working directory, so it names no file. A
+    .gitignore line is no signal once the tree or that file names a .secrets directory. Such a
+    line is left behind after the move, to guard old checkouts.
     Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text.
     """
     bare, named, unread = set(), {}, []
+    moved = any(".secrets" in path.split("/")[:-1] for path in tree)
     for path in sorted(tree):
         directory, name = posixpath.split(path)
         gitignore = name == ".gitignore"
@@ -599,7 +603,10 @@ def named_secret_signals(tree, read_text, directories, holding):
         if text is None:
             unread.append(path)
         elif gitignore:
-            for line in text.splitlines():
+            lines = text.splitlines()
+            if moved or any(".secrets" in line.strip().lstrip("!").split("/") for line in lines):
+                continue
+            for line in lines:
                 found = ignored_secrets_folder(line)
                 if not found:
                     continue
@@ -617,8 +624,10 @@ def named_secret_signals(tree, read_text, directories, holding):
             for match in SECRET_REFERENCE.finditer(text):
                 prefix, written, folder, rest = match.groups()
                 line = text[text.rfind("\n", 0, match.start()) + 1 : match.start()]
-                keyed = compose and COMPOSE_FILE_KEY.fullmatch(line)
-                if not (prefix or written.startswith("../") or keyed):
+                host = COMPOSE_HOST_LINE.fullmatch(line) if compose else None
+                if compose and not host:
+                    continue
+                if not (prefix or written.startswith("../") or (host and host.group(1))):
                     continue
                 rest = (rest or "").rstrip(".")
                 within = posixpath.normpath(posixpath.join(root, written))
