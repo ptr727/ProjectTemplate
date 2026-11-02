@@ -5,7 +5,7 @@ runs **language formatting/lint and the fleet's shared doc gates**. For .NET it 
 `dotnet format` style via `dotnet husky run`. For a Python repo it runs `ruff format --check` /
 `ruff check` / the repo's type checker (native tooling, no Docker, the same checks the
 `../pre-commit/.pre-commit-config.yaml` snippet runs). It also runs the diff-scoped
-prose/comment-style gate and the whole-tree line-ending check. Copy `../hub_fetch_run.py`
+prose/comment-style gate over the paths the commit stages, and the whole-tree line-ending check. Copy `../hub_fetch_run.py`
 alongside `pre-commit` for the doc gates to run. The script fetches those two checks fresh from
 `ptr727/ProjectTemplate`'s `main` branch and runs them, rather than vendoring or pinning a copy.
 A pin that nothing keeps current goes stale by construction. CI (this repo's own, and the hub's) is
@@ -28,7 +28,7 @@ runs in CI as pinned action wrappers, and on demand via the VS Code **Lint** tas
 prose gate in whole-repo mode, for on-demand full-tree validation beyond the diff-scoped
 commit-time run. Its `Lint: EOL` task runs the same whole-tree EOL check the hook runs.
 Keeping the Docker-dependent doc linters out of the hook is what keeps it fast. Docker is the
-dependency it stays free of, though the hook still needs network for the two
+dependency it stays free of, though the hook still needs network for the
 `hub_fetch_run.py` calls above. A fully offline clone therefore fails the commit loudly on the
 fetch rather than silently skipping the doc gates.
 

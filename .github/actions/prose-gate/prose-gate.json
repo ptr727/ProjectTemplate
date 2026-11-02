@@ -53,6 +53,10 @@
     "--exclude": { "action": "append", "default": [] },
     "--summary": { "action": "store_true" },
     "--list-files": { "action": "store_true", "help": "print the discovered file set and exit, for auditing the sweep scope" },
+    "--skip-generated": {
+      "action": "store_true",
+      "help": "drop a named file inside a generated tree, as a directory scan does, for a hook naming a commit's paths"
+    },
     "--diff": {
       "metavar": "BASE",
       "help": "only report violations on lines changed vs BASE (matches the repo policy: fix as each file is next edited, not swept)"
