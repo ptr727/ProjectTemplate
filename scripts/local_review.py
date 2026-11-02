@@ -328,7 +328,7 @@ def read_report(path: Path, digest: str) -> tuple[str, int]:
     except OSError as e:
         raise CannotRun(f"the report at {path} could not be read ({e})") from e
     try:
-        lines = raw.decode("utf-8").splitlines()
+        lines = raw.decode("utf-8-sig").splitlines()
     except UnicodeDecodeError as e:
         raise CannotRun(f"the report at {path} is not UTF-8 text ({e})") from e
     header = lines[0].rstrip() if lines else ""

@@ -1115,6 +1115,18 @@ class ReceiptCase(RepoCase):
         self.assertEqual(entry["findings"], 3)
         self.assertEqual(entry["reportSha256"], hashlib.sha256(report.read_bytes()).hexdigest())
 
+    def test_a_report_opening_with_a_byte_order_mark_is_read(self) -> None:
+        """Windows PowerShell 5.1 writes one ahead of UTF-8 text, which would hide the header."""
+        (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
+        reviewed = self.digest()
+        report = local_review.report_path(self.tmp, reviewed)
+        text = f"{local_review.REPORT_HEADER}{reviewed}\r\na.py:1 one finding\r\n"
+        report.write_bytes(text.encode("utf-8-sig"))
+        self.assertEqual(self.main_quiet(self.record_cli(reviewed, report)), 0)
+        receipt, _ = local_review.read_receipt(self.tmp)
+        assert receipt is not None
+        self.assertEqual(receipt["passes"][0]["findings"], 1)
+
     def test_a_header_only_report_records_no_findings(self) -> None:
         (self.tmp / "a.py").write_text("x\n", encoding="utf-8")
         reviewed = self.digest()
