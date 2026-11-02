@@ -6989,7 +6989,8 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         (root / "b" / "two.md").write_text("# Two\n\nA clean line.\n", encoding="utf-8")
         self.git(root, "add", "-A")
         with mock.patch.dict(os.environ, {"GIT_DIR": str(root / ".git")}):
-            self.assertEqual(str(root.resolve()), prose_lint.repo_root(root / "a" / "one.md"))
+            found = prose_lint.repo_root(root / "a" / "one.md")
+            self.assertEqual(root.resolve(), Path(found).resolve())
             code = self.run_in(root, "--diff", "HEAD", "--", "a/one.md", "b/two.md")
         self.assertEqual(1, code)
         self.assertNotIn("more than one repository", self.err.getvalue())
