@@ -3856,6 +3856,33 @@ class SecretStemCase(unittest.TestCase):
                 [".gitignore"],
             ),
             (
+                "a .gitignore naming .secrets is dropped, but not for a comment, and a plain path past the folder is none",
+                {
+                    ".gitignore": "/.secrets/*\n/secrets/\n",
+                    "ops/.gitignore": "# TODO: move secrets/ to deploy/.secrets/\nsecrets/\n",
+                    "web/.gitignore": "/secrets/generated.json\n",
+                },
+                [],
+                ["ops/.gitignore"],
+            ),
+            (
+                "a tracked directory, a devcontainer env file, a named volume, an exempt file, and prose are no secret file",
+                {
+                    ".vscode/launch.json": (
+                        '["${workspaceFolder}/.secrets/Prod.Certs", "${workspaceFolder}/.secrets/README.md"]\n'
+                        "// Put the token in ${workspaceFolder}/.secrets/app.env.\n"
+                        '{"detail": "Put the token in ${workspaceFolder}/.secrets/app.env."}\n'
+                    ),
+                    ".secrets/Prod.Certs/tls_key.example": "",
+                    ".devcontainer/devcontainer.json": (
+                        '{"runArgs": ["--env-file", "${localWorkspaceFolder}/.secrets/App.env"]}\n'
+                    ),
+                    "compose.yml": "services:\n  a:\n    volumes:\n      - secrets:/run/secrets\n",
+                },
+                [],
+                [],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (
@@ -4135,6 +4162,17 @@ class SecretStemCase(unittest.TestCase):
                 )
             ],
         )
+
+    def test_a_workflow_named_like_compose_is_not_read(self) -> None:
+        read: list[str] = []
+
+        def read_text(path: str) -> str:
+            read.append(path)
+            return "services:\n  a:\n    volumes:\n      - ./secrets:/s\n"
+
+        got = audit.secret_stem_findings({".github/workflows/docker-compose.yml"}, read_text)
+
+        self.assertEqual((got, read), ([], []))
 
     def test_a_gitignore_is_not_read_once_the_tree_carries_a_secrets_directory(self) -> None:
         read: list[str] = []

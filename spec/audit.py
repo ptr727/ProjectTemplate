@@ -546,7 +546,7 @@ def ignored_secrets_folder(line):
     if any("*" not in segment for segment in after):
         return None
     folder = "/".join(segments[: at + 1])
-    floating = body.startswith("**/") or "/" not in body or any(c in folder for c in "*?[")
+    floating = "/" not in body or any(c in folder for c in "*?[")
     return folder, not floating
 
 
@@ -635,12 +635,7 @@ def secret_path_target(tree, directories, holding, root, written, rest):
     """
     within = posixpath.normpath(posixpath.join(root, written))
     parent = posixpath.dirname(within)
-    if (
-        within.startswith("..")
-        or within in tree
-        or within in holding
-        or (parent and parent not in directories)
-    ):
+    if within in tree or within in holding or (parent and parent not in directories):
         return None
     rest = (rest or "").rstrip(".")
     resolved = posixpath.join(within, rest)
@@ -682,7 +677,8 @@ def named_secret_signals(tree, read_text, directories, holding):
             unread.append(path)
         elif gitignore:
             lines = text.splitlines()
-            if any(".secrets" in line.strip().lstrip("!").split("/") for line in lines):
+            live = [line.strip() for line in lines if not line.strip().startswith("#")]
+            if any(".secrets" in line.lstrip("!").split("/") for line in live):
                 continue
             for line in lines:
                 found = ignored_secrets_folder(line)
@@ -718,8 +714,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                 )
                 root = posixpath.normpath(posixpath.join(root, listing[1])) if listing else root
                 file = ".devcontainer" not in path
-                matches = [] if root.startswith("..") else SECRET_REFERENCE.finditer(live)
-                found = [(match, file) for match in matches]
+                found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
             for match, file in found:
                 if not match:
                     continue
