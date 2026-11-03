@@ -275,7 +275,7 @@ for, and it binds harder than any throughput target.
   needing a file outside its claim stops and reports rather than editing it. Where no live group
   holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
   claim comment at once. A grown set failing the tier test in "Choosing the Worker's Model Tier"
-  stops the group there. One passing it lets the worker continue, unless the agent-safety hold
+  under a worker below `frontier` stops the group there. One passing it lets the worker continue, unless the agent-safety hold
   below applies. That is the ordinary path for a doc describing the
   group's own change, and it is answered at once rather than at a round boundary. A file may sit on a branch no
   claim comment covers, or on one whose set is unknown. Then the worker is stopped for the
@@ -374,7 +374,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   merged to develop during the run may not reach it. In the hub, the brief tells the worker to
   read each fleet skill from develop as it invokes it. That covers any reference file it links.
   The read is `git fetch origin develop && git show origin/develop:.agents/skills/<name>/<path>`,
-  in place of the installed copy. Reading develop rather than the worker's own tree also covers a
+  in place of the installed copy. The orchestrator reads the skills it applies the same way at
+  each round's start, so both seats follow one version. Reading develop rather than the worker's own tree also covers a
   worker on an older branch, such as a resumed group. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
   The one exception is an away-mode promotion worker under the `main` or `release` scope, per
