@@ -474,8 +474,8 @@ $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopA
 # So a run of later error and abort lines cannot push the actual reason out of the report.
 # A portable or zip package has no installer, so winget's own WinGet-<timestamp>.log for the call holds its reason instead.
 # That log is the latest one started since the attempt that names the package id, and only its error lines are kept.
-# Only there does an access denial or a sharing violation count as files in use, being winget's own refusal to replace a file.
-# In an installer log the same words can be a permission failure, which no running process causes.
+# Only there does an access denial count as files in use, being winget's own refusal to replace a file.
+# In an installer log a denial can be a permission failure, which no running process causes.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
     $result = @{ Log = $null; Entries = @(); WingetLog = $null; WingetEntries = @(); InUse = $false }
@@ -498,7 +498,7 @@ function Get-InstallerFailureReason {
     }
     $idPattern = "(?i)(?<![\w.])$([regex]::Escape($Id))(?![\w.])"
     $session = Get-ChildItem -LiteralPath $Directory -Filter 'WinGet-*.log' -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.CreationTime -ge $Since -and $_.LastWriteTime -ge $Since } | Sort-Object CreationTime, Name -Descending |
+        Where-Object { $_.CreationTime -ge $Since } | Sort-Object CreationTime, Name -Descending |
         Where-Object { Select-String -LiteralPath $_.FullName -Pattern $idPattern -Quiet } | Select-Object -First 1
     if ($session) {
         $result.WingetLog = $session.FullName
