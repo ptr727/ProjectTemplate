@@ -3883,6 +3883,25 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
+                "a negated ignore line, a secrets.json, and an interpolated secret file are no signal",
+                {
+                    "web/.gitignore": "!**/secrets/*.example\n",
+                    ".vscode/settings.json": '{"x": "${workspaceFolder}/secrets.json"}\n',
+                    "compose.yml": "secrets:\n  s:\n    file: ./.secrets/${ENV}_db_password\n",
+                },
+                [],
+                [],
+            ),
+            (
+                "a compose build context and a config file are host paths",
+                {
+                    "compose.yml": "services:\n  a:\n    build:\n      context: ./secrets\n",
+                    "deploy/compose.yml": "configs:\n  c:\n    file: ./secrets/App.txt\n",
+                },
+                ["deploy/secrets/App.txt (named in deploy/compose.yml)"],
+                ["compose.yml", "deploy/compose.yml"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (

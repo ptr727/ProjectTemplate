@@ -753,9 +753,7 @@ def secret_stem_findings(tree, read_text=None):
         segments = path.split("/")
         name = segments[-1]
         in_secrets = segments[-2:-1] == [".secrets"] or (
-            path in held
-            and segments[-2:-1] == ["secrets"]
-            and posixpath.dirname(path) not in holding
+            path in held and segments[-2:-1] == ["secrets"]
         )
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
