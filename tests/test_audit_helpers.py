@@ -3707,6 +3707,9 @@ class SecretStemCase(unittest.TestCase):
             audit.secret_stem_findings(None), [], "an unreadable tree reports nothing here"
         )
 
+    def test_a_tree_alone_reads_no_signal_file(self) -> None:
+        self.assertEqual(audit.secret_stem_findings({".gitignore", "compose.yml"}), [])
+
     def test_a_bare_secrets_directory_is_read_from_the_files_naming_it(self) -> None:
         """The directory is ignored by design, so a .gitignore line and a config path are the signals."""
         bare = (
@@ -3930,9 +3933,15 @@ class SecretStemCase(unittest.TestCase):
                     "deploy/.gitignore": "ap?/secrets/\n",
                     "deploy/ap1/README.md": "",
                     "compose.yml": "services:\n  app:\n",
+                    ".devcontainer/c/devcontainer.json": '{"x": "${containerWorkspaceFolder}/secrets"}\n',
                 },
                 ["secrets/app.txt (named in .vscode/launch.json)"],
-                [".devcontainer.json", ".vscode/launch.json", "deploy/.gitignore"],
+                [
+                    ".devcontainer.json",
+                    ".devcontainer/c/devcontainer.json",
+                    ".vscode/launch.json",
+                    "deploy/.gitignore",
+                ],
             ),
             (
                 "a floating line falls back to its own directory, and a first-line comment and a padded line are read",

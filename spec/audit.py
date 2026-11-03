@@ -536,7 +536,7 @@ def ignored_secrets_folder(line):
     secrets/__pycache__/, ignores only that path.
     """
     pattern = line.strip()
-    if not pattern or pattern.startswith(("#", "!")):
+    if pattern.startswith(("#", "!")):
         return None
     body = pattern.rstrip("/")
     segments = body.lstrip("/").split("/")
@@ -670,7 +670,7 @@ def named_secret_signals(tree, read_text, directories, holding):
         directory, name = posixpath.split(path)
         gitignore = name == ".gitignore"
         compose = COMPOSE_FILE.fullmatch(name) and not path.startswith(".github/workflows/")
-        editor = None if compose else EDITOR_CONFIG.fullmatch(path)
+        editor = EDITOR_CONFIG.fullmatch(path)
         if not (gitignore or compose or editor) or (gitignore and moved):
             continue
         text = read_text(path)
@@ -693,9 +693,8 @@ def named_secret_signals(tree, read_text, directories, holding):
                     stop = next(
                         i for i, p in enumerate(parts) if p == "secrets" or set(p) & set("*?[")
                     )
-                    prefix = posixpath.join(directory, *parts[:stop]) if stop else ""
-                    base = prefix or directory
-                    code = any(not base or h.startswith(f"{base}/") for h in holding)
+                    prefix = posixpath.join(directory, *parts[:stop])
+                    code = any(not prefix or h.startswith(f"{prefix}/") for h in holding)
                     signal = not code and (not prefix or prefix in directories)
                 if signal:
                     bare.add(path)
