@@ -275,7 +275,7 @@ for, and it binds harder than any throughput target.
   needing a file outside its claim stops and reports rather than editing it. Where no live group
   holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
   claim comment at once. A grown set failing the tier test in "Choosing the Worker's Model Tier"
-  re-tiers the group there. One passing it lets the worker continue, unless the agent-safety hold
+  stops the group there. One passing it lets the worker continue, unless the agent-safety hold
   below applies. That is the ordinary path for a doc describing the
   group's own change, and it is answered at once rather than at a round boundary. A file may sit on a branch no
   claim comment covers, or on one whose set is unknown. Then the worker is stopped for the
@@ -284,7 +284,8 @@ for, and it binds harder than any throughput target.
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
   the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
   the file for a doc, manifest entry, or rule sentence their own change put in disagreement. Such
-  a loser parks rather than narrowing, so that text is fixed rather than filed. Where the loser has already opened a
+  a loser parks rather than narrowing, so that text is fixed rather than filed. Two losers each
+  parked on the other are both stopped for the maintainer per "Raising a Blocked Question". Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
   branch reads to every later round as a live claim. Where the grown set enters the hub's
   `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue.
@@ -372,7 +373,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   read each fleet skill from develop as it invokes it. That covers any reference file it links.
   The read is `git fetch origin develop && git show origin/develop:.agents/skills/<name>/<path>`,
   in place of the installed copy. Reading develop rather than the worker's own tree also covers a
-  worker on an older branch, such as a resumed or re-tiered group. A downstream repository has no such gap, since its skills come from the hub.
+  worker on an older branch, such as a resumed group. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
   The one exception is an away-mode promotion worker under the `main` or `release` scope, per
   "Away Mode".
@@ -502,14 +503,9 @@ below `frontier`:
 
 The tier is chosen against the predicted set, the describing docs included, since those are often
 the carried content the first kind names. A grown set failing that test under a worker below
-`frontier` re-tiers the group. The orchestrator extends the claim comment with the grown file at
-once, so no other group is granted it. That worker does not make the edit. It commits
-what it has, runs the `local-strict-review` pass that push owes, pushes, and ends. It hands
-back that pass's findings, and the `frontier` worker's brief carries them for disposal. The
-orchestrator retires its clean worktree or clone alone, per "Cleanup Is the Orchestrator's",
-which leaves the pushed branch standing. The orchestrator then dispatches a `frontier` worker on
-that branch, and on its pull request where one is open. That worker attaches the branch in a
-worktree of its own, per `repo-worktree`'s continuation step.
+`frontier` stops the group for the maintainer, per "Raising a Blocked Question". The claim comment
+is extended with the grown file first, so no other group is granted it. That worker does not make
+the edit. Predicting the describing docs before dispatch is what keeps this stop rare.
 
 State the chosen tier and its reason in the round's report.
 
