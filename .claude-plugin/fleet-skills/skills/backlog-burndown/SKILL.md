@@ -274,8 +274,9 @@ for, and it binds harder than any throughput target.
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
   needing a file outside its claim stops and reports rather than editing it. Where no live group
   holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
-  claim comment at once. The tier test in "Choosing the Worker's Model Tier" then decides the rest. A
-  grown set passing it lets the worker continue, and one failing it re-tiers the group there. That is the ordinary path for a doc describing the
+  claim comment at once. A grown set failing the tier test in "Choosing the Worker's Model Tier"
+  re-tiers the group there. One passing it lets the worker continue, unless the agent-safety hold
+  below applies. That is the ordinary path for a doc describing the
   group's own change, and it is answered at once rather than at a round boundary. A file may sit on a branch no
   claim comment covers, or on one whose set is unknown. Then the worker is stopped for the
   maintainer per "Raising a Blocked Question". Where another group holds the file, the need is a
@@ -302,7 +303,7 @@ A group whose files are prose-heavy Markdown bloats in a way a code group does n
 own bound stated in the worker's brief.
 
 - **The change reaches the units the issue names and the units it puts in disagreement.** A unit
-  stating the rule or behavior the change altered is this change's to fix wherever it sits, per
+  stating the rule or behavior the change altered is this change's to fix wherever it sits in this repository, per
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
   A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too, per
   `pr-review-conduct` "Every finding ends in a listed outcome" outcome 4.
@@ -363,8 +364,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   makes the re-verification path work: a worker needing a file outside its claim stops and reports
   rather than editing it. The duty also has it wait for the orchestrator to adjudicate. State as
   well that a doc, manifest entry, or rule sentence the group's own change puts in disagreement
-  is reported this way. It is never filed as an
-  issue in its place, since "Grouping and File Claims" grants that edit or parks the group for it.
+  is reported this way. It is never filed as an issue in its place. "Grouping and File Claims"
+  grants that edit, parks the group for it, or stops the group for the maintainer.
 - **The brief points a hub worker at develop's copy of each skill it invokes.** A worker's
   installed skills need not match develop, since some installs snapshot promoted `main`. So a rule
   merged to develop during the run may not reach it. In the hub, the brief tells the worker to
@@ -503,7 +504,8 @@ The tier is chosen against the predicted set, the describing docs included, sinc
 the carried content the first kind names. A grown set failing that test under a worker below
 `frontier` re-tiers the group. The orchestrator extends the claim comment with the grown file at
 once, so no other group is granted it. That worker does not make the edit. It commits
-what it has, runs the `local-strict-review` pass that push owes, pushes, and ends. The
+what it has, runs the `local-strict-review` pass that push owes, pushes, and ends. It hands
+back that pass's findings, and the `frontier` worker's brief carries them for disposal. The
 orchestrator retires its clean worktree or clone alone, per "Cleanup Is the Orchestrator's",
 which leaves the pushed branch standing. The orchestrator then dispatches a `frontier` worker on
 that branch, and on its pull request where one is open. That worker attaches the branch in a

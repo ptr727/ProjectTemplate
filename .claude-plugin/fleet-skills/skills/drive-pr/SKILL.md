@@ -236,11 +236,8 @@ maintainer when".
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
-   An `introduced` finding is filed as an issue in this repository only for a design finding's
-   sites in files the change does not touch. `pr-review-conduct` "Triaging findings" files those
-   as one issue. A
-   fix belonging to another repository is filed there, per the last bullet below. A spent edit
-   budget hands any other `introduced` finding to this pull request's review loop, never past the
+   An `introduced` finding leads to an issue only where `pr-review-conduct` "Triaging findings"
+   or the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
    pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
    "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
    Otherwise it is declined under outcome 2 with that section's reason.
@@ -251,8 +248,8 @@ maintainer when".
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
      remark on wording. The reach is the file, as outcome 1's class sweep reaches it. Its fix is
      text this change wrote, so a finding on that fix is `introduced` and spends the same edit
-     budget. One that budget leaves unfixed takes the first bullet below that fits. One raised
-     later, by a later pass or a PR-hosted review, takes it too. So a push after the opening one is
+     budget. One that budget leaves unfixed takes the first bullet below that fits. One raised by a
+     pass after the opening push, or by a PR-hosted review, takes it too. So a push after the opening one is
      never owed for one, and the bound holds once per pull request. This bullet
      does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
      changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
@@ -274,7 +271,9 @@ maintainer when".
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
    - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
      "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
-     declines under outcome 2 and is filed there. A deferral noted only in a thread is lost the
+     declines under outcome 2 and is filed there. Where work here waits on that fix, it also
+     takes the local record `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" requires of
+     a blocker filed elsewhere. A deferral noted only in a thread is lost the
      moment the PR merges, so each of these leaves its record where its outcome says.
 
    The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
