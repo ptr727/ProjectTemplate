@@ -1972,9 +1972,8 @@ gh() {
         """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
-        step = "      - name: Upload coverage to Codecov step\n"
-        upload = job.split(step, 1)[1].split("\n\n", 1)[0]
-        self.assertIn("          flags: dotnet\n", upload)
+        upload = yaml_step(job, "Upload coverage to Codecov step")
+        self.assertEqual(yaml_value(upload, "with", "flags"), "dotnet")
 
     def test_validator_checks_out_the_triggering_commit(self) -> None:
         """A ref: on any checkout moves the gate off the commit a publisher releases.
