@@ -3909,6 +3909,19 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
+                "a bind source alone, an !override list, and a tracked named file each count once",
+                {
+                    "bind/compose.yml": (
+                        "services:\n  a:\n    volumes:\n      - type: bind\n        source: ./secrets\n        target: /s\n"
+                    ),
+                    "over/compose.yml": "services:\n  a:\n    volumes: !override\n      - ./secrets:/s\n",
+                    "compose.yml": "secrets:\n  w:\n    file: ./.secrets/Web_Token.txt\n",
+                    ".secrets/Web_Token.txt": "",
+                },
+                [".secrets/Web_Token.txt"],
+                ["bind/compose.yml", "over/compose.yml"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (

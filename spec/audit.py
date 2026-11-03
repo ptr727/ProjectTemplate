@@ -529,8 +529,9 @@ def secret_name_breaks(name, in_secrets):
 
 
 def ignored_secrets_folder(line):
-    """The secrets folder one .gitignore line ignores, itself or its files by glob, and whether it is anchored.
+    """The secrets folder one .gitignore line ignores, itself or its files by glob, and whether it is literal.
 
+    A literal line is anchored with no glob before the folder, so it names one path. Any other floats.
     None where the line ignores no such folder. A line naming a plain path past the folder, such as
     secrets/__pycache__/, ignores only that path.
     """
@@ -684,8 +685,8 @@ def named_secret_signals(tree, read_text, directories, holding):
                 found = ignored_secrets_folder(line)
                 if not found:
                     continue
-                folder, anchored = found
-                if anchored:
+                folder, literal = found
+                if literal:
                     signal = secret_path_target(tree, directories, holding, directory, folder, None)
                 else:
                     parts = folder.split("/")
@@ -703,7 +704,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                 root = directory
                 document = _yaml(text, loader=ComposeLoader)[0]
                 found = [
-                    (SECRET_PATH.fullmatch(value.strip()), file)
+                    (SECRET_PATH.fullmatch(value), file)
                     for value, file in compose_host_paths(document)
                 ]
             else:
