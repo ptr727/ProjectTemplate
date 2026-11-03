@@ -102,10 +102,14 @@ def skill_description(name):
         meta = yaml.safe_load("\n".join(lines[1:end]))
     except yaml.YAMLError as exc:
         raise ValueError(f"{path}: frontmatter is not valid YAML: {exc}") from None
-    description = meta.get("description") if isinstance(meta, dict) else None
-    if description is None or isinstance(description, str):
-        return description
-    raise ValueError(f"{path}: frontmatter description is not a string")
+    if meta is None:
+        return None
+    if isinstance(meta, dict):
+        description = meta.get("description")
+        if description is None or isinstance(description, str):
+            return description
+        raise ValueError(f"{path}: frontmatter description is not a string")
+    raise ValueError(f"{path}: frontmatter is not a mapping")
 
 
 def check_descriptions(names):

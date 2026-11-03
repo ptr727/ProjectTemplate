@@ -1093,6 +1093,7 @@ class DescriptionCase(TreeCase):
             "not a string": "---\nname: foo\ndescription: 12\n---\n",
             "never closes": "---\nname: foo\ndescription: x\n",
             "not valid YAML": "---\nname: foo\ndescription: [x\n---\n",
+            "not a mapping": "---\n- name: foo\n- description: x\n---\n",
         }
         for message, body in cases.items():
             with self.subTest(message):
