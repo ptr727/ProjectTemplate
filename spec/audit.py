@@ -406,7 +406,7 @@ SECRET_REFERENCE = re.compile(
 )
 WORKSPACE_FOLDER = re.compile(r'"folders"\s*:\s*\[\s*\{[^}]*?"path"\s*:\s*"([^"]*)"')
 EDITOR_COMMENT = re.compile(r"(?:^|(?<=\s))//.*$", re.MULTILINE)
-SECRET_PATH = re.compile(rf"(?:\./)?{SECRET_FOLDER}(?:/(.*))?")
+SECRET_PATH = re.compile(rf"{SECRET_FOLDER}(?:/(.*))?")
 SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
 

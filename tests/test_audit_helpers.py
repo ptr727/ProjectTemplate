@@ -3935,6 +3935,18 @@ class SecretStemCase(unittest.TestCase):
                 [".devcontainer.json", ".vscode/launch.json", "deploy/.gitignore"],
             ),
             (
+                "a floating line falls back to its own directory, and a first-line comment and a padded line are read",
+                {
+                    "ops/.gitignore": "secrets/\n",
+                    "src/secrets/run.py": "",
+                    "web/.gitignore": "secrets/ \n",
+                    ".devcontainer/devcontainer.json": '// "${localWorkspaceFolder}/secrets/x"\n{}\n',
+                    "compose.yml": "services:\n  a:\n    environment: !reset {}\n    volumes:\n      - ./secrets:/s\n",
+                },
+                [],
+                ["compose.yml", "ops/.gitignore", "web/.gitignore"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (
