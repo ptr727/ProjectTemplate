@@ -399,7 +399,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
      "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
      declines under outcome 2. It is filed there where `GOVERNANCE.md` "Repository Boundaries and
-     Write Safety" allows that write, and goes to the maintainer otherwise. Where work here waits
+     Write Safety" and the session's own scope both allow that write. It goes to the maintainer
+     otherwise. Where work here waits
      on that fix, it also
      takes the local record `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" requires of
      a blocker filed elsewhere. A deferral noted only in a thread is lost the

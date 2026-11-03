@@ -272,15 +272,15 @@ for, and it binds harder than any throughput target.
   neither read is available the set is unknown rather than empty, and an unknown set collides with
   every group. So ask the maintainer what that branch holds, per "Raising a Blocked Question".
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
-  needing a file outside its claim stops and reports rather than editing it. Where no live group
-  holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
-  claim comment at once. A grown set failing the tier test in "Choosing the Worker's Model Tier"
-  under a worker below `frontier` stops the group there. One passing it lets the worker continue, unless the agent-safety hold
-  below applies. That is the ordinary path for a doc describing the
-  group's own change, and it is answered at once rather than at a round boundary. A file may sit on a branch no
-  claim comment covers, or on one whose set is unknown. Then the worker is stopped for the
-  maintainer per "Raising a Blocked Question". Where another group holds the file, the need is a
-  conflict. The orchestrator decides which group keeps the file and tells the loser what to do
+  needing a file outside its claim stops and reports rather than editing it. A file may sit on a
+  branch no claim comment covers, or on one whose set is unknown. Then the worker is stopped for
+  the maintainer per "Raising a Blocked Question". Where no branch holds the file, the orchestrator
+  verifies that as it verifies a prediction. It then extends the claim comment at once. A grown
+  set failing the tier test in "Choosing the Worker's Model Tier" under a worker below `frontier`
+  stops the group there. One passing it lets the worker continue, unless the agent-safety hold
+  below applies. That is the ordinary path for a doc describing the group's own change, and it is
+  answered at once rather than at a round boundary. Where another group holds the file, the need
+  is a conflict. The orchestrator decides which group keeps the file and tells the loser what to do
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
   the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
   the file for a doc, manifest entry, or rule sentence their own change put in disagreement. Such
@@ -307,9 +307,9 @@ own bound stated in the worker's brief.
 - **The change reaches the units the issue names and the units it puts in disagreement.** A unit
   stating the rule or behavior the change altered is this change's to fix wherever it sits in this repository, per
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
-  A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too, only
-  where `pr-review-conduct` "Every finding ends in a listed outcome" outcome 4's first bullet
-  fixes it.
+  A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too. It
+  is in reach where `pr-review-conduct` "Every finding ends in a listed outcome" fixes it, under
+  outcome 1's class sweep or outcome 4's first bullet.
   Rewording a unit that only reads less well now stays out of the diff and is not filed either.
   Every unit the diff grows into is read again by every later round, so a wider edit lengthens the
   loop it was meant to close.
@@ -375,7 +375,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   read each fleet skill from develop as it invokes it. That covers any reference file it links.
   The read is `git fetch origin develop && git show origin/develop:.agents/skills/<name>/<path>`,
   in place of the installed copy. The orchestrator reads the skills it applies the same way at
-  each round's start, so both seats follow one version. Reading develop rather than the worker's own tree also covers a
+  each round's start. Reading develop rather than the worker's own tree also covers a
   worker on an older branch, such as a resumed group. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
   The one exception is an away-mode promotion worker under the `main` or `release` scope, per
