@@ -817,7 +817,7 @@ Set-StrictMode -Version Latest
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
-$wanted = @('Get-InstallerFailureReason', 'Get-InstallRoot', 'Invoke-Utf8Run', 'Get-ToolHolder')
+$wanted = @('Get-InstallerFailureReason', 'Select-FailureEntry', 'Get-InstallRoot', 'Invoke-Utf8Run', 'Get-ToolHolder')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -825,7 +825,13 @@ $case = Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json
 $results = [ordered]@{}
 foreach ($probe in $case.reasons) {
     $reason = Get-InstallerFailureReason -Id $probe.id -Since ([datetime]$probe.since) -Directory $case.directory
-    $results["reason $($probe.id) $($probe.since)"] = [ordered]@{ log = [bool]$reason.Log; entries = @($reason.Entries); in_use = $reason.InUse }
+    $results["reason $($probe.id) $($probe.since)"] = [ordered]@{
+        log = [bool]$reason.Log
+        entries = @($reason.Entries)
+        winget_log = [bool]$reason.WingetLog
+        winget_entries = @($reason.WingetEntries)
+        in_use = $reason.InUse
+    }
 }
 $env:ProgramFiles = 'C:\PF'
 ${env:ProgramFiles(x86)} = 'C:\PF86'
@@ -892,9 +898,12 @@ foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSOb
     $script:REASON = @{
         Log = 'C:\log.log'
         Entries = @($case.Value.entries | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') })
+        WingetLog = 'C:\winget.log'
+        WingetEntries = @(if ($case.Value.PSObject.Properties['winget_entries']) { $case.Value.winget_entries | ForEach-Object { $_ -replace '<HOME>', $HOME.Replace('$', '$$') } })
         InUse = [bool]($case.Value.PSObject.Properties['in_use'] -and $case.Value.in_use)
     }
     if ($script:REASON.Entries.Count -eq 0) { $script:REASON.Log = $null }
+    if ($script:REASON.WingetEntries.Count -eq 0) { $script:REASON.WingetLog = $null }
     function Get-InstallerFailureReason { param([string]$Id, [datetime]$Since) return $script:REASON }
     $script:LINES = @()
     Write-InstallFailure -ToolName 'tool' -Package 'Example.Tool' -Code $case.Value.code -Since (Get-Date) -Probe 'tool' -Executable $case.Value.executable
@@ -913,6 +922,22 @@ INNO_LOG = [
     "                          Please terminate those processes and retry.",
     "2026-01-02 03:04:06.001   Failed to proceed to next wizard page; aborting.",
     "2026-01-02 03:04:06.002   Deinitializing Setup.",
+]
+
+PORTABLE_WINGET_LOG = [
+    "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'upgrade' '--id' 'Portable.Tool'",
+    "2026-01-02 03:04:05.200 <I> [CLI ] Deleting portable exe at: C:\\LAD\\Portable.Tool_x\\tool.exe",
+    (
+        "2026-01-02 03:04:05.300 <E> [CLI ] Caught std::exception: remove: Access is denied.:"
+        ' "C:\\LAD\\Portable.Tool_x\\tool.exe"'
+    ),
+    "2026-01-02 03:04:05.301 <E> [CLI ] Portable installer failed: 2316632067",
+    "2026-01-02 03:04:05.302 <E> [CLI ] Terminating context: 0x8a150052 at C:\\src\\InstallFlow.cpp:239",
+]
+
+OTHER_WINGET_LOG = [
+    "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'upgrade' '--id' 'Portable.Tool.Extra'",
+    "2026-01-02 03:04:05.300 <E> [CLI ] Caught std::exception: remove: Access is denied.",
 ]
 
 BUSY_LOG = [
@@ -936,6 +961,13 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             log.write_text("\r\n".join([*INNO_LOG, ""]), encoding="utf-8", newline="")
             busy = Path(directory, "Busy.Tool.1.0-26-01-02-03-04-05.log")
             busy.write_text("\r\n".join([*BUSY_LOG, ""]), encoding="utf-8", newline="")
+            for name, lines in (
+                ("WinGet-2026-01-02-03-04-05.000.log", PORTABLE_WINGET_LOG),
+                ("WinGet-2026-01-02-03-04-06.000.log", OTHER_WINGET_LOG),
+            ):
+                Path(directory, name).write_text(
+                    "\r\n".join([*lines, ""]), encoding="utf-8", newline=""
+                )
             elsewhere = Path(directory, "LAD", "Programs", "Tool", "tool.exe")
             elsewhere.parent.mkdir(parents=True)
             elsewhere.write_bytes(b"")
@@ -946,6 +978,8 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                     {"id": "Example.Tool", "since": "2100-01-01"},
                     {"id": "Other.Tool", "since": "2000-01-01"},
                     {"id": "Busy.Tool", "since": "2000-01-01"},
+                    {"id": "Portable.Tool", "since": "2000-01-01"},
+                    {"id": "Portable.Tool", "since": "2100-01-01"},
                 ],
                 "roots": [
                     "C:\\PF\\Git\\cmd\\git.exe",
@@ -976,6 +1010,8 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                     ),
                     "Failed to proceed to next wizard page; aborting.",
                 ],
+                "winget_log": False,
+                "winget_entries": [],
                 "in_use": True,
             },
         )
@@ -991,15 +1027,47 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                     "Error 3: rollback step failed.",
                     "Error 4: rollback step failed.",
                 ],
+                "winget_log": False,
+                "winget_entries": [],
                 "in_use": True,
             },
         )
 
     def test_a_log_older_than_the_attempt_or_for_another_id_is_not_read(self) -> None:
         results = self.run_cases()
-        unread = {"log": False, "entries": [], "in_use": False}
+        unread = {
+            "log": False,
+            "entries": [],
+            "winget_log": False,
+            "winget_entries": [],
+            "in_use": False,
+        }
         self.assertEqual(results["reason Example.Tool 2100-01-01"], unread)
         self.assertEqual(results["reason Other.Tool 2000-01-01"], unread)
+        self.assertEqual(results["reason Portable.Tool 2100-01-01"], unread)
+
+    def test_wingets_own_log_gives_a_portable_packages_reason(self) -> None:
+        """A package with no installer log has its reason read from winget's own session log.
+
+        A session log naming a longer id that only starts with this one is not read as this one's.
+        """
+        self.assertEqual(
+            self.run_cases()["reason Portable.Tool 2000-01-01"],
+            {
+                "log": False,
+                "entries": [],
+                "winget_log": True,
+                "winget_entries": [
+                    (
+                        "Caught std::exception: remove: Access is denied.:"
+                        ' "C:\\LAD\\Portable.Tool_x\\tool.exe"'
+                    ),
+                    "Portable installer failed: 2316632067",
+                    "Terminating context: 0x8a150052 at C:\\src\\InstallFlow.cpp:239",
+                ],
+                "in_use": True,
+            },
+        )
 
     @unittest.skipUnless(sys.platform == "win32", "reads this host's own process list")
     def test_a_same_named_process_outside_the_tree_is_not_a_holder(self) -> None:
@@ -1038,6 +1106,7 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
 INSTALLER_FAILED = -1978335226
 SHARING_VIOLATION = -2147024864
 WINGET_FILE_IN_USE = -1978334973
+WINGET_INSTALL_FAILED = -1978335150
 
 
 @unittest.skipUnless(
@@ -1063,6 +1132,15 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
             },
             "no reason": {"entries": [], "code": INSTALLER_FAILED, "executable": ""},
             "winget file in use": {"entries": [], "code": WINGET_FILE_IN_USE, "executable": ""},
+            "portable in use": {
+                "entries": [],
+                "winget_entries": [
+                    'Caught std::exception: remove: Access is denied.: "<HOME>\\Tool_x\\tool.exe"'
+                ],
+                "in_use": True,
+                "code": WINGET_INSTALL_FAILED,
+                "executable": "",
+            },
             "sharing violation": {
                 "entries": [],
                 "code": SHARING_VIOLATION,
@@ -1118,6 +1196,29 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
             [
                 "WARN tool failed on Example.Tool, winget exited -1978334973 (0x8A150103)",
                 "HOLDERS tool",
+            ],
+        )
+
+    def test_wingets_own_log_saying_access_denied_names_the_holders(self) -> None:
+        self.assertEqual(
+            self.run_cases()["portable in use"],
+            [
+                "WARN tool failed on Example.Tool, winget exited -1978335150 (0x8A150052)",
+                "INFO winget's own log says:",
+                (
+                    "INFO   Caught std::exception: remove: Access is denied.:"
+                    ' "%USERPROFILE%\\Tool_x\\tool.exe"'
+                ),
+                "INFO Full winget log: LOG",
+                "HOLDERS tool",
+                (
+                    "INFO Running from tool's install, and Windows cannot replace a file a"
+                    " running process holds:"
+                ),
+                "INFO   helper (process 1234)",
+                "INFO   bash (process 99)",
+                "INFO Close them, or stop them with the command below, then run this again:",
+                "INFO   Stop-Process -Id 1234, 99",
             ],
         )
 
