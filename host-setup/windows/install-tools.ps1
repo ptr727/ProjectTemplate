@@ -460,8 +460,9 @@ function Invoke-WingetRemove {
 # Where App Installer keeps every installer log winget asks a package for, named <package id>.<version>-<timestamp>.log.
 $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir'
 
-# The entries of the installer log one failed winget call wrote that say why it failed, or none where no such log or entry exists.
-# All winget reports is that the installer exited non-zero, with a code the installer chose.
+# The entries of the installer log one failed winget call wrote, and of winget's own log for that call, that say why it failed.
+# Each is none where no such log or entry exists.
+# For a package with an installer, all winget reports is that the installer exited non-zero, with a code the installer chose.
 # So the reason lives in that log and nowhere a person reads by default.
 # A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text.
 # That text is the whole reason.
@@ -471,6 +472,10 @@ $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopA
 # Whether files were in use is read from every entry before that cap.
 # An in-use entry is always among those shown, the first one put back where none survived the cap.
 # So a run of later error and abort lines cannot push the actual reason out of the report.
+# A portable or zip package has no installer, so winget's own WinGet-<timestamp>.log for the call holds its reason instead.
+# That log is the latest one started since the attempt that names the package id, and only its error lines are kept.
+# Only there does an access denial or a sharing violation count as files in use, being winget's own refusal to replace a file.
+# In an installer log the same words can be a permission failure, which no running process causes.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
     $result = @{ Log = $null; Entries = @(); WingetLog = $null; WingetEntries = @(); InUse = $false }
@@ -499,7 +504,7 @@ function Get-InstallerFailureReason {
         $result.WingetLog = $session.FullName
         $errors = @(Get-Content -LiteralPath $session.FullName -ErrorAction SilentlyContinue |
             Where-Object { $_ -match '^\S+ \S+ <E> ' } | ForEach-Object { ($_ -replace '^\S+ \S+ <E> \[[^\]]*\]\s*', '').Trim() })
-        $selected = Select-FailureEntry -Entries $errors -Pattern '.'
+        $selected = Select-FailureEntry -Entries $errors -Pattern '.' -InUsePattern '(?i)in use by|used by another process|access is denied|sharing violation'
         $result.WingetEntries = $selected.Entries
         $result.InUse = $result.InUse -or $selected.InUse
     }
@@ -507,12 +512,11 @@ function Get-InstallerFailureReason {
 }
 
 function Select-FailureEntry {
-    param([string[]]$Entries, [Parameter(Mandatory)][string]$Pattern)
-    $inUsePattern = '(?i)process\(es\) use|in use by|used by another process|access is denied|sharing violation'
-    $matched = @($Entries | Where-Object { $_ -and ($_ -match $Pattern -or $_ -match $inUsePattern) })
-    $inUse = @($matched | Where-Object { $_ -match $inUsePattern })
+    param([string[]]$Entries, [Parameter(Mandatory)][string]$Pattern, [string]$InUsePattern = '(?i)process\(es\) use|in use by|used by another process')
+    $matched = @($Entries | Where-Object { $_ -and ($_ -match $Pattern -or $_ -match $InUsePattern) })
+    $inUse = @($matched | Where-Object { $_ -match $InUsePattern })
     $shown = @($matched | Select-Object -Last 4)
-    if ($inUse.Count -gt 0 -and -not ($shown | Where-Object { $_ -match $inUsePattern })) {
+    if ($inUse.Count -gt 0 -and -not ($shown | Where-Object { $_ -match $InUsePattern })) {
         $shown = @($inUse[0]) + @($matched | Select-Object -Last 3)
     }
     return @{ Entries = $shown; InUse = $inUse.Count -gt 0 }
@@ -583,7 +587,7 @@ function Get-ToolHolder {
 
 # What a failed winget call owes its reader:
 #   - winget's code
-#   - the reason the installer's own log gives
+#   - the reason the installer's own log gives, and the one winget's own log gives
 #   - the processes that may hold the tool's files
 # The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
 # The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
@@ -591,6 +595,7 @@ function Get-ToolHolder {
 # So the processes running from the tool's install are named only where something says files were in use.
 # Something says so in one of these ways:
 #   - an installer log entry in Inno Setup's or Windows' own in-use wording
+#   - an error in winget's own log for the call saying a file was in use or denied
 #   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
 # Anything else names nobody, for this reason.
 # A Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree.

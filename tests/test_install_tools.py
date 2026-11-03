@@ -940,6 +940,10 @@ OTHER_WINGET_LOG = [
     "2026-01-02 03:04:05.300 <E> [CLI ] Caught std::exception: remove: Access is denied.",
 ]
 
+DENIED_LOG = [
+    "2026-01-02 03:04:05.100   Error 0x80070005: Access is denied.",
+]
+
 BUSY_LOG = [
     "2026-01-02 03:04:05.100   The file is being used by another process.",
     *(
@@ -961,6 +965,8 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             log.write_text("\r\n".join([*INNO_LOG, ""]), encoding="utf-8", newline="")
             busy = Path(directory, "Busy.Tool.1.0-26-01-02-03-04-05.log")
             busy.write_text("\r\n".join([*BUSY_LOG, ""]), encoding="utf-8", newline="")
+            denied = Path(directory, "Denied.Tool.1.0-26-01-02-03-04-05.log")
+            denied.write_text("\r\n".join([*DENIED_LOG, ""]), encoding="utf-8", newline="")
             for name, lines in (
                 ("WinGet-2026-01-02-03-04-05.000.log", PORTABLE_WINGET_LOG),
                 ("WinGet-2026-01-02-03-04-06.000.log", OTHER_WINGET_LOG),
@@ -978,6 +984,7 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                     {"id": "Example.Tool", "since": "2100-01-01"},
                     {"id": "Other.Tool", "since": "2000-01-01"},
                     {"id": "Busy.Tool", "since": "2000-01-01"},
+                    {"id": "Denied.Tool", "since": "2000-01-01"},
                     {"id": "Portable.Tool", "since": "2000-01-01"},
                     {"id": "Portable.Tool", "since": "2100-01-01"},
                 ],
@@ -1030,6 +1037,19 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                 "winget_log": False,
                 "winget_entries": [],
                 "in_use": True,
+            },
+        )
+
+    def test_an_installer_logs_access_denial_alone_is_not_files_in_use(self) -> None:
+        """An installer's denial can be a permission failure, which no running process causes."""
+        self.assertEqual(
+            self.run_cases()["reason Denied.Tool 2000-01-01"],
+            {
+                "log": True,
+                "entries": ["Error 0x80070005: Access is denied."],
+                "winget_log": False,
+                "winget_entries": [],
+                "in_use": False,
             },
         )
 
