@@ -1711,7 +1711,7 @@ def main(argv=()):
                     f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing"
                 )
 
-        # The audit engine's intent_canonical_rel() trusts this is a string once validated, the same way it trusts reference above.
+        # The audit engine's intent_ref() trusts this is a string once validated, the same way it trusts reference above.
         intent_ref = item.get("intentRef")
         if intent_ref is not None and not isinstance(intent_ref, str):
             errors.append(f"files.json: {path} intentRef must be a string")
@@ -1769,6 +1769,7 @@ def main(argv=()):
             headings = {h.text for h in fidelity_text_module().headings(hub_text) if h.level == 2}
             for elt in sections:
                 name = elt.get("name") if isinstance(elt, dict) else elt
+                # Exact, not section_key(), on purpose: the declared name is the verbatim "path > section" disposition label, so it must stay byte-equal to the heading.
                 if isinstance(name, str) and name and name not in headings:
                     errors.append(
                         f"files.json: {path} declares section '{name}' but no '## {name}' heading exists in {path}"

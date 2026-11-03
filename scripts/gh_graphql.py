@@ -32,6 +32,18 @@ class GraphQLError(Exception):
         self.detail = detail
 
 
+class NullNodeError(GraphQLError):
+    """A response holding a null list item, which GitHub could not resolve at read time.
+
+    GraphQL can return one with no entry in `errors`, so nothing read off the response is
+    trustworthy. `where` is the dotted path of the first connection holding one.
+    """
+
+    def __init__(self, where: str) -> None:
+        super().__init__(f"gh graphql returned a null node GitHub could not resolve under {where}")
+        self.where = where
+
+
 class Response(NamedTuple):
     """The `data` of one response, and the errors it carried that the caller chose to tolerate."""
 
@@ -90,6 +102,9 @@ def request(
     `gh api graphql` exits non-zero with the JSON still on stdout when the response carries
     errors, so that stdout is read first. An error is tolerated only where `tolerate` accepts it,
     and the tolerated ones come back beside the data for the caller to report.
+
+    A null item in any `nodes` list raises `NullNodeError`, since every caller would otherwise
+    index into it. A caller reading a query may read again before giving up.
     """
     code, stdout, stderr = run(build_argv(query, variables))
     try:
@@ -105,7 +120,22 @@ def request(
         raise GraphQLError("gh graphql returned no data", json.dumps(errors)[:DETAIL_CAP])
     if not isinstance(payload["data"], dict):
         raise GraphQLError("gh graphql returned data that is not an object")
+    if (where := null_node(payload["data"])) is not None:
+        raise NullNodeError(where)
     return Response(payload["data"], list(errors or []))
+
+
+def null_node(data: object, path: str = "") -> str | None:
+    """The path of the first connection under `data` whose `nodes` holds a null, else None."""
+    if isinstance(data, list):
+        items = [(path, value) for value in data]
+    elif isinstance(data, dict):
+        if isinstance(nodes := data.get("nodes"), list) and None in nodes:
+            return path or "nodes"
+        items = [(f"{path}.{key}".lstrip("."), value) for key, value in data.items()]
+    else:
+        return None
+    return next((found for key, value in items if (found := null_node(value, key))), None)
 
 
 def _descend(node: object, path: Sequence[str]) -> object:

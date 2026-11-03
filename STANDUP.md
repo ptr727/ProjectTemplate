@@ -190,6 +190,8 @@ Choose the destination while scaffolding rather than after. Repo-specific conten
 
 Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type (its section 6 per-type walkthrough). Use the source-only subset for a source-only repo, the file-target leaf(s) for a publishing repo, and the two-workflow shape for an operational config repo. Reuse [`catalog/snippets/workflows/`][workflows] as the reference implementation, satisfying the contract by outcome rather than byte for byte.
 
+A caller stub copied from a snippet carries that snippet's minimum known-good hub pin. Resolve each hub `uses:` pin to the latest hub release before committing it, per [`docs/reusable-workflows.md`][reusable-workflows] "Pinning". Dependabot bumps it from there.
+
 ## 4. Apply Settings, Rulesets, and Secrets
 
 **Read the remote and the repository before running anything else here**. That is because this is the first step needing either and every step before it passes without both. The commands follow:
@@ -237,6 +239,7 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 
 <!-- Workflow -->
 
+[reusable-workflows]: ./docs/reusable-workflows.md
 [workflows]: ./catalog/snippets/workflows/
 
 <!-- Repo -->

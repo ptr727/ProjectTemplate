@@ -42,10 +42,12 @@ class FakeGh:
         tree: set[str],
         modes: dict[str, str] | None = None,
         unread: frozenset[str] = frozenset(),
+        texts: dict[str, str] | None = None,
     ) -> None:
         self.tree = tree
         self.modes = modes or {}
         self.unread = unread
+        self.texts = texts or {}
         self.paths: list[str] = []
 
     def __call__(self, path: str, ok404: bool = False) -> Any:
@@ -72,7 +74,8 @@ class FakeGh:
                     return None
                 raise RuntimeError(f"gh api {path}: HTTP 404")
             if name in self.tree:
-                return {"encoding": "base64", "content": base64.b64encode(b"x\n").decode()}
+                text = self.texts.get(name, "x\n").encode()
+                return {"encoding": "base64", "content": base64.b64encode(text).decode()}
             if ok404:
                 return None
         raise AssertionError(f"unexpected gh read: {path}")
@@ -83,6 +86,7 @@ def run_audit(
     modes: dict[str, str] | None = None,
     unread: frozenset[str] = frozenset(),
     hub: frozenset[str] = frozenset(),
+    texts: dict[str, str] | None = None,
 ) -> tuple[list[tuple[str, str]], FakeGh]:
     """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
 
@@ -99,7 +103,7 @@ def run_audit(
             "repoOwnedTrees": audit.load("spec/files.json")["repoOwnedTrees"],
         },
     }
-    fake = FakeGh(tree, modes, unread)
+    fake = FakeGh(tree, modes, unread, texts)
     with (
         mock.patch.object(audit, "gh", fake),
         mock.patch.object(audit, "hub_tracked", lambda rev=None: hub),
@@ -187,9 +191,37 @@ class AuditRepoNamingCase(unittest.TestCase):
                 ),
                 (
                     "runtime-secrets: 1 env or secret file(s) break the env and secret file rule "
-                    'of CODESTYLE.md "Script and Utility File Names", or are a bare .env in a '
-                    '.secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out: '
-                    ".secrets/Db_Root_Password.example"
+                    'of CODESTYLE.md "Script and Utility File Names", or are a .txt or bare .env '
+                    'file in a secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules '
+                    "out: .secrets/Db_Root_Password.example"
+                ),
+            ],
+        )
+
+    def test_a_bare_secrets_directory_is_read_from_the_tracked_files_naming_it(self) -> None:
+        """The issue's constructed case: nothing under secrets/ is tracked, so the audited branch's files are read."""
+        texts = {
+            ".gitignore": "secrets/\n",
+            ".vscode/launch.json": (
+                '{"args": ["--token-file=${workspaceFolder}/secrets/app_token.txt"]}\n'
+            ),
+        }
+        findings, fake = run_audit(CARRIED | {".codecov.yml"} | set(texts), texts=texts)
+
+        self.assertIn(f"repos/{SLUG}/contents/.vscode/launch.json?ref=main", fake.paths)
+        self.assertEqual(
+            self.naming_findings(findings),
+            [
+                (
+                    "runtime-secrets: 1 env or secret file(s) break the env and secret file rule "
+                    'of CODESTYLE.md "Script and Utility File Names", or are a .txt or bare .env '
+                    'file in a secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules '
+                    "out: secrets/app_token.txt (named in .vscode/launch.json)"
+                ),
+                (
+                    "runtime-secrets: 2 tracked file(s) name or sit in a bare secrets/ directory, "
+                    'which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and '
+                    "update each: .gitignore, .vscode/launch.json"
                 ),
             ],
         )

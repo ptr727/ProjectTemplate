@@ -3,18 +3,15 @@ name: drive-pr
 description: >-
   Drives a ptr727/ProjectTemplate fleet pull request through its review loop, feature branch into
   develop and, when asked, on to a mergeable develop -> main promotion PR, disposing of every
-  reviewer finding along the way under pr-review-conduct's outcomes, carried here whole as a
-  generated include, and escalating to whoever dispatched the drive where the drive's own seat
-  cannot reach the maintainer. Use this whenever asked to drive, land, take, chase, or push
-  a PR toward develop or main, or to run the review loop hands off instead of narrating each
-  round. When the request does not say how far ("drive this PR", "land it"), ask once whether the
-  target is develop or a mergeable main promotion PR, rather than guessing. Triggers even when
-  only one PR is named, because a finding raised against the develop -> main promotion PR
-  routinely needs its own feature -> develop fix cycle before the promotion PR can go green, and
-  stopping at the first promotion-PR finding is the early exit this skill exists to prevent. Ends
-  at develop merged, or at a promotion PR meeting every pr-review-conduct Merge Gate item except
-  the maintainer's explicit permission to merge, never merges main itself, that is the separate
-  merge-and-release skill, its own go-ahead.
+  reviewer finding under pr-review-conduct's outcomes and escalating to whoever dispatched the drive
+  where its seat cannot reach the maintainer. Use this whenever asked to drive, land, take, chase,
+  or push a PR toward develop or main, or to run the review loop hands off. When the request does
+  not say how far ("drive this PR", "land it"), ask once whether the target is develop or a
+  mergeable main promotion PR, rather than guessing. Triggers even when only one PR is named,
+  because a promotion-PR finding routinely needs its own feature -> develop fix cycle, and stopping
+  at the first one is the early exit this skill prevents. Ends at develop merged, or at a promotion
+  PR meeting every Merge Gate item but the maintainer's permission to merge. It never merges main,
+  which is merge-and-release's, its own go-ahead.
 ---
 
 # Drive PR
@@ -119,7 +116,12 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    body lists is one. A no-thread finding on an earlier round is one too, since `FINDINGS WITH NO
    THREAD` reads the head's round alone. Dispose of them before running `merge`. A finding no
    thread carries and a part under `REVIEWER OUTPUT NOTED` still refuse it until each carries the
-   `--ack` record pr-review-conduct "Answering a suppressed finding" states. It squash-merges only an open pull request into `develop`, headed in
+   `--ack` record pr-review-conduct "Answering a suppressed finding" states. A `qodo_open`
+   finding refuses it the same way, even where Qodo also opened a thread for it, since resolving
+   that thread answers nothing. For a disproved one, that comment's body mentions the Qodo login
+   the digest's remedy line names. It asks Qodo to dismiss the finding by the number the remedy
+   line gives, with the reason. That answer is the redrive an `UNTHREADED_FINDINGS` line naming
+   `qodo_open` owes, rather than a blocked merge for the maintainer. It squash-merges only an open pull request into `develop`, headed in
    that same repository on a branch that is not permanent. The merge is pinned to the head the gate
    read and confirmed by reading it back.
    Every run ends on one `next=` line, and the drive follows it rather than reading each status
@@ -135,8 +137,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    - `next=redrive` is a refusal that merged nothing and that this seat can clear. Do what its
      `status=` lines name, per step 3 and pr-review-conduct, giving each finding they count an
      outcome per "Disposing of Every Finding". A check still running clears by waiting for it,
-     with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. Then run `merge`
-     once more.
+     with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. A hosted
+     reviewer's review still running on the head is such a check, refused as `CHECKS_PENDING`.
+     Then run `merge` once more.
    - `next=retry` is a read that did not answer, or a merge `gh` refused on an unchanged head. Run
      `merge` once more as it is.
    - `next=maintainer` is a line no action of this seat can change, or a merge whose `cleanup`
@@ -144,7 +147,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 
    One rerun after `redrive` or `retry` is the bound. Report what still stands then to the
    maintainer as a blocked merge, naming the pull request, each line, and each counted finding's
-   outcome. The maintainer can then merge it by hand. A refusal this seat reports is never routed
+   outcome. Name each check the refusal's `pending=` line lists too, since a pull request with a
+   check or a review still running is not finished. The maintainer can then merge it by hand. A refusal this seat reports is never routed
    around, and it hands the maintainer no command to run instead.
    A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
@@ -232,14 +236,32 @@ maintainer when".
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
+   An `introduced` finding leads to an issue only where `pr-review-conduct` "Triaging findings"
+   or the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
+   pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
+   "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
+   Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A local pass before the push that opens the pull request can raise a `pre-existing`
+     correctness defect in a file the diff already touches. That defect is fixed here under
+     outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
+     remark on wording. The reach is the file, as outcome 1's class sweep reaches it. Its fix is
+     text this change wrote, so a finding on that fix is `introduced` and spends the same edit
+     budget. One that budget leaves unfixed takes the first bullet below that fits. One raised by a
+     pass after the opening push, or by a PR-hosted review, takes it too. So a push after the opening one is
+     never owed for one, and the bound holds once per pull request. This bullet
+     does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
+     changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
+     canonical unit in a carrying repository, which `pr-review-conduct` "Merge Gate" item 3 routes
+     to the hub.
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
-   - A `pre-existing` correctness defect with a stated failure is filed once as its own issue,
-     labeled `pre-existing`. Such a finding names an input or a state and the wrong output or the
-     crash it produces. Its body line goes under a `Pre-existing findings, filed` heading and
-     links that issue. A thread raising it is answered with that issue's link and resolved.
+   - A `pre-existing` correctness defect in code that runs, with a stated failure, is filed once
+     as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
+     wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
+     filed` heading and links that issue. A thread raising it is answered with that issue's link
+     and resolved.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -247,10 +269,17 @@ maintainer when".
    - Any other `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the
      pull request body with its location and its class. No issue is filed for it. The body line
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
-   - Any other deferral is filed as an issue first, and the reply carries its link. A deferral
-     noted only in a thread is lost the moment the PR merges.
+   - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
+     "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
+     declines under outcome 2. It is filed there where `GOVERNANCE.md` "Repository Boundaries and
+     Write Safety" and the session's own scope both allow that write. It goes to the maintainer
+     otherwise. Where work here waits
+     on that fix, it also
+     takes the local record `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" requires of
+     a blocker filed elsewhere. A deferral noted only in a thread is lost the
+     moment the PR merges, so each of these leaves its record where its outcome says.
 
-   The body keeps every other unfiled `pre-existing` line, the fourth bullet's, under one
+   The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
    heading, `Pre-existing findings, not filed`. Each line under these headings carries its
    location and its class. The headings stay apart from the open `introduced` findings a spent
    edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
@@ -263,7 +292,8 @@ maintainer when".
    the content rather than the one carrying it. An issue filed where nobody may make the fix is
    a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
    2026-10-16 to 2026-10-23, 108 of 329 non-handoff issues filed across four fleet repositories
-   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked.
+   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked. A fix
+   inside a pull request already open costs only rounds that pull request already pays for.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something. Add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.

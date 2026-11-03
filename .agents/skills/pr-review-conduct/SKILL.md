@@ -1,21 +1,17 @@
 ---
 name: pr-review-conduct
 description: >-
-  Governs opening, driving, and merging a pull request review loop in a ptr727/ProjectTemplate fleet
-  repo: requesting a review at its defined moments, triaging findings, replying and resolving
-  threads, and deciding whether a PR is actually mergeable. Use this whenever about to open a PR,
-  immediately after creating one, about to merge a PR, enable auto-merge, ask the maintainer for
-  merge permission, push a fix and move on without re-checking review state, or judge a PR "green"
-  or "clean" from CI or mergeStateStatus alone. Triggers even when the request sounds routine,
-  such as "open a PR," "merge this," or "it's all green, go ahead," because mergeStateStatus:
-  CLEAN can go clean once checks pass and every known thread is resolved, while still saying
-  nothing about whether the review covered the current head SHA, read the full diff, or left a
-  suppressed low-confidence finding, which opens no thread at all, unanswered. Also triggers when
-  a review loop looks stuck (no review landing, findings that keep reappearing) or when deciding a
-  finding is real, false, deferred, or a deliberate decline, or when a review looks missing or
-  skipped. This skill is the contract that `scripts/pr_review.py`, `drive-pr`, and
-  `merge-and-release` implement: running the loop hands-off is `drive-pr` and merging main is
-  `merge-and-release`, each winning for its own action while this skill still binds the gate.
+  Governs a ptr727/ProjectTemplate fleet repo's pull request review loop: requesting reviews,
+  triaging findings, replying to and resolving threads, and deciding whether a PR is actually
+  mergeable. Use this whenever about to open a PR or just after creating one, whenever about to
+  merge, enable auto-merge, or ask for merge permission, whenever about to push a fix without
+  re-checking review state, and whenever judging a PR "green" from CI or mergeStateStatus alone.
+  Triggers even when the request sounds routine ("merge this", "it's all green, go ahead"), because
+  mergeStateStatus: CLEAN says nothing about whether the review covered the current head SHA. Also
+  triggers when a review looks stuck, missing, or skipped, and when judging a finding real, false,
+  deferred, or declined. Running the loop hands-off is `drive-pr` and merging main is
+  `merge-and-release`, each winning for its own action while this skill, the contract they and
+  `scripts/pr_review.py` implement, binds the gate.
 ---
 
 # PR Review Conduct
@@ -64,6 +60,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    and Qodo are advisory. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
    names Copilot the incumbent and says no candidate is a required reviewer. An advisory
    reviewer's absence blocks nothing, while its findings owe item 3 exactly as Copilot's do.
+   A review of the head it has started and not finished is not an absence. While a CodeRabbit
+   or Qodo check on the head has neither passed nor failed, `merge` refuses as `CHECKS_PENDING`,
+   whatever the merge state reads. `wait` holds an attested head then too. A reviewer whose newest
+   output is a rate limit posted since the check began posts no review, so its check holds
+   nothing.
    `pr_review.py`'s `review_on_head` names Copilot's own coverage specifically, not "no review of
    any kind covers this head". An advisory reviewer carrying the exact head under
    `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is
@@ -139,6 +140,14 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    to decline one with evidence rather than a reason to leave it unanswered. Qodo's own
    `Resolved`/`Dismissed` self-tracked badge is a fast pre-triage signal, not a substitute for
    reading the finding, spot-verify against `gh pr diff` rather than trusting it outright.
+   That badge is the only thing that closes a Qodo finding on Qodo's side, and `qodo_open`
+   counts the findings without it. Resolving a thread Qodo opened for the finding, or answering
+   it in the conversation, adds no badge. Qodo marks a fixed finding `Resolved` itself, and a
+   disproved one `Dismissed` only when asked. So answer a disproved one with a comment that
+   mentions the Qodo login the digest's remedy line names. It asks Qodo to dismiss that finding
+   by the number the remedy line gives, with the reason.
+   Posted as the `--ack` comment "Answering a suppressed finding" states, the one write also
+   answers `merge`.
    A Copilot round states its own count of open findings, which the digest reads as
    `overview=T/M` beside the number of review threads that round opened. The digest's
    `FINDINGS WITH NO THREAD` block counts the findings the round names that no open entry links
@@ -166,9 +175,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    holds rather than what the two numbers add up to.
    What closing a finding owes turns on whether it is `pre-existing`, under the classes
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
-   `pre-existing` finding on text inside a canonical Markdown unit takes the first bullet of
+   `pre-existing` finding on text inside a canonical Markdown unit takes the tracker bullet of
    outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
-   `scripts/canonical_review.py list` names. That bullet applies once per unit rather than once
+   `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
    whichever round first needs it files it. The round answers each finding with that issue's
@@ -354,14 +363,32 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
+   An `introduced` finding leads to an issue only where `pr-review-conduct` "Triaging findings"
+   or the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
+   pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
+   "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
+   Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A local pass before the push that opens the pull request can raise a `pre-existing`
+     correctness defect in a file the diff already touches. That defect is fixed here under
+     outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
+     remark on wording. The reach is the file, as outcome 1's class sweep reaches it. Its fix is
+     text this change wrote, so a finding on that fix is `introduced` and spends the same edit
+     budget. One that budget leaves unfixed takes the first bullet below that fits. One raised by a
+     pass after the opening push, or by a PR-hosted review, takes it too. So a push after the opening one is
+     never owed for one, and the bound holds once per pull request. This bullet
+     does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
+     changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
+     canonical unit in a carrying repository, which `pr-review-conduct` "Merge Gate" item 3 routes
+     to the hub.
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
-   - A `pre-existing` correctness defect with a stated failure is filed once as its own issue,
-     labeled `pre-existing`. Such a finding names an input or a state and the wrong output or the
-     crash it produces. Its body line goes under a `Pre-existing findings, filed` heading and
-     links that issue. A thread raising it is answered with that issue's link and resolved.
+   - A `pre-existing` correctness defect in code that runs, with a stated failure, is filed once
+     as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
+     wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
+     filed` heading and links that issue. A thread raising it is answered with that issue's link
+     and resolved.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -369,10 +396,17 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    - Any other `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the
      pull request body with its location and its class. No issue is filed for it. The body line
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
-   - Any other deferral is filed as an issue first, and the reply carries its link. A deferral
-     noted only in a thread is lost the moment the PR merges.
+   - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
+     "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
+     declines under outcome 2. It is filed there where `GOVERNANCE.md` "Repository Boundaries and
+     Write Safety" and the session's own scope both allow that write. It goes to the maintainer
+     otherwise. Where work here waits
+     on that fix, it also
+     takes the local record `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" requires of
+     a blocker filed elsewhere. A deferral noted only in a thread is lost the
+     moment the PR merges, so each of these leaves its record where its outcome says.
 
-   The body keeps every other unfiled `pre-existing` line, the fourth bullet's, under one
+   The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
    heading, `Pre-existing findings, not filed`. Each line under these headings carries its
    location and its class. The headings stay apart from the open `introduced` findings a spent
    edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
@@ -385,7 +419,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    the content rather than the one carrying it. An issue filed where nobody may make the fix is
    a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
    2026-10-16 to 2026-10-23, 108 of 329 non-handoff issues filed across four fleet repositories
-   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked.
+   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked. A fix
+   inside a pull request already open costs only rounds that pull request already pays for.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something. Add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.

@@ -2934,32 +2934,18 @@ class GroundTruthCase(unittest.TestCase):
                 )
 
     def test_baseline_file_findings_only_the_alternative(self) -> None:
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
-            mock.patch.object(audit, "gh", holding(".codecov.yml")),
-        ):
-            alt_content, _, alt_findings = audit.baseline_file_findings(
-                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT, False
+        with mock.patch.object(audit, "gh", holding(".codecov.yml")):
+            found, alt_content, _, alt_findings = audit.baseline_file_findings(
+                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT
             )
-        stale_at_alt = [t for lvl, t in alt_findings if lvl == "DRIFT" and ".codecov.yml" in t]
-        self.assertTrue(
-            alt_content is not None and len(alt_findings) == 1 and len(stale_at_alt) == 1,
-            f"baseline_file_findings, only the alternative -> {alt_findings}",
-        )
+        self.assertEqual(found, ".codecov.yml")
+        self.assertIsNotNone(alt_content)
+        self.assertEqual(alt_findings, [])
 
     def test_baseline_file_findings_neither(self) -> None:
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
-            mock.patch.object(audit, "gh", holding()),
-        ):
-            _, _, none_findings = audit.baseline_file_findings(
-                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT, False
+        with mock.patch.object(audit, "gh", holding()):
+            _, _, _, none_findings = audit.baseline_file_findings(
+                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT
             )
         want_none = [
             (
@@ -2971,62 +2957,203 @@ class GroundTruthCase(unittest.TestCase):
             none_findings, want_none, f"baseline_file_findings, neither -> {none_findings}"
         )
 
-    def test_intent_staleness_skips_a_copy_matching_the_hub_file_at_path(self) -> None:
+
+HUB_CHANGE = ("2020-01-01T00:00:00+00:00", "abc1234")
+OLD_COMMIT = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
+
+
+def intent_run(baseline: dict[str, Any], content: dict[str, str], notes: list[str]) -> Any:
+    """A non-hub Run holding `content` as read, for check_files_intent."""
+    run = audit.Run({"name": "Widget", "driftNotes": notes}, {}, "o/r", "main", {}, None, None)
+    run.__dict__["baseline"] = {p: (item, set(), set()) for p, item in baseline.items()}
+    run.content.update(content)
+    run.found.update({p: p for p in content})
+    return run
+
+
+class IntentAdvisoryCase(unittest.TestCase):
+    """The files.intent advisory: when a copy reads as trailing, and how a driftNote acknowledges it."""
+
+    def patched(self, texts: dict[str, str], commit: Any = OLD_COMMIT) -> contextlib.ExitStack:
+        stack = contextlib.ExitStack()
+        stack.enter_context(
+            mock.patch.object(audit, "hub_last_change", lambda rel, anchor=None: HUB_CHANGE)
+        )
+        stack.enter_context(mock.patch.object(audit, "canonical_current_text", texts.get))
+        stack.enter_context(mock.patch.object(audit, "gh", lambda ep, ok404=False: commit))
+        return stack
+
+    def test_a_copy_matching_the_hub_file_at_path_is_current(self) -> None:
         unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
         texts = {"DOC.md": "the doc", "widget.json": "same"}
-        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
-        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
-        for held, want in (
-            (content, 0),
-            ({**content, "content": base64.b64encode(b"x").decode()}, 1),
-        ):
-            with (
-                mock.patch.object(
-                    audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-                ),
-                mock.patch.object(audit, "canonical_current_text", texts.get),
-                mock.patch.object(
-                    audit,
-                    "gh",
-                    lambda ep, ok404=False, held=held: commit if "commits" in ep else held,
-                ),
-            ):
-                _, _, findings = audit.baseline_file_findings(
-                    "o/r", "main", "widget.json", [], unit, False
-                )
-            self.assertEqual(len(findings), want, f"intentRef unit, held={held} -> {findings}")
+        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        for down, want in (("same", None), ("x", trailing)):
+            with self.subTest(down=down), self.patched(texts):
+                got = audit.intent_trail("o/r", "main", "widget.json", unit, down, "widget.json")
+            self.assertEqual(got, want)
 
-    def test_intent_staleness_reference_unit_ignores_the_hub_file_at_path(self) -> None:
+    def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
+        asked: list[tuple[str, str | None]] = []
+
+        def change(rel: str, anchor: str | None = None) -> tuple[str, str]:
+            asked.append((rel, anchor))
+            return HUB_CHANGE
+
+        unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
+        with (
+            self.patched({"DOC.md": "the doc"}),
+            mock.patch.object(audit, "hub_last_change", change),
+        ):
+            audit.intent_trail("o/r", "main", "widget.json", unit, "x", "widget.json")
+        self.assertEqual(asked, [("DOC.md", "widget")])
+
+    def test_a_reference_unit_ignores_the_hub_file_at_path(self) -> None:
         unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
-        texts = {"snip/w.yml": "snippet", "w.yml": "same"}
-        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
-        content = {"encoding": "base64", "content": base64.b64encode(b"same").decode()}
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", texts.get),
-            mock.patch.object(
-                audit, "gh", lambda ep, ok404=False: commit if "commits" in ep else content
-            ),
-        ):
-            _, _, findings = audit.baseline_file_findings("o/r", "main", "w.yml", [], unit, False)
-        self.assertEqual(len(findings), 1, f"reference unit -> {findings}")
+        with self.patched({"snip/w.yml": "snippet", "w.yml": "same"}):
+            self.assertIsNotNone(audit.intent_trail("o/r", "main", "w.yml", unit, "same", "w.yml"))
 
-    def test_intent_staleness_message_names_the_intent_canonical(self) -> None:
-        commit = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
-        with (
-            mock.patch.object(
-                audit, "hub_last_change", lambda rel: ("2020-01-01T00:00:00+00:00", "abc1234")
-            ),
-            mock.patch.object(audit, "canonical_current_text", lambda rel: "canonical"),
-            mock.patch.object(audit, "gh", lambda ep, ok404=False: commit),
-        ):
-            findings = audit.check_intent_staleness(
-                "o/r", "main", "w.json", "DOC.md", "x", "w.json"
-            )
+    def test_a_copy_newer_than_the_canonical_is_current(self) -> None:
+        unit = {"path": "w.json", "fidelity": "intent", "intentRef": "DOC.md"}
+        newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
+        with self.patched({"DOC.md": "canonical"}, newer):
+            self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x", "w.json"))
+
+    def test_the_trail_reads_the_alternative_it_was_found_at(self) -> None:
+        asked: list[str] = []
+
+        def fake(ep: str, ok404: bool = False) -> Any:
+            asked.append(ep)
+            return OLD_COMMIT
+
+        with self.patched({"WORKFLOW.md": "canonical"}), mock.patch.object(audit, "gh", fake):
+            audit.intent_trail("o/r", "main", "codecov.yml", BASELINE_UNIT, "x", ".codecov.yml")
+        self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+
+    def test_the_finding_names_the_intent_canonical(self) -> None:
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        findings = audit.intent_findings({}, "main", trails)
         self.assertEqual(len(findings), 1)
         self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
+
+    def test_an_acknowledgement_clears_the_change_it_names_and_no_other(self) -> None:
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        cases = [
+            ("the cited sha", "Verified `w.json@abc1234`, nothing to adopt (files.intent).", 0, 0),
+            ("a full sha", "Verified `w.json@abc1234" + "0" * 33 + "` (files.intent).", 0, 0),
+            ("an older sha", "Verified `w.json@def5678` (files.intent).", 1, 1),
+            ("another path", "Verified `x.json@abc1234` (files.intent).", 1, 1),
+            ("no code span", "Verified w.json, nothing to adopt (files.intent).", 1, 1),
+            ("no check id", "Verified `w.json@abc1234`.", 1, 0),
+        ]
+        for label, note, advisories, registry in cases:
+            with self.subTest(label):
+                findings = audit.intent_findings({"driftNotes": [note]}, "main", trails)
+                got = [t for _, t in findings]
+                self.assertEqual(sum(t.startswith("intent:") for t in got), advisories, got)
+                self.assertEqual(sum(t.startswith("registry:") for t in got), registry, got)
+
+    def test_an_acknowledgement_of_a_current_copy_is_stale(self) -> None:
+        findings = audit.intent_findings(
+            {"driftNotes": ["`w.json@abc1234` (files.intent)"]}, "main", {}
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("acknowledges 1 copy(ies) the advisory does not report", findings[0][1])
+
+    def test_check_files_intent_reads_only_intent_units_it_read(self) -> None:
+        intent = {"path": "w.json", "fidelity": "intent", "intentRef": "DOC.md"}
+        run = intent_run(
+            {"w.json": intent, "unread.json": intent, "AGENTS.md": None},
+            {"w.json": "x", "AGENTS.md": "x"},
+            [],
+        )
+        with self.patched({"DOC.md": "canonical"}):
+            findings = audit.check_files_intent(run)
+        self.assertEqual([t.split(" ", 2)[1] for _, t in findings], ["w.json"])
+
+    def test_check_files_intent_keys_a_copy_by_the_alternative_it_was_read_at(self) -> None:
+        asked: list[str] = []
+
+        def fake(ep: str, ok404: bool = False) -> Any:
+            asked.append(ep)
+            return OLD_COMMIT
+
+        for notes, want in (
+            ([], [".codecov.yml"]),
+            (["`.codecov.yml@abc1234` (files.intent)"], []),
+        ):
+            run = intent_run({"codecov.yml": BASELINE_UNIT}, {"codecov.yml": "x"}, notes)
+            run.found["codecov.yml"] = ".codecov.yml"
+            asked.clear()
+            with (
+                self.subTest(notes=notes),
+                self.patched({"WORKFLOW.md": "canonical"}),
+                mock.patch.object(audit, "gh", fake),
+            ):
+                findings = audit.check_files_intent(run)
+            self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+            self.assertEqual([t.split(" ", 2)[1] for _, t in findings], want)
+
+    def test_the_anchor_is_read_only_from_an_intent_ref(self) -> None:
+        cases = [
+            ({"intentRef": "GOVERNANCE.md#line-endings"}, "line-endings"),
+            ({"intentRef": "GOVERNANCE.md"}, None),
+            ({"intentRef": "GOVERNANCE.md#"}, None),
+            ({"intentRef": "#line-endings"}, None),
+            ({"reference": "snip/w.yml", "intentRef": "WORKFLOW.md#d3"}, None),
+            ({}, None),
+        ]
+        for item, want in cases:
+            with self.subTest(item=item):
+                self.assertEqual(audit.intent_ref(item, "w.json")[1], want)
+
+
+class AnchoredLastChangeCase(unittest.TestCase):
+    """hub_last_change dates an anchored intentRef by its section, over constructed revisions."""
+
+    def test_an_edit_outside_the_anchored_section_does_not_date_it(self) -> None:
+        doc = "# Doc\n\n## Rules\n\n### Line Endings\n\n{le}\n\n### Other\n\n{other}\n"
+        revisions = [
+            ("2022-01-01T00:00:00+00:00", "c" * 40, doc.format(le="lf", other="three")),
+            ("2021-01-01T00:00:00+00:00", "b" * 40, doc.format(le="lf", other="two")),
+            ("2020-01-01T00:00:00+00:00", "a" * 40, doc.format(le="crlf", other="one")),
+        ]
+        cases = [
+            ("the anchored section", "line-endings", ("2021-01-01T00:00:00+00:00", "bbbbbbb")),
+            ("a sibling section", "other", ("2022-01-01T00:00:00+00:00", "ccccccc")),
+            ("an unresolved anchor", "gone", ("2022-01-01T00:00:00+00:00", "ccccccc")),
+            ("no anchor", None, ("2022-01-01T00:00:00+00:00", "ccccccc")),
+        ]
+        for label, anchor, want in cases:
+            with self.subTest(label):
+                audit.hub_last_change.cache_clear()
+                self.addCleanup(audit.hub_last_change.cache_clear)
+                with mock.patch.object(audit, "_git_revisions", lambda rel: revisions):
+                    self.assertEqual(audit.hub_last_change("DOC.md", anchor), want)
+
+    def test_a_section_new_in_history_dates_from_its_introduction(self) -> None:
+        revisions = [
+            ("2022-01-01T00:00:00+00:00", "c" * 40, "## A\n\nintro\n\n### Line Endings\n\nlf\n"),
+            ("2021-01-01T00:00:00+00:00", "b" * 40, "## A\n\n### Line Endings\n\nlf\n"),
+            ("2020-01-01T00:00:00+00:00", "a" * 40, "## A\n"),
+        ]
+        audit.hub_last_change.cache_clear()
+        self.addCleanup(audit.hub_last_change.cache_clear)
+        with mock.patch.object(audit, "_git_revisions", lambda rel: revisions):
+            got = audit.hub_last_change("DOC.md", "line-endings")
+        self.assertEqual(got, ("2021-01-01T00:00:00+00:00", "bbbbbbb"))
+
+    def test_every_anchored_intent_ref_resolves_in_the_hub(self) -> None:
+        for item in audit.load("spec/files.json")["baseline"]:
+            rel, anchor = audit.intent_ref(item, item["path"])
+            if anchor is None:
+                continue
+            with self.subTest(path=item["path"], intentRef=item["intentRef"]):
+                text = (audit.ROOT / rel).read_text(encoding="utf-8")
+                self.assertIsNotNone(audit.extract_anchored(text, anchor))
+
+
+class AlternativesManifestCase(unittest.TestCase):
+    """declared_alternatives against the live manifest."""
 
     def test_declared_alternatives_on_the_live_manifest(self) -> None:
         live_alts = audit.declared_alternatives(audit.load("spec/files.json")["baseline"])
@@ -3530,6 +3657,11 @@ class SecretStemCase(unittest.TestCase):
                 },
             ),
             (
+                "a .txt on a single credential in a .secrets directory breaks",
+                {".secrets/app_token.txt.example", "deploy/.secrets/api_key.TXT"},
+                {".secrets/app_token.txt.example", "deploy/.secrets/api_key.TXT"},
+            ),
+            (
                 "a badly separated name, or a capitalized .env file elsewhere, breaks",
                 {
                     ".secrets/app_-web.env",
@@ -3549,7 +3681,6 @@ class SecretStemCase(unittest.TestCase):
             (
                 "a file nested below a .secrets directory, a tool-fixed env name, or another file is out of scope",
                 {
-                    "secrets/db-root-password.example",
                     "config/.secrets-notes/Odd-Name",
                     ".secrets/docs/Mixed-Case.md",
                     ".env",
@@ -3575,6 +3706,566 @@ class SecretStemCase(unittest.TestCase):
         self.assertEqual(
             audit.secret_stem_findings(None), [], "an unreadable tree reports nothing here"
         )
+
+    def test_a_tree_alone_reads_no_signal_file(self) -> None:
+        self.assertEqual(audit.secret_stem_findings({".gitignore", "compose.yml"}), [])
+
+    def test_a_bare_secrets_directory_is_read_from_the_files_naming_it(self) -> None:
+        """The directory is ignored by design, so a .gitignore line and a config path are the signals."""
+        bare = (
+            "runtime-secrets: {} tracked file(s) name or sit in a bare secrets/ directory, which "
+            'GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and update each: {}'
+        )
+        cases: list[tuple[str, dict[str, str], list[str], list[str]]] = [
+            (
+                "the issue's constructed case reports the directory and the .txt it names",
+                {
+                    ".gitignore": "secrets/\n",
+                    ".vscode/launch.json": '{"args": ["--token-file=${workspaceFolder}/secrets/app_token.txt"]}\n',
+                },
+                ["secrets/app_token.txt (named in .vscode/launch.json)"],
+                [".gitignore", ".vscode/launch.json"],
+            ),
+            (
+                "each bare ignore pattern names the directory",
+                {
+                    ".gitignore": "/secrets\n",
+                    "deploy/.gitignore": "**/secrets/\n",
+                    "web/.gitignore": "secrets/*\n!secrets/*.example\n",
+                    "ops/.gitignore": "secrets/**/*\n!secrets/**/*.example\n",
+                },
+                [],
+                [".gitignore", "deploy/.gitignore", "ops/.gitignore", "web/.gitignore"],
+            ),
+            (
+                "an unmarked secrets/ token is no path, and an unmarked compose file: value is one",
+                {
+                    "compose.yml": "# Docker secrets/configs are mounted read-only\nVAULT_KV_PATH: secrets/data/app\n",
+                    ".vscode/launch.json": '{"env": {"VAULT_PATH": "secrets/myapp"}}\n',
+                    "deploy/compose.yml": "secrets:\n  db:\n    file: secrets/Db_Password\n",
+                },
+                ["deploy/secrets/Db_Password (named in deploy/compose.yml)"],
+                ["deploy/compose.yml"],
+            ),
+            (
+                "a long-syntax bind source and an env_file path entry are host paths",
+                {
+                    "compose.yml": (
+                        "services:\n  app:\n    env_file:\n      - path: ./secrets/App.env\n"
+                        "    volumes:\n      - source: ./secrets\n        type: bind\n        target: /s\n"
+                    ),
+                },
+                ["secrets/App.env (named in compose.yml)"],
+                ["compose.yml"],
+            ),
+            (
+                "a .gitignore line beside a code directory named secrets is no signal, anchored or floating",
+                {
+                    "deploy/.gitignore": "/secrets/\n",
+                    "deploy/secrets/run.py": "",
+                    "ops/.gitignore": "secrets/\n",
+                    "ops/lib/secrets/run.py": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a relative editor path is no signal, even into a code directory",
+                {
+                    ".vscode/tasks.json": (
+                        '{"options": {"cwd": "${workspaceFolder}/src"}, "command": "python ./secrets/manager.py"}\n'
+                    ),
+                    "src/secrets/manager.py": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "the deprecated and file workspace variables root a path, and a composer.yml is no compose file",
+                {
+                    ".vscode/launch.json": '{"envFile": "${workspaceRoot}/secrets/app.env"}\n',
+                    ".vscode/tasks.json": '{"command": "cat ${fileWorkspaceFolder}/.secrets/Api_Token.txt"}\n',
+                    "composer.yml": "secrets:\n  s:\n    file: ./secrets/Db_Password\n",
+                },
+                [".secrets/Api_Token.txt (named in .vscode/tasks.json)"],
+                [".vscode/launch.json"],
+            ),
+            (
+                "an editor comment line is no path, and an anchored ignore line takes the same refusals",
+                {
+                    ".devcontainer/devcontainer.json": (
+                        '{\n  // "mounts": ["source=${localWorkspaceFolder}/secrets/Api_Key,target=/k,type=bind"]\n}\n'
+                    ),
+                    ".vscode/launch.json": (
+                        '{\n  // "envFile": "${workspaceFolder}/secrets/app.env"\n'
+                        '  "envFile": "${workspaceFolder}/.secrets/app.env" // was ${workspaceFolder}/secrets/app.env\n'
+                        '  "url": "http://localhost/${workspaceFolder}/secrets/x"\n}\n'
+                    ),
+                    ".gitignore": "legacy/secrets/\nlegacy/*/secrets/\n/tools/secrets\n",
+                    "tools/secrets": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a workspace file is read, and a bind or mount source names no file",
+                {
+                    "App.code-workspace": '{"settings": {"python.envFile": "${workspaceFolder}/secrets/App.env"}}\n',
+                    "deploy/compose.yml": "services:\n  a:\n    volumes:\n      - ./.secrets/Prod_Certs:/certs:ro\n",
+                    ".devcontainer/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Api_Certs,target=/c,type=bind",'
+                        ' {"source": "${localWorkspaceFolder}/.secrets/Prod_Certs", "type": "bind"},'
+                        ' "type=bind,src=${localWorkspaceFolder}/.secrets/Web_Certs,dst=/c"],'
+                        ' "runArgs": ["-v", "${localWorkspaceFolder}/.secrets/Run_Certs:/certs:ro"],'
+                        ' "postCreateCommand": "mkdir -p ${containerWorkspaceFolder}/.secrets/Tls_Certs"}\n'
+                    ),
+                },
+                ["secrets/App.env (named in App.code-workspace)"],
+                ["App.code-workspace"],
+            ),
+            (
+                "a workspace file resolves against its listed folder, and an editor bind with no extension names no file",
+                {
+                    "App.code-workspace": (
+                        '{"folders": [{"path": "src"}], "settings": {"x": "${workspaceFolder}/secrets/manager.py"}}\n'
+                    ),
+                    "src/secrets/manager.py": "",
+                    "src/secrets/__init__.py": "",
+                    ".vscode/tasks.json": (
+                        '{"command": "docker run -v ${workspaceFolder}/.secrets/Prod_Certs:/certs app",'
+                        ' "detail": "Mounts the certs in ${workspaceFolder}/.secrets/Tls_Certs."}\n'
+                    ),
+                    ".secrets/README.md": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a compose secret or env file named secrets is a file, not a directory",
+                {
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets\nservices:\n  app:\n    env_file: ./secrets\n",
+                },
+                [],
+                [],
+            ),
+            (
+                "a floating ignore line is silenced only by a code directory below its own prefix",
+                {
+                    ".gitignore": "deploy/**/secrets/\n",
+                    "deploy/app/compose.yml": "",
+                    "src/app/secrets/manager.py": "",
+                },
+                [],
+                [".gitignore"],
+            ),
+            (
+                "a .gitignore naming .secrets is dropped, but not for a comment, and a plain path past the folder is none",
+                {
+                    ".gitignore": "/.secrets/*\n/secrets/\n",
+                    "ops/.gitignore": "# TODO: move secrets/ to deploy/.secrets/\nsecrets/\n",
+                    "web/.gitignore": "/secrets/generated.json\n",
+                },
+                [],
+                ["ops/.gitignore"],
+            ),
+            (
+                "a tracked directory, a devcontainer env file, a named volume, an exempt file, and prose are no secret file",
+                {
+                    ".vscode/launch.json": (
+                        '["${workspaceFolder}/.secrets/Prod.Certs", "${workspaceFolder}/.secrets/README.md"]\n'
+                        "// Put the token in ${workspaceFolder}/.secrets/app.env.\n"
+                        '{"detail": "Put the token in ${workspaceFolder}/.secrets/app.env."}\n'
+                    ),
+                    ".secrets/Prod.Certs/tls_key.example": "",
+                    ".devcontainer/devcontainer.json": (
+                        '{"runArgs": ["--env-file", "${localWorkspaceFolder}/.secrets/App.env"]}\n'
+                    ),
+                    "compose.yml": "services:\n  a:\n    volumes:\n      - secrets:/run/secrets\n",
+                },
+                [],
+                [],
+            ),
+            (
+                "a negated ignore line, a secrets.json, and an interpolated secret file are no signal",
+                {
+                    "web/.gitignore": "!**/secrets/*.example\n",
+                    ".vscode/settings.json": '{"x": "${workspaceFolder}/secrets.json"}\n',
+                    "compose.yml": "secrets:\n  s:\n    file: ./.secrets/${ENV}_db_password\n",
+                },
+                [],
+                [],
+            ),
+            (
+                "a compose build context, as a mapping or a string, and a config file are host paths",
+                {
+                    "compose.yml": "services:\n  a:\n    build:\n      context: ./secrets\n",
+                    "web/compose.yml": "services:\n  b:\n    build: ./secrets\n",
+                    "deploy/compose.yml": "configs:\n  c:\n    file: ./secrets/App.txt\n",
+                },
+                ["deploy/secrets/App.txt (named in deploy/compose.yml)"],
+                ["compose.yml", "deploy/compose.yml", "web/compose.yml"],
+            ),
+            (
+                "a negated .secrets line also marks a .gitignore as moved",
+                {".gitignore": "secrets/\n!.secrets/README.md\n"},
+                [],
+                [],
+            ),
+            (
+                "a bind source alone, an !override list, and a tracked named file each count once",
+                {
+                    "bind/compose.yml": (
+                        "services:\n  a:\n    volumes:\n      - type: bind\n        source: ./secrets\n        target: /s\n"
+                    ),
+                    "over/compose.yml": "services:\n  a:\n    volumes: !override\n      - ./secrets:/s\n",
+                    "compose.yml": "secrets:\n  w:\n    file: ./.secrets/Web_Token.txt\n",
+                    ".secrets/Web_Token.txt": "",
+                },
+                [".secrets/Web_Token.txt"],
+                ["bind/compose.yml", "over/compose.yml"],
+            ),
+            (
+                "a path separator variable, a root .devcontainer.json, a ? glob, and a null service",
+                {
+                    ".vscode/launch.json": '["${workspaceFolder}${pathSeparator}secrets${pathSeparator}app.txt"]\n',
+                    ".devcontainer.json": '{"mounts": ["source=${localWorkspaceFolder}/ops/secrets,target=/s"]}\n',
+                    "ops/README.md": "",
+                    "deploy/.gitignore": "ap?/secrets/\n",
+                    "deploy/ap1/README.md": "",
+                    "compose.yml": "services:\n  app:\n",
+                    ".devcontainer/c/devcontainer.json": '{"x": "${containerWorkspaceFolder}/secrets"}\n',
+                },
+                ["secrets/app.txt (named in .vscode/launch.json)"],
+                [
+                    ".devcontainer.json",
+                    ".devcontainer/c/devcontainer.json",
+                    ".vscode/launch.json",
+                    "deploy/.gitignore",
+                ],
+            ),
+            (
+                "a floating line falls back to its own directory, and a first-line comment and a padded line are read",
+                {
+                    "ops/.gitignore": "secrets/\n",
+                    "src/secrets/run.py": "",
+                    "web/.gitignore": "secrets/ \n",
+                    ".devcontainer/devcontainer.json": '// "${localWorkspaceFolder}/secrets/x"\n{}\n',
+                    "compose.yml": "services:\n  a:\n    environment: !reset {}\n    volumes:\n      - ./secrets:/s\n",
+                },
+                [],
+                ["compose.yml", "ops/.gitignore", "web/.gitignore"],
+            ),
+            (
+                "a compose override file carrying !reset is read",
+                {
+                    "compose.override.yml": (
+                        "services:\n  app:\n    ports: !reset []\n    volumes:\n      - ./secrets:/run/secrets\n"
+                    ),
+                },
+                [],
+                ["compose.override.yml"],
+            ),
+            (
+                "a tracked file named secrets is no directory, and a tracked directory is no secret file",
+                {
+                    ".vscode/tasks.json": '{"command": "${workspaceFolder}/scripts/secrets"}\n',
+                    "scripts/secrets": "",
+                    "compose.yml": "services:\n  a:\n    volumes:\n      - ./tools/secrets:/usr/local/bin/secrets:ro\n",
+                    "tools/secrets": "",
+                    ".devcontainer/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/.secrets/Prod_Certs,target=/c,type=bind"]}\n'
+                    ),
+                    ".secrets/Prod_Certs/tls_key.example": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a .gitignore line left behind after the move to .secrets is no signal",
+                {
+                    ".gitignore": "/.secrets/*\n!/.secrets/*.example\n/secrets/\n",
+                    "deploy/.gitignore": "/secrets/\n",
+                    "deploy/.secrets/db_password.example": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a quoted compose file: value is a path, and a container-side value is not",
+                {
+                    "compose.yml": 'secrets:\n  db:\n    file: "secrets/Db_Password"\n',
+                    "app/compose.yml": (
+                        "services:\n  app:\n    working_dir: /app\n    environment:\n"
+                        "      TOKEN_FILE: ./secrets/api_token.txt\n    command: cat ./secrets/x\n"
+                    ),
+                    "web/compose.yml": (
+                        "services:\n  web:\n    working_dir: /app\n    command:\n      - ./secrets/api_token.txt\n"
+                        "    healthcheck:\n      test:\n        - ./secrets/check\n"
+                        "    volumes:\n      - type: volume\n        source: secrets\n        target: /s\n"
+                    ),
+                },
+                ["secrets/Db_Password (named in compose.yml)"],
+                ["compose.yml"],
+            ),
+            (
+                "a committed credential beside its template does not make the directory code",
+                {
+                    "secrets/README.md": "",
+                    "secrets/db_password.example": "",
+                    "secrets/db_password": "",
+                },
+                [],
+                ["secrets/db_password", "secrets/db_password.example"],
+            ),
+            (
+                "a compose file naming one reports it beside its directory",
+                {
+                    "deploy/compose.yml": "secrets:\n  db_password:\n    file: ./secrets/db_password\n"
+                },
+                [],
+                ["deploy/compose.yml"],
+            ),
+            (
+                "a .secrets path, a mount point, a comment, a negation, and a GitHub secret are not a bare directory",
+                {
+                    ".gitignore": "# secrets/\n**/.secrets/*\n!secrets/x\nsecrets.json\n",
+                    "docker-compose.yml": "secrets:\n  - source: db_password\n    target: /run/secrets/db_password\n",
+                    ".vscode/tasks.json": '{"env": {"TOKEN": "${{ secrets.TOKEN }}", "F": "${workspaceFolder}/.secrets/db_password"}}\n',
+                },
+                [],
+                [],
+            ),
+            (
+                "an untracked file a .secrets path names is judged where it has an extension, a templated one once",
+                {
+                    ".vscode/launch.json": (
+                        '["${workspaceFolder}/.secrets/Api_Token", "${workspaceFolder}${/}.secrets${/}web_token.txt",'
+                        ' "${workspaceFolder}/.secrets/Mail_Relay.txt", "./.secrets/Cwd_Token.txt"]\n'
+                    ),
+                    ".secrets/Mail_Relay.txt.example": "",
+                },
+                [
+                    ".secrets/web_token.txt (named in .vscode/launch.json)",
+                    ".secrets/Mail_Relay.txt.example",
+                ],
+                [],
+            ),
+            (
+                "a URL path or a cloud resource name with a secrets segment is no repo path",
+                {
+                    ".vscode/launch.json": '{"env": {"API": "http://localhost:8080/api/secrets/list"}}\n',
+                    "compose.yml": "DB: projects/my-proj/secrets/db-password/versions/latest\n",
+                },
+                [],
+                [],
+            ),
+            (
+                "a whole-directory mount names the directory, and a secrets: key does not",
+                {
+                    "compose.yml": "secrets:\n  app_token:\n    file: x\nservices:\n  app:\n    volumes:\n      - ./secrets:/run/secrets:ro\n",
+                    "deploy/compose.yml": "services:\n  app:\n    volumes:\n      - ./secrets/:/run/secrets\n",
+                    ".devcontainer/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/secrets,target=/run/secrets,type=bind"]}\n'
+                    ),
+                },
+                [],
+                [".devcontainer/devcontainer.json", "compose.yml", "deploy/compose.yml"],
+            ),
+            (
+                "a .secrets directory holding a nested template still has a named file judged",
+                {
+                    "compose.yml": "secrets:\n  s:\n    file: ./.secrets/Db_Password\n",
+                    ".secrets/prod/db_password.example": "",
+                },
+                [".secrets/Db_Password (named in compose.yml)"],
+                [],
+            ),
+            (
+                "a nested template in a bare directory holds it",
+                {
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets/prod/db_password.txt\n",
+                    "secrets/prod/db_password.txt.example": "",
+                },
+                [],
+                ["compose.yml", "secrets/prod/db_password.txt.example"],
+            ),
+            (
+                "a code directory named secrets is no signal from its template or a .gitignore line",
+                {
+                    ".gitignore": (
+                        "src/app/secrets/__pycache__/\n**/secrets/__pycache__/\nsrc/**/secrets/__pycache__/\n"
+                        "secrets/\n"
+                    ),
+                    "src/app/secrets/manager.py": "",
+                    "src/app/secrets/config.toml.example": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "a path relative to a task's cwd names no file",
+                {
+                    ".vscode/tasks.json": (
+                        '{"options": {"cwd": "${workspaceFolder}/deploy"},'
+                        ' "command": "cat ./.secrets/api_token.txt $PWD/.secrets/api_token.txt"}\n'
+                    ),
+                    "deploy/.secrets/api_token.txt.example": "",
+                },
+                ["deploy/.secrets/api_token.txt.example"],
+                [],
+            ),
+            (
+                "a bare directory holding its own .gitignore and templates is reported, and each template judged",
+                {
+                    "secrets/.gitignore": "*\n!*.example\n!README.md\n",
+                    "secrets/README.md": "",
+                    "secrets/Db_Password.example": "",
+                },
+                ["secrets/Db_Password.example"],
+                ["secrets/.gitignore", "secrets/Db_Password.example"],
+            ),
+            (
+                "a compose file under .devcontainer resolves against its own directory",
+                {
+                    ".devcontainer/docker-compose.yml": "secrets:\n  s:\n    file: ../secrets/app_token.txt\n"
+                },
+                ["secrets/app_token.txt (named in .devcontainer/docker-compose.yml)"],
+                [".devcontainer/docker-compose.yml"],
+            ),
+            (
+                "a path into a directory tracking code is not a bare directory",
+                {
+                    ".vscode/launch.json": (
+                        '{"program": "${workspaceFolder}/src/app/secrets/manager.py",'
+                        ' "cwd": "${workspaceFolder}/src/app/secrets/tools"}\n'
+                    ),
+                    ".vscode/settings.json": '{"files.exclude": {"src/app/secrets/*.pyc": true}}\n',
+                    "compose.yml": "# see src/app/secrets/manager.py.\n",
+                    "src/app/secrets/manager.py": "",
+                    "src/app/secrets/tools/run.py": "",
+                },
+                [],
+                [],
+            ),
+            (
+                "one untracked name two files mention counts once",
+                {
+                    "compose.yml": "secrets:\n  s:\n    file: ./secrets/App_Token.txt\n",
+                    ".vscode/launch.json": '["${workspaceFolder}/secrets/App_Token.txt"]\n',
+                },
+                ["secrets/App_Token.txt (named in .vscode/launch.json, compose.yml)"],
+                [".vscode/launch.json", "compose.yml"],
+            ),
+            (
+                "a secret file is judged, and a comment, interpolation, and a glob are no name",
+                {
+                    "compose.yml": (
+                        "secrets:\n  t:\n    file: ./.secrets/App_Token.txt\nservices:\n  app:\n    volumes:\n"
+                        "      # put the token in .secrets/web_token.\n      - ./.secrets/${ENV}_db_password:/p\n"
+                    ),
+                    ".vscode/settings.json": '{"files.exclude": {".secrets/*": true}}\n',
+                },
+                [".secrets/App_Token.txt (named in compose.yml)"],
+                [],
+            ),
+            (
+                "the devcontainer variables root a folder, a Windows path is read, and a shell cwd is not",
+                {
+                    ".devcontainer/app/devcontainer.json": (
+                        '{"mounts": ["source=${localWorkspaceFolder}/secrets/app_token,'
+                        'target=/run/secrets/app_token,type=bind"]}\n'
+                    ),
+                    ".devcontainer.json": '{"x": "${containerWorkspaceFolder}/.secrets/Api_Key"}\n',
+                    "deploy/compose.yaml": "env: $(pwd)/.secrets/Mail_Token\n",
+                    ".vscode/launch.json": '{"args": ["${workspaceFolder}\\\\.secrets\\\\Web_Token.txt"]}\n',
+                },
+                [
+                    ".secrets/Web_Token.txt (named in .vscode/launch.json)",
+                ],
+                [".devcontainer/app/devcontainer.json"],
+            ),
+        ]
+        for label, texts, named, naming in cases:
+            with self.subTest(label):
+                tree = set(texts)
+                got = audit.secret_stem_findings(tree, texts.get)
+                stems = [t for _, t in got if " env or secret file(s) " in t]
+                self.assertEqual(len(stems), 1 if named else 0, got)
+                for path in named:
+                    self.assertIn(path, stems[0])
+                if named:
+                    self.assertTrue(stems[0].startswith(f"runtime-secrets: {len(named)} env"), got)
+                want = [bare.format(len(naming), ", ".join(naming))] if naming else []
+                self.assertEqual([t for _, t in got if "bare secrets/" in t], want)
+
+    def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
+        """A compose path is relative to its own directory, an editor's to its workspace, and one leaving the repo is no signal."""
+        texts = {
+            "deploy/compose.yml": "secrets:\n  s:\n    file: ./.secrets/web_token.txt\n",
+            "compose.yml": "secrets:\n  s:\n    file: ../secrets/Db_Password\n",
+            "app/.vscode/launch.json": '["${workspaceFolder}/.secrets/Api_Token"]\n',
+        }
+        tree = set(texts) | {
+            "deploy/.secrets/web_token.txt.example",
+            "app/.secrets/Api_Token.example",
+        }
+
+        got = audit.secret_stem_findings(tree, texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": app/.secrets/Api_Token.example, deploy/.secrets/web_token.txt.example"
+            ),
+            got,
+        )
+
+    def test_a_signal_file_read_with_no_text_is_undecided(self) -> None:
+        got = audit.secret_stem_findings({".gitignore", "README.md"}, lambda path: None)
+
+        self.assertEqual(
+            got,
+            [
+                (
+                    "DRIFT",
+                    (
+                        "runtime-secrets: could not read 1 file(s) to look for a bare "
+                        "secrets/ directory or a named secret file, verify by hand: .gitignore"
+                    ),
+                )
+            ],
+        )
+
+    def test_a_workflow_named_like_compose_is_not_read(self) -> None:
+        read: list[str] = []
+
+        def read_text(path: str) -> str:
+            read.append(path)
+            return "services:\n  a:\n    volumes:\n      - ./secrets:/s\n"
+
+        got = audit.secret_stem_findings({".github/workflows/docker-compose.yml"}, read_text)
+
+        self.assertEqual((got, read), ([], []))
+
+    def test_a_gitignore_is_not_read_once_the_tree_carries_a_secrets_directory(self) -> None:
+        read: list[str] = []
+
+        def read_text(path: str) -> str:
+            read.append(path)
+            return "/secrets/\n"
+
+        got = audit.secret_stem_findings({".gitignore", ".secrets/db_password.example"}, read_text)
+
+        self.assertEqual((got, read), ([], []))
+
+    def test_a_compose_file_that_does_not_parse_is_no_signal(self) -> None:
+        """A template such as a Jinja compose file never parses, so reporting it would never clear."""
+        texts = {
+            "compose.yml": "services: [\n",
+            "deploy/docker-compose.yml": "image: {{ image }}\n",
+        }
+
+        self.assertEqual(audit.secret_stem_findings(set(texts), texts.get), [])
 
 
 class DeclaredTypesCase(unittest.TestCase):
@@ -4651,9 +5342,9 @@ class MembershipFindingsCase(unittest.TestCase):
 
 
 class IntentCanonicalRelCase(unittest.TestCase):
-    """Holds the intent_canonical_rel resolution check."""
+    """Holds the intent_ref canonical resolution check."""
 
-    def test_intent_canonical_rel(self) -> None:
+    def test_intent_ref_canonical(self) -> None:
         canonical_cases = [
             (
                 "no reference or intentRef falls back to the file's own path",
@@ -4706,7 +5397,7 @@ class IntentCanonicalRelCase(unittest.TestCase):
         ]
         for label, item, path, want in canonical_cases:
             with self.subTest(label):
-                self.assertEqual(audit.intent_canonical_rel(item, path), want)
+                self.assertEqual(audit.intent_ref(item, path)[0], want)
 
 
 class RegistryCase(unittest.TestCase):
@@ -4722,7 +5413,6 @@ class RegistryCase(unittest.TestCase):
         named = {audit.check_function(c).__name__ for c in audit.registered_checks()}
         defined = {n for n in vars(audit) if n.startswith("check_") and callable(vars(audit)[n])}
         defined -= {"check_function", "check_interface", "check_verbatim"}
-        defined -= {"check_intent_staleness"}
         self.assertEqual(defined - named, set())
 
     def test_suppression_ids_resolve_against_the_registry(self) -> None:
@@ -4732,11 +5422,27 @@ class RegistryCase(unittest.TestCase):
             audit.is_suppression_id({"types": ["python"]}, "python.directories.declared")
         )
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "filenaming.scripts"))
+        self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "files.intent"))
         self.assertFalse(audit.is_suppression_id(typed, "settings.general"))
+
+    def test_a_repo_check_reading_the_baseline_runs_after_it(self) -> None:
+        checks = list(audit.registered_checks())
+        first_read = next(i for i, c in enumerate(checks) if c["scope"] == "baseline")
+        reads = re.compile(r"run\.(content|found|docs)\b|_readme\(run\)")
+        readers = []
+        for i, check in enumerate(checks):
+            if check["scope"] != "repo":
+                continue
+            if reads.search(inspect.getsource(audit.check_function(check))):
+                readers.append(check["id"])
+                with self.subTest(check["id"]):
+                    self.assertGreater(i, first_read)
+        self.assertIn("files.intent", readers)
 
     def test_only_these_checks_skip_the_hub(self) -> None:
         skipped = {c["id"] for c in audit.registered_checks() if not c["hub"]}
         want = {"sections.undeclared", "carried.template-ref", "tree.verbatim", "hubonly.carried"}
+        want.add("files.intent")
         self.assertEqual(skipped, want)
 
     def test_file_checks_read_their_own_baseline_slots(self) -> None:

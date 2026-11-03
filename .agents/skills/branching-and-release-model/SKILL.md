@@ -1,19 +1,16 @@
 ---
 name: branching-and-release-model
 description: >-
-  Governs how a ptr727/ProjectTemplate fleet repo branches, promotes, and publishes: the feature
-  -> develop -> main flow, squash-only vs. merge-commit-only branch protection, the promotion
-  traps (never delete develop, EOL-only conflicts), the two-phase publish model (PRs smoke-test
-  only, a human merge never auto-publishes), NBGV versioning, and the operational-repo delta
-  (direct-to-develop commits, advisory CI, dispatch-only release) that applies whenever the
-  registry's workflowModel reads operational. Use this whenever choosing a target branch,
-  promoting develop to main, resolving a promotion conflict, deciding whether a config change
-  needs a PR or can commit straight to develop, bumping version.json, adding or dropping a release
-  target, or reasoning about why a merge did or didn't publish. Triggers even when the request
-  sounds like ordinary git housekeeping ("just push this config fix", "merge develop into main"),
-  because the two workflow models genuinely differ and a step correct in one is a rule violation
-  in the other. This is the git policy: `workflow-ci-contract` keeps the YAML half, and performing
-  a promotion merge or a release dispatch is `merge-and-release`, which wins where both fire.
+  Governs how a ptr727/ProjectTemplate fleet repo branches, promotes, and publishes: the feature ->
+  develop -> main flow, squash-only vs. merge-commit-only branch protection, the promotion traps,
+  the two-phase publish model, NBGV versioning, and the operational-repo delta. Use this whenever
+  choosing a target branch, promoting develop to main, resolving a promotion conflict, deciding
+  whether a config change needs a PR or can commit straight to develop, bumping version.json, adding
+  or dropping a release target, or reasoning about why a merge did or didn't publish. Triggers even
+  when the request sounds like ordinary git housekeeping ("just push this config fix", "merge
+  develop into main"), because a step correct in one workflow model is a rule violation in the
+  other. This is the git policy: `workflow-ci-contract` keeps the YAML half, and performing a
+  promotion merge or a release dispatch is `merge-and-release`, which wins where both fire.
 ---
 
 # Branching and Release Model

@@ -59,7 +59,7 @@ class CodeBlockCase(unittest.TestCase):
 
 
 class SectionCase(unittest.TestCase):
-    def test_section_key_strips_then_case_folds(self) -> None:
+    def test_section_key_strips_then_lowercases(self) -> None:
         self.assertEqual(fidelity_text.section_key("  Mixed CASE \t"), "mixed case")
         self.assertEqual(
             fidelity_text.section_key("Mixed case"), fidelity_text.section_key("MIXED CASE")
@@ -70,6 +70,24 @@ class SectionCase(unittest.TestCase):
         self.assertEqual(fidelity_text.section_span(text, "alpha"), (2, 6))
         self.assertEqual(fidelity_text.section_span(text, "Beta"), (6, None))
         self.assertIsNone(fidelity_text.section_span(text, "Gamma"))
+
+    def test_heading_slug_follows_the_github_anchor_shape(self) -> None:
+        self.assertEqual(fidelity_text.heading_slug("Line Endings"), "line-endings")
+        self.assertEqual(
+            fidelity_text.heading_slug("D3 - Versioning and Classification"),
+            "d3---versioning-and-classification",
+        )
+        self.assertEqual(fidelity_text.heading_slug("Why `uv`? (Notes)"), "why-uv-notes")
+
+    def test_extract_anchored_ends_at_a_heading_of_its_level_or_above(self) -> None:
+        text = "## A\n\n### Line Endings\n\nlf\n\n#### Detail\n\nd\n\n### Next\n\nn\n\n## B\n"
+        self.assertEqual(
+            fidelity_text.extract_anchored(text, "line-endings"),
+            "### Line Endings\n\nlf\n\n#### Detail\n\nd\n",
+        )
+        self.assertTrue(fidelity_text.extract_anchored(text, "a").endswith("### Next\n\nn\n"))
+        self.assertEqual(fidelity_text.extract_anchored(text, "b"), "## B\n")
+        self.assertIsNone(fidelity_text.extract_anchored(text, "gone"))
 
     def test_strip_sections_keeps_an_identical_passage_elsewhere(self) -> None:
         text = "## Keep\n\nsame\n\n## Drop\n\nsame\n"

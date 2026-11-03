@@ -220,7 +220,7 @@ def git_bytes(root: Path, args: str, base: str) -> str | None:
     """A diff against `base`, captured as bytes so a lone carriage return breaks no line."""
     try:
         cmd = ["git", "-C", str(root), *args.split(), base, "--"]
-        raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+        raw = subprocess.run(cmd, capture_output=True, check=True, env=tree_env()).stdout
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return raw.decode("utf-8", "surrogateescape")
@@ -228,7 +228,9 @@ def git_bytes(root: Path, args: str, base: str) -> str | None:
 
 def untracked_paths(root: Path) -> list[str]:
     """Paths under `root` that git holds no history for and is not ignoring, which no diff names."""
-    out = git_text("-C", str(root), "ls-files", "-z", "--others", "--exclude-standard")
+    out = git_text(
+        "-C", str(root), "ls-files", "-z", "--others", "--exclude-standard", env=tree_env()
+    )
     return [name for name in (out or "").split("\0") if name]
 
 
@@ -442,9 +444,24 @@ GIT_LOCATION = frozenset(
 )
 
 
+def git_env() -> dict[str, str]:
+    """This process's environment without the variables that tell git which repository to use."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
+
+
+def tree_env() -> dict[str, str]:
+    """`git_env()` for a read of the scanned tree, which keeps the index a commit hands its hook.
+
+    Under `git commit -a` or `git commit <paths>` that index is what the commit records, and the
+    checkout's own index is not. So it alone says which files the commit tracks.
+    """
+    index = os.environ.get("GIT_INDEX_FILE")
+    return git_env() | ({"GIT_INDEX_FILE": index} if index is not None else {})
+
+
 def checkout_provenance(script: Path) -> str:
     """The commit describing this file, `-dirty` where edited, unknown where git tracks it not."""
-    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION}
+    env = git_env()
     where = ("-C", str(script.parent))
     if git_text(*where, "ls-files", "--error-unmatch", "--", str(script), env=env) is None:
         return "unknown"
@@ -493,15 +510,24 @@ def printable(line: str) -> str:
     return escaped.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
+def lookup_start(path: Path) -> Path:
+    """The directory a git lookup for `path` starts in, the path itself or the file's directory."""
+    return path if path.is_dir() else path.parent
+
+
 def repo_root(path: Path) -> str:
-    """The repository top level containing `path`, or '' when git cannot say."""
-    start = path if path.is_dir() else path.parent
-    return (git_text("-C", str(start), "rev-parse", "--show-toplevel") or "").strip()
+    """The repository top level containing `path`, or '' when git cannot say.
+
+    A hook in a linked worktree inherits `GIT_DIR`, under which git reports whatever directory it
+    starts in as the top level. So the lookup drops the location variables, as provenance does.
+    """
+    start = lookup_start(path)
+    return (git_text("-C", str(start), "rev-parse", "--show-toplevel", env=git_env()) or "").strip()
 
 
 def tracked_paths(root: Path) -> list[Path] | None:
     """Paths git tracks under `root`, or None when git cannot answer or answers with nothing."""
-    out = git_text("-C", str(root), "ls-files", "-z")
+    out = git_text("-C", str(root), "ls-files", "-z", env=tree_env())
     if out is None or not out.strip("\0"):
         return None
     return [root / name for name in out.split("\0") if name]
@@ -527,14 +553,21 @@ def is_text(path: Path) -> bool:
 
 def shallow_checkout(root: Path) -> bool:
     """Whether the checkout at `root` is shallow, which holds no deletion history to key on."""
-    answer = git_text("-C", str(root), "rev-parse", "--is-shallow-repository") or ""
-    return answer.strip() == "true"
+    answer = git_text("-C", str(root), "rev-parse", "--is-shallow-repository", env=tree_env())
+    return (answer or "").strip() == "true"
 
 
 def discover(
-    paths: list[str], excludes: tuple[str, ...] = (), root: Path | None = None
+    paths: list[str],
+    excludes: tuple[str, ...] = (),
+    root: Path | None = None,
+    skip_generated: bool = False,
 ) -> list[Path]:
-    """Every authored text file under the paths, scoped by git where git can describe the tree."""
+    """Every authored text file under the paths, scoped by git where git can describe the tree.
+
+    A named file is read even inside a generated tree, unless `skip_generated` drops it there as a
+    wider scan does. A hook naming a commit's paths sets it, so it keeps no copy of the tree list.
+    """
     found: list[tuple[Path, str]] = []
     for raw in paths:
         p = Path(raw)
@@ -542,7 +575,9 @@ def discover(
         anchor = root if root is not None else Path(repo_root(base) or base)
         trees = config_for(str(anchor)).exempt["generated_trees"]
         if p.is_file():
-            found.append((p, repo_key(p, anchor)))
+            key = repo_key(p, anchor)
+            if not skip_generated or trees.isdisjoint(Path(key).parts):
+                found.append((p, key))
             continue
         candidates = tracked_paths(base)
         # Whether git can describe a tree is settled by asking git, never by its answer's size.
@@ -1427,7 +1462,8 @@ def carried_paths(root: str) -> frozenset[str]:
 @functools.cache
 def once_tracked(root: str, rel_path: str) -> bool:
     """Whether git at `root` ever recorded `rel_path`, the deletion signature this rule keys on."""
-    return bool((git_text("-C", root, "log", "-1", "--format=%H", "--", rel_path) or "").strip())
+    found = git_text("-C", root, "log", "-1", "--format=%H", "--", rel_path, env=tree_env())
+    return bool((found or "").strip())
 
 
 def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
@@ -2032,18 +2068,19 @@ def main(argv: list[str] | None = None) -> int:
     # Anything that is not a file or a directory, a FIFO or a socket included, is refused.
     if unusable := [p for p in scan_paths if not (Path(p).is_file() or Path(p).is_dir())]:
         return refuse("error-not-a-path", paths=quoted(unusable))
-    git_roots = {found for found in (repo_root(Path(p)) for p in scan_paths) if found}
+    starts = {lookup_start(Path(p)) for p in scan_paths}
+    git_roots = {found for found in map(repo_root, starts) if found}
     if len(git_roots) > 1:
         return refuse("error-many-repositories", roots=quoted(git_roots))
     first, in_git = Path(scan_paths[0]), bool(git_roots)
-    scan_root = Path(git_roots.pop()) if git_roots else first if first.is_dir() else first.parent
+    scan_root = Path(git_roots.pop()) if git_roots else lookup_start(first)
     try:
         config_for(str(scan_root))
     except OverrideError as exc:
         return refuse("error-override", path=scan_root / OVERRIDE_NAME, why=exc)
     stand_downs(rules, a, scan_root, in_git)
 
-    files = discover(scan_paths, tuple(a.exclude), scan_root)
+    files = discover(scan_paths, tuple(a.exclude), scan_root, a.skip_generated)
     keys = {f: repo_key(f, scan_root) for f in files}
     if a.list_files:
         for f in files:

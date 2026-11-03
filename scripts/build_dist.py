@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4"]
+# dependencies = ["markdown-it-py>=4", "pyyaml>=6"]
 # ///
 """Generate the GitHub and Claude-compatible copies of .agents/skills/.
 
@@ -29,6 +29,7 @@ It exits 0 clean, 1 stale, and 2 on a real failure. So a caller reading the exit
 finding apart from the check itself not having run. A real failure is a symlink under
 .agents/skills/, an unreadable file, or an include region it cannot render. So is an
 INCLUDE_DESTINATIONS entry that is stale, carried, or measured against a manifest it cannot read.
+So is a skill whose frontmatter description is over DESCRIPTION_LIMIT.
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ PLUGIN_MANIFEST = DIST_PLUGIN / ".claude-plugin" / "plugin.json"
 # Under the plugin root and not under .github/skills/, which spec/files.json carries whole to every fleet repository.
 DIGEST_DIR = DIST_PLUGIN / ".source-digests"
 GITHUB_SKILLS = ROOT / ".github" / "skills"
+DESCRIPTION_LIMIT = 1024
 
 
 def skill_names():
@@ -77,6 +79,58 @@ def reject_symlinks(skill_dir):
     for p in skill_dir.rglob("*"):
         if p.is_symlink():
             raise ValueError(f"{p} is a symlink; .agents/skills/ must contain only real files")
+
+
+def skill_description(name):
+    """The parsed `description` of a skill's SKILL.md frontmatter, or None where it states none.
+
+    Measured on the YAML-parsed string rather than the raw lines, since a folded block scalar's
+    indentation and line breaks are not characters a loader keeps. PyYAML is imported here rather
+    than at module level because skills_install.py imports this module under a plain python3.
+    """
+    import yaml
+
+    path = SKILLS_SRC / name / "SKILL.md"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "---":
+        return None
+    try:
+        end = lines.index("---", 1)
+    except ValueError:
+        raise ValueError(f"{path}: frontmatter opens with --- and never closes") from None
+    try:
+        meta = yaml.safe_load("\n".join(lines[1:end]))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path}: frontmatter is not valid YAML: {exc}") from None
+    if meta is None:
+        return None
+    if isinstance(meta, dict):
+        description = meta.get("description")
+        if description is None or isinstance(description, str):
+            return description
+        raise ValueError(f"{path}: frontmatter description is not a string")
+    raise ValueError(f"{path}: frontmatter is not a mapping")
+
+
+def check_descriptions(names):
+    """Raise if any named skill's description is longer than DESCRIPTION_LIMIT characters.
+
+    DESCRIPTION_LIMIT is the Agent Skills specification's documented maximum. A loader can keep only
+    a description's head. The tail is where a description names the sibling skill that wins a
+    shared trigger. So a description past the limit loses its routing silently. Only a trim repairs
+    it, which is why this is a refusal rather than a stale result.
+    """
+    over = []
+    for name in names:
+        reject_symlinks(SKILLS_SRC / name)
+        description = skill_description(name)
+        if description is not None and len(description) > DESCRIPTION_LIMIT:
+            over.append(f"{name} ({len(description)})")
+    if over:
+        raise ValueError(
+            f"Skill description over the {DESCRIPTION_LIMIT}-character Agent Skills limit: "
+            f"{', '.join(over)}. Trim it in .agents/skills/<name>/SKILL.md, moving narrative into the body."
+        )
 
 
 def tree_digest(root, names):
@@ -694,6 +748,7 @@ def fill_includes():
 
 def regenerate():
     names = skill_names()
+    check_descriptions(names)
     # Before the copy, so the mirrors carry the filled text and the digests hash it.
     fill_includes()
     if DIST_PLUGIN.is_symlink() or DIST_PLUGIN.is_file():
@@ -789,6 +844,7 @@ def main():
         try:
             drift = include_drift()
             stale = is_stale(drift)
+            check_descriptions(skill_names())
         except (ValueError, OSError) as exc:
             # 2 rather than 1, so a caller reading the exit code (host-setup/menu.sh among them) can tell this apart from the stale result below.
             # That result also exits 1 by this flag's own documented contract.

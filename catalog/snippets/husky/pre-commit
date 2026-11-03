@@ -40,8 +40,19 @@ else
     exit 1
 fi
 
-# The prose gate scopes to the working tree against HEAD, not only the staged index.
-# A partially staged file is judged on all of its edits, not only the staged ones.
+# The prose gate reads the paths this commit stages, so an unrelated untracked file cannot refuse it.
+# It reads their working-tree content, so a partially staged file is judged on all of its edits.
+# A path that is no longer a file is dropped, since the gate refuses a submodule or a deleted path.
+# An empty list skips the gate, which given no path would scan the whole tree.
+# The inner sh checks for that itself, since GNU xargs runs once on empty input and BSD xargs does not.
+# The list is read once on its own first, because a pipeline hides a failure of its first command.
+# `--skip-generated` passes over a staged file in a generated tree, as a whole-tree scan does.
+# The run_py function is out of reach of xargs, so uv chooses the interpreter, which hub_fetch_run.py needs anyway.
 # The pull request gate reads every line the branch changes against its base.
-run_py "$hub_fetch_run" .github/actions/prose-gate/prose_lint.py . --diff HEAD || exit 1
+git diff --cached --name-only --diff-filter=ACMRT -z >/dev/null || exit 1
+# shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
+git diff --cached --name-only --diff-filter=ACMRT -z |
+    xargs -0 sh -c 'fetch=$1; shift; for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
+        [ "$#" -eq 0 ] || exec uv run --no-project python "$fetch" .github/actions/prose-gate/prose_lint.py \
+            --skip-generated --diff HEAD -- "$@"' sh "$hub_fetch_run" || exit 1
 run_py "$hub_fetch_run" .github/actions/repo-gate/repo_gate.py --check eol || exit 1

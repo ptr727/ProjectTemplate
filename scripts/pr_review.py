@@ -167,10 +167,12 @@ Subcommands
            required check unregistered only under unread rules, a `CHECKS TRUNCATED` rollup, a
            DRAFT merge, or a pull request not open.
            30 = still pending at the timeout. On a held head it is any hold
-           `status=CHECKS_PENDING` names, a required check still settling and a workflow run still
-           open among them. Where the rollup holds a type this cannot read, a BLOCKED hold's note
-           says an unmet required check may sit in its unread part. It is also a round past
-           --min-rounds not yet landed.
+           `status=CHECKS_PENDING` names, a required check still settling, a workflow run still
+           open, and a CodeRabbit or Qodo check not yet passed or failed on any merge state among
+           them, the last unless that reviewer's newest output is a rate limit since it began.
+           Where the rollup holds a type this cannot read, a BLOCKED hold's note says an unmet
+           required check may sit in its unread part. It is also a round past --min-rounds not
+           yet landed.
            40 = no Copilot review covers the head, in any of these cases:
            - The reviewer answered outside a formal review.
            - The request returned success and recorded nothing on the pull request.
@@ -252,6 +254,7 @@ from pr_review_checks import (
     checks_settling,
     checks_stuck,
     held_checks_open,
+    hosted_reviews_running,
     runs_open,
 )
 from pr_review_copilot import has_prose
@@ -277,7 +280,6 @@ from pr_review_rounds import (
     newest_first,
     newest_of,
     newest_request_event,
-    null_node,
     open_threads,
     polled_past,
     possible_quota,
@@ -382,14 +384,14 @@ HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus mergedAt closedAt mergeCommit{ oid }
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
-    comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized } pageInfo{ hasPreviousPage } }
+    comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
-        ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) }
+        ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) creator{ login } }
       }}}
       checkSuites(last:50){ nodes{ databaseId status app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
     }}}
@@ -492,25 +494,25 @@ def gh_graphql(query: str, **variables) -> dict:
 
     The transport raises `GraphQLError` and never exits, so a failed read prints its detail and
     ends the run at exit 1. Only an error set made of `workflowRun` paths is tolerated. A response
-    holding a null node ends the run too, and only that case is retried first. A query is read
-    again on `READ_RETRY_DELAYS`, and a mutation is never sent twice.
+    holding a null node ends the run too, after a query is read again on `READ_RETRY_DELAYS`. A
+    mutation is never sent twice.
     """
 
-    def send() -> shared.Response:
+    def send() -> shared.Response | shared.NullNodeError:
         try:
             return shared.request(query, variables, tolerate=_is_workflow_run_error)
+        except shared.NullNodeError as exc:
+            return exc
         except shared.GraphQLError as exc:
             sys.stderr.write(exc.detail)
             raise SystemExit(str(exc)) from exc
 
     reads = query.lstrip().startswith("query")
     delays = READ_RETRY_DELAYS if reads else ()
-    response = backoff(send(), send, lambda r: null_node(r.data) is not None, delays=delays)
-    if (where := null_node(response.data)) is not None:
-        raise SystemExit(
-            f"gh graphql returned a null node GitHub could not resolve under {where}, so the "
-            "response is unread" + ("" if reads else ", though the write it answers was sent")
-        )
+    response = backoff(send(), send, lambda r: isinstance(r, shared.NullNodeError), delays=delays)
+    if isinstance(response, shared.NullNodeError):
+        sent = "" if reads else ", though the write it answers was sent"
+        raise SystemExit(f"{response}, so the response is unread{sent}")
     data = response.data
     if response.tolerated:
         sys.stderr.write("gh graphql: workflowRun unreadable, checks are not deduped by workflow\n")
@@ -1759,6 +1761,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             )
             return 46
         runs = runs_open(final)
+        hosted = hosted_reviews_running(final, checks, now, a.check_grace, a.check_stall)
         if covered and held_checks_open(
             final,
             checks,
@@ -1770,11 +1773,12 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             print(
                 "status=CHECKS_PENDING an attested local pass covers this head, and by the "
                 "timeout a check had not concluded, none this can read had posted, a workflow run on the head "
-                "had not completed, a check the base branch requires had not registered or came "
-                "from another app, or the merge was still UNKNOWN, so the merge is not ready yet: "
-                "wait again, or read the checks above"
+                "had not completed, a hosted reviewer was still reviewing it, a check the base "
+                "branch requires had not registered or came from another app, or the merge was "
+                "still UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
                 + _unmet_note(final, required_for(final, owner, repo), checks)
                 + (f" (not completed: {', '.join(runs)})" if runs else "")
+                + (f" (reviewing: {', '.join(hosted)})" if hosted else "")
             )
             return 30
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.

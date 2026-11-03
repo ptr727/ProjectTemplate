@@ -386,6 +386,7 @@ class TestOpenFindings(unittest.TestCase):
             "Outstanding findings:",
             "Unresolved review findings:",
             "Open review findings:",
+            "Open findings:",
             "Review findings remain:",
         ):
             with self.subTest(label=label):
@@ -403,6 +404,7 @@ class TestOpenFindings(unittest.TestCase):
             "Outstanding findings:",
             "Unresolved review findings:",
             "Open review findings:",
+            "Open findings:",
             "Review findings remain:",
         ):
             with self.subTest(label=label):

@@ -1904,6 +1904,9 @@ class TestCommentWrapRule(BaitCase):
             ("app.ts", "// eslint-disable-next-line no-console\n"),
             ("app.ts", "// prettier-ignore\n"),
             ("settings.jsonc", "// cSpell:ignore exampleword\n"),
+            ("Parse.cs", "// lang=json\n"),
+            ("Parse.cs", "// language=regex\n"),
+            ("Parse.cs", "// lang = json\n"),
         ):
             with self.subTest(name=name, text=text.strip()):
                 self.assertEqual([], self.kinds(text, self.COMMENT_RULES, name=name))
@@ -6934,6 +6937,139 @@ class TestTheScanScopeIsTheScopeReported(unittest.TestCase):
         (root / "reports").mkdir()
         (root / "reports" / "audit.md").write_text(self.BAIT, encoding="utf-8")
         self.assertEqual(0, self.run_in(root, "."))
+
+    def test_a_hook_naming_a_staged_file_in_a_generated_tree_passes(self) -> None:
+        """A commit staging a report names it, and the hook must not read what a sweep skips.
+
+        Read as named, the file reports its bait. The same file under `--skip-generated` is dropped,
+        so a hook keeps no copy of `generated_trees` to stay out of that tree.
+        """
+        root = self.repo()
+        (root / "reports" / "run").mkdir(parents=True)
+        (root / "reports" / "run" / "audit.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        named = ("--diff", "HEAD", "--", "reports/run/audit.md")
+        self.assertEqual(1, self.run_in(root, *named))
+        self.assertEqual(0, self.run_in(root, "--skip-generated", *named))
+
+    def test_skip_generated_reads_the_trees_the_repository_declares(self) -> None:
+        """The repository's own `generated_trees` entry is honored, and an authored file is read."""
+        root = self.repo()
+        (root / ".prose-gate.json").write_text('{"generated_trees": ["out"]}\n', encoding="utf-8")
+        (root / "out").mkdir()
+        (root / "out" / "page.md").write_text(self.BAIT, encoding="utf-8")
+        (root / "NEW.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        argv = ("--skip-generated", "--diff", "HEAD", "--")
+        self.assertEqual(0, self.run_in(root, *argv, "out/page.md"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(1, self.run_in(root, *argv, "out/page.md", "NEW.md"))
+        self.assertIn("NEW.md:3: dupword", out.getvalue())
+        self.assertNotIn("out/page.md", out.getvalue())
+
+    def test_a_hook_naming_its_staged_paths_leaves_an_untracked_file_unread(self) -> None:
+        """An untracked scratch file refused every commit while the hook scanned the whole tree."""
+        root = self.repo()
+        (root / "note.md").write_text(self.BAIT, encoding="utf-8")
+        (root / "DOC.md").write_text("# Doc\n\nA clean line, edited.\n", encoding="utf-8")
+        self.git(root, "add", "DOC.md")
+        self.assertEqual(1, self.run_in(root, ".", "--diff", "HEAD"))
+        self.assertEqual(0, self.run_in(root, "--skip-generated", "--diff", "HEAD", "--", "DOC.md"))
+
+    def test_a_hook_in_a_linked_worktree_names_paths_from_several_directories(self) -> None:
+        """Git hands such a hook `GIT_DIR`, and under it each named directory read as its own top.
+
+        So two staged files in two directories were refused as spanning two repositories.
+        """
+        root = self.repo()
+        (root / "a").mkdir()
+        (root / "b").mkdir()
+        (root / "a" / "one.md").write_text(self.BAIT, encoding="utf-8")
+        (root / "b" / "two.md").write_text("# Two\n\nA clean line.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(root / ".git")}):
+            found = prose_lint.repo_root(root / "a" / "one.md")
+            self.assertEqual(root.resolve(), Path(found).resolve())
+            code = self.run_in(root, "--diff", "HEAD", "--", "a/one.md", "b/two.md")
+        self.assertEqual(1, code)
+        self.assertNotIn("more than one repository", self.err.getvalue())
+
+    def test_a_hook_in_a_linked_worktree_names_a_subdirectory(self) -> None:
+        """Under `GIT_DIR` the named directory was read as the top, so the top's ignores lapsed."""
+        root = self.repo()
+        (root / "sub").mkdir()
+        (root / ".gitignore").write_text("sub/scratch.md\n", encoding="utf-8")
+        (root / "sub" / "a.md").write_text("# A\n\nA clean line.\n", encoding="utf-8")
+        (root / "sub" / "scratch.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "sub")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(root / ".git")}):
+            self.assertEqual([root / "sub" / "a.md"], prose_lint.tracked_paths(root / "sub"))
+            self.assertEqual([], prose_lint.untracked_paths(root / "sub"))
+            self.assertEqual(0, self.run_in(root, "sub"))
+
+    def test_each_scanned_tree_read_answers_for_the_directory_it_names(self) -> None:
+        """An inherited `GIT_DIR` naming another repository, shallow, answers none of these reads."""
+        source = self.repo("source")
+        (source / "ONLY.md").write_text("# Only\n\nA clean line.\n", encoding="utf-8")
+        self.git(source, "add", "-A")
+        self.git(source, "commit", "-qm", "only")
+        self.git(self.tmp, "clone", "-q", "--depth", "1", source.as_uri(), "shallow")
+        root = self.repo()
+        (root / "ROOT.md").write_text("# Root\n\nA clean line.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "-qm", "root")
+        (root / "DOC.md").write_text(self.BAIT, encoding="utf-8")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.tmp / "shallow" / ".git")}):
+            self.assertEqual([root / "DOC.md", root / "ROOT.md"], prose_lint.tracked_paths(root))
+            self.assertEqual([], prose_lint.untracked_paths(root))
+            self.assertFalse(prose_lint.shallow_checkout(root))
+            self.assertFalse(prose_lint.once_tracked(str(root), "ONLY.md"))
+            self.assertEqual("DOC.md\n", prose_lint.git_bytes(root, "diff --name-only", "HEAD"))
+
+    @unittest.skipUnless(os.name == "posix", "the hook below is written for a POSIX shell")
+    def test_a_commit_naming_paths_keeps_the_index_it_hands_its_hook(self) -> None:
+        """`git commit <paths>` hands the hook the index that commit records, not the checkout's.
+
+        Here the checkout's index has dropped `sub/kept.md`, which an ignore then hides. The
+        commit still records it, so a hook scanning `sub` reads it. Dropping `GIT_INDEX_FILE`
+        with `GIT_DIR` would lose it, and inheriting `GIT_DIR` would read the ignored file too.
+        """
+        root = self.repo()
+        (root / "sub").mkdir()
+        (root / ".gitignore").write_text("sub/kept.md\nsub/scratch.md\n", encoding="utf-8")
+        (root / "sub" / "a.md").write_text("# A\n\nA clean line.\n", encoding="utf-8")
+        (root / "sub" / "kept.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(root, "add", "-A")
+        self.git(root, "add", "-f", "sub/kept.md")
+        self.git(root, "commit", "-qm", "sub")
+        tree = self.tmp / "linked"
+        self.git(root, "worktree", "add", "-q", str(tree))
+        (tree / "sub" / "scratch.md").write_text(self.BAIT, encoding="utf-8")
+        self.git(tree, "rm", "-q", "--cached", "sub/kept.md")
+        (tree / "sub" / "a.md").write_text("# A\n\nA clean line, edited.\n", encoding="utf-8")
+        hooks, listed = self.tmp / "hooks", self.tmp / "listed.txt"
+        hooks.mkdir()
+        command = shlex.join([sys.executable, str(PROSE_LINT_SCRIPT), "--list-files", "sub"])
+        hook = hooks / "pre-commit"
+        hook.write_text(f"#!/bin/sh\n{command} > {shlex.quote(str(listed))}\n", encoding="utf-8")
+        hook.chmod(0o755)
+        self.git(tree, "-c", f"core.hooksPath={hooks}", "commit", "-qm", "edit", "sub/a.md")
+        self.assertEqual("sub/a.md\nsub/kept.md\n", listed.read_text(encoding="utf-8"))
+
+    def test_a_hook_naming_many_files_looks_up_each_directory_once(self) -> None:
+        """A commit staging hundreds of files names each, and each lookup starts a git process."""
+        root = self.repo()
+        (root / "a").mkdir()
+        for name in ("one.md", "two.md", "three.md"):
+            (root / "a" / name).write_text("# Doc\n\nA clean line.\n", encoding="utf-8")
+        self.git(root, "add", "-A")
+        with mock.patch.object(prose_lint, "repo_root", wraps=prose_lint.repo_root) as lookup:
+            self.assertEqual(
+                0, self.run_in(root, "--diff", "HEAD", "--", "a/one.md", "a/two.md", "a/three.md")
+            )
+        self.assertEqual(1, lookup.call_count)
 
     def test_a_binary_file_is_not_read_because_it_is_untracked(self) -> None:
         """The text test decides what the rules can read, and it is applied to both sources."""

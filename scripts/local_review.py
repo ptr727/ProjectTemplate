@@ -83,12 +83,19 @@ A recorded pass means a review ran over exactly this content. It never means the
 Disposing of what a review found is judgment, per `pr-review-conduct`'s outcomes, so a pass is
 recorded whether the pass raised findings or none.
 
+An `agent-skill` pass is recorded from the report its reviewer wrote, never from a count the caller
+types. A typed count binds the record to nothing the reviewer produced. So a driver that misread or
+imagined a review could record one that never reported. The report opens with the digest it was
+written for, and each later non-blank line is one finding. `record` refuses a report that is absent
+or names another digest. It stores the report's sha256 and derives the count from its lines.
+
 Usage: python3 scripts/local_review.py status [--target '<branch>']
-           what the current content digest is, and which backends hold a pass on it.
+           the content digest, which backends hold a pass on it, and its reportPath.
        python3 scripts/local_review.py record --reviewer '<id>' --expect-digest '<digest>'
-                                             [--target '<branch>'] [--findings '<count>']
-           record that <id> reviewed the content `status` reported as <digest>. It refuses when the
-           content has moved since.
+                                             --report '<path>' [--target '<branch>']
+           record that <id> reviewed the content `status` reported as <digest>. The count comes
+           from the report at <path>. It refuses when the content has moved or the report does not
+           match.
        python3 scripts/local_review.py check [--target '<branch>']
            exit 0 covered, 1 not covered, 2 could not run. A branch holding no net content
            against its target is covered, there being nothing for a review to read.
@@ -123,11 +130,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import GIT_LOCATION_VARS
 
-RECEIPT_VERSION = 1
+RECEIPT_VERSION = 2
 RECEIPT_NAME = "local-review-receipt.json"
 # Kept in the git directory rather than the working tree, so staging the tree does not stage these.
 STAGING_INDEX_PREFIX = "local-review-index."
 STAGING_OBJECTS_PREFIX = "local-review-objects."
+REPORT_PREFIX = "local-review-report."
+REPORT_SUFFIX = ".txt"
+REPORT_HEADER = "contentDigest: "
 DEFAULT_TARGET = "develop"
 
 EXIT_COVERED = 0
@@ -293,6 +303,52 @@ def receipt_path(root: Path) -> Path:
     by accident, is never picked up as untracked content, and needs no .gitignore entry.
     """
     return git_dir(root) / RECEIPT_NAME
+
+
+def report_path(root: Path, digest: str) -> Path:
+    """Where an `agent-skill` reviewer writes its report over the content `digest` names."""
+    return git_dir(root) / f"{REPORT_PREFIX}{digest}{REPORT_SUFFIX}"
+
+
+def read_report(path: Path, digest: str) -> tuple[str, int]:
+    """The report's sha256 and finding count, refusing a report not written for `digest`.
+
+    The first line names the digest the reviewer was handed, and every later non-blank line is one
+    finding. So a pass with nothing to report writes the first line alone. A blank line counts as
+    nothing, and any other line counts as a finding. That errs toward a count too high rather than
+    a clean pass nobody wrote.
+    """
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError as e:
+        raise CannotRun(
+            f"no report at {path}, so no review has reported over this content."
+            " Record only once the dispatched reviewer has finished and written it"
+        ) from e
+    lines = raw.decode("utf-8-sig").splitlines()
+    header = lines[0].rstrip() if lines else ""
+    if not header.startswith(REPORT_HEADER):
+        raise CannotRun(f"the report at {path} does not open with a '{REPORT_HEADER}<digest>' line")
+    written_for = header.removeprefix(REPORT_HEADER).strip()
+    if written_for != digest:
+        raise CannotRun(
+            f"the report at {path} was written for {written_for[:12] or 'no digest'},"
+            f" not for {digest[:12]}, so it reviewed other content"
+        )
+    findings = sum(1 for line in lines[1:] if line.strip())
+    return hashlib.sha256(raw).hexdigest(), findings
+
+
+def prune_reports(root: Path, keep: Path) -> None:
+    """Remove the reports written for any digest other than the one just recorded.
+
+    A report over content that no longer exists can never be recorded again, the same reason the
+    receipt drops a pass over it. Without this, a checkout that outlives many reviews would collect
+    one report per review.
+    """
+    for stale in git_dir(root).glob(f"{REPORT_PREFIX}*{REPORT_SUFFIX}"):
+        if stale != keep:
+            stale.unlink(missing_ok=True)
 
 
 def ref_exists(ref: str, root: Path) -> bool:
@@ -797,7 +853,13 @@ def held_lock(path: Path, timeout: float = 10.0) -> int:
 
 
 def write_pass(
-    root: Path, target: str, base: str, digest: str, reviewer: str, findings: int | None
+    root: Path,
+    target: str,
+    base: str,
+    digest: str,
+    reviewer: str,
+    findings: int | None,
+    report_sha256: str | None = None,
 ) -> dict:
     """Add one backend's pass to the receipt, dropping any pass that no longer covers the content.
 
@@ -811,25 +873,32 @@ def write_pass(
     path = receipt_path(root)
     fd_lock = held_lock(path)
     try:
-        return _write_pass_locked(root, target, base, digest, reviewer, findings)
+        return _write_pass_locked(root, target, base, digest, reviewer, findings, report_sha256)
     finally:
         os.close(fd_lock)
         Path(str(path) + ".lock").unlink(missing_ok=True)
 
 
 def _write_pass_locked(
-    root: Path, target: str, base: str, digest: str, reviewer: str, findings: int | None
+    root: Path,
+    target: str,
+    base: str,
+    digest: str,
+    reviewer: str,
+    findings: int | None,
+    report_sha256: str | None = None,
 ) -> dict:
     """The read, merge, and replace that `write_pass` holds the lock around."""
     receipt, _ = read_receipt(root)
     kept = [p for p in covering_passes(receipt, base, digest, target) if p["reviewer"] != reviewer]
-    kept.append(
-        {
-            "reviewer": reviewer,
-            "recordedUtc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "findings": findings,
-        }
-    )
+    entry: dict = {
+        "reviewer": reviewer,
+        "recordedUtc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "findings": findings,
+    }
+    if report_sha256 is not None:
+        entry["reportSha256"] = report_sha256
+    kept.append(entry)
     out = {
         "receiptVersion": RECEIPT_VERSION,
         "target": target,
@@ -969,6 +1038,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                 "reviewers": [p["reviewer"] for p in passes],
                 "findings": {p["reviewer"]: p.get("findings") for p in passes},
                 "receiptProblems": problems,
+                "reportPath": str(report_path(root, digest)),
             },
             indent=2,
         )
@@ -990,9 +1060,6 @@ def cmd_record(args: argparse.Namespace) -> int:
             sys.stderr,
         )
         return EXIT_CANNOT_RUN
-    if args.findings is not None and args.findings < 0:
-        emit(f"--findings cannot be negative, got {args.findings}", sys.stderr)
-        return EXIT_CANNOT_RUN
     root = repo_root()
     target = resolve_target(args.target)
     base, digest, changed = current_state(target, root)
@@ -1012,11 +1079,13 @@ def cmd_record(args: argparse.Namespace) -> int:
             sys.stderr,
         )
         return EXIT_CANNOT_RUN
-    out = write_pass(root, target, base, digest, args.reviewer, args.findings)
+    sha256, findings = read_report(Path(args.report), digest)
+    out = write_pass(root, target, base, digest, args.reviewer, findings, sha256)
+    prune_reports(root, report_path(root, digest))
     reviewers = ", ".join(p["reviewer"] for p in out["passes"])
     emit(
         f"recorded {args.reviewer} over {changed} changed path(s) against {target}"
-        f" at {digest[:12]}. Passes now: {reviewers}"
+        f" at {digest[:12]}, {findings} finding(s) from its report. Passes now: {reviewers}"
     )
     return EXIT_COVERED
 
@@ -1075,7 +1144,6 @@ def cmd_check(args: argparse.Namespace) -> int:
     # Printed so it runs exactly as it stands.
     # That means the full digest rather than the abbreviated form above, the required
     # --expect-digest present, and no placeholder left to substitute.
-    # --findings is optional, so it is left out rather than shown as something to fill in.
     # A placeholder would make the one actionable line here a command nobody can paste.
     # The target is quoted because git permits a ref name to hold shell metacharacters.
     # Confirmed against a real repository for a semicolon, a command substitution, and an ampersand.
@@ -1085,10 +1153,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     # A branch based on anything else has a change set this scope does not describe.
     # The line below would then record a pass over paths no reviewer was shown.
     emit(
-        "\nRun the local-strict-review pass over this diff, then record it:\n"
+        "\nRun the local-strict-review pass over this diff, have it write its report to the"
+        " path below, and once it has finished, record it:\n"
         f"  python3 scripts/local_review.py record --reviewer agent-skill"
-        f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}\n"
-        "Add --findings '<count>' to record how many it raised.\n"
+        f" --target {shlex.quote(target)} --expect-digest {shlex.quote(digest)}"
+        f" --report {shlex.quote(str(report_path(root, digest)))}\n"
         f"That line records a pass against {target}, which is the branch this check measured rather"
         " than one it discovered. Where the review read this branch against a different base, that"
         " is the wrong scope and the line records content nobody looked at.",
@@ -1148,11 +1217,18 @@ def main(argv: list[str] | None = None) -> int:
     p_record.add_argument(
         "--reviewer", required=True, help=f"one of: {', '.join(sorted(BACKENDS))}"
     )
-    p_record.add_argument("--findings", type=int, default=None, help="how many findings it raised")
     p_record.add_argument(
         "--expect-digest",
         required=True,
         help="the contentDigest the review was run against, refusing to record if it has moved",
+    )
+    p_record.add_argument(
+        "--report",
+        required=True,
+        help=(
+            "the report the reviewer wrote, normally the reportPath `status` names. Its first line"
+            f" is '{REPORT_HEADER}<digest>' and each later non-blank line is one finding"
+        ),
     )
     p_record.set_defaults(func=cmd_record)
 
