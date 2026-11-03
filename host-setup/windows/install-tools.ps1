@@ -474,7 +474,7 @@ $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopA
 # So a run of later error and abort lines cannot push the actual reason out of the report.
 # A portable or zip package has no installer, so winget's own WinGet-<timestamp>.log for the call holds its reason instead.
 # That log is the latest one started since the attempt that names the package id, and only its error lines are kept.
-# Only there does an access denial count as files in use, being winget's own refusal to replace a file.
+# Only there does an access denial count as files in use, and only one naming a file, as winget reports failing to replace one.
 # In an installer log a denial can be a permission failure, which no running process causes.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
@@ -504,7 +504,7 @@ function Get-InstallerFailureReason {
         $result.WingetLog = $session.FullName
         $errors = @(Get-Content -LiteralPath $session.FullName -ErrorAction SilentlyContinue |
             Where-Object { $_ -match '^\S+ \S+ <E> ' } | ForEach-Object { ($_ -replace '^\S+ \S+ <E> \[[^\]]*\]\s*', '').Trim() })
-        $selected = Select-FailureEntry -Entries $errors -Pattern '.' -InUsePattern '(?i)in use by|used by another process|access is denied|sharing violation'
+        $selected = Select-FailureEntry -Entries $errors -Pattern '.' -InUsePattern '(?i)in use by|used by another process|access is denied\.?:\s*"'
         $result.WingetEntries = $selected.Entries
         $result.InUse = $result.InUse -or $selected.InUse
     }
@@ -598,7 +598,7 @@ function Get-ToolHolder {
 #   - an error in winget's own log for the call saying a file was in use or denied
 #   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
 # Anything else names nobody, for this reason.
-# A Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree.
+# A Git upgrade that failed on a download logs no such entry and still finds every open Git Bash running from Git's own tree.
 # Blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)

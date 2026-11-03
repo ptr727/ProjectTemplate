@@ -940,6 +940,11 @@ OTHER_WINGET_LOG = [
     "2026-01-02 03:04:05.300 <E> [CLI ] Caught std::exception: remove: Access is denied.",
 ]
 
+UNRELATED_DENIAL_WINGET_LOG = [
+    "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'install' '--id' 'Settings.Tool'",
+    "2026-01-02 03:04:05.300 <E> [CORE] Failed to open the settings store: Access is denied.",
+]
+
 DENIED_LOG = [
     "2026-01-02 03:04:05.100   Error 0x80070005: Access is denied.",
 ]
@@ -970,6 +975,7 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             for name, lines in (
                 ("WinGet-2026-01-02-03-04-05.000.log", PORTABLE_WINGET_LOG),
                 ("WinGet-2026-01-02-03-04-06.000.log", OTHER_WINGET_LOG),
+                ("WinGet-2026-01-02-03-04-07.000.log", UNRELATED_DENIAL_WINGET_LOG),
             ):
                 Path(directory, name).write_text(
                     "\r\n".join([*lines, ""]), encoding="utf-8", newline=""
@@ -985,6 +991,7 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                     {"id": "Other.Tool", "since": "2000-01-01"},
                     {"id": "Busy.Tool", "since": "2000-01-01"},
                     {"id": "Denied.Tool", "since": "2000-01-01"},
+                    {"id": "Settings.Tool", "since": "2000-01-01"},
                     {"id": "Portable.Tool", "since": "2000-01-01"},
                     {"id": "Portable.Tool", "since": "2100-01-01"},
                 ],
@@ -1049,6 +1056,19 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                 "entries": ["Error 0x80070005: Access is denied."],
                 "winget_log": False,
                 "winget_entries": [],
+                "in_use": False,
+            },
+        )
+
+    def test_a_winget_denial_naming_no_file_is_not_files_in_use(self) -> None:
+        """Only a denial naming a file is winget failing to replace one."""
+        self.assertEqual(
+            self.run_cases()["reason Settings.Tool 2000-01-01"],
+            {
+                "log": False,
+                "entries": [],
+                "winget_log": True,
+                "winget_entries": ["Failed to open the settings store: Access is denied."],
                 "in_use": False,
             },
         )
