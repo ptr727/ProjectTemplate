@@ -394,6 +394,20 @@ ENV_SECRET_FIELD = r"[a-z0-9]+(?:-+[a-z0-9]+)*"
 ENV_SECRET_NAME = re.compile(rf"{ENV_SECRET_FIELD}(?:_{ENV_SECRET_FIELD})*(?:\.[a-z0-9]+)?")
 ENV_SECRET_TEMPLATE = ".example"
 SECRETS_DIRECTORY_EXEMPT = {"README.md", ".gitignore", ".gitkeep"}
+COMPOSE_FILE = re.compile(r"(?:docker-)?compose(?:[.-][\w-]+)*\.ya?ml")
+EDITOR_CONFIG = re.compile(
+    r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json"
+    r"|[^/]+\.code-workspace)"
+)
+SECRET_FOLDER = r"((?:[\w.-]+/)*(\.?secrets))"
+SECRET_REFERENCE = re.compile(
+    r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
+    rf"{SECRET_FOLDER}(?:/([^\s\"'`,;:)}}\]\\]*))?(?![\w.-])"
+)
+WORKSPACE_FOLDER = re.compile(r'"folders"\s*:\s*\[\s*\{[^}]*?"path"\s*:\s*"([^"]*)"')
+EDITOR_COMMENT = re.compile(r"(?:^|(?<=\s))//.*$", re.MULTILINE)
+SECRET_PATH = re.compile(rf"{SECRET_FOLDER}(?:/(.*))?")
+SECRET_FILE_NAME = re.compile(r"[\w.-]+")
 PATHS_SHOWN = 5
 
 
@@ -508,40 +522,287 @@ def file_naming_findings(entry, blobs, read_text):
     return findings
 
 
-def secret_stem_findings(tree):
-    """DRIFT naming each tracked env or secret file whose name breaks CODESTYLE.md's env and secret file rule.
+def secret_name_breaks(name, in_secrets):
+    """Whether a file name breaks the env and secret file rule, a .txt in a secrets directory included."""
+    named = name.removesuffix(ENV_SECRET_TEMPLATE)
+    return not ENV_SECRET_NAME.fullmatch(named) or (in_secrets and named.endswith(".txt"))
 
-    Every file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere whose name opens on no dot.
+
+def ignored_secrets_folder(line):
+    """The secrets folder one .gitignore line ignores, itself or its files by glob, and whether it is literal.
+
+    A literal line is anchored with no glob before the folder, so it names one path. Any other floats.
+    None where the line ignores no such folder. A line naming a plain path past the folder, such as
+    secrets/__pycache__/, ignores only that path.
+    """
+    pattern = line.strip()
+    if pattern.startswith(("#", "!")):
+        return None
+    body = pattern.rstrip("/")
+    segments = body.lstrip("/").split("/")
+    if "secrets" not in segments:
+        return None
+    at = segments.index("secrets")
+    after = segments[at + 1 :]
+    if any("*" not in segment for segment in after):
+        return None
+    folder = "/".join(segments[: at + 1])
+    floating = "/" not in body or any(c in folder for c in "*?[")
+    return folder, not floating
+
+
+def secret_folders(tree):
+    """Each tracked directory, each secrets one tracking more than its own files, and each file a bare one holds.
+
+    A secrets directory's own files are its README.md, .gitignore, .gitkeep, and .example templates,
+    and each file beside its own template.
+    A held file is one of those other than README.md, in a secrets directory that is not code.
+    """
+    directories, holding, owned = set(), set(), {}
+    for path in tree:
+        segments = path.split("/")
+        name = segments[-1]
+        own = (
+            name in SECRETS_DIRECTORY_EXEMPT
+            or name.endswith(ENV_SECRET_TEMPLATE)
+            or path + ENV_SECRET_TEMPLATE in tree
+        )
+        for at in range(1, len(segments)):
+            folder = "/".join(segments[:at])
+            directories.add(folder)
+            if segments[at - 1] == "secrets" and not own:
+                holding.add(folder)
+            elif segments[at - 1] == "secrets" and name != "README.md":
+                owned.setdefault(path, []).append(folder)
+    held = {path for path, folders in owned.items() if any(f not in holding for f in folders)}
+    return directories, holding, held
+
+
+class ComposeLoader(yaml.SafeLoader):
+    """The safe loader, plus the !reset and !override tags compose files may carry."""
+
+
+def _compose_tag(loader, node):
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    return loader.construct_scalar(node)
+
+
+ComposeLoader.add_constructor("!reset", _compose_tag)
+ComposeLoader.add_constructor("!override", _compose_tag)
+
+
+def compose_host_paths(document):
+    """Each path a compose document resolves on the host, and whether it is always a file.
+
+    Secret, config, and env files are files. A bind source or a build context may be a directory.
+    A short-syntax volume source is a path only where it opens on . or /, since any other is a volume name.
+    """
+    if not isinstance(document, dict):
+        return []
+    files, others = [], []
+    for section in ("secrets", "configs"):
+        entries = document.get(section)
+        for entry in entries.values() if isinstance(entries, dict) else []:
+            files.append(entry.get("file") if isinstance(entry, dict) else None)
+    services = document.get("services")
+    for service in services.values() if isinstance(services, dict) else []:
+        if not isinstance(service, dict):
+            continue
+        env = service.get("env_file")
+        for item in env if isinstance(env, list) else [env]:
+            files.append(item.get("path") if isinstance(item, dict) else item)
+        volumes = service.get("volumes")
+        for volume in volumes if isinstance(volumes, list) else []:
+            if isinstance(volume, str) and volume.startswith((".", "/")):
+                others.append(volume.split(":", 1)[0])
+            elif isinstance(volume, dict) and volume.get("type") == "bind":
+                others.append(volume.get("source"))
+        build = service.get("build")
+        others.append(build.get("context") if isinstance(build, dict) else build)
+    paired = [(path, True) for path in files] + [(path, False) for path in others]
+    return [(path, file) for path, file in paired if isinstance(path, str)]
+
+
+def secret_path_target(tree, directories, holding, root, written, rest):
+    """The secrets folder one repo-relative path names and the file it judges there, or None for neither.
+
+    No folder is named by a path that climbs out of the repo or ends at a tracked file. Nor by one
+    into a code directory in `holding`, or below a directory the tree lacks. The file is None where
+    the path names no plain file name. It is also None for one the tree tracks, templates, or holds
+    as a directory.
+    """
+    within = posixpath.normpath(posixpath.join(root, written))
+    parent = posixpath.dirname(within)
+    if within in tree or within in holding or (parent and parent not in directories):
+        return None
+    rest = (rest or "").rstrip(".")
+    resolved = posixpath.join(within, rest)
+    plain = SECRET_FILE_NAME.fullmatch(rest) and rest not in SECRETS_DIRECTORY_EXEMPT
+    tracked = resolved in tree or resolved in directories or resolved + ENV_SECRET_TEMPLATE in tree
+    if not plain or tracked:
+        return within, None
+    return within, resolved
+
+
+def named_secret_signals(tree, read_text, directories, holding):
+    """What tracked files say of the secrets directories the tree cannot show, since one is ignored by design.
+
+    The files read are each .gitignore and each compose or editor config file. A compose file is
+    read by its keys, for the paths compose resolves on the host against the file's own directory.
+    An editor file is read for a path a workspace variable roots, since any other depends on a
+    launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
+    point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
+    no signal once the tree or that file names a .secrets directory. Such a line is left behind
+    after the move, to guard old checkouts. A compose bind source or build context, any devcontainer
+    path, and an editor path with no extension may each be a directory. Each reports the folder but
+    judges no file name. A .code-workspace file's paths resolve against its first listed folder.
+    Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
+    named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
+    is each file read that returned no text. A compose file that does not parse, such as a template,
+    is no signal. Neither is an editor file's // comment, whether it opens a line or follows a space.
+    """
+    bare, named, unread = set(), {}, []
+    moved = any(".secrets" in path.split("/")[:-1] for path in tree)
+    for path in sorted(tree):
+        directory, name = posixpath.split(path)
+        gitignore = name == ".gitignore"
+        compose = COMPOSE_FILE.fullmatch(name) and not path.startswith(".github/workflows/")
+        editor = EDITOR_CONFIG.fullmatch(path)
+        if not (gitignore or compose or editor) or (gitignore and moved):
+            continue
+        text = read_text(path)
+        if text is None:
+            unread.append(path)
+        elif gitignore:
+            lines = text.splitlines()
+            live = [line.strip() for line in lines if not line.strip().startswith("#")]
+            if any(".secrets" in line.lstrip("!").split("/") for line in live):
+                continue
+            for line in lines:
+                found = ignored_secrets_folder(line)
+                if not found:
+                    continue
+                folder, literal = found
+                if literal:
+                    signal = secret_path_target(tree, directories, holding, directory, folder, None)
+                else:
+                    parts = folder.split("/")
+                    stop = next(
+                        i for i, p in enumerate(parts) if p == "secrets" or set(p) & set("*?[")
+                    )
+                    prefix = posixpath.join(directory, *parts[:stop])
+                    code = any(not prefix or h.startswith(f"{prefix}/") for h in holding)
+                    signal = not code and (not prefix or prefix in directories)
+                if signal:
+                    bare.add(path)
+        else:
+            if compose:
+                root = directory
+                document = _yaml(text, loader=ComposeLoader)[0]
+                found = [
+                    (SECRET_PATH.fullmatch(value), file)
+                    for value, file in compose_host_paths(document)
+                ]
+            else:
+                live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
+                live = live.replace("${/}", "/").replace("${pathSeparator}", "/")
+                root = editor.group(1)
+                listing = (
+                    WORKSPACE_FOLDER.search(live) if path.endswith(".code-workspace") else None
+                )
+                root = posixpath.join(root, listing[1]) if listing else root
+                file = ".devcontainer" not in path
+                found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
+            for match, file in found:
+                if not match:
+                    continue
+                written, folder, rest = match.group(1, 2, 3)
+                if compose and file and rest is None:
+                    continue
+                file = file and (compose or "." in (rest or "").rstrip("."))
+                target = secret_path_target(tree, directories, holding, root, written, rest)
+                if not target:
+                    continue
+                if folder == "secrets":
+                    bare.add(path)
+                if file and target[1] and secret_name_breaks(posixpath.basename(target[1]), True):
+                    named.setdefault(target[1], set()).add(path)
+    listed = [f"{p} (named in {', '.join(sorted(f))})" for p, f in sorted(named.items())]
+    return sorted(bare), listed, unread
+
+
+def secret_stem_findings(tree, read_text=None):
+    """DRIFT naming each env or secret file whose name breaks CODESTYLE.md's env and secret file rule.
+
+    Every tracked file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere
+    whose name opens on no dot. A bare `secrets/` directory holding its own tracked .gitignore,
+    .gitkeep, or .example template, or a file beside its own template, is reported. Each file
+    directly in it other than its README.md, .gitignore, and .gitkeep is judged. With `read_text`,
+    which returns a path's text or None, the tracked .gitignore, compose, and editor config files
+    are read too. They report a bare `secrets/` directory and judge each secret file they name that
+    the tree lacks.
     `tree` is the blob path set, or None when unread, which reports nothing.
     """
     if tree is None:
         return []
     broken = []
+    directories, holding, held = secret_folders(tree)
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        in_secrets = segments[-2:-1] == [".secrets"]
+        in_secrets = segments[-2:-1] == [".secrets"] or (
+            path in held and segments[-2:-1] == ["secrets"]
+        )
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
-        named = name.removesuffix(ENV_SECRET_TEMPLATE)
         folded = name.lower().removesuffix(ENV_SECRET_TEMPLATE)
         if not in_secrets and (folded.startswith(".") or not folded.endswith(".env")):
             continue
-        if not ENV_SECRET_NAME.fullmatch(named):
+        if secret_name_breaks(name, in_secrets):
             broken.append(path)
-    if not broken:
-        return []
-    return [
-        (
-            "DRIFT",
+    bare, named, unread = ([], [], [])
+    if read_text:
+        bare, named, unread = named_secret_signals(tree, read_text, directories, holding)
+    broken += named
+    bare = sorted(set(bare) | set(held))
+    findings = []
+    if broken:
+        findings.append(
             (
-                f"runtime-secrets: {len(broken)} env or secret file(s) break the env and secret file "
-                f'rule of CODESTYLE.md "Script and Utility File Names", or are a bare .env in a '
-                f'.secrets directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out: '
-                f"{capped_paths(broken)}"
-            ),
+                "DRIFT",
+                (
+                    f"runtime-secrets: {len(broken)} env or secret file(s) break the env and secret "
+                    f'file rule of CODESTYLE.md "Script and Utility File Names", or are a .txt or '
+                    f'bare .env file in a secrets directory, which GOVERNANCE.md "Repo-Scoped '
+                    f'Secrets" rules out: {capped_paths(broken)}'
+                ),
+            )
         )
-    ]
+    if bare:
+        findings.append(
+            (
+                "DRIFT",
+                (
+                    f"runtime-secrets: {len(bare)} tracked file(s) name or sit in a bare secrets/ "
+                    f'directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it '
+                    f".secrets/ and update each: {capped_paths(bare)}"
+                ),
+            )
+        )
+    if unread:
+        findings.append(
+            (
+                "DRIFT",
+                (
+                    f"runtime-secrets: could not read {len(unread)} file(s) to look for a bare "
+                    f"secrets/ directory or a named secret file, verify by hand: {capped_paths(unread)}"
+                ),
+            )
+        )
+    return findings
 
 
 @functools.cache
@@ -885,11 +1146,13 @@ def workspace_cspell_words(text):
     )
 
 
-def _yaml(text, compose=False):
+def _yaml(text, compose=False, loader=yaml.SafeLoader):
     """`(document, True)`, the node tree with `compose`, or `(None, False)` where `text` does not parse."""
     try:
         return (
-            yaml.compose(text, Loader=yaml.SafeLoader) if compose else yaml.safe_load(text)
+            yaml.compose(text, Loader=yaml.SafeLoader)
+            if compose
+            else yaml.load(text, Loader=loader)
         ), True
     except yaml.YAMLError:
         return None, False
@@ -1931,7 +2194,7 @@ def check_filenaming_scripts(run):
 
 
 def check_secrets_stems(run):
-    return secret_stem_findings(run.tree)
+    return secret_stem_findings(run.tree, run.read_text)
 
 
 def check_secrets_names(run):
