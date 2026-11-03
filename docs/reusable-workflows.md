@@ -197,7 +197,7 @@ Hub: `get-version-task.yml` and `publish-plan-task.yml` hosted, and the downstre
   - [ ] ESPHome-NonRoot (`get-version-task.yml` and `publish-plan-task.yml`)
   - [ ] NxWitness (`get-version-task.yml` and `publish-plan-task.yml`)
   - [ ] PhotoCleaner (`get-version-task.yml`)
-  - [ ] PlexCleaner (`get-version-task.yml`, and gains the `plan` job D4.1 requires by adopting `publish-plan-task.yml` rather than by a copy)
+  - [x] PlexCleaner (`get-version-task.yml`, and gains the `plan` job D4.1 requires by adopting `publish-plan-task.yml` rather than by a copy): its copy deleted. Versioning runs through the hub's `build-release-task.yml`, which calls `get-version-task.yml`. Its `plan` job calls `publish-plan-task.yml` by pin. The change was adopted on `develop` in ptr727/PlexCleaner#940 at `0e9b0b9`, merged 2026-08-30 and carried on `main`, its ground-truth branch. There `.github/workflows/` holds only the `merge-bot-pull-request.yml`, `publish-release.yml`, and `test-pull-request.yml` stubs.
   - [x] VSCode-Server-DotNetCore (`get-version-task.yml`): carries no copy, with versioning through the hub's `build-release-task.yml`, which calls `get-version-task.yml`. The change was adopted on `develop` in ptr727/VSCode-Server-DotNetCore#129 and carried on `main`, its ground-truth branch, at `e571822`. There the `main` audit run 2026-10-16T06:40:34Z reports no `interface` finding.
   - [x] KiCadLibrary (`get-version-task.yml`): its copy deleted, with versioning through the hub's `build-release-task.yml`, which calls `get-version-task.yml`, in ptr727/KiCadLibrary#60. The change was promoted to `main` in ptr727/KiCadLibrary#65, where the `main` audit run 2026-10-04T01:15:54Z reports no `interface` finding.
   - [ ] aiopurpleair (`get-version-task.yml`)
@@ -214,7 +214,7 @@ Hub: `build-release-task.yml` provides the `dotnet-publish`, `build-nuget`, and 
 - [x] Hub pull request on `develop` in #762.
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `build-release-task.yml` and `build-docker-task.yml`. The first release attempt, on `82fecef`, ended in `startup_failure` in [run-startup-failure][run-startup-failure] because `build-nuget` and `github-release` declared job-level permissions. #772 fixed it before #774 promoted.
 - [x] PhotoCleaner (pilot, vanilla Docker plus .NET publish): ptr727/PhotoCleaner#55 on `develop` (`c80cb29`), promoted in ptr727/PhotoCleaner#56 (`fa91db0`). The migration deleted five carried task files. It mapped every value to a task input (`dotnet_publish_project`, `docker_image`) and needed no repo hook. The [pilot publish run][pilot-publish-run] released `1.1.11` with the .NET publish asset and Docker image. That run exposed an archive naming regression between the hub default and the repo leaf. The fix derives the name from the project file, with `dotnet_publish_asset_name` as an override. The next PhotoCleaner release proves the fix.
-- [ ] PlexCleaner (second, the same shape)
+- [x] PlexCleaner (second, the same shape): adopted on `develop` in ptr727/PlexCleaner#940 at `0e9b0b9`, merged 2026-08-30 and carried on `main`, its ground-truth branch. There `publish-release.yml` calls `build-release-task.yml` by pin, and so does the smoke job in `test-pull-request.yml`.
 - [x] VSCode-Server-DotNetCore (vanilla Docker only): `publish-release.yml` on `main`, its ground-truth branch, calls `build-release-task.yml` by pin with `enable_docker: true` and the other legs off. The repo's `main` at `e571822` carries only the `merge-bot-pull-request.yml`, `publish-release.yml`, and `test-pull-request.yml` stubs, where the `main` audit run 2026-10-16T06:40:34Z reports no `interface` finding.
 - [ ] ESPHome-NonRoot (`docker-prepare` hook for the upstream pin)
 - [ ] NxWitness (matrix hook and `build-base`)
@@ -237,6 +237,7 @@ Hub: `publish-docker-readme-task.yml` with a `docker-readme-transform` hook, `ch
 - [x] Promoted to `main` in #774 (`0b07a59d`) and released as `2.0.352`, the first tag carrying `publish-docker-readme-task.yml`, `check-upstream-version-task.yml`, `deploy-site-task.yml`, and `run-codegen-pull-request-task.yml`.
 - [ ] Adoption, one checkbox per carrier added when the hub pull request merges.
   - [x] VSCode-Server-DotNetCore (`publish-docker-readme-task.yml`): `publish-release.yml` on `main`, its ground-truth branch, calls `publish-docker-readme-task.yml` by pin and keeps no local copy, at `e571822`. There the `main` audit run 2026-10-16T06:40:34Z reports no `interface` finding.
+  - [x] PlexCleaner (`publish-docker-readme-task.yml`): adopted on `develop` in ptr727/PlexCleaner#940 at `0e9b0b9`, merged 2026-08-30 and carried on `main`, its ground-truth branch. There `publish-release.yml` calls `publish-docker-readme-task.yml` by pin and keeps no local copy.
   - [ ] NxWitness (`publish-docker-readme-task.yml`, moving the readme job out of `publish-release.yml`, and `run-codegen-pull-request-task.yml` with its scheduler)
   - [ ] ESPHome-NonRoot (`check-upstream-version-task.yml`, both trackers, the second with `auto-merge: false`)
   - [ ] Blog (`deploy-site-task.yml`, keeping `deploy-site.yml` as its own caller)
