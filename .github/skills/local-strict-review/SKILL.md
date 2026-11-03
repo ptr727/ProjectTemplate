@@ -55,9 +55,9 @@ Rules that bind this task: quote `fleet-code-review`'s "Review the Change" secti
   the same job, and report a consolidation finding where one exists. Where the diff itself adds
   hardening the threat model rules out, report that code as an over-hardening finding. Never
   ask for such hardening.
-  On text the diff did not write, report only wrong behavior or a false or unfollowable
-  instruction, never a wording, style, or consolidation remark, since outcome 4 of
-  `pr-review-conduct` "Every finding ends in a listed outcome" drops it.
+  On text this change did not touch, report only wrong behavior or a false or unfollowable
+  instruction, never a wording, style, or consolidation remark. This change never fixes such a
+  remark, and the carried-content sweep reads a canonical unit whole on its own.
   Do not quote "Publish Every Finding", this task's report contract is the Return line below,
   not a PR comment or a coverage marker.
 Return: one finding per line, file:line, the concrete failure scenario, or for a design finding

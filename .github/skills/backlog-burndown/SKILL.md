@@ -275,12 +275,15 @@ for, and it binds harder than any throughput target.
   needing a file outside its claim stops and reports rather than editing it. Where no live group
   holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
   claim comment and tells the worker to continue. That is the ordinary path for a doc describing
-  the group's own change, and it is answered at once rather than at a round boundary. Where
-  another group holds the file and the need is such a doc, the requester's pull request waits to
-  merge until the holder's does. The requester then updates its branch from develop and makes the
-  edit there. The edit is filed as an issue only where the holder is stopped on the maintainer, or
-  the run ends, before it can land. A grant either way re-applies the tier test in "Choosing the
-  Worker's Model Tier". Any other need for a held file is a conflict. The orchestrator
+  the group's own change, and it is answered at once rather than at a round boundary. A file may
+  sit on a branch no claim comment covers, or on one whose set is unknown. Then the worker is
+  stopped for the maintainer per "Raising a Blocked Question". Where another group holds the file
+  and the need is such a doc, the requester's pull request waits to merge until the holder's
+  does. The requester then updates its branch from develop and makes the edit there. A holder
+  stopped on the maintainer parks the requester behind the same question rather than letting it
+  merge without the edit. Two groups each waiting on the other this way are a conflict. A grant
+  either way re-applies the tier test in "Choosing the Worker's Model Tier". Any other need for a
+  held file is a conflict too. The orchestrator
   decides which group keeps the file and tells the loser what to do rather than leaving it to
   choose. The loser narrows its change to drop that file, parks until the holder merges, or
   abandons its branch per "Cleanup Is the Orchestrator's". Where the loser has already opened a
@@ -365,7 +368,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief points a hub worker at develop's copy of any skill develop has changed.** A worker
   loads its installed skills, which follow promoted `main`, so a rule merged to develop earlier in
   the run does not reach it. In the hub, after `git fetch origin main develop`, list
-  `git diff --name-only origin/main origin/develop -- .agents/skills/`. The brief tells the worker
+  `git diff --name-only --diff-filter=d origin/main origin/develop -- .agents/skills/`. The filter
+  leaves out a deleted path, so every skill it names still exists on develop. The brief tells the worker
   to read each skill named there from `<worktree>/.agents/skills/<name>/SKILL.md` instead of its
   installed copy. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
@@ -500,7 +504,10 @@ the carried content the first kind names. A claim can grow into carried canonica
 design change under a worker below `frontier`. That re-tiers the group, and the worker does not
 make the edit.
 The worker commits what it has without pushing, and ends. The orchestrator retires its clean
-worktree alone, per "Cleanup Is the Orchestrator's", which leaves the branch standing. It then
+worktree alone, per "Cleanup Is the Orchestrator's", which leaves the branch standing. A worker
+in a standalone clone holds the only copy of that branch. So it also pushes the commit before
+ending, after the `local-strict-review` pass that push owes. Retiring the clone alone then finds
+its tip on the remote. It then
 dispatches a `frontier` worker on that branch, and on its pull request where one is open. That
 worker attaches the branch in a worktree of its own, per `repo-worktree`'s continuation step.
 
