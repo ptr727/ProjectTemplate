@@ -1964,7 +1964,17 @@ gh() {
 
         # Without a flag naming its leg, each upload merges into one number that hides which leg it came from.
         self.assertIn("          flags: python-${{ matrix.label || matrix.python-version }}\n", job)
-        self.assertIn("          flags: dotnet\n", job)
+
+    def test_validator_dotnet_upload_carries_a_fixed_flag(self) -> None:
+        """A caller's codecov.yml can reach an unflagged upload only through the total.
+
+        The .NET upload therefore carries one fixed flag, the same in every leg, so a caller can name it.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        step = "      - name: Upload coverage to Codecov step\n"
+        upload = job.split(step, 1)[1].split("\n\n", 1)[0]
+        self.assertIn("          flags: dotnet\n", upload)
 
     def test_validator_checks_out_the_triggering_commit(self) -> None:
         """A ref: on any checkout moves the gate off the commit a publisher releases.
