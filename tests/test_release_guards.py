@@ -1964,6 +1964,7 @@ gh() {
 
         # Without a flag naming its leg, each upload merges into one number that hides which leg it came from.
         self.assertIn("          flags: python-${{ matrix.label || matrix.python-version }}\n", job)
+        self.assertIn("          flags: dotnet\n", job)
 
     def test_validator_checks_out_the_triggering_commit(self) -> None:
         """A ref: on any checkout moves the gate off the commit a publisher releases.
