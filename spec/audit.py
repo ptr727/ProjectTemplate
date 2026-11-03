@@ -525,7 +525,7 @@ def file_naming_findings(entry, blobs, read_text):
 def secret_name_breaks(name, in_secrets):
     """Whether a file name breaks the env and secret file rule, a .txt in a secrets directory included."""
     named = name.removesuffix(ENV_SECRET_TEMPLATE)
-    return not ENV_SECRET_NAME.fullmatch(named) or (in_secrets and named.lower().endswith(".txt"))
+    return not ENV_SECRET_NAME.fullmatch(named) or (in_secrets and named.endswith(".txt"))
 
 
 def ignored_secrets_folder(line):
@@ -710,11 +710,11 @@ def named_secret_signals(tree, read_text, directories, holding):
             else:
                 live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
                 live = live.replace("${/}", "/").replace("${pathSeparator}", "/")
-                root = editor.group(1).rstrip("/")
+                root = editor.group(1)
                 listing = (
                     WORKSPACE_FOLDER.search(live) if path.endswith(".code-workspace") else None
                 )
-                root = posixpath.normpath(posixpath.join(root, listing[1])) if listing else root
+                root = posixpath.join(root, listing[1]) if listing else root
                 file = ".devcontainer" not in path
                 found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
             for match, file in found:

@@ -3922,6 +3922,19 @@ class SecretStemCase(unittest.TestCase):
                 ["bind/compose.yml", "over/compose.yml"],
             ),
             (
+                "a path separator variable, a root .devcontainer.json, a ? glob, and a null service",
+                {
+                    ".vscode/launch.json": '["${workspaceFolder}${pathSeparator}secrets${pathSeparator}app.txt"]\n',
+                    ".devcontainer.json": '{"mounts": ["source=${localWorkspaceFolder}/ops/secrets,target=/s"]}\n',
+                    "ops/README.md": "",
+                    "deploy/.gitignore": "ap?/secrets/\n",
+                    "deploy/ap1/README.md": "",
+                    "compose.yml": "services:\n  app:\n",
+                },
+                ["secrets/app.txt (named in .vscode/launch.json)"],
+                [".devcontainer.json", ".vscode/launch.json", "deploy/.gitignore"],
+            ),
+            (
                 "a compose override file carrying !reset is read",
                 {
                     "compose.override.yml": (
