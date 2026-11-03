@@ -177,9 +177,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
    `pre-existing` finding on text inside a canonical Markdown unit takes the tracker bullet of
    outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
-   `scripts/canonical_review.py list` names. In the authoring repository, outside a promotion pull
-   request, a correctness defect in a file the diff touches is the exception. That outcome's first
-   bullet fixes it here. The tracker bullet applies once per unit rather than once
+   `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
    whichever round first needs it files it. The round answers each finding with that issue's

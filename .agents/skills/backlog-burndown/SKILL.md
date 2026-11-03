@@ -499,8 +499,9 @@ below `frontier`:
   on a contract not stated in the edited file.
 
 The tier is chosen against the predicted set, the describing docs included, since those are often
-the carried content the first kind names. A grown claim reaching carried canonical content under
-a worker below `frontier` re-tiers the group, and that worker does not make the edit. It commits
+the carried content the first kind names. A grown set failing that test under a worker below
+`frontier` re-tiers the group. The orchestrator extends the claim comment with the grown file at
+once, so no other group is granted it. That worker does not make the edit. It commits
 what it has, runs the `local-strict-review` pass that push owes, pushes, and ends. The
 orchestrator retires its clean worktree or clone alone, per "Cleanup Is the Orchestrator's",
 which leaves the pushed branch standing. The orchestrator then dispatches a `frontier` worker on
