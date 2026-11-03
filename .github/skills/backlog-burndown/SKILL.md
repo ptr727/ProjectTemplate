@@ -274,16 +274,16 @@ for, and it binds harder than any throughput target.
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
   needing a file outside its claim stops and reports rather than editing it. Where no live group
   holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
-  claim comment and tells the worker to continue. It does so only once the grown set passes the
-  tier test in "Choosing the Worker's Model Tier". That is the ordinary path for a doc describing the
+  claim comment at once. The tier test in "Choosing the Worker's Model Tier" then decides the rest. A
+  grown set passing it lets the worker continue, and one failing it re-tiers the group there. That is the ordinary path for a doc describing the
   group's own change, and it is answered at once rather than at a round boundary. A file may sit on a branch no
   claim comment covers, or on one whose set is unknown. Then the worker is stopped for the
   maintainer per "Raising a Blocked Question". Where another group holds the file, the need is a
   conflict. The orchestrator decides which group keeps the file and tells the loser what to do
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
-  the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". A loser needing
-  the file for a doc describing its own change parks rather than narrowing, so the doc is fixed
-  rather than filed. Where the loser has already opened a
+  the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
+  the file for a doc, manifest entry, or rule sentence their own change put in disagreement. Such
+  a loser parks rather than narrowing, so that text is fixed rather than filed. Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
   branch reads to every later round as a live claim. Where the grown set enters the hub's
   `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue.
@@ -362,7 +362,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   claimed set, and state that any other group's file is out of bounds. Also state the duty that
   makes the re-verification path work: a worker needing a file outside its claim stops and reports
   rather than editing it. The duty also has it wait for the orchestrator to adjudicate. State as
-  well that a doc describing the group's own change is reported this way. It is never filed as an
+  well that a doc, manifest entry, or rule sentence the group's own change puts in disagreement
+  is reported this way. It is never filed as an
   issue in its place, since "Grouping and File Claims" grants that edit or parks the group for it.
 - **The brief points a hub worker at develop's copy of each skill it invokes.** A worker's
   installed skills need not match develop, since some installs snapshot promoted `main`. So a rule
