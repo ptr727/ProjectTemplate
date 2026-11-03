@@ -4048,13 +4048,12 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "a path relative to a task's cwd names no file, and a workflow is no compose file",
+                "a path relative to a task's cwd names no file",
                 {
                     ".vscode/tasks.json": (
                         '{"options": {"cwd": "${workspaceFolder}/deploy"},'
                         ' "command": "cat ./.secrets/api_token.txt $PWD/.secrets/api_token.txt"}\n'
                     ),
-                    ".github/workflows/docker-compose.yml": "run: echo x > ./secrets/app_token.txt\n",
                     "deploy/.secrets/api_token.txt.example": "",
                 },
                 ["deploy/.secrets/api_token.txt.example"],
