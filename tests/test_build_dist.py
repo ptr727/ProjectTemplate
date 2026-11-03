@@ -1084,15 +1084,18 @@ class DescriptionCase(TreeCase):
     def test_a_skill_with_no_frontmatter_or_no_description_is_not_measured(self) -> None:
         self.make_skill("bare", "# Bare\n")
         self.make_skill("named", "---\nname: named\n---\n\n# Named\n")
+        self.make_skill("empty", "---\n---\n\n# Empty\n")
         self.assertIsNone(build_dist.skill_description("bare"))
         self.assertIsNone(build_dist.skill_description("named"))
-        build_dist.check_descriptions(["bare", "named"])
+        self.assertIsNone(build_dist.skill_description("empty"))
+        build_dist.check_descriptions(["bare", "named", "empty"])
 
     def test_a_description_that_cannot_be_measured_is_refused(self) -> None:
         cases = {
             "not a string": "---\nname: foo\ndescription: 12\n---\n",
             "never closes": "---\nname: foo\ndescription: x\n",
             "not valid YAML": "---\nname: foo\ndescription: [x\n---\n",
+            "not a mapping": "---\n- name: foo\n- description: x\n---\n",
         }
         for message, body in cases.items():
             with self.subTest(message):
