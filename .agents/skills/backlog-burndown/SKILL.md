@@ -279,7 +279,9 @@ for, and it binds harder than any throughput target.
   sit on a branch no claim comment covers, or on one whose set is unknown. Then the worker is
   stopped for the maintainer per "Raising a Blocked Question". Where another group holds the file
   and the need is such a doc, the requester's pull request waits to merge until the holder's
-  does. The requester then updates its branch from develop and makes the edit there. A holder
+  does. The orchestrator names the file as awaited on the requester's claim comment, and every
+  later prediction is verified against it as a claim. The requester then updates its branch from
+  develop and makes the edit there. A holder
   stopped on the maintainer parks the requester behind the same question rather than letting it
   merge without the edit. Two groups each waiting on the other this way are a conflict. A grant
   either way re-applies the tier test in "Choosing the Worker's Model Tier". Any other need for a
@@ -307,6 +309,8 @@ own bound stated in the worker's brief.
 - **The change reaches the units the issue names and the units it puts in disagreement.** A unit
   stating the rule or behavior the change altered is this change's to fix wherever it sits, per
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
+  A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too, per
+  `pr-review-conduct` "Every finding ends in a listed outcome" outcome 4.
   Rewording a unit that only reads less well now stays out of the diff and is not filed either.
   Every unit the diff grows into is read again by every later round, so a wider edit lengthens the
   loop it was meant to close.
@@ -369,9 +373,11 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   loads its installed skills, which follow promoted `main`, so a rule merged to develop earlier in
   the run does not reach it. In the hub, after `git fetch origin main develop`, list
   `git diff --name-only --diff-filter=d origin/main origin/develop -- .agents/skills/`. The filter
-  leaves out a deleted path, so every skill it names still exists on develop. The brief tells the worker
-  to read each skill named there from `<worktree>/.agents/skills/<name>/SKILL.md` instead of its
-  installed copy. A downstream repository has no such gap, since its skills come from the hub.
+  leaves out a deleted path, so every skill it names still exists on develop. The brief tells the
+  worker to read each skill named there with
+  `git fetch origin develop && git show origin/develop:.agents/skills/<name>/SKILL.md` instead of
+  its installed copy. Reading develop rather than its own tree matters to a worker attaching an
+  older branch, such as a resumed or re-tiered group. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
   The one exception is an away-mode promotion worker under the `main` or `release` scope, per
   "Away Mode".

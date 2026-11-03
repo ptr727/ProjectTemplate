@@ -236,19 +236,23 @@ maintainer when".
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
-   No `introduced` finding is filed as an issue. A spent edit budget hands it to this pull
-   request's review loop, never past the pull request. The one exception is a design finding's sites
-   in files the change does not touch. "Triaging findings" files those as one issue. An edge case on code this change wrote is `introduced`. It is
-   fixed where `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" says it earns a fix, and
-   otherwise declined under outcome 2 with that section's reason.
+   An `introduced` finding is filed as an issue in this repository only for a design finding's
+   sites in files the change does not touch. "Triaging findings" files those as one issue. A
+   fix belonging to another repository is filed there, per the last bullet below. A spent edit
+   budget hands any other `introduced` finding to this pull request's review loop, never past the
+   pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
+   "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
+   Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
    - A `pre-existing` correctness defect in a file the diff already touches is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
      remark on wording. The reach is the file, as outcome 1's class sweep reaches it. Its fix is
-     text this change wrote, so a finding on that fix is
-     `introduced` and spends the same edit budget. One that budget leaves unfixed takes the first
-     bullet below that fits.
+     text this change wrote, so a finding on that fix is `introduced` and spends the same edit
+     budget. One that budget leaves unfixed takes the first bullet below that fits. This bullet
+     does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
+     changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
+     verbatim unit in a carrying repository, which "Merge Gate" item 3 routes by fidelity.
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
    - A `pre-existing` correctness defect in code that runs, with a stated failure, is filed once
@@ -263,8 +267,7 @@ maintainer when".
    - Any other `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the
      pull request body with its location and its class. No issue is filed for it. The body line
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
-   - Nothing else is deferred to an issue, apart from the design-finding sites above. A question
-     for the maintainer takes outcome 3 or
+   - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
      "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
      declines under outcome 2 and is filed there. A deferral noted only in a thread is lost the
      moment the PR merges, so each of these leaves its record where its outcome says.
