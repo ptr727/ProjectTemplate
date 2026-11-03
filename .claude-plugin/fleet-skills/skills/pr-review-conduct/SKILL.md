@@ -176,10 +176,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    What closing a finding owes turns on whether it is `pre-existing`, under the classes
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
    `pre-existing` finding on text inside a canonical Markdown unit takes the tracker bullet of
-   outcome 4 of "Every finding ends in a listed outcome" below. In the authoring repository, a
-   correctness defect in a file the diff touches is the exception, since that outcome's first
-   bullet fixes it here. Such a unit
-   is one the hub's `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
+   outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
+   `scripts/canonical_review.py list` names. In the authoring repository, outside a promotion pull
+   request, a correctness defect in a file the diff touches is the exception. That outcome's first
+   bullet fixes it here. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
    whichever round first needs it files it. The round answers each finding with that issue's
@@ -366,7 +366,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
    An `introduced` finding is filed as an issue in this repository only for a design finding's
-   sites in files the change does not touch. "Triaging findings" files those as one issue. A
+   sites in files the change does not touch. `pr-review-conduct` "Triaging findings" files those
+   as one issue. A
    fix belonging to another repository is filed there, per the last bullet below. A spent edit
    budget hands any other `introduced` finding to this pull request's review loop, never past the
    pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
@@ -381,7 +382,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      budget. One that budget leaves unfixed takes the first bullet below that fits. This bullet
      does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
      changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
-     verbatim unit in a carrying repository, which "Merge Gate" item 3 routes by fidelity.
+     canonical unit in a carrying repository, which `pr-review-conduct` "Merge Gate" item 3 routes
+     to the hub.
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
    - A `pre-existing` correctness defect in code that runs, with a stated failure, is filed once

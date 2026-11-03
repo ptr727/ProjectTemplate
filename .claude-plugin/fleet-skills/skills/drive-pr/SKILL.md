@@ -237,7 +237,8 @@ maintainer when".
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
    An `introduced` finding is filed as an issue in this repository only for a design finding's
-   sites in files the change does not touch. "Triaging findings" files those as one issue. A
+   sites in files the change does not touch. `pr-review-conduct` "Triaging findings" files those
+   as one issue. A
    fix belonging to another repository is filed there, per the last bullet below. A spent edit
    budget hands any other `introduced` finding to this pull request's review loop, never past the
    pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
@@ -252,7 +253,8 @@ maintainer when".
      budget. One that budget leaves unfixed takes the first bullet below that fits. This bullet
      does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
      changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
-     verbatim unit in a carrying repository, which "Merge Gate" item 3 routes by fidelity.
+     canonical unit in a carrying repository, which `pr-review-conduct` "Merge Gate" item 3 routes
+     to the hub.
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
    - A `pre-existing` correctness defect in code that runs, with a stated failure, is filed once
