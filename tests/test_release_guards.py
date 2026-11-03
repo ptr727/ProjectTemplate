@@ -1966,7 +1966,7 @@ gh() {
         self.assertIn("          flags: python-${{ matrix.label || matrix.python-version }}\n", job)
 
     def test_validator_dotnet_upload_carries_a_fixed_flag(self) -> None:
-        """A path filter cannot tell the .NET upload from a Python leg's where their paths overlap.
+        """A path filter cannot tell the .NET upload from a Python leg's upload where their paths overlap.
 
         The .NET upload therefore carries one fixed flag, the same in every leg, so a caller can name it.
         """
