@@ -274,9 +274,9 @@ for, and it binds harder than any throughput target.
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
   needing a file outside its claim stops and reports rather than editing it. Where no live group
   holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
-  claim comment and tells the worker to continue. That is the ordinary path for a doc describing
-  the group's own change, and it is answered at once rather than at a round boundary. A grant
-  re-applies the tier test in "Choosing the Worker's Model Tier". A file may sit on a branch no
+  claim comment and tells the worker to continue. It does so only once the grown set passes the
+  tier test in "Choosing the Worker's Model Tier". That is the ordinary path for a doc describing the
+  group's own change, and it is answered at once rather than at a round boundary. A file may sit on a branch no
   claim comment covers, or on one whose set is unknown. Then the worker is stopped for the
   maintainer per "Raising a Blocked Question". Where another group holds the file, the need is a
   conflict. The orchestrator decides which group keeps the file and tells the loser what to do
@@ -364,12 +364,12 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   rather than editing it. The duty also has it wait for the orchestrator to adjudicate. State as
   well that a doc describing the group's own change is reported this way. It is never filed as an
   issue in its place, since "Grouping and File Claims" grants that edit or parks the group for it.
-- **The brief points a hub worker at develop's copy of each skill it invokes.** A worker loads its
-  installed skills, which follow promoted `main`, so a rule merged to develop during the run does
-  not reach it. In the hub, the brief tells the worker to read each fleet skill from develop
-  as it invokes it. The read is
-  `git fetch origin develop && git show origin/develop:.agents/skills/<name>/SKILL.md`, in place
-  of the installed copy. Reading develop rather than the worker's own tree also covers a
+- **The brief points a hub worker at develop's copy of each skill it invokes.** A worker's
+  installed skills need not match develop, since some installs snapshot promoted `main`. So a rule
+  merged to develop during the run may not reach it. In the hub, the brief tells the worker to
+  read each fleet skill from develop as it invokes it. That covers any reference file it links.
+  The read is `git fetch origin develop && git show origin/develop:.agents/skills/<name>/<path>`,
+  in place of the installed copy. Reading develop rather than the worker's own tree also covers a
   worker on an older branch, such as a resumed or re-tiered group. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
   The one exception is an away-mode promotion worker under the `main` or `release` scope, per
@@ -499,16 +499,13 @@ below `frontier`:
   on a contract not stated in the edited file.
 
 The tier is chosen against the predicted set, the describing docs included, since those are often
-the carried content the first kind names. A claim can grow into carried canonical content or a
-design change under a worker below `frontier`. That re-tiers the group, and the worker does not
-make the edit.
-The worker commits what it has without pushing, and ends. The orchestrator retires its clean
-worktree alone, per "Cleanup Is the Orchestrator's", which leaves the branch standing. A worker
-in a standalone clone holds the only copy of that branch. So it also pushes the commit before
-ending, after the `local-strict-review` pass that push owes. Retiring the clone alone then finds
-its tip on the remote. The orchestrator then
-dispatches a `frontier` worker on that branch, and on its pull request where one is open. That
-worker attaches the branch in a worktree of its own, per `repo-worktree`'s continuation step.
+the carried content the first kind names. A grown claim reaching carried canonical content under
+a worker below `frontier` re-tiers the group, and that worker does not make the edit. It commits
+what it has, runs the `local-strict-review` pass that push owes, pushes, and ends. The
+orchestrator retires its clean worktree or clone alone, per "Cleanup Is the Orchestrator's",
+which leaves the pushed branch standing. The orchestrator then dispatches a `frontier` worker on
+that branch, and on its pull request where one is open. That worker attaches the branch in a
+worktree of its own, per `repo-worktree`'s continuation step.
 
 State the chosen tier and its reason in the round's report.
 

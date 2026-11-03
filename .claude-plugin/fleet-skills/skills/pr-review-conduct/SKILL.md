@@ -375,11 +375,12 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
-   - A `pre-existing` correctness defect in a file the diff already touches is fixed here under
-     outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
+   - A `pre-existing` correctness defect a local pass raises in a file the diff already touches
+     is fixed here under outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
      remark on wording. The reach is the file, as outcome 1's class sweep reaches it. Its fix is
      text this change wrote, so a finding on that fix is `introduced` and spends the same edit
-     budget. One that budget leaves unfixed takes the first bullet below that fits. This bullet
+     budget. One that budget leaves unfixed takes the first bullet below that fits. A PR-hosted
+     review's such finding takes it too, so a hosted round never owes a push for one. This bullet
      does not apply on a develop -> main promotion pull request. Its diff is a batch of merged
      changes, and each fix there needs a feature pull request of its own. Nor does it apply to a
      canonical unit in a carrying repository, which `pr-review-conduct` "Merge Gate" item 3 routes
