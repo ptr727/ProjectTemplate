@@ -513,7 +513,7 @@ function Get-InstallerFailureReason {
 
 function Select-FailureEntry {
     param([string[]]$Entries, [Parameter(Mandatory)][string]$Pattern, [string]$InUsePattern = '(?i)process\(es\) use|in use by|used by another process')
-    $matched = @($Entries | Where-Object { $_ -and ($_ -match $Pattern -or $_ -match $InUsePattern) })
+    $matched = @($Entries | Where-Object { $_ -match $Pattern -or $_ -match $InUsePattern })
     $inUse = @($matched | Where-Object { $_ -match $InUsePattern })
     $shown = @($matched | Select-Object -Last 4)
     if ($inUse.Count -gt 0 -and -not ($shown | Where-Object { $_ -match $InUsePattern })) {
