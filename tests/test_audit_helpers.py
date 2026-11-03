@@ -3893,13 +3893,20 @@ class SecretStemCase(unittest.TestCase):
                 [],
             ),
             (
-                "a compose build context and a config file are host paths",
+                "a compose build context, as a mapping or a string, and a config file are host paths",
                 {
                     "compose.yml": "services:\n  a:\n    build:\n      context: ./secrets\n",
+                    "web/compose.yml": "services:\n  b:\n    build: ./secrets\n",
                     "deploy/compose.yml": "configs:\n  c:\n    file: ./secrets/App.txt\n",
                 },
                 ["deploy/secrets/App.txt (named in deploy/compose.yml)"],
-                ["compose.yml", "deploy/compose.yml"],
+                ["compose.yml", "deploy/compose.yml", "web/compose.yml"],
+            ),
+            (
+                "a negated .secrets line also marks a .gitignore as moved",
+                {".gitignore": "secrets/\n!.secrets/README.md\n"},
+                [],
+                [],
             ),
             (
                 "a compose override file carrying !reset is read",
@@ -3985,13 +3992,14 @@ class SecretStemCase(unittest.TestCase):
                 "an untracked file a .secrets path names is judged where it has an extension, a templated one once",
                 {
                     ".vscode/launch.json": (
-                        '["${workspaceFolder}/.secrets/Api_Token", "${workspaceFolder}/.secrets/web_token.txt",'
-                        ' "${workspaceFolder}/.secrets/mail_relay", "./.secrets/Cwd_Token"]\n'
+                        '["${workspaceFolder}/.secrets/Api_Token", "${workspaceFolder}${/}.secrets${/}web_token.txt",'
+                        ' "${workspaceFolder}/.secrets/Mail_Relay.txt", "./.secrets/Cwd_Token.txt"]\n'
                     ),
-                    ".secrets/mail_relay.example": "",
+                    ".secrets/Mail_Relay.txt.example": "",
                 },
                 [
                     ".secrets/web_token.txt (named in .vscode/launch.json)",
+                    ".secrets/Mail_Relay.txt.example",
                 ],
                 [],
             ),

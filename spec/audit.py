@@ -708,6 +708,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                 ]
             else:
                 live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
+                live = live.replace("${/}", "/").replace("${pathSeparator}", "/")
                 root = editor.group(1).rstrip("/")
                 listing = (
                     WORKSPACE_FOLDER.search(live) if path.endswith(".code-workspace") else None
