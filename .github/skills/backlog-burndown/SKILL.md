@@ -284,8 +284,9 @@ for, and it binds harder than any throughput target.
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
   the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
   the file for a doc, manifest entry, or rule sentence their own change put in disagreement. Such
-  a loser parks rather than narrowing, so that text is fixed rather than filed. Two losers each
-  parked on the other are both stopped for the maintainer per "Raising a Blocked Question". Where the loser has already opened a
+  a loser parks rather than narrowing, so that text is fixed rather than filed. Losers parked in a
+  cycle, each waiting on another in it, are all stopped for the maintainer per "Raising a Blocked
+  Question". Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
   branch reads to every later round as a live claim. Where the grown set enters the hub's
   `host-setup/agent-safety/`, the orchestrator applies the hold "Ranking" places on such an issue.
@@ -306,8 +307,9 @@ own bound stated in the worker's brief.
 - **The change reaches the units the issue names and the units it puts in disagreement.** A unit
   stating the rule or behavior the change altered is this change's to fix wherever it sits in this repository, per
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
-  A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too, per
-  `pr-review-conduct` "Every finding ends in a listed outcome" outcome 4.
+  A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too, only
+  where `pr-review-conduct` "Every finding ends in a listed outcome" outcome 4's first bullet
+  fixes it.
   Rewording a unit that only reads less well now stays out of the diff and is not filed either.
   Every unit the diff grows into is read again by every later round, so a wider edit lengthens the
   loop it was meant to close.

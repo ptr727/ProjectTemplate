@@ -271,7 +271,9 @@ maintainer when".
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
    - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
      "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
-     declines under outcome 2 and is filed there. Where work here waits on that fix, it also
+     declines under outcome 2. It is filed there where `GOVERNANCE.md` "Repository Boundaries and
+     Write Safety" allows that write, and goes to the maintainer otherwise. Where work here waits
+     on that fix, it also
      takes the local record `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" requires of
      a blocker filed elsewhere. A deferral noted only in a thread is lost the
      moment the PR merges, so each of these leaves its record where its outcome says.
