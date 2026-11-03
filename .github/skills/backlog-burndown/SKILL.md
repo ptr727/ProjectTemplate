@@ -21,8 +21,10 @@ description: >-
 Asking for one issue to be fixed is `drive-pr`'s job and needs no skill above it. Asking for a
 whole backlog to be worked down is a different problem, and several things about it are not obvious.
 Parallelism is bounded by file overlap rather than by agent count, so the grouping decides the
-throughput. The backlog is not a fixed list, since every review round files deferral issues that
-belong in the next round's ranking. So a plan made once is stale by its second round. And a
+throughput. The backlog is not a fixed list, since a review round can file issues that belong in
+the next round's ranking. So a plan made once is stale by its second round. Each such issue later
+costs a lane, a pull request, and a review of its own. So a fix that can land in the pull request
+already open lands there, per "Grouping and File Claims" and "Bounding a Prose Group". And a
 prose-heavy repository conflicts on content rather than on syntax. So two agents rewording the
 same section produce a conflict no tool resolves and no reviewer catches early.
 
@@ -89,8 +91,8 @@ A round is the unit. Each one runs these steps in order.
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
    the next round prepares under the freeze "The Promotion Boundary" describes. Under that freeze
    it ranks, groups, and verifies claims, and dispatches nothing until that merge lands. Do not
-   carry the previous round's ranking forward. The deferral issues this round's reviews filed are
-   now open issues with a claim on the next round's attention. An issue that ranked low last round
+   carry the previous round's ranking forward. Any issue this round's reviews filed is now an
+   open issue with a claim on the next round's attention. An issue that ranked low last round
    can rank high once a sibling fix lands.
 
 ## Ranking
@@ -197,6 +199,12 @@ for, and it binds harder than any throughput target.
   follows the keyword directly, with at most a colon between them. So the words `on promotion:` keep the line inert. Without that line nothing records which issues a merged pull request closes, since a
   body's other issue references are not the same set.
 - **Predict each group's file set** by reading the issues, not by guessing from their titles.
+  The set includes every file that describes the behavior a fix changes, beside the files holding
+  that behavior. That is the doc, the manifest entry, or the rule sentence `GOVERNANCE.md`
+  "Verification Discipline" makes the change's own to fix. Find them by searching the tree for
+  the identifier, flag, check name, or rule phrase the fix changes, rather than by guessing which
+  docs apply. Two groups needing one such file are one group, per the first bullet. A predicted
+  edit lands before the first push, where it costs no extra CI run or hosted review.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The comment opens with `**Backlog burndown claim`
   and writes the branch name in backticks. Every edit to it other than a release keeps that
@@ -264,7 +272,15 @@ for, and it binds harder than any throughput target.
   neither read is available the set is unknown rather than empty, and an unknown set collides with
   every group. So ask the maintainer what that branch holds, per "Raising a Blocked Question".
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
-  needing a file another group holds stops and reports rather than editing it. The orchestrator
+  needing a file outside its claim stops and reports rather than editing it. Where no live group
+  holds the file, the orchestrator verifies that as it verifies a prediction. It then extends the
+  claim comment and tells the worker to continue. That is the ordinary path for a doc describing
+  the group's own change, and it is answered at once rather than at a round boundary. Where
+  another group holds the file and the need is such a doc, the requester's pull request waits to
+  merge until the holder's does. The requester then updates its branch from develop and makes the
+  edit there. The edit is filed as an issue only where the holder is stopped on the maintainer, or
+  the run ends, before it can land. A grant either way re-applies the tier test in "Choosing the
+  Worker's Model Tier". Any other need for a held file is a conflict. The orchestrator
   decides which group keeps the file and tells the loser what to do rather than leaving it to
   choose. The loser narrows its change to drop that file, parks until the holder merges, or
   abandons its branch per "Cleanup Is the Orchestrator's". Where the loser has already opened a
@@ -285,8 +301,12 @@ for, and it binds harder than any throughput target.
 A group whose files are prose-heavy Markdown bloats in a way a code group does not. It needs its
 own bound stated in the worker's brief.
 
-- **The change stays inside the units the issue names.** Rewording an adjacent section because it
-  now reads inconsistently is the next issue, filed, not this one's diff.
+- **The change reaches the units the issue names and the units it puts in disagreement.** A unit
+  stating the rule or behavior the change altered is this change's to fix wherever it sits, per
+  `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
+  Rewording a unit that only reads less well now stays out of the diff and is not filed either.
+  Every unit the diff grows into is read again by every later round, so a wider edit lengthens the
+  loop it was meant to close.
 - **Deleting a claim beats qualifying it.** Where a review disproves something a rule leaned on,
   remove the rule that leaned on it. A narrowed qualifier is where a new false claim gets
   introduced. It is the most common way a prose round produces the finding the following round
@@ -339,7 +359,15 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   reads this skill, so a claim it was never given is a claim it cannot respect. State this group's
   claimed set, and state that any other group's file is out of bounds. Also state the duty that
   makes the re-verification path work: a worker needing a file outside its claim stops and reports
-  rather than editing it. The duty also has it wait for the orchestrator to adjudicate.
+  rather than editing it. The duty also has it wait for the orchestrator to adjudicate. State as
+  well that a doc describing the group's own change is reported this way. It is never filed as an
+  issue in its place, since "Grouping and File Claims" grants or sequences that edit.
+- **The brief points a hub worker at develop's copy of any skill develop has changed.** A worker
+  loads its installed skills, which follow promoted `main`, so a rule merged to develop earlier in
+  the run does not reach it. In the hub, after `git fetch origin main develop`, list
+  `git diff --name-only origin/main origin/develop -- .agents/skills/`. The brief tells the worker
+  to read each skill named there from `<worktree>/.agents/skills/<name>/SKILL.md` instead of its
+  installed copy. A downstream repository has no such gap, since its skills come from the hub.
 - **The worker never merges to main** and never resolves a thread it did not actually dispose of.
   The one exception is an away-mode promotion worker under the `main` or `release` scope, per
   "Away Mode".
@@ -466,6 +494,15 @@ below `frontier`:
   looks.
 - One whose issues are **complex or entangled**, where the fix depends on cross-file reasoning or
   on a contract not stated in the edited file.
+
+The tier is chosen against the predicted set, the describing docs included, since those are often
+the carried content the first kind names. A claim can grow into carried canonical content or a
+design change under a worker below `frontier`. That re-tiers the group, and the worker does not
+make the edit.
+The worker commits what it has without pushing, and ends. The orchestrator retires its clean
+worktree alone, per "Cleanup Is the Orchestrator's", which leaves the branch standing. It then
+dispatches a `frontier` worker on that branch, and on its pull request where one is open. That
+worker attaches the branch in a worktree of its own, per `repo-worktree`'s continuation step.
 
 State the chosen tier and its reason in the round's report.
 

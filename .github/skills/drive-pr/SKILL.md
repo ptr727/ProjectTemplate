@@ -236,14 +236,26 @@ maintainer when".
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
+   No `introduced` finding is filed as an issue. A spent edit budget hands it to this pull
+   request's review loop, never past the pull request. An edge case on code this change
+   wrote is `introduced` where its deployment can produce the input, so it is fixed. Where
+   `GOVERNANCE.md` "Trust Boundaries and Hardening Effort" rules the input out, it is declined
+   under outcome 2.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A `pre-existing` correctness defect in a file the diff already touches is fixed here under
+     outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
+     remark on wording. In a canonical Markdown file the reach is the unit the diff touches
+     rather than the whole file. Its fix is text this change wrote, so a finding on that fix is
+     `introduced` and spends the same edit budget. One that budget leaves unfixed takes the first
+     bullet below that fits.
    - A `pre-existing` finding on a canonical Markdown unit keeps the per-unit tracker
      `pr-review-conduct` "Merge Gate" item 3 describes, since that already costs one link per unit.
-   - A `pre-existing` correctness defect with a stated failure is filed once as its own issue,
-     labeled `pre-existing`. Such a finding names an input or a state and the wrong output or the
-     crash it produces. Its body line goes under a `Pre-existing findings, filed` heading and
-     links that issue. A thread raising it is answered with that issue's link and resolved.
+   - A `pre-existing` correctness defect in code that runs, with a stated failure, is filed once
+     as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
+     wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
+     filed` heading and links that issue. A thread raising it is answered with that issue's link
+     and resolved.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -251,10 +263,12 @@ maintainer when".
    - Any other `pre-existing` finding, from a local pass or a PR-hosted review, is listed in the
      pull request body with its location and its class. No issue is filed for it. The body line
      is its outcome, and a thread raising it is answered with a pointer to that line and resolved.
-   - Any other deferral is filed as an issue first, and the reply carries its link. A deferral
-     noted only in a thread is lost the moment the PR merges.
+   - Nothing else is deferred to an issue. A question for the maintainer takes outcome 3 or
+     "Escalate to the maintainer when", whichever fits. A fix that belongs to another repository
+     declines under outcome 2 and is filed there. A deferral noted only in a thread is lost the
+     moment the PR merges, so each of these leaves its record where its outcome says.
 
-   The body keeps every other unfiled `pre-existing` line, the fourth bullet's, under one
+   The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
    heading, `Pre-existing findings, not filed`. Each line under these headings carries its
    location and its class. The headings stay apart from the open `introduced` findings a spent
    edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
@@ -267,7 +281,8 @@ maintainer when".
    the content rather than the one carrying it. An issue filed where nobody may make the fix is
    a deferral nobody can close. Filing every `pre-existing` finding is the expensive path. From
    2026-10-16 to 2026-10-23, 108 of 329 non-handoff issues filed across four fleet repositories
-   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked.
+   carried `pre-existing`. Each one costs a lane, a pull request, and a review once worked. A fix
+   inside a pull request already open costs only rounds that pull request already pays for.
 5. **Keeps recurring although the class was swept, so the rule is what needs fixing.** A finding
    raised repeatedly against correct code means the code is not communicating something. Add the
    comment, sharpen the name, narrow the interface, or fix the rule if the rule is wrong.
