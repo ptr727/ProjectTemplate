@@ -450,49 +450,56 @@ class GitInCase(unittest.TestCase):
 
 class RunWithDeadlineCase(unittest.TestCase):
     """The deadline holds with a grandchild holding the pipes, which `subprocess.run` waits out on
-    Windows. A real process tree is the only way to show that, since a mock holds no pipe."""
+    Windows. A real process tree is the only way to show that, since a mock holds no pipe.
 
-    def run_stalled_tree(self, pid_file: Path) -> float:
+    The child launches with `close_fds=False` because a default Windows launch inherits no handle.
+    Only an inheriting grandchild holds the pipes, as a shim's child does. The real grace period
+    stays, since it also bounds `taskkill`, and the sleep outlasts every budget."""
+
+    def setUp(self) -> None:
+        self.pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
+        self.addCleanup(self.reap)
+
+    def run_stalled_tree(self) -> float:
         grandchild = (
             "import os, pathlib, sys, time; "
-            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(20)"
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
         )
         child = (
             "import subprocess, sys, time; "
-            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]]); "
-            "time.sleep(20)"
+            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], close_fds=False); "
+            "time.sleep(30)"
         )
         started = time.monotonic()
         with (
-            mock.patch("skills_install.SUBPROCESS_TIMEOUT", 3),
-            mock.patch("skills_install.KILL_GRACE_SECONDS", 1),
+            mock.patch("skills_install.SUBPROCESS_TIMEOUT", 5),
             self.assertRaises(subprocess.TimeoutExpired),
         ):
-            skills_install.run_with_deadline([sys.executable, "-c", child, str(pid_file)])
-        return time.monotonic() - started
+            skills_install.run_with_deadline([sys.executable, "-c", child, str(self.pid_file)])
+        elapsed = time.monotonic() - started
+        self.assertTrue(self.pid_file.exists(), "the grandchild did not start before the deadline")
+        return elapsed
 
-    def reap(self, pid_file: Path) -> None:
+    def reap(self) -> None:
         """A POSIX grandchild outlives the kill by design, so this test ends it."""
-        if os.name != "nt" and pid_file.exists():
+        if os.name != "nt" and self.pid_file.exists():
             with contextlib.suppress(ProcessLookupError):
-                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                os.kill(int(self.pid_file.read_text()), signal.SIGKILL)
 
     def test_a_grandchild_holding_the_pipes_does_not_outlast_the_deadline(self) -> None:
-        pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
-        self.addCleanup(self.reap, pid_file)
-        self.assertLess(self.run_stalled_tree(pid_file), 15)
+        self.assertLess(self.run_stalled_tree(), 25)
 
     @unittest.skipUnless(os.name == "nt", "only Windows kills the tree")
     def test_windows_kills_the_grandchild_too(self) -> None:
-        pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
-        self.run_stalled_tree(pid_file)
+        self.run_stalled_tree()
+        pid = int(self.pid_file.read_text())
         listing = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {int(pid_file.read_text())}", "/FO", "CSV", "/NH"],
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
             capture_output=True,
             text=True,
             check=True,
         )
-        self.assertNotIn(f'"{int(pid_file.read_text())}"', listing.stdout)
+        self.assertNotIn(f'"{pid}"', listing.stdout)
 
     def test_a_finished_child_returns_its_output_and_status(self) -> None:
         result = skills_install.run_with_deadline(
