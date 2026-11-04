@@ -85,7 +85,7 @@ The Keychain prompt for the passphrase appears on first use after each reboot, a
 
 ### Windows (without WSL)
 
-WSL2 is the supported route for the devcontainer setup in this repo, since Docker Desktop's WSL2 backend is the supported path. A native Windows launch starts the container only where `USERPROFILE` is set and `HOME` is not, per [Devcontainer troubleshooting][devcontainer-troubleshooting]. Commit signing inside a container started that way is untested.
+WSL2 is the supported route for the devcontainer setup in this repo. A native Windows launch has its own conditions, per [Devcontainer troubleshooting][devcontainer-troubleshooting]. Commit signing inside a container started that way is untested.
 
 If you must work on Windows directly without a devcontainer, OpenSSH for Windows can sign with `gpg.format=ssh`.
 
