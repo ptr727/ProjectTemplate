@@ -354,7 +354,7 @@ function Get-PathEntryTarget {
     return [Environment]::ExpandEnvironmentVariables($text)
 }
 
-# The key two entries are compared by: the target without a trailing \ or \., which name the same directory.
+# Returns the key that duplicate detection compares, which is the target without a trailing \ or \., since those name the same directory.
 # A drive root keeps its \, since C: alone names the current directory on that drive rather than its root.
 function Get-PathEntryKey {
     param([Parameter(Mandatory)][string]$Target)
@@ -387,7 +387,7 @@ function Get-DirectoryState {
 # Off Windows that reads a drive letter as relative, and so would misjudge every entry under a test there.
 function Get-PathEntryState {
     param([Parameter(Mandatory)][string]$Target)
-    # A whole %NAME% token rather than any %, since a directory name may hold a literal one.
+    # The check looks for a whole %NAME% token rather than any %, since a directory name may hold a literal one.
     if ($Target -match '%[^%\\]+%') { return 'unexpanded' }
     $root = if ($Target -match '^[A-Za-z]:\\') { $Target.Substring(0, 3) }
     elseif ($Target -match '^\\\\[^\\]+\\[^\\]+') { $Matches[0] }
