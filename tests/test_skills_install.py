@@ -496,10 +496,9 @@ class RunWithDeadlineCase(unittest.TestCase):
         listing = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
             capture_output=True,
-            text=True,
             check=True,
         )
-        self.assertNotIn(f'"{pid}"', listing.stdout)
+        self.assertNotIn(f'"{pid}"'.encode(), listing.stdout)
 
     def test_a_finished_child_returns_its_output_and_status(self) -> None:
         result = skills_install.run_with_deadline(
