@@ -35,6 +35,8 @@ The host SSH key, allowed-signers file, and `gh` config directory are mounted in
 | `~/.config/git/allowed_signers` | `/home/vscode/.config/git/allowed_signers` | read-only | Maps your email to your public key so `git verify-commit` and `git log --show-signature` work inside the container. |
 | `~/.config/gh` | `/home/vscode/.config/gh` | read-write | `gh` CLI auth state shared with the host. See [`gh` credential store][gh-credential-store] below. |
 
+Each mount uses the string form, which passes straight to Docker's `--mount` flag. The Dev Containers CLI drops a `readonly` key from the object form, which leaves the host file writable from the container.
+
 Each mount's `source` finds the host home directory by joining `${localEnv:HOME}${localEnv:USERPROFILE}`, so exactly one of those variables must be set. Each host path must also exist under that directory, since Docker refuses an absent one inside WSL2. See [Troubleshooting][troubleshooting] for a native Windows launch.
 
 VS Code Dev Containers automatically copies your host `~/.gitconfig` into the container at startup. So `user.name`, `user.email`, `user.signingkey`, `gpg.format`, and `commit.gpgsign` propagate without an explicit mount.
