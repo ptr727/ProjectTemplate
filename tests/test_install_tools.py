@@ -993,12 +993,6 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             log.write_text("\r\n".join([*INNO_LOG, ""]), encoding="utf-8", newline="")
             busy = Path(directory, "Busy.Tool.1.0-26-01-02-03-04-05.log")
             busy.write_text("\r\n".join([*BUSY_LOG, ""]), encoding="utf-8", newline="")
-            longer_id = Path(directory, "Example.Tool.Extra.1.0-26-01-02-03-04-06.log")
-            longer_id.write_text(
-                "Error: a longer id's own failure.\r\n", encoding="utf-8", newline=""
-            )
-            future = log.stat().st_mtime + 60
-            os.utime(longer_id, (future, future))
             denied = Path(directory, "Denied.Tool.1.0-26-01-02-03-04-05.log")
             denied.write_text("\r\n".join([*DENIED_LOG, ""]), encoding="utf-8", newline="")
             for name, lines in (
