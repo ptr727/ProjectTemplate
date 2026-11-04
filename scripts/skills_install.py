@@ -246,7 +246,7 @@ def claude_json(*args):
     try:
         listing = run_with_deadline(claude_argv(*args))
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
     return entries if isinstance(entries, list) else None
 

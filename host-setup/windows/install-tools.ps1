@@ -496,10 +496,10 @@ function Get-InstallerFailureReason {
         $result.Entries = $selected.Entries
         $result.InUse = $selected.InUse
     }
-    $idPattern = "(?i)(?<![\w.])$([regex]::Escape($Id))(?![\w.])"
+    $idPattern = "(?i)(?<![\w.-])$([regex]::Escape($Id))(?![\w.-])"
     $session = Get-ChildItem -LiteralPath $Directory -Filter 'WinGet-*.log' -File -ErrorAction SilentlyContinue |
         Where-Object { $_.CreationTime -ge $Since } | Sort-Object CreationTime, Name -Descending |
-        Where-Object { Select-String -LiteralPath $_.FullName -Pattern $idPattern -Quiet } | Select-Object -First 1
+        Where-Object { Select-String -LiteralPath $_.FullName -Pattern $idPattern -Quiet -ErrorAction SilentlyContinue } | Select-Object -First 1
     if ($session) {
         $result.WingetLog = $session.FullName
         $errors = @(Get-Content -LiteralPath $session.FullName -ErrorAction SilentlyContinue |
