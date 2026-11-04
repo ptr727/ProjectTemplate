@@ -1328,19 +1328,21 @@ function info { param([string]$Message) Write-Host "INFO $Message" }
 function step { param([string]$Message) Write-Host "STEP $Message" }
 function warn { param([string]$Message) Write-Host "WARN $Message" }
 function confirm { param([string]$Message) return $true }
-function Invoke-PackageUpgrade { }
+function Invoke-ToolApply { param([string]$ToolName) $script:GROWN = $true }
+function Invoke-PackageUpgrade { $script:GROWN = $true }
 function Get-HostDescription { 'a host' }
 function Get-Upgradable { @{ Ready = @(); Explicit = @() } }
 function Get-WslVersion { '2.0' }
 function Get-DockerProcess { , @() }
+$GROWN = $case.action -notlike 'Invoke-*'
 if ($case.action -notin @('read', 'text')) {
-    function Get-HostPathLength { $case.length }
+    function Get-HostPathLength { if ($script:GROWN) { $case.length } else { 0 } }
 }
 $NOTES = @()
 $NOTE_TEXTS = @()
 $JSON_OUTPUT = $true
 $ELEVATED = $false
-$SELECTED = @()
+$SELECTED = if ($case.action -eq 'Invoke-Apply') { @('jq') } else { @() }
 $CHANGED = @()
 $FAILED = @()
 $MODE = 'packages'
@@ -1354,7 +1356,9 @@ switch ($case.action) {
         $read = {
             param($hive, $subKey)
             $key = $hive.OpenSubKey($subKey)
-            [Environment]::ExpandEnvironmentVariables($key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+            if ($key.GetValueNames() -notcontains 'Path') { return '' }
+            $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            if ($key.GetValueKind('Path') -eq 'ExpandString') { [Environment]::ExpandEnvironmentVariables($raw) } else { $raw }
         }
         $machine = & $read ([Microsoft.Win32.Registry]::LocalMachine) 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
         $user = & $read ([Microsoft.Win32.Registry]::CurrentUser) 'Environment'
@@ -1369,7 +1373,11 @@ switch ($case.action) {
     shutil.which("pwsh"), "needs pwsh to drive the Windows host scripts' own functions"
 )
 class TestWindowsPathLengthWarning(unittest.TestCase):
-    """The warning above the margin, in both scripts, on every path that runs it."""
+    """The warning above the margin, in both scripts, on every path that runs it.
+
+    The stubbed installs are what grow the stubbed length.
+    So an apply or an upgrade measuring before them reads 0 and prints no warning.
+    """
 
     FUNCTIONS = ("Get-HostPathLength", "Get-PathLengthWarning")
 
@@ -1413,14 +1421,14 @@ class TestWindowsPathLengthWarning(unittest.TestCase):
         under = json.loads(self.drive(WINDOWS_INSTALLER, "Show-Report", 3700, *wanted))
         self.assertEqual(under["notes"], [])
 
-    def test_an_apply_prints_it_with_its_notes(self) -> None:
+    def test_an_apply_measures_after_its_installs_and_prints_it(self) -> None:
         wanted = ("Invoke-Apply", "Add-PathLengthNote", "note")
         over = self.drive(WINDOWS_INSTALLER, "Invoke-Apply", 3701, *wanted)
         self.assertIn("INFO path: the machine and user Path", over)
         under = self.drive(WINDOWS_INSTALLER, "Invoke-Apply", 3700, *wanted)
         self.assertNotIn("Path", under)
 
-    def test_upgrade_host_warns_in_status_and_after_an_upgrade(self) -> None:
+    def test_upgrade_host_warns_in_status_and_measures_after_an_upgrade(self) -> None:
         for action in ("Show-Status", "Invoke-Upgrade"):
             with self.subTest(action=action):
                 wanted = (action, "Write-PathLengthWarning")
