@@ -592,29 +592,30 @@ function Show-Menu {
     log '   3  Upgrade the host tools that trail upstream'
     log '   4  Report the host OS upgrade status'
     log '   5  Upgrade the host OS packages'
-    log '   6  Report git and GitHub setup'
-    log '   7  Configure git and GitHub'
+    log '   6  Remove dead and duplicate Path entries'
+    log '   7  Report git and GitHub setup'
+    log '   8  Configure git and GitHub'
     # Only setup-wsl.ps1's -Status runs here.
     # The -Install action of setup-wsl.ps1 needs a distribution name, which no menu entry collects.
     # Installing one nobody asked for is exactly what this stays out of.
-    log '   8  Report the WSL platform and the distributions installed'
-    log '   9  Report fleet Skills install status'
-    log '  10  Install or update the fleet Skills'
-    log '  11  Report the coding-agent tools installed for this user'
-    log '  12  Upgrade the coding-agent tools already installed'
-    log '  13  Install coding-agent tools by name'
+    log '   9  Report the WSL platform and the distributions installed'
+    log '  10  Report fleet Skills install status'
+    log '  11  Install or update the fleet Skills'
+    log '  12  Report the coding-agent tools installed for this user'
+    log '  13  Upgrade the coding-agent tools already installed'
+    log '  14  Install coding-agent tools by name'
     log ''
     log "Hub, $($script:HUB_REPO):"
-    log '  14  Audit a cataloged repo'
-    log '  15  Check the generated Skills distributions are current'
+    log '  15  Audit a cataloged repo'
+    log '  16  Check the generated Skills distributions are current'
     # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
     if ($script:DOWNSTREAM_ROOT -and $script:REF -eq $script:DEFAULT_REF) {
         log ''
         log 'Downstream, the repo this menu is run from:'
-        log '  16  Check what the hub would change here, change nothing'
-        log "  17  Pull the hub's verbatim-owned files into this repo"
-        log "  18  Check the hub's verbatim rule sections inside this repo's mixed files"
-        log '  19  Pull those rule sections in, leaving every other section alone'
+        log '  17  Check what the hub would change here, change nothing'
+        log "  18  Pull the hub's verbatim-owned files into this repo"
+        log "  19  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log '  20  Pull those rule sections in, leaving every other section alone'
     }
     log ''
     log '   q  Quit'
@@ -632,25 +633,26 @@ function Invoke-Dispatch {
         '3' { return (Invoke-HostTool -Tool 'install-tools.ps1' -Arguments '-Upgrade') }
         '4' { return (Invoke-HostTool -Tool 'upgrade-host.ps1' -Arguments '-Status') }
         '5' { return (Invoke-HostTool -Tool 'upgrade-host.ps1' -Arguments '-Packages') }
-        '6' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Status') }
-        '7' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Configure') }
-        '8' { return (Invoke-HostTool -Tool 'setup-wsl.ps1' -Arguments '-Status') }
-        '9' { return (Invoke-HostTool -Tool 'install-skills.ps1' -Arguments '-Report') }
-        '10' { return (Invoke-SkillsInstall) }
-        '11' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Report') }
-        '12' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Upgrade') }
-        '13' { return (Invoke-AgentsInstall) }
-        '14' { return (Invoke-AuditRepo) }
-        '15' { return (Invoke-CheckSkillsDist) }
-        '16' { return (Invoke-CarryAction 'check') }
-        '17' {
+        '6' { return (Invoke-HostTool -Tool 'upgrade-host.ps1' -Arguments '-CleanPath') }
+        '7' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Status') }
+        '8' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Configure') }
+        '9' { return (Invoke-HostTool -Tool 'setup-wsl.ps1' -Arguments '-Status') }
+        '10' { return (Invoke-HostTool -Tool 'install-skills.ps1' -Arguments '-Report') }
+        '11' { return (Invoke-SkillsInstall) }
+        '12' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Report') }
+        '13' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Upgrade') }
+        '14' { return (Invoke-AgentsInstall) }
+        '15' { return (Invoke-AuditRepo) }
+        '16' { return (Invoke-CheckSkillsDist) }
+        '17' { return (Invoke-CarryAction 'check') }
+        '18' {
             # -DryRun changes nothing, and scripts/carry.py itself has no dry-run mode.
             # So a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check') }
             return (Invoke-CarryAction 'apply')
         }
-        '18' { return (Invoke-CarryAction 'check-sections') }
-        '19' {
+        '19' { return (Invoke-CarryAction 'check-sections') }
+        '20' {
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check-sections') }
             return (Invoke-CarryAction 'apply-sections')
         }

@@ -1334,6 +1334,8 @@ function Get-HostDescription { 'a host' }
 function Get-Upgradable { @{ Ready = @(); Explicit = @() } }
 function Get-WslVersion { '2.0' }
 function Get-DockerProcess { , @() }
+function Read-PathScope { @{ Raw = ''; Kind = $null } }
+function Get-PathCleanup { @{ Machine = @{ Removed = @(); Unjudged = @() }; User = @{ Removed = @(); Unjudged = @() } } }
 $GROWN = $case.action -notlike 'Invoke-*'
 if ($case.action -notin @('read', 'text')) {
     function Get-HostPathLength { if ($script:GROWN) { $case.length } else { 0 } }
