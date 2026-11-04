@@ -105,7 +105,10 @@ def run_with_deadline(argv):
 
 
 def git_in(root, *args):
-    """Run git against `root`, returning stripped stdout, or None on any failure."""
+    """Run git against `root`, returning stripped stdout, or None on a failure.
+
+    Output that does not decode raises instead, since None could read as a clean tree.
+    """
     try:
         r = run_with_deadline(["git", "-C", str(root), *args])
     except UnicodeDecodeError:
@@ -246,7 +249,7 @@ def claude_json(*args):
     try:
         listing = run_with_deadline(claude_argv(*args))
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
     return entries if isinstance(entries, list) else None
 

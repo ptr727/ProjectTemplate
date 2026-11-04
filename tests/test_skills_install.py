@@ -875,6 +875,14 @@ class PluginStateCase(unittest.TestCase):
         ).start()
         self.assertEqual(skills_install.plugin_state(), {"installed": None, "enabled": None})
 
+    def test_a_listing_that_does_not_decode_is_unknown(self) -> None:
+        """A real child, since a decode failure is what the reader thread once swallowed."""
+        with mock.patch("shutil.which", return_value=sys.executable):
+            listing = skills_install.claude_json(
+                "-c", "import sys; sys.stdout.buffer.write(bytes([255]))"
+            )
+        self.assertIsNone(listing)
+
     def test_the_live_channel_carries_the_state_only_where_registered(self) -> None:
         mock.patch("skills_install.claude_available", return_value=True).start()
         state = {"installed": True, "enabled": False}

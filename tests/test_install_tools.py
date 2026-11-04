@@ -833,6 +833,13 @@ foreach ($probe in $case.reasons) {
         in_use = $reason.InUse
     }
 }
+$held = [System.IO.File]::Open((Join-Path $case.directory $case.locked), 'Open', 'Read', 'None')
+try {
+    $reason = Get-InstallerFailureReason -Id 'Locked.Tool' -Since ([datetime]'2000-01-01') -Directory $case.directory
+    $results['locked'] = [ordered]@{ winget_log = [bool]$reason.WingetLog; winget_entries = @($reason.WingetEntries) }
+} finally {
+    $held.Dispose()
+}
 $env:ProgramFiles = 'C:\PF'
 ${env:ProgramFiles(x86)} = 'C:\PF86'
 $env:LOCALAPPDATA = 'C:\LAD'
@@ -940,6 +947,22 @@ OTHER_WINGET_LOG = [
     "2026-01-02 03:04:05.300 <E> [CLI ] Caught std::exception: remove: Access is denied.",
 ]
 
+HYPHEN_NEIGHBOR_WINGET_LOG = [
+    "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'upgrade' '--id' 'Portable.Tool-Extra'",
+    "2026-01-02 03:04:05.200 <I> [CLI ] WinGet invoked with arguments: 'upgrade' '--id' 'Vendor-Portable.Tool'",
+    "2026-01-02 03:04:05.300 <E> [CLI ] A neighboring package's own failure.",
+]
+
+READABLE_WINGET_LOG = [
+    "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'upgrade' '--id' 'Locked.Tool'",
+    "2026-01-02 03:04:05.300 <E> [CLI ] The readable log's failure.",
+]
+
+LOCKED_WINGET_LOG = [
+    "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'upgrade' '--id' 'Locked.Tool'",
+    "2026-01-02 03:04:05.300 <E> [CLI ] The locked log's failure.",
+]
+
 UNRELATED_DENIAL_WINGET_LOG = [
     "2026-01-02 03:04:05.100 <I> [CLI ] WinGet invoked with arguments: 'install' '--id' 'Settings.Tool'",
     "2026-01-02 03:04:05.300 <E> [CORE] Failed to open the settings store: Access is denied.",
@@ -976,6 +999,9 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                 ("WinGet-2026-01-02-03-04-05.000.log", PORTABLE_WINGET_LOG),
                 ("WinGet-2026-01-02-03-04-06.000.log", OTHER_WINGET_LOG),
                 ("WinGet-2026-01-02-03-04-07.000.log", UNRELATED_DENIAL_WINGET_LOG),
+                ("WinGet-2026-01-02-03-04-08.000.log", HYPHEN_NEIGHBOR_WINGET_LOG),
+                ("WinGet-2026-01-02-03-04-09.000.log", READABLE_WINGET_LOG),
+                ("WinGet-2026-01-02-03-04-10.000.log", LOCKED_WINGET_LOG),
             ):
                 Path(directory, name).write_text(
                     "\r\n".join([*lines, ""]), encoding="utf-8", newline=""
@@ -985,6 +1011,7 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
             elsewhere.write_bytes(b"")
             cases = {
                 "directory": directory,
+                "locked": "WinGet-2026-01-02-03-04-10.000.log",
                 "reasons": [
                     {"id": "Example.Tool", "since": "2000-01-01"},
                     {"id": "Example.Tool", "since": "2100-01-01"},
@@ -1058,6 +1085,13 @@ class TestWindowsInstallFailureReason(unittest.TestCase):
                 "winget_entries": [],
                 "in_use": False,
             },
+        )
+
+    def test_a_winget_log_nothing_can_read_leaves_the_readable_one_to_report(self) -> None:
+        """A locked log is skipped like an absent one, so the failure report still runs."""
+        self.assertEqual(
+            self.run_cases()["locked"],
+            {"winget_log": True, "winget_entries": ["The readable log's failure."]},
         )
 
     def test_a_winget_denial_naming_no_file_is_not_files_in_use(self) -> None:
