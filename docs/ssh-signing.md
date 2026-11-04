@@ -85,9 +85,9 @@ The Keychain prompt for the passphrase appears on first use after each reboot, a
 
 ### Windows (without WSL)
 
-Native Windows is **not supported** for the devcontainer setup in this repo. Use WSL2 instead. The reason: VS Code Dev Containers needs a Linux-like file system for the bind-mounts to behave consistently. A second part of the reason is that Docker Desktop's WSL2 backend is the supported path.
+The supported route for the devcontainer setup in this repo is opening it from inside a WSL2 distribution. A native Windows launch has its own conditions, per [Devcontainer troubleshooting][devcontainer-troubleshooting]. Commit signing inside a container started that way is untested.
 
-If you must work on Windows directly without a devcontainer, OpenSSH for Windows can sign with `gpg.format=ssh`, but the bind-mounted devcontainer setup expects Linux/WSL2 paths.
+If you must work on Windows directly without a devcontainer, OpenSSH for Windows can sign with `gpg.format=ssh`.
 
 ## Verify Signing
 
@@ -116,11 +116,12 @@ If the container's `~/.ssh` directory exists with the wrong owner (root, surface
 
 **`signing failed: no allowed signers`.** The `allowed_signers` file exists but doesn't contain a line matching `user.email` + a key. Re-run `echo "$(git config --global user.email) namespaces=\"git\" $(cat ~/.ssh/id_ed25519.pub)" >> ~/.config/git/allowed_signers`.
 
-**Verifies on the host but not in the container.** The bind-mount source path differs. `${localEnv:HOME}` resolves on Linux/macOS hosts, and on Windows hosts (WSL2 backend) the `${localEnv:USERPROFILE}` fallback in `devcontainer.json` handles it. Check the actual mount with `mount | grep ssh` inside the container.
+**Verifies on the host but not in the container.** The bind-mount source path differs. Each `source` in `devcontainer.json` joins `${localEnv:HOME}${localEnv:USERPROFILE}`, which resolves where exactly one of them is set. That is `HOME` on Linux, macOS, and WSL2, and `USERPROFILE` on a native Windows launch. Check the actual mount with `mount | grep ssh` inside the container.
 
 **SSH agent says "could not open a connection".** The host's agent isn't running. Linux: `systemctl --user start ssh-agent.socket`. macOS: open a new terminal so launchd starts the agent.
 
 <!-- Repo -->
 
 [devcontainer]: ./devcontainer.md
+[devcontainer-troubleshooting]: ./devcontainer.md#troubleshooting
 [host-setup]: ./host-setup.md
