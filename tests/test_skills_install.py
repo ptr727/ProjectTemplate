@@ -12,9 +12,11 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -50,7 +52,7 @@ class SourceRefCase(unittest.TestCase):
             result.stdout = "deadbeef\n" if "rev-parse" in args else ""
             return result
 
-        with mock.patch("subprocess.run", side_effect=fake_run):
+        with mock.patch("skills_install.run_with_deadline", side_effect=fake_run):
             skills_install.source_ref()
 
         status_call = next(c for c in calls if "status" in c)
@@ -72,7 +74,7 @@ class SourceRefCase(unittest.TestCase):
             result.stdout = ""
             return result
 
-        with mock.patch("subprocess.run", side_effect=no_git):
+        with mock.patch("skills_install.run_with_deadline", side_effect=no_git):
             with mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"}):
                 self.assertEqual(
                     skills_install.source_ref(),
@@ -135,7 +137,7 @@ class SourceRefCase(unittest.TestCase):
             return result
 
         with (
-            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("skills_install.run_with_deadline", side_effect=fake_run),
             mock.patch.dict("os.environ", {"SKILLS_SOURCE_COMMIT": "cafe1234"}),
         ):
             self.assertEqual(skills_install.source_ref()["commit"], "deadbeef")
@@ -432,18 +434,106 @@ class ReportCase(unittest.TestCase):
 class GitInCase(unittest.TestCase):
     def test_a_stalled_git_reads_as_a_failure_rather_than_hanging(self) -> None:
         with mock.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1)
-        ) as run:
+            "skills_install.run_with_deadline",
+            side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1),
+        ):
             self.assertIsNone(skills_install.git_in(Path("."), "status"))
-        self.assertEqual(run.call_args.kwargs["timeout"], skills_install.SUBPROCESS_TIMEOUT)
 
     def test_output_that_does_not_decode_is_raised_rather_than_read_as_no_answer(self) -> None:
         undecodable = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
         with (
-            mock.patch("subprocess.run", side_effect=undecodable),
+            mock.patch("skills_install.run_with_deadline", side_effect=undecodable),
             self.assertRaises(UnicodeDecodeError),
         ):
             skills_install.git_in(Path("."), "status", "--porcelain")
+
+
+class RunWithDeadlineCase(unittest.TestCase):
+    """The deadline holds with a grandchild holding the pipes, which `subprocess.run` waits out on
+    Windows. A real process tree is the only way to show that, since a mock holds no pipe."""
+
+    def run_stalled_tree(self, pid_file: Path) -> float:
+        grandchild = (
+            "import os, pathlib, sys, time; "
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(20)"
+        )
+        child = (
+            "import subprocess, sys, time; "
+            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]]); "
+            "time.sleep(20)"
+        )
+        started = time.monotonic()
+        with (
+            mock.patch("skills_install.SUBPROCESS_TIMEOUT", 3),
+            mock.patch("skills_install.KILL_GRACE_SECONDS", 1),
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
+            skills_install.run_with_deadline([sys.executable, "-c", child, str(pid_file)])
+        return time.monotonic() - started
+
+    def reap(self, pid_file: Path) -> None:
+        """A POSIX grandchild outlives the kill by design, so this test ends it."""
+        if os.name != "nt" and pid_file.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+    def test_a_grandchild_holding_the_pipes_does_not_outlast_the_deadline(self) -> None:
+        pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
+        self.addCleanup(self.reap, pid_file)
+        self.assertLess(self.run_stalled_tree(pid_file), 15)
+
+    @unittest.skipUnless(os.name == "nt", "only Windows kills the tree")
+    def test_windows_kills_the_grandchild_too(self) -> None:
+        pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
+        self.run_stalled_tree(pid_file)
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {int(pid_file.read_text())}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertNotIn(f'"{int(pid_file.read_text())}"', listing.stdout)
+
+    def test_a_finished_child_returns_its_output_and_status(self) -> None:
+        result = skills_install.run_with_deadline(
+            [sys.executable, "-c", "import sys; print('out'); sys.exit(3)"]
+        )
+        self.assertEqual((result.returncode, result.stdout.strip()), (3, "out"))
+
+    def test_output_that_does_not_decode_is_raised(self) -> None:
+        with self.assertRaises(UnicodeDecodeError):
+            skills_install.run_with_deadline(
+                [sys.executable, "-c", r"import sys; sys.stdout.buffer.write(b'\xff')"]
+            )
+
+
+@unittest.skipUnless(os.name == "nt", "a .cmd shim is a Windows launcher")
+class ClaudeCmdShimCase(unittest.TestCase):
+    """An npm install puts `claude.cmd` on `PATH`, and each claude child has to reach it. The stub
+    answers an empty listing and logs its arguments, so a call that missed it logs nothing."""
+
+    def setUp(self) -> None:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.log = directory / "argv.log"
+        (directory / "claude.cmd").write_bytes(
+            f'@echo off\r\necho %*>>"{self.log}"\r\necho []\r\n'.encode()
+        )
+        system32 = Path(os.environ["SYSTEMROOT"]) / "System32"
+        patcher = mock.patch.dict(os.environ, {"PATH": f"{directory};{system32}"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def logged(self) -> str:
+        return self.log.read_text(encoding="utf-8")
+
+    def test_a_listing_reaches_the_shim(self) -> None:
+        self.assertEqual(skills_install.claude_json("plugin", "list", "--json"), [])
+        self.assertIn("plugin list --json", self.logged())
+
+    def test_the_marketplace_registers_and_the_plugin_installs_through_the_shim(self) -> None:
+        self.assertTrue(skills_install.register_claude_marketplace())
+        self.assertIn("plugin marketplace add", self.logged())
+        self.assertIn("plugin install", self.logged())
 
 
 class IntendedCommitCase(unittest.TestCase):
@@ -520,7 +610,7 @@ class LiveChannelCase(unittest.TestCase):
 
     def listing(self, stdout: str, returncode: int = 0) -> None:
         result = mock.Mock(returncode=returncode, stdout=stdout)
-        mock.patch("subprocess.run", return_value=result).start()
+        mock.patch("skills_install.run_with_deadline", return_value=result).start()
 
     def test_claude_absent_says_so(self) -> None:
         mock.patch("skills_install.claude_available", return_value=False).start()
@@ -532,7 +622,8 @@ class LiveChannelCase(unittest.TestCase):
 
     def test_a_stalled_listing_is_not_read_as_unregistered(self) -> None:
         mock.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1)
+            "skills_install.run_with_deadline",
+            side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1),
         ).start()
         self.assertIsNone(skills_install.live_channel()["registered"])
 
@@ -734,16 +825,18 @@ class PluginStateCase(unittest.TestCase):
 
     def plugin_list(self, stdout: str, returncode: int = 0) -> None:
         result = mock.Mock(returncode=returncode, stdout=stdout)
-        self.runner = mock.patch("subprocess.run", return_value=result).start()
+        self.runner = mock.patch("skills_install.run_with_deadline", return_value=result).start()
 
     def plugin_id(self) -> str:
         return f"{skills_install.PLUGIN_NAME}@{skills_install.MARKETPLACE_NAME}"
 
     def test_an_installed_and_enabled_plugin_reads_as_both(self) -> None:
         self.plugin_list(json.dumps([{"id": self.plugin_id(), "scope": "user", "enabled": True}]))
-        self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": True})
-        self.assertEqual(self.runner.call_args.args[0], ["claude", "plugin", "list", "--json"])
-        self.assertEqual(self.runner.call_args.kwargs["timeout"], skills_install.SUBPROCESS_TIMEOUT)
+        with mock.patch("shutil.which", return_value="/opt/claude.CMD"):
+            self.assertEqual(skills_install.plugin_state(), {"installed": True, "enabled": True})
+        self.assertEqual(
+            self.runner.call_args.args[0], ["/opt/claude.CMD", "plugin", "list", "--json"]
+        )
 
     def test_only_the_user_scope_install_counts(self) -> None:
         """A project install of the same id is not what the installer put in place."""
@@ -768,10 +861,11 @@ class PluginStateCase(unittest.TestCase):
         self.assertEqual(skills_install.plugin_state(), unknown)
         self.plugin_list("{}")
         self.assertEqual(skills_install.plugin_state(), unknown)
-        mock.patch("subprocess.run", side_effect=OSError).start()
+        mock.patch("skills_install.run_with_deadline", side_effect=OSError).start()
         self.assertEqual(skills_install.plugin_state(), unknown)
         mock.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1)
+            "skills_install.run_with_deadline",
+            side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=1),
         ).start()
         self.assertEqual(skills_install.plugin_state(), {"installed": None, "enabled": None})
 
@@ -879,6 +973,7 @@ class RegisterCase(unittest.TestCase):
             return mock.Mock(returncode=returncode, stdout="", stderr=stderr)
 
         mock.patch("subprocess.run", side_effect=fake_run).start()
+        mock.patch("skills_install.run_with_deadline", side_effect=fake_run).start()
         with contextlib.redirect_stderr(io.StringIO()) as err:
             result = skills_install.register_claude_marketplace()
         self.stderr = err.getvalue()
