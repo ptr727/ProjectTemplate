@@ -354,6 +354,15 @@ function Get-PathEntryTarget {
     return [Environment]::ExpandEnvironmentVariables($text)
 }
 
+# The key two entries are compared by: the target without a trailing \ or \., which name the same directory.
+# A drive root keeps its \, since C: alone names the current directory on that drive rather than its root.
+function Get-PathEntryKey {
+    param([Parameter(Mandatory)][string]$Target)
+    $key = $Target -replace '(\\\.?)+$', ''
+    if ($key -match '^[A-Za-z]:$' -and $Target.Length -gt 2) { $key += '\' }
+    return $key
+}
+
 # Whether a directory is there, missing, a file instead, or could not be read.
 # Only a not-found answer is missing.
 # Anything else, such as a drive that is not ready or a share that refuses, is unreadable.
@@ -378,7 +387,8 @@ function Get-DirectoryState {
 # Off Windows that reads a drive letter as relative, and so would misjudge every entry under a test there.
 function Get-PathEntryState {
     param([Parameter(Mandatory)][string]$Target)
-    if ($Target.Contains('%')) { return 'unexpanded' }
+    # A whole %NAME% token rather than any %, since a directory name may hold a literal one.
+    if ($Target -match '%[^%\\]+%') { return 'unexpanded' }
     $root = if ($Target -match '^[A-Za-z]:\\') { $Target.Substring(0, 3) }
     elseif ($Target -match '^\\\\[^\\]+\\[^\\]+') { $Matches[0] }
     else { $null }
@@ -458,7 +468,7 @@ function Get-PathCleanup {
                 continue
             }
             $target = Get-PathEntryTarget -Entry $entry
-            if (-not $seen.Add(($target -replace '(\\\.?)+$', ''))) {
+            if (-not $seen.Add((Get-PathEntryKey -Target $target))) {
                 $removed.Add(@{ Entry = $entry; Reason = 'repeats an earlier entry' })
                 continue
             }

@@ -22,6 +22,7 @@ UPGRADER = ROOT / "host-setup" / "windows" / "upgrade-host.ps1"
 
 FUNCTIONS = (
     "Get-PathEntryTarget",
+    "Get-PathEntryKey",
     "Get-PathEntryState",
     "Get-PathCleanup",
     "Get-PathWriteScope",
@@ -228,6 +229,29 @@ class TestPathCleanupPlan(unittest.TestCase):
         self.assertIn("did not answer", unjudged["\\\\server\\share\\bin"])
         self.assertIn("could not be read", unjudged["C:\\locked"])
         self.assertIn("not a full path", unjudged["bin"])
+
+    def test_a_drive_root_is_not_a_duplicate_of_the_bare_drive(self) -> None:
+        plan = drive(
+            "plan",
+            user="C:\\;C:;C:\\.;c:\\\\",
+            directories={"C:\\": "present", "c:\\\\": "present"},
+        )["plan"]
+        self.assertEqual(plan["User"]["Value"], "C:\\;C:")
+        self.assertEqual(
+            removed(plan, "User"),
+            [("C:\\.", "repeats an earlier entry"), ("c:\\\\", "repeats an earlier entry")],
+        )
+        self.assertIn("not a full path", plan["User"]["Unjudged"][0]["Reason"])
+
+    def test_a_literal_percent_in_a_directory_name_is_judged(self) -> None:
+        plan = drive(
+            "plan",
+            user="C:\\tools\\50%;C:\\gone\\100%",
+            directories={"C:\\tools\\50%": "present"},
+        )["plan"]
+        self.assertEqual(plan["User"]["Value"], "C:\\tools\\50%")
+        self.assertEqual(removed(plan, "User"), [("C:\\gone\\100%", "does not exist")])
+        self.assertEqual(plan["User"]["Unjudged"], [])
 
     def test_an_entry_naming_a_file_is_removed(self) -> None:
         plan = drive(
