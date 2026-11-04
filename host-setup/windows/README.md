@@ -77,13 +77,13 @@ To recover, remove entries, then sign out and back in. Shortening an entry with 
 
 ## Cleaning Path
 
-`upgrade-host.ps1 -CleanPath` removes three kinds of entry from `Path`, and `-Status` lists them without removing anything.
+`upgrade-host.ps1 -CleanPath` removes the entries below from `Path`, and `-Status` lists them without removing anything.
 
 - **A duplicate.** Entries are compared after expanding variables, folding case, removing surrounding quotes, and trimming a trailing `\` or `\.`. The first in effective order is kept, machine before user. So a user entry repeating a machine one is removed from the user half.
-- **A dead entry**, whose directory does not exist. An entry is dead only when its drive or share root answers and the directory does not. An entry under an unmounted drive or an offline share is listed and kept. So is one holding a variable that does not expand, and one that is not a full path. So too is one holding a variable whose stored value changed after the terminal started, since this process would expand it to the old directory. A state that could not be read is never reported as an absence.
+- **A dead entry**, whose directory does not exist, or which names a file rather than a directory. An entry is dead only when its drive or share root answers and the directory does not. An entry under an unmounted drive or an offline share is listed and kept. So is one holding a variable that does not expand, and one that is not a full path. So too is one holding a variable whose stored value changed after the terminal started, since this process would expand it to the old directory. A state that could not be read is never reported as an absence.
 - **An empty entry**, from a doubled or trailing `;`.
 
-It reads and writes each half's raw registry value, keeping its `REG_EXPAND_SZ` kind and every kept entry's unexpanded text and place. Writing the expanded `Path` back would freeze `%USERPROFILE%` and its like into literal paths. It asks first unless `-Yes` was given, and `-DryRun` prints the value it would write instead. After the prompt it reads each half again and writes nothing where one changed, so it never reverts a change an install made meanwhile. Before each write it prints the previous value, so a cleanup can be undone by hand. After writing it broadcasts the environment change, so a program started afterwards sees the new `Path` without a sign-out.
+It reads and writes each half's raw registry value, keeping its `REG_EXPAND_SZ` kind and every kept entry's unexpanded text and place. Writing the expanded `Path` back would freeze `%USERPROFILE%` and its like into literal paths. It asks first unless `-Yes` was given, and `-DryRun` prints the value it would write instead. After the prompt it reads both halves again and writes neither where either changed, so it never reverts a change an install made meanwhile. Where the second write fails after the first succeeded, it says which half was written and still broadcasts the change. Before each write it prints the previous value, so a cleanup can be undone by hand. After writing it broadcasts the environment change, so a program started afterwards sees the new `Path` without a sign-out.
 
 **Elevation is detected and never required.** Unelevated, it cleans the user half, lists the machine findings, and exits successfully. It names an elevated run, such as the same command under `gsudo`, as the way to remove them. Elevated, it cleans both halves. It raises no UAC prompt of its own and refuses no run for its elevation state, which keeps "Elevation and Scope" above.
 
@@ -110,7 +110,7 @@ pwsh -NoProfile -File ..\bootstrap.ps1 -Help
 
 ## menu.ps1
 
-[`menu.ps1`][menu-ps1] sits beside [`menu.sh`][menu] at the top of [`host-setup/`][host-setup-readme] for the same reason `bootstrap.ps1` sits beside `bootstrap.sh`. That reason is that `menu.ps1` fronts this registry's scripts rather than joining it. [`host-setup/README.md`][host-setup-readme] "The Human Menu" carries `menu.ps1`'s full contract. `menu.ps1` shares `bootstrap.ps1`'s PowerShell 5.1 to `pwsh` handoff, and it adds two entries with no Linux peer, since each is a Windows-side concern. They are `setup-wsl.ps1 -Status` and `upgrade-host.ps1 -CleanPath`.
+[`menu.ps1`][menu-ps1] sits beside [`menu.sh`][menu] at the top of [`host-setup/`][host-setup-readme] for the same reason `bootstrap.ps1` sits beside `bootstrap.sh`. That reason is that `menu.ps1` fronts this registry's scripts rather than joining it. [`host-setup/README.md`][host-setup-readme] "The Human Menu" carries `menu.ps1`'s full contract. `menu.ps1` shares `bootstrap.ps1`'s PowerShell 5.1 to `pwsh` handoff, and it adds entries with no Linux peer, since each is a Windows-side concern: `setup-wsl.ps1 -Status` and `upgrade-host.ps1 -CleanPath`.
 
 ```powershell
 pwsh -NoProfile -File ..\menu.ps1 -Help

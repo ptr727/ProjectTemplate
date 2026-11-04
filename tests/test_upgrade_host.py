@@ -60,15 +60,21 @@ function Read-PathScope {
     param([string]$Scope)
     $script:READS[$Scope]++
     $raw = $script:case.stored[$Scope].raw
+    $kind = $script:case.stored[$Scope].kind
     if ($script:READS[$Scope] -gt 1 -and $script:case.changedOnReread -contains $Scope) { $raw += ';C:\installed-meanwhile' }
-    @{ Raw = $raw; Kind = $script:case.stored[$Scope].kind }
+    if ($script:READS[$Scope] -gt 1 -and $script:case.kindChangedOnReread -contains $Scope) { $kind = 'String' }
+    @{ Raw = $raw; Kind = $kind }
 }
 function Read-StoredVariable {
     param([string]$Name)
     if ($script:case.storedVariables.ContainsKey($Name)) { return $script:case.storedVariables[$Name] }
     return $null
 }
-function Write-PathScope { param([string]$Scope, [string]$Value, $Kind) $script:WRITES.Add([ordered]@{ scope = $Scope; value = $Value; kind = "$Kind" }) }
+function Write-PathScope {
+    param([string]$Scope, [string]$Value, $Kind)
+    if ($script:case.failWrite -eq $Scope) { throw 'access denied' }
+    $script:WRITES.Add([ordered]@{ scope = $Scope; value = $Value; kind = "$Kind" })
+}
 function Send-EnvironmentChange { $script:BROADCASTS++; return $true }
 function Get-DirectoryState {
     param([string]$Path)
@@ -129,6 +135,8 @@ def drive(
         "sessionUser": options.get("session_user", "same"),
         "storedVariables": options.get("stored_variables", {}),
         "changedOnReread": options.get("changed_on_reread", []),
+        "kindChangedOnReread": options.get("kind_changed_on_reread", []),
+        "failWrite": options.get("fail_write", ""),
         "dryRun": options.get("dry_run", False),
         "confirm": options.get("confirm", True),
         "environment": options.get("environment", {}),
@@ -220,6 +228,17 @@ class TestPathCleanupPlan(unittest.TestCase):
         self.assertIn("did not answer", unjudged["\\\\server\\share\\bin"])
         self.assertIn("could not be read", unjudged["C:\\locked"])
         self.assertIn("not a full path", unjudged["bin"])
+
+    def test_an_entry_naming_a_file_is_removed(self) -> None:
+        plan = drive(
+            "plan",
+            user="C:\\tools\\tool.exe;C:\\tools",
+            directories={"C:\\tools\\tool.exe": "file", "C:\\tools": "present"},
+        )["plan"]
+        self.assertEqual(
+            removed(plan, "User"), [("C:\\tools\\tool.exe", "names a file rather than a directory")]
+        )
+        self.assertEqual(plan["User"]["Value"], "C:\\tools")
 
     def test_empty_entries_are_removed(self) -> None:
         plan = drive(
@@ -325,6 +344,28 @@ class TestPathCleanupWrite(unittest.TestCase):
                 self.assertIn("Path changed after it was read", result["outcome"])
                 self.assertEqual(result["writes"], [])
                 self.assertEqual(result["broadcasts"], 0)
+
+    def test_a_machine_change_stops_an_unelevated_user_write(self) -> None:
+        result = self.clean(elevated=False, changed_on_reread=["Machine"])
+        self.assertIn("machine Path changed after it was read", result["outcome"])
+        self.assertEqual(result["writes"], [])
+
+    def test_a_kind_changed_while_the_prompt_waited_is_not_written(self) -> None:
+        result = self.clean(elevated=False, kind_changed_on_reread=["User"])
+        self.assertIn("user Path changed after it was read", result["outcome"])
+        self.assertEqual(result["writes"], [])
+
+    def test_a_failed_second_write_names_the_first_and_still_broadcasts(self) -> None:
+        result = self.clean(elevated=True, fail_write="User")
+        self.assertIn("but the machine Path was already written", result["outcome"])
+        self.assertEqual([write["scope"] for write in result["writes"]], ["Machine"])
+        self.assertEqual(result["broadcasts"], 1)
+
+    def test_a_failed_first_write_says_nothing_was_written(self) -> None:
+        result = self.clean(elevated=True, fail_write="Machine")
+        self.assertIn("so nothing was written", result["outcome"])
+        self.assertEqual(result["writes"], [])
+        self.assertEqual(result["broadcasts"], 0)
 
     def test_the_previous_value_is_printed_before_its_write(self) -> None:
         result = self.clean(elevated=False)

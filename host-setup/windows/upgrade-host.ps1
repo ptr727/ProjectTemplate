@@ -71,8 +71,8 @@ function usage {
 Usage: upgrade-host.ps1 [options]
 
 Upgrades this host: the packages winget manages, and the WSL platform. A Windows feature update is
-Windows Update's to make and has no action here. Also removes the dead and duplicate Path entries
-installs leave behind.
+Windows Update's to make and has no action here. -CleanPath removes the dead and duplicate Path
+entries installs leave behind, and no other action edits Path.
 
 Actions, name one, default -Packages:
   -s, -Status       Report the host, what is upgradable, and the WSL platform
@@ -354,15 +354,16 @@ function Get-PathEntryTarget {
     return [Environment]::ExpandEnvironmentVariables($text)
 }
 
-# Whether a directory is there, missing, or could not be read.
+# Whether a directory is there, missing, a file instead, or could not be read.
 # Only a not-found answer is missing.
 # Anything else, such as a drive that is not ready or a share that refuses, is unreadable.
 # A state that could not be read is never reported as an absence.
 function Get-DirectoryState {
     param([Parameter(Mandatory)][string]$Path)
     try {
-        $null = [IO.File]::GetAttributes($Path)
-        return 'present'
+        $attributes = [IO.File]::GetAttributes($Path)
+        if ($attributes.HasFlag([IO.FileAttributes]::Directory)) { return 'present' }
+        return 'file'
     } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
         return 'missing'
     } catch {
@@ -386,6 +387,7 @@ function Get-PathEntryState {
     switch (Get-DirectoryState -Path $Target) {
         'present' { return 'present' }
         'missing' { return 'dead' }
+        'file' { return 'file' }
         default { return 'unreadable' }
     }
 }
@@ -463,6 +465,11 @@ function Get-PathCleanup {
             $state = Get-PathEntryState -Target $target
             if ($state -eq 'dead') {
                 $removed.Add(@{ Entry = $entry; Reason = 'does not exist' })
+                continue
+            }
+            # A command search looks inside each entry as a directory, so an entry naming a file never finds anything.
+            if ($state -eq 'file') {
+                $removed.Add(@{ Entry = $entry; Reason = 'names a file rather than a directory' })
                 continue
             }
             $kept.Add($entry)
@@ -545,14 +552,17 @@ function Invoke-PathCleanup {
 
     if (-not (confirm "Remove these entries from the $(($scopes | ForEach-Object { $_.ToLower() }) -join ' and ') Path?")) { die 'Declined' }
 
-    # Read again after the prompt, which can wait indefinitely.
+    # Read both halves again after the prompt, which can wait indefinitely.
     # Writing the plan over a Path an install changed meanwhile would silently revert that change.
-    foreach ($scope in $scopes) {
-        if ((Read-PathScope -Scope $scope).Raw -cne $stored[$scope].Raw) {
+    # The half not written is checked too, since the user half's duplicates are judged against the machine half.
+    foreach ($scope in 'Machine', 'User') {
+        $now = Read-PathScope -Scope $scope
+        if ($now.Raw -cne $stored[$scope].Raw -or "$($now.Kind)" -ne "$($stored[$scope].Kind)") {
             die "The $($scope.ToLower()) Path changed after it was read, so nothing was written. Run this again."
         }
     }
 
+    $written = @()
     foreach ($scope in $scopes) {
         $label = $scope.ToLower()
         # Printed before the write rather than after, so a cleanup that goes wrong can still be undone by hand.
@@ -564,8 +574,13 @@ function Invoke-PathCleanup {
         try {
             Write-PathScope -Scope $scope -Value $plan[$scope].Value -Kind $stored[$scope].Kind
         } catch {
-            die "Writing the $label Path failed, and it is as it was: $($_.Exception.Message)"
+            $failure = $_.Exception.Message
+            if ($written.Count -eq 0) { die "Writing the $label Path failed, so nothing was written: $failure" }
+            # The half already written stays written, so it is still announced.
+            $null = Send-EnvironmentChange
+            die "Writing the $label Path failed, and it is as it was, but the $($written -join ' and ') Path was already written: $failure"
         }
+        $written += $label
         info "Wrote the $label Path"
     }
 
