@@ -1,6 +1,6 @@
 {
     "name": "ProjectTemplate (.NET)",
-    "image": "mcr.microsoft.com/devcontainers/dotnet:1-10.0",
+    "image": "mcr.microsoft.com/devcontainers/dotnet:2-10.0",
 
     "features": {
         "ghcr.io/devcontainers/features/common-utils:2": {},

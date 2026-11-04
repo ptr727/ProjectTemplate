@@ -4,8 +4,10 @@ This repo ships no application toolchain. It keeps two per-language [Dev Contain
 
 | Devcontainer | Image | Toolchain |
 | ------------ | ----- | --------- |
-| [`catalog/snippets/devcontainer/dotnet/devcontainer.json`][devcontainer] | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | .NET 10 SDK |
-| [`catalog/snippets/devcontainer/python/devcontainer.json`][devcontainer-2] | `mcr.microsoft.com/devcontainers/python:1-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
+| [`catalog/snippets/devcontainer/dotnet/devcontainer.json`][devcontainer] | `mcr.microsoft.com/devcontainers/dotnet:2-10.0` | .NET 10 SDK |
+| [`catalog/snippets/devcontainer/python/devcontainer.json`][devcontainer-2] | `mcr.microsoft.com/devcontainers/python:3-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
+
+Each tag pins the image's major version and its runtime version, so it takes that major's updates without an edit. A maintainer changes a tag by hand, because Dependabot's `devcontainers` ecosystem updates a definition's Features and not its `image`. Start the definition with its post-create step after changing a tag, since a tag can be absent from the registry or fail its feature build.
 
 In a repo that carries one of these definitions, install the [Dev Containers extension][marketplace-link] and pick **Reopen in Container**.
 
