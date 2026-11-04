@@ -33,6 +33,8 @@ The host SSH key, allowed-signers file, and `gh` config directory are mounted in
 | `~/.config/git/allowed_signers` | `/home/vscode/.config/git/allowed_signers` | read-only | Maps your email to your public key so `git verify-commit` and `git log --show-signature` work inside the container. |
 | `~/.config/gh` | `/home/vscode/.config/gh` | read-write | `gh` CLI auth state shared with the host. See [`gh` credential store][gh-credential-store] below. |
 
+Each mount's `source` finds the host home directory by joining `${localEnv:HOME}${localEnv:USERPROFILE}`, so exactly one of those variables must be set. See [Troubleshooting][troubleshooting] for a Windows launch that sets `HOME` too.
+
 VS Code Dev Containers automatically copies your host `~/.gitconfig` into the container at startup. So `user.name`, `user.email`, `user.signingkey`, `gpg.format`, and `commit.gpgsign` propagate without an explicit mount.
 
 The SSH agent is forwarded automatically by the Dev Containers extension via `SSH_AUTH_SOCK`. So signing works as long as the agent on the host has your key loaded.
@@ -100,6 +102,8 @@ If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed sig
 
 ## Troubleshooting
 
+**Container fails to start on Windows with `The filename, directory name, or volume label syntax is incorrect`.** A launch with both `HOME` and `USERPROFILE` set joins them into an invalid bind-mount path. VS Code launched from Git Bash does this, and so does a `HOME` variable set in the Windows environment. `devcontainer.json` substitution has no fallback that picks one of them. Close every VS Code window, then reopen the repo from WSL2 or launch VS Code from the Start menu. Remove a `HOME` variable set in the Windows environment first.
+
 **Permission denied writing to `~/.ssh/known_hosts` in the container.** The `onCreateCommand` should have chowned `~/.ssh` to `vscode`. Rebuild the container, and if it persists, open a shell and run the same `sudo install -d -m 700 -o vscode -g vscode ~/.ssh` manually.
 
 **`git commit` fails with "no SSH agent socket".** VS Code Dev Containers forwards `SSH_AUTH_SOCK` automatically, but only if the host has `ssh-agent` running with at least one key. Run `ssh-add -l` on the host first, and if it says "could not open a connection to your authentication agent", start the agent (see [host setup][host-setup]).
@@ -116,6 +120,7 @@ If `git -c gpg.format=ssh commit -S` errors with `signing failed: no allowed sig
 [devcontainer-2]: ../catalog/snippets/devcontainer/python/devcontainer.json
 [gh-credential-store]: #gh-credential-store
 [host-setup]: ./host-setup.md
+[troubleshooting]: #troubleshooting
 
 <!-- External -->
 
