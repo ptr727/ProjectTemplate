@@ -28,7 +28,7 @@ if [[ "$installed_uv_version" != "$UV_VERSION" ]]; then
     # This produces a logged sha256 of exactly the bytes we ran.
     # A compromised installer therefore leaves a forensic trail.
     # It also lets a future change pin a known-good checksum (set EXPECTED_SHA below).
-    installer=$(mktemp -t uv-install.XXXXXX.sh)
+    installer=$(mktemp "${TMPDIR:-/tmp}/uv-install.XXXXXX")
     trap 'rm -f "$installer"' EXIT
     curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" -o "$installer"
     actual_sha=$(sha256sum "$installer" | awk '{print $1}')
