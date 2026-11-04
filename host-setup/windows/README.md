@@ -63,6 +63,18 @@ Some applications update themselves and never rewrite the version recorded at in
 
 These are listed apart, left alone, and printed with **no command beside them**. Offering one invites a full reinstall over a working, already current copy in pursuit of a number that will not move. `MSYS2` is the worked example. It upgrades through `pacman` from inside the msys shell, and the version `winget` shows is the installer's rather than the one it runs. `install-tools.ps1` reports such a tool as `self-updating` rather than `outdated` for the same reason.
 
+## The Path Length Warning
+
+`install-tools.ps1` and `upgrade-host.ps1` warn when the machine and user `Path` together expand past 3700 characters. `install-tools.ps1` checks in its report and after an apply. `upgrade-host.ps1` checks in `-Status` and after an upgrade. Neither edits `Path`, since which entry to drop is the operator's call.
+
+The failure this warns ahead of reports nothing itself. Past about 4095 expanded characters, Explorer's rebuild of its environment keeps the machine entries and drops the user half of `Path`. Whatever Explorer launches inherits that. So an editor opened from the Start menu stops finding per-user tools, while a new Windows Terminal tab still finds them.
+
+3700 is a margin chosen below that limit. The check reads the length alone, without asking Explorer what it did. No run of these scripts has pushed a `Path` over the limit, so the limit is as reported rather than as tested here.
+
+The usual route there is `winget`. The [`winget` issue tracker explains][winget-path] that it adds one long `Path` entry per portable package when it cannot create symlinks. That happens when Developer Mode is off and it runs unelevated. Otherwise it links them through a single directory.
+
+To recover, remove entries, then sign out and back in. Shortening an entry with a variable such as `%LOCALAPPDATA%` shrinks the stored value and leaves the expanded length the same.
+
 ## Why There Is No Linter Category
 
 Neither this tooling nor its Linux sibling installs `markdownlint`, `cspell`, `actionlint`, `editorconfig-checker`, `shellcheck`, `shfmt`, `PSScriptAnalyzer`, `check-jsonschema` or `ruff`. That is a decision rather than a gap.
@@ -122,7 +134,7 @@ This moved a boundary the tool used to hold. WSL used to be read-only here, and 
 | `ssh-agent` is a socket, started per shell | `ssh-agent` is a Windows service, reported and not started | Starting it needs administrator, and nothing here elevates |
 | no WSL script | `setup-wsl.ps1` | WSL is a Windows-side concern with no Linux-side peer |
 
-The scripts here share no file with each other. The roughly thirty duplicated lines of logging, the dry-run wrapper and the confirmation prompt are identical rather than merely similar. That is the same rule the Linux scripts follow, for the same reason, and it is stated in [`host-setup/README.md`][host-setup-readme]. Do not factor them out.
+The scripts here share no file with each other. The roughly thirty duplicated lines of logging, the dry-run wrapper and the confirmation prompt are identical rather than merely similar. That is the same rule the Linux scripts follow, for the same reason, and it is stated in [`host-setup/README.md`][host-setup-readme]. Do not factor them out. `install-tools.ps1` and `upgrade-host.ps1` each carry the `Path` length functions under the same rule, and a test holds the two copies equal.
 
 ## Verification
 
@@ -172,3 +184,4 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 [setup-wsl]: ./setup-wsl.ps1
 [test-bootstrap]: ../../tests/test_bootstrap.py
 [upgrade-host]: ./upgrade-host.ps1
+[winget-path]: https://github.com/microsoft/winget-cli/issues/3601
