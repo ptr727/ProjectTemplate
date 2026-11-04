@@ -460,8 +460,9 @@ function Invoke-WingetRemove {
 # Where App Installer keeps every installer log winget asks a package for, named <package id>.<version>-<timestamp>.log.
 $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir'
 
-# The entries of the installer log one failed winget call wrote that say why it failed, or none where no such log or entry exists.
-# All winget reports is that the installer exited non-zero, with a code the installer chose.
+# The entries of the installer log one failed winget call wrote, and of winget's own log for that call, that say why it failed.
+# Each is none where no such log or entry exists.
+# For a package with an installer, all winget reports is that the installer exited non-zero, with a code the installer chose.
 # So the reason lives in that log and nowhere a person reads by default.
 # A silent Inno Setup installer, Git for Windows among them, answers its own blocking dialog and logs the dialog's text.
 # That text is the whole reason.
@@ -471,32 +472,54 @@ $WINGET_LOG_DIRECTORY = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.DesktopA
 # Whether files were in use is read from every entry before that cap.
 # An in-use entry is always among those shown, the first one put back where none survived the cap.
 # So a run of later error and abort lines cannot push the actual reason out of the report.
+# A portable or zip package has no installer, so winget's own WinGet-<timestamp>.log for the call holds its reason instead.
+# That log is the latest one started since the attempt that names the package id, and only its error lines are kept.
+# Only there does an access denial count as files in use, and only one naming a file, as winget reports failing to replace one.
+# In an installer log a denial can be a permission failure, which no running process causes.
 function Get-InstallerFailureReason {
     param([Parameter(Mandatory)][string]$Id, [Parameter(Mandatory)][datetime]$Since, [string]$Directory = $script:WINGET_LOG_DIRECTORY)
-    $result = @{ Log = $null; Entries = @(); InUse = $false }
+    $result = @{ Log = $null; Entries = @(); WingetLog = $null; WingetEntries = @(); InUse = $false }
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $result }
     $log = Get-ChildItem -LiteralPath $Directory -Filter "$Id.*.log" -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | Select-Object -Last 1
-    if (-not $log) { return $result }
-    $result.Log = $log.FullName
-    $entries = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in (Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)) {
-        if (($line -eq '' -or $line -match '^\s') -and $entries.Count -gt 0) {
-            $entries[$entries.Count - 1] = "$($entries[$entries.Count - 1]) $($line.Trim())".TrimEnd()
-        } else {
-            $entries.Add(($line -replace '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+\s+', '').Trim())
+    if ($log) {
+        $result.Log = $log.FullName
+        $entries = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in (Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue)) {
+            if (($line -eq '' -or $line -match '^\s') -and $entries.Count -gt 0) {
+                $entries[$entries.Count - 1] = "$($entries[$entries.Count - 1]) $($line.Trim())".TrimEnd()
+            } else {
+                $entries.Add(($line -replace '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+\s+', '').Trim())
+            }
         }
+        $selected = Select-FailureEntry -Entries $entries -Pattern '(?i)suppressed message box|\berror\b|\bfail|\babort|denied|in use|return value 3'
+        $result.Entries = $selected.Entries
+        $result.InUse = $selected.InUse
     }
-    $inUsePattern = '(?i)process\(es\) use|in use by|used by another process'
-    $matched = @($entries | Where-Object { $_ -match '(?i)suppressed message box|\berror\b|\bfail|\babort|denied|in use|return value 3' -or $_ -match $inUsePattern })
-    $inUse = @($matched | Where-Object { $_ -match $inUsePattern })
-    $result.InUse = $inUse.Count -gt 0
+    $idPattern = "(?i)(?<![\w.-])$([regex]::Escape($Id))(?![\w.-])"
+    $session = Get-ChildItem -LiteralPath $Directory -Filter 'WinGet-*.log' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.CreationTime -ge $Since } | Sort-Object CreationTime, Name -Descending |
+        Where-Object { Select-String -LiteralPath $_.FullName -Pattern $idPattern -Quiet -ErrorAction SilentlyContinue } | Select-Object -First 1
+    if ($session) {
+        $result.WingetLog = $session.FullName
+        $errors = @(Get-Content -LiteralPath $session.FullName -ErrorAction SilentlyContinue |
+            Where-Object { $_ -match '^\S+ \S+ <E> ' } | ForEach-Object { ($_ -replace '^\S+ \S+ <E> \[[^\]]*\]\s*', '').Trim() })
+        $selected = Select-FailureEntry -Entries $errors -Pattern '.' -InUsePattern '(?i)in use by|used by another process|access is denied\.?:\s*"'
+        $result.WingetEntries = $selected.Entries
+        $result.InUse = $result.InUse -or $selected.InUse
+    }
+    return $result
+}
+
+function Select-FailureEntry {
+    param([string[]]$Entries, [Parameter(Mandatory)][string]$Pattern, [string]$InUsePattern = '(?i)process\(es\) use|in use by|used by another process')
+    $matched = @($Entries | Where-Object { $_ -match $Pattern -or $_ -match $InUsePattern })
+    $inUse = @($matched | Where-Object { $_ -match $InUsePattern })
     $shown = @($matched | Select-Object -Last 4)
-    if ($result.InUse -and -not ($shown | Where-Object { $_ -match $inUsePattern })) {
+    if ($inUse.Count -gt 0 -and -not ($shown | Where-Object { $_ -match $InUsePattern })) {
         $shown = @($inUse[0]) + @($matched | Select-Object -Last 3)
     }
-    $result.Entries = $shown
-    return $result
+    return @{ Entries = $shown; InUse = $inUse.Count -gt 0 }
 }
 
 # The directory one installed file's package owns, read as the child of the container it was installed into.
@@ -564,7 +587,7 @@ function Get-ToolHolder {
 
 # What a failed winget call owes its reader:
 #   - winget's code
-#   - the reason the installer's own log gives
+#   - the reason the installer's own log gives, and the one winget's own log gives
 #   - the processes that may hold the tool's files
 # The hex form of the code is the one winget documents its codes under, where the signed decimal matches nothing a search finds.
 # The log entries pass through the same home folder masking as the log's path, since an installer's reason commonly names a file under the profile.
@@ -572,22 +595,28 @@ function Get-ToolHolder {
 # So the processes running from the tool's install are named only where something says files were in use.
 # Something says so in one of these ways:
 #   - an installer log entry in Inno Setup's or Windows' own in-use wording
+#   - an error in winget's own log for the call saying a file was in use or denied
 #   - winget's code being one of its own package-in-use or file-in-use codes, a sharing violation, or an access denial
 # Anything else names nobody, for this reason.
-# A Git upgrade that failed on a download leaves no log and still finds every open Git Bash running from Git's own tree.
+# A Git upgrade that failed on a download logs no such entry and still finds every open Git Bash running from Git's own tree.
 # Blaming those would send the reader after the wrong thing.
 function Write-InstallFailure {
     param([Parameter(Mandatory)][string]$ToolName, [Parameter(Mandatory)][string]$Package, [Parameter(Mandatory)][int]$Code, [Parameter(Mandatory)][datetime]$Since, [Parameter(Mandatory)][string]$Probe, [string]$Executable)
     warn "$ToolName failed on $Package, winget exited $Code ($('0x{0:X8}' -f $Code))"
     $reason = Get-InstallerFailureReason -Id $Package -Since $Since
-    if ($reason.Entries.Count -gt 0) {
-        info 'The installer log says:'
-        foreach ($entry in $reason.Entries) {
-            $shown = if ($HOME) { $entry -ireplace [regex]::Escape($HOME), '%USERPROFILE%' } else { $entry }
-            info "  $shown"
+    foreach ($source in @(
+            @{ Heading = 'The installer log says:'; Entries = @($reason.Entries); Log = $reason.Log; Label = 'Full installer log' }
+            @{ Heading = "winget's own log says:"; Entries = @($reason.WingetEntries); Log = $reason.WingetLog; Label = 'Full winget log' }
+        )) {
+        if ($source.Entries.Count -gt 0) {
+            info $source.Heading
+            foreach ($entry in $source.Entries) {
+                $shown = if ($HOME) { $entry -ireplace [regex]::Escape($HOME), '%USERPROFILE%' } else { $entry }
+                info "  $shown"
+            }
         }
+        if ($source.Log) { info "$($source.Label): $(Hide-Home $source.Log)" }
     }
-    if ($reason.Log) { info "Full installer log: $(Hide-Home $reason.Log)" }
     $logInUse = [bool]$reason.InUse
     # 0x8A150101 and 0x8A150103 are winget's own INSTALL_PACKAGE_IN_USE and INSTALL_FILE_IN_USE, which it returns where a manifest maps the installer's exit code to either.
     # 0x80070020 and 0x80070005 are ERROR_SHARING_VIOLATION and ERROR_ACCESS_DENIED carried as an HRESULT.

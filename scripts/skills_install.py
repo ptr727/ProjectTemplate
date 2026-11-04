@@ -35,6 +35,7 @@ Usage: python3 scripts/skills_install.py            (installs)
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -48,6 +49,7 @@ import build_dist
 
 # A stalled child would hang a read-only report indefinitely, so every git and claude child the report runs gets a deadline.
 SUBPROCESS_TIMEOUT = 60
+KILL_GRACE_SECONDS = 5
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKILLS_SRC = ROOT / ".agents" / "skills"
@@ -68,17 +70,47 @@ def agents_home():
     return Path(override).expanduser() if override else Path.home() / ".agents"
 
 
-def git_in(root, *args):
-    """Run git against `root`, returning stripped stdout, or None on any failure."""
+def kill_process_tree(process):
+    """Kill `process` and, on Windows, what it started, since a launcher's child outlives it alone."""
+    if os.name == "nt":
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                capture_output=True,
+                check=False,
+                timeout=KILL_GRACE_SECONDS,
+            )
+    process.kill()
+
+
+def run_with_deadline(argv):
+    """Run a report child, raising `TimeoutExpired` close to SUBPROCESS_TIMEOUT.
+
+    `subprocess.run` on Windows kills only the direct child at the deadline, then waits with no
+    bound for the pipes to close. A child of a launcher or a `.cmd` shim holds them open, so that
+    wait lasts as long as the stall. Here the tree is killed and the final collection is bounded.
+
+    Stdout decodes here because text mode decodes on a reader thread on Windows, where a failure
+    prints a traceback and never reaches the caller. No caller reads stderr, so none is captured.
+    """
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
-        r = subprocess.run(
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=SUBPROCESS_TIMEOUT,
-        )
+        stdout, _ = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        kill_process_tree(process)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.communicate(timeout=KILL_GRACE_SECONDS)
+        raise
+    return subprocess.CompletedProcess(argv, process.returncode, stdout.decode("utf-8"))
+
+
+def git_in(root, *args):
+    """Run git against `root`, returning stripped stdout, or None on a failure.
+
+    Output that does not decode raises instead, since None could read as a clean tree.
+    """
+    try:
+        r = run_with_deadline(["git", "-C", str(root), *args])
     except UnicodeDecodeError:
         raise
     except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -203,19 +235,21 @@ def claude_available():
     return shutil.which("claude") is not None
 
 
+def claude_argv(*args):
+    """The argv running `claude <args>`, naming the path `which` found.
+
+    `CreateProcess` searches for a bare name with `.exe` alone, so it misses the `claude.cmd` an
+    npm install puts on `PATH`, which `which` finds through `PATHEXT`.
+    """
+    return [shutil.which("claude") or "claude", *args]
+
+
 def claude_json(*args):
     """The JSON list `claude <args>` prints, or None where it cannot be run or read as one."""
     try:
-        listing = subprocess.run(
-            ["claude", *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=SUBPROCESS_TIMEOUT,
-        )
+        listing = run_with_deadline(claude_argv(*args))
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+    except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
     return entries if isinstance(entries, list) else None
 
@@ -340,7 +374,7 @@ def register_claude_marketplace():
         )
 
     marketplace_add = subprocess.run(
-        ["claude", "plugin", "marketplace", "add", str(ROOT)],
+        claude_argv("plugin", "marketplace", "add", str(ROOT)),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -362,7 +396,7 @@ def install_claude_plugin():
     if plugin_state()["installed"]:
         return True
     install = subprocess.run(
-        ["claude", "plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"],
+        claude_argv("plugin", "install", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--scope", "user"),
         capture_output=True,
         text=True,
         encoding="utf-8",
