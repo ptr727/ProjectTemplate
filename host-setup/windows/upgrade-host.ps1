@@ -390,8 +390,39 @@ function Get-PathEntryState {
     }
 }
 
+# A variable's value as the registry stores it, expanded, or nothing where neither scope stores it.
+# The user scope is read first, since it overrides the machine one.
+function Read-StoredVariable {
+    param([Parameter(Mandatory)][string]$Name)
+    foreach ($scope in 'User', 'Machine') {
+        $key = Open-PathKey -Scope $scope
+        if ($null -eq $key) { continue }
+        try {
+            $value = $key.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        } finally {
+            $key.Dispose()
+        }
+        if ($null -ne $value) { return [Environment]::ExpandEnvironmentVariables([string]$value) }
+    }
+    return $null
+}
+
+# Whether a variable an entry names now stores a value other than the one this process inherited.
+# An install that repoints a variable, such as a JDK upgrade moving JAVA_HOME, leaves a running terminal on the old value.
+# Judging the entry by that value would read a live entry as dead.
+function Test-StaleVariable {
+    param([Parameter(Mandatory)][string]$Entry)
+    foreach ($match in [regex]::Matches($Entry, '%([^%;]+)%')) {
+        $name = $match.Groups[1].Value
+        $stored = Read-StoredVariable -Name $name
+        if ($null -ne $stored -and $stored -ne [Environment]::GetEnvironmentVariable($name)) { return $true }
+    }
+    return $false
+}
+
 # Why an entry that was not judged is kept, by its state.
 $PATH_KEPT_REASON = @{
+    stale      = 'a variable in it changed after this terminal started, so it was not judged. Run this again from a new terminal'
     unexpanded = 'a variable in it does not expand here, so it was not judged'
     relative   = 'it is not a full path, so it was not judged'
     root       = 'its drive or share did not answer, so it was not judged'
@@ -418,6 +449,12 @@ function Get-PathCleanup {
                 $removed.Add(@{ Entry = $entry; Reason = 'from a doubled or trailing ;' })
                 continue
             }
+            # Kept out of the duplicate keys too, since its stale expansion could match an entry it does not name.
+            if (Test-StaleVariable -Entry $entry) {
+                $kept.Add($entry)
+                $unjudged.Add(@{ Entry = $entry; Reason = $script:PATH_KEPT_REASON.stale })
+                continue
+            }
             $target = Get-PathEntryTarget -Entry $entry
             if (-not $seen.Add(($target -replace '(\\\.?)+$', ''))) {
                 $removed.Add(@{ Entry = $entry; Reason = 'repeats an earlier entry' })
@@ -436,19 +473,20 @@ function Get-PathCleanup {
     return $plan
 }
 
-# Whether this process runs as the user signed in to its session.
+# Whether this process runs as the user signed in to its session: same, other, or unknown.
 # An elevation as another account opens that account's HKCU, so its user Path is not the signed-in user's.
 # The owner of this session's explorer.exe is the signed-in user.
-# A session with no Explorer, such as one over SSH, has no answer, and the user half is then left alone.
-function Test-SessionUser {
+# A session with no Explorer, such as one over SSH, has no answer.
+function Get-SessionUserMatch {
     $self = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $session = (Get-Process -Id $PID).SessionId
     $shells = @(Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe' AND SessionId = $session" -ErrorAction SilentlyContinue)
+    if ($shells.Count -eq 0) { return 'unknown' }
     foreach ($shell in $shells) {
         $owner = Invoke-CimMethod -InputObject $shell -MethodName GetOwnerSid -ErrorAction SilentlyContinue
-        if ($owner -and $owner.Sid -eq $self) { return $true }
+        if ($owner -and $owner.Sid -eq $self) { return 'same' }
     }
-    return $false
+    return 'other'
 }
 
 # Which halves this run may write, and why a half it may not is left alone.
@@ -461,12 +499,13 @@ function Get-PathWriteScope {
             Reason  = @{ Machine = 'Removing the machine entries needs an elevated run, such as this same command under gsudo.' }
         }
     }
-    if (Test-SessionUser) { return @{ Machine = $true; User = $true; Reason = @{} } }
-    return @{
-        Machine = $true
-        User    = $false
-        Reason  = @{ User = 'This elevated process does not run as the user signed in to this session, so the user Path it reads is another account''s and is left alone. Run unelevated to clean the signed-in user''s.' }
+    $match = Get-SessionUserMatch
+    if ($match -eq 'same') { return @{ Machine = $true; User = $true; Reason = @{} } }
+    $reason = switch ($match) {
+        'other' { 'This elevated process does not run as the user signed in to this session, so the user Path it reads is another account''s and is left alone. Run unelevated to clean the signed-in user''s.' }
+        default { 'No Explorer runs in this session to name its signed-in user, so this elevated run cannot tell whose user Path it reads and leaves it alone. Remove the user entries listed above by hand, or run this from a desktop session.' }
     }
+    return @{ Machine = $true; User = $false; Reason = @{ User = $reason } }
 }
 
 function Show-PathFinding {
@@ -505,6 +544,14 @@ function Invoke-PathCleanup {
     }
 
     if (-not (confirm "Remove these entries from the $(($scopes | ForEach-Object { $_.ToLower() }) -join ' and ') Path?")) { die 'Declined' }
+
+    # Read again after the prompt, which can wait indefinitely.
+    # Writing the plan over a Path an install changed meanwhile would silently revert that change.
+    foreach ($scope in $scopes) {
+        if ((Read-PathScope -Scope $scope).Raw -cne $stored[$scope].Raw) {
+            die "The $($scope.ToLower()) Path changed after it was read, so nothing was written. Run this again."
+        }
+    }
 
     foreach ($scope in $scopes) {
         $label = $scope.ToLower()

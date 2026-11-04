@@ -28,6 +28,7 @@ FUNCTIONS = (
     "Show-PathFinding",
     "Invoke-PathCleanup",
     "Show-Status",
+    "Test-StaleVariable",
 )
 
 HARNESS = r"""
@@ -54,7 +55,19 @@ function step { param([string]$Message) $script:LINES.Add("==> $Message") }
 function warn { param([string]$Message) $script:LINES.Add("WARNING: $Message") }
 function die { param([string]$Message) throw "DIE $Message" }
 function confirm { param([string]$Question) $script:CONFIRMS.Add($Question); return $script:case.confirm }
-function Read-PathScope { param([string]$Scope) @{ Raw = $script:case.stored[$Scope].raw; Kind = $script:case.stored[$Scope].kind } }
+$READS = @{ Machine = 0; User = 0 }
+function Read-PathScope {
+    param([string]$Scope)
+    $script:READS[$Scope]++
+    $raw = $script:case.stored[$Scope].raw
+    if ($script:READS[$Scope] -gt 1 -and $script:case.changedOnReread -contains $Scope) { $raw += ';C:\installed-meanwhile' }
+    @{ Raw = $raw; Kind = $script:case.stored[$Scope].kind }
+}
+function Read-StoredVariable {
+    param([string]$Name)
+    if ($script:case.storedVariables.ContainsKey($Name)) { return $script:case.storedVariables[$Name] }
+    return $null
+}
 function Write-PathScope { param([string]$Scope, [string]$Value, $Kind) $script:WRITES.Add([ordered]@{ scope = $Scope; value = $Value; kind = "$Kind" }) }
 function Send-EnvironmentChange { $script:BROADCASTS++; return $true }
 function Get-DirectoryState {
@@ -62,7 +75,7 @@ function Get-DirectoryState {
     if ($script:case.directories.ContainsKey($Path)) { return $script:case.directories[$Path] }
     return 'missing'
 }
-function Test-SessionUser { return $script:case.sessionUser }
+function Get-SessionUserMatch { return $script:case.sessionUser }
 function Write-PathLengthWarning { }
 function Get-HostDescription { 'a host' }
 function Get-Upgradable { @{ Ready = @(); Explicit = @() } }
@@ -113,7 +126,9 @@ def drive(
         },
         "directories": {**LIVE_ROOT, **(directories or {})},
         "elevated": options.get("elevated", False),
-        "sessionUser": options.get("session_user", True),
+        "sessionUser": options.get("session_user", "same"),
+        "storedVariables": options.get("stored_variables", {}),
+        "changedOnReread": options.get("changed_on_reread", []),
         "dryRun": options.get("dry_run", False),
         "confirm": options.get("confirm", True),
         "environment": options.get("environment", {}),
@@ -224,13 +239,34 @@ class TestPathCleanupPlan(unittest.TestCase):
     def test_kept_entries_keep_their_unexpanded_text(self) -> None:
         plan = drive(
             "plan",
-            user="%T3862%\\bin;%t3862%\\BIN\\;%NOT_SET_3862%\\x",
+            user="%T3862%\\bin;%T3862%\\BIN\\;%NOT_SET_3862%\\x",
             directories={"C:\\home\\bin": "present"},
             environment={"T3862": "C:\\home"},
         )["plan"]
         self.assertEqual(plan["User"]["Value"], "%T3862%\\bin;%NOT_SET_3862%\\x")
-        self.assertEqual(removed(plan, "User"), [("%t3862%\\BIN\\", "repeats an earlier entry")])
+        self.assertEqual(removed(plan, "User"), [("%T3862%\\BIN\\", "repeats an earlier entry")])
         self.assertIn("does not expand", plan["User"]["Unjudged"][0]["Reason"])
+
+    def test_an_entry_whose_variable_changed_since_the_terminal_started_is_kept(self) -> None:
+        plan = drive(
+            "plan",
+            user="%J3862%\\bin;C:\\jdk-new\\bin",
+            directories={"C:\\jdk-new\\bin": "present"},
+            environment={"J3862": "C:\\jdk-old"},
+            stored_variables={"J3862": "C:\\jdk-new"},
+        )["plan"]
+        self.assertEqual(removed(plan, "User"), [])
+        self.assertEqual(plan["User"]["Value"], "%J3862%\\bin;C:\\jdk-new\\bin")
+        self.assertIn("changed after this terminal started", plan["User"]["Unjudged"][0]["Reason"])
+
+    def test_an_unchanged_stored_variable_is_judged(self) -> None:
+        plan = drive(
+            "plan",
+            user="%J3862%\\bin",
+            environment={"J3862": "C:\\jdk-old"},
+            stored_variables={"J3862": "C:\\jdk-old"},
+        )["plan"]
+        self.assertEqual(removed(plan, "User"), [("%J3862%\\bin", "does not exist")])
 
 
 @unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive upgrade-host.ps1's own functions")
@@ -263,7 +299,7 @@ class TestPathCleanupWrite(unittest.TestCase):
         self.assertEqual(result["broadcasts"], 1)
 
     def test_elevated_as_the_session_user_cleans_both_halves(self) -> None:
-        result = self.clean(elevated=True, session_user=True)
+        result = self.clean(elevated=True, session_user="same")
         self.assertEqual(result["outcome"], "ok")
         self.assertEqual(
             [(write["scope"], write["value"]) for write in result["writes"]],
@@ -273,12 +309,22 @@ class TestPathCleanupWrite(unittest.TestCase):
         self.assertNotIn("elevated run", "\n".join(result["lines"]))
 
     def test_elevated_as_another_account_leaves_the_user_half_alone(self) -> None:
-        result = self.clean(elevated=True, session_user=False)
-        self.assertEqual(result["outcome"], "ok")
-        self.assertEqual([write["scope"] for write in result["writes"]], ["Machine"])
-        text = "\n".join(result["lines"])
-        self.assertIn("remove  C:\\gone-user", text)
-        self.assertIn("another account's", text)
+        for match, reason in (("other", "another account's"), ("unknown", "No Explorer runs")):
+            with self.subTest(match=match):
+                result = self.clean(elevated=True, session_user=match)
+                self.assertEqual(result["outcome"], "ok")
+                self.assertEqual([write["scope"] for write in result["writes"]], ["Machine"])
+                text = "\n".join(result["lines"])
+                self.assertIn("remove  C:\\gone-user", text)
+                self.assertIn(reason, text)
+
+    def test_a_half_changed_while_the_prompt_waited_is_not_written(self) -> None:
+        for changed in (["User"], ["Machine"]):
+            with self.subTest(changed=changed):
+                result = self.clean(elevated=True, changed_on_reread=changed)
+                self.assertIn("Path changed after it was read", result["outcome"])
+                self.assertEqual(result["writes"], [])
+                self.assertEqual(result["broadcasts"], 0)
 
     def test_the_previous_value_is_printed_before_its_write(self) -> None:
         result = self.clean(elevated=False)
