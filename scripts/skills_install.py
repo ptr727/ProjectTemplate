@@ -101,9 +101,7 @@ def run_with_deadline(argv):
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.communicate(timeout=KILL_GRACE_SECONDS)
         raise
-    return subprocess.CompletedProcess(
-        argv, process.returncode, stdout.decode("utf-8").replace("\r\n", "\n")
-    )
+    return subprocess.CompletedProcess(argv, process.returncode, stdout.decode("utf-8"))
 
 
 def git_in(root, *args):
