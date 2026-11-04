@@ -4,8 +4,10 @@ This repo ships no application toolchain. It keeps two per-language [Dev Contain
 
 | Devcontainer | Image | Toolchain |
 | ------------ | ----- | --------- |
-| [`catalog/snippets/devcontainer/dotnet/devcontainer.json`][devcontainer] | `mcr.microsoft.com/devcontainers/dotnet:1-10.0` | .NET 10 SDK |
-| [`catalog/snippets/devcontainer/python/devcontainer.json`][devcontainer-2] | `mcr.microsoft.com/devcontainers/python:1-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
+| [`catalog/snippets/devcontainer/dotnet/devcontainer.json`][devcontainer] | `mcr.microsoft.com/devcontainers/dotnet:2-10.0` | .NET 10 SDK |
+| [`catalog/snippets/devcontainer/python/devcontainer.json`][devcontainer-2] | `mcr.microsoft.com/devcontainers/python:3-3.14-bookworm` | Python 3.14 + version-pinned `uv` |
+
+Each tag pins the image's major version and its runtime version, so it takes that major's updates without an edit. A maintainer changes a tag by hand, because Dependabot's `devcontainers` ecosystem updates a definition's Features and not its `image`. After changing a tag, start the definition with its post-create step, since a tag can be absent from the registry or fail its feature build. Start it in a carrying repo or in a scratch tree holding it under `.devcontainer/<language>/`, the path its `postCreateCommand` names. A .NET scratch tree also needs a local tool manifest, since its post-create restores local tools.
 
 In a repo that carries one of these definitions, install the [Dev Containers extension][marketplace-link] and pick **Reopen in Container**.
 
@@ -32,6 +34,8 @@ The host SSH key, allowed-signers file, and `gh` config directory are mounted in
 | `~/.ssh/id_ed25519.pub` | `/home/vscode/.ssh/id_ed25519.pub` | read-only | Public half of the SSH key. The private key never enters the container, since SSH agent forwarding handles signing. |
 | `~/.config/git/allowed_signers` | `/home/vscode/.config/git/allowed_signers` | read-only | Maps your email to your public key so `git verify-commit` and `git log --show-signature` work inside the container. |
 | `~/.config/gh` | `/home/vscode/.config/gh` | read-write | `gh` CLI auth state shared with the host. See [`gh` credential store][gh-credential-store] below. |
+
+Each mount uses the string form, which passes straight to Docker's `--mount` flag. The Dev Containers CLI drops a `readonly` key from the object form, which leaves the host file writable from the container.
 
 Each mount's `source` finds the host home directory by joining `${localEnv:HOME}${localEnv:USERPROFILE}`, so exactly one of those variables must be set. Each host path must also exist under that directory, since Docker refuses an absent one inside WSL2. See [Troubleshooting][troubleshooting] for a native Windows launch.
 
