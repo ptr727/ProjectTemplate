@@ -134,7 +134,7 @@ This moved a boundary the tool used to hold. WSL used to be read-only here, and 
 | `ssh-agent` is a socket, started per shell | `ssh-agent` is a Windows service, reported and not started | Starting it needs administrator, and nothing here elevates |
 | no WSL script | `setup-wsl.ps1` | WSL is a Windows-side concern with no Linux-side peer |
 
-The scripts here share no file with each other. The roughly thirty duplicated lines of logging, the dry-run wrapper and the confirmation prompt are identical rather than merely similar. That is the same rule the Linux scripts follow, for the same reason, and it is stated in [`host-setup/README.md`][host-setup-readme]. Do not factor them out. The `Path` length functions `install-tools.ps1` and `upgrade-host.ps1` both carry follow the same rule, and a test holds the two copies equal.
+The scripts here share no file with each other. The roughly thirty duplicated lines of logging, the dry-run wrapper and the confirmation prompt are identical rather than merely similar. That is the same rule the Linux scripts follow, for the same reason, and it is stated in [`host-setup/README.md`][host-setup-readme]. Do not factor them out. `install-tools.ps1` and `upgrade-host.ps1` each carry the `Path` length functions under the same rule, and a test holds the two copies equal.
 
 ## Verification
 

@@ -262,7 +262,7 @@ function Get-PathLengthWarning {
     param([int]$Length)
     $margin = 3700
     if ($Length -le $margin) { return $null }
-    return "the machine and user Path together expand to $Length characters, above the $margin this warns at. Past about 4095, Explorer silently drops the user half of Path from everything it launches, so an editor stops finding per-user tools while a new terminal tab still finds them. Remove entries, since shortening one with a variable leaves its expanded length the same, then sign out and back in."
+    return "the machine and user Path together expand to $Length characters, above the warning margin of $margin. Past about 4095, Explorer silently drops the user half of Path from everything it launches, so an editor stops finding per-user tools while a new terminal tab still finds them. Remove entries, since shortening one with a variable leaves its expanded length the same, then sign out and back in."
 }
 
 function Write-PathLengthWarning {
