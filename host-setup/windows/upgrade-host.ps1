@@ -2,6 +2,7 @@
 # Two things are brought current:
 #   - The packages winget manages, which is routine.
 #   - The WSL platform itself, which is the Windows peer of a kernel and moves on its own release schedule.
+# A third action removes the dead, duplicate and empty entries those installs leave in Path.
 #
 # A WSL platform update is refused while Docker Desktop is running.
 # The reason is that Docker holds the WSL service open, so the update then fails part way rather than declining.
@@ -18,6 +19,7 @@ param(
     [Alias('p')][switch]$Packages,
     [Alias('w')][switch]$Wsl,
     [Alias('a')][switch]$All,
+    [Alias('c')][switch]$CleanPath,
     [Alias('n')][switch]$DryRun,
     [Alias('y')][switch]$Yes,
     [Alias('h')][switch]$Help
@@ -45,7 +47,8 @@ $ACTIONS = [ordered]@{
     status   = [bool]$Status
     packages = [bool]$Packages
     wsl      = [bool]$Wsl
-    all      = [bool]$All
+    all       = [bool]$All
+    cleanpath = [bool]$CleanPath
 }
 $WANT_HELP = [bool]$Help
 
@@ -68,13 +71,15 @@ function usage {
 Usage: upgrade-host.ps1 [options]
 
 Upgrades this host: the packages winget manages, and the WSL platform. A Windows feature update is
-Windows Update's to make and has no action here.
+Windows Update's to make and has no action here. -CleanPath removes the dead and duplicate Path
+entries installs leave behind, and no other action edits Path.
 
 Actions, name one, default -Packages:
   -s, -Status       Report the host, what is upgradable, and the WSL platform
   -p, -Packages     Upgrade every winget package that has an upgrade
   -w, -Wsl          Update the WSL platform only
   -a, -All          Upgrade the packages, then update the WSL platform
+  -c, -CleanPath    Remove dead, duplicate and empty Path entries
   -h, -Help         Show this help
 
 Options:
@@ -89,12 +94,23 @@ Some packages report a version winget cannot move, because the application updat
 version it was installed at is the one recorded. Those are listed apart and left alone, and the
 report names where each is actually upgraded from.
 
+-CleanPath removes an entry whose directory does not exist, an entry repeating an earlier one, and
+an empty entry. An entry whose drive or share does not answer is kept, since its state could not be
+read. Run unelevated, it cleans the user Path and lists the machine findings, which an elevated run
+such as the same command under gsudo removes. Run elevated, it cleans both. Either way it prints
+each previous value before writing it, so a cleanup can be undone by hand. -Status lists what it
+would remove.
+
 Examples:
   upgrade-host.ps1                 Upgrade the winget packages
   upgrade-host.ps1 -Status         Report, change nothing
   upgrade-host.ps1 -Packages -Yes  Upgrade unattended
   upgrade-host.ps1 -All            Upgrade the packages, then the WSL platform
   upgrade-host.ps1 -Wsl -DryRun    Show what a WSL update would run
+  upgrade-host.ps1 -CleanPath -DryRun
+                                   Show what a Path cleanup would remove
+  gsudo upgrade-host.ps1 -CleanPath
+                                   Clean the machine Path too
 '@
 }
 
@@ -270,6 +286,322 @@ function Write-PathLengthWarning {
     if ($warning) { warn $warning }
 }
 
+# --- Path cleanup ---
+
+# Each half of Path is read and written as the registry stores it rather than through [Environment]::GetEnvironmentVariable.
+# That call expands the value, and writing an expanded value back freezes %USERPROFILE% and its like into literal paths.
+function Open-PathKey {
+    param([Parameter(Mandatory)][ValidateSet('Machine', 'User')][string]$Scope, [bool]$Writable = $false)
+    if ($Scope -eq 'Machine') {
+        return [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $Writable)
+    }
+    return [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $Writable)
+}
+
+# One half of Path as stored, its variables unexpanded, with the value's registry kind so a write can keep it.
+# A half with no Path value reads as empty, which a cleanup leaves alone.
+function Read-PathScope {
+    param([Parameter(Mandatory)][ValidateSet('Machine', 'User')][string]$Scope)
+    $none = @{ Raw = ''; Kind = $null }
+    $key = Open-PathKey -Scope $Scope
+    if ($null -eq $key) { return $none }
+    try {
+        if ($key.GetValueNames() -notcontains 'Path') { return $none }
+        return @{
+            Raw  = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            Kind = $key.GetValueKind('Path')
+        }
+    } finally {
+        $key.Dispose()
+    }
+}
+
+function Write-PathScope {
+    param(
+        [Parameter(Mandatory)][ValidateSet('Machine', 'User')][string]$Scope,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory)][Microsoft.Win32.RegistryValueKind]$Kind
+    )
+    $key = Open-PathKey -Scope $Scope -Writable $true
+    if ($null -eq $key) { throw "the $($Scope.ToLower()) Path key could not be opened for writing" }
+    try { $key.SetValue('Path', $Value, $Kind) } finally { $key.Dispose() }
+}
+
+# Tells running programs the environment changed, so a process started after the cleanup sees it without a sign-out.
+# This is the broadcast the System Properties dialog sends after an edit.
+function Send-EnvironmentChange {
+    if (-not ('UpgradeHost.NativeMethods' -as [type])) {
+        # The closing marker of a here-string has to sit at column 0, so this block is deliberately unindented.
+        Add-Type -Namespace UpgradeHost -Name NativeMethods -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+    }
+    $HWND_BROADCAST = [IntPtr]0xffff
+    $WM_SETTINGCHANGE = 0x1A
+    $SMTO_ABORTIFHUNG = 2
+    $answer = [UIntPtr]::Zero
+    $sent = [UpgradeHost.NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [UIntPtr]::Zero, 'Environment', $SMTO_ABORTIFHUNG, 5000, [ref]$answer)
+    return ($sent -ne [IntPtr]::Zero)
+}
+
+# The directory an entry names, expanded and without the quotes cmd accepts around one holding a space.
+# Both matter, because Test-Path on the quoted or unexpanded text reads a working entry as missing.
+function Get-PathEntryTarget {
+    param([Parameter(Mandatory)][string]$Entry)
+    $text = $Entry.Trim()
+    if ($text.Length -ge 2 -and $text.StartsWith('"') -and $text.EndsWith('"')) { $text = $text.Substring(1, $text.Length - 2) }
+    return [Environment]::ExpandEnvironmentVariables($text)
+}
+
+# Returns the key that duplicate detection compares, which is the target without a trailing \ or \., since those name the same directory.
+# A drive root keeps its \, since C: alone names the current directory on that drive rather than its root.
+function Get-PathEntryKey {
+    param([Parameter(Mandatory)][string]$Target)
+    $key = $Target -replace '(\\\.?)+$', ''
+    if ($key -match '^[A-Za-z]:$' -and $Target.Length -gt 2) { $key += '\' }
+    return $key
+}
+
+# Whether a directory is there, missing, a file instead, or could not be read.
+# Only a not-found answer is missing.
+# Anything else, such as a drive that is not ready or a share that refuses, is unreadable.
+# A state that could not be read is never reported as an absence.
+function Get-DirectoryState {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $attributes = [IO.File]::GetAttributes($Path)
+        if ($attributes.HasFlag([IO.FileAttributes]::Directory)) { return 'present' }
+        return 'file'
+    } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+        return 'missing'
+    } catch {
+        return 'unreadable'
+    }
+}
+
+# Whether an entry is present, dead, or one this cleanup does not judge.
+# An entry is dead only when its drive or share root answers and the directory does not.
+# A root that does not answer is an unmounted drive or an offline share, and the entry may well come back with it.
+# The root is matched by shape rather than with [IO.Path].
+# Off Windows that reads a drive letter as relative, and so would misjudge every entry under a test there.
+function Get-PathEntryState {
+    param([Parameter(Mandatory)][string]$Target)
+    # The check looks for a whole %NAME% token rather than any %, since a directory name may hold a literal one.
+    if ($Target -match '%[^%\\]+%') { return 'unexpanded' }
+    $root = if ($Target -match '^[A-Za-z]:\\') { $Target.Substring(0, 3) }
+    elseif ($Target -match '^\\\\[^\\]+\\[^\\]+') { $Matches[0] }
+    else { $null }
+    if (-not $root) { return 'relative' }
+    if ((Get-DirectoryState -Path $root) -ne 'present') { return 'root' }
+    switch (Get-DirectoryState -Path $Target) {
+        'present' { return 'present' }
+        'missing' { return 'dead' }
+        'file' { return 'file' }
+        default { return 'unreadable' }
+    }
+}
+
+# A variable's value as the registry stores it, expanded, or nothing where neither scope stores it.
+# The user scope is read first, since it overrides the machine one.
+function Read-StoredVariable {
+    param([Parameter(Mandatory)][string]$Name)
+    foreach ($scope in 'User', 'Machine') {
+        $key = Open-PathKey -Scope $scope
+        if ($null -eq $key) { continue }
+        try {
+            $value = $key.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        } finally {
+            $key.Dispose()
+        }
+        if ($null -ne $value) { return [Environment]::ExpandEnvironmentVariables([string]$value) }
+    }
+    return $null
+}
+
+# Whether a variable an entry names now stores a value other than the one this process inherited.
+# An install that repoints a variable, such as a JDK upgrade moving JAVA_HOME, leaves a running terminal on the old value.
+# Judging the entry by that value would read a live entry as dead.
+function Test-StaleVariable {
+    param([Parameter(Mandatory)][string]$Entry)
+    foreach ($match in [regex]::Matches($Entry, '%([^%;]+)%')) {
+        $name = $match.Groups[1].Value
+        $stored = Read-StoredVariable -Name $name
+        if ($null -ne $stored -and $stored -ne [Environment]::GetEnvironmentVariable($name)) { return $true }
+    }
+    return $false
+}
+
+# Why an entry that was not judged is kept, by its state.
+$PATH_KEPT_REASON = @{
+    stale      = 'a variable in it changed after this terminal started, so it was not judged. Run this again from a new terminal'
+    unexpanded = 'a variable in it does not expand here, so it was not judged'
+    relative   = 'it is not a full path, so it was not judged'
+    root       = 'its drive or share did not answer, so it was not judged'
+    unreadable = 'its directory could not be read, so it was not judged'
+}
+
+# What a cleanup would remove from each half, and what it keeps without judging.
+# Machine entries come first because that is the order of the effective Path.
+# So of two equal entries the machine one is kept, and a user entry repeating a machine one is removed from the user half.
+# Entries compare after expansion, case folding, and trimming a trailing \ or \., which name the same directory.
+# Every kept entry keeps its stored text, unexpanded, and its place.
+function Get-PathCleanup {
+    param([AllowEmptyString()][string]$Machine, [AllowEmptyString()][string]$User)
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $plan = [ordered]@{}
+    foreach ($scope in 'Machine', 'User') {
+        $raw = if ($scope -eq 'Machine') { $Machine } else { $User }
+        $kept = [Collections.Generic.List[string]]::new()
+        $removed = [Collections.Generic.List[object]]::new()
+        $unjudged = [Collections.Generic.List[object]]::new()
+        $entries = if ($raw) { $raw -split ';' } else { @() }
+        foreach ($entry in $entries) {
+            if (-not $entry.Trim()) {
+                $removed.Add(@{ Entry = $entry; Reason = 'from a doubled or trailing ;' })
+                continue
+            }
+            # Kept out of the duplicate keys too, since its stale expansion could match an entry it does not name.
+            if (Test-StaleVariable -Entry $entry) {
+                $kept.Add($entry)
+                $unjudged.Add(@{ Entry = $entry; Reason = $script:PATH_KEPT_REASON.stale })
+                continue
+            }
+            $target = Get-PathEntryTarget -Entry $entry
+            if (-not $seen.Add((Get-PathEntryKey -Target $target))) {
+                $removed.Add(@{ Entry = $entry; Reason = 'repeats an earlier entry' })
+                continue
+            }
+            $state = Get-PathEntryState -Target $target
+            if ($state -eq 'dead') {
+                $removed.Add(@{ Entry = $entry; Reason = 'does not exist' })
+                continue
+            }
+            # A command search looks inside each entry as a directory, so an entry naming a file never finds anything.
+            if ($state -eq 'file') {
+                $removed.Add(@{ Entry = $entry; Reason = 'names a file rather than a directory' })
+                continue
+            }
+            $kept.Add($entry)
+            if ($state -ne 'present') { $unjudged.Add(@{ Entry = $entry; Reason = $script:PATH_KEPT_REASON[$state] }) }
+        }
+        $plan[$scope] = @{ Value = ($kept -join ';'); Removed = $removed.ToArray(); Unjudged = $unjudged.ToArray() }
+    }
+    return $plan
+}
+
+# Whether this process runs as the user signed in to its session: same, other, or unknown.
+# An elevation as another account opens that account's HKCU, so its user Path is not the signed-in user's.
+# The owner of this session's explorer.exe is the signed-in user.
+# A session with no Explorer, such as one over SSH, has no answer.
+function Get-SessionUserMatch {
+    $self = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $session = (Get-Process -Id $PID).SessionId
+    $shells = @(Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe' AND SessionId = $session" -ErrorAction SilentlyContinue)
+    if ($shells.Count -eq 0) { return 'unknown' }
+    foreach ($shell in $shells) {
+        $owner = Invoke-CimMethod -InputObject $shell -MethodName GetOwnerSid -ErrorAction SilentlyContinue
+        if ($owner -and $owner.Sid -eq $self) { return 'same' }
+    }
+    return 'other'
+}
+
+# Which halves this run may write, and why a half it may not is left alone.
+# Elevation is detected and never required, so neither answer is a refusal.
+function Get-PathWriteScope {
+    if (-not $script:ELEVATED) {
+        return @{
+            Machine = $false
+            User    = $true
+            Reason  = @{ Machine = 'Removing the machine entries needs an elevated run, such as this same command under gsudo.' }
+        }
+    }
+    $match = Get-SessionUserMatch
+    if ($match -eq 'same') { return @{ Machine = $true; User = $true; Reason = @{} } }
+    $reason = switch ($match) {
+        'other' { 'This elevated process does not run as the user signed in to this session, so the user Path it reads is another account''s and is left alone. Run unelevated to clean the signed-in user''s.' }
+        default { 'No Explorer runs in this session to name its signed-in user, so this elevated run cannot tell whose user Path it reads and leaves it alone. Remove the user entries listed above by hand, or run this from a desktop session.' }
+    }
+    return @{ Machine = $true; User = $false; Reason = @{ User = $reason } }
+}
+
+function Show-PathFinding {
+    param([Parameter(Mandatory)]$Plan, [Parameter(Mandatory)]$Write)
+    foreach ($scope in 'Machine', 'User') {
+        $half = $Plan[$scope]
+        $label = $scope.ToLower()
+        if ($half.Removed.Count -eq 0 -and $half.Unjudged.Count -eq 0) {
+            info "$label Path: nothing to remove"
+            continue
+        }
+        info "$label Path: $($half.Removed.Count) to remove"
+        foreach ($row in $half.Removed) {
+            $shown = if ($row.Entry.Trim()) { $row.Entry } else { '(empty)' }
+            info "  remove  $shown  ($($row.Reason))"
+        }
+        foreach ($row in $half.Unjudged) { info "  keep    $($row.Entry)  ($($row.Reason))" }
+        if ($half.Removed.Count -gt 0 -and -not $Write[$scope]) { info "  $($Write.Reason[$scope])" }
+    }
+}
+
+function Invoke-PathCleanup {
+    log "Host: $(Get-HostDescription)"
+    log "Mode: $($script:MODE)$(if ($script:DRY_RUN) { ' (dry run)' })"
+    $stored = @{ Machine = Read-PathScope -Scope Machine; User = Read-PathScope -Scope User }
+    $plan = Get-PathCleanup -Machine $stored.Machine.Raw -User $stored.User.Raw
+    $write = Get-PathWriteScope
+
+    step 'Path cleanup'
+    Show-PathFinding -Plan $plan -Write $write
+    $scopes = @('Machine', 'User' | Where-Object { $write[$_] -and $plan[$_].Removed.Count -gt 0 })
+    if ($scopes.Count -eq 0) {
+        info 'Nothing this run can remove'
+        step 'Done'
+        return
+    }
+
+    if (-not (confirm "Remove these entries from the $(($scopes | ForEach-Object { $_.ToLower() }) -join ' and ') Path?")) { die 'Declined' }
+
+    # Read both halves again after the prompt, which can wait indefinitely.
+    # Writing the plan over a Path an install changed meanwhile would silently revert that change.
+    # The half not written is checked too, since the user half's duplicates are judged against the machine half.
+    foreach ($scope in 'Machine', 'User') {
+        $now = Read-PathScope -Scope $scope
+        if ($now.Raw -cne $stored[$scope].Raw -or "$($now.Kind)" -ne "$($stored[$scope].Kind)") {
+            die "The $($scope.ToLower()) Path changed after it was read, so nothing was written. Run this again."
+        }
+    }
+
+    $written = @()
+    foreach ($scope in $scopes) {
+        $label = $scope.ToLower()
+        # Printed before the write rather than after, so a cleanup that goes wrong can still be undone by hand.
+        info "Previous $label Path, to restore by hand: $($stored[$scope].Raw)"
+        if ($script:DRY_RUN) {
+            info "[dry run] write the $label Path as: $($plan[$scope].Value)"
+            continue
+        }
+        try {
+            Write-PathScope -Scope $scope -Value $plan[$scope].Value -Kind $stored[$scope].Kind
+        } catch {
+            $failure = $_.Exception.Message
+            if ($written.Count -eq 0) { die "Writing the $label Path failed, so nothing was written: $failure" }
+            # The half already written stays written, so it is still announced.
+            $null = Send-EnvironmentChange
+            die "Writing the $label Path failed, and it is as it was, but the $($written -join ' and ') Path was already written: $failure"
+        }
+        $written += $label
+        info "Wrote the $label Path"
+    }
+
+    if (-not $script:DRY_RUN -and -not (Send-EnvironmentChange)) {
+        warn 'The environment change was not broadcast, so a program started from Explorer sees the new Path only after a sign-out'
+    }
+
+    Write-PathLengthWarning
+    step 'Done'
+}
+
 function Show-Status {
     log "Host      : $(Get-HostDescription)"
     if ($script:ELEVATED) {
@@ -296,6 +628,13 @@ function Show-Status {
     }
 
     Write-PathLengthWarning
+
+    $plan = Get-PathCleanup -Machine (Read-PathScope -Scope Machine).Raw -User (Read-PathScope -Scope User).Raw
+    $removable = $plan.Machine.Removed.Count + $plan.User.Removed.Count
+    log "Path      : $(if ($removable -gt 0) { "$removable entr$(if ($removable -eq 1) { 'y' } else { 'ies' }) that -CleanPath removes" } else { 'nothing for -CleanPath to remove' })"
+    if ($removable -gt 0 -or $plan.Machine.Unjudged.Count -gt 0 -or $plan.User.Unjudged.Count -gt 0) {
+        Show-PathFinding -Plan $plan -Write (Get-PathWriteScope)
+    }
 
     if ($upgradable.Explicit.Count -eq 0) { return }
     log ''
@@ -379,7 +718,11 @@ function main {
     $script:MODE = Resolve-Mode
     Test-HostSupported
 
-    if ($script:MODE -eq 'status') { Show-Status } else { Invoke-Upgrade }
+    switch ($script:MODE) {
+        'status' { Show-Status }
+        'cleanpath' { Invoke-PathCleanup }
+        default { Invoke-Upgrade }
+    }
 }
 
 main
