@@ -105,7 +105,10 @@ def run_with_deadline(argv):
 
 
 def git_in(root, *args):
-    """Run git against `root`, returning stripped stdout, or None on any failure."""
+    """Run git against `root`, returning stripped stdout, or None on a failure.
+
+    Output that does not decode raises instead, since None could read as a clean tree.
+    """
     try:
         r = run_with_deadline(["git", "-C", str(root), *args])
     except UnicodeDecodeError:

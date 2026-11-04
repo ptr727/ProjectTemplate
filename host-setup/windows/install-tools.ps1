@@ -481,7 +481,8 @@ function Get-InstallerFailureReason {
     $result = @{ Log = $null; Entries = @(); WingetLog = $null; WingetEntries = @(); InUse = $false }
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $result }
     $log = Get-ChildItem -LiteralPath $Directory -Filter "$Id.*.log" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | Select-Object -Last 1
+        Where-Object { $_.LastWriteTime -ge $Since -and $_.Name -match "^$([regex]::Escape($Id))\.v?\d" } |
+        Sort-Object LastWriteTime | Select-Object -Last 1
     if ($log) {
         $result.Log = $log.FullName
         $entries = [System.Collections.Generic.List[string]]::new()
