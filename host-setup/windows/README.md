@@ -5,7 +5,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 ## What Is Here
 
 - [`install-tools.ps1`][install-tools] installs and upgrades the host tools. It reports what each one is installed at, where it came from, and which scope it sits in. Installing, upgrading or reinstalling `docker` also brings the WSL platform up to Docker Desktop's own floor where it is behind.
-- [`upgrade-host.ps1`][upgrade-host] upgrades the packages `winget` manages and updates the WSL platform.
+- [`upgrade-host.ps1`][upgrade-host] upgrades the packages `winget` manages and updates the WSL platform. Its `-CleanPath` action removes dead, duplicate and empty `Path` entries.
 - [`setup-github.ps1`][setup-github] configures the SSH key, git, and commit signing.
 - [`setup-wsl.ps1`][setup-wsl] installs a WSL distribution and reports how Docker Desktop is integrated with the ones this host runs.
 - [`install-agents.ps1`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed. cswap is the exception to each tool's own updater, going through `uv tool upgrade` since its updater cannot replace its own running launcher on Windows. The script installs a tool only when that tool is named. A tool winget owns is left to `upgrade-host.ps1`. It refuses an elevated session, since the tools live in the user's profile. codex and opencode document no Windows installer outside a package manager, so it installs neither and names the route their documentation gives.
@@ -65,7 +65,7 @@ These are listed apart, left alone, and printed with **no command beside them**.
 
 ## The Path Length Warning
 
-`install-tools.ps1` and `upgrade-host.ps1` warn when the machine and user `Path` together expand past 3700 characters. `install-tools.ps1` checks in its report and after an apply. `upgrade-host.ps1` checks in `-Status` and after an upgrade. Neither edits `Path`, since which entry to drop is the operator's call.
+`install-tools.ps1` and `upgrade-host.ps1` warn when the machine and user `Path` together expand past 3700 characters. `install-tools.ps1` checks in its report and after an apply. `upgrade-host.ps1` checks in `-Status` and after an upgrade. Neither upgrade nor install edits `Path`. `upgrade-host.ps1 -CleanPath` is the one action that does, and it removes only the entries "Cleaning Path" below names. Which live entry to drop beyond those stays the operator's call.
 
 The failure this warns ahead of reports nothing itself. Past about 4095 expanded characters, Explorer's rebuild of its environment keeps the machine entries and drops the user half of `Path`. Whatever Explorer launches inherits that. So an editor opened from the Start menu stops finding per-user tools, while a new Windows Terminal tab still finds them.
 
@@ -74,6 +74,22 @@ The failure this warns ahead of reports nothing itself. Past about 4095 expanded
 The usual route there is `winget`. The [`winget` issue tracker explains][winget-path] that it adds one long `Path` entry per portable package when it cannot create symlinks. That happens when Developer Mode is off and it runs unelevated. Otherwise it links them through a single directory.
 
 To recover, remove entries, then sign out and back in. Shortening an entry with a variable such as `%LOCALAPPDATA%` shrinks the stored value and leaves the expanded length the same.
+
+## Cleaning Path
+
+`upgrade-host.ps1 -CleanPath` removes three kinds of entry from `Path`, and `-Status` lists them without removing anything.
+
+- **A duplicate.** Entries are compared after expanding variables, folding case, removing surrounding quotes, and trimming a trailing `\` or `\.`. The first in effective order is kept, machine before user. So a user entry repeating a machine one is removed from the user half.
+- **A dead entry**, whose directory does not exist. An entry is dead only when its drive or share root answers and the directory does not. An entry under an unmounted drive or an offline share is listed and kept. So is one holding a variable that does not expand, and one that is not a full path. A state that could not be read is never reported as an absence.
+- **An empty entry**, from a doubled or trailing `;`.
+
+It reads and writes each half's raw registry value, keeping its `REG_EXPAND_SZ` kind and every kept entry's unexpanded text and place. Writing the expanded `Path` back would freeze `%USERPROFILE%` and its like into literal paths. It asks first unless `-Yes` was given, and `-DryRun` prints the value it would write instead. Before each write it prints the previous value, so a cleanup can be undone by hand. After writing it broadcasts the environment change, so a program started afterwards sees the new `Path` without a sign-out.
+
+**Elevation is detected and never required.** Unelevated, it cleans the user half, lists the machine findings, and exits successfully. It names an elevated run, such as the same command under `gsudo`, as the way to remove them. Elevated, it cleans both halves. It raises no UAC prompt of its own and refuses no run for its elevation state, which keeps "Elevation and Scope" above.
+
+An elevation as another account opens that account's user `Path` rather than the signed-in user's, the same hazard "Elevation and Scope" names for a user-scope install. So an elevated run writes the user half only when it runs as the owner of its session's Explorer. Otherwise it cleans the machine half and lists the user findings with the reason. `gsudo` elevates the same user by default, so its runs clean both halves.
+
+It does not find an entry fully shadowed by earlier ones. Removing one can drop a DLL or a script that something else loads from it. It also does not ask Explorer whether it dropped the user half.
 
 ## Why There Is No Linter Category
 
@@ -156,6 +172,7 @@ Then the dry runs, which print what each action would do:
 host-setup\windows\install-tools.ps1 -Upgrade -DryRun
 host-setup\windows\install-tools.ps1 -Install -Repo C:\path\to\repository -DryRun
 host-setup\windows\upgrade-host.ps1 -Packages -DryRun
+host-setup\windows\upgrade-host.ps1 -CleanPath -DryRun
 host-setup\windows\setup-github.ps1 -Configure -DryRun
 host-setup\windows\setup-wsl.ps1 -Install Debian -DryRun
 ```
