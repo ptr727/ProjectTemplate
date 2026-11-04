@@ -1448,6 +1448,29 @@ function Show-List {
     }
 }
 
+# The expanded length of the machine and user Path together, which is the length Explorer's rebuild of its environment measures.
+# Reading each scope from the registry rather than $env:Path matters, because this process may have inherited a Path that was already rebuilt.
+function Get-HostPathLength {
+    $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+    return "$machine;$user".Length
+}
+
+# The warning for a Path this long, or nothing below the margin.
+# Past about 4095 characters Explorer drops the user half of Path and reports no error.
+# So the warning has to come from the install that grows it, because nothing else on the host says so.
+function Get-PathLengthWarning {
+    param([int]$Length)
+    $margin = 3700
+    if ($Length -le $margin) { return $null }
+    return "the machine and user Path together expand to $Length characters, above the $margin this warns at. Past about 4095, Explorer silently drops the user half of Path from everything it launches, so an editor stops finding per-user tools while a new terminal tab still finds them. Remove entries, since shortening one with a variable leaves its expanded length the same, then sign out and back in."
+}
+
+function Add-PathLengthNote {
+    $warning = Get-PathLengthWarning -Length (Get-HostPathLength)
+    if ($warning) { note 'path' $warning }
+}
+
 function Show-Report {
     $format = '{0,-10} {1,-16} {2,-16} {3,-24} {4,-13} {5}'
     if (-not $script:JSON_OUTPUT) { log ($format -f 'TOOL', 'INSTALLED', 'AVAILABLE', 'SOURCE', 'SCOPE', 'STATUS') }
@@ -1482,6 +1505,7 @@ function Show-Report {
     if ($script:ELEVATED) {
         note 'report' 'this pwsh is elevated, and some installers fail when launched from an elevated process, so an unelevated run is the one to prefer'
     }
+    Add-PathLengthNote
 
     if ($script:JSON_OUTPUT) {
         [ordered]@{
@@ -1671,6 +1695,9 @@ function Invoke-Apply {
     } else {
         log 'Nothing changed'
     }
+
+    # After the installs rather than before, because an install is what grows Path.
+    Add-PathLengthNote
 
     # Printed here as well as under a report.
     # This is because an apply is where most notes are actually raised, and until now none of them reached the console.

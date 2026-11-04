@@ -29,6 +29,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 LINUX_INSTALLER = ROOT / "host-setup" / "linux" / "install-tools.sh"
 WINDOWS_INSTALLER = ROOT / "host-setup" / "windows" / "install-tools.ps1"
+WINDOWS_UPGRADER = ROOT / "host-setup" / "windows" / "upgrade-host.ps1"
 
 AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f \u00e9 end'
 
@@ -358,12 +359,13 @@ Set-StrictMode -Version Latest
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
-$wanted = @('note', 'Get-NoteText', 'Show-Report', 'Resolve-Mode', 'die')
+$wanted = @('note', 'Get-NoteText', 'Show-Report', 'Resolve-Mode', 'die', 'Add-PathLengthNote', 'Get-PathLengthWarning')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 function log { param([string]$Message = '') Write-Host $Message }
 function info { param([string]$Message) Write-Host "  $Message" }
+function Get-HostPathLength { 0 }
 function Get-Tool { param([string]$Name) @{ Name = $Name } }
 function Get-ToolState {
     param([hashtable]$Tool)
@@ -507,7 +509,7 @@ Set-StrictMode -Version Latest
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
-$wanted = @('Show-Report', 'Invoke-ToolApply', 'Get-NoteText', 'note')
+$wanted = @('Show-Report', 'Invoke-ToolApply', 'Get-NoteText', 'note', 'Add-PathLengthNote', 'Get-PathLengthWarning')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -515,6 +517,7 @@ function log { param([string]$Message = '') Write-Host "LOG $Message" }
 function info { param([string]$Message) Write-Host "INFO $Message" }
 function warn { param([string]$Message) Write-Host "WARN $Message" }
 function die { param([string]$Message) throw $Message }
+function Get-HostPathLength { 0 }
 function Get-Tool { param([string]$Name) @{ Name = $Name; Package = 'jqlang.jq'; Probe = 'jq'; Optional = @() } }
 function Get-ToolState {
     param([hashtable]$Tool)
@@ -1306,6 +1309,132 @@ class TestWindowsInstallFailureReport(unittest.TestCase):
             ],
         )
         self.assertEqual(lines[-1], "INFO   Stop-Process -Id 1234, 99")
+
+
+PATH_LENGTH_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$case = Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($case.script, [ref]$tokens, [ref]$errors)
+$definitions = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $case.wanted -contains $node.Name }, $true))
+foreach ($definition in $definitions) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function log { param([string]$Message = '') Write-Host "LOG $Message" }
+function info { param([string]$Message) Write-Host "INFO $Message" }
+function step { param([string]$Message) Write-Host "STEP $Message" }
+function warn { param([string]$Message) Write-Host "WARN $Message" }
+function confirm { param([string]$Message) return $true }
+function Invoke-PackageUpgrade { }
+function Get-HostDescription { 'a host' }
+function Get-Upgradable { @{ Ready = @(); Explicit = @() } }
+function Get-WslVersion { '2.0' }
+function Get-DockerProcess { , @() }
+if ($case.action -notin @('read', 'text')) {
+    function Get-HostPathLength { $case.length }
+}
+$NOTES = @()
+$NOTE_TEXTS = @()
+$JSON_OUTPUT = $true
+$ELEVATED = $false
+$SELECTED = @()
+$CHANGED = @()
+$FAILED = @()
+$MODE = 'packages'
+$DRY_RUN = $false
+switch ($case.action) {
+    'warning' {
+        $case.lengths | ForEach-Object { [ordered]@{ length = $_; warning = Get-PathLengthWarning -Length $_ } } | ConvertTo-Json -AsArray
+    }
+    'text' { $definitions | Sort-Object { $_.Name } | ForEach-Object { $_.Extent.Text } }
+    'read' {
+        $read = {
+            param($hive, $subKey)
+            $key = $hive.OpenSubKey($subKey)
+            [Environment]::ExpandEnvironmentVariables($key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+        }
+        $machine = & $read ([Microsoft.Win32.Registry]::LocalMachine) 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+        $user = & $read ([Microsoft.Win32.Registry]::CurrentUser) 'Environment'
+        [ordered]@{ expected = "$machine;$user".Length; actual = Get-HostPathLength } | ConvertTo-Json
+    }
+    default { & $case.action }
+}
+"""
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows host scripts' own functions"
+)
+class TestWindowsPathLengthWarning(unittest.TestCase):
+    """The warning above the margin, in both scripts, on every path that runs it."""
+
+    FUNCTIONS = ("Get-HostPathLength", "Get-PathLengthWarning")
+
+    def drive(self, script: Path, action: str, length: int = 0, *wanted: str) -> str:
+        cases = {
+            "script": str(script),
+            "action": action,
+            "length": length,
+            "wanted": [*self.FUNCTIONS, *wanted],
+        }
+        result = run_pwsh_harness(PATH_LENGTH_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_the_warning_starts_one_past_the_margin(self) -> None:
+        cases = {
+            "script": str(WINDOWS_INSTALLER),
+            "action": "warning",
+            "lengths": [0, 3700, 3701, 5000],
+            "wanted": ["Get-PathLengthWarning"],
+        }
+        result = run_pwsh_harness(PATH_LENGTH_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["length"]: row["warning"] for row in json.loads(result.stdout)}
+        self.assertIsNone(rows[0])
+        self.assertIsNone(rows[3700])
+        self.assertIn("expand to 3701 characters", rows[3701])
+        self.assertIn("expand to 5000 characters", rows[5000])
+
+    def test_both_scripts_carry_the_same_functions(self) -> None:
+        installer = self.drive(WINDOWS_INSTALLER, "text")
+        self.assertIn("function Get-HostPathLength", installer)
+        self.assertIn("function Get-PathLengthWarning", installer)
+        self.assertEqual(installer, self.drive(WINDOWS_UPGRADER, "text"))
+
+    def test_the_report_files_it_as_a_note(self) -> None:
+        wanted = ("Show-Report", "Add-PathLengthNote", "note", "Get-NoteText")
+        over = json.loads(self.drive(WINDOWS_INSTALLER, "Show-Report", 3701, *wanted))
+        self.assertEqual(len(over["notes"]), 1, over["notes"])
+        self.assertIn("expand to 3701 characters", over["notes"][0])
+        under = json.loads(self.drive(WINDOWS_INSTALLER, "Show-Report", 3700, *wanted))
+        self.assertEqual(under["notes"], [])
+
+    def test_an_apply_prints_it_with_its_notes(self) -> None:
+        wanted = ("Invoke-Apply", "Add-PathLengthNote", "note")
+        over = self.drive(WINDOWS_INSTALLER, "Invoke-Apply", 3701, *wanted)
+        self.assertIn("INFO path: the machine and user Path", over)
+        under = self.drive(WINDOWS_INSTALLER, "Invoke-Apply", 3700, *wanted)
+        self.assertNotIn("Path", under)
+
+    def test_upgrade_host_warns_in_status_and_after_an_upgrade(self) -> None:
+        for action in ("Show-Status", "Invoke-Upgrade"):
+            with self.subTest(action=action):
+                wanted = (action, "Write-PathLengthWarning")
+                over = self.drive(WINDOWS_UPGRADER, action, 3701, *wanted)
+                self.assertIn("WARN the machine and user Path together expand to 3701", over)
+                under = self.drive(WINDOWS_UPGRADER, action, 3700, *wanted)
+                self.assertNotIn("WARN", under)
+
+    @unittest.skipUnless(os.name == "nt", "reads the Windows registry")
+    def test_the_length_is_the_expanded_registry_values_joined(self) -> None:
+        for script in (WINDOWS_INSTALLER, WINDOWS_UPGRADER):
+            with self.subTest(script=script.name):
+                lengths = json.loads(self.drive(script, "read"))
+                self.assertEqual(lengths["actual"], lengths["expected"])
 
 
 if __name__ == "__main__":
