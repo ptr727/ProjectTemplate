@@ -14,7 +14,12 @@
             "required": ["copilot", "coderabbit", "qodo"],
             "additionalProperties": false,
             "properties": {
-                "copilot": { "allOf": [{ "$ref": "#/$defs/bot" }], "not": { "required": ["command"] } },
+                "copilot": {
+                    "allOf": [{ "$ref": "#/$defs/bot" }],
+                    "not": { "required": ["command"] },
+                    "if": { "properties": { "trigger": { "const": "explicit" } }, "required": ["trigger"] },
+                    "then": { "not": { "properties": { "gate": { "const": false } }, "required": ["gate"] } }
+                },
                 "coderabbit": {
                     "allOf": [{ "$ref": "#/$defs/bot" }],
                     "properties": {
@@ -63,7 +68,7 @@
                     "minimum": 1
                 },
                 "gate": {
-                    "description": "Whether the merge waits for this bot's review on the head. Copilot alone can gate, and it defaults to true. CodeRabbit and Qodo are asked but never waited on.",
+                    "description": "Whether the merge waits for this bot's review on the head. Copilot alone can gate, and it defaults to true. An explicit Copilot must gate, since wait requests Copilot only for a round the merge waits on. CodeRabbit and Qodo are asked but never waited on.",
                     "type": "boolean"
                 },
                 "command": { "type": "string" }

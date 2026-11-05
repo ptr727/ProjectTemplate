@@ -124,6 +124,9 @@ class TestParse(unittest.TestCase):
                 copilot={"trigger": "auto", "bases": [], "often": 1}
             ),
             "bots.copilot is missing bases": stated(copilot={"trigger": "auto"}),
+            "bots.copilot is explicit with gate false": stated(
+                copilot={"trigger": "explicit", "bases": [], "gate": False}
+            ),
         }
         for want, data in cases.items():
             with self.subTest(want), self.assertRaisesRegex(policy.PolicyError, re.escape(want)):
@@ -150,7 +153,7 @@ class TestBotDecisions(unittest.TestCase):
 
     def test_a_request_is_sent_for_explicit_and_for_a_gated_automatic_bot_only(self) -> None:
         cases = {
-            ("explicit", False): True,
+            ("explicit", True): True,
             ("auto", True): True,
             ("auto", False): False,
             ("off", True): False,
@@ -530,6 +533,21 @@ class TestReviewThreadFixes(unittest.TestCase):
         self.assertEqual("UNREAD", side.checks_hold(pr, NOW, *WINDOWS))
 
 
+class TestPolicyFreeReads(unittest.TestCase):
+    def test_a_read_that_never_consults_the_policy_does_not_fetch_it(self) -> None:
+        """So a malformed policy on the base cannot end `attest`, `comment`, or `claims`."""
+        target = {"repository": {"pullRequest": {"headRefOid": fixtures.HEAD, "baseRefName": "x"}}}
+        with (
+            mock.patch.object(pr_review, "gh_graphql", return_value=target),
+            mock.patch.object(pr_review.review_policy, "policy_for") as fetched,
+        ):
+            pr = pr_review.gql(pr_review.Q_ATTEST_TARGET, "o", "r", 7, policy=False)
+            self.assertNotIn(policy.PAYLOAD_KEY, pr)
+            fetched.assert_not_called()
+            pr_review.gql(pr_review.Q_ATTEST_TARGET, "o", "r", 7)
+            fetched.assert_called_once()
+
+
 class TestSchemaParity(unittest.TestCase):
     """The schema an editor validates against states exactly the rules the reader enforces."""
 
@@ -547,6 +565,24 @@ class TestSchemaParity(unittest.TestCase):
         )
         for name in ("copilot", "qodo"):
             self.assertEqual({"required": ["command"]}, bots[name]["not"], name)
+        self.assertEqual({"trigger": {"const": "explicit"}}, bots["copilot"]["if"]["properties"])
+        self.assertEqual({"gate": {"const": False}}, bots["copilot"]["then"]["not"]["properties"])
+
+
+PARTIAL = f"{fixtures.OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+
+
+def attested_on(pr: dict) -> dict:
+    """`pr` with its owner attesting a local pass over its head against its base."""
+    marker = (
+        f"Attested.\n\n<!-- fleet-local-review: head={fixtures.HEAD} "
+        f"base={pr['baseRefName']} findings=0 -->"
+    )
+    pr["comments"] = {
+        "nodes": [trusted(marker, fixtures.LATE)],
+        "pageInfo": {"hasPreviousPage": False},
+    }
+    return pr
 
 
 class TestCopilotGate(unittest.TestCase):
@@ -554,23 +590,53 @@ class TestCopilotGate(unittest.TestCase):
         rules = parsed(copilot={"trigger": "auto", "bases": ["@default"], "gate": False})
         self.assertFalse(rounds.promotion(with_policy(fixtures.payload([]), rules, "main")))
 
+    def test_a_copilot_never_waited_on_lets_a_partial_or_cut_history_hold(self) -> None:
+        """No round is coming to settle that history, so `wait` must not poll for one."""
+        histories = {
+            "partial": lambda: fixtures.payload([fixtures.review(oid=fixtures.OLD, body=PARTIAL)]),
+            "truncated": lambda: fixtures.payload([fixtures.review(oid=MOVED)], older_reviews=True),
+        }
+        ungated = {
+            "off": parsed(copilot={"trigger": "off", "bases": ["@default"]}),
+            "auto ungated": parsed(copilot={"trigger": "auto", "bases": [], "gate": False}),
+        }
+        for history, build in histories.items():
+            for name, rules in ungated.items():
+                with self.subTest(history=history, policy=name):
+                    pr = attested_on(with_policy(build(), rules))
+                    self.assertTrue(rounds.holds(pr))
+                    self.assertTrue(rounds.local_cover(pr))
+            with self.subTest(history=history, policy="hub default"):
+                pr = attested_on(with_policy(build(), policy.load_default()))
+                self.assertFalse(rounds.holds(pr))
+                self.assertFalse(rounds.local_cover(pr))
+
 
 class TestWaitHoldsForChecks(fixtures.GqlCase):
     """An explicit Copilot policy waiting for green checks requests nothing on a red or running head."""
 
-    def run_wait(self, node: dict) -> tuple[int, str, mock.MagicMock]:
+    def run_wait(self, node: dict, *extra: str) -> tuple[int, str, mock.MagicMock]:
         rules = parsed(
             copilot={"trigger": "explicit", "bases": ["^develop$"], "when": "after-checks"}
         )
         pr = with_policy(fixtures.payload([], checks=[node]), rules)
         self.answer(pr)
-        sent = mock.MagicMock(return_value={"repository": {"pullRequests": {"nodes": []}}})
+        bot = {"__typename": "Bot", "login": rounds.REVIEWER, "id": "BOT_123"}
+        history = [{"number": 1, "reviews": {"nodes": [{"author": bot}]}}]
+
+        def graphql(query: str, **variables: object) -> dict:
+            if "pullRequests(first:$prs" in query:
+                return {"repository": {"pullRequests": {"nodes": history}}}
+            answered = fixtures.answer_request(query, variables, fixtures.RECORDED)
+            return answered or {"repository": {"pullRequests": {"nodes": []}}}
+
+        sent = mock.MagicMock(side_effect=graphql)
         with (
             contextlib.redirect_stdout(io.StringIO()) as out,
             mock.patch.object(pr_review, "gh_graphql", sent),
             mock.patch.object(pr_review.time, "sleep"),
         ):
-            code = pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"])
+            code = pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0", *extra])
         return code, out.getvalue(), sent
 
     def requested(self, sent: mock.MagicMock) -> bool:
@@ -590,6 +656,20 @@ class TestWaitHoldsForChecks(fixtures.GqlCase):
         self.assertEqual(30, code, out)
         self.assertIn("checks read PENDING", out)
         self.assertFalse(self.requested(sent))
+
+    def test_green_checks_reach_the_request(self) -> None:
+        code, out, sent = self.run_wait(fixtures.check(started=fixtures.EARLY))
+        self.assertTrue(self.requested(sent), out)
+        self.assertIn("auto-request: requested a Copilot review", out)
+        self.assertNotIn("CHECKS_BEFORE_REVIEW", out)
+        self.assertNotEqual(40, code)
+
+    def test_request_skips_the_hold_on_a_failed_build(self) -> None:
+        failed = fixtures.check(conclusion="FAILURE", started=fixtures.EARLY)
+        code, out, sent = self.run_wait(failed, "--request")
+        self.assertTrue(self.requested(sent), out)
+        self.assertNotIn("CHECKS_BEFORE_REVIEW", out)
+        self.assertNotEqual(40, code)
 
 
 class TestWaitAsksSideReviewers(fixtures.GqlCase):

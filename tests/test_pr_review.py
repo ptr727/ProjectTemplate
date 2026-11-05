@@ -7971,7 +7971,7 @@ class TestAttest(unittest.TestCase):
         replies = iter(heads)
         target = {"headRefOid": heads[0], "baseRefName": "develop"}
 
-        def gql(query: str, *_: object) -> dict:
+        def gql(query: str, *_: object, **__: object) -> dict:
             if query == pr_review.Q_ATTEST_BRANCH:
                 return {
                     "state": "OPEN",

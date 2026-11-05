@@ -11,7 +11,8 @@ The trigger says how a review arrives, never whether the gate wants one. That is
 skills stay silent about the trigger. `wait` sends each request the policy asks for, and the gate asks
 the same question in every mode.
 
-- `explicit`: the bot does not start on its own, so `wait` requests it once `when` allows.
+- `explicit`: the bot does not start on its own, so `wait` requests it once `when` allows. An
+  explicit Copilot always gates, since `wait` requests Copilot only for a round the merge waits on.
 - `auto`: the bot starts on its own. For Copilot, which the gate waits on, `wait` still requests
   it where nothing is pending. So a missed automatic trigger is filled rather than waited out. For
   CodeRabbit and Qodo `wait` requests nothing.
@@ -86,6 +87,10 @@ class BotPolicy:
             return False
         return self.max_rounds is None or done < self.max_rounds
 
+    def never_waited_on(self) -> bool:
+        """Whether the merge never waits on this bot, so no round of its is coming to settle on."""
+        return self.trigger == "off" or not self.gate
+
     def waits_for_checks(self) -> bool:
         """Whether a request waits for the head's checks to go green first."""
         return self.trigger == "explicit" and self.when == "after-checks"
@@ -143,6 +148,12 @@ def _bot(source: str, name: str, raw: object) -> BotPolicy:
         raise _fail(source, f"{where}.gate is {gate!r}, not a boolean")
     if gate and name != "copilot":
         raise _fail(source, f"{where}.gate is true, and only copilot can gate the merge")
+    if name == "copilot" and trigger == "explicit" and not gate:
+        raise _fail(
+            source,
+            f"{where} is explicit with gate false, and wait requests Copilot only for a round the "
+            "merge waits on, so an ungated Copilot is auto or off",
+        )
     command = raw.get("command", "review")
     if "command" in raw and name != "coderabbit":
         raise _fail(source, f"{where}.command applies to coderabbit only")

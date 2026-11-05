@@ -541,12 +541,12 @@ def unconfirmed(status: str, why: str, response: dict, code: int) -> int:
     return code
 
 
-def gql(query: str, owner: str, repo: str, num: int) -> dict:
+def gql(query: str, owner: str, repo: str, num: int, policy: bool = True) -> dict:
     data = gh_graphql(query, o=owner, r=repo, n=num)
     pr = data["repository"]["pullRequest"]
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
-    if isinstance(pr, dict) and pr.get("baseRefName"):
+    if policy and isinstance(pr, dict) and pr.get("baseRefName"):
         pr[review_policy.PAYLOAD_KEY] = review_policy.policy_for(
             owner, repo, pr["baseRefName"], reread, answered_absent
         )
@@ -1036,7 +1036,7 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     if refused := scope_refusal(owner):
         return refused
 
-    target = gql(Q_COMMENT_TARGET, owner, repo, num)
+    target = gql(Q_COMMENT_TARGET, owner, repo, num, policy=False)
     if not target or not target.get("id") or not target.get("url"):
         return not_written(
             "TARGET_NOT_READ",
@@ -1076,7 +1076,7 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """
     if refused := scope_refusal(owner):
         return refused
-    target = gql(Q_ATTEST_TARGET, owner, repo, num) or {}
+    target = gql(Q_ATTEST_TARGET, owner, repo, num, policy=False) or {}
     head, base = target.get("headRefOid") or "", target.get("baseRefName") or ""
     if not head or not base:
         return not_written(
@@ -1174,7 +1174,7 @@ def await_registered_head(
     Applies only where the remote branch tip is the checkout's own commit, so the head is merely
     late. Any other tip, or one that cannot be read, returns at once with the head as read.
     """
-    meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
+    meta = gql(Q_ATTEST_BRANCH, owner, repo, num, policy=False) or {}
     ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
     if not is_open(meta) or not ref or not source or not safe_ref(ref):
         return head, True
@@ -1184,7 +1184,8 @@ def await_registered_head(
     first = head
     for delay in ATTEST_HEAD_DELAYS:
         _attest_sleep(delay)
-        head = (gql(Q_ATTEST_TARGET, owner, repo, num) or {}).get("headRefOid") or head
+        read = gql(Q_ATTEST_TARGET, owner, repo, num, policy=False) or {}
+        head = read.get("headRefOid") or head
         if head == local:
             return head, True
         if head != first:
@@ -1491,7 +1492,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
 
 def check_claims(owner: str, repo: str, num: int) -> int:
     """Report every reference the description makes that its own head tree does not carry."""
-    pr = gql(Q_CLAIMS, owner, repo, num)
+    pr = gql(Q_CLAIMS, owner, repo, num, policy=False)
     head, body = pr["headRefOid"], pr.get("body") or ""
     uses, shas = body_references(body)
 
