@@ -451,6 +451,22 @@ class ReviewTests(unittest.TestCase):
             (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (0, 1, 0)
         )
 
+    def test_a_review_request_event_times_a_round_as_explicit(self) -> None:
+        review = {
+            "author": {"login": RABBIT},
+            "commit": {"oid": SHA_A},
+            "submittedAt": "2026-01-01T03:00:00Z",
+        }
+        event = {**requested("User", RABBIT), "createdAt": "2026-01-01T02:00:00Z"}
+        result = self.tally(
+            commits=[commit(SHA_A, at="2026-01-01T01:00:00Z")],
+            reviews=[review],
+            timelineItems=[event],
+        )
+        rabbit = result.bots["coderabbit"]
+        self.assertEqual((rabbit.explicit_rounds, rabbit.automatic_rounds), (1, 0))
+        self.assertEqual(rabbit.requests_by_user, 1)
+
     def test_times_with_an_offset_are_ordered_in_utc(self) -> None:
         def review(at: str) -> dict[str, object]:
             return {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}, "submittedAt": at}
