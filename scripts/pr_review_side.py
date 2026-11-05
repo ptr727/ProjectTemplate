@@ -66,7 +66,9 @@ def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
     if not nodes:
         since = age(head_arrived(pr), now) if head_arrived(pr) else None
         return "PENDING" if since is None or since <= grace else ""
-    shapes = {check_shape(n, now, grace, stall) for n in nodes if not n.get("unreadable")}
+    if any(n.get("unreadable") for n in nodes):
+        return "UNREAD"
+    shapes = {check_shape(n, now, grace, stall) for n in nodes}
     if "FAILED" in shapes:
         return "FAILURE"
     if stuck := sorted(shapes - {"", "RUNNING_LONG"}):
@@ -96,8 +98,13 @@ def side_asks(pr: dict, body: str) -> list[dict]:
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
-    """Whether a request `body` was posted since the head arrived, False while it has not."""
-    since = head_arrived(pr)
+    """Whether a request `body` was posted since the head arrived.
+
+    Before any suite exists, the head's commit time stands in as a lower bound. So a request made
+    between a push and its first suite still counts for that head. A head that never gets a check
+    is then not asked again on every run.
+    """
+    since = head_arrived(pr) or (head_commit(pr).get("committedDate") or "")
     return bool(since) and any((n.get("createdAt") or "") >= since for n in side_asks(pr, body))
 
 
@@ -149,23 +156,29 @@ def asks_any(pr: dict) -> bool:
 
 
 def request_side_reviews(
-    read: Callable[[], dict], await_green: Callable[[], str], post: Callable[[str], dict]
+    read: Callable[[], dict],
+    await_green: Callable[[], str],
+    post: Callable[[str], dict],
+    phase: str,
 ) -> list[str]:
-    """Ask each comment-triggered reviewer the policy asks explicitly, once per head, and say so.
+    """Ask each comment-triggered reviewer the policy asks explicitly in `phase`, once per head.
 
-    Each is judged on a fresh read, read again after any wait for green checks. So a request that
-    a concurrent session sent during the wait is seen. Nothing is sent where the reviewer answered
-    or was asked since the head arrived, or its cap is spent. The merge never waits on these
-    reviewers, so a held or skipped ask is a note rather than an exit. `post` sends one comment
-    and returns the created node, and an unconfirmed one ends the run, since it may have landed.
+    `phase` is the `when` value this call serves, so an on-open ask never waits behind a check
+    wait. A reviewer that answered or was asked since the head arrived is skipped before any wait,
+    and judged again on a fresh read after one. So a request that a concurrent session sent during
+    the wait is seen. Nothing is sent where its cap is spent. The merge never waits on these
+    reviewers, so a held ask is a note rather than an exit. `post` sends one comment and returns
+    the created node, and an unconfirmed one ends the run, since it may have landed.
     """
     lines: list[str] = []
     held: str | None = None
     pr = read()
     for name, bot, body in side_reviewers(pr):
-        if not bot.requests():
+        if not bot.requests() or bot.when != phase:
             continue
-        if not bot.rounds_left(side_rounds(pr, name, body)) and not side_asked_on_head(pr, body):
+        if side_answered(pr, name) or side_asked_on_head(pr, body):
+            continue
+        if not bot.rounds_left(side_rounds(pr, name, body)):
             lines.append(
                 f"note: the review policy allows {name} no further round, so none was asked"
             )
@@ -178,8 +191,8 @@ def request_side_reviews(
                     f"note: {name} is asked only once the head's checks pass, and they read {held}"
                 )
                 continue
-        if side_answered(pr, name) or side_asked_on_head(pr, body):
-            continue
+            if side_answered(pr, name) or side_asked_on_head(pr, body):
+                continue
         made = post(body)
         if not made.get("url") or (made.get("body") or "") != body:
             raise SystemExit(
@@ -230,11 +243,28 @@ def await_green(
 
 
 def ask(
-    read: Callable[[], dict], await_green: Callable[[], str], post: Callable[[str], dict]
+    read: Callable[[], dict],
+    await_green: Callable[[], str],
+    send: Callable[..., dict],
+    dig: Callable[..., dict],
+    pr: dict | bool,
+    phase: str,
 ) -> None:
-    """Send and print `request_side_reviews`'s requests."""
-    for line in request_side_reviews(read, await_green, post):
+    """Send and print the `phase` requests, where `pr` is a payload whose policy asks any."""
+    if not isinstance(pr, dict) or not asks_any(pr):
+        return
+
+    def post(body: str) -> dict:
+        return dig(send(body=body), *COMMENT_PATH)
+
+    for line in request_side_reviews(read, await_green, post, phase):
         print(line)
+
+
+def copilot_wanted(copilot: review_policy.BotPolicy, pr: dict) -> bool:
+    """Whether the policy has `wait` request Copilot on this pull request's base."""
+    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
+    return copilot.requests() and copilot.covers(pr.get("baseRefName") or "", default)
 
 
 def checks_note(held: str) -> str:

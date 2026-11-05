@@ -297,7 +297,7 @@ Run `local-strict-review` against the branch's current diff before every push th
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
 2. Run `uv run --no-project --script scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
-3. Request each review the repository's review policy owes, which step 4's `wait` is what does.
+3. Send each request the repository's review policy asks for, which step 4's `wait` is what does.
    Under the hub's default that is one Copilot round, on the head of a pull request into the default
    branch. A promotion is one such pull request. Auto-trigger is unreliable, so `wait` fills a
    missed one. On a pull request into any other branch, `wait` reads step 1's

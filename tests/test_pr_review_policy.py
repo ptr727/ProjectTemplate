@@ -331,14 +331,14 @@ def posted(body: str) -> dict:
 
 class TestRequestSideReviews(SideCase):
     def run_requests(
-        self, pr: dict, answer: dict | None = None, held: str = ""
+        self, pr: dict, answer: dict | None = None, held: str = "", phase: str = "on-open"
     ) -> tuple[mock.MagicMock, mock.MagicMock]:
         def send(body: str) -> dict:
             node = posted(body)["addComment"]["commentEdge"]["node"]
             return answer if answer is not None else node
 
         post, green = mock.MagicMock(side_effect=send), mock.MagicMock(return_value=held)
-        side.request_side_reviews(lambda: pr, green, post)
+        side.request_side_reviews(lambda: pr, green, post, phase)
         return post, green
 
     def test_an_explicit_bot_is_asked_with_its_own_command_on_the_pull_request(self) -> None:
@@ -358,9 +358,31 @@ class TestRequestSideReviews(SideCase):
             qodo={**EXPLICIT_QODO, "when": "after-checks"},
             coderabbit={**EXPLICIT_RABBIT, "when": "after-checks"},
         )
-        sent, green = self.run_requests(pr, held="FAILURE")
+        sent, green = self.run_requests(pr, held="FAILURE", phase="after-checks")
         self.assertEqual(0, sent.call_count)
         green.assert_called_once()
+
+    def test_each_phase_asks_only_its_own_reviewers(self) -> None:
+        pr = self.ruled(qodo=EXPLICIT_QODO, coderabbit={**EXPLICIT_RABBIT, "when": "after-checks"})
+        sent, green = self.run_requests(pr, phase="on-open")
+        self.assertEqual([mock.call("/review")], sent.call_args_list)
+        green.assert_not_called()
+        sent, _ = self.run_requests(pr, phase="after-checks")
+        self.assertEqual([mock.call("@coderabbitai full review")], sent.call_args_list)
+
+    def test_an_already_asked_reviewer_does_not_wait_for_the_checks(self) -> None:
+        bot = {**EXPLICIT_QODO, "when": "after-checks"}
+        pr = self.ruled([trusted("/review", fixtures.LATE)], qodo=bot)
+        sent, green = self.run_requests(pr, phase="after-checks")
+        self.assertEqual(0, sent.call_count)
+        green.assert_not_called()
+
+    def test_before_any_suite_the_commit_time_bounds_an_ask(self) -> None:
+        pr = fixtures.payload([], comments=[trusted("/review", fixtures.LATE)])
+        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = fixtures.EARLY
+        self.assertTrue(side.side_asked_on_head(pr, "/review"))
+        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = "2026-08-02T12:00:00Z"
+        self.assertFalse(side.side_asked_on_head(pr, "/review"))
 
     def test_an_unconfirmed_request_ends_the_run(self) -> None:
         wrong = {"url": "", "body": ""}
@@ -469,7 +491,7 @@ class TestUngatedSideReviewers(SideCase):
     def test_an_automatic_side_reviewer_is_never_asked(self) -> None:
         post = mock.MagicMock()
         pr = self.ruled(qodo={"trigger": "auto", "bases": ["^develop$"]})
-        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post)
+        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post, "on-open")
         post.assert_not_called()
 
     def test_a_request_sent_during_the_wait_is_seen_before_asking(self) -> None:
@@ -478,7 +500,9 @@ class TestUngatedSideReviewers(SideCase):
         after = self.ruled([trusted("/review", fixtures.LATE)], qodo=bot)
         reads = iter([before, after])
         post = mock.MagicMock()
-        side.request_side_reviews(lambda: next(reads), mock.MagicMock(return_value=""), post)
+        side.request_side_reviews(
+            lambda: next(reads), mock.MagicMock(return_value=""), post, "after-checks"
+        )
         post.assert_not_called()
 
     def test_a_stuck_check_is_named_rather_than_polled(self) -> None:
@@ -489,6 +513,26 @@ class TestUngatedSideReviewers(SideCase):
         self.assertEqual("STALE_RECORD", held)
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(44, side.checks_status(held))
+
+
+class TestReviewThreadFixes(unittest.TestCase):
+    def test_a_boolean_version_is_refused(self) -> None:
+        with self.assertRaisesRegex(policy.PolicyError, "version is True"):
+            policy.parse({**DEFAULT, "version": True}, "where")
+
+    def test_an_unreadable_check_holds_the_review(self) -> None:
+        pr = checked(fixtures.check(started=fixtures.EARLY))
+        pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"].append(
+            {"__typename": "Mystery"}
+        )
+        self.assertEqual("UNREAD", side.checks_hold(pr, NOW, *WINDOWS))
+
+    def test_copilot_is_wanted_only_on_a_base_it_covers(self) -> None:
+        bot = parsed(copilot={"trigger": "explicit", "bases": ["@default"]}).bot("copilot")
+        main = with_policy(fixtures.payload([]), policy.load_default(), "main")
+        develop = with_policy(fixtures.payload([]), policy.load_default(), "develop")
+        self.assertTrue(side.copilot_wanted(bot, main))
+        self.assertFalse(side.copilot_wanted(bot, develop))
 
 
 class TestSchemaParity(unittest.TestCase):

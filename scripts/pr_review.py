@@ -179,7 +179,6 @@ Subcommands
            - The request returned success and recorded nothing on the pull request.
            - The reviewer writes under a login no query filters on.
            - The review policy held the request until the checks pass, and they failed.
-           44 also covers a check the review policy waits on that sits in a shape no wait clears.
            41 = the newest round is a refusal or a quota state. The kind is printed in its status
            line and, for a refusal on this pull request, in the digest's `refusal=`. The cases are:
            - A refusal on the head. One saying every changed file is in Copilot's default review
@@ -197,7 +196,8 @@ Subcommands
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, still in
            progress inside a run that has completed, or failed. On a held head a check running
-           long or held by its environment polls to 30 instead.
+           long or held by its environment polls to 30 instead. 44 also covers a check the review
+           policy holds a request for that sits in a shape no wait clears, before any review.
            45 = an open attested held head that nothing holds, its merge other than CLEAN,
            UNSTABLE, or HAS_HOOKS. One case is a payload with no commit matching the head, named
            `CHECKS UNREADABLE` in the digest. Another is a DIRTY merge with no check posted that
@@ -1617,13 +1617,13 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and not stopped
         and not held
         and not reviewer_requested(pr)
-        and (copilot is None or a.request or copilot.requests())
+        and (copilot is None or a.request or side.copilot_wanted(copilot, pr))
     )
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)
-    if may_request and side.asks_any(pr):
-        send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
-        side.ask(read_held, await_green, lambda body: mutated(send(body=body), *side.COMMENT_PATH))
+    send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
+    ask = functools.partial(side.ask, read_held, await_green, send, mutated, may_request and pr)
+    ask("on-open")
     checks_hold = await_green() if owed and side.holds_for_checks(copilot, a.request) else ""
     owed = owed and not checks_hold
     if owed:
@@ -1642,6 +1642,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
+    ask("after-checks")
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:

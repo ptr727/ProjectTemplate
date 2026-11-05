@@ -158,7 +158,7 @@ def parse(data: object, source: str) -> Policy:
     stray = sorted(set(data) - {"$schema", "version", "bots"})
     if stray:
         raise _fail(source, f"unknown key(s) {', '.join(stray)}")
-    if data.get("version") != VERSION:
+    if isinstance(data.get("version"), bool) or data.get("version") != VERSION:
         raise _fail(source, f"version is {data.get('version')!r}, and this reader knows {VERSION}")
     bots = data.get("bots")
     if not isinstance(bots, dict):
