@@ -28,6 +28,17 @@ def issue(*labels: str) -> dict[str, object]:
     return {"number": 1, "labels": [{"name": label} for label in labels]}
 
 
+DEFAULT_POLICY = SCRIPTS.parent / "spec" / "pr-review.default.json"
+
+
+def policy_text(**triggers: str) -> str:
+    """The hub default policy as JSON text, each named bot's trigger replaced."""
+    data = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))
+    for bot, trigger in triggers.items():
+        data["bots"][bot]["trigger"] = trigger
+    return json.dumps(data)
+
+
 def metrics(**overrides: object) -> bm.RepoMetrics:
     fields: dict[str, object] = {
         "name": "alpha",
@@ -479,10 +490,13 @@ class PolicyTests(unittest.TestCase):
         with patch:
             return bm.fetch_policy("o", "alpha", "develop")
 
-    def test_a_404_means_absent(self) -> None:
+    def test_a_404_reads_the_hub_default_marked_as_such(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
         self.assertEqual(error, "")
-        self.assertEqual(set(triggers.values()), {"default"})
+        default = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))["bots"]
+        self.assertEqual(
+            triggers, {bot: f"{default[bot]['trigger']} (default)" for bot in bm.BOT_LOGINS}
+        )
 
     def test_any_other_error_is_an_error_not_absent(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
@@ -490,14 +504,24 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("403", error)
 
     def test_triggers_are_read_per_bot(self) -> None:
-        text = json.dumps(
-            {"bots": {"copilot": {"trigger": "auto"}, "qodo": {"trigger": "explicit"}}}
-        )
+        text = policy_text(qodo="explicit", coderabbit="off")
         triggers, error = self.fetch(return_value=self.payload(text))
         self.assertEqual(error, "")
-        self.assertEqual(
-            triggers, {"copilot": "auto", "coderabbit": "unspecified", "qodo": "explicit"}
-        )
+        self.assertEqual(triggers, {"copilot": "auto", "coderabbit": "off", "qodo": "explicit"})
+
+    def test_a_policy_the_gate_refuses_is_an_error(self) -> None:
+        data = json.loads(policy_text(copilot="explicit"))
+        data["bots"]["copilot"]["gate"] = False
+        triggers, error = self.fetch(return_value=self.payload(json.dumps(data)))
+        self.assertEqual(triggers, {})
+        self.assertIn("gate false", error)
+
+    def test_a_policy_omitting_a_bot_is_an_error(self) -> None:
+        data = json.loads(policy_text())
+        del data["bots"]["qodo"]
+        triggers, error = self.fetch(return_value=self.payload(json.dumps(data)))
+        self.assertEqual(triggers, {})
+        self.assertIn("missing qodo", error)
 
     def test_invalid_json_is_an_error(self) -> None:
         _triggers, error = self.fetch(return_value=self.payload("{nope"))
@@ -606,10 +630,30 @@ class ReviewCollectTests(unittest.TestCase):
         with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 404")):
             self.assertEqual(bm.policy_branch("o", "a", "main"), ("main", ""))
         with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 500")):
-            self.assertIn("500", bm.policy_branch("o", "a", "main")[1])
+            branch, error = bm.policy_branch("o", "a", "main")
+        self.assertEqual(branch, "")
+        self.assertIn("500", error)
+
+    def test_a_failed_develop_probe_prints_no_branch_and_exits_one(self) -> None:
+        def fake(args: list[str]) -> object:
+            if "branches" in args[1]:
+                raise bm.GhError("gh: Server Error (HTTP 500)")
+            return {}
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha"])
+        self.assertEqual(code, 1)
+        self.assertIn("| copilot | error | n/a |", out.getvalue())
+        self.assertIn("alpha: reading the policy file failed", err.getvalue())
 
     def test_a_failed_history_keeps_the_trigger_and_exits_one(self) -> None:
-        text = json.dumps({"bots": {"copilot": {"trigger": "explicit"}}})
+        text = policy_text(qodo="explicit")
         body = {"content": base64.b64encode(text.encode()).decode()}
 
         def fake(args: list[str]) -> object:
@@ -628,8 +672,11 @@ class ReviewCollectTests(unittest.TestCase):
         ):
             code = bm.main(["--owner", "o", "--repo", "alpha"])
         self.assertEqual(code, 1)
-        self.assertIn("| copilot | explicit | develop |", out.getvalue())
+        self.assertIn("| qodo | explicit | develop |", out.getvalue())
         self.assertIn("history failed", out.getvalue())
+        self.assertEqual(
+            err.getvalue(), "backlog_metrics.py: alpha: reading the policy history failed\n"
+        )
 
     def test_history_reports_more_only_past_the_cap(self) -> None:
         def commits(count: int) -> list[dict[str, object]]:
@@ -698,7 +745,9 @@ class ReviewCollectTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Review return on cost, per bot", out.getvalue())
         self.assertIn("| error |", out.getvalue())
-        self.assertIn("alpha", err.getvalue())
+        self.assertEqual(
+            err.getvalue(), "backlog_metrics.py: alpha: reading the policy file failed\n"
+        )
 
     def test_a_failed_review_query_exits_one_without_a_report(self) -> None:
         out, err = io.StringIO(), io.StringIO()
@@ -717,9 +766,21 @@ class ReviewCollectTests(unittest.TestCase):
         start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 8)
         md = bm.render_markdown(start, end, [metrics()], [], [result])
         page_html = bm.render_html(start, end, [metrics()], [], [result])
-        self.assertIn("| alpha | copilot | default | n/a | 0 | 0 | n/a | n/a | 2.0 | 3 |", md)
+        self.assertIn("| alpha | copilot | n/a | n/a | 0 | 0 | n/a | n/a | n/a | 2.0 | 3 |", md)
         self.assertIn("Threaded findings (count)", md)
         self.assertEqual(page_html.count("<table"), 3)
+
+    def test_a_side_reviewer_row_prints_each_round_class(self) -> None:
+        stats = bm.BotStats(automatic_rounds=4, explicit_rounds=2, unclassified_rounds=1)
+        result = bm.ReviewMetrics(name="alpha", bots={"qodo": stats})
+        row = bm.review_bot_rows([result])[0]
+        start = bm.REVIEW_BOT_HEADERS.index("Automatic rounds (count)")
+        self.assertEqual(
+            bm.REVIEW_BOT_HEADERS[start : start + 3],
+            ("Automatic rounds (count)", "Explicit rounds (count)", "Unclassified rounds (count)"),
+        )
+        self.assertEqual(row[start : start + 3], ["4", "2", "1"])
+        self.assertEqual(len(row), len(bm.REVIEW_BOT_HEADERS))
 
 
 class MainTests(unittest.TestCase):

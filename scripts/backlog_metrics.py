@@ -17,14 +17,13 @@ Usage
 Exit codes
   0  the report was written.
   1  a `gh` call for issues, pull requests, runs, or the review pass failed, so no number is
-     guessed. A failed policy-file read still writes the report, with `error` in place of the
-     policy, and then exits 1.
+     guessed. A failed read of the policy file, of its history, or of whether `develop` exists
+     still writes the report and then exits 1. Where the policy itself went unread, the report
+     shows `error` in its place.
   2  the command line was wrong.
 """
 
 import argparse
-import base64
-import binascii
 import datetime
 import html
 import json
@@ -37,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from gh_graphql import GraphQLError, request, run_subprocess, walk
+from pr_review_policy import BOTS, POLICY_PATH, PolicyError, decode_contents, load_default
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
@@ -54,7 +54,6 @@ EVENT_CAP = 100
 INTEGRATION_BRANCH = "develop"
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 HISTORY_CAP = 10
-POLICY_PATH = ".github/pr-review.json"
 ATTESTATION = re.compile(
     r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
     re.MULTILINE,
@@ -71,10 +70,9 @@ def reviewer_logins() -> dict[str, str]:
     `pr_review_rounds.py` holds the same mapping but imports a Markdown parser at load, which
     this report has no use for, so the JSON is read directly.
     """
-    names = ("copilot", "coderabbit", "qodo")
     return {
         name: str(json.loads((REVIEWERS_DIR / f"{name}.json").read_text(encoding="utf-8"))["login"])
-        for name in names
+        for name in BOTS
     }
 
 
@@ -388,23 +386,6 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
                 stats.findings_on_green_heads += 1
 
 
-def policy_triggers(text: str) -> dict[str, str]:
-    """Each bot's `trigger` from the policy file, `unspecified` where the file omits the bot.
-
-    The schema is the hub's `spec/pr-review.schema.json`, which nests each bot under `bots`.
-    """
-    data = json.loads(text)
-    if not isinstance(data, dict) or not isinstance(data.get("bots"), dict):
-        raise TypeError("the policy file is not a JSON object with a bots object")
-    bots: dict[str, Any] = data["bots"]
-    result: dict[str, str] = {}
-    for name in BOT_LOGINS:
-        entry = bots.get(name)
-        trigger = entry.get("trigger") if isinstance(entry, dict) else None
-        result[name] = str(trigger) if trigger is not None else "unspecified"
-    return result
-
-
 def window_start(today: datetime.date, days: int) -> datetime.date:
     return today - datetime.timedelta(days=days)
 
@@ -492,6 +473,7 @@ REVIEW_BOT_HEADERS = (
     "Requests by automation (count)",
     "Requests by user (count)",
     "Automatic rounds (count)",
+    "Explicit rounds (count)",
     "Unclassified rounds (count)",
     "Rounds per reviewed PR (mean)",
     "Rounds per reviewed PR (max)",
@@ -520,11 +502,12 @@ def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
         [
             r.name,
             bot,
-            "error" if r.policy_error else r.policy.get(bot, "default"),
+            "error" if r.policy_error else r.policy.get(bot, "n/a"),
             r.policy_branch or "n/a",
             str(stats.requests_by_automation),
             str(stats.requests_by_user),
             str(stats.automatic_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
+            str(stats.explicit_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
             str(stats.unclassified_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
             mean(stats.rounds),
             str(max(stats.rounds, default=0)) if stats.rounds else "n/a",
@@ -737,30 +720,42 @@ def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
 
 
 def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
-    """The branch whose policy a feature PR sees: `develop` where it exists, else the default."""
+    """The branch whose policy a feature PR sees: `develop` where it exists, else the default.
+
+    A probe that failed names no branch, since which one a feature PR sees is then unknown.
+    """
     try:
         run_gh(["api", f"repos/{owner}/{name}/branches/{INTEGRATION_BRANCH}"])
     except GhError as error:
         if "HTTP 404" in str(error):
             return default, ""
-        return default, str(error)
+        return "", str(error)
     return INTEGRATION_BRANCH, ""
 
 
 def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
-    """Read the policy file once at `ref`. A 404 means absent, nothing else does."""
+    """Each bot's trigger in the policy file at `ref`. A 404 means absent, nothing else does.
+
+    The file is parsed by the reader the review gate uses, so a policy the gate refuses reads as
+    an error here too. An absent file reads as the hub default's triggers, each marked `(default)`.
+    """
     quoted = urllib.parse.quote(ref, safe="")
     try:
         payload = run_gh(["api", f"repos/{owner}/{name}/contents/{POLICY_PATH}?ref={quoted}"])
     except GhError as error:
         if "HTTP 404" in str(error):
-            return {bot: "default" for bot in BOT_LOGINS}, ""
-        return {}, str(error)
+            payload = None
+        else:
+            return {}, str(error)
     try:
-        text = base64.b64decode(str(payload["content"])).decode("utf-8")
-        return policy_triggers(text), ""
-    except (KeyError, TypeError, ValueError, binascii.Error) as error:
+        if payload is None:
+            policy, mark = load_default(), " (default)"
+        else:
+            source = f"{owner}/{name}:{POLICY_PATH}@{ref}"
+            policy, mark = decode_contents(str(payload["content"]), source), ""
+    except (KeyError, TypeError, PolicyError) as error:
         return {}, f"unreadable policy file: {error}"
+    return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
 
 
 def fetch_policy_changes(
@@ -894,13 +889,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     billing = billing_lines(f"{end.year}-{end.month:02d}", names, usage, error_text)
     render = render_html if args.format == "html" else render_markdown
     sys.stdout.write(render(start, end, metrics, billing, reviews))
-    failed = [r.name for r in reviews if r.policy_error or r.history_error]
-    if failed:
-        print(
-            f"backlog_metrics.py: policy file unreadable for {', '.join(failed)}", file=sys.stderr
-        )
-        return 1
-    return 0
+    failed = [
+        f"backlog_metrics.py: {r.name}: reading the {what} failed"
+        for r in reviews
+        for what, error in (("policy file", r.policy_error), ("policy history", r.history_error))
+        if error
+    ]
+    for line in failed:
+        print(line, file=sys.stderr)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
