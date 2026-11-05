@@ -314,17 +314,15 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics) -> None:
 def policy_triggers(text: str) -> dict[str, str]:
     """Each bot's `trigger` from the policy file, `unspecified` where the file omits the bot.
 
-    A bot's entry may sit at the top level or under a `reviewers` object.
-    The file's schema is owned by the change that adds it.
+    The schema is the hub's `spec/pr-review.schema.json`, which nests each bot under `bots`.
     """
     data = json.loads(text)
-    if not isinstance(data, dict):
-        raise TypeError("the policy file is not a JSON object")
-    nested = data.get("reviewers")
-    scope: dict[str, Any] = nested if isinstance(nested, dict) else data
+    if not isinstance(data, dict) or not isinstance(data.get("bots"), dict):
+        raise TypeError("the policy file is not a JSON object with a bots object")
+    bots: dict[str, Any] = data["bots"]
     result: dict[str, str] = {}
     for name in BOT_LOGINS:
-        entry = scope.get(name)
+        entry = bots.get(name)
         trigger = entry.get("trigger") if isinstance(entry, dict) else None
         result[name] = str(trigger) if trigger is not None else "unspecified"
     return result
@@ -441,7 +439,7 @@ def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
         [
             r.name,
             bot,
-            "error" if r.policy_error else r.policy.get(bot, "none"),
+            "error" if r.policy_error else r.policy.get(bot, "default"),
             str(stats.requests_by_automation),
             str(stats.requests_by_user),
             mean(stats.rounds),
@@ -634,7 +632,7 @@ def fetch_policy(owner: str, name: str) -> tuple[dict[str, str], str]:
         payload = run_gh(["api", f"repos/{owner}/{name}/contents/{POLICY_PATH}"])
     except GhError as error:
         if "HTTP 404" in str(error):
-            return {bot: "none" for bot in BOT_LOGINS}, ""
+            return {bot: "default" for bot in BOT_LOGINS}, ""
         return {}, str(error)
     try:
         text = base64.b64decode(str(payload["content"])).decode("utf-8")

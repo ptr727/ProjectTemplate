@@ -397,7 +397,7 @@ class PolicyTests(unittest.TestCase):
     def test_a_404_means_absent(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
         self.assertEqual(error, "")
-        self.assertEqual(set(triggers.values()), {"none"})
+        self.assertEqual(set(triggers.values()), {"default"})
 
     def test_any_other_error_is_an_error_not_absent(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
@@ -405,11 +405,13 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("403", error)
 
     def test_triggers_are_read_per_bot(self) -> None:
-        text = json.dumps({"copilot": {"trigger": "auto"}, "qodo": {"trigger": "manual"}})
+        text = json.dumps(
+            {"bots": {"copilot": {"trigger": "auto"}, "qodo": {"trigger": "explicit"}}}
+        )
         triggers, error = self.fetch(return_value=self.payload(text))
         self.assertEqual(error, "")
         self.assertEqual(
-            triggers, {"copilot": "auto", "coderabbit": "unspecified", "qodo": "manual"}
+            triggers, {"copilot": "auto", "coderabbit": "unspecified", "qodo": "explicit"}
         )
 
     def test_invalid_json_is_an_error(self) -> None:
@@ -469,7 +471,7 @@ class ReviewCollectTests(unittest.TestCase):
         start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 8)
         md = bm.render_markdown(start, end, [metrics()], [], [result])
         page = bm.render_html(start, end, [metrics()], [], [result])
-        self.assertIn("| alpha | copilot | none | 0 | 0 | 2.0 | 3 |", md)
+        self.assertIn("| alpha | copilot | default | 0 | 0 | 2.0 | 3 |", md)
         self.assertEqual(page.count("<table"), 3)
 
 
