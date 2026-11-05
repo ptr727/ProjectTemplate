@@ -8,7 +8,7 @@ branch's rules therefore reach `held_checks_open` as an argument rather than as 
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pr_review_copilot as adapter
 from pr_review_rounds import (
@@ -45,15 +45,24 @@ CHECK_STALL = 1800
 CHECKS_WINDOW = 100
 
 
-def age(stamp: str, now: datetime) -> float | None:
-    """Seconds from `stamp` to `now`, or None where the stamp is absent or unparseable."""
-    if not stamp:
-        return None
+def utc_instant(stamp: str) -> datetime | None:
+    """A GitHub timestamp in UTC, None where it is absent, does not parse, or names no zone.
+
+    A commit's `GitTimestamp` keeps its own offset and a `DateTime` is UTC, so only parsed stamps
+    order by instant. A stamp naming no zone has no one instant, so it reads as None rather than as
+    the host's local time. Returning UTC makes each print alike.
+    """
     try:
-        return (now - datetime.fromisoformat(stamp)).total_seconds()
-    # ValueError is an unparseable stamp and TypeError a parseable one with no zone, and neither may take the digest down.
-    except (ValueError, TypeError):
+        parsed = datetime.fromisoformat(stamp) if stamp else None
+    except ValueError:
         return None
+    return parsed.astimezone(UTC) if parsed is not None and parsed.tzinfo else None
+
+
+def age(stamp: str, now: datetime) -> float | None:
+    """Seconds from `stamp` to `now`, or None where `utc_instant` reads no instant."""
+    instant = utc_instant(stamp)
+    return (now - instant).total_seconds() if instant is not None else None
 
 
 def head_commit(pr: dict) -> dict:

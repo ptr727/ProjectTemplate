@@ -1666,6 +1666,13 @@ class TestCheckShapes(unittest.TestCase):
         self.assertIsNone(pr_review_checks.age("nonsense", NOW))
         self.assertEqual(900.0, pr_review_checks.age(ago(900), NOW))
 
+    def test_utc_instant_orders_an_offset_stamp_with_a_utc_one(self) -> None:
+        local = pr_review_checks.utc_instant("2026-01-01T10:00:00-07:00")
+        self.assertEqual(local, pr_review_checks.utc_instant("2026-01-01T17:00:00Z"))
+        self.assertEqual(str(local), "2026-01-01 17:00:00+00:00")
+        for stamp in ("", "nonsense", "2026-01-01T17:00:00"):
+            self.assertIsNone(pr_review_checks.utc_instant(stamp))
+
     def test_a_finished_check_carrying_no_conclusion_yet_is_settling_not_failing(self) -> None:
         """Reading an absent verdict as a failure invents a red check out of a race in the API.
 
