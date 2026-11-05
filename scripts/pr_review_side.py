@@ -16,13 +16,11 @@ from datetime import UTC, datetime
 import pr_review_policy as review_policy
 from pr_review_checks import (
     HOSTED_REVIEWERS,
-    UNFINISHED,
     age,
     check_nodes,
     check_shape,
     checks_settling,
     head_commit,
-    hosted_reviews_running,
 )
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -59,17 +57,21 @@ def head_arrived(pr: dict) -> str:
 def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
     """What holds a review back on the head's checks, empty where nothing does.
 
-    FAILURE where a check finished without passing, PENDING where one is still settling or none
-    has posted inside the grace after the head arrived. A hosted reviewer's own check is left out,
+    FAILURE where a check finished without passing, and a stuck shape's own name where one sits
+    in a shape no wait clears. PENDING where one is still settling, or none has posted inside the
+    grace after the head arrived. A hosted reviewer's own check is left out,
     since the review it stands for is the one being held.
     """
     nodes = [n for n in check_nodes(pr) if not hosted_check(n)]
     if not nodes:
         since = age(head_arrived(pr), now) if head_arrived(pr) else None
         return "PENDING" if since is None or since <= grace else ""
-    if any(check_shape(n, now, grace, stall) == "FAILED" for n in nodes):
+    shapes = {check_shape(n, now, grace, stall) for n in nodes if not n.get("unreadable")}
+    if "FAILED" in shapes:
         return "FAILURE"
-    return "PENDING" if checks_settling(nodes, now, grace, stall, UNFINISHED) else ""
+    if stuck := sorted(shapes - {"", "RUNNING_LONG"}):
+        return stuck[0]
+    return "PENDING" if checks_settling(nodes, now, grace, stall) else ""
 
 
 def hosted_check(node: dict) -> bool:
@@ -78,24 +80,6 @@ def hosted_check(node: dict) -> bool:
     return bool(READS_AS_REVIEWER.search(name)) or any(
         node.get("poster") == login or name == vocab for vocab, login in HOSTED_REVIEWERS.items()
     )
-
-
-def started(pr: dict, name: str, now: datetime, grace: float, stall: float) -> bool:
-    """Whether an automatic reviewer has begun on this head, or may still be about to.
-
-    Its check running, or its own comment since the head arrived, means it began. Inside the grace
-    after arrival it may still start, so asking then would buy a second round.
-    """
-    login, since = SIDE_LOGINS[name], head_arrived(pr)
-    elapsed = age(since, now) if since else None
-    if elapsed is None or elapsed <= grace:
-        return True
-    running = {r.casefold() for r in hosted_reviews_running(pr, check_nodes(pr), now, grace, stall)}
-    vocab = {v for v, lg in HOSTED_REVIEWERS.items() if lg == login}
-    if login.casefold() in running or vocab & running:
-        return True
-    own = reviewer_nodes(pr, "comments", login)
-    return any((n.get("updatedAt") or n.get("createdAt") or "") >= since for n in own)
 
 
 def side_asks(pr: dict, body: str) -> list[dict]:
@@ -130,20 +114,15 @@ def side_rounds(pr: dict, name: str, body: str) -> int:
     return max(asked, len(heads))
 
 
-def side_answered(pr: dict, name: str, body: str) -> bool:
-    """Whether `name` has reviewed the current head.
+def side_answered(pr: dict, name: str) -> bool:
+    """Whether `name` has reviewed the current head, known for CodeRabbit alone.
 
-    CodeRabbit answers with a formal review on the head's commit. Qodo edits its standing comment,
-    so it has answered where that comment changed after both the head and the newest request.
+    CodeRabbit answers with a formal review on the head's commit. Qodo edits one standing comment
+    that names no head, so a request is the only per-head record of it.
     """
-    if name == "coderabbit":
-        return bool(head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)))
-    found = qodo_comment(pr)
-    if found is None:
-        return False
-    asks = side_asks(pr, body)
-    after = max(head_arrived(pr), (asks[-1].get("createdAt") or "") if asks else "")
-    return (found.get("updatedAt") or found.get("createdAt") or "") >= after
+    return name == "coderabbit" and bool(
+        head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN))
+    )
 
 
 def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:
@@ -164,49 +143,29 @@ def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:
     return found
 
 
-def side_unmet(pr: dict) -> list[str]:
-    """Each comment-triggered reviewer the policy gates the merge on that has not answered the head.
-
-    One asked on this head is owed until it answers, whatever its cap reads, since the request
-    already spent the round. One not yet asked is owed only while a round is still allowed.
-    """
-    return [
-        name
-        for name, bot, body in side_reviewers(pr)
-        if bot.gate
-        and not side_answered(pr, name, body)
-        and (side_asked_on_head(pr, body) or bot.rounds_left(side_rounds(pr, name, body)))
-    ]
-
-
 def asks_any(pr: dict) -> bool:
     """Whether the policy on `pr` may ask any comment-triggered reviewer on this base."""
     return any(bot.requests() for _, bot, _ in side_reviewers(pr))
 
 
 def request_side_reviews(
-    read: Callable[[], dict],
-    await_green: Callable[[], str],
-    post: Callable[[str], dict],
-    windows: tuple[float, float],
-) -> tuple[list[str], str]:
-    """Ask each comment-triggered reviewer the policy owes a round on this head, once per head.
+    read: Callable[[], dict], await_green: Callable[[], str], post: Callable[[str], dict]
+) -> list[str]:
+    """Ask each comment-triggered reviewer the policy asks explicitly, once per head, and say so.
 
-    Returns the lines to print and what held a request back on the checks. Each reviewer is judged
-    on a fresh read at the current time, read again after any wait for green checks. Nothing is sent
-    where it answered or was asked since the head arrived, or its cap is spent. An automatic one is
-    not asked while it has begun or may still begin, per `started`. `post` sends one comment and
-    returns the created node, and an unconfirmed one ends the run, since it may have landed.
+    Each is judged on a fresh read, read again after any wait for green checks. So a request that
+    a concurrent session sent during the wait is seen. Nothing is sent where the reviewer answered
+    or was asked since the head arrived, or its cap is spent. The merge never waits on these
+    reviewers, so a held or skipped ask is a note rather than an exit. `post` sends one comment
+    and returns the created node, and an unconfirmed one ends the run, since it may have landed.
     """
     lines: list[str] = []
     held: str | None = None
     pr = read()
     for name, bot, body in side_reviewers(pr):
-        if not bot.requests() or side_answered(pr, name, body) or side_asked_on_head(pr, body):
+        if not bot.requests():
             continue
-        if bot.trigger == "auto" and started(pr, name, datetime.now(UTC), *windows):
-            continue
-        if not bot.rounds_left(side_rounds(pr, name, body)):
+        if not bot.rounds_left(side_rounds(pr, name, body)) and not side_asked_on_head(pr, body):
             lines.append(
                 f"note: the review policy allows {name} no further round, so none was asked"
             )
@@ -219,6 +178,8 @@ def request_side_reviews(
                     f"note: {name} is asked only once the head's checks pass, and they read {held}"
                 )
                 continue
+        if side_answered(pr, name) or side_asked_on_head(pr, body):
+            continue
         made = post(body)
         if not made.get("url") or (made.get("body") or "") != body:
             raise SystemExit(
@@ -226,7 +187,7 @@ def request_side_reviews(
                 "unconfirmed: inspect the conversation before asking again, since it may have landed"
             )
         lines.append(f"auto-request: asked {name} for a round on the current head ({made['url']})")
-    return lines, held or ""
+    return lines
 
 
 def copilot_policy(pr: dict | None, requested: bool) -> review_policy.BotPolicy | None:
@@ -269,18 +230,11 @@ def await_green(
 
 
 def ask(
-    read: Callable[[], dict],
-    await_green: Callable[[], str],
-    post: Callable[[str], dict],
-    args: Namespace,
-) -> str:
-    """Send and print `request_side_reviews`'s requests, and return what held one on the checks."""
-    lines, held = request_side_reviews(
-        read, await_green, post, (args.check_grace, args.check_stall)
-    )
-    for line in lines:
+    read: Callable[[], dict], await_green: Callable[[], str], post: Callable[[str], dict]
+) -> None:
+    """Send and print `request_side_reviews`'s requests."""
+    for line in request_side_reviews(read, await_green, post):
         print(line)
-    return held
 
 
 def checks_note(held: str) -> str:
@@ -292,19 +246,12 @@ def checks_note(held: str) -> str:
 
 def checks_status(held: str) -> int:
     """Print the status line for a head whose checks held the Copilot request back, and its exit."""
-    pending = held == "PENDING"
-    then = "wait again once they conclude" if pending else "fix the build and push"
+    then, code = {
+        "PENDING": ("wait again once they conclude", 30),
+        "FAILURE": ("fix the build and push", 40),
+    }.get(held, ("read the checks, since that shape is one no wait clears", 44))
     print(
         f"status=CHECKS_BEFORE_REVIEW the head's checks read {held}, and the review policy "
         f"holds the review request until they pass: {then}"
     )
-    return 30 if pending else 40
-
-
-def side_status(owing: list[str]) -> int:
-    """Print the status line for a gated reviewer that has not answered the head, and exit 30."""
-    print(
-        "status=SIDE_REVIEW_PENDING the review policy gates the merge on a round from "
-        f"{', '.join(owing)} on this head, and none has landed by the timeout: wait again"
-    )
-    return 30
+    return code

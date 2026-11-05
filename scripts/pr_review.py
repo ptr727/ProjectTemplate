@@ -173,13 +173,13 @@ Subcommands
            Where the rollup holds a type this cannot read, a BLOCKED hold's note says an unmet
            required check may sit in its unread part. It is also a round past --min-rounds not
            yet landed. It is also checks the review policy waits on still running,
-           `status=CHECKS_BEFORE_REVIEW`, or a gated CodeRabbit or Qodo round not yet landed,
-           `status=SIDE_REVIEW_PENDING`.
+           `status=CHECKS_BEFORE_REVIEW`.
            40 = no Copilot review covers the head, in any of these cases:
            - The reviewer answered outside a formal review.
            - The request returned success and recorded nothing on the pull request.
            - The reviewer writes under a login no query filters on.
            - The review policy held the request until the checks pass, and they failed.
+           44 also covers a check the review policy waits on that sits in a shape no wait clears.
            41 = the newest round is a refusal or a quota state. The kind is printed in its status
            line and, for a refusal on this pull request, in the digest's `refusal=`. The cases are:
            - A refusal on the head. One saying every changed file is in Copilot's default review
@@ -247,8 +247,6 @@ from pathlib import Path
 import gh_graphql as shared
 import pr_review_policy as review_policy
 import pr_review_side as side
-
-mutated = shared.mutated
 from pr_review_answers import ack_lines, report_verdict
 from pr_review_checks import (
     CHECK_GRACE,
@@ -303,6 +301,8 @@ from pr_review_rounds import (
     thread_author,
     threads_truncated,
 )
+
+mutated = shared.mutated
 
 # The directory this script sits in, the anchor every scope answer is read from.
 HERE = Path(__file__).resolve().parent
@@ -394,7 +394,7 @@ HELD_FIELDS = """
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    commits(last:1){ nodes{ commit{ oid committedDate statusCheckRollup{ state
+    commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
@@ -1621,6 +1621,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     )
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)
+    if may_request and side.asks_any(pr):
+        send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
+        side.ask(read_held, await_green, lambda body: mutated(send(body=body), *side.COMMENT_PATH))
     checks_hold = await_green() if owed and side.holds_for_checks(copilot, a.request) else ""
     owed = owed and not checks_hold
     if owed:
@@ -1639,12 +1642,6 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
-    side_hold = ""
-    if may_request and side.asks_any(pr):
-        send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
-        side_hold = side.ask(
-            read_held, await_green, lambda body: mutated(send(body=body), *side.COMMENT_PATH), a
-        )
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:
@@ -1735,9 +1732,6 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             a.timeout,
         )
 
-    if snapshot is not None and side.side_unmet(snapshot) and not checks_hold and not side_hold:
-        backoff(snapshot, read_held, lambda p: bool(side.side_unmet(p)), start, a.timeout)
-        final = None
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
     if not is_open(final):
@@ -1831,8 +1825,6 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "not ready to merge"
             )
             return 45
-        if owing := side.side_unmet(final):
-            return side.checks_status(side_hold) if side_hold else side.side_status(owing)
         return 0
     # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)

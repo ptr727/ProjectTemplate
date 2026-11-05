@@ -826,7 +826,6 @@ ROUTED = {
             "CHECKS_MISSING",
             "COPILOT_ERROR_TRANSIENT",
             "CHECKS_BEFORE_REVIEW",
-            "SIDE_REVIEW_PENDING",
         ),
         "redrive",
     ),

@@ -18,13 +18,18 @@
                 "coderabbit": {
                     "allOf": [{ "$ref": "#/$defs/bot" }],
                     "properties": {
+                        "gate": { "const": false },
                         "command": {
                             "description": "The comment that requests a review: review is incremental, full review rereads the whole pull request.",
                             "enum": ["review", "full review"]
                         }
                     }
                 },
-                "qodo": { "allOf": [{ "$ref": "#/$defs/bot" }], "not": { "required": ["command"] } }
+                "qodo": {
+                    "allOf": [{ "$ref": "#/$defs/bot" }],
+                    "properties": { "gate": { "const": false } },
+                    "not": { "required": ["command"] }
+                }
             }
         }
     },
@@ -58,7 +63,7 @@
                     "minimum": 1
                 },
                 "gate": {
-                    "description": "Whether the merge waits for this bot's review on the head. Defaults to true for copilot and false for the others.",
+                    "description": "Whether the merge waits for this bot's review on the head. Copilot alone can gate, and it defaults to true. CodeRabbit and Qodo are asked but never waited on.",
                     "type": "boolean"
                 },
                 "command": { "type": "string" }

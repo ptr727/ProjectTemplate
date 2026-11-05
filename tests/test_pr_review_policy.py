@@ -23,7 +23,6 @@ import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -156,7 +155,7 @@ class TestBotDecisions(unittest.TestCase):
             ("off", True): False,
         }
         for (trigger, gate), want in cases.items():
-            bot = parsed(qodo={"trigger": trigger, "bases": [], "gate": gate}).bot("qodo")
+            bot = parsed(copilot={"trigger": trigger, "bases": [], "gate": gate}).bot("copilot")
             with self.subTest(trigger=trigger, gate=gate):
                 self.assertEqual(want, bot.requests())
 
@@ -276,11 +275,10 @@ class TestCopilotCover(unittest.TestCase):
         self.assertEqual(policy.PAYLOAD_KEY, rounds.POLICY_KEY)
 
 
-EXPLICIT_QODO = {"trigger": "explicit", "bases": ["^develop$"], "gate": True}
+EXPLICIT_QODO = {"trigger": "explicit", "bases": ["^develop$"]}
 EXPLICIT_RABBIT = {
     "trigger": "explicit",
     "bases": ["^develop$"],
-    "gate": True,
     "command": "full review",
 }
 
@@ -306,9 +304,9 @@ class TestSideReaders(unittest.TestCase):
         body = side.side_command("coderabbit", "full review")
         self.assertEqual("@coderabbitai full review", body)
         moved = fixtures.payload([fixtures.review(login=rounds.CODERABBIT_LOGIN, oid=MOVED)])
-        self.assertFalse(side.side_answered(moved, "coderabbit", body))
+        self.assertFalse(side.side_answered(moved, "coderabbit"))
         on_head = fixtures.payload([fixtures.review(login=rounds.CODERABBIT_LOGIN)])
-        self.assertTrue(side.side_answered(on_head, "coderabbit", body))
+        self.assertTrue(side.side_answered(on_head, "coderabbit"))
         both = fixtures.payload(
             [
                 fixtures.review(login=rounds.CODERABBIT_LOGIN, oid=MOVED),
@@ -325,39 +323,10 @@ class SideCase(unittest.TestCase):
         return committed(with_policy(pr, parsed(**bots), "develop"), fixtures.EARLY)
 
 
-class TestSideUnmet(SideCase):
-    def test_a_gated_bot_not_yet_asked_is_owed(self) -> None:
-        self.assertEqual(["qodo"], side.side_unmet(self.ruled(qodo=EXPLICIT_QODO)))
-
-    def test_an_ungated_or_uncovered_bot_is_not(self) -> None:
-        self.assertEqual([], side.side_unmet(self.ruled(qodo={**EXPLICIT_QODO, "gate": False})))
-        self.assertEqual(
-            [], side.side_unmet(self.ruled(qodo={**EXPLICIT_QODO, "bases": ["^main$"]}))
-        )
-
-    def test_an_asked_bot_stays_owed_although_its_one_round_is_spent(self) -> None:
-        asked = [trusted("/review", fixtures.LATE)]
-        self.assertEqual(
-            ["qodo"],
-            side.side_unmet(self.ruled(asked, qodo={**EXPLICIT_QODO, "rounds": "once"})),
-        )
-
-    def test_a_spent_cap_with_no_request_on_this_head_owes_nothing(self) -> None:
-        pr = self.ruled(
-            [trusted("/review", "2026-08-02T09:00:00Z")], qodo={**EXPLICIT_QODO, "rounds": "once"}
-        )
-        self.assertEqual([], side.side_unmet(pr))
-
-    def test_no_policy_on_the_payload_names_no_side_reviewer(self) -> None:
-        self.assertEqual([], side.side_reviewers(fixtures.payload([])))
-
-
 def posted(body: str) -> dict:
-    return {
-        "addComment": {
-            "commentEdge": {"node": {"id": "IC_1", "url": "https://example.test/c/1", "body": body}}
-        }
-    }
+    """The answer an addComment mutation gives for `body`."""
+    node = {"id": "IC_1", "url": "https://example.test/c/1", "body": body}
+    return {"addComment": {"commentEdge": {"node": node}}}
 
 
 class TestRequestSideReviews(SideCase):
@@ -369,7 +338,7 @@ class TestRequestSideReviews(SideCase):
             return answer if answer is not None else node
 
         post, green = mock.MagicMock(side_effect=send), mock.MagicMock(return_value=held)
-        side.request_side_reviews(lambda: pr, green, post, WINDOWS)
+        side.request_side_reviews(lambda: pr, green, post)
         return post, green
 
     def test_an_explicit_bot_is_asked_with_its_own_command_on_the_pull_request(self) -> None:
@@ -468,40 +437,6 @@ class TestChecksHold(unittest.TestCase):
         self.assertEqual("", held)
 
 
-class TestAutomaticStart(SideCase):
-    AUTO: ClassVar[dict] = {"trigger": "auto", "bases": ["^develop$"], "gate": True}
-
-    def test_a_gated_automatic_bot_is_not_asked_inside_the_grace(self) -> None:
-        pr = self.ruled(qodo=self.AUTO)
-        just = (datetime.now(UTC) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        committed(pr, just)
-        post = mock.MagicMock()
-        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post, WINDOWS)
-        post.assert_not_called()
-
-    def test_one_that_has_said_something_since_the_head_has_started(self) -> None:
-        pr = self.ruled(
-            [
-                {
-                    "author": {"login": rounds.QODO_LOGIN},
-                    "createdAt": fixtures.LATE,
-                    "body": "working",
-                }
-            ],
-            qodo=self.AUTO,
-        )
-        self.assertTrue(side.started(pr, "qodo", NOW, *WINDOWS))
-
-    def test_one_silent_past_the_grace_is_asked_to_fill_the_missed_trigger(self) -> None:
-        pr = self.ruled(qodo=self.AUTO)
-        self.assertFalse(side.started(pr, "qodo", NOW, *WINDOWS))
-        post = mock.MagicMock(
-            side_effect=lambda body: posted(body)["addComment"]["commentEdge"]["node"]
-        )
-        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post, WINDOWS)
-        post.assert_called_once_with("/review")
-
-
 class TestSideCounts(SideCase):
     def test_an_automatic_qodo_round_counts_once_its_comment_exists(self) -> None:
         pr = self.ruled(qodo=EXPLICIT_QODO)
@@ -520,7 +455,40 @@ class TestSideCounts(SideCase):
         )
         self.assertFalse(side.side_asked_on_head(bare, "/review"))
         self.assertEqual("PENDING", side.checks_hold(bare, NOW, *WINDOWS))
-        self.assertTrue(side.started(bare, "qodo", NOW, *WINDOWS))
+
+
+class TestUngatedSideReviewers(SideCase):
+    def test_only_copilot_can_gate_the_merge(self) -> None:
+        for name in ("coderabbit", "qodo"):
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(policy.PolicyError, "only copilot can gate"),
+            ):
+                parsed(**{name: {"trigger": "explicit", "bases": [], "gate": True}})
+
+    def test_an_automatic_side_reviewer_is_never_asked(self) -> None:
+        post = mock.MagicMock()
+        pr = self.ruled(qodo={"trigger": "auto", "bases": ["^develop$"]})
+        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post)
+        post.assert_not_called()
+
+    def test_a_request_sent_during_the_wait_is_seen_before_asking(self) -> None:
+        bot = {**EXPLICIT_QODO, "when": "after-checks"}
+        before = self.ruled(qodo=bot)
+        after = self.ruled([trusted("/review", fixtures.LATE)], qodo=bot)
+        reads = iter([before, after])
+        post = mock.MagicMock()
+        side.request_side_reviews(lambda: next(reads), mock.MagicMock(return_value=""), post)
+        post.assert_not_called()
+
+    def test_a_stuck_check_is_named_rather_than_polled(self) -> None:
+        stale = fixtures.check(
+            status="IN_PROGRESS", conclusion="", started=fixtures.EARLY, suite_status="COMPLETED"
+        )
+        held = side.checks_hold(checked(stale), NOW, *WINDOWS)
+        self.assertEqual("STALE_RECORD", held)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(44, side.checks_status(held))
 
 
 class TestSchemaParity(unittest.TestCase):
@@ -583,6 +551,33 @@ class TestWaitHoldsForChecks(fixtures.GqlCase):
         self.assertEqual(30, code, out)
         self.assertIn("checks read PENDING", out)
         self.assertFalse(self.requested(sent))
+
+
+class TestWaitAsksSideReviewers(fixtures.GqlCase):
+    """A side reviewer is asked whatever Copilot's own round has done, since nothing waits on it."""
+
+    def test_an_explicit_qodo_is_asked_on_a_head_copilot_already_covered(self) -> None:
+        rules = parsed(qodo={"trigger": "explicit", "bases": ["^develop$"]})
+        pr = with_policy(fixtures.payload([fixtures.review()]), rules)
+        committed(pr, fixtures.EARLY)
+        self.answer(pr)
+
+        def graphql(query: str, **variables: object) -> dict:
+            if "addComment" in query:
+                return posted(str(variables["body"]))
+            return {"repository": {"pullRequests": {"nodes": []}}}
+
+        sent = mock.MagicMock(side_effect=graphql)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review, "gh_graphql", sent),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"])
+        asks = [c for c in sent.call_args_list if c.args and "addComment" in c.args[0]]
+        self.assertEqual(1, len(asks), out.getvalue())
+        self.assertEqual("/review", asks[0].kwargs["body"])
+        self.assertIn("auto-request: asked qodo", out.getvalue())
 
 
 if __name__ == "__main__":

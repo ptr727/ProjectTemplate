@@ -12,9 +12,9 @@ skills stay silent about the trigger. `wait` requests whatever the policy says t
 start for itself, and the gate asks the same question in every mode.
 
 - `explicit`: the bot does not start on its own, so `wait` requests it once `when` allows.
-- `auto`: the bot starts on its own. For a bot the gate waits on, `wait` still requests it where
-  nothing is pending. So a missed automatic trigger is filled rather than waited out. For any other
-  bot `wait` requests nothing.
+- `auto`: the bot starts on its own. For Copilot, which the gate waits on, `wait` still requests
+  it where nothing is pending. So a missed automatic trigger is filled rather than waited out. For
+  CodeRabbit and Qodo `wait` requests nothing.
 - `off`: the bot is never requested and never waited on.
 
 The policy is read from the pull request's base branch rather than its head. So a pull request
@@ -141,6 +141,8 @@ def _bot(source: str, name: str, raw: object) -> BotPolicy:
     gate = raw.get("gate", name == "copilot")
     if not isinstance(gate, bool):
         raise _fail(source, f"{where}.gate is {gate!r}, not a boolean")
+    if gate and name != "copilot":
+        raise _fail(source, f"{where}.gate is true, and only copilot can gate the merge")
     command = raw.get("command", "review")
     if "command" in raw and name != "coderabbit":
         raise _fail(source, f"{where}.command applies to coderabbit only")
