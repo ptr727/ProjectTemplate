@@ -4,8 +4,9 @@
 No case starts `gh`. The counting and rendering functions take parsed lists, and the cases that
 reach `run_gh` replace the subprocess call. The fixtures are invented names and counts.
 
-Run as `python3 tests/test_backlog_metrics.py`, or under
-`python3 -m unittest discover -s tests`.
+Run as `uv run --no-project --with-requirements tests/requirements.txt python
+tests/test_backlog_metrics.py`, or under the same command with `-m unittest discover -s tests`.
+The script imports the review gate's Markdown readers, so it needs those requirements.
 """
 
 import base64
@@ -22,6 +23,9 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import backlog_metrics as bm
+import gh_graphql
+import pr_review_copilot
+import pr_review_rounds
 
 
 def issue(*labels: str) -> dict[str, object]:
@@ -110,6 +114,13 @@ class CountingTests(unittest.TestCase):
         self.assertEqual(bm.per_merged(1, 3), "0.3")
         self.assertEqual(bm.per_merged(0, 4), "0.0")
         self.assertEqual(bm.per_merged(5, 0), "n/a")
+
+    def test_the_mean_of_rounds_is_per_merged_with_no_helper_of_its_own(self) -> None:
+        self.assertFalse(hasattr(bm, "mean"))
+        stats = {"copilot": bm.BotStats(rounds=[1, 2]), "qodo": bm.BotStats()}
+        row = bm.review_bot_rows([bm.ReviewMetrics(name="alpha", bots=stats)])
+        index = bm.REVIEW_BOT_HEADERS.index("Rounds per reviewed PR (mean)")
+        self.assertEqual([r[index] for r in row], ["1.5", "n/a"])
 
 
 class BillingTests(unittest.TestCase):
@@ -265,6 +276,11 @@ class CollectTests(unittest.TestCase):
 COPILOT = bm.BOT_LOGINS["copilot"]
 RABBIT = bm.BOT_LOGINS["coderabbit"]
 QODO = bm.BOT_LOGINS["qodo"]
+REFUSED = (
+    "Copilot was unable to review this pull request because the user who requested the "
+    "review has reached their quota limit."
+)
+QODO_COMMENT = "<h3>Code Review by Qodo</h3>\nOne finding."
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 SHA_C = "c" * 40
@@ -337,6 +353,12 @@ class ReviewTests(unittest.TestCase):
             {"copilot-pull-request-reviewer", "coderabbitai", "qodo-free-for-open-source-projects"},
         )
 
+    def test_logins_are_the_gates_vocabulary_logins_with_no_local_reader(self) -> None:
+        for name, login in bm.BOT_LOGINS.items():
+            self.assertIs(login, pr_review_copilot.VOCABULARIES[name]["login"])
+        self.assertFalse(hasattr(bm, "reviewer_logins"))
+        self.assertFalse(hasattr(bm, "REVIEWERS_DIR"))
+
     def test_rounds_count_distinct_heads_per_bot_and_commits_are_counted(self) -> None:
         reviews = [
             {"author": {"login": COPILOT}, "commit": {"oid": SHA_A}},
@@ -358,13 +380,17 @@ class ReviewTests(unittest.TestCase):
         bm.review_pr(pr_payload(head="develop", commits=[commit(SHA_A)]), result, "main")
         self.assertEqual((result.prs, result.promotions_skipped, result.commits), (1, 1, 1))
 
-    def test_requests_split_by_actor_type_and_trigger_comments_follow_their_author(self) -> None:
+    def test_requests_split_by_actor_type_and_follow_the_gates_ask_rule(self) -> None:
         comments = [
             comment(f"@{RABBIT} review"),
-            comment(f"text\n@{RABBIT} full review", login="b", kind="Bot"),
-            comment(f"@{RABBIT} review", login=RABBIT, kind="Bot"),
-            comment("hello\n/review"),
+            comment(f"@{RABBIT} full review", login="b", kind="Bot"),
+            comment(f"@{RABBIT} review", association="NONE"),
+            comment(f"@{RABBIT} review", minimized=True),
+            comment(f"text\n@{RABBIT} review"),
             comment(f"@{RABBIT} reviewing"),
+            comment("/review", kind="Bot"),
+            comment("hello\n/review"),
+            comment(" /review\n"),
         ]
         events = [requested("Bot", COPILOT), requested("User", COPILOT)]
         result = self.tally(comments=comments, timelineItems=events)
@@ -373,6 +399,8 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result.bots["coderabbit"].requests_by_user, 1)
         self.assertEqual(result.bots["coderabbit"].requests_by_automation, 1)
         self.assertEqual(result.bots["qodo"].requests_by_user, 1)
+        self.assertEqual(result.bots["qodo"].requests_by_automation, 1)
+        self.assertFalse(hasattr(bm, "EXPLICIT_COMMENT"))
 
     def test_each_reviewed_head_is_explicit_automatic_or_unclassified(self) -> None:
         def review(login: str, head: str, at: str) -> dict[str, object]:
@@ -399,7 +427,57 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(
             (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (1, 1, 1)
         )
-        self.assertEqual(result.bots["qodo"].explicit_rounds, 1)
+        qodo = result.bots["qodo"]
+        self.assertEqual(
+            (qodo.explicit_rounds, qodo.automatic_rounds, qodo.unclassified_rounds), (0, 0, 0)
+        )
+
+    def test_a_refused_review_is_no_round_and_no_reviewed_head(self) -> None:
+        def review(head: str, body: str, at: str) -> dict[str, object]:
+            return {
+                "author": {"login": RABBIT},
+                "commit": {"oid": head},
+                "body": body,
+                "submittedAt": at,
+            }
+
+        result = self.tally(
+            commits=[commit(SHA_A, at="2026-01-01T01:00:00Z"), commit(SHA_B)],
+            reviews=[
+                review(SHA_A, "Looks fine.", "2026-01-01T03:00:00Z"),
+                review(SHA_B, REFUSED, "2026-01-01T04:00:00Z"),
+                {**review(SHA_C, "Looks fine.", "2026-01-01T04:00:00Z"), "commit": None},
+            ],
+        )
+        rabbit = result.bots["coderabbit"]
+        self.assertEqual(rabbit.rounds, [1])
+        self.assertEqual(
+            (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (0, 1, 0)
+        )
+
+    def test_qodo_rounds_follow_its_standing_comment_and_asks_with_no_classes(self) -> None:
+        standing = comment(QODO_COMMENT, association="NONE", login=QODO, kind="Bot")
+        both = self.tally(comments=[standing, comment("/review"), comment("/review")])
+        self.assertEqual(both.bots["qodo"].rounds, [2])
+        alone = self.tally(comments=[standing])
+        self.assertEqual(alone.bots["qodo"].rounds, [1])
+        none = self.tally(comments=[])
+        self.assertEqual(none.bots["qodo"].rounds, [])
+        heads_only = self.tally(
+            reviews=[{"author": {"login": QODO}, "commit": {"oid": SHA_A}, "body": "x"}] * 3
+        )
+        self.assertEqual(heads_only.bots["qodo"].rounds, [])
+        row = bm.review_bot_rows([both])[2]
+        start = bm.REVIEW_BOT_HEADERS.index("Automatic rounds (count)")
+        self.assertEqual(row[1], "qodo")
+        self.assertEqual(row[start : start + 3], ["n/a", "n/a", "n/a"])
+
+    def test_the_review_query_fetches_what_the_gate_readers_read(self) -> None:
+        reviews = bm.REVIEW_QUERY.split("reviews(")[1].split("reviewThreads(")[0]
+        comments = bm.REVIEW_QUERY.split("comments(first: 100)")[1].split("timelineItems")[0]
+        self.assertIn("body", reviews)
+        for field in ("authorAssociation", "isMinimized", "body", "createdAt", "__typename"):
+            self.assertIn(field, comments)
 
     def test_local_findings_sum_and_unknown_is_counted_apart(self) -> None:
         comments = [attest(SHA_A, "2"), attest(SHA_B, "unknown"), attest(SHA_C, "0")]
@@ -417,7 +495,24 @@ class ReviewTests(unittest.TestCase):
             comment(f"prose {marker(SHA_A, '4')}"),
             comment(f"text\n{marker(SHA_B, '5')}\nmore"),
         ]
-        self.assertEqual(bm.attestations(comments, "develop"), {SHA_B: "5"})
+        self.assertEqual(bm.attestations(pr_payload(comments=comments)), {SHA_B: "5"})
+
+    def test_the_first_attestation_of_a_head_wins_as_in_the_gate(self) -> None:
+        comments = [attest(SHA_A, "2"), attest(SHA_A, "0"), attest(SHA_B, "unknown")]
+        pr = pr_payload(comments=comments)
+        self.assertEqual(bm.attestations(pr), {SHA_A: "2", SHA_B: "unknown"})
+        gate = pr_review_rounds.attestation({**pr, "headRefOid": SHA_A})
+        self.assertEqual(gate, "2")
+        result = self.tally(comments=comments)
+        self.assertEqual((result.local_findings, result.local_unknown), (2, 1))
+
+    def test_attestations_use_the_gates_fence_rule_and_no_local_copy(self) -> None:
+        tilde = f"~~~\n{marker(SHA_A, '7')}\n~~~"
+        pr = pr_payload(comments=[comment(tilde), attest(SHA_B, "1")])
+        self.assertEqual(bm.attestations(pr), {SHA_B: "1"})
+        self.assertIsNone(pr_review_rounds.attestation({**pr, "headRefOid": SHA_A}))
+        for name in ("ATTESTATION", "TRUSTED_ASSOCIATIONS", "body_lines"):
+            self.assertFalse(hasattr(bm, name))
 
     def test_bot_findings_missed_by_clean_local_review_and_on_green_heads(self) -> None:
         threads = [
@@ -577,12 +672,21 @@ class ReviewCollectTests(unittest.TestCase):
 
     def test_a_null_node_is_a_reported_error(self) -> None:
         bad = {"data": {"search": {"nodes": [None]}}}
+        started: list[list[str]] = []
+
+        def fake_run(argv: list[str]) -> tuple[int, str, str]:
+            started.append(argv)
+            return 0, json.dumps(bad), ""
+
+        def routed(query: str, variables: dict[str, object], **_: object) -> gh_graphql.Response:
+            return gh_graphql.request(query, variables, run=fake_run)
+
         with (
-            unittest.mock.patch.object(bm, "request", wraps=bm.request),
-            unittest.mock.patch.object(bm, "run_subprocess", return_value=(0, json.dumps(bad), "")),
+            unittest.mock.patch.object(bm, "request", routed),
             self.assertRaises(bm.GhError),
         ):
             bm.graphql("q", {})
+        self.assertEqual(len(started), 1)
 
     def test_a_graphql_error_becomes_a_gh_error(self) -> None:
         with (
@@ -593,6 +697,31 @@ class ReviewCollectTests(unittest.TestCase):
         ):
             bm.graphql("q", {})
         self.assertIn("detail", str(raised.exception))
+
+    def test_a_walk_error_becomes_a_gh_error_and_main_names_it(self) -> None:
+        stuck = page([1], True, 2)
+        stuck["search"]["pageInfo"]["endCursor"] = None  # type: ignore[index]
+        with (
+            unittest.mock.patch.object(bm, "graphql", return_value=stuck),
+            self.assertRaises(bm.GhError) as raised,
+        ):
+            bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+        self.assertIn("without a cursor", str(raised.exception))
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "graphql", return_value=stuck),
+            unittest.mock.patch.object(
+                bm,
+                "run_gh",
+                side_effect=lambda args: {"usageItems": []} if args[0] == "api" else [],
+            ),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha"])
+        self.assertEqual(code, 1)
+        self.assertIn("backlog_metrics.py: reading the review figures failed", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
 
     def test_a_repeated_pr_is_counted_once_and_noted(self) -> None:
         result = self.collect([page([1, 2], True, 3), page([2, 3], False, 3)])
@@ -619,9 +748,11 @@ class ReviewCollectTests(unittest.TestCase):
         self.assertTrue(any("commits" in u and "sha=develop" in u for u in seen))
 
     def test_without_develop_the_default_branch_is_read(self) -> None:
-        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 404")):
-            self.assertEqual(bm.policy_branch("o", "a", "main"), ("main", ""))
-        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 500")):
+        for status in ("404", "422"):
+            absent = bm.GhError(f"gh: Not Found (HTTP {status})")
+            with unittest.mock.patch.object(bm, "run_gh", side_effect=absent):
+                self.assertEqual(bm.policy_branch("o", "a", "main"), ("main", ""))
+        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("gh: x (HTTP 500)")):
             branch, error = bm.policy_branch("o", "a", "main")
         self.assertEqual(branch, "")
         self.assertIn("500", error)
@@ -712,13 +843,15 @@ class ReviewCollectTests(unittest.TestCase):
         result = bm.ReviewMetrics(name="alpha", policy_changes=dates)
         self.assertIn("2026-01-03", bm.review_notes([result])[0])
 
-    def test_history_404_is_unchanged_and_other_errors_are_errors(self) -> None:
+    def test_any_history_error_including_a_404_is_an_error(self) -> None:
         since = datetime.date(2026, 1, 1)
-        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 404")):
-            self.assertEqual(bm.fetch_policy_changes("o", "a", "main", since), ([], ""))
-        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 500")):
-            _dates, error = bm.fetch_policy_changes("o", "a", "main", since)
-        self.assertIn("500", error)
+        for status in ("404", "500"):
+            with unittest.mock.patch.object(
+                bm, "run_gh", side_effect=bm.GhError(f"gh: x (HTTP {status})")
+            ):
+                dates, error = bm.fetch_policy_changes("o", "a", "main", since)
+            self.assertEqual(dates, [])
+            self.assertIn(status, error)
 
     def test_a_policy_error_still_writes_the_report_and_exits_one(self) -> None:
         def fake(args: list[str]) -> object:
@@ -745,17 +878,29 @@ class ReviewCollectTests(unittest.TestCase):
             err.getvalue(), "backlog_metrics.py: alpha: reading the policy file failed\n"
         )
 
-    def test_a_failed_review_query_exits_one_without_a_report(self) -> None:
+    def test_a_failed_review_query_still_writes_the_backlog_report_and_exits_one(self) -> None:
+        def fake(args: list[str]) -> object:
+            if args[0] == "api":
+                return {"usageItems": []}
+            return [issue("bug")] if args[0] == "issue" else [{"number": 1}]
+
         out, err = io.StringIO(), io.StringIO()
         with (
             unittest.mock.patch.object(bm, "graphql", side_effect=bm.GhError("null node")),
-            unittest.mock.patch.object(bm, "run_gh", return_value=[]),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
             code = bm.main(["--owner", "o", "--repo", "alpha"])
         self.assertEqual(code, 1)
-        self.assertEqual(out.getvalue(), "")
+        report = out.getvalue()
+        self.assertIn("| alpha |", report)
+        self.assertIn("Actions minutes", report)
+        self.assertIn("Review figures were unavailable: null node", report)
+        self.assertNotIn("Review return on cost", report)
+        self.assertEqual(
+            err.getvalue(), "backlog_metrics.py: reading the review figures failed: null node\n"
+        )
 
     def test_both_formats_carry_the_review_tables(self) -> None:
         result = bm.ReviewMetrics(name="alpha", bots={"copilot": bm.BotStats(rounds=[1, 3])})
@@ -768,7 +913,7 @@ class ReviewCollectTests(unittest.TestCase):
 
     def test_a_side_reviewer_row_prints_each_round_class(self) -> None:
         stats = bm.BotStats(automatic_rounds=4, explicit_rounds=2, unclassified_rounds=1)
-        result = bm.ReviewMetrics(name="alpha", bots={"qodo": stats})
+        result = bm.ReviewMetrics(name="alpha", bots={"coderabbit": stats})
         row = bm.review_bot_rows([result])[0]
         start = bm.REVIEW_BOT_HEADERS.index("Automatic rounds (count)")
         self.assertEqual(

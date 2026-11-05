@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["markdown-it-py>=4"]
+# ///
 """Render a weekly backlog and review-cost report for the fleet's repositories.
 
 Why this exists: a weekly count of issues filed against closed, and of issues per merged pull
@@ -11,16 +15,20 @@ Counting and rendering are pure functions over parsed `gh` output, and `run_gh` 
 that starts a process.
 
 Usage
-  python3 scripts/backlog_metrics.py [--owner OWNER] [--repo NAME ...] [--days N]
-                                     [--format markdown|html]
+  uv run --no-project --script scripts/backlog_metrics.py [--owner OWNER] [--repo NAME ...]
+                                                           [--days N] [--format markdown|html]
+
+It is a uv script because it imports the review gate's own readers, which parse Markdown. A copy
+of those readers here would drift from the gate and report figures the gate would not.
 
 Exit codes
   0  the report was written.
-  1  a `gh` call for issues, pull requests, runs, or the review pass failed, so no number is
-     guessed. Four reads fail more softly: the default branch, whether `develop` exists, the
-     policy file, and its history. A failed one still writes the report, names that read on
-     stderr, and exits 1.
-     Where the policy itself went unread, the report shows `error` in its place.
+  1  a `gh` call for issues, pull requests, or runs failed, so no number is guessed and no report
+     is written. A failed review query still writes the backlog and billing report. It adds one
+     line saying the review figures were unavailable and names the error on stderr, then exits 1.
+     Four reads fail more softly: the default branch, whether `develop` exists, the policy file,
+     and its history. A failed one still writes the report, names that read on stderr, and
+     exits 1. Where the policy itself went unread, the report shows `error` in its place.
   2  the command line was wrong.
 """
 
@@ -28,23 +36,24 @@ import argparse
 import datetime
 import html
 import json
-import re
 import sys
 import urllib.parse
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pr_review_rounds as rounds
+import pr_review_side as side
 from gh_graphql import GraphQLError, request, run_subprocess, walk
-from pr_review_policy import BOTS, POLICY_PATH, PolicyError, fetch, said_absent
+from pr_review_copilot import VOCABULARIES
+from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch, said_absent
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
 LIST_LIMIT = 1000
 HANDOFF_LABEL = "handoff"
 REVIEW_WORKFLOW = "Running Copilot Code Review"
-REVIEWERS_DIR = Path(__file__).resolve().parent / "reviewers"
 PAGE_SIZE = 50
 PR_CAP = 500
 COMMIT_CAP = 50
@@ -53,39 +62,15 @@ COMMENT_CAP = 100
 REVIEW_CAP = 100
 EVENT_CAP = 100
 INTEGRATION_BRANCH = "develop"
-TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 HISTORY_CAP = 10
-ATTESTATION = re.compile(
-    r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
-    re.MULTILINE,
-)
 FAILED_STATES = frozenset({"FAILURE", "ERROR"})
 LABELS = ("pre-existing", "prose", "documentation", "bug", "script", "enhancement", "decision")
 
 Items = Sequence[Mapping[str, Any]]
 
 
-def reviewer_logins() -> dict[str, str]:
-    """Each bot's short name mapped to its login, read from the adapter files that own it.
-
-    `pr_review_rounds.py` holds the same mapping but imports a Markdown parser at load, which
-    this report has no use for, so the JSON is read directly.
-    """
-    return {
-        name: str(json.loads((REVIEWERS_DIR / f"{name}.json").read_text(encoding="utf-8"))["login"])
-        for name in BOTS
-    }
-
-
-BOT_LOGINS = reviewer_logins()
-EXPLICIT_COMMENT = {
-    "coderabbit": re.compile(
-        rf"^\s*@{re.escape(BOT_LOGINS['coderabbit'])}\s+(?:full\s+)?review\b",
-        re.IGNORECASE | re.MULTILINE,
-    ),
-    "qodo": re.compile(r"^\s*/review\b", re.MULTILINE),
-}
-AUTOMATIC_ROUND_BOTS = ("coderabbit", "qodo")
+BOT_LOGINS = {name: str(VOCABULARIES[name]["login"]) for name in BOTS}
+AUTOMATIC_ROUND_BOTS = ("coderabbit",)
 
 
 class GhError(RuntimeError):
@@ -234,6 +219,13 @@ def is_automation(actor: Mapping[str, Any] | None) -> bool:
     return (actor or {}).get("__typename") == "Bot"
 
 
+def count_request(stats: BotStats, actor: Mapping[str, Any] | None) -> None:
+    if is_automation(actor):
+        stats.requests_by_automation += 1
+    else:
+        stats.requests_by_user += 1
+
+
 def nodes_of(connection: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
     return list((connection or {}).get("nodes") or [])
 
@@ -250,34 +242,19 @@ def head_state(commit: Mapping[str, Any]) -> str:
     return "green" if state == "SUCCESS" else "other"
 
 
-def body_lines(body: str) -> list[str]:
-    """The lines of a comment body that sit outside a fenced code block."""
-    lines: list[str] = []
-    fenced = False
-    for line in body.splitlines():
-        if line.strip().startswith("```"):
-            fenced = not fenced
-        elif not fenced:
-            lines.append(line.strip())
-    return lines
+def attestations(pr: Mapping[str, Any]) -> dict[str, str]:
+    """Head sha to the findings text of its first trusted attestation for the pull request's base.
 
-
-def attestations(comments: Items, base: str) -> dict[str, str]:
-    """Head sha to the findings text of its newest trusted attestation for this base.
-
-    A marker counts only in a comment by an owner, member or collaborator that is not minimized.
-    It must name the pull request's base and stand as a line of its own outside a fence.
+    The gate's own readers decide what counts, so a marker the gate would not accept is not
+    counted here. The first one per head wins, as in the gate's `attestation`.
     """
+    base = str(pr.get("baseRefName") or "")
     found: dict[str, str] = {}
-    for comment in comments:
-        if comment.get("authorAssociation") not in TRUSTED_ASSOCIATIONS:
-            continue
-        if comment.get("isMinimized"):
-            continue
-        for line in body_lines(str(comment.get("body") or "")):
-            match = ATTESTATION.fullmatch(line)
+    for _, lines in rounds.trusted_comments(dict(pr)):
+        for line in lines:
+            match = rounds.ATTESTATION.fullmatch(line)
             if match and match.group(2) == base:
-                found[match.group(1)] = match.group(3)
+                found.setdefault(match.group(1), match.group(3))
     return found
 
 
@@ -286,9 +263,15 @@ def is_promotion(pr: Mapping[str, Any], default_branch: str) -> bool:
 
 
 def classify_rounds(
-    pr: Mapping[str, Any], login: str, triggers: Sequence[str], stats: BotStats
+    pr: Mapping[str, Any],
+    login: str,
+    triggers: Sequence[str],
+    stats: BotStats,
+    heads: set[str],
 ) -> None:
     """Sort each head the bot reviewed into automatic, explicit or unclassified.
+
+    `heads` is the gate's set of reviewed heads, so a refusal never counts as a round.
 
     A head arrives at its commit date. It is explicit when a trigger falls between that arrival
     and the bot's first review of it. A head without both times cannot be classified. A trigger
@@ -301,10 +284,10 @@ def classify_rounds(
         for n in nodes_of(pr.get("commits"))
     }
     first: dict[str, str] = {}
-    for review in nodes_of(pr.get("reviews")):
-        if (review.get("author") or {}).get("login") != login:
+    for review in rounds.reviewer_nodes(dict(pr), "reviews", login):
+        oid = str(rounds.commit_oid(review))
+        if oid not in heads:
             continue
-        oid = str((review.get("commit") or {}).get("oid"))
         at = str(review.get("submittedAt") or "")
         if oid not in first or (at and at < first[oid]):
             first[oid] = at
@@ -329,8 +312,7 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
             result.truncated.append(f"PR {number} {key}")
     commits = [n.get("commit") or {} for n in nodes_of(pr.get("commits"))]
     states = {str(c.get("oid")): head_state(c) for c in commits}
-    comments = nodes_of(pr.get("comments"))
-    attested = attestations(comments, str(pr.get("baseRefName") or ""))
+    attested = attestations(pr)
     result.prs += 1
     result.commits += len(commits)
     for value in attested.values():
@@ -345,38 +327,34 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
                 result.failing_after_clean_local += 1
     for name, login in BOT_LOGINS.items():
         stats = result.bots.setdefault(name, BotStats())
-        reviewed = {
-            str((r.get("commit") or {}).get("oid"))
-            for r in nodes_of(pr.get("reviews"))
-            if (r.get("author") or {}).get("login") == login
+        heads = {
+            str(rounds.commit_oid(n))
+            for n in rounds.reviewer_nodes(dict(pr), "reviews", login)
+            if not rounds.refusal_of(n) and rounds.commit_oid(n)
         }
-        if reviewed:
-            stats.rounds.append(len(reviewed))
-        for event in nodes_of(pr.get("timelineItems")):
-            if (event.get("requestedReviewer") or {}).get("login") == login:
-                if is_automation(event.get("actor")):
-                    stats.requests_by_automation += 1
-                else:
-                    stats.requests_by_user += 1
-        pattern = EXPLICIT_COMMENT.get(name)
-        triggers: list[str] = []
-        if pattern:
-            for c in comments:
-                author = c.get("author") or {}
-                if author.get("login") == login or not pattern.search(str(c.get("body") or "")):
-                    continue
-                triggers.append(str(c.get("createdAt") or ""))
-                if is_automation(author):
-                    stats.requests_by_automation += 1
-                else:
-                    stats.requests_by_user += 1
+        events = [
+            e
+            for e in nodes_of(pr.get("timelineItems"))
+            if (e.get("requestedReviewer") or {}).get("login") == login
+        ]
+        for event in events:
+            count_request(stats, event.get("actor"))
+        asks: list[Mapping[str, Any]] = []
+        for command in (
+            COMMANDS if name == "coderabbit" else (("review",) if name == "qodo" else ())
+        ):
+            asks += side.side_asks(dict(pr), side.side_command(name, command))
+        for ask in asks:
+            count_request(stats, ask.get("author"))
+        if name == "qodo":
+            total = side.side_rounds(dict(pr), name, side.side_command(name))
+            if total > 0:
+                stats.rounds.append(total)
+        elif heads:
+            stats.rounds.append(len(heads))
         if name in AUTOMATIC_ROUND_BOTS:
-            triggers += [
-                str(e.get("createdAt") or "")
-                for e in nodes_of(pr.get("timelineItems"))
-                if (e.get("requestedReviewer") or {}).get("login") == login
-            ]
-            classify_rounds(pr, login, triggers, stats)
+            triggers = [str(n.get("createdAt") or "") for n in (*asks, *events)]
+            classify_rounds(pr, login, triggers, stats, heads)
         for thread in nodes_of(pr.get("reviewThreads")):
             first = nodes_of(thread.get("comments"))[:1]
             if not first or (first[0].get("author") or {}).get("login") != login:
@@ -496,10 +474,6 @@ REVIEW_REPO_HEADERS = (
 )
 
 
-def mean(values: Sequence[int]) -> str:
-    return f"{sum(values) / len(values):.1f}" if values else "n/a"
-
-
 def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
     return [
         [
@@ -512,7 +486,7 @@ def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
             str(stats.automatic_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
             str(stats.explicit_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
             str(stats.unclassified_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            mean(stats.rounds),
+            per_merged(sum(stats.rounds), len(stats.rounds)),
             str(max(stats.rounds, default=0)) if stats.rounds else "n/a",
             str(stats.findings),
             str(stats.missed_by_local),
@@ -681,7 +655,7 @@ query($search: String!, $owner: String!, $name: String!, $after: String) {
       }
       reviews(first: @REVIEW@) {
         pageInfo { hasNextPage }
-        nodes { author { login } submittedAt commit { oid } }
+        nodes { author { login } submittedAt body commit { oid } }
       }
       reviewThreads(first: @THREAD@) {
         pageInfo { hasNextPage }
@@ -722,6 +696,18 @@ def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
         raise GhError(f"{error} {error.detail}".strip()) from error
 
 
+def walked(fetch: Callable[[str | None], dict]) -> Iterator[dict]:
+    """Each page of the search, a walk's own `GraphQLError` raised as a `GhError`.
+
+    The walk raises for a page claiming another without a moving cursor, as `request` raises for
+    a failed query. Both then reach `main` as the one error type it names on stderr.
+    """
+    try:
+        yield from walk(fetch, ["search"])
+    except GraphQLError as error:
+        raise GhError(f"{error} {error.detail}".strip()) from error
+
+
 def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
     """The branch whose policy a feature PR sees: `develop` where it exists, else the default.
 
@@ -730,7 +716,7 @@ def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
     try:
         run_gh(["api", f"repos/{owner}/{name}/branches/{INTEGRATION_BRANCH}"])
     except GhError as error:
-        if "HTTP 404" in str(error):
+        if said_absent(str(error)):
             return default, ""
         return "", str(error)
     return INTEGRATION_BRANCH, ""
@@ -780,8 +766,6 @@ def fetch_policy_changes(
     try:
         commits = run_gh(["api", f"repos/{owner}/{name}/commits?{query}"])
     except GhError as error:
-        if "HTTP 404" in str(error):
-            return [], ""
         return [], str(error)
     if not isinstance(commits, list):
         return [], "the policy history was not a list"
@@ -810,7 +794,7 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
     seen = 0
     numbers: set[object] = set()
     branch = ""
-    for page in walk(fetch, ["search"]):
+    for page in walked(fetch):
         branch = str(
             ((page.get("repository") or {}).get("defaultBranchRef") or {}).get("name") or ""
         )
@@ -888,12 +872,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     start = window_start(end, args.days)
     try:
         metrics = [collect(owner, name, start) for name in names]
-        reviews = [collect_reviews(owner, name, start) for name in names]
     except GhError as error:
         print(f"backlog_metrics.py: {error}", file=sys.stderr)
         return 1
+    reviews: list[ReviewMetrics] = []
+    review_error = ""
+    try:
+        reviews = [collect_reviews(owner, name, start) for name in names]
+    except GhError as error:
+        review_error = str(error)
+        print(f"backlog_metrics.py: reading the review figures failed: {error}", file=sys.stderr)
     usage, error_text = fetch_billing(owner, end)
     billing = billing_lines(f"{end.year}-{end.month:02d}", names, usage, error_text)
+    if review_error:
+        billing.append(f"Review figures were unavailable: {review_error}")
     render = render_html if args.format == "html" else render_markdown
     sys.stdout.write(render(start, end, metrics, billing, reviews))
     failed = [
@@ -904,7 +896,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     for line in failed:
         print(line, file=sys.stderr)
-    return 1 if failed else 0
+    return 1 if failed or review_error else 0
 
 
 if __name__ == "__main__":
