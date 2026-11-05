@@ -203,6 +203,8 @@ class BotStats:
     requests_by_user: int = 0
     rounds: list[int] = field(default_factory=list)
     automatic_rounds: int = 0
+    explicit_rounds: int = 0
+    unclassified_rounds: int = 0
     findings: int = 0
     missed_by_local: int = 0
     findings_on_green_heads: int = 0
@@ -221,6 +223,9 @@ class ReviewMetrics:
     bots: dict[str, BotStats] = field(default_factory=dict)
     policy: dict[str, str] = field(default_factory=dict)
     policy_error: str = ""
+    policy_branch: str = ""
+    history_error: str = ""
+    duplicates_skipped: int = 0
     policy_changes: list[str] = field(default_factory=list)
     truncated: list[str] = field(default_factory=list)
 
@@ -280,6 +285,38 @@ def is_promotion(pr: Mapping[str, Any], default_branch: str) -> bool:
     return pr.get("headRefName") == INTEGRATION_BRANCH and pr.get("baseRefName") == default_branch
 
 
+def classify_rounds(
+    pr: Mapping[str, Any], login: str, triggers: Sequence[str], stats: BotStats
+) -> None:
+    """Sort each head the bot reviewed into automatic, explicit or unclassified.
+
+    A head arrives at its commit date. It is explicit when a trigger falls between that arrival
+    and the bot's first review of it. A head without both times cannot be classified.
+    """
+    arrival = {
+        str((n.get("commit") or {}).get("oid")): str(
+            (n.get("commit") or {}).get("committedDate") or ""
+        )
+        for n in nodes_of(pr.get("commits"))
+    }
+    first: dict[str, str] = {}
+    for review in nodes_of(pr.get("reviews")):
+        if (review.get("author") or {}).get("login") != login:
+            continue
+        oid = str((review.get("commit") or {}).get("oid"))
+        at = str(review.get("submittedAt") or "")
+        if oid not in first or (at and at < first[oid]):
+            first[oid] = at
+    for oid, reviewed_at in first.items():
+        arrived = arrival.get(oid, "")
+        if not arrived or not reviewed_at or "" in triggers:
+            stats.unclassified_rounds += 1
+        elif any(arrived <= t <= reviewed_at for t in triggers):
+            stats.explicit_rounds += 1
+        else:
+            stats.automatic_rounds += 1
+
+
 def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str = "") -> None:
     """Fold one merged pull request's review payload into the repository's tallies."""
     if is_promotion(pr, default_branch):
@@ -321,19 +358,24 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
                 else:
                     stats.requests_by_user += 1
         pattern = EXPLICIT_COMMENT.get(name)
-        explicit = 0
+        triggers: list[str] = []
         if pattern:
             for c in comments:
                 author = c.get("author") or {}
                 if author.get("login") == login or not pattern.search(str(c.get("body") or "")):
                     continue
-                explicit += 1
+                triggers.append(str(c.get("createdAt") or ""))
                 if is_automation(author):
                     stats.requests_by_automation += 1
                 else:
                     stats.requests_by_user += 1
         if name in AUTOMATIC_ROUND_BOTS:
-            stats.automatic_rounds += max(0, len(reviewed) - explicit)
+            triggers += [
+                str(e.get("createdAt") or "")
+                for e in nodes_of(pr.get("timelineItems"))
+                if (e.get("requestedReviewer") or {}).get("login") == login
+            ]
+            classify_rounds(pr, login, triggers, stats)
         for thread in nodes_of(pr.get("reviewThreads")):
             first = nodes_of(thread.get("comments"))[:1]
             if not first or (first[0].get("author") or {}).get("login") != login:
@@ -446,9 +488,11 @@ REVIEW_BOT_HEADERS = (
     "Repository",
     "Bot",
     "Policy trigger",
+    "Policy branch",
     "Requests by automation (count)",
     "Requests by user (count)",
     "Automatic rounds (count)",
+    "Unclassified rounds (count)",
     "Rounds per reviewed PR (mean)",
     "Rounds per reviewed PR (max)",
     "Threaded findings (count)",
@@ -477,9 +521,11 @@ def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
             r.name,
             bot,
             "error" if r.policy_error else r.policy.get(bot, "default"),
+            r.policy_branch or "n/a",
             str(stats.requests_by_automation),
             str(stats.requests_by_user),
             str(stats.automatic_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
+            str(stats.unclassified_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
             mean(stats.rounds),
             str(max(stats.rounds, default=0)) if stats.rounds else "n/a",
             str(stats.findings),
@@ -517,11 +563,19 @@ def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
             )
         if r.policy_changes:
             out.append(
-                f"{r.name}: {POLICY_PATH} changed on {', '.join(r.policy_changes)}, inside the window,"
+                f"{r.name}: {POLICY_PATH} changed on {', '.join(r.policy_changes)} on {r.policy_branch},"
+                " inside the window,"
                 " so the window mixes two policies."
             )
         if r.policy_error:
             out.append(f"{r.name}: reading {POLICY_PATH} failed: {r.policy_error}")
+        if r.history_error:
+            out.append(f"{r.name}: reading the {POLICY_PATH} history failed: {r.history_error}")
+        if r.duplicates_skipped:
+            out.append(
+                f"{r.name}: {r.duplicates_skipped} pull requests came twice while paging"
+                " and were counted once, so the walk shifted."
+            )
     return out
 
 
@@ -637,11 +691,11 @@ query($search: String!, $owner: String!, $name: String!, $after: String) {
       baseRefName
       commits(first: @COMMIT@) {
         pageInfo { hasNextPage }
-        nodes { commit { oid statusCheckRollup { state } } }
+        nodes { commit { oid committedDate statusCheckRollup { state } } }
       }
       reviews(first: @REVIEW@) {
         pageInfo { hasNextPage }
-        nodes { author { login } commit { oid } }
+        nodes { author { login } submittedAt commit { oid } }
       }
       reviewThreads(first: @THREAD@) {
         pageInfo { hasNextPage }
@@ -649,11 +703,12 @@ query($search: String!, $owner: String!, $name: String!, $after: String) {
       }
       comments(first: @COMMENT@) {
         pageInfo { hasNextPage }
-        nodes { body authorAssociation isMinimized author { login __typename } }
+        nodes { body createdAt authorAssociation isMinimized author { login __typename } }
       }
       timelineItems(first: @EVENT@, itemTypes: [REVIEW_REQUESTED_EVENT]) {
         pageInfo { hasNextPage }
         nodes { ... on ReviewRequestedEvent {
+          createdAt
           actor { login __typename }
           requestedReviewer { ... on Bot { login } ... on User { login } }
         } }
@@ -681,10 +736,22 @@ def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
         raise GhError(f"{error} {error.detail}".strip()) from error
 
 
-def fetch_policy(owner: str, name: str) -> tuple[dict[str, str], str]:
-    """Read the policy file once at the default branch head. A 404 means absent, nothing else does."""
+def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
+    """The branch whose policy a feature PR sees: `develop` where it exists, else the default."""
     try:
-        payload = run_gh(["api", f"repos/{owner}/{name}/contents/{POLICY_PATH}"])
+        run_gh(["api", f"repos/{owner}/{name}/branches/{INTEGRATION_BRANCH}"])
+    except GhError as error:
+        if "HTTP 404" in str(error):
+            return default, ""
+        return default, str(error)
+    return INTEGRATION_BRANCH, ""
+
+
+def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
+    """Read the policy file once at `ref`. A 404 means absent, nothing else does."""
+    quoted = urllib.parse.quote(ref, safe="")
+    try:
+        payload = run_gh(["api", f"repos/{owner}/{name}/contents/{POLICY_PATH}?ref={quoted}"])
     except GhError as error:
         if "HTTP 404" in str(error):
             return {bot: "default" for bot in BOT_LOGINS}, ""
@@ -699,13 +766,13 @@ def fetch_policy(owner: str, name: str) -> tuple[dict[str, str], str]:
 def fetch_policy_changes(
     owner: str, name: str, branch: str, since: datetime.date
 ) -> tuple[list[str], str]:
-    """The dates the policy file changed on the default branch inside the window."""
+    """The dates the policy file changed on `branch` inside the window."""
     query = urllib.parse.urlencode(
         {
             "path": POLICY_PATH,
             "sha": branch,
             "since": f"{since.isoformat()}T00:00:00Z",
-            "per_page": HISTORY_CAP,
+            "per_page": HISTORY_CAP + 1,
         }
     )
     try:
@@ -720,14 +787,14 @@ def fetch_policy_changes(
         str(((c.get("commit") or {}).get("committer") or {}).get("date") or "unknown")[:10]
         for c in commits
     ]
-    if len(commits) >= HISTORY_CAP:
-        dates.append(f"more than {HISTORY_CAP} commits")
+    if len(dates) > HISTORY_CAP:
+        dates = [*dates[:HISTORY_CAP], f"more than {HISTORY_CAP} commits"]
     return dates, ""
 
 
 def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetrics:
-    """Read the window's merged pull requests, newest update first, up to `PR_CAP`."""
-    search = f"repo:{owner}/{name} is:pr is:merged merged:>={since.isoformat()} sort:updated-desc"
+    """Read the window's merged pull requests, newest first, up to `PR_CAP`."""
+    search = f"repo:{owner}/{name} is:pr is:merged merged:>={since.isoformat()} sort:created-desc"
 
     def fetch(after: str | None) -> dict:
         variables: dict[str, object] = {"search": search, "owner": owner, "name": name}
@@ -739,6 +806,7 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
     for bot in BOT_LOGINS:
         result.bots[bot] = BotStats()
     seen = 0
+    numbers: set[object] = set()
     branch = ""
     for page in walk(fetch, ["search"]):
         branch = str(
@@ -746,7 +814,10 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
         )
         connection = page["search"]
         for pr in connection.get("nodes") or []:
-            if seen < PR_CAP:
+            if pr.get("number") in numbers:
+                result.duplicates_skipped += 1
+            elif seen < PR_CAP:
+                numbers.add(pr.get("number"))
                 seen += 1
                 review_pr(pr, result, branch)
         if seen >= PR_CAP:
@@ -754,12 +825,17 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
             if total > PR_CAP:
                 result.truncated.append(f"{total} merged PRs, {PR_CAP} read")
             break
-    result.policy, result.policy_error = fetch_policy(owner, name)
-    if branch:
-        result.policy_changes, history_error = fetch_policy_changes(owner, name, branch, since)
-        result.policy_error = result.policy_error or history_error
-    else:
-        result.policy_error = result.policy_error or "the repository has no default branch"
+    if not branch:
+        result.policy_error = "the repository has no default branch"
+        return result
+    result.policy_branch, branch_error = policy_branch(owner, name, branch)
+    if branch_error:
+        result.policy_error = branch_error
+        return result
+    result.policy, result.policy_error = fetch_policy(owner, name, result.policy_branch)
+    result.policy_changes, result.history_error = fetch_policy_changes(
+        owner, name, result.policy_branch, since
+    )
     return result
 
 
@@ -818,7 +894,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     billing = billing_lines(f"{end.year}-{end.month:02d}", names, usage, error_text)
     render = render_html if args.format == "html" else render_markdown
     sys.stdout.write(render(start, end, metrics, billing, reviews))
-    failed = [r.name for r in reviews if r.policy_error]
+    failed = [r.name for r in reviews if r.policy_error or r.history_error]
     if failed:
         print(
             f"backlog_metrics.py: policy file unreadable for {', '.join(failed)}", file=sys.stderr

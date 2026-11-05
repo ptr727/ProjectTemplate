@@ -8,6 +8,7 @@ Run as `python3 tests/test_backlog_metrics.py`, or under
 `python3 -m unittest discover -s tests`.
 """
 
+import base64
 import contextlib
 import datetime
 import io
@@ -264,8 +265,10 @@ def comment(
     minimized: bool = False,
     login: str = "p",
     kind: str = "User",
+    at: str = "2026-01-01T00:00:00Z",
 ) -> dict[str, object]:
     return {
+        "createdAt": at,
         "body": body,
         "authorAssociation": association,
         "isMinimized": minimized,
@@ -281,9 +284,9 @@ def attest(head: str, findings: str) -> dict[str, object]:
     return comment(marker(head, findings))
 
 
-def commit(oid: str, state: str | None = None) -> dict[str, object]:
+def commit(oid: str, state: str | None = None, at: str = "") -> dict[str, object]:
     rollup = {"state": state} if state else None
-    return {"commit": {"oid": oid, "statusCheckRollup": rollup}}
+    return {"commit": {"oid": oid, "statusCheckRollup": rollup, "committedDate": at}}
 
 
 def thread(login: str, head: str) -> dict[str, object]:
@@ -360,16 +363,45 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result.bots["coderabbit"].requests_by_automation, 1)
         self.assertEqual(result.bots["qodo"].requests_by_user, 1)
 
-    def test_automatic_rounds_are_reviewed_rounds_beyond_explicit_requests(self) -> None:
-        reviews = [
-            {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}},
-            {"author": {"login": RABBIT}, "commit": {"oid": SHA_B}},
-            {"author": {"login": QODO}, "commit": {"oid": SHA_A}},
-        ]
-        comments = [comment(f"@{RABBIT} review"), comment("/review"), comment("/review")]
-        result = self.tally(reviews=reviews, comments=comments)
-        self.assertEqual(result.bots["coderabbit"].automatic_rounds, 1)
-        self.assertEqual(result.bots["qodo"].automatic_rounds, 0)
+    def test_each_reviewed_head_is_explicit_automatic_or_unclassified(self) -> None:
+        def review(login: str, head: str, at: str) -> dict[str, object]:
+            return {"author": {"login": login}, "commit": {"oid": head}, "submittedAt": at}
+
+        result = self.tally(
+            commits=[
+                commit(SHA_A, at="2026-01-01T01:00:00Z"),
+                commit(SHA_B, at="2026-01-01T04:00:00Z"),
+                commit(SHA_C),
+            ],
+            reviews=[
+                review(RABBIT, SHA_A, "2026-01-01T03:00:00Z"),
+                review(RABBIT, SHA_B, "2026-01-01T05:00:00Z"),
+                review(RABBIT, SHA_C, "2026-01-01T06:00:00Z"),
+                review(QODO, SHA_A, "2026-01-01T03:00:00Z"),
+            ],
+            comments=[
+                comment(f"@{RABBIT} review", at="2026-01-01T02:00:00Z"),
+                comment("/review", at="2026-01-01T02:00:00Z"),
+            ],
+        )
+        rabbit = result.bots["coderabbit"]
+        self.assertEqual(
+            (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (1, 1, 1)
+        )
+        self.assertEqual(result.bots["qodo"].explicit_rounds, 1)
+
+    def test_a_trigger_without_a_time_leaves_a_head_unclassified(self) -> None:
+        review = {
+            "author": {"login": RABBIT},
+            "commit": {"oid": SHA_A},
+            "submittedAt": "2026-01-01T03:00:00Z",
+        }
+        result = self.tally(
+            commits=[commit(SHA_A, at="2026-01-01T01:00:00Z")],
+            reviews=[review],
+            comments=[{**comment(f"@{RABBIT} review"), "createdAt": None}],
+        )
+        self.assertEqual(result.bots["coderabbit"].unclassified_rounds, 1)
 
     def test_local_findings_sum_and_unknown_is_counted_apart(self) -> None:
         comments = [attest(SHA_A, "2"), attest(SHA_B, "unknown"), attest(SHA_C, "0")]
@@ -436,8 +468,6 @@ class ReviewTests(unittest.TestCase):
 class PolicyTests(unittest.TestCase):
     @staticmethod
     def payload(text: str) -> dict[str, str]:
-        import base64
-
         return {"content": base64.b64encode(text.encode()).decode()}
 
     def fetch(
@@ -447,7 +477,7 @@ class PolicyTests(unittest.TestCase):
             bm, "run_gh", side_effect=side_effect, return_value=return_value
         )
         with patch:
-            return bm.fetch_policy("o", "alpha")
+            return bm.fetch_policy("o", "alpha", "develop")
 
     def test_a_404_means_absent(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
@@ -489,7 +519,7 @@ def page(
 
 
 def quiet_rest(args: list[str]) -> object:
-    if "contents" in args[1]:
+    if "contents" in args[1] or "branches" in args[1]:
         raise bm.GhError("gh: Not Found (HTTP 404)")
     return []
 
@@ -508,7 +538,7 @@ class ReviewCollectTests(unittest.TestCase):
         self.collect([page([], False, 0)])
         variables = self.gql.call_args_list[0].args[1]
         self.assertIn("merged:>=2026-01-01", variables["search"])
-        self.assertIn("sort:updated-desc", variables["search"])
+        self.assertIn("sort:created-desc", variables["search"])
         self.assertNotIn("after", variables)
 
     def test_pages_are_followed_with_the_cursor(self) -> None:
@@ -548,6 +578,73 @@ class ReviewCollectTests(unittest.TestCase):
             bm.graphql("q", {})
         self.assertIn("detail", str(raised.exception))
 
+    def test_a_repeated_pr_is_counted_once_and_noted(self) -> None:
+        result = self.collect([page([1, 2], True, 3), page([2, 3], False, 3)])
+        self.assertEqual(result.prs, 3)
+        self.assertEqual(result.duplicates_skipped, 1)
+        self.assertIn("counted once", bm.review_notes([result])[0])
+
+    def test_the_policy_is_read_at_develop_where_it_exists(self) -> None:
+        seen: list[str] = []
+
+        def fake(args: list[str]) -> object:
+            seen.append(args[1])
+            if "contents" in args[1]:
+                raise bm.GhError("gh: Not Found (HTTP 404)")
+            return []
+
+        with (
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+        ):
+            result = bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+        self.assertEqual(result.policy_branch, "develop")
+        self.assertTrue(any("contents" in u and "ref=develop" in u for u in seen))
+        self.assertTrue(any("commits" in u and "sha=develop" in u for u in seen))
+
+    def test_without_develop_the_default_branch_is_read(self) -> None:
+        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 404")):
+            self.assertEqual(bm.policy_branch("o", "a", "main"), ("main", ""))
+        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 500")):
+            self.assertIn("500", bm.policy_branch("o", "a", "main")[1])
+
+    def test_a_failed_history_keeps_the_trigger_and_exits_one(self) -> None:
+        text = json.dumps({"bots": {"copilot": {"trigger": "explicit"}}})
+        body = {"content": base64.b64encode(text.encode()).decode()}
+
+        def fake(args: list[str]) -> object:
+            if "contents" in args[1]:
+                return body
+            if "commits" in args[1]:
+                raise bm.GhError("gh: Server Error (HTTP 500)")
+            return {}
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha"])
+        self.assertEqual(code, 1)
+        self.assertIn("| copilot | explicit | develop |", out.getvalue())
+        self.assertIn("history failed", out.getvalue())
+
+    def test_history_reports_more_only_past_the_cap(self) -> None:
+        def commits(count: int) -> list[dict[str, object]]:
+            return [{"commit": {"committer": {"date": "2026-01-03T00:00:00Z"}}}] * count
+
+        since = datetime.date(2026, 1, 1)
+        with unittest.mock.patch.object(bm, "run_gh", return_value=commits(bm.HISTORY_CAP)) as run:
+            dates, _ = bm.fetch_policy_changes("o", "a", "main", since)
+        self.assertEqual(len(dates), bm.HISTORY_CAP)
+        self.assertIn(f"per_page={bm.HISTORY_CAP + 1}", run.call_args.args[0][1])
+        with unittest.mock.patch.object(bm, "run_gh", return_value=commits(bm.HISTORY_CAP + 1)):
+            dates, _ = bm.fetch_policy_changes("o", "a", "main", since)
+        self.assertEqual(dates[-1], f"more than {bm.HISTORY_CAP} commits")
+        self.assertEqual(len(dates), bm.HISTORY_CAP + 1)
+
     def test_a_missing_default_branch_is_an_error_not_an_empty_history(self) -> None:
         result = self.collect([page([], False, 0, branch=None)])
         self.assertIn("no default branch", result.policy_error)
@@ -560,7 +657,7 @@ class ReviewCollectTests(unittest.TestCase):
             "path=.github%2Fpr-review.json",
             "sha=main",
             "since=2026-01-01T",
-            "per_page=10",
+            "per_page=11",
         ):
             self.assertIn(part, url)
 
@@ -620,7 +717,7 @@ class ReviewCollectTests(unittest.TestCase):
         start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 8)
         md = bm.render_markdown(start, end, [metrics()], [], [result])
         page_html = bm.render_html(start, end, [metrics()], [], [result])
-        self.assertIn("| alpha | copilot | default | 0 | 0 | n/a | 2.0 | 3 |", md)
+        self.assertIn("| alpha | copilot | default | n/a | 0 | 0 | n/a | n/a | 2.0 | 3 |", md)
         self.assertIn("Threaded findings (count)", md)
         self.assertEqual(page_html.count("<table"), 3)
 
