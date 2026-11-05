@@ -258,14 +258,32 @@ SHA_B = "b" * 40
 SHA_C = "c" * 40
 
 
+def comment(
+    body: str,
+    association: str = "OWNER",
+    minimized: bool = False,
+    login: str = "p",
+    kind: str = "User",
+) -> dict[str, object]:
+    return {
+        "body": body,
+        "authorAssociation": association,
+        "isMinimized": minimized,
+        "author": {"login": login, "__typename": kind},
+    }
+
+
+def marker(head: str, findings: str, base: str = "develop") -> str:
+    return f"<!-- fleet-local-review: head={head} base={base} findings={findings} -->"
+
+
 def attest(head: str, findings: str) -> dict[str, object]:
-    body = f"<!-- fleet-local-review: head={head} base=develop findings={findings} -->"
-    return {"body": body, "author": {"login": "someone", "__typename": "User"}}
+    return comment(marker(head, findings))
 
 
-def commit(oid: str, *conclusions: str) -> dict[str, object]:
-    suites = [{"conclusion": c} for c in conclusions]
-    return {"commit": {"oid": oid, "checkSuites": {"nodes": suites}}}
+def commit(oid: str, state: str | None = None) -> dict[str, object]:
+    rollup = {"state": state} if state else None
+    return {"commit": {"oid": oid, "statusCheckRollup": rollup}}
 
 
 def thread(login: str, head: str) -> dict[str, object]:
@@ -274,7 +292,11 @@ def thread(login: str, head: str) -> dict[str, object]:
 
 
 def pr_payload(**parts: object) -> dict[str, object]:
-    base: dict[str, object] = {"number": 1}
+    base: dict[str, object] = {
+        "number": 1,
+        "headRefName": parts.pop("head", "feature/x"),
+        "baseRefName": "develop",
+    }
     for key in ("commits", "reviews", "reviewThreads", "comments", "timelineItems"):
         base[key] = {"pageInfo": {"hasNextPage": False}, "nodes": parts.get(key, [])}
     return base
@@ -292,7 +314,7 @@ class ReviewTests(unittest.TestCase):
         result = bm.ReviewMetrics(name="alpha")
         for bot in bm.BOT_LOGINS:
             result.bots[bot] = bm.BotStats()
-        bm.review_pr(pr_payload(**parts), result)
+        bm.review_pr(pr_payload(**parts), result, "main")
         return result
 
     def test_logins_come_from_the_adapter_files(self) -> None:
@@ -301,7 +323,7 @@ class ReviewTests(unittest.TestCase):
             {"copilot-pull-request-reviewer", "coderabbitai", "qodo-free-for-open-source-projects"},
         )
 
-    def test_rounds_count_distinct_heads_per_bot_and_pushes_count_commits(self) -> None:
+    def test_rounds_count_distinct_heads_per_bot_and_commits_are_counted(self) -> None:
         reviews = [
             {"author": {"login": COPILOT}, "commit": {"oid": SHA_A}},
             {"author": {"login": COPILOT}, "commit": {"oid": SHA_A}},
@@ -309,30 +331,63 @@ class ReviewTests(unittest.TestCase):
             {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}},
         ]
         result = self.tally(commits=[commit(SHA_A), commit(SHA_B)], reviews=reviews)
-        self.assertEqual(result.pushes, 2)
+        self.assertEqual(result.commits, 2)
         self.assertEqual(result.bots["copilot"].rounds, [2])
         self.assertEqual(result.bots["coderabbit"].rounds, [1])
         self.assertEqual(result.bots["qodo"].rounds, [])
 
-    def test_requests_split_by_actor_type_and_explicit_comments_count_as_user(self) -> None:
+    def test_promotion_prs_are_excluded(self) -> None:
+        result = bm.ReviewMetrics(name="alpha")
+        promo = pr_payload(head="develop", commits=[commit(SHA_A)])
+        promo["baseRefName"] = "main"
+        bm.review_pr(promo, result, "main")
+        bm.review_pr(pr_payload(head="develop", commits=[commit(SHA_A)]), result, "main")
+        self.assertEqual((result.prs, result.promotions_skipped, result.commits), (1, 1, 1))
+
+    def test_requests_split_by_actor_type_and_trigger_comments_follow_their_author(self) -> None:
         comments = [
-            {"body": f"@{RABBIT} review", "author": {"login": "p", "__typename": "User"}},
-            {"body": f"@{RABBIT} review", "author": {"login": RABBIT, "__typename": "Bot"}},
-            {"body": "/review", "author": {"login": "p", "__typename": "User"}},
-            {"body": f"@{RABBIT} reviewing", "author": {"login": "p", "__typename": "User"}},
+            comment(f"@{RABBIT} review"),
+            comment(f"text\n@{RABBIT} full review", login="b", kind="Bot"),
+            comment(f"@{RABBIT} review", login=RABBIT, kind="Bot"),
+            comment("hello\n/review"),
+            comment(f"@{RABBIT} reviewing"),
         ]
         events = [requested("Bot", COPILOT), requested("User", COPILOT)]
         result = self.tally(comments=comments, timelineItems=events)
         self.assertEqual(result.bots["copilot"].requests_by_automation, 1)
         self.assertEqual(result.bots["copilot"].requests_by_user, 1)
         self.assertEqual(result.bots["coderabbit"].requests_by_user, 1)
+        self.assertEqual(result.bots["coderabbit"].requests_by_automation, 1)
         self.assertEqual(result.bots["qodo"].requests_by_user, 1)
+
+    def test_automatic_rounds_are_reviewed_rounds_beyond_explicit_requests(self) -> None:
+        reviews = [
+            {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}},
+            {"author": {"login": RABBIT}, "commit": {"oid": SHA_B}},
+            {"author": {"login": QODO}, "commit": {"oid": SHA_A}},
+        ]
+        comments = [comment(f"@{RABBIT} review"), comment("/review"), comment("/review")]
+        result = self.tally(reviews=reviews, comments=comments)
+        self.assertEqual(result.bots["coderabbit"].automatic_rounds, 1)
+        self.assertEqual(result.bots["qodo"].automatic_rounds, 0)
 
     def test_local_findings_sum_and_unknown_is_counted_apart(self) -> None:
         comments = [attest(SHA_A, "2"), attest(SHA_B, "unknown"), attest(SHA_C, "0")]
         result = self.tally(comments=comments)
         self.assertEqual(result.local_findings, 2)
         self.assertEqual(result.local_unknown, 1)
+
+    def test_an_attestation_is_trusted_only_under_every_condition(self) -> None:
+        fenced = f"```\n{marker(SHA_A, '9')}\n```"
+        comments = [
+            comment(marker(SHA_A, "1"), association="NONE"),
+            comment(marker(SHA_A, "2"), minimized=True),
+            comment(marker(SHA_A, "3", base="other")),
+            comment(fenced),
+            comment(f"prose {marker(SHA_A, '4')}"),
+            comment(f"text\n{marker(SHA_B, '5')}\nmore"),
+        ]
+        self.assertEqual(bm.attestations(comments, "develop"), {SHA_B: "5"})
 
     def test_bot_findings_missed_by_clean_local_review_and_on_green_heads(self) -> None:
         threads = [
@@ -342,7 +397,7 @@ class ReviewTests(unittest.TestCase):
             thread("someone", SHA_A),
         ]
         result = self.tally(
-            commits=[commit(SHA_A, "SUCCESS", "SKIPPED"), commit(SHA_B, "SUCCESS", "FAILURE")],
+            commits=[commit(SHA_A, "SUCCESS"), commit(SHA_B, "FAILURE")],
             comments=[attest(SHA_A, "0"), attest(SHA_B, "3")],
             reviewThreads=threads,
         )
@@ -355,25 +410,25 @@ class ReviewTests(unittest.TestCase):
 
     def test_failing_heads_and_those_after_a_clean_attestation(self) -> None:
         result = self.tally(
-            commits=[
-                commit(SHA_A, "FAILURE"),
-                commit(SHA_B, "TIMED_OUT"),
-                commit(SHA_C, "SUCCESS"),
-            ],
+            commits=[commit(SHA_A, "FAILURE"), commit(SHA_B, "ERROR"), commit(SHA_C, "SUCCESS")],
             comments=[attest(SHA_A, "0"), attest(SHA_B, "1")],
         )
         self.assertEqual(result.failing_heads, 2)
         self.assertEqual(result.failing_after_clean_local, 1)
 
-    def test_a_pending_head_is_neither_failed_nor_green(self) -> None:
-        self.assertEqual(bm.head_state(commit(SHA_A, "SUCCESS", "")["commit"]), "other")  # type: ignore[arg-type]
-        self.assertEqual(bm.head_state(commit(SHA_A)["commit"]), "other")  # type: ignore[arg-type]
+    def test_head_state_reads_the_status_rollup(self) -> None:
+        def state(value: str | None) -> str:
+            return bm.head_state(commit(SHA_A, value)["commit"])  # type: ignore[arg-type]
+
+        self.assertEqual(state("SUCCESS"), "green")
+        self.assertEqual([state("FAILURE"), state("ERROR")], ["failed", "failed"])
+        self.assertEqual([state("PENDING"), state("EXPECTED"), state(None)], ["other"] * 3)
 
     def test_a_cut_connection_is_recorded_as_truncated(self) -> None:
         pr = pr_payload()
         pr["commits"] = {"pageInfo": {"hasNextPage": True}, "nodes": []}
         result = bm.ReviewMetrics(name="alpha")
-        bm.review_pr(pr, result)
+        bm.review_pr(pr, result, "main")
         self.assertEqual(result.truncated, ["PR 1 commits"])
         self.assertIn("truncated", bm.review_notes([result])[0])
 
@@ -419,43 +474,125 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("unreadable", error)
 
 
+def page(
+    numbers: list[int], more: bool, total: int, branch: str | None = "main"
+) -> dict[str, object]:
+    nodes = [pr_payload() | {"number": n} for n in numbers]
+    return {
+        "repository": {"defaultBranchRef": {"name": branch} if branch else None},
+        "search": {
+            "issueCount": total,
+            "pageInfo": {"hasNextPage": more, "endCursor": "c" if more else None},
+            "nodes": nodes,
+        },
+    }
+
+
+def quiet_rest(args: list[str]) -> object:
+    if "contents" in args[1]:
+        raise bm.GhError("gh: Not Found (HTTP 404)")
+    return []
+
+
 class ReviewCollectTests(unittest.TestCase):
-    def test_the_query_is_capped_and_search_scoped_to_the_window(self) -> None:
-        reply = {"data": {"search": {"issueCount": 0, "nodes": []}}}
-        with unittest.mock.patch.object(
-            bm, "run_gh", side_effect=[reply, bm.GhError("HTTP 404")]
-        ) as run:
-            result = bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
-        first = run.call_args_list[0].args[0]
-        self.assertIn("repo:o/alpha is:pr is:merged merged:>=2026-01-01", " ".join(first))
-        self.assertIn(f"first: {bm.PR_CAP}", bm.REVIEW_QUERY)
-        self.assertEqual(result.prs, 0)
-
-    def test_more_merged_prs_than_the_cap_is_marked_truncated(self) -> None:
-        reply = {"data": {"search": {"issueCount": bm.PR_CAP + 1, "nodes": []}}}
-        with unittest.mock.patch.object(bm, "run_gh", side_effect=[reply, bm.GhError("HTTP 404")]):
-            result = bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
-        self.assertTrue(result.truncated)
-
-    def test_graphql_errors_raise(self) -> None:
+    def collect(self, pages: list[dict[str, object]]) -> bm.ReviewMetrics:
         with (
-            unittest.mock.patch.object(bm, "run_gh", return_value={"errors": [{"m": "x"}]}),
+            unittest.mock.patch.object(bm, "graphql", side_effect=pages) as gql,
+            unittest.mock.patch.object(bm, "run_gh", side_effect=quiet_rest),
+        ):
+            result = bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+        self.gql = gql
+        return result
+
+    def test_the_search_is_ordered_and_scoped_to_the_window(self) -> None:
+        self.collect([page([], False, 0)])
+        variables = self.gql.call_args_list[0].args[1]
+        self.assertIn("merged:>=2026-01-01", variables["search"])
+        self.assertIn("sort:updated-desc", variables["search"])
+        self.assertNotIn("after", variables)
+
+    def test_pages_are_followed_with_the_cursor(self) -> None:
+        result = self.collect([page([1, 2], True, 3), page([3], False, 3)])
+        self.assertEqual(result.prs, 3)
+        self.assertEqual(self.gql.call_args_list[1].args[1]["after"], "c")
+        self.assertEqual(result.truncated, [])
+
+    def test_the_hard_cap_stops_reading_and_is_reported(self) -> None:
+        with unittest.mock.patch.object(bm, "PR_CAP", 3):
+            result = self.collect([page([1, 2], True, 9), page([3, 4], True, 9)])
+        self.assertEqual(result.prs, 3)
+        self.assertEqual(self.gql.call_count, 2)
+        self.assertEqual(result.truncated, ["9 merged PRs, 3 read"])
+
+    def test_exactly_the_cap_is_not_truncated(self) -> None:
+        with unittest.mock.patch.object(bm, "PR_CAP", 2):
+            result = self.collect([page([1, 2], False, 2)])
+        self.assertEqual(result.truncated, [])
+
+    def test_a_null_node_is_a_reported_error(self) -> None:
+        bad = {"data": {"search": {"nodes": [None]}}}
+        with (
+            unittest.mock.patch.object(bm, "request", wraps=bm.request),
+            unittest.mock.patch.object(bm, "run_subprocess", return_value=(0, json.dumps(bad), "")),
             self.assertRaises(bm.GhError),
         ):
-            bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+            bm.graphql("q", {})
+
+    def test_a_graphql_error_becomes_a_gh_error(self) -> None:
+        with (
+            unittest.mock.patch.object(
+                bm, "request", side_effect=bm.GraphQLError("boom", "detail")
+            ),
+            self.assertRaises(bm.GhError) as raised,
+        ):
+            bm.graphql("q", {})
+        self.assertIn("detail", str(raised.exception))
+
+    def test_a_missing_default_branch_is_an_error_not_an_empty_history(self) -> None:
+        result = self.collect([page([], False, 0, branch=None)])
+        self.assertIn("no default branch", result.policy_error)
+
+    def test_the_history_read_names_the_branch_path_and_window(self) -> None:
+        with unittest.mock.patch.object(bm, "run_gh", return_value=[]) as run:
+            bm.fetch_policy_changes("o", "alpha", "main", datetime.date(2026, 1, 1))
+        url = run.call_args.args[0][1]
+        for part in (
+            "path=.github%2Fpr-review.json",
+            "sha=main",
+            "since=2026-01-01T",
+            "per_page=10",
+        ):
+            self.assertIn(part, url)
+
+    def test_history_dates_and_notes(self) -> None:
+        commits = [{"commit": {"committer": {"date": "2026-01-03T10:00:00Z"}}}]
+        with unittest.mock.patch.object(bm, "run_gh", return_value=commits):
+            dates, error = bm.fetch_policy_changes("o", "alpha", "main", datetime.date(2026, 1, 1))
+        self.assertEqual((dates, error), (["2026-01-03"], ""))
+        result = bm.ReviewMetrics(name="alpha", policy_changes=dates)
+        self.assertIn("2026-01-03", bm.review_notes([result])[0])
+
+    def test_history_404_is_unchanged_and_other_errors_are_errors(self) -> None:
+        since = datetime.date(2026, 1, 1)
+        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 404")):
+            self.assertEqual(bm.fetch_policy_changes("o", "a", "main", since), ([], ""))
+        with unittest.mock.patch.object(bm, "run_gh", side_effect=bm.GhError("HTTP 500")):
+            _dates, error = bm.fetch_policy_changes("o", "a", "main", since)
+        self.assertIn("500", error)
 
     def test_a_policy_error_still_writes_the_report_and_exits_one(self) -> None:
         def fake(args: list[str]) -> object:
-            if args[:2] == ["api", "graphql"]:
-                return {"data": {"search": {"issueCount": 0, "nodes": []}}}
             if args[0] == "api" and "contents" in args[1]:
                 raise bm.GhError("gh: Forbidden (HTTP 403)")
+            if args[0] == "api" and "commits" in args[1]:
+                return []
             if args[0] == "api":
                 return {"usageItems": []}
             return []
 
         out, err = io.StringIO(), io.StringIO()
         with (
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
             unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
@@ -466,22 +603,35 @@ class ReviewCollectTests(unittest.TestCase):
         self.assertIn("| error |", out.getvalue())
         self.assertIn("alpha", err.getvalue())
 
+    def test_a_failed_review_query_exits_one_without_a_report(self) -> None:
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "graphql", side_effect=bm.GhError("null node")),
+            unittest.mock.patch.object(bm, "run_gh", return_value=[]),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha"])
+        self.assertEqual(code, 1)
+        self.assertEqual(out.getvalue(), "")
+
     def test_both_formats_carry_the_review_tables(self) -> None:
         result = bm.ReviewMetrics(name="alpha", bots={"copilot": bm.BotStats(rounds=[1, 3])})
         start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 8)
         md = bm.render_markdown(start, end, [metrics()], [], [result])
-        page = bm.render_html(start, end, [metrics()], [], [result])
-        self.assertIn("| alpha | copilot | default | 0 | 0 | 2.0 | 3 |", md)
-        self.assertEqual(page.count("<table"), 3)
+        page_html = bm.render_html(start, end, [metrics()], [], [result])
+        self.assertIn("| alpha | copilot | default | 0 | 0 | n/a | 2.0 | 3 |", md)
+        self.assertIn("Threaded findings (count)", md)
+        self.assertEqual(page_html.count("<table"), 3)
 
 
 class MainTests(unittest.TestCase):
     def test_main_writes_the_report_to_stdout(self) -> None:
         def fake(args: list[str]) -> object:
-            if args[:2] == ["api", "graphql"]:
-                return {"data": {"search": {"issueCount": 0, "nodes": []}}}
             if args[0] == "api" and "contents" in args[1]:
                 raise bm.GhError("gh api exited 1: gh: Not Found (HTTP 404)")
+            if args[0] == "api" and "commits" in args[1]:
+                return []
             if args[0] == "api":
                 return {"usageItems": []}
             if args[0] == "issue":
@@ -492,6 +642,7 @@ class MainTests(unittest.TestCase):
 
         out = io.StringIO()
         with (
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
             unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
             contextlib.redirect_stdout(out),
         ):

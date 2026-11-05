@@ -30,12 +30,13 @@ import html
 import json
 import re
 import sys
+import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gh_graphql import GraphQLError, run_subprocess
+from gh_graphql import GraphQLError, request, run_subprocess, walk
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
@@ -43,20 +44,22 @@ LIST_LIMIT = 1000
 HANDOFF_LABEL = "handoff"
 REVIEW_WORKFLOW = "Running Copilot Code Review"
 REVIEWERS_DIR = Path(__file__).resolve().parent / "reviewers"
-PR_CAP = 50
+PAGE_SIZE = 50
+PR_CAP = 500
 COMMIT_CAP = 50
 THREAD_CAP = 100
 COMMENT_CAP = 100
 REVIEW_CAP = 100
 EVENT_CAP = 100
-SUITE_CAP = 10
+INTEGRATION_BRANCH = "develop"
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+HISTORY_CAP = 10
 POLICY_PATH = ".github/pr-review.json"
 ATTESTATION = re.compile(
     r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
     re.MULTILINE,
 )
-FAILED_CONCLUSIONS = frozenset({"FAILURE", "TIMED_OUT", "STARTUP_FAILURE"})
-GREEN_CONCLUSIONS = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
+FAILED_STATES = frozenset({"FAILURE", "ERROR"})
 LABELS = ("pre-existing", "prose", "documentation", "bug", "script", "enhancement", "decision")
 
 Items = Sequence[Mapping[str, Any]]
@@ -78,10 +81,12 @@ def reviewer_logins() -> dict[str, str]:
 BOT_LOGINS = reviewer_logins()
 EXPLICIT_COMMENT = {
     "coderabbit": re.compile(
-        rf"^\s*@{re.escape(BOT_LOGINS['coderabbit'])}\s+review\b", re.IGNORECASE
+        rf"^\s*@{re.escape(BOT_LOGINS['coderabbit'])}\s+(?:full\s+)?review\b",
+        re.IGNORECASE | re.MULTILINE,
     ),
-    "qodo": re.compile(r"^\s*/review\b"),
+    "qodo": re.compile(r"^\s*/review\b", re.MULTILINE),
 }
+AUTOMATIC_ROUND_BOTS = ("coderabbit", "qodo")
 
 
 class GhError(RuntimeError):
@@ -197,6 +202,7 @@ class BotStats:
     requests_by_automation: int = 0
     requests_by_user: int = 0
     rounds: list[int] = field(default_factory=list)
+    automatic_rounds: int = 0
     findings: int = 0
     missed_by_local: int = 0
     findings_on_green_heads: int = 0
@@ -206,7 +212,8 @@ class BotStats:
 class ReviewMetrics:
     name: str
     prs: int = 0
-    pushes: int = 0
+    promotions_skipped: int = 0
+    commits: int = 0
     local_findings: int = 0
     local_unknown: int = 0
     failing_heads: int = 0
@@ -214,13 +221,8 @@ class ReviewMetrics:
     bots: dict[str, BotStats] = field(default_factory=dict)
     policy: dict[str, str] = field(default_factory=dict)
     policy_error: str = ""
+    policy_changes: list[str] = field(default_factory=list)
     truncated: list[str] = field(default_factory=list)
-
-
-def bare_login(actor: Mapping[str, Any] | None) -> str:
-    """A login without the `[bot]` suffix or `app/` prefix some surfaces add."""
-    login = str((actor or {}).get("login") or "")
-    return login.removeprefix("app/").removesuffix("[bot]")
 
 
 def is_automation(actor: Mapping[str, Any] | None) -> bool:
@@ -236,26 +238,53 @@ def cut(connection: Mapping[str, Any] | None) -> bool:
 
 
 def head_state(commit: Mapping[str, Any]) -> str:
-    """Classify a head's check suites as `failed`, `green`, or `other` (pending or absent)."""
-    conclusions = [str(s.get("conclusion") or "") for s in nodes_of(commit.get("checkSuites"))]
-    if any(c in FAILED_CONCLUSIONS for c in conclusions):
+    """Classify a head by its rolled-up status as `failed`, `green`, or `other`."""
+    state = str((commit.get("statusCheckRollup") or {}).get("state") or "")
+    if state in FAILED_STATES:
         return "failed"
-    if conclusions and all(c in GREEN_CONCLUSIONS for c in conclusions):
-        return "green"
-    return "other"
+    return "green" if state == "SUCCESS" else "other"
 
 
-def attestations(comments: Items) -> dict[str, str]:
-    """Head sha to the findings text of its newest attestation, `unknown` kept as its own value."""
+def body_lines(body: str) -> list[str]:
+    """The lines of a comment body that sit outside a fenced code block."""
+    lines: list[str] = []
+    fenced = False
+    for line in body.splitlines():
+        if line.strip().startswith("```"):
+            fenced = not fenced
+        elif not fenced:
+            lines.append(line.strip())
+    return lines
+
+
+def attestations(comments: Items, base: str) -> dict[str, str]:
+    """Head sha to the findings text of its newest trusted attestation for this base.
+
+    A marker counts only in a comment by an owner, member or collaborator that is not minimized.
+    It must name the pull request's base and stand as a line of its own outside a fence.
+    """
     found: dict[str, str] = {}
     for comment in comments:
-        for match in ATTESTATION.finditer(str(comment.get("body") or "")):
-            found[match.group(1)] = match.group(3)
+        if comment.get("authorAssociation") not in TRUSTED_ASSOCIATIONS:
+            continue
+        if comment.get("isMinimized"):
+            continue
+        for line in body_lines(str(comment.get("body") or "")):
+            match = ATTESTATION.fullmatch(line)
+            if match and match.group(2) == base:
+                found[match.group(1)] = match.group(3)
     return found
 
 
-def review_pr(pr: Mapping[str, Any], result: ReviewMetrics) -> None:
+def is_promotion(pr: Mapping[str, Any], default_branch: str) -> bool:
+    return pr.get("headRefName") == INTEGRATION_BRANCH and pr.get("baseRefName") == default_branch
+
+
+def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str = "") -> None:
     """Fold one merged pull request's review payload into the repository's tallies."""
+    if is_promotion(pr, default_branch):
+        result.promotions_skipped += 1
+        return
     number = pr.get("number")
     for key in ("commits", "reviews", "reviewThreads", "comments", "timelineItems"):
         if cut(pr.get(key)):
@@ -263,9 +292,9 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics) -> None:
     commits = [n.get("commit") or {} for n in nodes_of(pr.get("commits"))]
     states = {str(c.get("oid")): head_state(c) for c in commits}
     comments = nodes_of(pr.get("comments"))
-    attested = attestations(comments)
+    attested = attestations(comments, str(pr.get("baseRefName") or ""))
     result.prs += 1
-    result.pushes += len(commits)
+    result.commits += len(commits)
     for value in attested.values():
         if value == "unknown":
             result.local_unknown += 1
@@ -281,27 +310,33 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics) -> None:
         reviewed = {
             str((r.get("commit") or {}).get("oid"))
             for r in nodes_of(pr.get("reviews"))
-            if bare_login(r.get("author")) == login
+            if (r.get("author") or {}).get("login") == login
         }
         if reviewed:
             stats.rounds.append(len(reviewed))
         for event in nodes_of(pr.get("timelineItems")):
-            requested = bare_login(event.get("requestedReviewer"))
-            if requested == login:
+            if (event.get("requestedReviewer") or {}).get("login") == login:
                 if is_automation(event.get("actor")):
                     stats.requests_by_automation += 1
                 else:
                     stats.requests_by_user += 1
         pattern = EXPLICIT_COMMENT.get(name)
+        explicit = 0
         if pattern:
-            stats.requests_by_user += sum(
-                1
-                for c in comments
-                if not is_automation(c.get("author")) and pattern.search(str(c.get("body") or ""))
-            )
+            for c in comments:
+                author = c.get("author") or {}
+                if author.get("login") == login or not pattern.search(str(c.get("body") or "")):
+                    continue
+                explicit += 1
+                if is_automation(author):
+                    stats.requests_by_automation += 1
+                else:
+                    stats.requests_by_user += 1
+        if name in AUTOMATIC_ROUND_BOTS:
+            stats.automatic_rounds += max(0, len(reviewed) - explicit)
         for thread in nodes_of(pr.get("reviewThreads")):
             first = nodes_of(thread.get("comments"))[:1]
-            if not first or bare_login(first[0].get("author")) != login:
+            if not first or (first[0].get("author") or {}).get("login") != login:
                 continue
             head = str((first[0].get("originalCommit") or {}).get("oid"))
             stats.findings += 1
@@ -413,16 +448,18 @@ REVIEW_BOT_HEADERS = (
     "Policy trigger",
     "Requests by automation (count)",
     "Requests by user (count)",
+    "Automatic rounds (count)",
     "Rounds per reviewed PR (mean)",
     "Rounds per reviewed PR (max)",
-    "Findings (count)",
+    "Threaded findings (count)",
     "Findings missed by local review (count)",
     "Findings on all-green heads (count)",
 )
 REVIEW_REPO_HEADERS = (
     "Repository",
     "Merged PRs read (count)",
-    "Pushes per merged PR (mean)",
+    "Promotion PRs excluded (count)",
+    "Commits per merged PR (mean)",
     "Local findings (sum)",
     "Local attestations with unknown findings (count)",
     "Failing heads (count)",
@@ -442,6 +479,7 @@ def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
             "error" if r.policy_error else r.policy.get(bot, "default"),
             str(stats.requests_by_automation),
             str(stats.requests_by_user),
+            str(stats.automatic_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
             mean(stats.rounds),
             str(max(stats.rounds, default=0)) if stats.rounds else "n/a",
             str(stats.findings),
@@ -458,7 +496,8 @@ def review_repo_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
         [
             r.name,
             str(r.prs),
-            per_merged(r.pushes, r.prs),
+            str(r.promotions_skipped),
+            per_merged(r.commits, r.prs),
             str(r.local_findings),
             str(r.local_unknown),
             str(r.failing_heads),
@@ -475,6 +514,11 @@ def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
             out.append(
                 f"{r.name}: review figures are truncated, since a cap was reached"
                 f" (at most {PR_CAP} merged PRs per repository): {', '.join(r.truncated)}."
+            )
+        if r.policy_changes:
+            out.append(
+                f"{r.name}: {POLICY_PATH} changed on {', '.join(r.policy_changes)}, inside the window,"
+                " so the window mixes two policies."
             )
         if r.policy_error:
             out.append(f"{r.name}: reading {POLICY_PATH} failed: {r.policy_error}")
@@ -582,14 +626,18 @@ def collect(owner: str, name: str, since: datetime.date) -> RepoMetrics:
 
 
 REVIEW_QUERY = """
-query($search: String!) {
-  search(query: $search, type: ISSUE, first: @PR@) {
+query($search: String!, $owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) { defaultBranchRef { name } }
+  search(query: $search, type: ISSUE, first: @PAGE@, after: $after) {
     issueCount
+    pageInfo { hasNextPage endCursor }
     nodes { ... on PullRequest {
       number
+      headRefName
+      baseRefName
       commits(first: @COMMIT@) {
         pageInfo { hasNextPage }
-        nodes { commit { oid checkSuites(first: @SUITE@) { nodes { conclusion } } } }
+        nodes { commit { oid statusCheckRollup { state } } }
       }
       reviews(first: @REVIEW@) {
         pageInfo { hasNextPage }
@@ -601,7 +649,7 @@ query($search: String!) {
       }
       comments(first: @COMMENT@) {
         pageInfo { hasNextPage }
-        nodes { body author { login __typename } }
+        nodes { body authorAssociation isMinimized author { login __typename } }
       }
       timelineItems(first: @EVENT@, itemTypes: [REVIEW_REQUESTED_EVENT]) {
         pageInfo { hasNextPage }
@@ -615,15 +663,22 @@ query($search: String!) {
 }
 """
 for _token, _cap in (
-    ("PR", PR_CAP),
+    ("PAGE", PAGE_SIZE),
     ("COMMIT", COMMIT_CAP),
-    ("SUITE", SUITE_CAP),
     ("REVIEW", REVIEW_CAP),
     ("THREAD", THREAD_CAP),
     ("COMMENT", COMMENT_CAP),
     ("EVENT", EVENT_CAP),
 ):
     REVIEW_QUERY = REVIEW_QUERY.replace(f"@{_token}@", str(_cap))
+
+
+def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
+    """Run one GraphQL document through the shared reader, so a null node or error raises."""
+    try:
+        return dict(request(query, variables).data)
+    except GraphQLError as error:
+        raise GhError(f"{error} {error.detail}".strip()) from error
 
 
 def fetch_policy(owner: str, name: str) -> tuple[dict[str, str], str]:
@@ -641,21 +696,70 @@ def fetch_policy(owner: str, name: str) -> tuple[dict[str, str], str]:
         return {}, f"unreadable policy file: {error}"
 
 
+def fetch_policy_changes(
+    owner: str, name: str, branch: str, since: datetime.date
+) -> tuple[list[str], str]:
+    """The dates the policy file changed on the default branch inside the window."""
+    query = urllib.parse.urlencode(
+        {
+            "path": POLICY_PATH,
+            "sha": branch,
+            "since": f"{since.isoformat()}T00:00:00Z",
+            "per_page": HISTORY_CAP,
+        }
+    )
+    try:
+        commits = run_gh(["api", f"repos/{owner}/{name}/commits?{query}"])
+    except GhError as error:
+        if "HTTP 404" in str(error):
+            return [], ""
+        return [], str(error)
+    if not isinstance(commits, list):
+        return [], "the policy history was not a list"
+    dates = [
+        str(((c.get("commit") or {}).get("committer") or {}).get("date") or "unknown")[:10]
+        for c in commits
+    ]
+    if len(commits) >= HISTORY_CAP:
+        dates.append(f"more than {HISTORY_CAP} commits")
+    return dates, ""
+
+
 def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetrics:
-    """Read the window's merged pull requests, at most `PR_CAP`, and tally the review figures."""
-    search = f"repo:{owner}/{name} is:pr is:merged merged:>={since.isoformat()}"
-    payload = run_gh(["api", "graphql", "-f", f"query={REVIEW_QUERY}", "-f", f"search={search}"])
-    if not isinstance(payload, dict) or payload.get("errors") or not payload.get("data"):
-        raise GhError(f"review query for {owner}/{name} returned errors: {payload!r:.300}")
-    found = payload["data"]["search"]
+    """Read the window's merged pull requests, newest update first, up to `PR_CAP`."""
+    search = f"repo:{owner}/{name} is:pr is:merged merged:>={since.isoformat()} sort:updated-desc"
+
+    def fetch(after: str | None) -> dict:
+        variables: dict[str, object] = {"search": search, "owner": owner, "name": name}
+        if after is not None:
+            variables["after"] = after
+        return graphql(REVIEW_QUERY, variables)
+
     result = ReviewMetrics(name=name)
     for bot in BOT_LOGINS:
         result.bots[bot] = BotStats()
-    if int(found.get("issueCount") or 0) > PR_CAP:
-        result.truncated.append(f"{found['issueCount']} merged PRs, {PR_CAP} read")
-    for pr in found.get("nodes") or []:
-        review_pr(pr, result)
+    seen = 0
+    branch = ""
+    for page in walk(fetch, ["search"]):
+        branch = str(
+            ((page.get("repository") or {}).get("defaultBranchRef") or {}).get("name") or ""
+        )
+        connection = page["search"]
+        for pr in connection.get("nodes") or []:
+            if seen < PR_CAP:
+                seen += 1
+                review_pr(pr, result, branch)
+        if seen >= PR_CAP:
+            total = int(connection.get("issueCount") or 0)
+            if total > PR_CAP:
+                result.truncated.append(f"{total} merged PRs, {PR_CAP} read")
+            break
     result.policy, result.policy_error = fetch_policy(owner, name)
+    if branch:
+        result.policy_changes, history_error = fetch_policy_changes(owner, name, branch, since)
+        result.policy_error = result.policy_error or history_error
+    else:
+        result.policy_error = result.policy_error or "the repository has no default branch"
     return result
 
 
