@@ -14,6 +14,7 @@ import base64
 import contextlib
 import copy
 import functools
+import importlib.util
 import io
 import json
 import re
@@ -40,14 +41,16 @@ MOVED = "b" * 40
 NOW = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
 WINDOWS = (300.0, 1800.0)
 ARGS = argparse.Namespace(timeout=60.0, check_grace=WINDOWS[0], check_stall=WINDOWS[1])
-DEFAULT = json.loads((REPO / "spec" / "pr-review.default.json").read_text(encoding="utf-8"))
+DEFAULT = json.loads((REPO / "spec" / "agent-policy.default.json").read_text(encoding="utf-8"))
+BOTS = DEFAULT["review"]["bots"]
+SCHEMA = json.loads((REPO / "spec" / "agent-policy.schema.json").read_text(encoding="utf-8"))
 
 
 def stated(**bots: dict) -> dict:
     """The default policy's data with each named bot's settings replaced by `bots`."""
     data = copy.deepcopy(DEFAULT)
     for name, settings in bots.items():
-        data["bots"][name] = settings
+        data["review"]["bots"][name] = settings
     return data
 
 
@@ -88,8 +91,21 @@ class TestParse(unittest.TestCase):
         self.assertEqual(set(policy.BOTS), set(rules.bots))
 
     def test_the_default_matches_the_schema_file_it_names(self) -> None:
-        self.assertEqual("./pr-review.schema.json", DEFAULT["$schema"])
-        self.assertTrue((REPO / "spec" / "pr-review.schema.json").is_file())
+        self.assertEqual("./agent-policy.schema.json", DEFAULT["$schema"])
+        self.assertTrue((REPO / "spec" / "agent-policy.schema.json").is_file())
+
+    def test_a_file_with_no_review_section_reads_the_default_review(self) -> None:
+        only_guard = {
+            "version": 1,
+            "guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}},
+        }
+        self.assertEqual(policy.load_default().bots, policy.parse(only_guard, "test").bots)
+        self.assertTrue(policy.parse(only_guard, "test").from_default)
+        self.assertFalse(parsed().from_default)
+
+    def test_the_review_reader_leaves_the_guard_section_to_the_guard(self) -> None:
+        data = {**stated(qodo={"trigger": "off", "bases": []}), "guard": {"anything": 1}}
+        self.assertEqual("off", policy.parse(data, "test").bot("qodo").trigger)
 
     def test_unset_fields_take_their_documented_defaults(self) -> None:
         rules = parsed(qodo={"trigger": "explicit", "bases": ["^develop$"]})
@@ -107,9 +123,11 @@ class TestParse(unittest.TestCase):
             "version is 2": {**DEFAULT, "version": 2},
             "bots is missing qodo": {
                 **DEFAULT,
-                "bots": {k: v for k, v in DEFAULT["bots"].items() if k != "qodo"},
+                "review": {"bots": {k: v for k, v in BOTS.items() if k != "qodo"}},
             },
-            "unknown bot(s) other": {**DEFAULT, "bots": {**DEFAULT["bots"], "other": {}}},
+            "unknown bot(s) other": {**DEFAULT, "review": {"bots": {**BOTS, "other": {}}}},
+            "review is not an object": {**DEFAULT, "review": []},
+            "review has unknown key(s) extra": {**DEFAULT, "review": {"bots": BOTS, "extra": 1}},
             "bots.qodo.trigger is 'sometimes'": stated(qodo={"trigger": "sometimes", "bases": []}),
             "bots.qodo.bases entry '(' is not a regex": stated(
                 qodo={"trigger": "auto", "bases": ["("]}
@@ -202,7 +220,7 @@ class TestFetch(unittest.TestCase):
 
     def test_a_file_that_is_not_json_is_refused(self) -> None:
         bad = base64.b64encode(b"{not json").decode()
-        with self.assertRaisesRegex(policy.PolicyError, "o/r:.github/pr-review.json@develop"):
+        with self.assertRaisesRegex(policy.PolicyError, "o/r:.github/agent-policy.json@develop"):
             policy.fetch("o", "r", "develop", lambda *_: bad)
 
 
@@ -566,13 +584,13 @@ class TestSchemaParity(unittest.TestCase):
     """The schema an editor validates against states exactly the rules the reader enforces."""
 
     def test_every_enum_and_key_matches_the_reader(self) -> None:
-        schema = json.loads((REPO / "spec" / "pr-review.schema.json").read_text(encoding="utf-8"))
+        schema = SCHEMA
         bot = schema["$defs"]["bot"]["properties"]
         self.assertEqual(set(policy.BOT_KEYS), set(bot))
         self.assertEqual(set(policy.TRIGGERS), set(bot["trigger"]["enum"]))
         self.assertEqual(set(policy.WHENS), set(bot["when"]["enum"]))
         self.assertEqual(set(policy.ROUNDS), set(bot["rounds"]["enum"]))
-        bots = schema["properties"]["bots"]["properties"]
+        bots = schema["properties"]["review"]["properties"]["bots"]["properties"]
         self.assertEqual(set(policy.BOTS), set(bots))
         self.assertEqual(
             set(policy.COMMANDS), set(bots["coderabbit"]["properties"]["command"]["enum"])
@@ -581,6 +599,26 @@ class TestSchemaParity(unittest.TestCase):
             self.assertEqual({"required": ["command"]}, bots[name]["not"], name)
         self.assertEqual({"trigger": {"const": "explicit"}}, bots["copilot"]["if"]["properties"])
         self.assertEqual({"gate": {"const": False}}, bots["copilot"]["then"]["not"]["properties"])
+
+    def test_the_sections_match_the_reader(self) -> None:
+        schema = SCHEMA
+        self.assertEqual({"$schema", "version", *policy.SECTIONS}, set(schema["properties"]))
+
+    def test_the_guard_reads_the_path_and_keys_the_schema_states(self) -> None:
+        """The write guard is a standalone hook that cannot import this reader, so its reading is pinned here."""
+        path = REPO / "host-setup" / "agent-safety" / "claude" / "gh-write-guard.py"
+        spec = importlib.util.spec_from_file_location("gh_write_guard", path)
+        assert spec and spec.loader
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        self.assertEqual(f"origin/main:{policy.POLICY_PATH}", guard._POLICY_BLOB)
+        schema = SCHEMA
+        section = schema["properties"]["guard"]["properties"]["primaryCheckout"]["properties"]
+        branches = section["commitInPlace"]["properties"]["branches"]
+        self.assertEqual({"not": {"enum": ["main", "master"]}}, {"not": branches["items"]["not"]})
+        source = path.read_text(encoding="utf-8")
+        self.assertIn('data["guard"]["primaryCheckout"]["commitInPlace"]["branches"]', source)
+        self.assertIn('branch in ("main", "master")', source)
 
 
 PARTIAL = f"{fixtures.OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"

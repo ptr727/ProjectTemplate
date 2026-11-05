@@ -40,7 +40,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    That holds where the whole review history is in view and no round on record states partial coverage. A policy that waits on no Copilot round drops that condition. That is a Copilot that is off, ungated, or past its cap. No refusal or pending request on the head then stands against the attestation either, since no round is coming to settle it. A promotion re-reviews content its feature pull requests already carried.
    So under the hub's default review policy, the hosted review runs once per change, at the
    promotion. There a pull request into the default branch, a promotion among them, always
-   carries a Copilot round on its head. A repository's own `.github/pr-review.json` can move,
+   carries a Copilot round on its head. A repository's own `.github/agent-policy.json` can move,
    cap, or hold that round until the head's checks pass. `pr_review.py` applies it, so follow
    the digest and the exit code rather than this paragraph's default. A review is matched
    by commit SHA rather than assumed from a green merge-state. A push makes checks go green *before* the

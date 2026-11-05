@@ -32,14 +32,14 @@ def issue(*labels: str) -> dict[str, object]:
     return {"number": 1, "labels": [{"name": label} for label in labels]}
 
 
-DEFAULT_POLICY = SCRIPTS.parent / "spec" / "pr-review.default.json"
+DEFAULT_POLICY = SCRIPTS.parent / "spec" / "agent-policy.default.json"
 
 
 def policy_text(**triggers: str) -> str:
     """The hub default policy as JSON text, each named bot's trigger replaced."""
     data = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))
     for bot, trigger in triggers.items():
-        data["bots"][bot]["trigger"] = trigger
+        data["review"]["bots"][bot]["trigger"] = trigger
     return json.dumps(data)
 
 
@@ -630,7 +630,7 @@ class PolicyTests(unittest.TestCase):
     def test_a_404_reads_the_hub_default_marked_as_such(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
         self.assertEqual(error, "")
-        default = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))["bots"]
+        default = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))["review"]["bots"]
         self.assertEqual(
             triggers, {bot: f"{default[bot]['trigger']} (default)" for bot in bm.BOT_LOGINS}
         )
@@ -652,6 +652,12 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(triggers, {})
         self.assertIn("403", error)
 
+    def test_a_file_stating_no_review_section_reads_the_default_marked(self) -> None:
+        text = json.dumps({"version": 1, "guard": {}})
+        triggers, error = self.fetch(return_value=self.payload(text))
+        self.assertEqual(error, "")
+        self.assertTrue(all(t.endswith(" (default)") for t in triggers.values()))
+
     def test_triggers_are_read_per_bot(self) -> None:
         text = policy_text(qodo="explicit", coderabbit="off")
         triggers, error = self.fetch(return_value=self.payload(text))
@@ -660,14 +666,14 @@ class PolicyTests(unittest.TestCase):
 
     def test_a_policy_the_gate_refuses_is_an_error(self) -> None:
         data = json.loads(policy_text(copilot="explicit"))
-        data["bots"]["copilot"]["gate"] = False
+        data["review"]["bots"]["copilot"]["gate"] = False
         triggers, error = self.fetch(return_value=self.payload(json.dumps(data)))
         self.assertEqual(triggers, {})
         self.assertIn("gate false", error)
 
     def test_a_policy_omitting_a_bot_is_an_error(self) -> None:
         data = json.loads(policy_text())
-        del data["bots"]["qodo"]
+        del data["review"]["bots"]["qodo"]
         triggers, error = self.fetch(return_value=self.payload(json.dumps(data)))
         self.assertEqual(triggers, {})
         self.assertIn("missing qodo", error)
@@ -890,7 +896,7 @@ class ReviewCollectTests(unittest.TestCase):
             bm.fetch_policy_changes("o", "alpha", "main", datetime.date(2026, 1, 1))
         url = run.call_args.args[0][1]
         for part in (
-            "path=.github%2Fpr-review.json",
+            "path=.github%2Fagent-policy.json",
             "sha=main",
             "since=2026-01-01T",
             "per_page=11",

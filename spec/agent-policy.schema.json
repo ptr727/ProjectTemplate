@@ -1,0 +1,115 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/agent-policy.schema.json",
+    "title": "Repository agent policy",
+    "description": "The per-repository settings that change how agents and their tooling behave in a repository, one section per concern. A repository states it in .github/agent-policy.json, and a section it leaves out reads that section of spec/agent-policy.default.json.",
+    "type": "object",
+    "required": ["version"],
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "review": {
+            "description": "Which bots review a repository's pull requests, on which bases, when, and how often. scripts/pr_review_policy.py is the reader, reading it from the pull request's base branch, and tests/test_pr_review_policy.py holds its rules equal to this section. auto means only that the bot may start on its own.",
+            "type": "object",
+            "required": ["bots"],
+            "additionalProperties": false,
+            "properties": {
+                "bots": {
+                    "type": "object",
+                    "required": ["copilot", "coderabbit", "qodo"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "copilot": {
+                            "allOf": [{ "$ref": "#/$defs/bot" }],
+                            "not": { "required": ["command"] },
+                            "if": { "properties": { "trigger": { "const": "explicit" } }, "required": ["trigger"] },
+                            "then": {
+                                "not": { "properties": { "gate": { "const": false } }, "required": ["gate"] }
+                            }
+                        },
+                        "coderabbit": {
+                            "allOf": [{ "$ref": "#/$defs/bot" }],
+                            "properties": {
+                                "gate": { "const": false },
+                                "command": {
+                                    "description": "The comment that requests a review: review is incremental, full review rereads the whole pull request.",
+                                    "enum": ["review", "full review"]
+                                }
+                            }
+                        },
+                        "qodo": {
+                            "allOf": [{ "$ref": "#/$defs/bot" }],
+                            "properties": { "gate": { "const": false } },
+                            "not": { "required": ["command"] }
+                        }
+                    }
+                }
+            }
+        },
+        "guard": {
+            "description": "Per-repository exemptions from the host write guard's requirement 6, which denies a mutating git operation in a primary checkout. The guard reads this section from origin/main only, so an exemption takes effect once the maintainer merges it there. No other guard requirement is configurable here.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "primaryCheckout": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "commitInPlace": {
+                            "description": "Lets an agent commit in place in the primary checkout while it is on a listed branch: add, rm, and mv of explicit paths, a commit that stages nothing itself and amends nothing, and an unforced push naming origin and that branch explicitly. reset, rebase, restore, stash, clean, and a pathspec checkout stay denied. An operational repository lists develop.",
+                            "type": "object",
+                            "required": ["branches"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "branches": {
+                                    "type": "array",
+                                    "uniqueItems": true,
+                                    "items": { "type": "string", "minLength": 1, "not": { "enum": ["main", "master"] } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "$defs": {
+        "bot": {
+            "type": "object",
+            "required": ["trigger", "bases"],
+            "properties": {
+                "trigger": {
+                    "description": "How a review arrives. explicit: wait requests it. auto: the bot starts on its own, and wait fills a missed start only for a gated bot. off: never requested or waited on.",
+                    "enum": ["auto", "explicit", "off"]
+                },
+                "bases": {
+                    "description": "The pull request base branches this bot reviews, each a full-match regex or @default for the repository's default branch.",
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 }
+                },
+                "when": {
+                    "description": "Whether an explicit request waits for the head's checks to go green first.",
+                    "enum": ["on-open", "after-checks"],
+                    "default": "on-open"
+                },
+                "rounds": {
+                    "description": "once: one round per pull request. per-push: a round on each new head.",
+                    "enum": ["once", "per-push"],
+                    "default": "per-push"
+                },
+                "maxRounds": {
+                    "description": "The most rounds on one pull request, or null for no cap. Copilot's rounds are the distinct heads its reviews cover, so a re-request on a covered head and a refusal count for nothing. CodeRabbit's are its asks or its reviewed heads, whichever is more. Qodo's are its asks, or one once its standing comment exists. Past the cap, an attested local pass covers a new head in place of a Copilot round, and CodeRabbit and Qodo are not asked again. A capped Copilot whose review history runs past the read window counts as past it, since its rounds cannot be counted.",
+                    "type": ["integer", "null"],
+                    "minimum": 1
+                },
+                "gate": {
+                    "description": "Whether the merge waits for this bot's review on the head. Copilot alone can gate, and it defaults to true. An explicit Copilot must gate, since wait requests Copilot only for a round the merge waits on. CodeRabbit and Qodo are asked but never waited on.",
+                    "type": "boolean"
+                },
+                "command": { "type": "string" }
+            },
+            "additionalProperties": false
+        }
+    }
+}
