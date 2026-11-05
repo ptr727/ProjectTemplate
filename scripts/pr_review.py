@@ -1416,7 +1416,7 @@ def _gh_run(argv: list[str], raw: bool) -> subprocess.CompletedProcess:
 
 def answered_absent(proc: subprocess.CompletedProcess) -> bool:
     """Whether GitHub said the object is not there, as opposed to nothing having been read."""
-    return review_policy.said_absent(proc.stderr)
+    return shared.said_absent(proc.stderr)
 
 
 def body_references(body: str) -> tuple[list[str], list[str]]:

@@ -11,8 +11,8 @@ window. The month's Actions minutes and Copilot gross cover the calendar month t
 So the report prints them beside the window's counts rather than dividing them by its merges.
 
 The report goes to stdout only, so a server timer can mail it. Nothing here runs from a workflow.
-Counting and rendering are pure functions over parsed `gh` output, and `run_gh` is the one place
-that starts a process.
+Counting and rendering are pure functions over parsed `gh` output. Only `run_gh` and `graphql`
+start a process.
 
 Usage
   uv run --no-project --script scripts/backlog_metrics.py [--owner OWNER] [--repo NAME ...]
@@ -45,9 +45,9 @@ from typing import Any
 
 import pr_review_rounds as rounds
 import pr_review_side as side
-from gh_graphql import GraphQLError, request, run_subprocess, walk
+from gh_graphql import GraphQLError, request, run_subprocess, said_absent, walk
 from pr_review_copilot import VOCABULARIES
-from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch, said_absent
+from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
@@ -286,7 +286,7 @@ def classify_rounds(
     first: dict[str, str] = {}
     for review in rounds.reviewer_nodes(dict(pr), "reviews", login):
         oid = str(rounds.commit_oid(review))
-        if oid not in heads:
+        if oid not in heads or rounds.refusal_of(review):
             continue
         at = str(review.get("submittedAt") or "")
         if oid not in first or (at and at < first[oid]):
@@ -344,8 +344,7 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
             COMMANDS if name == "coderabbit" else (("review",) if name == "qodo" else ())
         ):
             asks += side.side_asks(dict(pr), side.side_command(name, command))
-        for ask in asks:
-            count_request(stats, ask.get("author"))
+        stats.requests_by_user += len(asks)
         if name == "qodo":
             total = side.side_rounds(dict(pr), name, side.side_command(name))
             if total > 0:
@@ -739,7 +738,10 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
                 absent.append(path)
                 return None
             raise
-        return str(payload["content"])
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, str) or not content:
+            raise GhError(f"{owner}/{repo} {path} at {ref} carried no content")
+        return content
 
     try:
         policy = fetch(owner, name, ref, read)

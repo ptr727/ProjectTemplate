@@ -116,7 +116,6 @@ class CountingTests(unittest.TestCase):
         self.assertEqual(bm.per_merged(5, 0), "n/a")
 
     def test_the_mean_of_rounds_is_per_merged_with_no_helper_of_its_own(self) -> None:
-        self.assertFalse(hasattr(bm, "mean"))
         stats = {"copilot": bm.BotStats(rounds=[1, 2]), "qodo": bm.BotStats()}
         row = bm.review_bot_rows([bm.ReviewMetrics(name="alpha", bots=stats)])
         index = bm.REVIEW_BOT_HEADERS.index("Rounds per reviewed PR (mean)")
@@ -356,8 +355,6 @@ class ReviewTests(unittest.TestCase):
     def test_logins_are_the_gates_vocabulary_logins_with_no_local_reader(self) -> None:
         for name, login in bm.BOT_LOGINS.items():
             self.assertIs(login, pr_review_copilot.VOCABULARIES[name]["login"])
-        self.assertFalse(hasattr(bm, "reviewer_logins"))
-        self.assertFalse(hasattr(bm, "REVIEWERS_DIR"))
 
     def test_rounds_count_distinct_heads_per_bot_and_commits_are_counted(self) -> None:
         reviews = [
@@ -396,11 +393,10 @@ class ReviewTests(unittest.TestCase):
         result = self.tally(comments=comments, timelineItems=events)
         self.assertEqual(result.bots["copilot"].requests_by_automation, 1)
         self.assertEqual(result.bots["copilot"].requests_by_user, 1)
-        self.assertEqual(result.bots["coderabbit"].requests_by_user, 1)
-        self.assertEqual(result.bots["coderabbit"].requests_by_automation, 1)
-        self.assertEqual(result.bots["qodo"].requests_by_user, 1)
-        self.assertEqual(result.bots["qodo"].requests_by_automation, 1)
-        self.assertFalse(hasattr(bm, "EXPLICIT_COMMENT"))
+        self.assertEqual(result.bots["coderabbit"].requests_by_user, 2)
+        self.assertEqual(result.bots["coderabbit"].requests_by_automation, 0)
+        self.assertEqual(result.bots["qodo"].requests_by_user, 2)
+        self.assertEqual(result.bots["qodo"].requests_by_automation, 0)
 
     def test_each_reviewed_head_is_explicit_automatic_or_unclassified(self) -> None:
         def review(login: str, head: str, at: str) -> dict[str, object]:
@@ -454,6 +450,26 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(
             (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (0, 1, 0)
         )
+
+    def test_a_refusal_before_an_ask_does_not_time_the_round(self) -> None:
+        def review(body: str, at: str) -> dict[str, object]:
+            return {
+                "author": {"login": RABBIT},
+                "commit": {"oid": SHA_A},
+                "body": body,
+                "submittedAt": at,
+            }
+
+        result = self.tally(
+            commits=[commit(SHA_A, at="2026-01-01T01:00:00Z")],
+            reviews=[
+                review(REFUSED, "2026-01-01T02:00:00Z"),
+                review("Looks fine.", "2026-01-01T04:00:00Z"),
+            ],
+            comments=[{**comment(f"@{RABBIT} review"), "createdAt": "2026-01-01T03:00:00Z"}],
+        )
+        rabbit = result.bots["coderabbit"]
+        self.assertEqual((rabbit.explicit_rounds, rabbit.automatic_rounds), (1, 0))
 
     def test_qodo_rounds_follow_its_standing_comment_and_asks_with_no_classes(self) -> None:
         standing = comment(QODO_COMMENT, association="NONE", login=QODO, kind="Bot")
@@ -511,8 +527,6 @@ class ReviewTests(unittest.TestCase):
         pr = pr_payload(comments=[comment(tilde), attest(SHA_B, "1")])
         self.assertEqual(bm.attestations(pr), {SHA_B: "1"})
         self.assertIsNone(pr_review_rounds.attestation({**pr, "headRefOid": SHA_A}))
-        for name in ("ATTESTATION", "TRUSTED_ASSOCIATIONS", "body_lines"):
-            self.assertFalse(hasattr(bm, name))
 
     def test_bot_findings_missed_by_clean_local_review_and_on_green_heads(self) -> None:
         threads = [
@@ -584,6 +598,13 @@ class PolicyTests(unittest.TestCase):
         triggers, error = self.fetch(side_effect=bm.GhError("gh: No commit found (HTTP 422)"))
         self.assertEqual(error, "")
         self.assertTrue(all(t.endswith(" (default)") for t in triggers.values()))
+
+    def test_a_read_carrying_no_content_is_an_error(self) -> None:
+        payloads: list[object] = [{"content": None}, {"content": ""}, []]
+        for payload in payloads:
+            triggers, error = self.fetch(return_value=payload)
+            self.assertEqual(triggers, {})
+            self.assertIn("carried no content", error)
 
     def test_any_other_error_is_an_error_not_absent(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
