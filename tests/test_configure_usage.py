@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from host_capability import bash_or_skip
+from test_configure_archived import lift, run_bash
 
 CONFIGURE = Path(__file__).resolve().parents[1] / "repo-config" / "configure.sh"
 
@@ -107,6 +108,35 @@ class UsageCase(unittest.TestCase):
             with self.subTest(args=args):
                 result, calls = self.run_configure(*args)
                 self.assertNotEqual(calls, "", result.stderr)
+
+
+PROBE = lift(r"(if py -3 -c .*?\n^fi\n)")
+
+
+class InterpreterProbeCase(unittest.TestCase):
+    """The probe takes an interpreter that exits 0 for 3.10+ and refuses an older one without a traceback."""
+
+    def probe(self, exit_code: int) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "python3"
+            shim.write_text(f"#!/bin/sh\nexit {exit_code}\n", encoding="utf-8")
+            shim.chmod(0o755)
+            script = f'PATH={tmp}\n{PROBE}echo "picked ${{py_cmd[*]}}"\n'
+            return run_bash(script)
+
+    def test_a_new_enough_interpreter_is_picked(self) -> None:
+        done = self.probe(0)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("picked python3", done.stdout)
+
+    def test_an_older_interpreter_is_refused_with_a_message(self) -> None:
+        done = self.probe(1)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("3.10", done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_the_probe_asks_for_3_10(self) -> None:
+        self.assertEqual(PROBE.count("sys.version_info < (3, 10)"), 2)
 
 
 if __name__ == "__main__":

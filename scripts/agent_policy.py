@@ -120,10 +120,13 @@ def render(registry_data: Any, name: str, model: str) -> dict[str, Any]:
 
 
 def anchored(base: str) -> str:
-    """`base` as a CodeRabbit pattern, which searches, where a policy base must match whole."""
+    """`base` as a CodeRabbit pattern, which searches, where a policy base must match whole.
+
+    An alternation like `^a|b$` anchors each branch alone, so it is wrapped rather than trusted.
+    """
     body = base.removesuffix("$")
     slashes = len(body) - len(body.rstrip("\\"))
-    if base.startswith("^") and base.endswith("$") and slashes % 2 == 0:
+    if base.startswith("^") and base.endswith("$") and slashes % 2 == 0 and "|" not in base:
         return base
     return f"^(?:{base})$"
 

@@ -409,6 +409,7 @@ class AnchorCase(unittest.TestCase):
     def test_anchored_bases_stay_and_others_are_wrapped(self) -> None:
         self.assertEqual(agent_policy.anchored("^develop$"), "^develop$")
         self.assertEqual(agent_policy.anchored("release/.*"), "^(?:release/.*)$")
+        self.assertEqual(agent_policy.anchored("^main|develop$"), "^(?:^main|develop$)$")
         self.assertEqual(agent_policy.anchored("^a|b"), "^(?:^a|b)$")
         self.assertEqual(agent_policy.anchored("^a\\$"), "^(?:^a\\$)$")
         self.assertEqual(agent_policy.anchored("^a\\\\$"), "^a\\\\$")

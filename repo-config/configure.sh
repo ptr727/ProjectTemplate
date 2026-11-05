@@ -209,18 +209,18 @@ project_file="$script_dir/project.json"
 # The name python3 is not universal.
 # Native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run.
 # So this runs it rather than just checking PATH (docs/host-setup.md).
-# The probe checks 3.7+ (PEP 563, from __future__ import annotations).
-# That is because 3.7 is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
+# The probe checks 3.10+, which is the oldest interpreter the policy render and resolve_description.py run on.
+# That is because pr_review_policy builds a `str | None` alias at import, not because 3.10 is this repo's supported floor.
 # The repository floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py).
 # A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
 # The py launcher is probed first.
 # It reaches a registered interpreter whatever is active, where a bare python3 goes through PATH and a virtual environment can answer there instead.
-if py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+if py -3 -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>&1; then
     py_cmd=(py -3)
-elif python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+elif python3 -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>&1; then
     py_cmd=(python3)
 else
-    echo "No Python interpreter found (python3 or py -3) able to run this repo's Python scripts. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
+    echo "No Python 3.10 or newer found (python3 or py -3), the oldest that runs this repo's Python scripts. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
     exit 1
 fi
 
