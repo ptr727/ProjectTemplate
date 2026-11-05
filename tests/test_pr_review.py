@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
 from import_probe import import_delta
 
+DEFAULT_POLICY = pr_review.review_policy.load_default()
 _POLICY_PATCH = mock.patch.object(
     pr_review.review_policy, "policy_for", return_value=pr_review.review_policy.load_default()
 )
@@ -578,7 +579,10 @@ class GqlCase(unittest.TestCase):
         self.enterContext(mock.patch.object(pr_review, "page_files"))
 
         def fake(_query, _owner, _repo, _num):
-            return queue.pop(0) if len(queue) > 1 else queue[0]
+            pr = queue.pop(0) if len(queue) > 1 else queue[0]
+            if isinstance(pr, dict) and pr.get("baseRefName"):
+                pr.setdefault(pr_review.review_policy.PAYLOAD_KEY, DEFAULT_POLICY)
+            return pr
 
         patched = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=fake))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))

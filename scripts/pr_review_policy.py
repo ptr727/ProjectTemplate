@@ -8,8 +8,8 @@ hub's `spec/pr-review.default.json`. That default matches the behavior the scrip
 file existed.
 
 The trigger says how a review arrives, never whether the gate wants one. That is what lets the
-skills stay silent about the trigger. `wait` requests whatever the policy says the bot does not
-start for itself, and the gate asks the same question in every mode.
+skills stay silent about the trigger. `wait` sends each request the policy asks for, and the gate asks
+the same question in every mode.
 
 - `explicit`: the bot does not start on its own, so `wait` requests it once `when` allows.
 - `auto`: the bot starts on its own. For Copilot, which the gate waits on, `wait` still requests

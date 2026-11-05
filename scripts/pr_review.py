@@ -394,7 +394,7 @@ HELD_FIELDS = """
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
+    commits(last:1){ nodes{ commit{ oid committedDate statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
@@ -1617,7 +1617,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and not stopped
         and not held
         and not reviewer_requested(pr)
-        and (copilot is None or a.request or side.copilot_wanted(copilot, pr))
+        and (copilot is None or a.request or copilot.requests())
     )
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)

@@ -98,13 +98,14 @@ def side_asks(pr: dict, body: str) -> list[dict]:
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
-    """Whether a request `body` was posted since the head arrived.
+    """Whether a request `body` was posted since the head was committed.
 
-    Before any suite exists, the head's commit time stands in as a lower bound. So a request made
-    between a push and its first suite still counts for that head. A head that never gets a check
-    is then not asked again on every run.
+    The commit time is the one stamp that never moves once the head exists. A suite's creation
+    comes later, so an ask posted before the first suite would read as older than the head. An ask
+    for an earlier head, made after this one was committed, counts for this one too. That costs at
+    most one missed ask, never a duplicate paid round.
     """
-    since = head_arrived(pr) or (head_commit(pr).get("committedDate") or "")
+    since = head_commit(pr).get("committedDate") or ""
     return bool(since) and any((n.get("createdAt") or "") >= since for n in side_asks(pr, body))
 
 
@@ -259,12 +260,6 @@ def ask(
 
     for line in request_side_reviews(read, await_green, post, phase):
         print(line)
-
-
-def copilot_wanted(copilot: review_policy.BotPolicy, pr: dict) -> bool:
-    """Whether the policy has `wait` request Copilot on this pull request's base."""
-    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
-    return copilot.requests() and copilot.covers(pr.get("baseRefName") or "", default)
 
 
 def checks_note(held: str) -> str:

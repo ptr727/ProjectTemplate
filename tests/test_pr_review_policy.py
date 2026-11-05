@@ -73,7 +73,8 @@ def trusted(body: str, at: str) -> dict:
 
 
 def committed(pr: dict, at: str) -> dict:
-    """`pr` with its head commit stamped as committed at `at`."""
+    """`pr` with its head commit, and its first suite, stamped at `at`."""
+    pr["commits"]["nodes"][-1]["commit"]["committedDate"] = at
     pr["commits"]["nodes"][-1]["commit"]["checkSuites"] = {"nodes": [{"createdAt": at}]}
     return pr
 
@@ -437,6 +438,7 @@ class TestChecksHold(unittest.TestCase):
 
     def test_an_ask_before_a_later_push_is_not_one_on_the_head(self) -> None:
         pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.LATE)
+        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = fixtures.LATE
         pr["comments"]["nodes"] = [trusted("/review", "2026-08-02T10:30:00Z")]
         self.assertFalse(side.side_asked_on_head(pr, "/review"))
 
@@ -526,13 +528,6 @@ class TestReviewThreadFixes(unittest.TestCase):
             {"__typename": "Mystery"}
         )
         self.assertEqual("UNREAD", side.checks_hold(pr, NOW, *WINDOWS))
-
-    def test_copilot_is_wanted_only_on_a_base_it_covers(self) -> None:
-        bot = parsed(copilot={"trigger": "explicit", "bases": ["@default"]}).bot("copilot")
-        main = with_policy(fixtures.payload([]), policy.load_default(), "main")
-        develop = with_policy(fixtures.payload([]), policy.load_default(), "develop")
-        self.assertTrue(side.copilot_wanted(bot, main))
-        self.assertFalse(side.copilot_wanted(bot, develop))
 
 
 class TestSchemaParity(unittest.TestCase):
