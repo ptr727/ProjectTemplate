@@ -250,9 +250,236 @@ class CollectTests(unittest.TestCase):
         self.assertTrue(any(text.endswith("--json name") for text in joined))
 
 
+COPILOT = bm.BOT_LOGINS["copilot"]
+RABBIT = bm.BOT_LOGINS["coderabbit"]
+QODO = bm.BOT_LOGINS["qodo"]
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+SHA_C = "c" * 40
+
+
+def attest(head: str, findings: str) -> dict[str, object]:
+    body = f"<!-- fleet-local-review: head={head} base=develop findings={findings} -->"
+    return {"body": body, "author": {"login": "someone", "__typename": "User"}}
+
+
+def commit(oid: str, *conclusions: str) -> dict[str, object]:
+    suites = [{"conclusion": c} for c in conclusions]
+    return {"commit": {"oid": oid, "checkSuites": {"nodes": suites}}}
+
+
+def thread(login: str, head: str) -> dict[str, object]:
+    first = {"author": {"login": login}, "originalCommit": {"oid": head}}
+    return {"comments": {"nodes": [first]}}
+
+
+def pr_payload(**parts: object) -> dict[str, object]:
+    base: dict[str, object] = {"number": 1}
+    for key in ("commits", "reviews", "reviewThreads", "comments", "timelineItems"):
+        base[key] = {"pageInfo": {"hasNextPage": False}, "nodes": parts.get(key, [])}
+    return base
+
+
+def requested(actor_type: str, login: str) -> dict[str, object]:
+    return {
+        "actor": {"login": "x", "__typename": actor_type},
+        "requestedReviewer": {"login": login},
+    }
+
+
+class ReviewTests(unittest.TestCase):
+    def tally(self, **parts: object) -> bm.ReviewMetrics:
+        result = bm.ReviewMetrics(name="alpha")
+        for bot in bm.BOT_LOGINS:
+            result.bots[bot] = bm.BotStats()
+        bm.review_pr(pr_payload(**parts), result)
+        return result
+
+    def test_logins_come_from_the_adapter_files(self) -> None:
+        self.assertEqual(
+            set(bm.BOT_LOGINS.values()),
+            {"copilot-pull-request-reviewer", "coderabbitai", "qodo-free-for-open-source-projects"},
+        )
+
+    def test_rounds_count_distinct_heads_per_bot_and_pushes_count_commits(self) -> None:
+        reviews = [
+            {"author": {"login": COPILOT}, "commit": {"oid": SHA_A}},
+            {"author": {"login": COPILOT}, "commit": {"oid": SHA_A}},
+            {"author": {"login": COPILOT}, "commit": {"oid": SHA_B}},
+            {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}},
+        ]
+        result = self.tally(commits=[commit(SHA_A), commit(SHA_B)], reviews=reviews)
+        self.assertEqual(result.pushes, 2)
+        self.assertEqual(result.bots["copilot"].rounds, [2])
+        self.assertEqual(result.bots["coderabbit"].rounds, [1])
+        self.assertEqual(result.bots["qodo"].rounds, [])
+
+    def test_requests_split_by_actor_type_and_explicit_comments_count_as_user(self) -> None:
+        comments = [
+            {"body": f"@{RABBIT} review", "author": {"login": "p", "__typename": "User"}},
+            {"body": f"@{RABBIT} review", "author": {"login": RABBIT, "__typename": "Bot"}},
+            {"body": "/review", "author": {"login": "p", "__typename": "User"}},
+            {"body": f"@{RABBIT} reviewing", "author": {"login": "p", "__typename": "User"}},
+        ]
+        events = [requested("Bot", COPILOT), requested("User", COPILOT)]
+        result = self.tally(comments=comments, timelineItems=events)
+        self.assertEqual(result.bots["copilot"].requests_by_automation, 1)
+        self.assertEqual(result.bots["copilot"].requests_by_user, 1)
+        self.assertEqual(result.bots["coderabbit"].requests_by_user, 1)
+        self.assertEqual(result.bots["qodo"].requests_by_user, 1)
+
+    def test_local_findings_sum_and_unknown_is_counted_apart(self) -> None:
+        comments = [attest(SHA_A, "2"), attest(SHA_B, "unknown"), attest(SHA_C, "0")]
+        result = self.tally(comments=comments)
+        self.assertEqual(result.local_findings, 2)
+        self.assertEqual(result.local_unknown, 1)
+
+    def test_bot_findings_missed_by_clean_local_review_and_on_green_heads(self) -> None:
+        threads = [
+            thread(RABBIT, SHA_A),
+            thread(RABBIT, SHA_B),
+            thread(QODO, SHA_A),
+            thread("someone", SHA_A),
+        ]
+        result = self.tally(
+            commits=[commit(SHA_A, "SUCCESS", "SKIPPED"), commit(SHA_B, "SUCCESS", "FAILURE")],
+            comments=[attest(SHA_A, "0"), attest(SHA_B, "3")],
+            reviewThreads=threads,
+        )
+        rabbit = result.bots["coderabbit"]
+        self.assertEqual(rabbit.findings, 2)
+        self.assertEqual(rabbit.missed_by_local, 1)
+        self.assertEqual(rabbit.findings_on_green_heads, 1)
+        self.assertEqual(result.bots["qodo"].findings, 1)
+        self.assertEqual(result.bots["copilot"].findings, 0)
+
+    def test_failing_heads_and_those_after_a_clean_attestation(self) -> None:
+        result = self.tally(
+            commits=[
+                commit(SHA_A, "FAILURE"),
+                commit(SHA_B, "TIMED_OUT"),
+                commit(SHA_C, "SUCCESS"),
+            ],
+            comments=[attest(SHA_A, "0"), attest(SHA_B, "1")],
+        )
+        self.assertEqual(result.failing_heads, 2)
+        self.assertEqual(result.failing_after_clean_local, 1)
+
+    def test_a_pending_head_is_neither_failed_nor_green(self) -> None:
+        self.assertEqual(bm.head_state(commit(SHA_A, "SUCCESS", "")["commit"]), "other")  # type: ignore[arg-type]
+        self.assertEqual(bm.head_state(commit(SHA_A)["commit"]), "other")  # type: ignore[arg-type]
+
+    def test_a_cut_connection_is_recorded_as_truncated(self) -> None:
+        pr = pr_payload()
+        pr["commits"] = {"pageInfo": {"hasNextPage": True}, "nodes": []}
+        result = bm.ReviewMetrics(name="alpha")
+        bm.review_pr(pr, result)
+        self.assertEqual(result.truncated, ["PR 1 commits"])
+        self.assertIn("truncated", bm.review_notes([result])[0])
+
+
+class PolicyTests(unittest.TestCase):
+    @staticmethod
+    def payload(text: str) -> dict[str, str]:
+        import base64
+
+        return {"content": base64.b64encode(text.encode()).decode()}
+
+    def fetch(
+        self, *, side_effect: Exception | None = None, return_value: object = None
+    ) -> tuple[dict[str, str], str]:
+        patch = unittest.mock.patch.object(
+            bm, "run_gh", side_effect=side_effect, return_value=return_value
+        )
+        with patch:
+            return bm.fetch_policy("o", "alpha")
+
+    def test_a_404_means_absent(self) -> None:
+        triggers, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
+        self.assertEqual(error, "")
+        self.assertEqual(set(triggers.values()), {"none"})
+
+    def test_any_other_error_is_an_error_not_absent(self) -> None:
+        triggers, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
+        self.assertEqual(triggers, {})
+        self.assertIn("403", error)
+
+    def test_triggers_are_read_per_bot(self) -> None:
+        text = json.dumps({"copilot": {"trigger": "auto"}, "qodo": {"trigger": "manual"}})
+        triggers, error = self.fetch(return_value=self.payload(text))
+        self.assertEqual(error, "")
+        self.assertEqual(
+            triggers, {"copilot": "auto", "coderabbit": "unspecified", "qodo": "manual"}
+        )
+
+    def test_invalid_json_is_an_error(self) -> None:
+        _triggers, error = self.fetch(return_value=self.payload("{nope"))
+        self.assertIn("unreadable", error)
+
+
+class ReviewCollectTests(unittest.TestCase):
+    def test_the_query_is_capped_and_search_scoped_to_the_window(self) -> None:
+        reply = {"data": {"search": {"issueCount": 0, "nodes": []}}}
+        with unittest.mock.patch.object(
+            bm, "run_gh", side_effect=[reply, bm.GhError("HTTP 404")]
+        ) as run:
+            result = bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+        first = run.call_args_list[0].args[0]
+        self.assertIn("repo:o/alpha is:pr is:merged merged:>=2026-01-01", " ".join(first))
+        self.assertIn(f"first: {bm.PR_CAP}", bm.REVIEW_QUERY)
+        self.assertEqual(result.prs, 0)
+
+    def test_more_merged_prs_than_the_cap_is_marked_truncated(self) -> None:
+        reply = {"data": {"search": {"issueCount": bm.PR_CAP + 1, "nodes": []}}}
+        with unittest.mock.patch.object(bm, "run_gh", side_effect=[reply, bm.GhError("HTTP 404")]):
+            result = bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+        self.assertTrue(result.truncated)
+
+    def test_graphql_errors_raise(self) -> None:
+        with (
+            unittest.mock.patch.object(bm, "run_gh", return_value={"errors": [{"m": "x"}]}),
+            self.assertRaises(bm.GhError),
+        ):
+            bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
+
+    def test_a_policy_error_still_writes_the_report_and_exits_one(self) -> None:
+        def fake(args: list[str]) -> object:
+            if args[:2] == ["api", "graphql"]:
+                return {"data": {"search": {"issueCount": 0, "nodes": []}}}
+            if args[0] == "api" and "contents" in args[1]:
+                raise bm.GhError("gh: Forbidden (HTTP 403)")
+            if args[0] == "api":
+                return {"usageItems": []}
+            return []
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha"])
+        self.assertEqual(code, 1)
+        self.assertIn("Review return on cost, per bot", out.getvalue())
+        self.assertIn("| error |", out.getvalue())
+        self.assertIn("alpha", err.getvalue())
+
+    def test_both_formats_carry_the_review_tables(self) -> None:
+        result = bm.ReviewMetrics(name="alpha", bots={"copilot": bm.BotStats(rounds=[1, 3])})
+        start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 8)
+        md = bm.render_markdown(start, end, [metrics()], [], [result])
+        page = bm.render_html(start, end, [metrics()], [], [result])
+        self.assertIn("| alpha | copilot | none | 0 | 0 | 2.0 | 3 |", md)
+        self.assertEqual(page.count("<table"), 3)
+
+
 class MainTests(unittest.TestCase):
     def test_main_writes_the_report_to_stdout(self) -> None:
         def fake(args: list[str]) -> object:
+            if args[:2] == ["api", "graphql"]:
+                return {"data": {"search": {"issueCount": 0, "nodes": []}}}
+            if args[0] == "api" and "contents" in args[1]:
+                raise bm.GhError("gh api exited 1: gh: Not Found (HTTP 404)")
             if args[0] == "api":
                 return {"usageItems": []}
             if args[0] == "issue":
