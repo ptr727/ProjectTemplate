@@ -105,8 +105,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    Skip the merge in step 4 and go on to its post-merge path.
    On a promotion PR it means the drive's end state is passed, so stop and report it merged.
    A digest carrying `state=CLOSED` is a stop to report, with its `closed_at=`.
-   On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried,
-   so the hosted review runs once per change, at the promotion in step 6.
+   On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried.
+   So under the hub's default review policy, the hosted review runs once per change, at the
+   promotion in step 6. `wait` requests whatever the repository's review policy owes, so the
+   drive never asks whether a reviewer starts on its own.
 4. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's

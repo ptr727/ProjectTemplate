@@ -1,0 +1,69 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/ptr727/ProjectTemplate/spec/pr-review.schema.json",
+    "title": "Pull request review policy",
+    "description": "Which bots review a repository's pull requests, on which bases, when, and how often. A repository states it in .github/pr-review.json, and one carrying no file reads spec/pr-review.default.json. scripts/pr_review_policy.py is the reader and holds the same rules.",
+    "type": "object",
+    "required": ["version", "bots"],
+    "additionalProperties": false,
+    "properties": {
+        "$schema": { "type": "string" },
+        "version": { "const": 1 },
+        "bots": {
+            "type": "object",
+            "required": ["copilot", "coderabbit", "qodo"],
+            "additionalProperties": false,
+            "properties": {
+                "copilot": { "$ref": "#/$defs/bot" },
+                "coderabbit": {
+                    "allOf": [{ "$ref": "#/$defs/bot" }],
+                    "properties": {
+                        "command": {
+                            "description": "The comment that requests a review: review is incremental, full review rereads the whole pull request.",
+                            "enum": ["review", "full review"]
+                        }
+                    }
+                },
+                "qodo": { "allOf": [{ "$ref": "#/$defs/bot" }], "not": { "required": ["command"] } }
+            }
+        }
+    },
+    "$defs": {
+        "bot": {
+            "type": "object",
+            "required": ["trigger", "bases"],
+            "properties": {
+                "trigger": {
+                    "description": "How a review arrives. explicit: wait requests it. auto: the bot starts on its own, and wait fills a missed start only for a gated bot. off: never requested or waited on.",
+                    "enum": ["auto", "explicit", "off"]
+                },
+                "bases": {
+                    "description": "The pull request base branches this bot reviews, each a full-match regex or @default for the repository's default branch.",
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 }
+                },
+                "when": {
+                    "description": "Whether an explicit request waits for the head's checks to go green first.",
+                    "enum": ["on-open", "after-checks"],
+                    "default": "on-open"
+                },
+                "rounds": {
+                    "description": "once: one round per pull request. per-push: a round on each new head.",
+                    "enum": ["once", "per-push"],
+                    "default": "per-push"
+                },
+                "maxRounds": {
+                    "description": "The most rounds requested on one pull request, or null for no cap. Past it, an attested local pass covers a new head.",
+                    "type": ["integer", "null"],
+                    "minimum": 1
+                },
+                "gate": {
+                    "description": "Whether the merge waits for this bot's review on the head. Defaults to true for copilot and false for the others.",
+                    "type": "boolean"
+                },
+                "command": { "type": "string" }
+            },
+            "additionalProperties": false
+        }
+    }
+}

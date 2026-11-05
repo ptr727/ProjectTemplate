@@ -19,6 +19,7 @@ REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
 CODERABBIT_LOGIN = adapter.VOCABULARIES["coderabbit"]["login"]
 QODO_LOGIN = adapter.VOCABULARIES["qodo"]["login"]
 OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
+POLICY_KEY = "_reviewPolicy"
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
 # A login that reads as this reviewer without being the spelling every query filters on.
@@ -618,9 +619,29 @@ def attestation(pr: dict) -> str | None:
 
 
 def promotion(pr: dict) -> bool:
-    """Whether the pull request merges into the repository's default branch."""
+    """Whether a Copilot round rather than a local pass is to cover this head.
+
+    Without a review policy on the payload that is a merge into the default branch, the behavior
+    before `pr_review_policy` existed. With one, it is a base the policy's Copilot entry covers,
+    while a further round is allowed or one already covers the head. So a repository capping its
+    rounds falls back to an attested local pass once the cap is spent. An unread default branch
+    still demands the round, since nothing proves the base is not the default. `POLICY_KEY` names
+    the payload key here rather than importing it, since a reader imports no module that reads files.
+    """
     default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
-    return not default or pr.get("baseRefName") == default
+    policy = pr.get(POLICY_KEY)
+    if not default or policy is None:
+        return not default or pr.get("baseRefName") == default
+    bot = policy.bot("copilot")
+    if not bot.covers(pr.get("baseRefName") or "", default):
+        return False
+    return reviewed_head(pr) or bot.rounds_left(copilot_rounds(pr))
+
+
+def copilot_rounds(pr: dict) -> int:
+    """The distinct heads Copilot's own reviews cover on this pull request, refusals excluded."""
+    nodes = reviewer_nodes(pr, "reviews")
+    return len({commit_oid(n) for n in nodes if not refusal_of(n) and commit_oid(n)})
 
 
 def holds(pr: dict) -> bool:

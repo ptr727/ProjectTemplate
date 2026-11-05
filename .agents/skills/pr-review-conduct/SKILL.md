@@ -36,9 +36,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    thread, and a missing approval alike, and the response differs by cause.
 2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
    default, every head can carry an attested local pass instead, `coverage=local` in the digest.
-   That holds where the whole review history is in view and no round on record states partial coverage. A promotion re-reviews content its feature pull requests already carried, so
-   the hosted review runs once per change, at the promotion. A pull request into the default
-   branch, a promotion among them, always carries a Copilot round on its head. A review is matched
+   That holds where the whole review history is in view and no round on record states partial coverage. A promotion re-reviews content its feature pull requests already carried.
+   So under the hub's default review policy, the hosted review runs once per change, at the
+   promotion. There a pull request into the default branch, a promotion among them, always
+   carries a Copilot round on its head. A repository's own `.github/pr-review.json` can move,
+   cap, or hold that round until the head's checks pass. `pr_review.py` applies it, so follow
+   the digest and the exit code rather than this paragraph's default. A review is matched
    by commit SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
    re-review lands, and the matched review is **read**, not just counted. A review can carry the
    head SHA and still decline the PR outright, or say it read only part of the changed files.

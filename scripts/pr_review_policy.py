@@ -1,0 +1,208 @@
+"""A repository's pull request review policy: which bots review, on which bases, when, and how often.
+
+Why this exists: the bots cost money and agent time per round. So how far each one is asked to
+review is a per-repository choice rather than a fleet constant. The policy lives in the
+repository's own `.github/pr-review.json`. Changing it changes the scripts' behavior for that
+repository alone, and a rollback is a revert of one file. A repository carrying no file reads the
+hub's `spec/pr-review.default.json`. That default matches the behavior the scripts had before the
+file existed.
+
+The trigger says how a review arrives, never whether the gate wants one. That is what lets the
+skills stay silent about the trigger. `wait` requests whatever the policy says the bot does not
+start for itself, and the gate asks the same question in every mode.
+
+- `explicit`: the bot does not start on its own, so `wait` requests it once `when` allows.
+- `auto`: the bot starts on its own. For a bot the gate waits on, `wait` still requests it where
+  nothing is pending. So a missed automatic trigger is filled rather than waited out. For any other
+  bot `wait` requests nothing.
+- `off`: the bot is never requested and never waited on.
+
+The policy is read from the pull request's base branch rather than its head. So a pull request
+cannot change the policy its own review runs under. A payload carries its policy under
+`PAYLOAD_KEY`, and a `bases` entry of `DEFAULT_BASE` names the default branch, whose name varies.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+POLICY_PATH = ".github/pr-review.json"
+DEFAULT_PATH = Path(__file__).resolve().parent.parent / "spec" / "pr-review.default.json"
+PAYLOAD_KEY = "_reviewPolicy"
+VERSION = 1
+BOTS = ("copilot", "coderabbit", "qodo")
+TRIGGERS = ("auto", "explicit", "off")
+WHENS = ("on-open", "after-checks")
+ROUNDS = ("once", "per-push")
+COMMANDS = ("review", "full review")
+DEFAULT_BASE = "@default"
+BOT_KEYS = frozenset({"trigger", "bases", "when", "rounds", "maxRounds", "gate", "command"})
+
+
+class PolicyError(ValueError):
+    """A policy that does not parse or breaks the schema, named with where it was read from."""
+
+
+@dataclass(frozen=True)
+class BotPolicy:
+    """One bot's settings. `max_rounds` None means no cap."""
+
+    trigger: str
+    bases: tuple[str, ...]
+    when: str
+    rounds: str
+    max_rounds: int | None
+    gate: bool
+    command: str
+
+    def covers(self, base: str, default: str) -> bool:
+        """Whether this bot reviews a pull request into `base`, `default` naming the default branch."""
+        if self.trigger == "off":
+            return False
+        for entry in self.bases:
+            if entry == DEFAULT_BASE:
+                if default and base == default:
+                    return True
+            elif re.fullmatch(entry, base):
+                return True
+        return False
+
+    def requests(self) -> bool:
+        """Whether `wait` may send this bot a request at all, per the module docstring."""
+        return self.trigger == "explicit" or (self.trigger == "auto" and self.gate)
+
+    def rounds_left(self, done: int) -> bool:
+        """Whether a further round is allowed after `done` rounds on this pull request."""
+        if self.rounds == "once" and done >= 1:
+            return False
+        return self.max_rounds is None or done < self.max_rounds
+
+    def waits_for_checks(self) -> bool:
+        """Whether a request waits for the head's checks to go green first."""
+        return self.trigger == "explicit" and self.when == "after-checks"
+
+
+@dataclass(frozen=True)
+class Policy:
+    """Every bot's settings, and where they were read from."""
+
+    bots: dict[str, BotPolicy]
+    source: str
+
+    def bot(self, name: str) -> BotPolicy:
+        return self.bots[name]
+
+
+def _fail(source: str, why: str) -> PolicyError:
+    return PolicyError(f"{source}: {why}")
+
+
+def _bot(source: str, name: str, raw: object) -> BotPolicy:
+    where = f"bots.{name}"
+    if not isinstance(raw, dict):
+        raise _fail(source, f"{where} is not an object")
+    stray = sorted(set(raw) - BOT_KEYS)
+    if stray:
+        raise _fail(source, f"{where} has unknown key(s) {', '.join(stray)}")
+    missing = sorted({"trigger", "bases"} - set(raw))
+    if missing:
+        raise _fail(source, f"{where} is missing {', '.join(missing)}")
+    trigger = raw["trigger"]
+    if trigger not in TRIGGERS:
+        raise _fail(source, f"{where}.trigger is {trigger!r}, not one of {', '.join(TRIGGERS)}")
+    bases = raw["bases"]
+    if not isinstance(bases, list) or not all(isinstance(b, str) and b for b in bases):
+        raise _fail(source, f"{where}.bases is not a list of non-empty strings")
+    for entry in bases:
+        if entry != DEFAULT_BASE:
+            try:
+                re.compile(entry)
+            except re.error as exc:
+                raise _fail(
+                    source, f"{where}.bases entry {entry!r} is not a regex ({exc})"
+                ) from exc
+    when = raw.get("when", "on-open")
+    if when not in WHENS:
+        raise _fail(source, f"{where}.when is {when!r}, not one of {', '.join(WHENS)}")
+    rounds = raw.get("rounds", "per-push")
+    if rounds not in ROUNDS:
+        raise _fail(source, f"{where}.rounds is {rounds!r}, not one of {', '.join(ROUNDS)}")
+    cap = raw.get("maxRounds")
+    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or cap < 1):
+        raise _fail(source, f"{where}.maxRounds is {cap!r}, not a positive integer or null")
+    gate = raw.get("gate", name == "copilot")
+    if not isinstance(gate, bool):
+        raise _fail(source, f"{where}.gate is {gate!r}, not a boolean")
+    command = raw.get("command", "review")
+    if "command" in raw and name != "coderabbit":
+        raise _fail(source, f"{where}.command applies to coderabbit only")
+    if command not in COMMANDS:
+        raise _fail(source, f"{where}.command is {command!r}, not one of {', '.join(COMMANDS)}")
+    return BotPolicy(trigger, tuple(bases), when, rounds, cap, gate, command)
+
+
+def parse(data: object, source: str) -> Policy:
+    """The policy `data` states, every bot named, or PolicyError naming the first fault."""
+    if not isinstance(data, dict):
+        raise _fail(source, "the policy is not a JSON object")
+    stray = sorted(set(data) - {"$schema", "version", "bots"})
+    if stray:
+        raise _fail(source, f"unknown key(s) {', '.join(stray)}")
+    if data.get("version") != VERSION:
+        raise _fail(source, f"version is {data.get('version')!r}, and this reader knows {VERSION}")
+    bots = data.get("bots")
+    if not isinstance(bots, dict):
+        raise _fail(source, "bots is not an object")
+    stray = sorted(set(bots) - set(BOTS))
+    if stray:
+        raise _fail(source, f"bots names unknown bot(s) {', '.join(stray)}")
+    missing = [b for b in BOTS if b not in bots]
+    if missing:
+        raise _fail(source, f"bots is missing {', '.join(missing)}, and every bot is stated")
+    return Policy({name: _bot(source, name, bots[name]) for name in BOTS}, source)
+
+
+def load_default(path: Path = DEFAULT_PATH) -> Policy:
+    """The hub's default policy, read from this checkout."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise _fail(str(path), f"unreadable ({exc})") from exc
+    return parse(data, f"hub default {path.name}")
+
+
+def decode_contents(content: str, source: str) -> Policy:
+    """The policy in a contents API `content` field, which is base64 with line breaks."""
+    try:
+        text = base64.b64decode(content, validate=False).decode("utf-8")
+        data = json.loads(text)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise _fail(source, f"does not decode as JSON ({exc})") from exc
+    return parse(data, source)
+
+
+Reader = Callable[[str, str, str, str], str | None]
+
+
+def fetch(owner: str, repo: str, ref: str, read: Reader) -> Policy:
+    """The policy `owner/repo` carries at `ref`, or the hub default where it carries none.
+
+    `read` returns the contents API `content` field, or None where GitHub answered that the file is
+    absent. It raises on any other failure, so an unread file never reads as an absent one.
+    """
+    source = f"{owner}/{repo}:{POLICY_PATH}@{ref}"
+    content = read(owner, repo, POLICY_PATH, ref)
+    if content is None:
+        return load_default()
+    return decode_contents(content, source)
+
+
+def describe(policy: Policy) -> str:
+    """One line naming each bot's trigger, for a digest or a metrics column."""
+    return " ".join(f"{name}={policy.bot(name).trigger}" for name in BOTS)

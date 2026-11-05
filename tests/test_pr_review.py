@@ -47,6 +47,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
 from import_probe import import_delta
 
+_POLICY_PATCH = mock.patch.object(
+    pr_review.side, "policy_for", return_value=pr_review.review_policy.load_default()
+)
+
+
+def setUpModule() -> None:
+    """Have every case read the hub default policy unless it patches its own.
+
+    So no case reaches for a contents API read it never staged. The default states the behavior
+    the gate had before policies.
+    """
+    _POLICY_PATCH.start()
+
+
+def tearDownModule() -> None:
+    _POLICY_PATCH.stop()
+
+
 REPO = Path(__file__).resolve().parent.parent
 # The gate and the reader modules it imports, which every whole-source guard below reads together.
 GATE_SOURCES = (
@@ -2855,7 +2873,9 @@ class TestNullNodes(unittest.TestCase):
             mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
             mock.patch.object(pr_review.time, "sleep"),
         ):
-            self.assertEqual(clean, pr_review.gql("query", "o", "r", 7))
+            read = pr_review.gql("query", "o", "r", 7)
+        self.assertIsNotNone(read.pop(pr_review.review_policy.PAYLOAD_KEY))
+        self.assertEqual(clean, read)
         self.assertEqual(2, run.call_count)
 
     def test_a_null_node_that_stays_ends_the_run_naming_where_it_sat(self) -> None:

@@ -242,6 +242,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as shared
+import pr_review_policy as review_policy
+import pr_review_side as side
 from pr_review_answers import ack_lines, report_verdict
 from pr_review_checks import (
     CHECK_GRACE,
@@ -287,6 +289,7 @@ from pr_review_rounds import (
     quota_signal,
     refusing_review,
     request_recorded,
+    reviewed_head,
     reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
@@ -386,7 +389,7 @@ HELD_FIELDS = """
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
+    commits(last:1){ nodes{ commit{ oid committedDate statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
@@ -473,6 +476,7 @@ LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
 # The conversation-comment and thread mutations the runbook publishes.
 # `url` is fetched because it confirms the comment or reply carried a body.
+COMMENT_PATH = ("addComment", "commentEdge", "node")
 M_COMMENT = """
 mutation($subjectId:ID!,$body:String!){
   addComment(input:{subjectId:$subjectId, body:$body}){
@@ -545,6 +549,10 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     pr = data["repository"]["pullRequest"]
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
+    if isinstance(pr, dict) and pr.get("baseRefName"):
+        pr[review_policy.PAYLOAD_KEY] = side.policy_for(
+            owner, repo, pr["baseRefName"], gh_rest, answered_absent
+        )
     return pr
 
 
@@ -1592,6 +1600,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and holds(snapshot)
         and (not answer or attested(snapshot))
     )
+    copilot = side.copilot_policy(snapshot, reviewer_requested(pr))
     retry, watch = "", False
     if snapshot and stopped and not held:
         state, line = transient_state(owner, repo, a.number, snapshot, stopped)
@@ -1602,7 +1611,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     # Skipped once a round past --min-rounds covers the head, Copilot answered outside a review, or a request is pending.
     recorded: bool | None = None
     final: dict | None = full if done else None
-    if (
+    owed = (
         may_request
         and not done
         and not answer
@@ -1611,7 +1620,13 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and not stopped
         and not held
         and not reviewer_requested(pr)
-    ):
+        and (copilot is None or a.request or copilot.requests())
+    )
+    read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
+    await_green = functools.partial(side.await_green, read_held, start, a.timeout, backoff)
+    checks_hold = await_green() if owed and side.holds_for_checks(copilot, a.request) else ""
+    owed, final = (False, None) if checks_hold else (owed, final)
+    if owed:
         line, recorded = request_copilot_review(
             owner, repo, a.number, pr["id"], copilot_bot_id(history), POLL_DELAYS[0]
         )
@@ -1627,7 +1642,12 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
-    if recorded is False:
+    if snapshot is not None and may_request:
+        post = functools.partial(gh_graphql, M_COMMENT, subjectId=snapshot.get("id") or pr["id"])
+        side.ask(snapshot, await_green, lambda body: mutated(post(body=body), *COMMENT_PATH))
+    if checks_hold:
+        print(side.checks_note(checks_hold))
+    elif recorded is False:
         print(
             "note: the review request returned success and recorded nothing on this pull "
             "request, no pending reviewer and no review-request event, so this wait stops here "
@@ -1715,6 +1735,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             a.timeout,
         )
 
+    if snapshot is not None and side.side_unmet(snapshot) and not checks_hold:
+        backoff(snapshot, read_held, lambda p: bool(side.side_unmet(p)), start, a.timeout)
+        final = None
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
     if not is_open(final):
@@ -1735,6 +1758,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     )
     print(out)
     print(f"waited={int(time.monotonic() - start)}s")
+    if checks_hold and not reviewed_head(final):
+        return side.checks_status(checks_hold)
     # A stuck required check decides the code only once the review itself is sound.
     held = held and holds(final)
     covered = held and local_cover(final)
@@ -1806,6 +1831,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "not ready to merge"
             )
             return 45
+        if owing := side.side_unmet(final):
+            return side.side_status(owing)
         return 0
     # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)
