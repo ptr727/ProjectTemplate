@@ -652,6 +652,12 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(triggers, {})
         self.assertIn("403", error)
 
+    def test_a_file_stating_no_review_section_reads_the_default_marked(self) -> None:
+        text = json.dumps({"version": 1, "guard": {}})
+        triggers, error = self.fetch(return_value=self.payload(text))
+        self.assertEqual(error, "")
+        self.assertTrue(all(t.endswith(" (default)") for t in triggers.values()))
+
     def test_triggers_are_read_per_bot(self) -> None:
         text = policy_text(qodo="explicit", coderabbit="off")
         triggers, error = self.fetch(return_value=self.payload(text))

@@ -100,6 +100,8 @@ class TestParse(unittest.TestCase):
             "guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}},
         }
         self.assertEqual(policy.load_default().bots, policy.parse(only_guard, "test").bots)
+        self.assertTrue(policy.parse(only_guard, "test").from_default)
+        self.assertFalse(parsed().from_default)
 
     def test_the_review_reader_leaves_the_guard_section_to_the_guard(self) -> None:
         data = {**stated(qodo={"trigger": "off", "bases": []}), "guard": {"anything": 1}}

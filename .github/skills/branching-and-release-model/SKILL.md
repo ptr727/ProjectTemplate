@@ -133,9 +133,9 @@ stays the same:
 - **The commit is made in place, by the maintainer and an agent alike.** It lands in the live
   checkout the running service reads, on `develop`, so the maintainer sees it where he edits. An
   agent may take a worktree or a pull request into `develop` instead, and neither is required.
-  The repository's `.github/agent-policy.json` lists `develop` in its `guard` section. That is
-  what lets the host write guard allow the in-place commit. The guard reads the file from `main`,
-  so the maintainer's merge grants the exemption.
+  The host write guard allows the in-place commit only once the repository's
+  `.github/agent-policy.json` on `main` lists `develop` in its `guard` section. The maintainer's
+  merge to `main` therefore grants the exemption, and until then the guard denies it.
 - **A direct push names the issues it fixes in its commit message**, as one line such as
   `Closes on promotion: #N, #M`. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
   PR carrying the push puts a closing keyword in its own body for each issue the line names, per the

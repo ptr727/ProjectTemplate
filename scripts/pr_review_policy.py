@@ -108,9 +108,10 @@ class BotPolicy:
 
 @dataclass(frozen=True)
 class Policy:
-    """Every bot's settings."""
+    """Every bot's settings, and whether they came from the hub default rather than the repository."""
 
     bots: dict[str, BotPolicy]
+    from_default: bool = False
 
     def bot(self, name: str) -> BotPolicy:
         return self.bots[name]
@@ -211,7 +212,7 @@ def load_default(path: Path = DEFAULT_PATH) -> Policy:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise _fail(str(path), f"unreadable ({exc})") from exc
-    return parse(data, f"hub default {path.name}", fallback=False)
+    return Policy(parse(data, f"hub default {path.name}", fallback=False).bots, from_default=True)
 
 
 def decode_contents(content: str, source: str) -> Policy:

@@ -92,7 +92,7 @@ already cut, and wrapper-repo upstream-version tracking.
 The registry `workflowModel` field is `release` (the default) or `operational`. **Operational**
 repos track a live service's running state rather than shipping versioned units of delivery.
 They hold live-service config such as Home Assistant, ESPHome, Vantage, and home automation. Commits go
-directly to `develop`, and CI runs on the push as advisory feedback only. The maintainer and an agent alike commit in place, in the live checkout the running service reads. A worktree or a pull request into `develop` stays available to an agent and is never required. The repository's `.github/agent-policy.json` lists `develop` in its `guard` section, which lets the host write guard allow that in-place commit. The guard reads that file from `main`, so the maintainer's merge is what grants it. A direct push names
+directly to `develop`, and CI runs on the push as advisory feedback only. The maintainer and an agent alike commit in place, in the live checkout the running service reads. A worktree or a pull request into `develop` stays available to an agent and is never required. The host write guard allows that in-place commit only once the repository's `.github/agent-policy.json` on `main` lists `develop` in its `guard` section. The maintainer's merge to `main` is therefore what grants it, and until then the guard denies it. A direct push names
 the issues it fixes in one `Closes on promotion:` line in its commit message, such as
 `Closes on promotion: #N, #M`. The promotion pull request carrying that push takes a closing
 keyword in its body for each issue the line names. Its body takes no closing keyword for a push

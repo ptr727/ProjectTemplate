@@ -117,6 +117,12 @@ _ALLOW_PRIMARY_ENV = "GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT"
 _FALSY_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
 _POLICY_BLOB = "origin/main:.github/agent-policy.json"
 _IN_PLACE_SUBS = frozenset({"add", "commit", "rm", "mv", "push"})
+_COMMIT_VALUES = frozenset(
+    {"--message", "--file", "--reuse-message", "--reedit-message", "--template", "--author"}
+    | {"--date", "--cleanup", "--trailer", "--fixup", "--squash"}
+)
+_COMMIT_SWEEPS = frozenset({"--all", "--amend", "--patch", "--interactive", "--include", "--only"})
+_IN_PLACE_PUSH_FLAGS = frozenset({"-q", "--quiet", "-v", "--verbose", "-u", "--set-upstream"})
 
 _NODE_ID_LITERAL = re.compile(r"^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$")
 _NODE_ID_IN_QUERY = re.compile(r'"([A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})"')
@@ -994,22 +1000,37 @@ def _rule_denial(op: str, br: str, rules: set[str] | None) -> str | None:
     return None
 
 
-def _skips_hooks(sub: str, args: list[str]) -> bool:
-    """True when a commit or push carries `--no-verify`, or a commit its `-n` in a short cluster."""
+def _commit_flags(args: list[str]) -> list[str]:
+    """A commit's options before any `--`, each short cluster cut at its first value-taking flag.
+
+    The word after a detached value is skipped, so a message such as `-m "-n fix"` reads as no flag.
+    """
+    out: list[str] = []
     i = 0
     while i < len(args) and args[i] != "--":
         a = args[i]
-        if a == "--no-verify":
-            return True
-        if sub == "commit" and re.fullmatch(r"-[A-Za-z]+", a):
-            for ch in a[1:]:
-                if ch == "n":
-                    return True
-                if ch in "mFcCt":
-                    break
+        if re.fullmatch(r"-[A-Za-z]+", a):
+            cut = next((k for k, ch in enumerate(a) if ch in "mFcCt"), len(a))
+            out.append(a[:cut])
             i += a[-1] in "mFcCt"
+        elif a in _COMMIT_VALUES:
+            i += 1
+        elif a.startswith("-"):
+            out.append(a.split("=", 1)[0])
+        else:
+            out.append(a)
         i += 1
-    return False
+    return out + args[i:]
+
+
+def _skips_hooks(sub: str, args: list[str]) -> bool:
+    """True when a commit or push carries `--no-verify`, or a commit its `-n` in a short cluster."""
+    if sub == "commit":
+        return any(
+            a == "--no-verify" or re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", a)
+            for a in _commit_flags(args)
+        )
+    return "--no-verify" in args[: args.index("--")] if "--" in args else "--no-verify" in args
 
 
 def _operands(args: list[str], values: frozenset[str]) -> list[str]:
@@ -1208,25 +1229,34 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
     only `branch` on `origin`, and requirement 4 still judges force and the branch's live rules.
     """
     if sub == "push":
-        remote, writes = _push_targets(args, lambda: (branch,))
-        return remote in (None, "origin") and bool(writes) and writes == [("update", branch)]
+        pos = [a for a in args if not a.startswith("-")]
+        specs = {branch, "HEAD", f"refs/heads/{branch}", f"{branch}:{branch}", f"HEAD:{branch}"}
+        return (
+            set(args) - set(pos) <= _IN_PLACE_PUSH_FLAGS
+            and pos[:1] in ([], ["origin"])
+            and len(pos) <= 2
+            and all(s in specs for s in pos[1:])
+        )
     if sub == "commit":
-        for a in args:
-            if a in ("--all", "--amend", "--patch", "--interactive"):
-                return False
-            lead = re.match(r"-([^-mFCct]*)", a)
-            if lead and set(lead[1]) & {"a", "p"}:
-                return False
-        return True
+        flags = _commit_flags(args)
+        return not any(
+            not a.startswith("-")
+            or a in _COMMIT_SWEEPS
+            or a.startswith("--pathspec")
+            or re.search(r"[apio]", a[1:])
+            and not a.startswith("--")
+            for a in flags
+        )
     paths = args[args.index("--") + 1 :] if "--" in args else args
     flags = args[: args.index("--")] if "--" in args else args
-    return (
-        bool(paths)
-        and len(paths) >= (2 if sub == "mv" else 1)
-        and not any(a.startswith("-") for a in flags)
-        and not any(p in (".", "*") or p.startswith(":") or re.search(r"[*?\[]", p) for p in paths)
-        and not any(os.path.isdir(os.path.join(target, p)) for p in paths)
-    )
+    if not paths or len(paths) < (2 if sub == "mv" else 1) or any(a.startswith("-") for a in flags):
+        return False
+    if any(p in (".", "*") or p.startswith(":") or re.search(r"[*?\[]", p) for p in paths):
+        return False
+    if sub != "add":
+        return True
+    joined = [_join_dir(target, p) for p in paths]
+    return all(j is not None and not os.path.isdir(j) for j in joined)
 
 
 def _primary_denial(
@@ -1235,6 +1265,7 @@ def _primary_denial(
     lookup: Callable[[str], bool | None],
     ref_resolver: Callable[[str, str], bool],
     in_place: Callable[[str], str | None],
+    switched: bool = False,
 ) -> str | None:
     """Requirement 6: why this is a mutating git operation in a primary checkout, or None."""
     if _base(cmd.argv[0]) != "git":
@@ -1251,7 +1282,7 @@ def _primary_denial(
         return None
     if not lookup(target):
         return None
-    in_place_ok = git.sub in _IN_PLACE_SUBS and not git.configs
+    in_place_ok = git.sub in _IN_PLACE_SUBS and not git.configs and not switched
     if (
         in_place_ok
         and (branch := in_place(target))
@@ -1537,7 +1568,7 @@ def classify(
         if reason := _bypass_denial(c, current_branch, rules_lookup, switched):
             return "deny", reason
     for c in reading.cmds:
-        if reason := _primary_denial(c, env_in, lookup, resolver, in_place):
+        if reason := _primary_denial(c, env_in, lookup, resolver, in_place, switched):
             return "deny", reason
     if any(_unbounded_wait(segs, timed) for segs, timed in reading.texts):
         return "deny", _WAIT_REASON
@@ -1869,7 +1900,8 @@ _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
     ("git add -- automations.yaml", "develop", "allow"),
     ('git commit -m "Record live change"', "develop", "allow"),
     ('git commit -m "Record live change"', None, "deny"),
-    ("git commit -S -m x automations.yaml", "develop", "allow"),
+    ("git commit -S -m x", "develop", "allow"),
+    ("git commit -S -m x automations.yaml", "develop", "deny"),
     ("git rm old.yaml", "develop", "allow"),
     ("git mv a.yaml b.yaml", "develop", "allow"),
     ("git push origin develop", "develop", "allow"),
@@ -1887,7 +1919,20 @@ _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
     ("git commit -a -m x", "develop", "deny"),
     ("git commit --amend --no-edit", "develop", "deny"),
     ("git commit -p", "develop", "deny"),
-    ("git -c core.hooksPath=/dev/null commit -m x", "develop", "deny"),
+    ("git -c user.name=x commit -m x", "develop", "deny"),
+    ("git commit -m x .", "develop", "deny"),
+    ("git commit -m x -- automations", "develop", "deny"),
+    ("git commit -o -m x automations.yaml", "develop", "deny"),
+    ("git commit --pathspec-from-file=list -m x", "develop", "deny"),
+    ('git commit -m "-p fix"', "develop", "allow"),
+    ("git commit -nm x", "develop", "deny"),
+    ("git checkout main && git add a.yaml && git commit -m x", "develop", "deny"),
+    ("git push origin develop --tags", "develop", "deny"),
+    ('git push origin develop "$B"', "develop", "deny"),
+    ("git push origin develop refs/tags/v1", "develop", "deny"),
+    ("git push -u origin develop", "develop", "allow"),
+    ("git mv old.yaml automations/", "develop", "allow"),
+    ('git add "$F"', "develop", "deny"),
     ("git rm -r automations", "develop", "deny"),
     ("git mv -f a.yaml b.yaml", "develop", "deny"),
     ("git mv a.yaml", "develop", "deny"),
@@ -2054,6 +2099,40 @@ def _is_primary_checkout_selftest() -> bool | str:
         if not _build_selftest_repo(primary, [["worktree", "add", "-q", linked, "-b", "x"]]):
             return "skip"
         return _is_primary_checkout(primary) is True and _is_primary_checkout(linked) is False
+
+
+def _in_place_selftest() -> bool | str:
+    """Read a real repository's agent policy from `origin/main` alone, and judge a real directory add.
+
+    "skip" where the repository could not be built, which is neither a pass nor a failure.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = os.path.join(tmp, "live")
+        if not _build_selftest_repo(repo, []):
+            return "skip"
+        os.makedirs(os.path.join(repo, ".github", "dir"))
+        got: list[object] = []
+
+        def publish(text: str) -> None:
+            with open(os.path.join(repo, _POLICY_BLOB.split(":")[1]), "w", encoding="utf-8") as f:
+                f.write(text)
+            got.append(_in_place_branch(repo))
+            for step in (
+                ["add", "-A"],
+                ["commit", "-qm", "p"],
+                ["update-ref", "refs/remotes/origin/main", "HEAD"],
+            ):
+                subprocess.run(
+                    [*_SELFTEST_GIT, "-C", repo, *step], capture_output=True, check=False
+                )
+            got.append(_in_place_branch(repo))
+
+        publish('{"guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}')
+        got += [
+            classify(f"git add {p}", repo, environ={})[0] for p in (".github/x.json", ".github/dir")
+        ]
+        publish("{")
+        return got == [None, "develop", "allow", "deny", "develop", None]
 
 
 _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
@@ -2277,6 +2356,11 @@ def _selftest_cases() -> int:
     ok = ok and live in (True, "skip")
     print(
         f"  {'FAIL' if live is False else 'ok  '} [live ] a real checkout reads as primary: {live}"
+    )
+    policy = _in_place_selftest()
+    ok = ok and policy in (True, "skip")
+    print(
+        f"  {'FAIL' if policy is False else 'ok  '} [live ] a real agent policy reads from main: {policy}"
     )
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1

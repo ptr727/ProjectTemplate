@@ -530,7 +530,7 @@ def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
             out.append(
                 f"{r.name}: {POLICY_PATH} changed on {', '.join(r.policy_changes)} on {r.policy_branch},"
                 " inside the window,"
-                " so the window mixes two policies."
+                " so the window may mix two review policies."
             )
         if r.policy_error:
             out.append(f"{r.name}: reading the {r.policy_read} failed: {r.policy_error}")
@@ -731,7 +731,8 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
     """Each bot's trigger in the policy file at `ref`, read the way the review gate reads it.
 
     The gate's own `fetch` does the read, so a file it would refuse reads as an error here too. A
-    file it would take as absent reads as the hub default, each trigger marked `(default)`.
+    file it would take as absent, or one stating no review section, reads as the hub default, each
+    trigger marked `(default)`.
     """
     absent: list[str] = []
 
@@ -755,7 +756,7 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
         return {}, str(error)
     except PolicyError as error:
         return {}, f"unreadable policy file: {error}"
-    mark = " (default)" if absent else ""
+    mark = " (default)" if policy.from_default else ""
     return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
 
 
