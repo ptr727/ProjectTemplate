@@ -461,12 +461,39 @@ class WiringCase(unittest.TestCase):
             script = (
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
                 f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
-                f"project_file={files['project']}\n"
+                f"project_file={files['project']}\ncheckout_given=false\n"
                 "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 1; }\n"
                 f"cmd_apply() {{\n    local f\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
             )
             result = run_bash(script)
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Aborting before any write", result.stderr)
+        self.assertNotIn("reached-the-writes", result.stdout)
+
+    def test_apply_plans_the_agent_policy_checkout_before_any_write(self) -> None:
+        """A checkout the policy files cannot be written into aborts with nothing applied."""
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {}
+            for name in ("settings", "labels", "develop", "main", "project"):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text("{}", encoding="utf-8")
+                files[name] = shlex.quote(str(path))
+            preflight = lift(
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n"
+                r"    # The project is resolved here.*?\n)    echo"
+            )
+            script = (
+                f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
+                f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
+                f"project_file={files['project']}\ncheckout_given=true\ncheckout=/x\n"
+                "agent_policy=p\nagent_policy_args=()\nrepo=acme/widget\n"
+                'uv() { echo "uv $*"; return 1; }\n'
+                "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
+                f"cmd_apply() {{\n    local f\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
+            )
+            result = run_bash(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--dry-run", result.stdout)
         self.assertIn("Aborting before any write", result.stderr)
         self.assertNotIn("reached-the-writes", result.stdout)
 
@@ -486,7 +513,7 @@ class WiringCase(unittest.TestCase):
             script = (
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
                 f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
-                f"project_file={absent}\n"
+                f"project_file={absent}\ncheckout_given=false\n"
                 "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
                 f"cmd_apply() {{\n    local f\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
             )
@@ -513,7 +540,7 @@ class WiringCase(unittest.TestCase):
                 'jqr() { printf "1\\n"; }\n'
             )
             script = (
-                f"repo=ptr727/Fixture\nmodel=release\nrepo_arg=\ndescription=\n"
+                f"repo=ptr727/Fixture\nmodel=release\nrepo_arg=\ndescription=\ncheckout_given=false\n"
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
                 f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
                 f"project_file={files['project']}\n{stubs}{body}cmd_apply\n"
@@ -537,7 +564,7 @@ class WiringCase(unittest.TestCase):
             script = (
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
                 f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
-                f"project_file={files['project']}\n{JQR}"
+                f"project_file={files['project']}\ncheckout_given=false\n{JQR}"
                 "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
                 'project_node_id() { echo "no such project" >&2; return 1; }\n'
                 f"cmd_apply() {{\n    local f project_id\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
@@ -557,6 +584,7 @@ class WiringCase(unittest.TestCase):
                 "check_security",
                 "check_labels",
                 "check_environments",
+                "check_agent_policy",
             )
         )
         script = (

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure or validate a repository against the committed fleet config in this directory, via the GitHub API.
 #
-#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational]   # create-or-update settings + labels + rulesets + the fleet project link (writes)
+#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>]   # create-or-update settings + labels + rulesets + the fleet project link (writes), and with --checkout the agent policy files
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it.
@@ -10,13 +10,19 @@
 # The repo defaults to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
 #
-# The apply mode writes five groups, in order.
+# The apply mode writes five groups, in order, plus a sixth when --checkout names a local checkout of the repo.
 # First settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only when it exists).
 # Then the Dependabot vulnerability alerts and automated security updates.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
 # Then the link to the fleet project declared in project.json, written only when the live link list does not already hold it.
 # The develop ruleset is develop.json where the model is PR-gated, or operational/develop.json for direct signed pushes.
+# The sixth group renders the repo's .github/agent-policy.json from the registry through scripts/agent_policy.py.
+# It writes that file plus the CodeRabbit and Qodo settings derived from it into the checkout, and never stages or commits.
+# The caller commits the files through the ordinary pull request flow.
+# The same render decides whether each ruleset carries a Copilot code review rule, so a repo whose policy has no automatic Copilot gets no rule.
+# The checkout is planned before the first API write, so a checkout that refuses stops the run with nothing applied.
+# Without --checkout apply writes no policy files and says so.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
 # The check mode is the read-only inverse, and it verifies the same five groups apply writes.
@@ -27,6 +33,7 @@
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
+# The agent policy files are checked too, read from the repo's default branch and compared with the render.
 # The project link is checked by resolving the declared project to a node id.
 # The check then asserts that id is among the ones the repository is linked to.
 # A label is checked on name, color, and description against labels.json.
@@ -51,10 +58,13 @@ usage() {
     cat <<'USAGE'
 Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
        repo-config/configure.sh apply|check release|operational
+       repo-config/configure.sh apply [owner/repo] [release|operational] --checkout <path>
        repo-config/configure.sh --help
 
   apply   create or update the fleet configuration on the repo (writes)
   check   validate the repo against the fleet configuration, non-zero on drift (reads)
+
+  --checkout <path>   with apply only, also write the agent policy files into this local checkout of the repo
 
 The repo defaults to the current gh repo, and the model to the registry lookup.
 USAGE
@@ -75,15 +85,50 @@ apply | check)
 "") refuse "No command given (expected apply or check)" ;;
 *) refuse "Unknown command '$1' (expected apply or check)" ;;
 esac
-for arg in "$@"; do
-    case "$arg" in
+# The option is parsed ahead of the positionals, so it may sit before or after them.
+checkout=""
+checkout_given=false
+positional=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
     -h | --help)
         usage
         exit 0
         ;;
-    -*) refuse "Unknown option '$arg'" ;;
+    --checkout)
+        if [ "$#" -lt 2 ] || [[ "$2" == -* ]]; then
+            refuse "Option '--checkout' needs a path"
+        fi
+        checkout="$2"
+        checkout_given=true
+        shift 2
+        ;;
+    --checkout=*)
+        checkout="${1#--checkout=}"
+        checkout_given=true
+        shift
+        ;;
+    -*) refuse "Unknown option '$1'" ;;
+    *)
+        positional+=("$1")
+        shift
+        ;;
     esac
 done
+# An empty array expansion trips set -u on the oldest bash, so it is expanded only when it holds something.
+if [ "${#positional[@]}" -gt 0 ]; then
+    set -- "${positional[@]}"
+else
+    set --
+fi
+if [ "$checkout_given" = true ]; then
+    if [ "$cmd" != apply ]; then
+        refuse "Option '--checkout' is valid only with apply"
+    fi
+    if [ -z "$checkout" ]; then
+        refuse "Option '--checkout' needs a path"
+    fi
+fi
 if [ "$#" -gt 2 ]; then
     refuse "Too many arguments (expected at most a repo and a model)"
 fi
@@ -157,6 +202,45 @@ main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
+
+# ----- Derive the agent policy facts and compose the ruleset payloads (shared by apply and check) -----
+# The Copilot code review rule is the one rule whose presence follows the repo's rendered policy rather than the fleet payload.
+# The file main.json stays the template for that rule's parameters.
+# A missing uv or a failed render stops here, before any write.
+main_source="$main_ruleset"
+agent_policy="$script_dir/../scripts/agent_policy.py"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "uv not found. The agent policy is rendered by $agent_policy, which runs under uv." >&2
+    exit 1
+fi
+agent_policy_args=(--registry "$registry" --name "$name" --model "$model")
+if ! policy_facts="$(uv run --no-project --script "$agent_policy" facts "${agent_policy_args[@]}")"; then
+    echo "Could not derive the agent policy for $repo. Aborting before any write." >&2
+    exit 1
+fi
+copilot_main="$(jq -r '.copilotRule.main' <<<"$policy_facts" | sed $'s/\r$//')"
+copilot_develop="$(jq -r '.copilotRule.develop' <<<"$policy_facts" | sed $'s/\r$//')"
+compose_dir="$(mktemp -d)"
+trap 'rm -rf "$compose_dir"' EXIT
+compose_ruleset() { # source-payload copilot-rule-wanted(true|false) output-file
+    local src="$1" want="$2" out="$3"
+    if [ ! -e "$src" ]; then
+        echo "Required payload $src not found. Aborting to avoid a partially-applied configuration." >&2
+        exit 1
+    fi
+    if ! jq --argjson want "$want" --slurpfile template "$main_source" '
+        .rules |= map(select(.type != "copilot_code_review"))
+        | if $want then .rules += [$template[0].rules[] | select(.type == "copilot_code_review")] else . end
+    ' "$src" >"$out"; then
+        echo "Could not compose the ruleset payload from $src. Aborting." >&2
+        exit 1
+    fi
+}
+main_ruleset="$compose_dir/main.json"
+compose_ruleset "$main_source" "$copilot_main" "$main_ruleset"
+develop_composed="$compose_dir/develop.json"
+compose_ruleset "$develop_ruleset" "$copilot_develop" "$develop_composed"
+develop_ruleset="$develop_composed"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
 # Absence keeps the About panel following the README.
@@ -312,7 +396,7 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
     fi
     rname="$(jqr '.name // empty' "$file")"
     if [ -z "$rname" ]; then
-        echo "Ruleset payload $file has no name. Aborting to avoid a partially-applied configuration." >&2
+        echo "Ruleset payload $file (composed from its source payload) has no name. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
     id="$(ruleset_id "$rname")"
@@ -440,6 +524,13 @@ cmd_apply() {
             exit 1
         fi
     done
+    # The agent policy files are planned here too, because a checkout that cannot take them would otherwise fail after every API write.
+    if [ "$checkout_given" = true ]; then
+        if ! uv run --no-project --script "$agent_policy" write "${agent_policy_args[@]}" --repo "$repo" --checkout "$checkout" --dry-run; then
+            echo "The agent policy files cannot be written into $checkout. Aborting before any write." >&2
+            exit 1
+        fi
+    fi
     # The label payload's content is validated here too, since apply_labels runs after the settings and Dependabot writes and an abort there would leave them applied.
     if ! why="$(labels_payload_ok)"; then
         echo "Label payload $labels_file $why. Aborting before any write." >&2
@@ -489,6 +580,13 @@ cmd_apply() {
     apply_ruleset "$main_ruleset"
     # ----- Fleet project link -----
     apply_project "$project_id"
+    # ----- Agent policy files (only into a checkout the caller names) -----
+    if [ "$checkout_given" = true ]; then
+        echo "Writing the agent policy files into $checkout (not staged or committed)"
+        uv run --no-project --script "$agent_policy" write "${agent_policy_args[@]}" --repo "$repo" --checkout "$checkout"
+    else
+        echo "Note: the agent policy files were not written. Run '$0 apply${repo_arg:+ $repo} --checkout <path>' to write them into a checkout, then commit them through a pull request."
+    fi
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
 }
 
@@ -850,6 +948,17 @@ check_environments() {
     note "deployment environments not declared by the registry: ${extra:-none} (reported, not asserted)"
 }
 
+check_agent_policy() { # the repo's default branch must carry the files the registry renders
+    local branch
+    if ! branch="$(gh api "repos/$repo" --jq '.default_branch')"; then
+        fail "could not read the default branch of $repo, so the agent policy files were not checked"
+        return
+    fi
+    if ! uv run --no-project --script "$agent_policy" check "${agent_policy_args[@]}" --repo "$repo" --ref "$branch"; then
+        FAILED=1
+    fi
+}
+
 cmd_check() {
     echo "Validating configuration for $repo (model: $model)"
     check_ruleset "$develop_ruleset"
@@ -859,6 +968,7 @@ cmd_check() {
     check_labels
     check_project
     check_environments
+    check_agent_policy
     # Secret names are asserted by spec/audit.py, not here.
     # A secret's value is never readable via the API regardless, repository-scoped and environment-scoped alike.
     note "run uv run --no-project --script spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"

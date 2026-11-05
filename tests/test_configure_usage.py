@@ -30,6 +30,17 @@ class UsageCase(unittest.TestCase):
             (root / "repo-config").mkdir()
             (root / "bin").mkdir()
             shutil.copy(CONFIGURE, root / "repo-config" / "configure.sh")
+            hub = CONFIGURE.parents[1]
+            for rel in (
+                "scripts/agent_policy.py",
+                "scripts/pr_review_policy.py",
+                "spec/agent-policy.default.json",
+                "repo-config/main.json",
+                "repo-config/develop.json",
+                "repo-config/operational/develop.json",
+            ):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(hub / rel, root / rel)
             calls = root / "gh-calls"
             gh_stub = root / "bin" / "gh"
             gh_stub.write_text(
@@ -88,6 +99,8 @@ class UsageCase(unittest.TestCase):
 
     def test_valid_arguments_reach_gh(self) -> None:
         """The control: a well-formed run gets past argument handling to its first API call."""
+        if shutil.which("uv") is None:
+            raise unittest.SkipTest("no uv on PATH, which the agent policy render needs")
         for args in (
             ["check", "owner/a.b_c-d", "release"],
             ["check", "operational"],
