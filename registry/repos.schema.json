@@ -88,6 +88,28 @@
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },
                 "lineEndings": { "$ref": "#/$defs/lineEndings" },
                 "hasDevelop": { "type": "boolean" },
+                "agentPolicy": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "review": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "bots": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "copilot": { "type": "object" },
+                                        "coderabbit": { "type": "object" },
+                                        "qodo": { "type": "object" }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "$comment": "A per-bot override of spec/agent-policy.default.json, merged shallowly per bot. repo-config/configure.sh apply --checkout renders the repository's .github/agent-policy.json from it and derives the CodeRabbit, Qodo, and Copilot ruleset settings from that render. The guard section is derived from workflowModel and cannot be declared. The bot fields and their values are scripts/pr_review_policy.py's, and scripts/agent_policy.py renders the policy, so spec/validate.py reports a malformed override."
+                },
                 "publish": {
                     "type": "array",
                     "items": {

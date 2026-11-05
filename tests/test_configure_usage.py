@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 from host_capability import bash_or_skip
+from test_configure_archived import lift, run_bash
 
 CONFIGURE = Path(__file__).resolve().parents[1] / "repo-config" / "configure.sh"
 
@@ -30,6 +31,18 @@ class UsageCase(unittest.TestCase):
             (root / "repo-config").mkdir()
             (root / "bin").mkdir()
             shutil.copy(CONFIGURE, root / "repo-config" / "configure.sh")
+            hub = CONFIGURE.parents[1]
+            for rel in (
+                "scripts/agent_policy.py",
+                "scripts/gh_graphql.py",
+                "scripts/pr_review_policy.py",
+                "spec/agent-policy.default.json",
+                "repo-config/main.json",
+                "repo-config/develop.json",
+                "repo-config/operational/develop.json",
+            ):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(hub / rel, root / rel)
             calls = root / "gh-calls"
             gh_stub = root / "bin" / "gh"
             gh_stub.write_text(
@@ -95,6 +108,35 @@ class UsageCase(unittest.TestCase):
             with self.subTest(args=args):
                 result, calls = self.run_configure(*args)
                 self.assertNotEqual(calls, "", result.stderr)
+
+
+PROBE = lift(r"(if py -3 -c .*?\n^fi\n)")
+
+
+class InterpreterProbeCase(unittest.TestCase):
+    """The probe takes an interpreter that exits 0 for 3.10+ and refuses an older one without a traceback."""
+
+    def probe(self, exit_code: int) -> subprocess.CompletedProcess[str]:
+        # Functions shadow both names on every platform, where a script on PATH runs only off Windows.
+        script = (
+            f"py() {{ return 1; }}\npython3() {{ return {exit_code}; }}\n"
+            f'{PROBE}echo "picked ${{py_cmd[*]}}"\n'
+        )
+        return run_bash(script)
+
+    def test_a_new_enough_interpreter_is_picked(self) -> None:
+        done = self.probe(0)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("picked python3", done.stdout)
+
+    def test_an_older_interpreter_is_refused_with_a_message(self) -> None:
+        done = self.probe(1)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("3.10", done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_the_probe_asks_for_3_10(self) -> None:
+        self.assertEqual(PROBE.count("sys.version_info < (3, 10)"), 2)
 
 
 if __name__ == "__main__":

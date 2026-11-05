@@ -75,6 +75,15 @@ NOT_COMMAND_LINE = {
 }
 
 BEFORE_FLAG = {
+    "scripts/agent_policy.py": (
+        "facts",
+        "--registry",
+        "registry/repos.json",
+        "--name",
+        "Example",
+        "--model",
+        "release",
+    ),
     "repo-config/configure.sh": ("check",),
     "scripts/canonical_review.py": ("list",),
     "scripts/carry.py": ("check", "Example", "--target", "."),

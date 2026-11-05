@@ -325,6 +325,36 @@ def canonical_file_in_root(rel_path):
     return resolved.is_file() and resolved.is_relative_to(ROOT)
 
 
+def agent_policy_module():
+    """`scripts/agent_policy.py`, imported on first use rather than at module import.
+
+    Lazily, because the scripts directory is not on the path of a plain `python3 spec/resolve_description.py`.
+    """
+    scripts = str(ROOT / "scripts")
+    if scripts not in sys.path:
+        sys.path.append(scripts)
+    import agent_policy
+
+    return agent_policy
+
+
+def agent_policy_errors_for_repo(repo, name, model):
+    """The renderer's refusal for a registry entry's optional `agentPolicy`, which repo-config/configure.sh would otherwise meet at apply time.
+
+    Presence is the test rather than truthiness, so a declared null reaches the renderer and is refused there.
+    """
+    if "agentPolicy" not in repo:
+        return []
+    module = agent_policy_module()
+    try:
+        module.render({"repos": [repo]}, name, model)
+    except module.Refusal as exc:
+        text = str(exc)
+        prefix = f"{name}: "
+        return [text if text.startswith(prefix + "agentPolicy") else f"{prefix}agentPolicy {text}"]
+    return []
+
+
 def environment_errors_for_repo(repo, name):
     """Shape errors for a registry entry's optional `environments` (a repo using no deployment environment declares none).
 
@@ -1349,6 +1379,13 @@ def main(argv=()):
         # A malformed entry would otherwise reach configure.sh.
         # There, a missing branchPolicy asserts against the literal "null" jq prints and reports drift on a repo that has none.
         errors.extend(environment_errors_for_repo(repo, name))
+        # Optional, and rendered into the repository's agent policy files by repo-config/configure.sh apply.
+        # The renderer's own refusal is reported here so a malformed override fails CI rather than an apply.
+        errors.extend(
+            agent_policy_errors_for_repo(
+                repo, name, effective_model if effective_model in WORKFLOW_MODELS else "release"
+            )
+        )
 
         status = repo.get("status")
         if status is None:

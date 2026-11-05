@@ -152,6 +152,20 @@ class WalkCase(unittest.TestCase):
         self.assertEqual(calls, [None])
 
 
+class OriginSlugCase(unittest.TestCase):
+    def test_every_url_form_yields_the_lowercase_slug(self) -> None:
+        for url in (
+            "https://github.com/Acme/Widget.git",
+            "https://github.com/acme/widget",
+            "https://github.com/acme/widget/",
+            "git@github.com:ACME/widget.git",
+            "ssh://git@github.com/acme/widget.git",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(gh_graphql.origin_slug(url), "acme/widget")
+        self.assertIsNone(gh_graphql.origin_slug("widget"))
+
+
 class SiblingImportCase(unittest.TestCase):
     """A script run by path from another directory still finds the module beside it."""
 

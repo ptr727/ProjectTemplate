@@ -69,6 +69,18 @@ def said_absent(stderr: str) -> bool:
     return m is not None and m.group(1) in ABSENT
 
 
+ORIGIN = re.compile(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$")
+
+
+def origin_slug(url: str) -> str | None:
+    """The lowercase `owner/repo` a git remote URL names, or None where it names none.
+
+    The https, ssh, and scp-like forms read alike, with or without `.git` and a trailing slash.
+    """
+    m = ORIGIN.search(url)
+    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
+
+
 def run_subprocess(argv: list[str]) -> tuple[int, str, str]:
     """Run `argv` and return its exit code, stdout and stderr.
 
