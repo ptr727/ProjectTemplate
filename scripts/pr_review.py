@@ -84,7 +84,7 @@ Subcommands
            round covering the head names exactly the changed files in its own file table, one
            added, modified, or deleted with no changed line GitHub counts left out where unnamed,
            `carried:table` where the newest round carrying a table does, `local` where an attested
-           local pass covers a head on a pull request into a branch other than the default, and
+           local pass covers a head the review policy hands to one, by default off the default, and
            `none` otherwise. A table stands in only where no round on record states partial
            coverage and the whole review history is in view. `none` decides no exit code and
            prints a note, since Merge Gate item 2 in pr-review-conduct reads this field.
@@ -146,14 +146,15 @@ Subcommands
            names a transient fetch failure is owed one re-request, unless the round before it was
            an error refusal too. A re-request already made after the refusal is never sent again.
            A held head names it under COPILOT_ERROR_TRANSIENT instead. The auto-request is also skipped on a pull
-           request into a branch other than the default, whose every head an attested local
-           pass covers. There an attested head has its checks polled instead while they can still
+           request the review policy hands to an attested local pass, by default one into a
+           branch other than the default. There an attested head has its checks polled instead while they can still
            move its merge and no thread is open on it, and one with no attestation exits 49. --request asks for a round anyway.
-           The bot id is read from the repository's most recently updated pull requests, the last
-           HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
-           carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
-           agent turn, not 90. A pull request found no longer open, on the first read or on any
-           poll, is neither requested nor polled further. `wait` then prints its digest and exits
+           The review policy can hold the Copilot request until the head's checks pass. An explicit CodeRabbit or Qodo
+           is asked by a PR conversation comment once per head, an after-checks one after the Copilot poll and only on
+           green checks. The bot id is read from the repository's most recently updated pull requests, the last
+           HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither carries any Copilot
+           activity. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90. A pull request
+           found no longer open, on the first read or on any poll, is neither requested nor polled further. `wait` then prints its digest and exits
            as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
@@ -172,19 +173,21 @@ Subcommands
            them, the last unless that reviewer's newest output is a rate limit since it began.
            Where the rollup holds a type this cannot read, a BLOCKED hold's note says an unmet
            required check may sit in its unread part. It is also a round past --min-rounds not
-           yet landed.
+           yet landed. It is also checks the review policy waits on still running,
+           `status=CHECKS_BEFORE_REVIEW`.
            40 = no Copilot review covers the head, in any of these cases:
            - The reviewer answered outside a formal review.
            - The request returned success and recorded nothing on the pull request.
            - The reviewer writes under a login no query filters on.
+           - The review policy held the request until the checks pass, and they failed.
            41 = the newest round is a refusal or a quota state. The kind is printed in its status
            line and, for a refusal on this pull request, in the digest's `refusal=`. The cases are:
            - A refusal on the head. One saying every changed file is in Copilot's default review
              exclusions is one only where no local pass is to cover the head, its status line
              `REVIEW_EXCLUDED_FILES_ONLY`.
-           - The pull request's newest review being a quota or error refusal on any head. On a
-             pull request into a branch other than the default, an attested local pass on a later
-             head covers that head instead.
+           - The pull request's newest review being a quota or error refusal on any head. Where the
+             policy hands heads to a local pass, by default off the default branch, an attested pass
+             on a later head covers that head instead, as it covers any head no Copilot round settles.
            - The reviewer's newest activity elsewhere in the repository being a quota refusal
              nothing answered since while this head carries none of its own.
            Proceed on the other reviewers' coverage rather than retrying, and pass
@@ -194,7 +197,8 @@ Subcommands
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, still in
            progress inside a run that has completed, or failed. On a held head a check running
-           long or held by its environment polls to 30 instead.
+           long or held by its environment polls to 30 instead. 44 also covers a check the review
+           policy holds a request for that sits in a shape no wait clears, before any review.
            45 = an open attested held head that nothing holds, its merge other than CLEAN,
            UNSTABLE, or HAS_HOOKS. One case is a payload with no commit matching the head, named
            `CHECKS UNREADABLE` in the digest. Another is a DIRTY merge with no check posted that
@@ -211,7 +215,7 @@ Subcommands
            the poll at once and outranks 30, 44, and 45, since no check clears it. A thread page cut
            at 100 is read to its end first. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
-           pull request merging into a branch other than the default with no attestation vouching
+           pull request the review policy hands to a local pass, with no attestation vouching
            for the head, a refusal naming Copilot's default review exclusions on it included. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.
 
@@ -242,6 +246,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gh_graphql as shared
+import pr_review_policy as review_policy
+import pr_review_side as side
 from pr_review_answers import ack_lines, report_verdict
 from pr_review_checks import (
     CHECK_GRACE,
@@ -267,6 +273,7 @@ from pr_review_rounds import (
     attested,
     commit_oid,
     copilot_bot_id,
+    copilot_settled,
     describe,
     excluded_refusal,
     files_unread,
@@ -287,6 +294,7 @@ from pr_review_rounds import (
     quota_signal,
     refusing_review,
     request_recorded,
+    reviewed_head,
     reviewer_login_drift,
     reviewer_nodes,
     reviewer_requested,
@@ -295,6 +303,8 @@ from pr_review_rounds import (
     thread_author,
     threads_truncated,
 )
+
+mutated = shared.mutated
 
 # The directory this script sits in, the anchor every scope answer is read from.
 HERE = Path(__file__).resolve().parent
@@ -344,7 +354,7 @@ HISTORY_PRS_WIDE = 100
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    id headRefOid state
+    id headRefOid state baseRefName baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
@@ -386,14 +396,14 @@ HELD_FIELDS = """
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
+    commits(last:1){ nodes{ commit{ oid committedDate statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) creator{ login } }
       }}}
-      checkSuites(last:50){ nodes{ databaseId status app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
+      checkSuites(last:50){ nodes{ databaseId status createdAt app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
     }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
@@ -526,13 +536,6 @@ def _is_workflow_run_error(error: object) -> bool:
     return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
 
 
-def mutated(data: dict, *path: str) -> dict:
-    """The object a mutation returned at `path` under `data`, empty wherever a step is absent."""
-    for key in path:
-        data = data.get(key) or {}
-    return data
-
-
 def unconfirmed(status: str, why: str, response: dict, code: int) -> int:
     """Print why a write is unconfirmed, then the response it returned, and return `code`."""
     print(f"status={status} {why}")
@@ -540,11 +543,15 @@ def unconfirmed(status: str, why: str, response: dict, code: int) -> int:
     return code
 
 
-def gql(query: str, owner: str, repo: str, num: int) -> dict:
+def gql(query: str, owner: str, repo: str, num: int, policy: bool = True) -> dict:
     data = gh_graphql(query, o=owner, r=repo, n=num)
     pr = data["repository"]["pullRequest"]
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
+    if policy and isinstance(pr, dict) and pr.get("baseRefName"):
+        pr[review_policy.PAYLOAD_KEY] = review_policy.policy_for(
+            owner, repo, pr["baseRefName"], reread, answered_absent
+        )
     return pr
 
 
@@ -1042,7 +1049,7 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
 
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     data = gh_graphql(M_COMMENT, subjectId=target["id"], body=body)
-    comment = mutated(data, "addComment", "commentEdge", "node")
+    comment = mutated(data, *side.COMMENT_PATH)
     if not comment.get("url") or (comment.get("body") or "") != body:
         return unconfirmed(
             "COMMENT_NOT_CONFIRMED",
@@ -1071,7 +1078,7 @@ def attest(owner: str, repo: str, num: int, checkout: str) -> int:
     """
     if refused := scope_refusal(owner):
         return refused
-    target = gql(Q_ATTEST_TARGET, owner, repo, num) or {}
+    target = gql(Q_ATTEST_TARGET, owner, repo, num, policy=False) or {}
     head, base = target.get("headRefOid") or "", target.get("baseRefName") or ""
     if not head or not base:
         return not_written(
@@ -1179,7 +1186,8 @@ def await_registered_head(
     first = head
     for delay in ATTEST_HEAD_DELAYS:
         _attest_sleep(delay)
-        head = (gql(Q_ATTEST_TARGET, owner, repo, num) or {}).get("headRefOid") or head
+        read = gql(Q_ATTEST_TARGET, owner, repo, num, policy=False) or {}
+        head = read.get("headRefOid") or head
         if head == local:
             return head, True
         if head != first:
@@ -1555,6 +1563,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
 
     `may_request` False sends no request whatever is owed, for a caller reading the gate as is.
     The body-less liveness read takes a head refusal for a round, so `polled_past` reads past it.
+    A held Copilot request is judged again on a fresh read once the check wait ends. The after-checks
+    side asks go after the Copilot poll, so their check wait never holds Copilot's round back.
     """
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     if refused := scope_refusal(owner):
@@ -1588,21 +1598,21 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     held = (
         snapshot is not None
         and not a.request
-        and not reviewer_requested(pr)
+        and (not reviewer_requested(pr) or copilot_settled(snapshot))
         and holds(snapshot)
-        and (not answer or attested(snapshot))
+        and (not answer or attested(snapshot) or copilot_settled(snapshot))
     )
+    copilot = side.copilot_policy(pr, reviewer_requested(pr))
     retry, watch = "", False
     if snapshot and stopped and not held:
         state, line = transient_state(owner, repo, a.number, snapshot, stopped)
         retry, watch = (line if state == "owed" else ""), state in {"owed", "pending"}
-    if retry:
-        stopped = None
+    stopped = None if retry else stopped
     # Request before the first poll, so `wait` makes a review happen rather than only watching for one.
     # Skipped once a round past --min-rounds covers the head, Copilot answered outside a review, or a request is pending.
     recorded: bool | None = None
     final: dict | None = full if done else None
-    if (
+    owed = (
         may_request
         and not done
         and not answer
@@ -1611,7 +1621,19 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and not stopped
         and not held
         and not reviewer_requested(pr)
-    ):
+        and (copilot is None or a.request or copilot.requests())
+    )
+    read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
+    await_green = functools.partial(side.await_green, read_held, start, a, backoff)
+    send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
+    ask = functools.partial(side.ask, read_held, a, send, mutated, may_request and pr)
+    ask("on-open")
+    waits = owed and side.holds_for_checks(copilot, a.request)
+    checks_hold = await_green() if waits else ""
+    fresh = gql(Q_LIVE, owner, repo, a.number) if waits and not checks_hold else pr
+    late = reviewer_requested(fresh) or any(liveness(fresh, a.min_rounds))
+    owed = owed and not checks_hold and not late
+    if owed:
         line, recorded = request_copilot_review(
             owner, repo, a.number, pr["id"], copilot_bot_id(history), POLL_DELAYS[0]
         )
@@ -1627,7 +1649,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
-    if recorded is False:
+    if checks_hold:
+        print(side.checks_note(checks_hold))
+    elif recorded is False:
         print(
             "note: the review request returned success and recorded nothing on this pull "
             "request, no pending reviewer and no review-request event, so this wait stops here "
@@ -1640,16 +1664,16 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             else "Run attest once a recorded pass covers this head."
         )
         print(
-            "note: this pull request merges into a branch other than the default, so its head is "
-            "to be covered by an attested local pass rather than a Copilot round, which runs once "
-            "per change at the promotion, and this wait requests nothing. No attested local pass "
+            "note: the review policy hands this head to an attested local pass rather than a "
+            "Copilot round, by default on a branch other than the default, and this wait "
+            "requests nothing. No attested local pass "
             f"covers this head yet. {why} Pass --request to ask for a round anyway."
         )
     elif held:
         print(
-            "note: this pull request merges into a branch other than the default, so its head is "
-            "covered by an attested local pass rather than a Copilot round, which runs once per "
-            "change at the promotion, and this wait requests nothing. Pass --request to ask "
+            "note: the review policy covers this head with an attested local pass rather than a "
+            "Copilot round, by default on a branch other than the default, and this wait "
+            "requests nothing. Pass --request to ask "
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
         )
@@ -1715,6 +1739,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             a.timeout,
         )
 
+    ask("after-checks")
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
     if not is_open(final):
@@ -1735,6 +1760,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     )
     print(out)
     print(f"waited={int(time.monotonic() - start)}s")
+    if checks_hold and not reviewed_head(final):
+        return side.checks_status(checks_hold)
     # A stuck required check decides the code only once the review itself is sound.
     held = held and holds(final)
     covered = held and local_cover(final)
@@ -1811,6 +1838,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     refusal = refusing_review(final)
     if refusal is None and not a.ignore_quota_signal:
         refusal = stopping_refusal(final)
+    refusal = None if held and copilot_settled(final) else refusal
     state, line = transient_state(owner, repo, a.number, final, refusal) if refusal else ("", "")
     if state == "pending" or (state == "owed" and reviewer_requested(final)):
         print(
@@ -1872,7 +1900,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         why = "Copilot's refusal says every changed file is excluded from its review. " * excluded
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
-            f"since a head into a branch other than the default is covered by a local pass. {why}Run "
+            f"since the review policy hands it to a local pass, by default off the default branch. {why}Run "
             "the local strict review, record it, push, and run `pr_review.py attest` from the "
             "checkout, or pass --request to ask Copilot for a round instead"
         )
@@ -1882,9 +1910,10 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             "status=REVIEW_EXCLUDED_FILES_ONLY the review carrying the head says it reviewed no "
             "file, since every changed file is in Copilot's default review exclusions, printed "
             "above under COPILOT REFUSED THIS ROUND. Re-requesting and splitting the pull request "
-            "both clear nothing. Into a branch other than the default, an attested local pass "
-            "covers this head while no round states partial coverage and the whole review history "
-            "is in view, and `wait` without --request reads it. Otherwise hand it to the maintainer"
+            "both clear nothing. Where the review policy hands the head to a local pass, by default "
+            "off the default branch, an attested one covers it while no round states partial coverage "
+            "and the whole review history is in view, and `wait` without --request reads it. "
+            "Otherwise hand it to the maintainer"
         )
         return 41
     if refusal:

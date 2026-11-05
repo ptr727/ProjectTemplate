@@ -125,6 +125,13 @@ def request(
     return Response(payload["data"], list(errors or []))
 
 
+def mutated(data: dict, *path: str) -> dict:
+    """The object a mutation returned at `path` under `data`, empty wherever a step is absent."""
+    for key in path:
+        data = data.get(key) or {}
+    return data
+
+
 def null_node(data: object, path: str = "") -> str | None:
     """The path of the first connection under `data` whose `nodes` holds a null, else None."""
     if isinstance(data, list):

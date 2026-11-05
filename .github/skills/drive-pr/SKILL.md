@@ -96,17 +96,19 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    route around. The hub carries such a hook, and a repository has one only if it adds one. That
    skill's refusal table says what each refusal means and what clears it.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
-   "Disposing of Every Finding" below. Request no Copilot round on this feature PR. Its `wait` reads
-   step 2's attestation as `coverage=local` and requests none, unless a partial round or a truncated
-   review history is on record. Exit `49` means the head carries no attestation, so run and record a
+   "Disposing of Every Finding" below. Request no review by hand. `wait` sends each request the review
+   policy asks for. Under the hub's default it reads step 2's attestation as `coverage=local` here. It
+   then requests no Copilot round, unless a partial round or a truncated review history is on record. Exit `49` means the head carries no attestation, so run and record a
    pass over it, push, and attest. Exit `46` means a thread is open on the head, so dispose of each
    one per "Disposing of Every Finding" and wait again. Read `state=` in every digest `wait` or `status` prints.
    A peer can merge or close the pull request mid-drive. A digest carrying `state=MERGED` on a feature PR into develop means the merge has landed.
    Skip the merge in step 4 and go on to its post-merge path.
    On a promotion PR it means the drive's end state is passed, so stop and report it merged.
    A digest carrying `state=CLOSED` is a stop to report, with its `closed_at=`.
-   On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried,
-   so the hosted review runs once per change, at the promotion in step 6.
+   On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried.
+   So under the hub's default review policy, the hosted review runs once per change, at the
+   promotion in step 6. `wait` sends each request the repository's review policy asks for, so
+   the drive never asks whether a reviewer starts on its own.
 4. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's

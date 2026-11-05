@@ -34,11 +34,15 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 1. Required status checks are green, and where they are not, the reason is **read**, never
    inferred. `BLOCKED` covers a failed check, a required check nothing is running, an unresolved
    thread, and a missing approval alike, and the response differs by cause.
-2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
-   default, every head can carry an attested local pass instead, `coverage=local` in the digest.
-   That holds where the whole review history is in view and no round on record states partial coverage. A promotion re-reviews content its feature pull requests already carried, so
-   the hosted review runs once per change, at the promotion. A pull request into the default
-   branch, a promotion among them, always carries a Copilot round on its head. A review is matched
+2. A review is confirmed on the **current head SHA**. The review policy can hand a head to a local
+   pass, by default on a pull request into a branch other than the default. Such a head can carry an
+   attested local pass instead, `coverage=local` in the digest.
+   That holds where the whole review history is in view and no round on record states partial coverage. A policy that waits on no Copilot round drops that condition. That is a Copilot that is off, ungated, or past its cap. No refusal or pending request on the head then stands against the attestation either, since no round is coming to settle it. A promotion re-reviews content its feature pull requests already carried.
+   So under the hub's default review policy, the hosted review runs once per change, at the
+   promotion. There a pull request into the default branch, a promotion among them, always
+   carries a Copilot round on its head. A repository's own `.github/pr-review.json` can move,
+   cap, or hold that round until the head's checks pass. `pr_review.py` applies it, so follow
+   the digest and the exit code rather than this paragraph's default. A review is matched
    by commit SHA rather than assumed from a green merge-state. A push makes checks go green *before* the
    re-review lands, and the matched review is **read**, not just counted. A review can carry the
    head SHA and still decline the PR outright, or say it read only part of the changed files.
@@ -72,15 +76,16 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A refusal is not that coverage, so this item stays unsatisfied under one, and the loop clears
    it where it can. A file-count refusal is cleared by splitting the pull request. A refusal saying
    every changed file is in Copilot's default review exclusions says nothing about the content, and
-   no round follows it. On a pull request into a branch other than the default, the attested local
-   pass covers that head. Where none can, it goes to the maintainer, `wait` exiting `41` as
+   no round follows it. The attested local pass covers that head where the review policy hands it
+   to a local pass. By default that is a pull request into a branch other than the default. Where none can, it goes to the maintainer, `wait` exiting `41` as
    `REVIEW_EXCLUDED_FILES_ONLY`. `pr_review.py wait` exits `41` on every other refusal and quota
    state no local pass covers, its `status=` line naming which. The digest's `refusal=` field carries a
    refusal on this pull request.
    `refusal=QUOTA` or `refusal=ERROR` means the pull request's newest Copilot review is an
    account-quota refusal or an error refusal read as a possible quota hit. That review can sit on
-   this head or an earlier one. On a pull request into a branch other than the default, an attested
-   local pass on a later head clears it, `coverage=local`. Otherwise nothing the loop does clears it, which is the case "Which
+   this head or an earlier one. Where the review policy hands heads to a local pass, by default off
+   the default branch, an attested later head clears it, `coverage=local`. One on
+   this head clears it too where the policy waits on no Copilot round. Otherwise nothing the loop does clears it, which is the case "Which
    Reviewers a Repository Actually Has" below states. An error refusal whose `RUN LOG READING` line says
    transient is the exception. `wait` re-requests it once and exits `30` while that request is
    pending. A second error refusal in a row, or a re-request made with no round answering it,
@@ -254,8 +259,9 @@ must have done.
   describes it as its own ordinary shape. Read the reviews themselves rather than the comments alone, since the third
   case appears only there.
 - **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.**
-  Merge Gate item 2 requires Copilot's own coverage of the current head. On a pull request into a
-  branch other than the default, an attested local pass stands in for it. The loop's own request
+  Merge Gate item 2 requires Copilot's own coverage of the current head. Where the review policy
+  hands the head to a local pass, by default off the default branch, an attested local pass stands
+  in for it. The loop's own request
   step below is where a missing one is answered, on the terms stated there. A refusal naming the
   account quota is its own case rather than a review. So is one saying only that Copilot
   encountered an error, which is what the
@@ -293,11 +299,13 @@ Run `local-strict-review` against the branch's current diff before every push th
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
 2. Run `uv run --no-project --script scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
-3. Request a Copilot round at one defined moment: the head of a pull request into the default
-   branch, a promotion among them. Auto-trigger is unreliable, so request it explicitly, which
-   step 4's `wait` is what does. On a pull request into any other branch, `wait` reads step 1's
+3. Send each request the repository's review policy asks for, which step 4's `wait` is what does.
+   Under the hub's default that is one Copilot round, on the head of a pull request into the default
+   branch. A promotion is one such pull request. Auto-trigger is unreliable, so `wait` fills a
+   missed one. On a pull request into any other branch, `wait` reads step 1's
    attestation as `coverage=local` where Merge Gate item 2 allows that reading. There `wait`
-   requests a round only where a partial round or a truncated review history is on record. Pass `wait --request` where a change
+   requests a round only where a partial round or a truncated review history is on record. It
+   requests none where the policy waits on no Copilot round, Copilot being off, ungated, or past its cap. Pass `wait --request` where a change
    deserves a Copilot round anyway. `wait` also skips the request where
    a review already covers the head, where the answer came outside a formal review, or where it
    detects drift. It skips it under a quota or error refusal too, and where something is already in
