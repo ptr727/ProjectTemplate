@@ -13,13 +13,13 @@ import re
 from collections.abc import Iterator
 
 import pr_review_copilot as adapter
+from pr_review_payload import bot_entry, default_branch
 
 # Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
 REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
 CODERABBIT_LOGIN = adapter.VOCABULARIES["coderabbit"]["login"]
 QODO_LOGIN = adapter.VOCABULARIES["qodo"]["login"]
 OTHER_REVIEWERS = (CODERABBIT_LOGIN, QODO_LOGIN)
-POLICY_KEY = "_reviewPolicy"
 KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 
 # A login that reads as this reviewer without being the spelling every query filters on.
@@ -628,30 +628,26 @@ def promotion(pr: dict) -> bool:
     before `pr_review_policy` existed. With one, it is a base the policy's gated Copilot entry covers,
     while a further round is allowed or one already covers the head. So a repository capping its
     rounds falls back to an attested local pass once the cap is spent. An unread default branch
-    still demands the round, since nothing proves the base is not the default. `POLICY_KEY` names
-    the payload key here rather than importing it, since a reader imports no module that reads files.
+    still demands the round, since nothing proves the base is not the default.
     """
-    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
-    policy = pr.get(POLICY_KEY)
-    if not default or policy is None:
+    default, bot = default_branch(pr), bot_entry(pr, "copilot")
+    if not default or bot is None:
         return not default or pr.get("baseRefName") == default
-    bot = policy.bot("copilot")
     if not bot.gate or not bot.covers(pr.get("baseRefName") or "", default):
         return False
-    return reviewed_head(pr) or bot.rounds_left(copilot_rounds(pr))
+    return reviewed_head(pr) or bot.rounds_left(reviewed_heads(pr))
 
 
-def copilot_rounds(pr: dict) -> int:
-    """The distinct heads Copilot's own reviews cover on this pull request, refusals excluded."""
-    nodes = reviewer_nodes(pr, "reviews")
+def reviewed_heads(pr: dict, login: str = REVIEWER) -> int:
+    """The distinct heads reviewer `login`'s own reviews cover on this pull request, refusals excluded."""
+    nodes = reviewer_nodes(pr, "reviews", login)
     return len({commit_oid(n) for n in nodes if not refusal_of(n) and commit_oid(n)})
 
 
 def copilot_settled(pr: dict) -> bool:
     """Whether no Copilot round can settle this head: Copilot off, ungated, or its cap spent."""
-    policy = pr.get(POLICY_KEY)
-    bot = policy.bot("copilot") if policy is not None else None
-    return bot is not None and (bot.never_waited_on() or not bot.rounds_left(copilot_rounds(pr)))
+    bot = bot_entry(pr, "copilot")
+    return bot is not None and (bot.never_waited_on() or not bot.rounds_left(reviewed_heads(pr)))
 
 
 def holds(pr: dict) -> bool:

@@ -29,6 +29,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import pr_review
+import pr_review_payload as payload
 import pr_review_policy as policy
 import pr_review_rounds as rounds
 import pr_review_side as side
@@ -278,7 +279,7 @@ class TestCopilotCover(unittest.TestCase):
         )
 
     def test_the_payload_key_matches_the_reader_constant(self) -> None:
-        self.assertEqual(policy.PAYLOAD_KEY, rounds.POLICY_KEY)
+        self.assertIs(policy.PAYLOAD_KEY, payload.POLICY_KEY)
 
 
 EXPLICIT_QODO = {"trigger": "explicit", "bases": ["^develop$"]}

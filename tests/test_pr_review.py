@@ -75,7 +75,9 @@ GATE_SOURCES = (
     "pr_review_rounds.py",
     "pr_review_digest.py",
     "pr_review_answers.py",
+    "pr_review_payload.py",
 )
+WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
 READER_IMPORTS = frozenset(
     {
@@ -89,6 +91,7 @@ READER_IMPORTS = frozenset(
         "pr_review_copilot",
         "pr_review_checks",
         "pr_review_check_lines",
+        "pr_review_payload",
         "pr_review_rounds",
     }
 )
@@ -99,6 +102,7 @@ READER_FLOORS = {
     "pr_review_rounds": "pr_review_copilot",
     "pr_review_digest": "pr_review_answers",
     "pr_review_answers": "pr_review_rounds",
+    "pr_review_payload": "typing",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -6938,7 +6942,7 @@ class TestContract(unittest.TestCase):
         """
         source = "".join(
             (REPO / "scripts" / name).read_text(encoding="utf-8")
-            for name in (*GATE_SOURCES, "pr_cleanup.py")
+            for name in (*WRITE_SCANNED, "pr_cleanup.py")
         )
         for verb in (
             "-X POST",
@@ -7013,7 +7017,7 @@ class TestContract(unittest.TestCase):
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         # A node id literal anywhere in the source is an example a hand copies out of it.
-        for name in GATE_SOURCES:
+        for name in WRITE_SCANNED:
             with self.subTest(module=name):
                 self.assertNotIn("PRRT_", (REPO / "scripts" / name).read_text(encoding="utf-8"))
         parser_options = re.findall(r"add_argument\(\s*[\"'](--[a-z-]+)[\"']", source)
@@ -7028,7 +7032,7 @@ class TestContract(unittest.TestCase):
     def test_no_write_suppresses_or_forces_its_own_result(self) -> None:
         """A mutation whose output is discarded is a write nobody can say landed."""
         source = "".join(
-            (REPO / "scripts" / name).read_text(encoding="utf-8") for name in GATE_SOURCES
+            (REPO / "scripts" / name).read_text(encoding="utf-8") for name in WRITE_SCANNED
         )
         for tail in (">/dev/null", "2>/dev/null", "&>/dev/null", "|| true", "|| :", "shell=True"):
             with self.subTest(tail=tail):

@@ -24,15 +24,16 @@ from pr_review_checks import (
     reviewer_check,
     runs_open,
 )
+from pr_review_payload import bot_entry, default_branch
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
     READS_AS_REVIEWER,
     TRUSTED_ASSOCIATIONS,
-    commit_oid,
     head_nodes,
     page_flag,
     qodo_comment,
+    reviewed_heads,
     reviewer_nodes,
 )
 
@@ -123,8 +124,7 @@ def side_rounds(pr: dict, name: str, body: str) -> int:
     asked = len(side_asks(pr, body))
     if name != "coderabbit":
         return max(asked, 1 if qodo_comment(pr) else 0)
-    heads = {commit_oid(n) for n in reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)} - {None}
-    return max(asked, len(heads))
+    return max(asked, reviewed_heads(pr, CODERABBIT_LOGIN))
 
 
 def side_answered(pr: dict, name: str) -> bool:
@@ -143,15 +143,11 @@ def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:
 
     Empty where no policy rides the payload, since a reviewer the gate never named stays unnamed.
     """
-    policy = pr.get(review_policy.PAYLOAD_KEY)
-    if policy is None:
-        return []
-    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
-    base = pr.get("baseRefName") or ""
+    default, base = default_branch(pr), pr.get("baseRefName") or ""
     found = []
     for name in SIDE_LOGINS:
-        bot = policy.bot(name)
-        if bot.covers(base, default):
+        bot = bot_entry(pr, name)
+        if bot is not None and bot.covers(base, default):
             found.append((name, bot, side_command(name, bot.command)))
     return found
 
@@ -222,8 +218,7 @@ def copilot_policy(pr: dict | None, requested: bool) -> review_policy.BotPolicy 
     A request can already be pending where the policy says Copilot is only asked explicitly. That
     draws a note, since unless a session or an earlier `wait` sent it, an automatic trigger is on.
     """
-    policy = (pr or {}).get(review_policy.PAYLOAD_KEY)
-    copilot = policy.bot("copilot") if policy is not None else None
+    copilot = bot_entry(pr, "copilot")
     if copilot is not None and copilot.trigger == "explicit" and requested:
         print(
             "note: a Copilot review was already requested when this wait started, while the "

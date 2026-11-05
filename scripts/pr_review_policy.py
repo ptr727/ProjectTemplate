@@ -36,9 +36,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
+from pr_review_payload import POLICY_KEY
+
 POLICY_PATH = ".github/pr-review.json"
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "spec" / "pr-review.default.json"
-PAYLOAD_KEY = "_reviewPolicy"
+PAYLOAD_KEY = POLICY_KEY
 VERSION = 1
 BOTS = ("copilot", "coderabbit", "qodo")
 TRIGGERS = ("auto", "explicit", "off")
