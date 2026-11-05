@@ -307,15 +307,31 @@ def plan(rendered: dict[str, Any], checkout: Path, repo: str) -> list[tuple[str,
     """
     verify_checkout(checkout, repo)
     want = facts(rendered)
-    policy = serialize(rendered)
+    policy_file = checkout / policy_lib.POLICY_PATH
+    policy = keep_endings(current_text(policy_file), serialize(rendered))
     return [
+        (policy_lib.POLICY_PATH, None if current_text(policy_file) == policy else policy),
         (
-            policy_lib.POLICY_PATH,
-            None if current_text(checkout / policy_lib.POLICY_PATH) == policy else policy,
+            YAML_PATH,
+            keep_endings(
+                current_text(checkout / YAML_PATH),
+                plan_yaml(checkout / YAML_PATH, want["coderabbit"]),
+            ),
         ),
-        (YAML_PATH, plan_yaml(checkout / YAML_PATH, want["coderabbit"])),
-        (TOML_PATH, plan_toml(checkout / TOML_PATH, want["qodo"])),
+        (
+            TOML_PATH,
+            keep_endings(
+                current_text(checkout / TOML_PATH), plan_toml(checkout / TOML_PATH, want["qodo"])
+            ),
+        ),
     ]
+
+
+def keep_endings(existing: str | None, text: str | None) -> str | None:
+    """`text` in CRLF where the file it replaces is CRLF, so a rewrite never flattens a CRLF file."""
+    if text is None or existing is None or "\r\n" not in existing:
+        return text
+    return text.replace("\r\n", "\n").replace("\n", "\r\n")
 
 
 def write(rendered: dict[str, Any], checkout: Path, repo: str, dry_run: bool = False) -> list[str]:

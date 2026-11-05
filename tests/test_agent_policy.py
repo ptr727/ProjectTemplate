@@ -172,6 +172,31 @@ class WriteCase(unittest.TestCase):
             self.assertIn(kept, toml_text)
         self.assertIn("disable_auto_feedback = false", toml_text)
 
+    def test_a_crlf_file_stays_crlf_and_an_lf_file_stays_lf(self) -> None:
+        crlf = {
+            ".coderabbit.yaml": "# lead\r\nreviews:\r\n  profile: chill\r\n",
+            ".pr_agent.toml": "[pr_reviewer]\r\nrequire_tests = true\r\n",
+            ".github/agent-policy.json": "{}\r\n",
+        }
+        for name, text in crlf.items():
+            target = self.checkout / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8", newline="")
+        agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        for name in crlf:
+            with self.subTest(name=name):
+                out = (self.checkout / name).read_bytes()
+                self.assertIn(b"\r\n", out)
+                self.assertNotIn(b"\n", out.replace(b"\r\n", b""))
+        second = agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        self.assertEqual([line.split()[0] for line in second], ["unchanged"] * 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            lf = make_checkout(tmp)
+            agent_policy.write(self.rendered, lf, "acme/widget")
+            for name in crlf:
+                with self.subTest(lf=name):
+                    self.assertNotIn(b"\r", (lf / name).read_bytes())
+
     def test_a_checkout_of_another_repo_is_refused_before_any_write(self) -> None:
         with self.assertRaises(agent_policy.Refusal):
             agent_policy.write(self.rendered, self.checkout, "acme/other")
