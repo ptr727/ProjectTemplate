@@ -9,16 +9,21 @@ behavior the gate had before policies existed, which the neutrality cases here h
 
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import copy
+import functools
 import io
 import json
 import re
 import subprocess
 import sys
+import time
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -30,6 +35,9 @@ import test_pr_review as fixtures
 
 REPO = Path(__file__).resolve().parent.parent
 MOVED = "b" * 40
+NOW = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
+WINDOWS = (300.0, 1800.0)
+ARGS = argparse.Namespace(timeout=60.0, check_grace=WINDOWS[0], check_stall=WINDOWS[1])
 DEFAULT = json.loads((REPO / "spec" / "pr-review.default.json").read_text(encoding="utf-8"))
 
 
@@ -75,7 +83,6 @@ class TestParse(unittest.TestCase):
     def test_the_hub_default_parses_and_names_every_bot(self) -> None:
         rules = policy.load_default()
         self.assertEqual(set(policy.BOTS), set(rules.bots))
-        self.assertEqual("copilot=auto coderabbit=auto qodo=auto", policy.describe(rules))
 
     def test_the_default_matches_the_schema_file_it_names(self) -> None:
         self.assertEqual("./pr-review.schema.json", DEFAULT["$schema"])
@@ -358,7 +365,7 @@ class TestRequestSideReviews(SideCase):
             return answer if answer is not None else node
 
         post, green = mock.MagicMock(side_effect=send), mock.MagicMock(return_value=held)
-        side.request_side_reviews(pr, green, post)
+        side.request_side_reviews(pr, green, post, NOW, WINDOWS)
         return post, green
 
     def test_an_explicit_bot_is_asked_with_its_own_command_on_the_pull_request(self) -> None:
@@ -388,41 +395,142 @@ class TestRequestSideReviews(SideCase):
             self.run_requests(self.ruled(qodo=EXPLICIT_QODO), answer=wrong)
 
 
-class TestHeadRollup(unittest.TestCase):
-    def test_a_null_rollup_is_none_and_a_missing_head_is_unread(self) -> None:
-        self.assertEqual("NONE", side.head_rollup(fixtures.payload([])))
-        self.assertEqual("PENDING", side.head_rollup(fixtures.payload([], checks=[])))
-        self.assertEqual("", side.head_rollup({"commits": {"nodes": []}}))
+def checked(*nodes: dict, at: str = fixtures.EARLY) -> dict:
+    """A payload whose head carries `nodes` as its checks, committed at `at`."""
+    pr = fixtures.payload([], checks=list(nodes))
+    pr["commits"]["nodes"][-1]["commit"]["committedDate"] = at
+    return pr
 
-    def test_await_green_names_what_holds_the_review(self) -> None:
-        def rolled(state: str | None) -> dict:
-            pr = fixtures.payload([], checks=[])
-            commit = pr["commits"]["nodes"][-1]["commit"]
-            commit["statusCheckRollup"] = None if state is None else {"state": state}
-            return pr
 
-        cases = {"SUCCESS": "", None: "", "FAILURE": "FAILURE", "ERROR": "ERROR"}
-        for state, want in cases.items():
-            with self.subTest(state=state), mock.patch.object(pr_review.time, "sleep"):
-                read = mock.MagicMock(return_value=rolled(state))
-                self.assertEqual(want, side.await_green(read, 0.0, 0.0, pr_review.backoff))
+class TestChecksHold(unittest.TestCase):
+    def test_a_failed_check_holds_and_a_passing_one_does_not(self) -> None:
+        self.assertEqual(
+            "FAILURE",
+            side.checks_hold(
+                checked(fixtures.check(conclusion="FAILURE", started=fixtures.EARLY)), NOW, *WINDOWS
+            ),
+        )
+        self.assertEqual(
+            "", side.checks_hold(checked(fixtures.check(started=fixtures.EARLY)), NOW, *WINDOWS)
+        )
 
-    def test_checks_still_running_at_the_bound_read_pending(self) -> None:
-        pending = fixtures.payload([], checks=[])
-        with mock.patch.object(pr_review.time, "monotonic", return_value=10.0):
-            held = side.await_green(lambda: pending, 0.0, 1.0, pr_review.backoff)
-        self.assertEqual("PENDING", held)
+    def test_a_running_check_holds_as_pending(self) -> None:
+        running = fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
+        self.assertEqual("PENDING", side.checks_hold(checked(running), NOW, *WINDOWS))
+
+    def test_no_check_yet_is_pending_inside_the_grace_and_clear_after_it(self) -> None:
+        fresh = checked(at=(NOW - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        self.assertEqual("PENDING", side.checks_hold(fresh, NOW, *WINDOWS))
+        self.assertEqual("", side.checks_hold(checked(), NOW, *WINDOWS))
+
+    def test_a_hosted_reviewer_check_is_not_the_build(self) -> None:
+        review = fixtures.check(
+            name="CodeRabbit", status="IN_PROGRESS", conclusion="", started=fixtures.EARLY
+        )
+        self.assertEqual(
+            "",
+            side.checks_hold(
+                checked(fixtures.check(started=fixtures.EARLY), review), NOW, *WINDOWS
+            ),
+        )
+
+    def test_the_head_arrives_with_its_first_check_not_its_commit(self) -> None:
+        pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.EARLY)
+        self.assertEqual(fixtures.LATE, side.head_arrived(pr))
+        self.assertEqual(fixtures.EARLY, side.head_arrived(checked(at=fixtures.EARLY)))
+
+    def test_an_ask_before_a_later_push_is_not_one_on_the_head(self) -> None:
+        pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.EARLY)
+        pr["comments"]["nodes"] = [trusted("/review", "2026-08-02T10:30:00Z")]
+        self.assertFalse(side.side_asked_on_head(pr, "/review"))
+
+    def test_await_green_polls_until_nothing_settles(self) -> None:
+        reads = iter(
+            [
+                checked(
+                    fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
+                ),
+                checked(fixtures.check(started=fixtures.EARLY)),
+            ]
+        )
+        with mock.patch.object(pr_review.time, "sleep"):
+            held = side.await_green(
+                lambda: next(reads),
+                time.monotonic(),
+                ARGS,
+                functools.partial(pr_review.backoff, delays=(0,)),
+            )
+        self.assertEqual("", held)
+
+
+class TestAutomaticStart(SideCase):
+    AUTO: ClassVar[dict] = {"trigger": "auto", "bases": ["^develop$"], "gate": True}
+
+    def test_a_gated_automatic_bot_is_not_asked_inside_the_grace(self) -> None:
+        pr = self.ruled(qodo=self.AUTO)
+        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = (
+            NOW - timedelta(seconds=10)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        post = mock.MagicMock()
+        side.request_side_reviews(pr, mock.MagicMock(return_value=""), post, NOW, WINDOWS)
+        post.assert_not_called()
+
+    def test_one_that_has_said_something_since_the_head_has_started(self) -> None:
+        pr = self.ruled(
+            [
+                {
+                    "author": {"login": rounds.QODO_LOGIN},
+                    "createdAt": fixtures.LATE,
+                    "body": "working",
+                }
+            ],
+            qodo=self.AUTO,
+        )
+        self.assertTrue(side.started(pr, "qodo", NOW, *WINDOWS))
+
+    def test_one_silent_past_the_grace_is_asked_to_fill_the_missed_trigger(self) -> None:
+        pr = self.ruled(qodo=self.AUTO)
+        self.assertFalse(side.started(pr, "qodo", NOW, *WINDOWS))
+        post = mock.MagicMock(
+            side_effect=lambda body: posted(body)["addComment"]["commentEdge"]["node"]
+        )
+        side.request_side_reviews(pr, mock.MagicMock(return_value=""), post, NOW, WINDOWS)
+        post.assert_called_once_with("/review")
+
+
+class TestSchemaParity(unittest.TestCase):
+    """The schema an editor validates against states exactly the rules the reader enforces."""
+
+    def test_every_enum_and_key_matches_the_reader(self) -> None:
+        schema = json.loads((REPO / "spec" / "pr-review.schema.json").read_text(encoding="utf-8"))
+        bot = schema["$defs"]["bot"]["properties"]
+        self.assertEqual(set(policy.BOT_KEYS), set(bot))
+        self.assertEqual(set(policy.TRIGGERS), set(bot["trigger"]["enum"]))
+        self.assertEqual(set(policy.WHENS), set(bot["when"]["enum"]))
+        self.assertEqual(set(policy.ROUNDS), set(bot["rounds"]["enum"]))
+        bots = schema["properties"]["bots"]["properties"]
+        self.assertEqual(set(policy.BOTS), set(bots))
+        self.assertEqual(
+            set(policy.COMMANDS), set(bots["coderabbit"]["properties"]["command"]["enum"])
+        )
+        for name in ("copilot", "qodo"):
+            self.assertEqual({"required": ["command"]}, bots[name]["not"], name)
+
+
+class TestCopilotGate(unittest.TestCase):
+    def test_an_ungated_copilot_hands_every_head_to_the_local_pass(self) -> None:
+        rules = parsed(copilot={"trigger": "auto", "bases": ["@default"], "gate": False})
+        self.assertFalse(rounds.promotion(with_policy(fixtures.payload([]), rules, "main")))
 
 
 class TestWaitHoldsForChecks(fixtures.GqlCase):
     """An explicit Copilot policy waiting for green checks requests nothing on a red or running head."""
 
-    def run_wait(self, state: str) -> tuple[int, str, mock.MagicMock]:
+    def run_wait(self, node: dict) -> tuple[int, str, mock.MagicMock]:
         rules = parsed(
             copilot={"trigger": "explicit", "bases": ["^develop$"], "when": "after-checks"}
         )
-        pr = with_policy(fixtures.payload([], checks=[]), rules)
-        pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["state"] = state
+        pr = with_policy(fixtures.payload([], checks=[node]), rules)
         self.answer(pr)
         sent = mock.MagicMock(return_value={"repository": {"pullRequests": {"nodes": []}}})
         with (
@@ -437,13 +545,16 @@ class TestWaitHoldsForChecks(fixtures.GqlCase):
         return any("requestReviews" in str(c.args[0]) for c in sent.call_args_list if c.args)
 
     def test_a_failed_build_is_not_reviewed_and_exits_40(self) -> None:
-        code, out, sent = self.run_wait("FAILURE")
+        code, out, sent = self.run_wait(
+            fixtures.check(conclusion="FAILURE", started=fixtures.EARLY)
+        )
         self.assertEqual(40, code, out)
         self.assertIn("status=CHECKS_BEFORE_REVIEW the head's checks read FAILURE", out)
         self.assertFalse(self.requested(sent))
 
     def test_checks_still_running_at_the_timeout_exit_30(self) -> None:
-        code, out, sent = self.run_wait("PENDING")
+        running = fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
+        code, out, sent = self.run_wait(running)
         self.assertEqual(30, code, out)
         self.assertIn("checks read PENDING", out)
         self.assertFalse(self.requested(sent))

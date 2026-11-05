@@ -34,8 +34,9 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 1. Required status checks are green, and where they are not, the reason is **read**, never
    inferred. `BLOCKED` covers a failed check, a required check nothing is running, an unresolved
    thread, and a missing approval alike, and the response differs by cause.
-2. A review is confirmed on the **current head SHA**. On a pull request into a branch other than the
-   default, every head can carry an attested local pass instead, `coverage=local` in the digest.
+2. A review is confirmed on the **current head SHA**. The review policy can hand a head to a local
+   pass, by default on a pull request into a branch other than the default. Such a head can carry an
+   attested local pass instead, `coverage=local` in the digest.
    That holds where the whole review history is in view and no round on record states partial coverage. A promotion re-reviews content its feature pull requests already carried.
    So under the hub's default review policy, the hosted review runs once per change, at the
    promotion. There a pull request into the default branch, a promotion among them, always
@@ -296,9 +297,10 @@ Run `local-strict-review` against the branch's current diff before every push th
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
 2. Run `uv run --no-project --script scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
-3. Request a Copilot round at one defined moment: the head of a pull request into the default
-   branch, a promotion among them. Auto-trigger is unreliable, so request it explicitly, which
-   step 4's `wait` is what does. On a pull request into any other branch, `wait` reads step 1's
+3. Request each review the repository's review policy owes, which step 4's `wait` is what does.
+   Under the hub's default that is one Copilot round, on the head of a pull request into the default
+   branch. A promotion is one such pull request. Auto-trigger is unreliable, so `wait` fills a
+   missed one. On a pull request into any other branch, `wait` reads step 1's
    attestation as `coverage=local` where Merge Gate item 2 allows that reading. There `wait`
    requests a round only where a partial round or a truncated review history is on record. Pass `wait --request` where a change
    deserves a Copilot round anyway. `wait` also skips the request where

@@ -4,21 +4,33 @@ This is a library module and has no command line. It is apart from `pr_review.py
 Copilot is requested through a review-request mutation. CodeRabbit and Qodo are asked by a
 comment and answer in their own shapes. Keeping their reading and asking here keeps the gate's
 Copilot loop the size it was. `pr_review.py` hands in the reads and the one write. So nothing here
-reaches GitHub on its own, and every case can drive it with constructed payloads. `ROLLUP_PENDING`
-holds the rollup states a running check reports, which a wait for green checks polls past.
+reaches GitHub on its own, and every case can drive it with constructed payloads.
 """
 
 from __future__ import annotations
 
 import functools
 import subprocess
+from argparse import Namespace
 from collections.abc import Callable
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 import pr_review_policy as review_policy
+from pr_review_checks import (
+    HOSTED_REVIEWERS,
+    UNFINISHED,
+    age,
+    check_nodes,
+    check_shape,
+    checks_settling,
+    head_commit,
+    hosted_reviews_running,
+)
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
+    READS_AS_REVIEWER,
     TRUSTED_ASSOCIATIONS,
     commit_oid,
     head_nodes,
@@ -27,7 +39,6 @@ from pr_review_rounds import (
 )
 
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
-ROLLUP_PENDING = frozenset({"PENDING", "EXPECTED"})
 
 
 def side_command(name: str, command: str = "review") -> str:
@@ -35,27 +46,57 @@ def side_command(name: str, command: str = "review") -> str:
     return f"@coderabbitai {command}" if name == "coderabbit" else "/review"
 
 
-def head_committed(pr: dict) -> str:
-    """The head commit's committer timestamp, empty where the payload does not carry it."""
-    nodes = (pr.get("commits") or {}).get("nodes") or []
-    return ((nodes[-1] if nodes else {}).get("commit") or {}).get("committedDate") or ""
+def head_arrived(pr: dict) -> str:
+    """When the head reached the pull request, read as its earliest check's start.
 
-
-def head_rollup(pr: dict) -> str:
-    """The head commit's check rollup state, NONE where the head carries no check at all.
-
-    Empty where the payload holds no head commit, so an unread rollup never reads as green.
+    A commit's own timestamp says when it was made rather than when it was pushed. So an earlier
+    ask or answer would read as one on a head pushed after it. The commit time stands in only
+    where no check has posted yet.
     """
-    nodes = (pr.get("commits") or {}).get("nodes") or []
+    stamps = [n["since"] for n in check_nodes(pr) if n.get("since")]
+    return min(stamps) if stamps else (head_commit(pr).get("committedDate") or "")
+
+
+def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
+    """What holds a review back on the head's checks, empty where nothing does.
+
+    FAILURE where a check finished without passing, PENDING where one is still settling or none
+    has posted inside the grace after the head arrived. A hosted reviewer's own check is left out,
+    since the review it stands for is the one being held.
+    """
+    nodes = [n for n in check_nodes(pr) if not hosted_check(n)]
     if not nodes:
-        return ""
-    rollup = (nodes[-1].get("commit") or {}).get("statusCheckRollup")
-    return "NONE" if rollup is None else (rollup.get("state") or "")
+        since = age(head_arrived(pr), now)
+        return "PENDING" if since is None or since <= grace else ""
+    if any(check_shape(n, now, grace, stall) == "FAILED" for n in nodes):
+        return "FAILURE"
+    return "PENDING" if checks_settling(nodes, now, grace, stall, UNFINISHED) else ""
 
 
-def green(state: str) -> str:
-    """What holds a review back under a rollup `state`: nothing once it passes or holds no check."""
-    return "" if state in ("SUCCESS", "NONE") else (state or "UNREAD")
+def hosted_check(node: dict) -> bool:
+    """Whether a check is a hosted reviewer's own, Copilot's review run included."""
+    name = (node.get("name") or "").casefold()
+    return bool(READS_AS_REVIEWER.search(name)) or any(
+        node.get("poster") == login or name == vocab for vocab, login in HOSTED_REVIEWERS.items()
+    )
+
+
+def started(pr: dict, name: str, now: datetime, grace: float, stall: float) -> bool:
+    """Whether an automatic reviewer has begun on this head, or may still be about to.
+
+    Its check running, or its own comment since the head arrived, means it began. Inside the grace
+    after arrival it may still start, so asking then would buy a second round.
+    """
+    login, since = SIDE_LOGINS[name], head_arrived(pr)
+    elapsed = age(since, now)
+    if elapsed is None or elapsed <= grace:
+        return True
+    running = {r.casefold() for r in hosted_reviews_running(pr, check_nodes(pr), now, grace, stall)}
+    vocab = {v for v, lg in HOSTED_REVIEWERS.items() if lg == login}
+    if login.casefold() in running or vocab & running:
+        return True
+    own = reviewer_nodes(pr, "comments", login)
+    return any((n.get("updatedAt") or n.get("createdAt") or "") >= since for n in own)
 
 
 def side_asks(pr: dict, body: str) -> list[dict]:
@@ -72,8 +113,8 @@ def side_asks(pr: dict, body: str) -> list[dict]:
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
-    """Whether a request `body` was posted since the head was committed."""
-    since = head_committed(pr)
+    """Whether a request `body` was posted since the head arrived."""
+    since = head_arrived(pr)
     return any((n.get("createdAt") or "") >= since for n in side_asks(pr, body))
 
 
@@ -102,7 +143,7 @@ def side_answered(pr: dict, name: str, body: str) -> bool:
     if found is None:
         return False
     asks = side_asks(pr, body)
-    after = max(head_committed(pr), (asks[-1].get("createdAt") or "") if asks else "")
+    after = max(head_arrived(pr), (asks[-1].get("createdAt") or "") if asks else "")
     return (found.get("updatedAt") or found.get("createdAt") or "") >= after
 
 
@@ -140,12 +181,17 @@ def side_unmet(pr: dict) -> list[str]:
 
 
 def request_side_reviews(
-    pr: dict, await_green: Callable[[], str], post: Callable[[str], dict]
+    pr: dict,
+    await_green: Callable[[], str],
+    post: Callable[[str], dict],
+    now: datetime,
+    windows: tuple[float, float],
 ) -> list[str]:
     """Ask each comment-triggered reviewer the policy owes a round on this head, once per head.
 
-    Returns the lines to print. Nothing is sent where the reviewer answered since the head was
-    committed, or was asked since then. Nothing is sent where its cap is spent, either. Nor where it
+    Returns the lines to print. Nothing is sent where the reviewer answered since the head
+    arrived, or was asked since then. An automatic one is not asked while it has begun or may
+    still begin, per `started`, and `windows` holds the check grace and stall. Nothing is sent where its cap is spent, either. Nor where it
     waits for green checks that are not. `await_green` is called at most once. `post` sends one
     comment and returns the created node. An unconfirmed one ends the run, since it may have landed.
     """
@@ -153,6 +199,8 @@ def request_side_reviews(
     held: str | None = None
     for name, bot, body in side_reviewers(pr):
         if not bot.requests() or side_answered(pr, name, body) or side_asked_on_head(pr, body):
+            continue
+        if bot.trigger == "auto" and started(pr, name, now, *windows):
             continue
         if not bot.rounds_left(side_rounds(pr, name, body)):
             lines.append(
@@ -242,20 +290,35 @@ def holds_for_checks(copilot: review_policy.BotPolicy | None, forced: bool) -> b
 
 
 def await_green(
-    read: Callable[[], dict], start: float, timeout: float, backoff: Callable[..., dict]
+    read: Callable[[], dict], start: float, args: Namespace, backoff: Callable[..., dict]
 ) -> str:
-    """Poll the head's checks with `backoff` until they leave pending, and name what holds a review.
+    """Poll the head's checks with `backoff` until none is settling, and name what holds a review.
 
-    Empty once they pass or the head carries none. Otherwise the state they read, PENDING where the
-    bound ran out first, so a failed build is never reviewed before it is fixed.
+    Empty once they pass. Otherwise what `checks_hold` reads, PENDING where `args.timeout` ran out
+    first. So a failed build is never reviewed before it is fixed.
     """
-    polled = backoff(read(), read, lambda p: head_rollup(p) in ROLLUP_PENDING, start, timeout)
-    return green(head_rollup(polled))
+    windows = (args.check_grace, args.check_stall)
+
+    def holding(p: dict) -> bool:
+        return checks_hold(p, datetime.now(UTC), *windows) == "PENDING"
+
+    polled = backoff(read(), read, holding, start, args.timeout)
+    return checks_hold(polled, datetime.now(UTC), *windows)
 
 
-def ask(pr: dict, await_green: Callable[[], str], post: Callable[[str], dict]) -> None:
-    """Send and print `request_side_reviews`'s requests."""
-    for line in request_side_reviews(pr, await_green, post):
+def ask(
+    pr: dict, await_green: Callable[[], str], send: Callable[..., dict], args: Namespace
+) -> None:
+    """Send and print `request_side_reviews`'s requests, `send` posting one comment body."""
+
+    def post(body: str) -> dict:
+        node = send(body=body)
+        for key in ("addComment", "commentEdge", "node"):
+            node = node.get(key) or {}
+        return node
+
+    windows = (args.check_grace, args.check_stall)
+    for line in request_side_reviews(pr, await_green, post, datetime.now(UTC), windows):
         print(line)
 
 

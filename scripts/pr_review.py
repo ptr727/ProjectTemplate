@@ -84,7 +84,7 @@ Subcommands
            round covering the head names exactly the changed files in its own file table, one
            added, modified, or deleted with no changed line GitHub counts left out where unnamed,
            `carried:table` where the newest round carrying a table does, `local` where an attested
-           local pass covers a head on a pull request into a branch other than the default, and
+           local pass covers a head the review policy hands to one, by default off the default, and
            `none` otherwise. A table stands in only where no round on record states partial
            coverage and the whole review history is in view. `none` decides no exit code and
            prints a note, since Merge Gate item 2 in pr-review-conduct reads this field.
@@ -146,8 +146,8 @@ Subcommands
            names a transient fetch failure is owed one re-request, unless the round before it was
            an error refusal too. A re-request already made after the refusal is never sent again.
            A held head names it under COPILOT_ERROR_TRANSIENT instead. The auto-request is also skipped on a pull
-           request into a branch other than the default, whose every head an attested local
-           pass covers. There an attested head has its checks polled instead while they can still
+           request the review policy hands to an attested local pass, by default one into a
+           branch other than the default. There an attested head has its checks polled instead while they can still
            move its merge and no thread is open on it, and one with no attestation exits 49. --request asks for a round anyway.
            The bot id is read from the repository's most recently updated pull requests, the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
@@ -211,7 +211,7 @@ Subcommands
            the poll at once and outranks 30, 44, and 45, since no check clears it. A thread page cut
            at 100 is read to its end first. `status=THREADS_UNRESOLVED` names the authors.
            49 = no Copilot round covers this head and none was requested. The situation is a
-           pull request merging into a branch other than the default with no attestation vouching
+           pull request the review policy hands to a local pass, with no attestation vouching
            for the head, a refusal naming Copilot's default review exclusions on it included. 64 = the write scope could not
            be established or excludes the target, checked before the auto-request or any poll.
 
@@ -551,7 +551,7 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
     if isinstance(pr, dict) and pr.get("baseRefName"):
         pr[review_policy.PAYLOAD_KEY] = side.policy_for(
-            owner, repo, pr["baseRefName"], gh_rest, answered_absent
+            owner, repo, pr["baseRefName"], reread, answered_absent
         )
     return pr
 
@@ -1050,7 +1050,7 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
 
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     data = gh_graphql(M_COMMENT, subjectId=target["id"], body=body)
-    comment = mutated(data, "addComment", "commentEdge", "node")
+    comment = mutated(data, *COMMENT_PATH)
     if not comment.get("url") or (comment.get("body") or "") != body:
         return unconfirmed(
             "COMMENT_NOT_CONFIRMED",
@@ -1623,9 +1623,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and (copilot is None or a.request or copilot.requests())
     )
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
-    await_green = functools.partial(side.await_green, read_held, start, a.timeout, backoff)
+    await_green = functools.partial(side.await_green, read_held, start, a, backoff)
     checks_hold = await_green() if owed and side.holds_for_checks(copilot, a.request) else ""
-    owed, final = (False, None) if checks_hold else (owed, final)
+    owed = owed and not checks_hold
     if owed:
         line, recorded = request_copilot_review(
             owner, repo, a.number, pr["id"], copilot_bot_id(history), POLL_DELAYS[0]
@@ -1643,8 +1643,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
     if snapshot is not None and may_request:
-        post = functools.partial(gh_graphql, M_COMMENT, subjectId=snapshot.get("id") or pr["id"])
-        side.ask(snapshot, await_green, lambda body: mutated(post(body=body), *COMMENT_PATH))
+        post = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
+        side.ask(snapshot, await_green, post, a)
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:
@@ -1660,16 +1660,16 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             else "Run attest once a recorded pass covers this head."
         )
         print(
-            "note: this pull request merges into a branch other than the default, so its head is "
-            "to be covered by an attested local pass rather than a Copilot round, which runs once "
-            "per change at the promotion, and this wait requests nothing. No attested local pass "
+            "note: the review policy hands this head to an attested local pass rather than a "
+            "Copilot round, by default on a branch other than the default, and this wait "
+            "requests nothing. No attested local pass "
             f"covers this head yet. {why} Pass --request to ask for a round anyway."
         )
     elif held:
         print(
-            "note: this pull request merges into a branch other than the default, so its head is "
-            "covered by an attested local pass rather than a Copilot round, which runs once per "
-            "change at the promotion, and this wait requests nothing. Pass --request to ask "
+            "note: the review policy covers this head with an attested local pass rather than a "
+            "Copilot round, by default on a branch other than the default, and this wait "
+            "requests nothing. Pass --request to ask "
             "for a round anyway. An attested head has its checks polled instead, while they can "
             "still move its merge."
         )

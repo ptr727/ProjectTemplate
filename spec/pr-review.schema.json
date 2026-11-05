@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://github.com/ptr727/ProjectTemplate/spec/pr-review.schema.json",
     "title": "Pull request review policy",
-    "description": "Which bots review a repository's pull requests, on which bases, when, and how often. A repository states it in .github/pr-review.json, and one carrying no file reads spec/pr-review.default.json. scripts/pr_review_policy.py is the reader and holds the same rules.",
+    "description": "Which bots review a repository's pull requests, on which bases, when, and how often. A repository states it in .github/pr-review.json, and one carrying no file reads spec/pr-review.default.json. scripts/pr_review_policy.py is the reader, and tests/test_pr_review_policy.py holds its rules equal to this file. auto means only that the bot may start on its own.",
     "type": "object",
     "required": ["version", "bots"],
     "additionalProperties": false,
@@ -14,7 +14,7 @@
             "required": ["copilot", "coderabbit", "qodo"],
             "additionalProperties": false,
             "properties": {
-                "copilot": { "$ref": "#/$defs/bot" },
+                "copilot": { "allOf": [{ "$ref": "#/$defs/bot" }], "not": { "required": ["command"] } },
                 "coderabbit": {
                     "allOf": [{ "$ref": "#/$defs/bot" }],
                     "properties": {

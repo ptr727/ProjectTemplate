@@ -622,7 +622,7 @@ def promotion(pr: dict) -> bool:
     """Whether a Copilot round rather than a local pass is to cover this head.
 
     Without a review policy on the payload that is a merge into the default branch, the behavior
-    before `pr_review_policy` existed. With one, it is a base the policy's Copilot entry covers,
+    before `pr_review_policy` existed. With one, it is a base the policy's gated Copilot entry covers,
     while a further round is allowed or one already covers the head. So a repository capping its
     rounds falls back to an attested local pass once the cap is spent. An unread default branch
     still demands the round, since nothing proves the base is not the default. `POLICY_KEY` names
@@ -633,7 +633,7 @@ def promotion(pr: dict) -> bool:
     if not default or policy is None:
         return not default or pr.get("baseRefName") == default
     bot = policy.bot("copilot")
-    if not bot.covers(pr.get("baseRefName") or "", default):
+    if not bot.gate or not bot.covers(pr.get("baseRefName") or "", default):
         return False
     return reviewed_head(pr) or bot.rounds_left(copilot_rounds(pr))
 
@@ -673,7 +673,7 @@ def local_cover(pr: dict) -> bool:
 
     It stands in only where all of these hold:
 
-    - The pull request is into a non-default branch.
+    - The review policy owes the head no Copilot round, by default off the default branch.
     - The head is one its writer attests.
     - No round on record read part of a diff.
     - The whole review history is in view.

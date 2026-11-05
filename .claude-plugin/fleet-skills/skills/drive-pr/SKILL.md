@@ -96,9 +96,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    route around. The hub carries such a hook, and a repository has one only if it adds one. That
    skill's refusal table says what each refusal means and what clears it.
 3. Drive pr-review-conduct's review loop on it to the Merge Gate, disposing of every finding per
-   "Disposing of Every Finding" below. Request no Copilot round on this feature PR. Its `wait` reads
-   step 2's attestation as `coverage=local` and requests none, unless a partial round or a truncated
-   review history is on record. Exit `49` means the head carries no attestation, so run and record a
+   "Disposing of Every Finding" below. Request no review by hand. `wait` requests what the review
+   policy owes. Under the hub's default it reads step 2's attestation as `coverage=local` here. It
+   then requests no Copilot round, unless a partial round or a truncated review history is on record. Exit `49` means the head carries no attestation, so run and record a
    pass over it, push, and attest. Exit `46` means a thread is open on the head, so dispose of each
    one per "Disposing of Every Finding" and wait again. Read `state=` in every digest `wait` or `status` prints.
    A peer can merge or close the pull request mid-drive. A digest carrying `state=MERGED` on a feature PR into develop means the merge has landed.

@@ -90,10 +90,9 @@ class BotPolicy:
 
 @dataclass(frozen=True)
 class Policy:
-    """Every bot's settings, and where they were read from."""
+    """Every bot's settings."""
 
     bots: dict[str, BotPolicy]
-    source: str
 
     def bot(self, name: str) -> BotPolicy:
         return self.bots[name]
@@ -165,7 +164,7 @@ def parse(data: object, source: str) -> Policy:
     missing = [b for b in BOTS if b not in bots]
     if missing:
         raise _fail(source, f"bots is missing {', '.join(missing)}, and every bot is stated")
-    return Policy({name: _bot(source, name, bots[name]) for name in BOTS}, source)
+    return Policy({name: _bot(source, name, bots[name]) for name in BOTS})
 
 
 def load_default(path: Path = DEFAULT_PATH) -> Policy:
@@ -201,8 +200,3 @@ def fetch(owner: str, repo: str, ref: str, read: Reader) -> Policy:
     if content is None:
         return load_default()
     return decode_contents(content, source)
-
-
-def describe(policy: Policy) -> str:
-    """One line naming each bot's trigger, for a digest or a metrics column."""
-    return " ".join(f"{name}={policy.bot(name).trigger}" for name in BOTS)

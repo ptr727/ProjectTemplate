@@ -5079,7 +5079,7 @@ class TestCli(GqlCase):
 
     def test_a_feature_pull_request_with_no_round_is_never_requested(self) -> None:
         """Into a branch other than the default, the attested local pass alone covers the head."""
-        covered = "its head is covered by an attested local pass"
+        covered = "covers this head with an attested local pass"
         for attest, code, said, unsaid in (
             (False, 49, "No attested local pass covers this head yet", covered),
             (True, 0, covered, "No attested local pass covers this head yet"),
@@ -5109,7 +5109,7 @@ class TestCli(GqlCase):
         self.assertIn("No attested local pass covers this head yet", out)
         self.assertIn("a Copilot refusal on this head overrules it", out)
         self.assertNotIn("Run attest once", out)
-        self.assertNotIn("its head is covered by an attested local pass", out)
+        self.assertNotIn("covers this head with an attested local pass", out)
         self.assertNotIn("coverage=local", out)
 
     def test_status_reads_a_feature_pull_request_with_no_round_from_its_attestation(
