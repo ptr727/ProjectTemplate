@@ -497,7 +497,8 @@ class ReviewTests(unittest.TestCase):
 
     def test_local_findings_sum_and_unknown_is_counted_apart(self) -> None:
         comments = [attest(SHA_A, "2"), attest(SHA_B, "unknown"), attest(SHA_C, "0")]
-        result = self.tally(comments=comments)
+        heads = [commit(SHA_A), commit(SHA_B), commit(SHA_C)]
+        result = self.tally(commits=heads, comments=comments)
         self.assertEqual(result.local_findings, 2)
         self.assertEqual(result.local_unknown, 1)
 
@@ -511,20 +512,29 @@ class ReviewTests(unittest.TestCase):
             comment(f"prose {marker(SHA_A, '4')}"),
             comment(f"text\n{marker(SHA_B, '5')}\nmore"),
         ]
-        self.assertEqual(bm.attestations(pr_payload(comments=comments)), {SHA_B: "5"})
+        heads = [commit(SHA_A), commit(SHA_B)]
+        self.assertEqual(
+            bm.attestations(pr_payload(commits=heads, comments=comments)), {SHA_B: "5"}
+        )
 
     def test_the_first_attestation_of_a_head_wins_as_in_the_gate(self) -> None:
         comments = [attest(SHA_A, "2"), attest(SHA_A, "0"), attest(SHA_B, "unknown")]
-        pr = pr_payload(comments=comments)
+        heads = [commit(SHA_A), commit(SHA_B), commit(SHA_C)]
+        pr = pr_payload(commits=heads, comments=comments)
         self.assertEqual(bm.attestations(pr), {SHA_A: "2", SHA_B: "unknown"})
         gate = pr_review_rounds.attestation({**pr, "headRefOid": SHA_A})
         self.assertEqual(gate, "2")
-        result = self.tally(comments=comments)
+        result = self.tally(commits=heads, comments=comments)
         self.assertEqual((result.local_findings, result.local_unknown), (2, 1))
+
+    def test_an_attestation_counts_only_for_a_read_commit(self) -> None:
+        pr = pr_payload(commits=[commit(SHA_A)], comments=[attest(SHA_A, "1"), attest(SHA_B, "4")])
+        self.assertEqual(bm.attestations(pr), {SHA_A: "1"})
 
     def test_attestations_use_the_gates_fence_rule_and_no_local_copy(self) -> None:
         tilde = f"~~~\n{marker(SHA_A, '7')}\n~~~"
-        pr = pr_payload(comments=[comment(tilde), attest(SHA_B, "1")])
+        heads = [commit(SHA_A), commit(SHA_B)]
+        pr = pr_payload(commits=heads, comments=[comment(tilde), attest(SHA_B, "1")])
         self.assertEqual(bm.attestations(pr), {SHA_B: "1"})
         self.assertIsNone(pr_review_rounds.attestation({**pr, "headRefOid": SHA_A}))
 

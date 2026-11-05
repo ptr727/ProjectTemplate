@@ -230,10 +230,6 @@ def nodes_of(connection: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
     return list((connection or {}).get("nodes") or [])
 
 
-def cut(connection: Mapping[str, Any] | None) -> bool:
-    return bool(((connection or {}).get("pageInfo") or {}).get("hasNextPage"))
-
-
 def head_state(commit: Mapping[str, Any]) -> str:
     """Classify a head by its rolled-up status as `failed`, `green`, or `other`."""
     state = str((commit.get("statusCheckRollup") or {}).get("state") or "")
@@ -243,18 +239,17 @@ def head_state(commit: Mapping[str, Any]) -> str:
 
 
 def attestations(pr: Mapping[str, Any]) -> dict[str, str]:
-    """Head sha to the findings text of its first trusted attestation for the pull request's base.
+    """Each read commit's sha to the findings text the gate's `attestation` reads for it as head.
 
-    The gate's own readers decide what counts, so a marker the gate would not accept is not
-    counted here. The first one per head wins, as in the gate's `attestation`.
+    Calling the gate's function keeps what counts as an attestation in one place. A head outside
+    the commits window is not read, and that window is already noted where it was cut.
     """
-    base = str(pr.get("baseRefName") or "")
     found: dict[str, str] = {}
-    for _, lines in rounds.trusted_comments(dict(pr)):
-        for line in lines:
-            match = rounds.ATTESTATION.fullmatch(line)
-            if match and match.group(2) == base:
-                found.setdefault(match.group(1), match.group(3))
+    for node in nodes_of(pr.get("commits")):
+        oid = str((node.get("commit") or {}).get("oid") or "")
+        value = rounds.attestation({**pr, "headRefOid": oid}) if oid else None
+        if value is not None:
+            found[oid] = value
     return found
 
 
@@ -308,7 +303,7 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
         return
     number = pr.get("number")
     for key in ("commits", "reviews", "reviewThreads", "comments", "timelineItems"):
-        if cut(pr.get(key)):
+        if rounds.page_flag(dict(pr), key, "hasNextPage"):
             result.truncated.append(f"PR {number} {key}")
     commits = [n.get("commit") or {} for n in nodes_of(pr.get("commits"))]
     states = {str(c.get("oid")): head_state(c) for c in commits}
@@ -747,7 +742,7 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
         policy = fetch(owner, name, ref, read)
     except GhError as error:
         return {}, str(error)
-    except (KeyError, TypeError, PolicyError) as error:
+    except PolicyError as error:
         return {}, f"unreadable policy file: {error}"
     mark = " (default)" if absent else ""
     return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
