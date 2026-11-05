@@ -943,9 +943,11 @@ class TestSideAskTiming(fixtures.GqlCase):
         moving = fixtures.check(status="IN_PROGRESS", conclusion="", started=just)
         running, green = self.covered(moving), self.covered(fixtures.check(started=fixtures.EARLY))
         slept: list[float] = []
+        reads: list[tuple[str, bool]] = []
 
         def read(query: str, *_args: object, **_kwargs: object) -> dict:
-            return green if query is pr_review.Q_HELD and slept else running
+            reads.append((query, bool(slept)))
+            return green if slept else running
 
         def graphql(query: str, **variables: object) -> dict:
             if "addComment" in query:
@@ -964,11 +966,17 @@ class TestSideAskTiming(fixtures.GqlCase):
         asks = [c.kwargs["body"] for c in sent.call_args_list if "addComment" in c.args[0]]
         self.assertEqual(["/review"], asks, out.getvalue())
         self.assertIn("auto-request: asked qodo", out.getvalue())
+        self.assertIn(
+            (pr_review.Q_FULL, True), reads, "the digest read a payload from before the poll"
+        )
 
-    def test_only_a_wait_that_polls_hands_the_ask_a_poll(self) -> None:
+    def test_only_a_wait_that_polls_copilot_hands_the_ask_a_poll(self) -> None:
+        """A held head's own poll already waited the checks out, so it reads them once."""
+        ungated = parsed(copilot={"trigger": "auto", "bases": [], "gate": False})
         cases = {
             "covered": (fixtures.payload([fixtures.review()]), True),
             "stopped": (fixtures.payload([fixtures.review(body=fixtures.QUOTA_REFUSED)]), False),
+            "held": (attested_on(with_policy(fixtures.payload([]), ungated)), False),
         }
         for name, (pr, polls) in cases.items():
             with self.subTest(name):
@@ -982,6 +990,17 @@ class TestSideAskTiming(fixtures.GqlCase):
                 after = [c for c in spy.call_args_list if "after-checks" in c.args]
                 self.assertEqual(1, len(after))
                 self.assertEqual(polls, after[0].args[-1] is not None)
+
+    def test_a_pull_request_merged_while_its_checks_settle_is_asked_nothing(self) -> None:
+        bot = {**EXPLICIT_QODO, "when": "after-checks"}
+        before = with_policy(fixtures.payload([]), parsed(qodo=bot))
+        merged = {**copy.deepcopy(before), "state": "MERGED"}
+        made = ({"url": "https://example.test/c/1", "body": "/review"}, True)
+        reads, post = iter([before, merged]), mock.MagicMock(return_value=made)
+        side.request_side_reviews(
+            lambda: next(reads), mock.MagicMock(return_value=""), post, "after-checks"
+        )
+        post.assert_not_called()
 
     def test_a_poll_handed_to_the_ask_decides_the_checks(self) -> None:
         pr = with_policy(checked(RUNNING), parsed(qodo=AFTER_CHECKS_QODO))

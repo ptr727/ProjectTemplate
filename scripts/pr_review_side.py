@@ -216,6 +216,8 @@ def request_side_reviews(
         if bot.waits_for_checks():
             if held is None:
                 held, pr = await_green(), read()
+                if pr.get("state", "OPEN") != "OPEN":
+                    return lines
             if held:
                 lines.append(
                     f"note: {name} is asked only once the head's checks pass, and they read {held}"

@@ -159,7 +159,7 @@ Subcommands
            as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
-           present does not poll the checks, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
+           present polls the checks only for an after-checks CodeRabbit or Qodo still to ask, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
            every workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
@@ -1560,8 +1560,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     `may_request` False sends no request whatever is owed, for a caller reading the gate as is.
     The body-less liveness read takes a head refusal for a round, so `polled_past` reads past it.
     A held Copilot request is judged again on a fresh read once the check wait ends. The after-checks
-    side asks go after the Copilot poll, so their check wait never holds Copilot's round back. They
-    poll the checks on the wait's clock only where the wait polled, so a wait that stops reads once.
+    side asks go after the Copilot poll, so their check wait never holds Copilot's round back. Only
+    a Copilot poll hands them the wait's clock to poll on, and a poll's digest then reads afresh.
     """
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     if refused := scope_refusal(owner):
@@ -1702,7 +1702,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             return last_full[0]
 
         polled = backoff(last_full[0], held_read, still_held, start, a.timeout)
-        final, polls = (polled if polled is last_full[0] else None), True
+        final = polled if polled is last_full[0] else None
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "
@@ -1741,7 +1741,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
 
     ask("after-checks", await_green if polls else None)
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
-    final = full_read(owner, repo, a.number, final)
+    final = full_read(owner, repo, a.number, None if polls else final)
     if not is_open(final):
         return run_status(owner, repo, a, final)
     now = datetime.now(UTC)
