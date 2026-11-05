@@ -16,7 +16,6 @@ import json
 import re
 import subprocess
 from collections.abc import Callable, Iterator, Sequence
-from datetime import UTC, datetime
 from typing import NamedTuple
 
 DETAIL_CAP = 800
@@ -68,18 +67,6 @@ def said_absent(stderr: str) -> bool:
     """
     m = HTTP_STATUS.search(stderr)
     return m is not None and m.group(1) in ABSENT
-
-
-def utc_instant(stamp: str) -> datetime | None:
-    """A GitHub timestamp as an aware UTC datetime, None where it is empty or does not parse.
-
-    A `GitTimestamp`, such as a commit's `committedDate`, keeps the committer's own offset, while a
-    `DateTime` is written in UTC. So the two order correctly only once both are converted.
-    """
-    try:
-        return datetime.fromisoformat(stamp).astimezone(UTC) if stamp else None
-    except ValueError:
-        return None
 
 
 def run_subprocess(argv: list[str]) -> tuple[int, str, str]:

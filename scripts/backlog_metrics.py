@@ -45,7 +45,8 @@ from typing import Any
 
 import pr_review_rounds as rounds
 import pr_review_side as side
-from gh_graphql import GraphQLError, request, run_subprocess, said_absent, utc_instant, walk
+from gh_graphql import GraphQLError, request, run_subprocess, said_absent, walk
+from pr_review_checks import utc_instant
 from pr_review_copilot import VOCABULARIES
 from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
@@ -61,6 +62,13 @@ THREAD_CAP = 100
 COMMENT_CAP = 100
 REVIEW_CAP = 100
 EVENT_CAP = 100
+CONNECTION_CAPS = {
+    "commits": COMMIT_CAP,
+    "reviews": REVIEW_CAP,
+    "reviewThreads": THREAD_CAP,
+    "comments": COMMENT_CAP,
+    "timelineItems": EVENT_CAP,
+}
 INTEGRATION_BRANCH = "develop"
 HISTORY_CAP = 10
 FAILED_STATES = frozenset({"FAILURE", "ERROR"})
@@ -304,9 +312,9 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
         result.promotions_skipped += 1
         return
     number = pr.get("number")
-    for key in ("commits", "reviews", "reviewThreads", "comments", "timelineItems"):
+    for key, cap in CONNECTION_CAPS.items():
         if rounds.page_flag(dict(pr), key, "hasNextPage"):
-            result.truncated.append(f"PR {number} {key}")
+            result.truncated.append(f"PR {number} {key} past {cap}")
     commits = [n.get("commit") or {} for n in nodes_of(pr.get("commits"))]
     states = {str(c.get("oid")): head_state(c) for c in commits}
     attested = attestations(pr)
@@ -352,10 +360,10 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
             triggers = [str(n.get("createdAt") or "") for n in (*asks, *events)]
             classify_rounds(pr, login, triggers, stats, heads)
         for thread in nodes_of(pr.get("reviewThreads")):
-            first = nodes_of(thread.get("comments"))[:1]
-            if not first or (first[0].get("author") or {}).get("login") != login:
+            if rounds.thread_author(dict(thread)) != login:
                 continue
-            head = str((first[0].get("originalCommit") or {}).get("oid"))
+            opening = rounds.first_comment(dict(thread))
+            head = str((opening.get("originalCommit") or {}).get("oid"))
             stats.findings += 1
             if attested.get(head) == "0":
                 stats.missed_by_local += 1
@@ -514,8 +522,8 @@ def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
     for r in reviews:
         if r.truncated:
             out.append(
-                f"{r.name}: review figures are truncated, since a cap was reached"
-                f" (at most {PR_CAP} merged PRs per repository): {', '.join(r.truncated)}."
+                f"{r.name}: review figures are truncated, since a cap was reached:"
+                f" {', '.join(r.truncated)}."
             )
         if r.policy_changes:
             out.append(

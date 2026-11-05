@@ -591,8 +591,10 @@ class ReviewTests(unittest.TestCase):
         pr["commits"] = {"pageInfo": {"hasNextPage": True}, "nodes": []}
         result = bm.ReviewMetrics(name="alpha")
         bm.review_pr(pr, result, "main")
-        self.assertEqual(result.truncated, ["PR 1 commits"])
-        self.assertIn("truncated", bm.review_notes([result])[0])
+        self.assertEqual(result.truncated, [f"PR 1 commits past {bm.COMMIT_CAP}"])
+        note = bm.review_notes([result])[0]
+        self.assertIn(f"PR 1 commits past {bm.COMMIT_CAP}", note)
+        self.assertNotIn(str(bm.PR_CAP), note)
 
 
 class PolicyTests(unittest.TestCase):
