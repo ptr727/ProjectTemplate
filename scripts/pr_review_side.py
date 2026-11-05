@@ -114,7 +114,7 @@ def side_asked_on_head(pr: dict, body: str) -> bool:
     comes later, so an ask posted before the first suite would read as older than the head. An ask
     for an earlier head, made after this one was committed, counts for this one too. That costs at
     most one missed ask, never a duplicate paid round. The two stamps are compared as instants,
-    since a commit's keeps its committer's own offset where a comment's is UTC.
+    since a commit's timestamp keeps its committer's own offset where a comment's is UTC.
     """
     since = utc_instant(head_commit(pr).get("committedDate") or "")
     asked = (utc_instant(n.get("createdAt") or "") for n in side_asks(pr, body))
