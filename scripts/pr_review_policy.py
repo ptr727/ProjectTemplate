@@ -48,6 +48,8 @@ WHENS = ("on-open", "after-checks")
 ROUNDS = ("once", "per-push")
 COMMANDS = ("review", "full review")
 DEFAULT_BASE = "@default"
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+ABSENT = frozenset({"404", "422"})
 BOT_KEYS = frozenset({"trigger", "bases", "when", "rounds", "maxRounds", "gate", "command"})
 
 
@@ -115,6 +117,16 @@ class Policy:
 
     def bot(self, name: str) -> BotPolicy:
         return self.bots[name]
+
+
+def said_absent(stderr: str) -> bool:
+    """Whether `gh`'s `stderr` says GitHub answered that the object is not there.
+
+    `HTTP_STATUS` is what `gh` prints only where GitHub answered. Outside `ABSENT`, the two returns
+    for an object that is not there, an answer means "not read" rather than "not there".
+    """
+    m = HTTP_STATUS.search(stderr)
+    return m is not None and m.group(1) in ABSENT
 
 
 def _fail(source: str, why: str) -> PolicyError:

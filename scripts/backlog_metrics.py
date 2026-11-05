@@ -17,9 +17,10 @@ Usage
 Exit codes
   0  the report was written.
   1  a `gh` call for issues, pull requests, runs, or the review pass failed, so no number is
-     guessed. A failed read of the policy file, of its history, or of whether `develop` exists
-     still writes the report and then exits 1. Where the policy itself went unread, the report
-     shows `error` in its place.
+     guessed. Four reads fail more softly: the default branch, whether `develop` exists, the
+     policy file, and its history. A failed one still writes the report, names that read on
+     stderr, and exits 1.
+     Where the policy itself went unread, the report shows `error` in its place.
   2  the command line was wrong.
 """
 
@@ -36,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from gh_graphql import GraphQLError, request, run_subprocess, walk
-from pr_review_policy import BOTS, POLICY_PATH, PolicyError, decode_contents, load_default
+from pr_review_policy import BOTS, POLICY_PATH, PolicyError, fetch, said_absent
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
@@ -221,6 +222,7 @@ class ReviewMetrics:
     bots: dict[str, BotStats] = field(default_factory=dict)
     policy: dict[str, str] = field(default_factory=dict)
     policy_error: str = ""
+    policy_read: str = "policy file"
     policy_branch: str = ""
     history_error: str = ""
     duplicates_skipped: int = 0
@@ -289,7 +291,8 @@ def classify_rounds(
     """Sort each head the bot reviewed into automatic, explicit or unclassified.
 
     A head arrives at its commit date. It is explicit when a trigger falls between that arrival
-    and the bot's first review of it. A head without both times cannot be classified.
+    and the bot's first review of it. A head without both times cannot be classified. A trigger
+    always has a time, since GitHub's schema makes `createdAt` non-null on both of its sources.
     """
     arrival = {
         str((n.get("commit") or {}).get("oid")): str(
@@ -307,7 +310,7 @@ def classify_rounds(
             first[oid] = at
     for oid, reviewed_at in first.items():
         arrived = arrival.get(oid, "")
-        if not arrived or not reviewed_at or "" in triggers:
+        if not arrived or not reviewed_at:
             stats.unclassified_rounds += 1
         elif any(arrived <= t <= reviewed_at for t in triggers):
             stats.explicit_rounds += 1
@@ -551,7 +554,7 @@ def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
                 " so the window mixes two policies."
             )
         if r.policy_error:
-            out.append(f"{r.name}: reading {POLICY_PATH} failed: {r.policy_error}")
+            out.append(f"{r.name}: reading the {r.policy_read} failed: {r.policy_error}")
         if r.history_error:
             out.append(f"{r.name}: reading the {POLICY_PATH} history failed: {r.history_error}")
         if r.duplicates_skipped:
@@ -734,27 +737,31 @@ def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
 
 
 def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
-    """Each bot's trigger in the policy file at `ref`. A 404 means absent, nothing else does.
+    """Each bot's trigger in the policy file at `ref`, read the way the review gate reads it.
 
-    The file is parsed by the reader the review gate uses, so a policy the gate refuses reads as
-    an error here too. An absent file reads as the hub default's triggers, each marked `(default)`.
+    The gate's own `fetch` does the read, so a file it would refuse reads as an error here too. A
+    file it would take as absent reads as the hub default, each trigger marked `(default)`.
     """
-    quoted = urllib.parse.quote(ref, safe="")
+    absent: list[str] = []
+
+    def read(owner: str, repo: str, path: str, ref: str) -> str | None:
+        quoted = urllib.parse.quote(ref, safe="")
+        try:
+            payload = run_gh(["api", f"repos/{owner}/{repo}/contents/{path}?ref={quoted}"])
+        except GhError as error:
+            if said_absent(str(error)):
+                absent.append(path)
+                return None
+            raise
+        return str(payload["content"])
+
     try:
-        payload = run_gh(["api", f"repos/{owner}/{name}/contents/{POLICY_PATH}?ref={quoted}"])
+        policy = fetch(owner, name, ref, read)
     except GhError as error:
-        if "HTTP 404" in str(error):
-            payload = None
-        else:
-            return {}, str(error)
-    try:
-        if payload is None:
-            policy, mark = load_default(), " (default)"
-        else:
-            source = f"{owner}/{name}:{POLICY_PATH}@{ref}"
-            policy, mark = decode_contents(str(payload["content"]), source), ""
+        return {}, str(error)
     except (KeyError, TypeError, PolicyError) as error:
         return {}, f"unreadable policy file: {error}"
+    mark = " (default)" if absent else ""
     return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
 
 
@@ -821,11 +828,11 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
                 result.truncated.append(f"{total} merged PRs, {PR_CAP} read")
             break
     if not branch:
-        result.policy_error = "the repository has no default branch"
+        result.policy_read, result.policy_error = "default branch", "the repository has none"
         return result
     result.policy_branch, branch_error = policy_branch(owner, name, branch)
     if branch_error:
-        result.policy_error = branch_error
+        result.policy_read, result.policy_error = f"{INTEGRATION_BRANCH} branch", branch_error
         return result
     result.policy, result.policy_error = fetch_policy(owner, name, result.policy_branch)
     result.policy_changes, result.history_error = fetch_policy_changes(
@@ -892,7 +899,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     failed = [
         f"backlog_metrics.py: {r.name}: reading the {what} failed"
         for r in reviews
-        for what, error in (("policy file", r.policy_error), ("policy history", r.history_error))
+        for what, error in ((r.policy_read, r.policy_error), ("policy history", r.history_error))
         if error
     ]
     for line in failed:

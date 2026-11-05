@@ -401,19 +401,6 @@ class ReviewTests(unittest.TestCase):
         )
         self.assertEqual(result.bots["qodo"].explicit_rounds, 1)
 
-    def test_a_trigger_without_a_time_leaves_a_head_unclassified(self) -> None:
-        review = {
-            "author": {"login": RABBIT},
-            "commit": {"oid": SHA_A},
-            "submittedAt": "2026-01-01T03:00:00Z",
-        }
-        result = self.tally(
-            commits=[commit(SHA_A, at="2026-01-01T01:00:00Z")],
-            reviews=[review],
-            comments=[{**comment(f"@{RABBIT} review"), "createdAt": None}],
-        )
-        self.assertEqual(result.bots["coderabbit"].unclassified_rounds, 1)
-
     def test_local_findings_sum_and_unknown_is_counted_apart(self) -> None:
         comments = [attest(SHA_A, "2"), attest(SHA_B, "unknown"), attest(SHA_C, "0")]
         result = self.tally(comments=comments)
@@ -497,6 +484,11 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(
             triggers, {bot: f"{default[bot]['trigger']} (default)" for bot in bm.BOT_LOGINS}
         )
+
+    def test_a_422_is_absent_as_the_gate_reads_it(self) -> None:
+        triggers, error = self.fetch(side_effect=bm.GhError("gh: No commit found (HTTP 422)"))
+        self.assertEqual(error, "")
+        self.assertTrue(all(t.endswith(" (default)") for t in triggers.values()))
 
     def test_any_other_error_is_an_error_not_absent(self) -> None:
         triggers, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
@@ -650,7 +642,10 @@ class ReviewCollectTests(unittest.TestCase):
             code = bm.main(["--owner", "o", "--repo", "alpha"])
         self.assertEqual(code, 1)
         self.assertIn("| copilot | error | n/a |", out.getvalue())
-        self.assertIn("alpha: reading the policy file failed", err.getvalue())
+        self.assertEqual(
+            err.getvalue(), "backlog_metrics.py: alpha: reading the develop branch failed\n"
+        )
+        self.assertIn("alpha: reading the develop branch failed: gh: Server Error", out.getvalue())
 
     def test_a_failed_history_keeps_the_trigger_and_exits_one(self) -> None:
         text = policy_text(qodo="explicit")
@@ -694,7 +689,8 @@ class ReviewCollectTests(unittest.TestCase):
 
     def test_a_missing_default_branch_is_an_error_not_an_empty_history(self) -> None:
         result = self.collect([page([], False, 0, branch=None)])
-        self.assertIn("no default branch", result.policy_error)
+        self.assertEqual(result.policy_read, "default branch")
+        self.assertIn("reading the default branch failed", bm.review_notes([result])[0])
 
     def test_the_history_read_names_the_branch_path_and_window(self) -> None:
         with unittest.mock.patch.object(bm, "run_gh", return_value=[]) as run:

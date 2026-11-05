@@ -445,11 +445,6 @@ BODY_CLAIM = re.compile(
     r"\s+(?:in|by|as)\s+`?(?P<sha>[0-9a-f]{7,40})`?",
     re.IGNORECASE,
 )
-# What `gh` prints when GitHub answered, as opposed to when nothing was reached at all.
-HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
-# The two GitHub returns for an object that is not there.
-# Everything outside this set is "not read" rather than "not there".
-ABSENT = {"404", "422"}
 # What a reference reads as where GitHub never answered for it.
 UNREAD = "unread"
 # Longer than the ordinary read's, since this one downloads a repository.
@@ -1421,8 +1416,7 @@ def _gh_run(argv: list[str], raw: bool) -> subprocess.CompletedProcess:
 
 def answered_absent(proc: subprocess.CompletedProcess) -> bool:
     """Whether GitHub said the object is not there, as opposed to nothing having been read."""
-    m = HTTP_STATUS.search(proc.stderr)
-    return m is not None and m.group(1) in ABSENT
+    return review_policy.said_absent(proc.stderr)
 
 
 def body_references(body: str) -> tuple[list[str], list[str]]:
