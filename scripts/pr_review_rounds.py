@@ -635,7 +635,7 @@ def promotion(pr: dict) -> bool:
         return not default or pr.get("baseRefName") == default
     if not bot.gate or not bot.covers(pr.get("baseRefName") or "", default):
         return False
-    return reviewed_head(pr) or bot.rounds_left(reviewed_heads(pr))
+    return reviewed_head(pr) or bot.rounds_left(reviewed_heads(pr), reviews_truncated(pr))
 
 
 def reviewed_heads(pr: dict, login: str = REVIEWER) -> int:
@@ -645,9 +645,10 @@ def reviewed_heads(pr: dict, login: str = REVIEWER) -> int:
 
 
 def copilot_settled(pr: dict) -> bool:
-    """Whether no Copilot round can settle this head: Copilot off, ungated, or its cap spent."""
+    """Whether no Copilot round can settle this head: Copilot off, ungated, or its cap spent or uncounted."""
     bot = bot_entry(pr, "copilot")
-    return bot is not None and (bot.never_waited_on() or not bot.rounds_left(reviewed_heads(pr)))
+    spent = bot is not None and not bot.rounds_left(reviewed_heads(pr), reviews_truncated(pr))
+    return bot is not None and (bot.never_waited_on() or spent)
 
 
 def holds(pr: dict) -> bool:

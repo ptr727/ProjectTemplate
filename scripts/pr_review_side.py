@@ -67,10 +67,13 @@ def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
     counts it, since a run's later jobs enter the rollup only as their `needs:` finish. A hosted
     reviewer's own check is left out, since the review it stands for is the one being held. A
     workflow run it posts from still counts while open, since a run names no reviewer it belongs to.
+    DIRTY where no check has posted on a conflicted head, which runs no `pull_request` workflow.
     """
     nodes = [n for n in check_nodes(pr) if not hosted_check(n)]
     if any(n.get("unreadable") for n in nodes):
         return "UNREAD"
+    if not nodes and pr.get("mergeStateStatus") == "DIRTY":
+        return "DIRTY"
     shapes = {check_shape(n, now, grace, stall) for n in nodes}
     if "FAILED" in shapes:
         return "FAILURE"
@@ -171,11 +174,14 @@ def request_side_reviews(
     the wait is seen. Nothing is sent where its cap is spent. Nor where a cap applies and the comment
     window is cut, since the rounds spent cannot then be counted. The merge never waits on these
     reviewers, so a held ask is a note rather than an exit. `post` sends one comment and returns
-    the created node, and an unconfirmed one ends the run, since it may have landed.
+    the created node, and an unconfirmed one ends the run, since it may have landed. A pull request
+    no longer open is asked nothing, since a peer can merge or close it while `wait` polls.
     """
     lines: list[str] = []
     held: str | None = None
     pr = read()
+    if pr.get("state", "OPEN") != "OPEN":
+        return lines
     for name, bot, body in side_reviewers(pr):
         if not bot.requests() or bot.when != phase:
             continue
@@ -253,20 +259,27 @@ def await_green(
 
 def ask(
     read: Callable[[], dict],
-    await_green: Callable[[], str],
+    args: Namespace,
     send: Callable[..., dict],
     dig: Callable[..., dict],
     pr: dict | bool,
     phase: str,
 ) -> None:
-    """Send and print the `phase` requests, where `pr` is a payload whose policy asks any."""
+    """Send and print the `phase` requests, where `pr` is a payload whose policy asks any.
+
+    The checks an after-checks ask waits on are read once rather than polled. So the ask never
+    holds `wait` past the Copilot poll it follows, nor holds a wait that stops without one.
+    """
     if not isinstance(pr, dict) or not asks_any(pr):
         return
 
     def post(body: str) -> dict:
         return dig(send(body=body), *COMMENT_PATH)
 
-    for line in request_side_reviews(read, await_green, post, phase):
+    def checks_now() -> str:
+        return checks_hold(read(), datetime.now(UTC), args.check_grace, args.check_stall)
+
+    for line in request_side_reviews(read, checks_now, post, phase):
         print(line)
 
 
@@ -282,6 +295,7 @@ def checks_status(held: str) -> int:
     then, code = {
         "PENDING": ("wait again once they conclude", 30),
         "FAILURE": ("fix the build and push", 40),
+        "DIRTY": ("resolve the conflict with the base, since a conflicted head runs no checks", 44),
     }.get(held, ("read the checks, since that shape is one no wait clears", 44))
     print(
         f"status=CHECKS_BEFORE_REVIEW the head's checks read {held}, and the review policy "

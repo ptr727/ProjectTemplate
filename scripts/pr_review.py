@@ -149,11 +149,12 @@ Subcommands
            request the review policy hands to an attested local pass, by default one into a
            branch other than the default. There an attested head has its checks polled instead while they can still
            move its merge and no thread is open on it, and one with no attestation exits 49. --request asks for a round anyway.
-           The bot id is read from the repository's most recently updated pull requests, the last
-           HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither
-           carries any Copilot activity. The loop runs in-process, so a 45-minute wait costs one
-           agent turn, not 90. A pull request found no longer open, on the first read or on any
-           poll, is neither requested nor polled further. `wait` then prints its digest and exits
+           The review policy can hold the Copilot request until the head's checks pass. An explicit CodeRabbit or Qodo
+           is asked by a PR conversation comment once per head, an after-checks one after the Copilot poll and only on
+           green checks. The bot id is read from the repository's most recently updated pull requests, the last
+           HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither carries any Copilot
+           activity. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90. A pull request
+           found no longer open, on the first read or on any poll, is neither requested nor polled further. `wait` then prints its digest and exits
            as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
@@ -1599,7 +1600,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and not a.request
         and (not reviewer_requested(pr) or copilot_settled(snapshot))
         and holds(snapshot)
-        and (not answer or attested(snapshot))
+        and (not answer or attested(snapshot) or copilot_settled(snapshot))
     )
     copilot = side.copilot_policy(pr, reviewer_requested(pr))
     retry, watch = "", False
@@ -1625,7 +1626,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)
     send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
-    ask = functools.partial(side.ask, read_held, await_green, send, mutated, may_request and pr)
+    ask = functools.partial(side.ask, read_held, a, send, mutated, may_request and pr)
     ask("on-open")
     waits = owed and side.holds_for_checks(copilot, a.request)
     checks_hold = await_green() if waits else ""

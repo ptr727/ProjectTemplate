@@ -861,5 +861,64 @@ class TestLocalPassFixes(fixtures.GqlCase):
         self.assertGreaterEqual(len(lives), 2, out)
 
 
+class TestSecondPassFixes(fixtures.GqlCase):
+    """The findings of the pass over e4622ee6, each case failing with its fix reverted."""
+
+    def test_a_closed_pull_request_is_asked_nothing(self) -> None:
+        made = {"url": "https://example.invalid/c/1", "body": "/review"}
+        for state, asked in (("MERGED", False), ("OPEN", True)):
+            with self.subTest(state):
+                pr = with_policy(fixtures.payload([]), parsed(qodo=EXPLICIT_QODO))
+                pr["state"] = state
+                post = mock.MagicMock(return_value=made)
+                side.request_side_reviews(
+                    mock.MagicMock(return_value=pr), mock.MagicMock(), post, "on-open"
+                )
+                self.assertEqual(asked, post.called)
+
+    def test_a_capped_copilot_past_the_review_window_counts_as_spent(self) -> None:
+        """Its rounds cannot be counted, so the cap is read as reached rather than as open."""
+        bases = {"trigger": "explicit", "bases": ["@default"]}
+        for rules, settled in (
+            (parsed(copilot={**bases, "maxRounds": 3}), True),
+            (parsed(copilot=bases), False),
+        ):
+            with self.subTest(settled=settled):
+                cut = fixtures.payload([fixtures.review(oid=MOVED)], older_reviews=True)
+                pr = with_policy(cut, rules, base="main")
+                self.assertEqual(settled, rounds.copilot_settled(pr))
+                self.assertEqual(not settled, rounds.promotion(pr))
+
+    def test_a_conflicted_head_with_no_check_names_its_conflict(self) -> None:
+        pr = fixtures.payload([])
+        self.assertEqual("PENDING", side.checks_hold(pr, NOW, *WINDOWS))
+        pr["mergeStateStatus"] = "DIRTY"
+        self.assertEqual("DIRTY", side.checks_hold(pr, NOW, *WINDOWS))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(44, side.checks_status("DIRTY"))
+        self.assertIn("resolve the conflict", out.getvalue())
+
+    def test_an_answer_outside_a_review_leaves_a_settled_head_to_the_local_pass(self) -> None:
+        ungated = parsed(copilot={"trigger": "auto", "bases": [], "gate": False})
+        self.answer(with_policy(fixtures.payload([], comments=[fixtures.comment()]), ungated))
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"])
+        self.assertEqual(49, code, out.getvalue())
+        self.assertIn("status=AWAITING_LOCAL_PASS", out.getvalue())
+
+    def test_an_after_checks_ask_reads_the_checks_once_rather_than_polling(self) -> None:
+        running = fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
+        pr = with_policy(checked(running), parsed(qodo={**EXPLICIT_QODO, "when": "after-checks"}))
+        read, send = mock.MagicMock(return_value=pr), mock.MagicMock()
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            side.ask(read, ARGS, send, pr_review.mutated, pr, "after-checks")
+        send.assert_not_called()
+        self.assertIn("they read PENDING", out.getvalue())
+        self.assertLessEqual(read.call_count, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

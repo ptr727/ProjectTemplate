@@ -63,7 +63,7 @@
                     "default": "per-push"
                 },
                 "maxRounds": {
-                    "description": "The most rounds on one pull request, or null for no cap. Copilot's rounds are the distinct heads its reviews cover, so a re-request on a covered head and a refusal count for nothing. CodeRabbit's are its asks or its reviewed heads, whichever is more. Qodo's are its asks, or one once its standing comment exists. Past the cap, an attested local pass covers a new head in place of a Copilot round, and CodeRabbit and Qodo are not asked again.",
+                    "description": "The most rounds on one pull request, or null for no cap. Copilot's rounds are the distinct heads its reviews cover, so a re-request on a covered head and a refusal count for nothing. CodeRabbit's are its asks or its reviewed heads, whichever is more. Qodo's are its asks, or one once its standing comment exists. Past the cap, an attested local pass covers a new head in place of a Copilot round, and CodeRabbit and Qodo are not asked again. A capped Copilot whose review history runs past the read window counts as past it, since its rounds cannot be counted.",
                     "type": ["integer", "null"],
                     "minimum": 1
                 },

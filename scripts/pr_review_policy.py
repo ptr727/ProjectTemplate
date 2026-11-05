@@ -87,8 +87,13 @@ class BotPolicy:
         """Whether the policy limits this bot's rounds on one pull request at all."""
         return self.rounds == "once" or self.max_rounds is not None
 
-    def rounds_left(self, done: int) -> bool:
-        """Whether a further round is allowed after `done` rounds on this pull request."""
+    def rounds_left(self, done: int, cut: bool = False) -> bool:
+        """Whether a further round is allowed after `done` rounds on this pull request.
+
+        A capped bot whose history was `cut` short has no round left, since what it spent is unknown.
+        """
+        if self.capped() and cut:
+            return False
         if self.rounds == "once" and done >= 1:
             return False
         return self.max_rounds is None or done < self.max_rounds
