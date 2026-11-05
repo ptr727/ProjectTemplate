@@ -13,9 +13,8 @@ import contextlib
 import copy
 import io
 import json
-import os
+import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -391,30 +390,24 @@ class CheckCase(unittest.TestCase):
 
 
 class GhReaderCase(unittest.TestCase):
-    """The contents reader, run against a stand-in gh that separates absent from broken."""
+    """The contents reader, run against a stand-in runner that separates absent from broken."""
 
-    def reader(self, tmp: str, body: str) -> agent_policy.Reader:
-        shim = Path(tmp) / "gh"
-        shim.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
-        shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
-        patcher = mock.patch.dict(os.environ, {"PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        return agent_policy.gh_reader("acme/widget", "main")
+    def reader(self, code: int, out: str, err: str) -> agent_policy.Reader:
+        def run(argv: list[str]) -> tuple[int, str, str]:
+            self.assertEqual(argv[:2], ["gh", "api"])
+            return code, out, err
+
+        return agent_policy.gh_reader("acme/widget", "main", run)
 
     def test_content_absent_and_broken_reads(self) -> None:
         content = base64.encodebytes(b"hello\n").decode()
-        with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "body.json").write_text(json.dumps(content), encoding="utf-8")
-            ok = self.reader(tmp, f"cat '{tmp}/body.json'")
-            self.assertEqual(ok(".pr_agent.toml"), "hello\n")
-        with tempfile.TemporaryDirectory() as tmp:
-            gone = self.reader(tmp, "echo 'gh: Not Found (HTTP 404)' >&2; exit 1")
-            self.assertIsNone(gone(".pr_agent.toml"))
-        with tempfile.TemporaryDirectory() as tmp:
-            broken = self.reader(tmp, "echo 'gh: Server Error (HTTP 500)' >&2; exit 1")
-            with self.assertRaises(agent_policy.Unreadable):
-                broken(".pr_agent.toml")
+        ok = self.reader(0, json.dumps(content), "")
+        self.assertEqual(ok(".pr_agent.toml"), "hello\n")
+        gone = self.reader(1, "", "gh: Not Found (HTTP 404)")
+        self.assertIsNone(gone(".pr_agent.toml"))
+        broken = self.reader(1, "", "gh: Server Error (HTTP 500)")
+        with self.assertRaises(agent_policy.Unreadable):
+            broken(".pr_agent.toml")
 
 
 class RefusalCase(unittest.TestCase):
@@ -580,7 +573,11 @@ class ComposeRulesetCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out.json"
             main = ROOT / "repo-config" / "main.json"
-            script = f"main_source={main}\n{COMPOSE}compose_ruleset {src} {want} {out}\n"
+            quoted = [shlex.quote(str(p)) for p in (main, src, out)]
+            script = (
+                f"main_source={quoted[0]}\n{COMPOSE}"
+                f"compose_ruleset {quoted[1]} {want} {quoted[2]}\n"
+            )
             done = run_bash(script, "jq")
             self.assertEqual(done.returncode, 0, done.stderr)
             return [rule["type"] for rule in json.loads(out.read_text(encoding="utf-8"))["rules"]]

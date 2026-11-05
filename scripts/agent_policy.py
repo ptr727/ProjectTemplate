@@ -200,6 +200,16 @@ def current_text(path: Path) -> str | None:
     return path.read_text(encoding="utf-8", newline="")
 
 
+def lf_text(path: Path) -> str | None:
+    """The file's text with CRLF read as LF, or None where it is absent.
+
+    The YAML and TOML round-trippers keep a carriage return inside a comment and emit LF elsewhere.
+    So they parse LF text, and plan() writes CRLF back wherever the file was CRLF.
+    """
+    text = current_text(path)
+    return None if text is None else text.replace("\r\n", "\n")
+
+
 def set_base_branches(node: Any, items: list[str]) -> None:
     """Make node['base_branches'] hold `items`, double-quoted, keeping the comment that follows the list."""
     from ruamel.yaml.comments import CommentedSeq
@@ -249,7 +259,7 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
     yaml.width = 4096
-    existing = current_text(path)
+    existing = lf_text(path)
     try:
         doc = yaml.load(existing) if existing is not None else None
     except YAMLError as exc:
@@ -283,7 +293,7 @@ def plan_toml(path: Path, want: dict[str, Any]) -> str | None:
     import tomlkit
     from tomlkit.exceptions import TOMLKitError
 
-    existing = current_text(path)
+    existing = lf_text(path)
     try:
         doc = tomlkit.parse(existing) if existing is not None else tomlkit.document()
     except TOMLKitError as exc:
@@ -354,16 +364,20 @@ def write(rendered: dict[str, Any], checkout: Path, repo: str, dry_run: bool = F
     return lines
 
 
-def gh_rest(path: str, jq: str) -> subprocess.CompletedProcess[str]:
+def gh_rest(
+    path: str, jq: str, run: gh_graphql.Runner = gh_graphql.run_subprocess
+) -> subprocess.CompletedProcess[str]:
     """One REST read through `gh`, returned whole since a 404 is an answer rather than a failure."""
-    code, out, err = gh_graphql.run_subprocess(["gh", "api", path, "--jq", jq])
+    code, out, err = run(["gh", "api", path, "--jq", jq])
     return subprocess.CompletedProcess(["gh", "api", path], code, out, err)
 
 
-def gh_reader(repo: str, ref: str) -> Reader:
+def gh_reader(repo: str, ref: str, run: gh_graphql.Runner = gh_graphql.run_subprocess) -> Reader:
     """A reader of one file's text through the contents API, None where it is absent."""
     owner, name = repo.split("/", 1)
-    read = policy_lib.contents_reader(gh_rest, lambda proc: gh_graphql.said_absent(proc.stderr))
+    read = policy_lib.contents_reader(
+        lambda path, jq: gh_rest(path, jq, run), lambda proc: gh_graphql.said_absent(proc.stderr)
+    )
 
     def get(path: str) -> str | None:
         try:

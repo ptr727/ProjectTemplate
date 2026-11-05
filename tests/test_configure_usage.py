@@ -117,12 +117,12 @@ class InterpreterProbeCase(unittest.TestCase):
     """The probe takes an interpreter that exits 0 for 3.10+ and refuses an older one without a traceback."""
 
     def probe(self, exit_code: int) -> subprocess.CompletedProcess[str]:
-        with tempfile.TemporaryDirectory() as tmp:
-            shim = Path(tmp) / "python3"
-            shim.write_text(f"#!/bin/sh\nexit {exit_code}\n", encoding="utf-8")
-            shim.chmod(0o755)
-            script = f'PATH={tmp}\n{PROBE}echo "picked ${{py_cmd[*]}}"\n'
-            return run_bash(script)
+        # Functions shadow both names on every platform, where a script on PATH runs only off Windows.
+        script = (
+            f"py() {{ return 1; }}\npython3() {{ return {exit_code}; }}\n"
+            f'{PROBE}echo "picked ${{py_cmd[*]}}"\n'
+        )
+        return run_bash(script)
 
     def test_a_new_enough_interpreter_is_picked(self) -> None:
         done = self.probe(0)
