@@ -585,7 +585,7 @@ class GqlCase(unittest.TestCase):
         def fake(_query, _owner, _repo, _num):
             pr = queue.pop(0) if len(queue) > 1 else queue[0]
             if isinstance(pr, dict) and pr.get("baseRefName"):
-                pr.setdefault(pr_review.review_policy.PAYLOAD_KEY, DEFAULT_POLICY)
+                pr.setdefault(pr_review.POLICY_KEY, DEFAULT_POLICY)
             return pr
 
         patched = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=fake))
@@ -2889,7 +2889,7 @@ class TestNullNodes(unittest.TestCase):
             mock.patch.object(pr_review.time, "sleep"),
         ):
             read = pr_review.gql("query", "o", "r", 7)
-        self.assertIsNotNone(read.pop(pr_review.review_policy.PAYLOAD_KEY))
+        self.assertIsNotNone(read.pop(pr_review.POLICY_KEY))
         self.assertEqual(clean, read)
         self.assertEqual(2, run.call_count)
 

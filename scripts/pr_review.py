@@ -150,15 +150,16 @@ Subcommands
            branch other than the default. There an attested head has its checks polled instead while they can still
            move its merge and no thread is open on it, and one with no attestation exits 49. --request asks for a round anyway.
            The review policy can hold the Copilot request until the head's checks pass. An explicit CodeRabbit or Qodo
-           is asked by a PR conversation comment once per head, an after-checks one after the Copilot poll and only on
-           green checks. The bot id is read from the repository's most recently updated pull requests, the last
+           is asked by a PR conversation comment once per head. An after-checks one is asked only on green checks,
+           awaited within --timeout after a poll for a Copilot round, and read once by any other wait, a held one's too.
+           The bot id is read from the repository's most recently updated pull requests, the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither carries any Copilot
            activity. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90. A pull request
            found no longer open, on the first read or on any poll, is neither requested nor polled further. `wait` then prints its digest and exits
            as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
-           present does not poll the checks, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
+           present polls the checks only for an after-checks CodeRabbit or Qodo still to ask, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
            every workflow run the read reaches on that head has then completed. The read reaches the
            head's last 50 check suites and those of its first CHECKS_WINDOW rollup contexts. A
            CLEAN, UNSTABLE, or HAS_HOOKS merge owes no required check. Under any other merge, an
@@ -197,8 +198,8 @@ Subcommands
            is in a shape no wait clears. It is queued with nothing acting on it, expected and
            never posted, running far past the job's cost, held by its environment, still in
            progress inside a run that has completed, or failed. On a held head a check running
-           long or held by its environment polls to 30 instead. 44 also covers a check the review
-           policy holds a request for that sits in a shape no wait clears, before any review.
+           long or held by its environment polls to 30 instead. 44 also covers, before any review, checks the review
+           policy holds a request for: one in a shape no wait clears, none posted on a DIRTY head, or one unreadable.
            45 = an open attested held head that nothing holds, its merge other than CLEAN,
            UNSTABLE, or HAS_HOOKS. One case is a payload with no commit matching the head, named
            `CHECKS UNREADABLE` in the digest. Another is a DIRTY merge with no check posted that
@@ -265,6 +266,7 @@ from pr_review_checks import (
 )
 from pr_review_copilot import has_prose
 from pr_review_digest import digest_refusal, render
+from pr_review_payload import POLICY_KEY
 from pr_review_rounds import (
     ACK_MARKER,
     FILES_UNREAD,
@@ -544,7 +546,7 @@ def gql(query: str, owner: str, repo: str, num: int, policy: bool = True) -> dic
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
     if policy and isinstance(pr, dict) and pr.get("baseRefName"):
-        pr[review_policy.PAYLOAD_KEY] = review_policy.policy_for(
+        pr[POLICY_KEY] = review_policy.policy_for(
             owner, repo, pr["baseRefName"], reread, answered_absent
         )
     return pr
@@ -1043,9 +1045,9 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
         )
 
     body = body.replace("\r\n", "\n").replace("\r", "\n")
-    data = gh_graphql(M_COMMENT, subjectId=target["id"], body=body)
-    comment = mutated(data, *side.COMMENT_PATH)
-    if not comment.get("url") or (comment.get("body") or "") != body:
+    send = functools.partial(gh_graphql, M_COMMENT, subjectId=target["id"])
+    comment, confirmed = side.post_comment(send, mutated, body)
+    if not confirmed:
         return unconfirmed(
             "COMMENT_NOT_CONFIRMED",
             "the response returned no URL or a different body. Inspect the PR conversation "
@@ -1558,7 +1560,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     `may_request` False sends no request whatever is owed, for a caller reading the gate as is.
     The body-less liveness read takes a head refusal for a round, so `polled_past` reads past it.
     A held Copilot request is judged again on a fresh read once the check wait ends. The after-checks
-    side asks go after the Copilot poll, so their check wait never holds Copilot's round back.
+    side asks go after the Copilot poll, so their check wait never holds Copilot's round back. Only
+    a Copilot poll hands them the wait's clock to poll on, and a poll's digest then reads afresh.
     """
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     if refused := scope_refusal(owner):
@@ -1643,6 +1646,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
+    polls = False
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:
@@ -1724,7 +1728,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             return (*liveness(live, a.min_rounds), fresh)
 
         backoff((done, answer, drift, False), read_live, lambda s: not any(s), start, a.timeout)
+        polls = True
     else:
+        polls = True
         backoff(
             (done, answer, drift),
             lambda: live_state(owner, repo, a.number, a.min_rounds),
@@ -1733,9 +1739,9 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             a.timeout,
         )
 
-    ask("after-checks")
+    ask("after-checks", await_green if polls else None)
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
-    final = full_read(owner, repo, a.number, final)
+    final = full_read(owner, repo, a.number, None if polls else final)
     if not is_open(final):
         return run_status(owner, repo, a, final)
     now = datetime.now(UTC)

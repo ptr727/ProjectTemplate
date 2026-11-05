@@ -61,7 +61,7 @@ def with_policy(
     """`pr` into `base`, the default branch named, carrying `rules` the way `gql` attaches them."""
     pr["baseRefName"] = base
     pr["baseRepository"] = {"defaultBranchRef": {"name": default}}
-    pr[policy.PAYLOAD_KEY] = rules
+    pr[payload.POLICY_KEY] = rules
     return pr
 
 
@@ -278,9 +278,6 @@ class TestCopilotCover(unittest.TestCase):
             rounds.promotion(with_policy(fixtures.payload([]), rules, "main", default=""))
         )
 
-    def test_the_payload_key_matches_the_reader_constant(self) -> None:
-        self.assertIs(policy.PAYLOAD_KEY, payload.POLICY_KEY)
-
 
 EXPLICIT_QODO = {"trigger": "explicit", "bases": ["^develop$"]}
 EXPLICIT_RABBIT = {
@@ -340,9 +337,13 @@ class TestRequestSideReviews(SideCase):
     def run_requests(
         self, pr: dict, answer: dict | None = None, held: str = "", phase: str = "on-open"
     ) -> tuple[mock.MagicMock, mock.MagicMock]:
-        def send(body: str) -> dict:
-            node = posted(body)["addComment"]["commentEdge"]["node"]
-            return answer if answer is not None else node
+        def send(body: str) -> tuple[dict, bool]:
+            reply = (
+                posted(body)
+                if answer is None
+                else {"addComment": {"commentEdge": {"node": answer}}}
+            )
+            return side.post_comment(lambda **_: reply, pr_review.mutated, body)
 
         post, green = mock.MagicMock(side_effect=send), mock.MagicMock(return_value=held)
         side.request_side_reviews(lambda: pr, green, post, phase)
@@ -555,7 +556,7 @@ class TestPolicyFreeReads(unittest.TestCase):
             mock.patch.object(pr_review.review_policy, "policy_for") as fetched,
         ):
             pr = pr_review.gql(pr_review.Q_ATTEST_TARGET, "o", "r", 7, policy=False)
-            self.assertNotIn(policy.PAYLOAD_KEY, pr)
+            self.assertNotIn(payload.POLICY_KEY, pr)
             fetched.assert_not_called()
             pr_review.gql(pr_review.Q_ATTEST_TARGET, "o", "r", 7)
             fetched.assert_called_once()
@@ -870,7 +871,7 @@ class TestSecondPassFixes(fixtures.GqlCase):
             with self.subTest(state):
                 pr = with_policy(fixtures.payload([]), parsed(qodo=EXPLICIT_QODO))
                 pr["state"] = state
-                post = mock.MagicMock(return_value=made)
+                post = mock.MagicMock(return_value=(made, True))
                 side.request_side_reviews(
                     mock.MagicMock(return_value=pr), mock.MagicMock(), post, "on-open"
                 )
@@ -909,7 +910,7 @@ class TestSecondPassFixes(fixtures.GqlCase):
         self.assertEqual(49, code, out.getvalue())
         self.assertIn("status=AWAITING_LOCAL_PASS", out.getvalue())
 
-    def test_an_after_checks_ask_reads_the_checks_once_rather_than_polling(self) -> None:
+    def test_an_after_checks_ask_given_no_poll_reads_the_checks_once(self) -> None:
         running = fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
         pr = with_policy(checked(running), parsed(qodo={**EXPLICIT_QODO, "when": "after-checks"}))
         read, send = mock.MagicMock(return_value=pr), mock.MagicMock()
@@ -918,6 +919,146 @@ class TestSecondPassFixes(fixtures.GqlCase):
         send.assert_not_called()
         self.assertIn("they read PENDING", out.getvalue())
         self.assertLessEqual(read.call_count, 3)
+
+
+RUNNING = fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
+AFTER_CHECKS_QODO = {**EXPLICIT_QODO, "when": "after-checks"}
+
+
+class TestSideAskTiming(fixtures.GqlCase):
+    """An after-checks ask outlasts the CI it follows, and an ask dates against its head by instant."""
+
+    def covered(self, check: dict) -> dict:
+        pr = with_policy(
+            fixtures.payload([fixtures.review()], checks=[check]), parsed(qodo=AFTER_CHECKS_QODO)
+        )
+        return committed(pr, fixtures.EARLY)
+
+    def test_a_head_whose_checks_outlast_the_copilot_round_is_asked_once_they_pass(self) -> None:
+        """The checks pass only once the wait has slept, as CI that outlasts the round does.
+
+        The running check started a moment ago, so the CLI's own stall window reads it as settling.
+        """
+        just = (datetime.now(UTC) - timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        moving = fixtures.check(status="IN_PROGRESS", conclusion="", started=just)
+        running, green = self.covered(moving), self.covered(fixtures.check(started=fixtures.EARLY))
+        slept: list[float] = []
+        reads: list[tuple[str, bool]] = []
+
+        def read(query: str, *_args: object, **_kwargs: object) -> dict:
+            reads.append((query, bool(slept)))
+            return green if slept else running
+
+        def graphql(query: str, **variables: object) -> dict:
+            if "addComment" in query:
+                return posted(str(variables["body"]))
+            return {"repository": {"pullRequests": {"nodes": []}}}
+
+        self.answer(running)
+        sent = mock.MagicMock(side_effect=graphql)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review, "gql", side_effect=read),
+            mock.patch.object(pr_review, "gh_graphql", sent),
+            mock.patch.object(pr_review.time, "sleep", side_effect=slept.append),
+        ):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "60"])
+        asks = [c.kwargs["body"] for c in sent.call_args_list if "addComment" in c.args[0]]
+        self.assertEqual(["/review"], asks, out.getvalue())
+        self.assertIn("auto-request: asked qodo", out.getvalue())
+        self.assertIn(
+            (pr_review.Q_FULL, True), reads, "the digest read a payload from before the poll"
+        )
+
+    def test_only_a_wait_that_polls_copilot_hands_the_ask_a_poll(self) -> None:
+        """A held head's own poll already waited the checks out, so it reads them once."""
+        ungated = parsed(copilot={"trigger": "auto", "bases": [], "gate": False})
+        cases = {
+            "covered": (fixtures.payload([fixtures.review()]), True),
+            "stopped": (fixtures.payload([fixtures.review(body=fixtures.QUOTA_REFUSED)]), False),
+            "held": (attested_on(with_policy(fixtures.payload([]), ungated)), False),
+        }
+        for name, (pr, polls) in cases.items():
+            with self.subTest(name):
+                self.answer(pr)
+                spy = self.enterContext(mock.patch.object(side, "ask", wraps=side.ask))
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    mock.patch.object(pr_review.time, "sleep"),
+                ):
+                    pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"])
+                after = [c for c in spy.call_args_list if "after-checks" in c.args]
+                self.assertEqual(1, len(after))
+                self.assertEqual(polls, after[0].args[-1] is not None)
+
+    def test_a_pull_request_merged_while_its_checks_settle_is_asked_nothing(self) -> None:
+        bot = {**EXPLICIT_QODO, "when": "after-checks"}
+        before = with_policy(fixtures.payload([]), parsed(qodo=bot))
+        merged = {**copy.deepcopy(before), "state": "MERGED"}
+        made = ({"url": "https://example.test/c/1", "body": "/review"}, True)
+        reads, post = iter([before, merged]), mock.MagicMock(return_value=made)
+        side.request_side_reviews(
+            lambda: next(reads), mock.MagicMock(return_value=""), post, "after-checks"
+        )
+        post.assert_not_called()
+
+    def test_a_poll_handed_to_the_ask_decides_the_checks(self) -> None:
+        pr = with_policy(checked(RUNNING), parsed(qodo=AFTER_CHECKS_QODO))
+        poll = mock.MagicMock(return_value="")
+        send = mock.MagicMock(side_effect=lambda body: posted(body))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            side.ask(
+                mock.MagicMock(return_value=pr),
+                ARGS,
+                send,
+                pr_review.mutated,
+                pr,
+                "after-checks",
+                poll,
+            )
+        poll.assert_called_once()
+        self.assertEqual("/review", send.call_args.kwargs["body"], out.getvalue())
+
+    def test_an_ask_and_a_commit_in_different_offsets_are_compared_as_instants(self) -> None:
+        """10:00 at -07:00 is 17:00 UTC, so a 12:00 UTC ask is five hours older than the head.
+
+        10:00 at +05:00 is 05:00 UTC, so a 06:00 UTC ask is an hour newer than the head.
+        """
+        cases = {
+            "west": ("2026-01-01T10:00:00-07:00", "2026-01-01T12:00:00Z", False),
+            "east": ("2026-01-01T10:00:00+05:00", "2026-01-01T06:00:00Z", True),
+        }
+        for name, (head, at, asked) in cases.items():
+            with self.subTest(name):
+                pr = committed(fixtures.payload([], comments=[trusted("/review", at)]), head)
+                self.assertEqual(asked, side.side_asked_on_head(pr, "/review"))
+
+    def test_a_stamp_naming_no_zone_counts_no_ask(self) -> None:
+        pr = committed(
+            fixtures.payload([], comments=[trusted("/review", "2026-01-01T12:00:00")]),
+            fixtures.EARLY,
+        )
+        self.assertFalse(side.side_asked_on_head(pr, "/review"))
+
+    def test_a_conflicted_or_unreadable_hold_exits_44(self) -> None:
+        for held in ("DIRTY", "UNREAD", "NOT_POSTED"):
+            with self.subTest(held), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(44, side.checks_status(held))
+
+    def test_a_comment_confirms_only_with_its_url_and_exact_body(self) -> None:
+        good = posted("/review")
+        self.assertTrue(side.post_comment(lambda **_: good, pr_review.mutated, "/review")[1])
+        for node in (
+            {"url": "", "body": "/review"},
+            {"url": "https://example.test/c/1", "body": "x"},
+        ):
+            with self.subTest(node):
+                reply = {"addComment": {"commentEdge": {"node": node}}}
+                made, confirmed = side.post_comment(
+                    lambda reply=reply, **_: reply, pr_review.mutated, "/review"
+                )
+                self.assertFalse(confirmed)
+                self.assertEqual(node, made)
 
 
 if __name__ == "__main__":
