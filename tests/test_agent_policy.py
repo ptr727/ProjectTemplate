@@ -9,7 +9,9 @@ The configure.sh case runs the script's own composition lines rather than a rest
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
+import io
 import json
 import os
 import shutil
@@ -278,12 +280,16 @@ class YamlPreservationCase(unittest.TestCase):
         self.assertEqual(agent_policy_yaml_load(got)["reviews"]["auto_review"]["base_branches"], [])
         self.assertIn("# Comment after the list.", got)
         self.assertIn("    # Second comment line.", got)
-        rest = [
-            ln for ln in self.lines(got) if "base_branches" not in ln and "Comment after" not in ln
-        ]
-        original = [ln for ln in self.lines(HUB_SHAPED) if "base_branches" not in ln]
-        original = [ln for ln in original if "^develop$" not in ln and "Comment after" not in ln]
-        self.assertEqual(rest, original)
+        lines = self.lines(got)
+        self.assertIn("    base_branches: []", lines)
+        at = lines.index("    # Comment after the list.")
+        self.assertEqual(lines[at + 1], "    # Second comment line.")
+        self.assertEqual(lines[at + 2], "    auto_pause_after_reviewed_commits: 0")
+        self.assertEqual(lines[at - 1], "    base_branches: []")
+        original = self.lines(HUB_SHAPED)
+        original.remove('      - "^develop$"')
+        original[original.index("    base_branches:")] = "    base_branches: []"
+        self.assertEqual(lines, original)
 
     def test_an_enabled_flip_keeps_the_trailing_comment(self) -> None:
         got = self.apply(False, ["^develop$"])
@@ -305,7 +311,7 @@ class CheckCase(unittest.TestCase):
             ".pr_agent.toml": "[config]\ndisable_auto_feedback = false\n",
         }
 
-    def run_check(self, files: Mapping[str, str | None | Exception]) -> list[tuple[bool, str]]:
+    def run_check(self, files: Mapping[str, str | None | Exception]) -> list[agent_policy.Result]:
         def read(path: str) -> str | None:
             got = files[path]
             if isinstance(got, Exception):
@@ -315,7 +321,7 @@ class CheckCase(unittest.TestCase):
         return agent_policy.check(self.rendered, read)
 
     def failures(self, files: Mapping[str, str | None | Exception]) -> list[str]:
-        return [msg for ok, msg in self.run_check(files) if not ok]
+        return [r.msg for r in self.run_check(files) if not r.ok]
 
     def test_matching_files_pass(self) -> None:
         self.assertEqual(self.failures(dict(self.files)), [])
@@ -337,7 +343,7 @@ class CheckCase(unittest.TestCase):
             "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^b$', '^a$']\n"
         )
         got = agent_policy.check(rendered, lambda path: files[path])
-        self.assertTrue(all(ok for ok, _ in got), got)
+        self.assertTrue(all(r.ok for r in got), got)
 
     def test_an_absent_qodo_key_fails(self) -> None:
         files = dict(self.files)
@@ -374,7 +380,7 @@ class GhReaderCase(unittest.TestCase):
     def test_content_absent_and_broken_reads(self) -> None:
         content = base64.encodebytes(b"hello\n").decode()
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "body.json").write_text(json.dumps({"content": content}), encoding="utf-8")
+            (Path(tmp) / "body.json").write_text(json.dumps(content), encoding="utf-8")
             ok = self.reader(tmp, f"cat '{tmp}/body.json'")
             self.assertEqual(ok(".pr_agent.toml"), "hello\n")
         with tempfile.TemporaryDirectory() as tmp:
@@ -384,6 +390,121 @@ class GhReaderCase(unittest.TestCase):
             broken = self.reader(tmp, "echo 'gh: Server Error (HTTP 500)' >&2; exit 1")
             with self.assertRaises(agent_policy.Unreadable):
                 broken(".pr_agent.toml")
+
+
+class RefusalCase(unittest.TestCase):
+    def test_an_auto_qodo_must_cover_main_and_develop(self) -> None:
+        for bases in (["@default"], ["^develop$"]):
+            with self.subTest(bases=bases), self.assertRaises(agent_policy.Refusal) as ctx:
+                agent_policy.render(registry(qodo={"bases": bases}), "Fixture", "release")
+            self.assertIn("qodo", str(ctx.exception))
+            self.assertIn("every pull request", str(ctx.exception))
+        agent_policy.render(registry(qodo={"bases": ["^(main|develop)$"]}), "Fixture", "release")
+        agent_policy.render(
+            registry(qodo={"trigger": "explicit", "bases": ["@default"]}), "Fixture", "release"
+        )
+
+
+class AnchorCase(unittest.TestCase):
+    def test_anchored_bases_stay_and_others_are_wrapped(self) -> None:
+        self.assertEqual(agent_policy.anchored("^develop$"), "^develop$")
+        self.assertEqual(agent_policy.anchored("release/.*"), "^(?:release/.*)$")
+        self.assertEqual(agent_policy.anchored("^a|b"), "^(?:^a|b)$")
+        self.assertEqual(agent_policy.anchored("^a\\$"), "^(?:^a\\$)$")
+        self.assertEqual(agent_policy.anchored("^a\\\\$"), "^a\\\\$")
+
+    def test_facts_and_check_use_the_anchored_form(self) -> None:
+        rendered = agent_policy.render(
+            registry(coderabbit={"bases": ["@default", "^develop$", "release/.*"]}),
+            "Fixture",
+            "release",
+        )
+        want = agent_policy.facts(rendered)["coderabbit"]["base_branches"]
+        self.assertEqual(want, ["^develop$", "^(?:release/.*)$"])
+        files = {
+            ".github/agent-policy.json": agent_policy.serialize(rendered),
+            ".coderabbit.yaml": "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^develop$', 'release/.*']\n",
+            ".pr_agent.toml": "[config]\ndisable_auto_feedback = false\n",
+        }
+        got = agent_policy.check(rendered, lambda path: files[path])
+        self.assertEqual(next(r.msg for r in got if not r.ok).split()[0], ".coderabbit.yaml")
+
+
+class TopLevelCase(unittest.TestCase):
+    def test_a_subdirectory_or_a_symlink_to_the_top_level(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            top = make_checkout(tmp)
+            (top / "sub").mkdir()
+            with self.assertRaises(agent_policy.Refusal) as ctx:
+                agent_policy.verify_checkout(top / "sub", "acme/widget")
+            self.assertIn("top level", str(ctx.exception))
+            link = Path(tmp) / "link"
+            link.symlink_to(top, target_is_directory=True)
+            agent_policy.verify_checkout(link, "acme/widget")
+
+
+class FactsImportCase(unittest.TestCase):
+    def test_the_facts_path_imports_nothing_third_party(self) -> None:
+        code = (
+            "import sys, runpy;"
+            f"sys.argv=['agent_policy.py','facts','--registry','none.json','--name','X','--model','release'];"
+            f"sys.path.insert(0, {str(ROOT / 'scripts')!r});"
+            "import agent_policy, pr_review_policy;"
+            "agent_policy.main(sys.argv[1:]);"
+            "bad=[m for m in ('ruamel','tomlkit','markdown_it','yaml') if m in sys.modules];"
+            "sys.exit(1 if bad else 0)"
+        )
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=60,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+
+class CheckExitCase(unittest.TestCase):
+    def run_main(self, files: dict[str, str | None | Exception]) -> tuple[int, str]:
+        def read(path: str) -> str | None:
+            got = files[path]
+            if isinstance(got, Exception):
+                raise got
+            return got
+
+        out = io.StringIO()
+        argv = [
+            "check", "--registry", "none.json", "--name", "X", "--model", "release",
+            "--repo", "acme/widget", "--ref", "main",
+        ]  # fmt: skip
+        with (
+            mock.patch.object(agent_policy, "gh_reader", lambda repo, ref: read),
+            contextlib.redirect_stdout(out),
+        ):
+            return agent_policy.main(argv), out.getvalue()
+
+    def good(self) -> dict[str, str | None | Exception]:
+        rendered = agent_policy.render(None, "X", "release")
+        return {
+            ".github/agent-policy.json": agent_policy.serialize(rendered),
+            ".coderabbit.yaml": "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^develop$']\n",
+            ".pr_agent.toml": "[config]\ndisable_auto_feedback = false\n",
+        }
+
+    def test_exit_codes(self) -> None:
+        self.assertEqual(self.run_main(self.good())[0], 0)
+        missing = self.good()
+        missing[".pr_agent.toml"] = None
+        self.assertEqual(self.run_main(missing)[0], 1)
+        broken = self.good()
+        broken[".coderabbit.yaml"] = agent_policy.Unreadable("HTTP 500")
+        broken[".pr_agent.toml"] = None
+        code, out = self.run_main(broken)
+        self.assertEqual(code, 2)
+        self.assertIn("unreadable", out)
+        self.assertIn(".pr_agent.toml is missing", out)
+        self.assertIn("ok", out)
 
 
 class CommandLineCase(unittest.TestCase):

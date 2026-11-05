@@ -33,6 +33,7 @@ class UsageCase(unittest.TestCase):
             hub = CONFIGURE.parents[1]
             for rel in (
                 "scripts/agent_policy.py",
+                "scripts/gh_graphql.py",
                 "scripts/pr_review_policy.py",
                 "spec/agent-policy.default.json",
                 "repo-config/main.json",
@@ -99,8 +100,6 @@ class UsageCase(unittest.TestCase):
 
     def test_valid_arguments_reach_gh(self) -> None:
         """The control: a well-formed run gets past argument handling to its first API call."""
-        if shutil.which("uv") is None:
-            raise unittest.SkipTest("no uv on PATH, which the agent policy render needs")
         for args in (
             ["check", "owner/a.b_c-d", "release"],
             ["check", "operational"],

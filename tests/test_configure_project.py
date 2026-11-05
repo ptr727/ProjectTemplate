@@ -497,6 +497,31 @@ class WiringCase(unittest.TestCase):
         self.assertIn("Aborting before any write", result.stderr)
         self.assertNotIn("reached-the-writes", result.stdout)
 
+    def test_apply_aborts_before_any_write_where_uv_is_absent(self) -> None:
+        """The dry run runs under uv, so a host without it stops at the pre-flight."""
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {}
+            for name in ("settings", "labels", "develop", "main", "project"):
+                path = Path(tmp) / f"{name}.json"
+                path.write_text("{}", encoding="utf-8")
+                files[name] = shlex.quote(str(path))
+            preflight = lift(
+                r"(    # Pre-flight every required payload before any write.*?\n    fi\n"
+                r"    # The project is resolved here.*?\n)    echo"
+            )
+            script = (
+                f"PATH={shlex.quote(tmp)}\n"
+                f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
+                f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
+                f"project_file={files['project']}\ncheckout_given=true\ncheckout=/x\n"
+                "agent_policy=p\nagent_policy_args=()\nrepo=acme/widget\n"
+                f"cmd_apply() {{\n    local f\n{preflight}    echo reached-the-writes\n}}\ncmd_apply\n"
+            )
+            result = run_bash(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("uv not found", result.stderr)
+        self.assertNotIn("reached-the-writes", result.stdout)
+
     def test_apply_stops_when_the_project_payload_is_not_there(self) -> None:
         """The existence loop is what a partial carry hits, and it runs before the contract test."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -21,6 +21,7 @@
 # It writes that file plus the CodeRabbit and Qodo settings derived from it into the checkout, and never stages or commits.
 # The caller commits the files through the ordinary pull request flow.
 # The same render decides whether each ruleset carries a Copilot code review rule, so a repo whose policy has no automatic Copilot gets no rule.
+# Deriving the policy needs only Python, while writing the files and checking them run under uv.
 # The checkout is planned before the first API write, so a checkout that refuses stops the run with nothing applied.
 # Without --checkout apply writes no policy files and says so.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
@@ -203,18 +204,35 @@ settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
 
+# ----- Resolve a Python interpreter (shared by apply and check) -----
+# The policy facts and the description both come from plain Python scripts, so neither needs uv.
+# The name python3 is not universal.
+# Native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run.
+# So this runs it rather than just checking PATH (docs/host-setup.md).
+# The probe checks 3.7+ (PEP 563, from __future__ import annotations).
+# That is because 3.7 is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
+# The repository floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py).
+# A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
+# The py launcher is probed first.
+# It reaches a registered interpreter whatever is active, where a bare python3 goes through PATH and a virtual environment can answer there instead.
+if py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+    py_cmd=(py -3)
+elif python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
+    py_cmd=(python3)
+else
+    echo "No Python interpreter found (python3 or py -3) able to run this repo's Python scripts. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
+    exit 1
+fi
+
 # ----- Derive the agent policy facts and compose the ruleset payloads (shared by apply and check) -----
 # The Copilot code review rule is the one rule whose presence follows the repo's rendered policy rather than the fleet payload.
 # The file main.json stays the template for that rule's parameters.
-# A missing uv or a failed render stops here, before any write.
+# The facts read needs only the interpreter above, since that path of the script imports nothing outside the standard library.
+# A failed render stops here, before any write.
 main_source="$main_ruleset"
 agent_policy="$script_dir/../scripts/agent_policy.py"
-if ! command -v uv >/dev/null 2>&1; then
-    echo "uv not found. The agent policy is rendered by $agent_policy, which runs under uv." >&2
-    exit 1
-fi
 agent_policy_args=(--registry "$registry" --name "$name" --model "$model")
-if ! policy_facts="$(uv run --no-project --script "$agent_policy" facts "${agent_policy_args[@]}")"; then
+if ! policy_facts="$("${py_cmd[@]}" "$agent_policy" facts "${agent_policy_args[@]}")"; then
     echo "Could not derive the agent policy for $repo. Aborting before any write." >&2
     exit 1
 fi
@@ -246,24 +264,6 @@ develop_ruleset="$develop_composed"
 # Absence keeps the About panel following the README.
 description=""
 if [ -f "$registry" ]; then
-    # Resolved here, not near the top, so a run with no registry (an explicit model, no hub checkout) never needs Python at all.
-    # The name python3 is not universal.
-    # Native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run.
-    # So this runs it rather than just checking PATH (docs/host-setup.md).
-    # The probe checks 3.7+ (PEP 563, from __future__ import annotations).
-    # That is because 3.7 is the oldest interpreter resolve_description.py happens to parse and run on, not because 3.7 is this repo's supported floor.
-    # The repository floor is 3.13 (spec/host-tools.json's python3 target, enforced on the host by scripts/host_gate.py).
-    # A too-old interpreter fails here with a clear message instead of a bare traceback from the script.
-    # The py launcher is probed first.
-    # It reaches a registered interpreter whatever is active, where a bare python3 goes through PATH and a virtual environment can answer there instead.
-    if py -3 -c "from __future__ import annotations" >/dev/null 2>&1; then
-        py_cmd=(py -3)
-    elif python3 -c "from __future__ import annotations" >/dev/null 2>&1; then
-        py_cmd=(python3)
-    else
-        echo "No Python interpreter found (python3 or py -3) able to run resolve_description.py. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
-        exit 1
-    fi
     # Delegates to spec/resolve_description.py rather than a third hand-rolled copy of description_errors().
     # A description that passes that check can never contain a newline, so command substitution has nothing to strip.
     if ! description="$("${py_cmd[@]}" "$script_dir/../spec/resolve_description.py" -- "$registry" "$name")"; then
@@ -526,6 +526,10 @@ cmd_apply() {
     done
     # The agent policy files are planned here too, because a checkout that cannot take them would otherwise fail after every API write.
     if [ "$checkout_given" = true ]; then
+        if ! command -v uv >/dev/null 2>&1; then
+            echo "uv not found. Writing the agent policy files runs $agent_policy under uv. Aborting before any write." >&2
+            exit 1
+        fi
         if ! uv run --no-project --script "$agent_policy" write "${agent_policy_args[@]}" --repo "$repo" --checkout "$checkout" --dry-run; then
             echo "The agent policy files cannot be written into $checkout. Aborting before any write." >&2
             exit 1
@@ -950,10 +954,15 @@ check_environments() {
 
 check_agent_policy() { # the repo's default branch must carry the files the registry renders
     local branch
+    if ! command -v uv >/dev/null 2>&1; then
+        fail "uv not found, so the agent policy files were not checked ($agent_policy runs under uv)"
+        return
+    fi
     if ! branch="$(gh api "repos/$repo" --jq '.default_branch')"; then
         fail "could not read the default branch of $repo, so the agent policy files were not checked"
         return
     fi
+    # Exit 1 is drift or a missing file and exit 2 a file that could not be read, and either fails the run.
     if ! uv run --no-project --script "$agent_policy" check "${agent_policy_args[@]}" --repo "$repo" --ref "$branch"; then
         FAILED=1
     fi

@@ -14,7 +14,8 @@ It derives the settings the bots read from their own files and the Copilot rules
 The libraries behind `write` and `check` are imported inside those subcommands.
 So `render` and `facts` run, and spec/validate.py imports `render`, with the standard library alone.
 
-Exit codes: 0 ok, 1 a refusal or drift, 2 the command could not run.
+Exit codes: 0 ok, 1 a refusal, drift or a missing file, 2 the command could not run.
+`check` exits 2 when any file could not be read, after printing every file's line.
 """
 
 from __future__ import annotations
@@ -23,17 +24,15 @@ import argparse
 import base64
 import binascii
 import json
-import re
 import subprocess
 import sys
-import tomllib
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-from urllib.parse import quote
+from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import gh_graphql
 import pr_review_policy as policy_lib
 
 SCHEMA_URL = (
@@ -42,10 +41,6 @@ SCHEMA_URL = (
 YAML_PATH = ".coderabbit.yaml"
 TOML_PATH = ".pr_agent.toml"
 MODELS = ("release", "operational")
-ORIGIN_RE = re.compile(
-    r"^(?:[a-z][a-z0-9+.-]*://[^/]+/|[^@/\s]+@[^:/\s]+:)(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$",
-    re.IGNORECASE,
-)
 
 
 class Refusal(ValueError):
@@ -113,7 +108,24 @@ def render(registry_data: Any, name: str, model: str) -> dict[str, Any]:
             f"{name}: agentPolicy coderabbit is auto without {policy_lib.DEFAULT_BASE} in bases, "
             "and CodeRabbit's automatic review always includes the default branch"
         )
+    qodo = parsed.bot("qodo")
+    if qodo.trigger == "auto" and not all(
+        qodo.covers(branch, "main") for branch in ("main", "develop")
+    ):
+        raise Refusal(
+            f"{name}: agentPolicy qodo is auto without covering both main and develop, "
+            "and Qodo's automatic review covers every pull request, so it cannot stop at fewer"
+        )
     return rendered
+
+
+def anchored(base: str) -> str:
+    """`base` as a CodeRabbit pattern, which searches, where a policy base must match whole."""
+    body = base.removesuffix("$")
+    slashes = len(body) - len(body.rstrip("\\"))
+    if base.startswith("^") and base.endswith("$") and slashes % 2 == 0:
+        return base
+    return f"^(?:{base})$"
 
 
 def serialize(rendered: dict[str, Any]) -> str:
@@ -134,7 +146,7 @@ def facts(rendered: dict[str, Any]) -> dict[str, Any]:
         },
         "coderabbit": {
             "enabled": crab.trigger == "auto",
-            "base_branches": [b for b in crab.bases if b != policy_lib.DEFAULT_BASE],
+            "base_branches": [anchored(b) for b in crab.bases if b != policy_lib.DEFAULT_BASE],
         },
         "qodo": {"disable_auto_feedback": parsed.bot("qodo").trigger != "auto"},
     }
@@ -168,9 +180,13 @@ def verify_checkout(checkout: Path, repo: str) -> None:
     """Refuse unless `checkout` is a work tree whose origin is `repo`."""
     if git_out(checkout, "rev-parse", "--is-inside-work-tree") != "true":
         raise Refusal(f"{checkout} is not a git work tree")
+    top = git_out(checkout, "rev-parse", "--show-toplevel")
+    if Path(top).resolve() != checkout.resolve():
+        raise Refusal(
+            f"{checkout} is inside the work tree {top}, and the top level is the only target"
+        )
     url = git_out(checkout, "remote", "get-url", "origin")
-    found = ORIGIN_RE.match(url)
-    if not found or found.group("slug").lower() != repo.lower():
+    if gh_graphql.origin_slug(url) != repo.lower():
         raise Refusal(f"{checkout} has origin {url!r}, which is not {repo}")
 
 
@@ -200,11 +216,19 @@ def set_base_branches(node: Any, items: list[str]) -> None:
     if quoted:
         seq.ca.items[len(quoted) - 1] = held
         return
-    # An empty list has no item to carry it, so the comment moves onto the key's own entry.
+    # An empty list has no item to carry it, so the comment becomes full-line comments before the next key.
+    # Where no key follows, it moves onto the key's own entry.
     token = held[0]
+    seq.fa.set_flow_style()
+    keys = list(node.keys())
+    following = keys[keys.index("base_branches") + 1 :]
+    if following:
+        lines = [ln.strip() for ln in token.value.split("\n") if ln.strip()]
+        text = "\n".join(ln[2:] if ln.startswith("# ") else ln[1:] for ln in lines)
+        node.yaml_set_comment_before_after_key(following[0], before=text, indent=token.column)
+        return
     token.value = token.value.lstrip("\n").lstrip(" ")
     token.column = 0
-    seq.fa.set_flow_style()
     node.ca.items["base_branches"] = [None, None, token, None]
 
 
@@ -311,37 +335,50 @@ def write(rendered: dict[str, Any], checkout: Path, repo: str, dry_run: bool = F
     return lines
 
 
+def gh_rest(path: str, jq: str) -> subprocess.CompletedProcess[str]:
+    """One REST read through `gh`, returned whole since a 404 is an answer rather than a failure."""
+    code, out, err = gh_graphql.run_subprocess(["gh", "api", path, "--jq", jq])
+    return subprocess.CompletedProcess(["gh", "api", path], code, out, err)
+
+
 def gh_reader(repo: str, ref: str) -> Reader:
     """A reader of one file's text through the contents API, None where it is absent."""
+    owner, name = repo.split("/", 1)
+    read = policy_lib.contents_reader(gh_rest, lambda proc: gh_graphql.said_absent(proc.stderr))
 
-    def read(path: str) -> str | None:
-        endpoint = f"repos/{repo}/contents/{path}?ref={quote(ref, safe='')}"
-        proc = subprocess.run(
-            ["gh", "api", endpoint], capture_output=True, text=True, encoding="utf-8", check=False
-        )
-        if proc.returncode != 0:
-            if "HTTP 404" in proc.stderr:
-                return None
-            raise Unreadable((proc.stderr or proc.stdout or "no output").strip()[:300])
+    def get(path: str) -> str | None:
         try:
-            content = json.loads(proc.stdout)["content"]
+            content = read(owner, name, path, ref)
+        except SystemExit as exc:
+            raise Unreadable(str(exc)) from exc
+        if content is None:
+            return None
+        try:
             return base64.b64decode(content).decode("utf-8")
-        except (ValueError, KeyError, TypeError, binascii.Error) as exc:
-            raise Unreadable(f"the response did not decode ({exc})") from exc
+        except (ValueError, binascii.Error) as exc:
+            raise Unreadable(f"{path} did not decode ({exc})") from exc
 
-    return read
+    return get
+
+
+class Result(NamedTuple):
+    """One assertion's outcome. `unreadable` marks a file the API could not be read, which is no drift."""
+
+    ok: bool
+    msg: str
+    unreadable: bool = False
 
 
 def check_file(
     path: str, read: Reader, judge: Callable[[str], list[tuple[bool, str]]]
-) -> list[tuple[bool, str]]:
+) -> list[Result]:
     try:
         text = read(path)
     except Unreadable as exc:
-        return [(False, f"{path} is unreadable, not missing ({exc})")]
+        return [Result(False, f"{path} is unreadable, not missing ({exc})", True)]
     if text is None:
-        return [(False, f"{path} is missing, run configure.sh apply --checkout to write it")]
-    return judge(text)
+        return [Result(False, f"{path} is missing, run configure.sh apply --checkout to write it")]
+    return [Result(ok, msg) for ok, msg in judge(text)]
 
 
 def judge_policy(rendered: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
@@ -381,6 +418,8 @@ def judge_yaml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
 
 def judge_toml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
     def judge(text: str) -> list[tuple[bool, str]]:
+        import tomllib
+
         msg = f"{TOML_PATH} config.disable_auto_feedback is {want['disable_auto_feedback']}"
         try:
             doc = tomllib.loads(text)
@@ -392,7 +431,7 @@ def judge_toml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
     return judge
 
 
-def check(rendered: dict[str, Any], read: Reader) -> list[tuple[bool, str]]:
+def check(rendered: dict[str, Any], read: Reader) -> list[Result]:
     """Every assertion the repository's three files owe against the render."""
     want = facts(rendered)
     results = check_file(policy_lib.POLICY_PATH, read, judge_policy(rendered))
@@ -405,7 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent_policy.py",
         description="Render, write, and check a repository's agent policy files.",
-        epilog="Exit codes: 0 ok, 1 a refusal or drift, 2 the command could not run.",
+        epilog="Exit codes: 0 ok, 1 a refusal, drift or a missing file, 2 the command or a file read could not run.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     for cmd, text in (
@@ -440,11 +479,12 @@ def run(args: argparse.Namespace) -> int:
         for line in write(rendered, Path(args.checkout), args.repo, args.dry_run):
             print(line)
     else:
-        failed = False
-        for ok, msg in check(rendered, gh_reader(args.repo, args.ref)):
-            print(f"  {'ok  ' if ok else 'FAIL'} {msg}")
-            failed = failed or not ok
-        return 1 if failed else 0
+        results = check(rendered, gh_reader(args.repo, args.ref))
+        for result in results:
+            print(f"  {'ok  ' if result.ok else 'FAIL'} {result.msg}")
+        if any(result.unreadable for result in results):
+            return 2
+        return 0 if all(result.ok for result in results) else 1
     return 0
 
 
@@ -455,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
     except Refusal as exc:
         print(f"agent_policy.py: {exc}", file=sys.stderr)
         return 1
-    except (OSError, ImportError) as exc:
+    except (OSError, ImportError, gh_graphql.GraphQLError) as exc:
         print(f"agent_policy.py: could not run ({exc})", file=sys.stderr)
         return 2
 
