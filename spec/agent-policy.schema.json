@@ -57,7 +57,7 @@
                     "additionalProperties": false,
                     "properties": {
                         "commitInPlace": {
-                            "description": "Lets an agent commit in place in the primary checkout while it is on a listed branch: add, rm, and mv of explicit paths, a commit that stages nothing itself and amends nothing, and an unforced push of that branch to origin. reset, rebase, restore, stash, clean, and a pathspec checkout stay denied. An operational repository lists develop.",
+                            "description": "Lets an agent commit in place in the primary checkout while it is on a listed branch: add, rm, and mv of explicit paths, a commit that stages nothing itself and amends nothing, and an unforced push naming origin and that branch explicitly. reset, rebase, restore, stash, clean, and a pathspec checkout stay denied. An operational repository lists develop.",
                             "type": "object",
                             "required": ["branches"],
                             "additionalProperties": false,

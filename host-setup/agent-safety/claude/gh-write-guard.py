@@ -801,9 +801,10 @@ def _in_place_branch(target_dir: str) -> str | None:
     try:
         data = json.loads(_git_stdout(target_dir, ["show", _POLICY_BLOB]) or "")
         allowed = data["guard"]["primaryCheckout"]["commitInPlace"]["branches"]
+        version = data["version"]
     except (ValueError, KeyError, TypeError):
         return None
-    return branch if isinstance(allowed, list) and branch in allowed else None
+    return branch if version == 1 and isinstance(allowed, list) and branch in allowed else None
 
 
 def _bare_push_branch(cwd: str | None, c_dirs: list[str], git_dir: str | None) -> object:
@@ -1027,10 +1028,9 @@ def _commit_flags(args: list[str]) -> list[str]:
 def _skips_hooks(sub: str, args: list[str]) -> bool:
     """True when a commit or push carries `--no-verify`, or a commit its `-n` in a short cluster."""
     if sub == "commit":
-        return any(
-            a == "--no-verify" or re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", a)
-            for a in _commit_flags(args)
-        )
+        flags = _commit_flags(args)
+        flags = flags[: flags.index("--")] if "--" in flags else flags
+        return any(a == "--no-verify" or re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", a) for a in flags)
     return "--no-verify" in args[: args.index("--")] if "--" in args else "--no-verify" in args
 
 
@@ -1234,14 +1234,15 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
         specs = {branch, "HEAD", f"refs/heads/{branch}", f"{branch}:{branch}", f"HEAD:{branch}"}
         return (
             set(args) - set(pos) <= _IN_PLACE_PUSH_FLAGS
-            and pos[:1] in ([], ["origin"])
-            and len(pos) <= 2
-            and all(s in specs for s in pos[1:])
+            and len(pos) == 2
+            and pos[0] == "origin"
+            and pos[1] in specs
         )
     if sub == "commit":
         flags = _commit_flags(args)
         return not any(
             not a.startswith("-")
+            or a == "--"
             or a in _COMMIT_SWEEPS
             or a.startswith("--pathspec")
             or re.search(r"[apio]", a[1:])
@@ -1296,7 +1297,8 @@ def _primary_denial(
         "the task (git worktree add) and run it there. The maintainer grants an exception "
         f"through {_ALLOW_PRIMARY_ENV}, set before the session starts, or for an in-place "
         "commit through the repository's .github/agent-policy.json on main, whose exemption "
-        "takes explicit paths and pushes only the checked-out branch. See GOVERNANCE.md "
+        "takes explicit paths and pushes as `git push origin <the checked-out branch>`. See "
+        "GOVERNANCE.md "
         "'Repository Boundaries and Write Safety' and the repo-worktree skill."
     )
 
@@ -1641,6 +1643,7 @@ _COMMIT_THEN_PUSH = (
 # (command, want, source), run in the worktree with no rules on any branch.
 # A source names the requirement whose plain shape a case is, the incident behind it, or the issue recording a shape a session hit.
 _CASES: list[tuple[str, str, str]] = [
+    ("git commit -m x -- -n", "allow", "R4"),
     ("gh pr comment 5 --body ok >/dev/null", "deny", "R1"),
     ("gh pr comment 5 --body ok 2>/dev/null", "deny", "R1"),
     ("gh pr comment 5 --body ok &>/dev/null", "deny", "R1"),
@@ -1906,10 +1909,12 @@ _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
     ("git rm old.yaml", "develop", "allow"),
     ("git mv a.yaml b.yaml", "develop", "allow"),
     ("git push origin develop", "develop", "allow"),
-    ("git push", "develop", "allow"),
+    ("git push", "develop", "deny"),
+    ("git push origin", "develop", "deny"),
+    ("git commit -m x -- -n", "develop", "deny"),
     ("git push origin HEAD", "develop", "allow"),
     ("git push origin develop", None, "deny"),
-    ("git add automations.yaml && git commit -m x && git push", "develop", "allow"),
+    ("git add automations.yaml && git commit -m x && git push origin develop", "develop", "allow"),
     ("git add -A", "develop", "deny"),
     ("git add .", "develop", "deny"),
     ("git add -u", "develop", "deny"),
@@ -2132,7 +2137,7 @@ def _in_place_selftest() -> bool | str:
 
         publish = ["update-ref", "refs/remotes/origin/main", "HEAD"]
         if not commit(
-            '{"guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}'
+            '{"version": 1, "guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}'
         ):
             return "skip"
         got.append(_in_place_branch(repo))
@@ -2142,7 +2147,9 @@ def _in_place_selftest() -> bool | str:
         got += [
             classify(f"git add {p}", repo, environ={})[0] for p in (".github/x.json", ".github/dir")
         ]
-        if not commit("{") or not run(publish):
+        if not commit(
+            '{"version": 2, "guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}'
+        ) or not run(publish):
             return "skip"
         got.append(_in_place_branch(repo))
         return got == [None, None, "develop", "allow", "deny", "develop", None]
