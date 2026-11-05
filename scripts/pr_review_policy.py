@@ -2,10 +2,11 @@
 
 Why this exists: the bots cost money and agent time per round. So how far each one is asked to
 review is a per-repository choice rather than a fleet constant. The policy lives in the
-repository's own `.github/pr-review.json`. Changing it changes the scripts' behavior for that
-repository alone, and a rollback is a revert of one file. A repository carrying no file reads the
-hub's `spec/pr-review.default.json`. That default matches the behavior the scripts had before the
-file existed.
+`review` section of the repository's own `.github/agent-policy.json`. Changing it changes the
+scripts' behavior for that repository alone, and a rollback is a revert of one file. A repository
+carrying no file, or a file with no `review` section, reads the hub's
+`spec/agent-policy.default.json`. That default matches the behavior the scripts had before the file
+existed. The file's other sections belong to other readers, such as the host write guard's `guard`.
 
 The trigger says how a review arrives, never whether the gate wants one. That is what lets the
 skills stay silent about the trigger. `wait` sends each request the policy asks for, and the gate asks
@@ -36,9 +37,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
-POLICY_PATH = ".github/pr-review.json"
-DEFAULT_PATH = Path(__file__).resolve().parent.parent / "spec" / "pr-review.default.json"
+POLICY_PATH = ".github/agent-policy.json"
+DEFAULT_PATH = Path(__file__).resolve().parent.parent / "spec" / "agent-policy.default.json"
 VERSION = 1
+SECTIONS = ("review", "guard")
 BOTS = ("copilot", "coderabbit", "qodo")
 TRIGGERS = ("auto", "explicit", "off")
 WHENS = ("on-open", "after-checks")
@@ -170,16 +172,28 @@ def _bot(source: str, name: str, raw: object) -> BotPolicy:
     return BotPolicy(trigger, tuple(bases), when, rounds, cap, gate, command)
 
 
-def parse(data: object, source: str) -> Policy:
-    """The policy `data` states, every bot named, or PolicyError naming the first fault."""
+def parse(data: object, source: str, fallback: bool = True) -> Policy:
+    """The review policy `data` states, every bot named, or PolicyError naming the first fault.
+
+    A file with no `review` section reads the hub default's, unless `fallback` is off, as it is for
+    the hub default itself.
+    """
     if not isinstance(data, dict):
         raise _fail(source, "the policy is not a JSON object")
-    stray = sorted(set(data) - {"$schema", "version", "bots"})
+    stray = sorted(set(data) - {"$schema", "version", *SECTIONS})
     if stray:
         raise _fail(source, f"unknown key(s) {', '.join(stray)}")
     if isinstance(data.get("version"), bool) or data.get("version") != VERSION:
         raise _fail(source, f"version is {data.get('version')!r}, and this reader knows {VERSION}")
-    bots = data.get("bots")
+    if "review" not in data and fallback:
+        return load_default()
+    review = data.get("review")
+    if not isinstance(review, dict):
+        raise _fail(source, "review is not an object")
+    stray = sorted(set(review) - {"bots"})
+    if stray:
+        raise _fail(source, f"review has unknown key(s) {', '.join(stray)}")
+    bots = review.get("bots")
     if not isinstance(bots, dict):
         raise _fail(source, "bots is not an object")
     stray = sorted(set(bots) - set(BOTS))
@@ -197,7 +211,7 @@ def load_default(path: Path = DEFAULT_PATH) -> Policy:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise _fail(str(path), f"unreadable ({exc})") from exc
-    return parse(data, f"hub default {path.name}")
+    return parse(data, f"hub default {path.name}", fallback=False)
 
 
 def decode_contents(content: str, source: str) -> Policy:
