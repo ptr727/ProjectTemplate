@@ -184,9 +184,9 @@ Subcommands
            - A refusal on the head. One saying every changed file is in Copilot's default review
              exclusions is one only where no local pass is to cover the head, its status line
              `REVIEW_EXCLUDED_FILES_ONLY`.
-           - The pull request's newest review being a quota or error refusal on any head. On a
-             pull request into a branch other than the default, an attested local pass on a later
-             head covers that head instead.
+           - The pull request's newest review being a quota or error refusal on any head. Where the
+             policy hands heads to a local pass, by default off the default branch, an attested pass
+             on a later head covers that head instead, as it covers any head no Copilot round settles.
            - The reviewer's newest activity elsewhere in the repository being a quota refusal
              nothing answered since while this head carries none of its own.
            Proceed on the other reviewers' coverage rather than retrying, and pass
@@ -1562,6 +1562,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
 
     `may_request` False sends no request whatever is owed, for a caller reading the gate as is.
     The body-less liveness read takes a head refusal for a round, so `polled_past` reads past it.
+    A held Copilot request is judged again on a fresh read once the check wait ends. The after-checks
+    side asks go after the Copilot poll, so their check wait never holds Copilot's round back.
     """
     # `wait` mutates through the auto-request, so a cross-owner target is refused before the read as well.
     if refused := scope_refusal(owner):
@@ -1604,8 +1606,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     if snapshot and stopped and not held:
         state, line = transient_state(owner, repo, a.number, snapshot, stopped)
         retry, watch = (line if state == "owed" else ""), state in {"owed", "pending"}
-    if retry:
-        stopped = None
+    stopped = None if retry else stopped
     # Request before the first poll, so `wait` makes a review happen rather than only watching for one.
     # Skipped once a round past --min-rounds covers the head, Copilot answered outside a review, or a request is pending.
     recorded: bool | None = None
@@ -1626,8 +1627,11 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
     ask = functools.partial(side.ask, read_held, await_green, send, mutated, may_request and pr)
     ask("on-open")
-    checks_hold = await_green() if owed and side.holds_for_checks(copilot, a.request) else ""
-    owed = owed and not checks_hold
+    waits = owed and side.holds_for_checks(copilot, a.request)
+    checks_hold = await_green() if waits else ""
+    fresh = gql(Q_LIVE, owner, repo, a.number) if waits and not checks_hold else pr
+    late = reviewer_requested(fresh) or any(liveness(fresh, a.min_rounds))
+    owed = owed and not checks_hold and not late
     if owed:
         line, recorded = request_copilot_review(
             owner, repo, a.number, pr["id"], copilot_bot_id(history), POLL_DELAYS[0]
@@ -1644,7 +1648,6 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
-    ask("after-checks")
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:
@@ -1735,6 +1738,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             a.timeout,
         )
 
+    ask("after-checks")
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, final)
     if not is_open(final):
@@ -1833,6 +1837,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     refusal = refusing_review(final)
     if refusal is None and not a.ignore_quota_signal:
         refusal = stopping_refusal(final)
+    refusal = None if held and copilot_settled(final) else refusal
     state, line = transient_state(owner, repo, a.number, final, refusal) if refusal else ("", "")
     if state == "pending" or (state == "owed" and reviewer_requested(final)):
         print(
@@ -1894,7 +1899,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         why = "Copilot's refusal says every changed file is excluded from its review. " * excluded
         print(
             "status=AWAITING_LOCAL_PASS no Copilot round covers this head and none was requested, "
-            f"since a head into a branch other than the default is covered by a local pass. {why}Run "
+            f"since the review policy hands it to a local pass, by default off the default branch. {why}Run "
             "the local strict review, record it, push, and run `pr_review.py attest` from the "
             "checkout, or pass --request to ask Copilot for a round instead"
         )
@@ -1904,9 +1909,10 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             "status=REVIEW_EXCLUDED_FILES_ONLY the review carrying the head says it reviewed no "
             "file, since every changed file is in Copilot's default review exclusions, printed "
             "above under COPILOT REFUSED THIS ROUND. Re-requesting and splitting the pull request "
-            "both clear nothing. Into a branch other than the default, an attested local pass "
-            "covers this head while no round states partial coverage and the whole review history "
-            "is in view, and `wait` without --request reads it. Otherwise hand it to the maintainer"
+            "both clear nothing. Where the review policy hands the head to a local pass, by default "
+            "off the default branch, an attested one covers it while no round states partial coverage "
+            "and the whole review history is in view, and `wait` without --request reads it. "
+            "Otherwise hand it to the maintainer"
         )
         return 41
     if refusal:

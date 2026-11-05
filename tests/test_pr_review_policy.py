@@ -21,8 +21,10 @@ import subprocess
 import sys
 import time
 import unittest
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -752,6 +754,110 @@ class TestWaitAsksSideReviewers(fixtures.GqlCase):
         self.assertEqual(1, len(asks), out.getvalue())
         self.assertEqual("/review", asks[0].kwargs["body"])
         self.assertIn("auto-request: asked qodo", out.getvalue())
+
+
+def bodiless(pr: dict) -> Callable[..., dict]:
+    """A `gql` answering `pr`, with every review body dropped from the live read as `Q_LIVE` drops it.
+
+    That read then takes a refusal on the head for a round, the shape `polled_past` exists for.
+    """
+    live = copy.deepcopy(pr)
+    for node in live["reviews"]["nodes"]:
+        node.pop("body", None)
+    return lambda query, *_args, **_kwargs: live if query is pr_review.Q_LIVE else pr
+
+
+class TestLocalPassFixes(fixtures.GqlCase):
+    """`wait` and `checks_hold` agree with the gate's own readings of a settled or still-running head."""
+
+    def wait(self, *extra: str) -> tuple[int, str]:
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            code = pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0", *extra])
+        return code, out.getvalue()
+
+    def test_a_settled_copilot_refusal_leaves_the_head_to_the_local_pass(self) -> None:
+        """The quota refusal on the head is no exit 41 where no Copilot round is coming."""
+        refused = [fixtures.review(body=fixtures.QUOTA_REFUSED)]
+        cases = {"attested": (attested_on, "covers this head"), "unattested": (None, "")}
+        for name, (attest, line) in cases.items():
+            with self.subTest(name):
+                ungated = parsed(copilot={"trigger": "auto", "bases": [], "gate": False})
+                pr = with_policy(fixtures.payload(refused), ungated)
+                self.answer(attest(pr) if attest else pr)
+                self.enterContext(mock.patch.object(pr_review, "gql", side_effect=bodiless(pr)))
+                code, out = self.wait()
+                self.assertNotEqual(41, code, out)
+                self.assertNotIn("COPILOT_QUOTA_EXHAUSTED", out)
+                self.assertIn(line or "status=AWAITING_LOCAL_PASS", out)
+
+    def test_an_open_workflow_run_holds_a_green_rollup(self) -> None:
+        """Between `needs:` stages the rollup reads green while the run's later jobs do not exist yet."""
+        between = fixtures.check(
+            started=fixtures.EARLY, suite_status="IN_PROGRESS", workflow=1, run=99
+        )
+        self.assertEqual("PENDING", side.checks_hold(checked(between), NOW, *WINDOWS))
+        done = fixtures.check(started=fixtures.EARLY, workflow=1, run=99)
+        self.assertEqual("", side.checks_hold(checked(done), NOW, *WINDOWS))
+
+    def test_the_after_checks_ask_runs_after_the_copilot_poll(self) -> None:
+        events: list[str] = []
+        real_backoff, real_requests = pr_review.backoff, side.request_side_reviews
+
+        def polled(*args: Any, **kwargs: Any) -> Any:
+            events.append("poll")
+            return real_backoff(*args, **kwargs)
+
+        def asked(*args: Any) -> list[str]:
+            events.append(str(args[-1]))
+            return real_requests(*args)
+
+        rules = parsed(qodo={**EXPLICIT_QODO, "when": "after-checks"})
+        self.answer(attested_on(with_policy(fixtures.payload([]), rules)))
+        with (
+            mock.patch.object(pr_review, "backoff", polled),
+            mock.patch.object(side, "request_side_reviews", asked),
+        ):
+            self.wait()
+        self.assertIn("after-checks", events)
+        self.assertLess(events.index("poll"), events.index("after-checks"), events)
+
+    def test_a_request_landing_during_the_check_wait_is_not_duplicated(self) -> None:
+        rules = parsed(
+            copilot={"trigger": "explicit", "bases": ["^develop$"], "when": "after-checks"}
+        )
+        green = [fixtures.check(started=fixtures.EARLY)]
+        before = with_policy(fixtures.payload([], checks=green), rules)
+        after = with_policy(fixtures.payload([], checks=green, pending=True), rules)
+        self.answer(before)
+        lives: list[int] = []
+
+        def read(query: str, *_args: object, **_kwargs: object) -> dict:
+            if query is pr_review.Q_LIVE:
+                lives.append(1)
+                return before if len(lives) == 1 else after
+            return before
+
+        bot = {"__typename": "Bot", "login": rounds.REVIEWER, "id": "BOT_123"}
+        history = [{"number": 1, "reviews": {"nodes": [{"author": bot}]}}]
+
+        def graphql(query: str, **variables: object) -> dict:
+            if "pullRequests(first:$prs" in query:
+                return {"repository": {"pullRequests": {"nodes": history}}}
+            answered = fixtures.answer_request(query, variables, fixtures.RECORDED)
+            return answered or {"repository": {"pullRequests": {"nodes": []}}}
+
+        sent = mock.MagicMock(side_effect=graphql)
+        with (
+            mock.patch.object(pr_review, "gql", side_effect=read),
+            mock.patch.object(pr_review, "gh_graphql", sent),
+        ):
+            _, out = self.wait()
+        requests = [c for c in sent.call_args_list if c.args and "requestReviews" in c.args[0]]
+        self.assertEqual([], requests, out)
+        self.assertGreaterEqual(len(lives), 2, out)
 
 
 if __name__ == "__main__":

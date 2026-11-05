@@ -22,6 +22,7 @@ from pr_review_checks import (
     checks_settling,
     head_commit,
     reviewer_check,
+    runs_open,
 )
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -60,14 +61,13 @@ def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
     """What holds a review back on the head's checks, empty where nothing does.
 
     FAILURE where a check finished without passing, and a stuck shape's own name where one sits
-    in a shape no wait clears. PENDING where one is still settling, or none has posted inside the
-    grace after the head arrived. A hosted reviewer's own check is left out,
-    since the review it stands for is the one being held.
+    in a shape no wait clears. PENDING where one is settling, a run on the head is open, or none
+    posted inside the grace after the head arrived. The open run counts as `held_checks_open`
+    counts it, since a run's later jobs enter the rollup only as their `needs:` finish. A hosted
+    reviewer's own check is left out, since the review it stands for is the one being held. A
+    workflow run it posts from still counts while open, since a run names no reviewer it belongs to.
     """
     nodes = [n for n in check_nodes(pr) if not hosted_check(n)]
-    if not nodes:
-        since = age(head_arrived(pr), now) if head_arrived(pr) else None
-        return "PENDING" if since is None or since <= grace else ""
     if any(n.get("unreadable") for n in nodes):
         return "UNREAD"
     shapes = {check_shape(n, now, grace, stall) for n in nodes}
@@ -75,7 +75,10 @@ def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
         return "FAILURE"
     if stuck := sorted(shapes - {"", "RUNNING_LONG"}):
         return stuck[0]
-    return "PENDING" if checks_settling(nodes, now, grace, stall) else ""
+    if runs_open(pr) or checks_settling(nodes, now, grace, stall):
+        return "PENDING"
+    since = age(head_arrived(pr), now) if head_arrived(pr) and not nodes else None
+    return "PENDING" if not nodes and (since is None or since <= grace) else ""
 
 
 def hosted_check(node: dict) -> bool:
@@ -217,15 +220,16 @@ def copilot_policy(pr: dict | None, requested: bool) -> review_policy.BotPolicy 
     """The policy's Copilot entry off `pr`, None where no policy rides it.
 
     A request can already be pending where the policy says Copilot is only asked explicitly. That
-    draws a note, since unless a session sent it by hand, an automatic trigger was left on.
+    draws a note, since unless a session or an earlier `wait` sent it, an automatic trigger is on.
     """
     policy = (pr or {}).get(review_policy.PAYLOAD_KEY)
     copilot = policy.bot("copilot") if policy is not None else None
     if copilot is not None and copilot.trigger == "explicit" and requested:
         print(
             "note: a Copilot review was already requested when this wait started, while the "
-            "review policy says Copilot is requested explicitly. If no session sent it, an "
-            "automatic trigger is still on, in the account's Copilot settings or a ruleset"
+            "review policy says Copilot is requested explicitly. If neither a session nor an "
+            "earlier wait sent it, an automatic trigger is still on, in the account's Copilot "
+            "settings or a ruleset"
         )
     return copilot
 
