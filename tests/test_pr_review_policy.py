@@ -345,6 +345,16 @@ class TestRequestSideReviews(SideCase):
         side.request_side_reviews(lambda: pr, green, post, phase)
         return post, green
 
+    def test_a_capped_bot_is_not_asked_once_the_comments_run_past_the_window(self) -> None:
+        """Asks outside the window would go uncounted, so the cap could be passed unseen."""
+        capped = {**EXPLICIT_QODO, "maxRounds": 3}
+        for settings, asked in ((capped, False), (EXPLICIT_QODO, True)):
+            pr = self.ruled(qodo=settings)
+            pr["comments"]["pageInfo"] = {"hasPreviousPage": True}
+            with self.subTest(capped="maxRounds" in settings):
+                sent, _ = self.run_requests(pr)
+                self.assertEqual(asked, sent.called)
+
     def test_an_explicit_bot_is_asked_with_its_own_command_on_the_pull_request(self) -> None:
         sent, _ = self.run_requests(self.ruled(coderabbit=EXPLICIT_RABBIT))
         self.assertEqual([mock.call("@coderabbitai full review")], sent.call_args_list)
@@ -606,10 +616,55 @@ class TestCopilotGate(unittest.TestCase):
                     pr = attested_on(with_policy(build(), rules))
                     self.assertTrue(rounds.holds(pr))
                     self.assertTrue(rounds.local_cover(pr))
+            with self.subTest(history=history, policy="spent cap"):
+                capped = parsed(copilot={"trigger": "explicit", "bases": [], "maxRounds": 1})
+                pr = attested_on(with_policy(build(), capped))
+                self.assertTrue(rounds.holds(pr))
+                self.assertTrue(rounds.local_cover(pr))
             with self.subTest(history=history, policy="hub default"):
                 pr = attested_on(with_policy(build(), policy.load_default()))
                 self.assertFalse(rounds.holds(pr))
                 self.assertFalse(rounds.local_cover(pr))
+
+
+class TestCopilotOutputOnTheHead(unittest.TestCase):
+    """Copilot's own word on the head settles nothing where the policy never waits on it."""
+
+    def cases(self) -> dict[str, dict]:
+        return {
+            "refusal": fixtures.payload([fixtures.review(body=fixtures.QUOTA_REFUSED)]),
+            "pending request": fixtures.payload([], pending=True),
+            "partial round": fixtures.payload([fixtures.review(body=PARTIAL)]),
+        }
+
+    def test_an_ungated_copilot_leaves_the_attested_local_pass_covering(self) -> None:
+        rules = parsed(copilot={"trigger": "auto", "bases": [], "gate": False})
+        for name, pr in self.cases().items():
+            with self.subTest(name):
+                ruled = attested_on(with_policy(pr, rules))
+                self.assertTrue(rounds.holds(ruled))
+                self.assertTrue(rounds.local_cover(ruled))
+                self.assertEqual("local", rounds.coverage(ruled)[0])
+
+    def test_the_hub_default_still_lets_it_stop_the_local_pass(self) -> None:
+        for name, pr in self.cases().items():
+            with self.subTest(name):
+                ruled = attested_on(with_policy(pr, policy.load_default()))
+                self.assertFalse(rounds.holds(ruled) and rounds.local_cover(ruled))
+
+
+class TestWaitUnderAnUngatedCopilot(fixtures.GqlCase):
+    def test_a_pending_request_does_not_stop_the_hold(self) -> None:
+        """An automatic request the policy does not wait on leaves `wait` on the attested pass."""
+        rules = parsed(copilot={"trigger": "auto", "bases": [], "gate": False})
+        pr = attested_on(with_policy(fixtures.payload([], pending=True), rules))
+        self.answer(pr)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"])
+        self.assertIn("covers this head with an attested local pass", out.getvalue())
 
 
 class TestWaitHoldsForChecks(fixtures.GqlCase):

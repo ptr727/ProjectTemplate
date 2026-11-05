@@ -272,6 +272,7 @@ from pr_review_rounds import (
     attested,
     commit_oid,
     copilot_bot_id,
+    copilot_settled,
     describe,
     excluded_refusal,
     files_unread,
@@ -1036,7 +1037,7 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
     if refused := scope_refusal(owner):
         return refused
 
-    target = gql(Q_COMMENT_TARGET, owner, repo, num, policy=False)
+    target = gql(Q_COMMENT_TARGET, owner, repo, num)
     if not target or not target.get("id") or not target.get("url"):
         return not_written(
             "TARGET_NOT_READ",
@@ -1174,7 +1175,7 @@ def await_registered_head(
     Applies only where the remote branch tip is the checkout's own commit, so the head is merely
     late. Any other tip, or one that cannot be read, returns at once with the head as read.
     """
-    meta = gql(Q_ATTEST_BRANCH, owner, repo, num, policy=False) or {}
+    meta = gql(Q_ATTEST_BRANCH, owner, repo, num) or {}
     ref, source = meta.get("headRefName") or "", (meta.get("headRepository") or {}).get("url") or ""
     if not is_open(meta) or not ref or not source or not safe_ref(ref):
         return head, True
@@ -1492,7 +1493,7 @@ def head_carries(owner: str, repo: str, head: str, refs: list[str]) -> set[str] 
 
 def check_claims(owner: str, repo: str, num: int) -> int:
     """Report every reference the description makes that its own head tree does not carry."""
-    pr = gql(Q_CLAIMS, owner, repo, num, policy=False)
+    pr = gql(Q_CLAIMS, owner, repo, num)
     head, body = pr["headRefOid"], pr.get("body") or ""
     uses, shas = body_references(body)
 
@@ -1594,7 +1595,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     held = (
         snapshot is not None
         and not a.request
-        and not reviewer_requested(pr)
+        and (not reviewer_requested(pr) or copilot_settled(snapshot))
         and holds(snapshot)
         and (not answer or attested(snapshot))
     )

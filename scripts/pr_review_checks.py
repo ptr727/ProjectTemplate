@@ -280,9 +280,14 @@ def hosted_reviews_running(
         n.get("name") or login
         for n in checks_settling(nodes, now, grace, stall, UNFINISHED)
         for name, login in HOSTED_REVIEWERS.items()
-        if n.get("poster") == login or (n.get("name") or "").casefold() == name
+        if reviewer_check(n, name, login)
         if not limited_since(pr, login, n.get("since") or "")
     ]
+
+
+def reviewer_check(node: dict, vocab: str, login: str) -> bool:
+    """Whether a check is hosted reviewer `login`'s, by its poster or by its vocabulary name."""
+    return node.get("poster") == login or (node.get("name") or "").casefold() == vocab
 
 
 def held_checks_open(

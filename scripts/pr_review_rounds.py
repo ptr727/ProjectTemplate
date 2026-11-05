@@ -437,8 +437,11 @@ def coverage(pr: dict) -> tuple[str, str]:
 
     A statement on a round covering the head decides it, the worst winning, but `unknown` yields to
     an earlier partial. Where none states any, a file table stands in under `table_cover`, then
-    an attested local pass under `local_cover`.
+    an attested local pass under `local_cover`. That pass decides first where `copilot_settled`
+    holds, since the policy then waits on no Copilot reading.
     """
+    if copilot_settled(pr) and local_cover(pr):
+        return "local", f"an attested local pass recorded {attestation(pr)} finding(s)"
     rounds = head_reviews(pr)
     rank = ("full", "unknown", "partial")
     stated = [(r.coverage, r.coverage_line) for n in rounds if (r := reading(n)).coverage != "none"]
@@ -644,20 +647,19 @@ def copilot_rounds(pr: dict) -> int:
     return len({commit_oid(n) for n in nodes if not refusal_of(n) and commit_oid(n)})
 
 
-def history_settled(pr: dict) -> bool:
-    """Whether no partial round or unread history stops a local pass from covering this head.
-
-    Both are waived where the policy never waits on Copilot, since no round is coming to settle them.
-    """
+def copilot_settled(pr: dict) -> bool:
+    """Whether no Copilot round can settle this head: Copilot off, ungated, or its cap spent."""
     policy = pr.get(POLICY_KEY)
-    if policy is not None and policy.bot("copilot").never_waited_on():
-        return True
-    return not (reviews_truncated(pr) or partial_on_record(pr))
+    bot = policy.bot("copilot") if policy is not None else None
+    return bot is not None and (bot.never_waited_on() or not bot.rounds_left(copilot_rounds(pr)))
 
 
 def holds(pr: dict) -> bool:
     """Whether a local pass rather than a Copilot round is to cover this head, attested or not."""
-    return not promotion(pr) and not reviewer_requested(pr) and history_settled(pr)
+    return not promotion(pr) and (
+        copilot_settled(pr)
+        or not (reviewer_requested(pr) or reviews_truncated(pr) or partial_on_record(pr))
+    )
 
 
 def polled_past(pr: dict, ignore_quota: bool, request: bool) -> bool:
@@ -681,17 +683,17 @@ def local_cover(pr: dict) -> bool:
 
     - The review policy owes the head no Copilot round, by default off the default branch.
     - The head is one its writer attests.
-    - The history settles, per `history_settled`.
+    - No round on record read part of a diff, and the whole review history is in view.
 
-    A refusal on this head
-    is Copilot's own word, which only a later Copilot round on the head spends. One saying every
-    changed file is in Copilot's default exclusions is the exception, since no round will follow it.
-    A refusal on an earlier head is spent by the head moving.
+    A refusal on this head is Copilot's own word, which only a later Copilot round on the head
+    spends. One saying every changed file is in Copilot's default exclusions is the exception,
+    since no round will follow it. A refusal on an earlier head is spent by the head moving. Where
+    `copilot_settled` holds, no round is coming at all, so only the first two conditions apply.
     """
+    if promotion(pr) or not attested(pr):
+        return False
     refusal = refusing_review(pr)
-    return (
+    return copilot_settled(pr) or (
         (refusal is None or excluded_refusal(refusal))
-        and not promotion(pr)
-        and attested(pr)
-        and history_settled(pr)
+        and not (reviews_truncated(pr) or partial_on_record(pr))
     )

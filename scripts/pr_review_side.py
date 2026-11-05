@@ -21,6 +21,7 @@ from pr_review_checks import (
     check_shape,
     checks_settling,
     head_commit,
+    reviewer_check,
 )
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -29,6 +30,7 @@ from pr_review_rounds import (
     TRUSTED_ASSOCIATIONS,
     commit_oid,
     head_nodes,
+    page_flag,
     qodo_comment,
     reviewer_nodes,
 )
@@ -80,7 +82,7 @@ def hosted_check(node: dict) -> bool:
     """Whether a check is a hosted reviewer's own, Copilot's review run included."""
     name = (node.get("name") or "").casefold()
     return bool(READS_AS_REVIEWER.search(name)) or any(
-        node.get("poster") == login or name == vocab for vocab, login in HOSTED_REVIEWERS.items()
+        reviewer_check(node, vocab, login) for vocab, login in HOSTED_REVIEWERS.items()
     )
 
 
@@ -167,7 +169,8 @@ def request_side_reviews(
     `phase` is the `when` value this call serves, so an on-open ask never waits behind a check
     wait. A reviewer that answered or was asked since the head arrived is skipped before any wait,
     and judged again on a fresh read after one. So a request that a concurrent session sent during
-    the wait is seen. Nothing is sent where its cap is spent. The merge never waits on these
+    the wait is seen. Nothing is sent where its cap is spent. Nor where a cap applies and the comment
+    window is cut, since the rounds spent cannot then be counted. The merge never waits on these
     reviewers, so a held ask is a note rather than an exit. `post` sends one comment and returns
     the created node, and an unconfirmed one ends the run, since it may have landed.
     """
@@ -182,6 +185,12 @@ def request_side_reviews(
         if not bot.rounds_left(side_rounds(pr, name, body)):
             lines.append(
                 f"note: the review policy allows {name} no further round, so none was asked"
+            )
+            continue
+        if bot.capped() and page_flag(pr, "comments", "hasPreviousPage"):
+            lines.append(
+                f"note: {name}'s rounds are capped and the comments run past the window, so its "
+                "rounds cannot be counted and none was asked"
             )
             continue
         if bot.waits_for_checks():

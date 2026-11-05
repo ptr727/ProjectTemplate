@@ -81,6 +81,10 @@ class BotPolicy:
         """Whether `wait` may send this bot a request at all, per the module docstring."""
         return self.trigger == "explicit" or (self.trigger == "auto" and self.gate)
 
+    def capped(self) -> bool:
+        """Whether the policy limits this bot's rounds on one pull request at all."""
+        return self.rounds == "once" or self.max_rounds is not None
+
     def rounds_left(self, done: int) -> bool:
         """Whether a further round is allowed after `done` rounds on this pull request."""
         if self.rounds == "once" and done >= 1:
