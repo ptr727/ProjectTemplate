@@ -278,7 +278,8 @@ def classify_rounds(
 
     A head arrives at its commit date. It is explicit when a trigger falls between that arrival
     and the bot's first review of it. A head without both times cannot be classified. Every time is
-    compared in UTC, since a commit date keeps the committer's own offset.
+    parsed before it is compared. A commit date keeps the committer's own offset, so its text does
+    not order against a UTC stamp.
     """
     arrival = {
         str((n.get("commit") or {}).get("oid")): utc_instant(

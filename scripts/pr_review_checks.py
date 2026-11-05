@@ -48,9 +48,9 @@ CHECKS_WINDOW = 100
 def utc_instant(stamp: str) -> datetime | None:
     """A GitHub timestamp in UTC, None where it is absent, does not parse, or names no zone.
 
-    A `GitTimestamp`, such as a commit's `committedDate`, keeps the committer's own offset, while a
-    `DateTime` is written in UTC. So the two order correctly only once both are converted. A stamp
-    naming no zone has no one instant, so it reads as None rather than as the host's local time.
+    A commit's `GitTimestamp` keeps its own offset and a `DateTime` is UTC, so only parsed stamps
+    order by instant. A stamp naming no zone has no one instant, so it reads as None rather than as
+    the host's local time. Returning UTC makes each print alike.
     """
     try:
         parsed = datetime.fromisoformat(stamp) if stamp else None
