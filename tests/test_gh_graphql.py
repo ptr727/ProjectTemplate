@@ -170,5 +170,17 @@ class SiblingImportCase(unittest.TestCase):
                     self.assertEqual(r.returncode, 0, r.stderr)
 
 
+class UtcInstantTests(unittest.TestCase):
+    def test_an_offset_and_a_utc_stamp_for_one_instant_are_equal(self) -> None:
+        local = gh_graphql.utc_instant("2026-01-01T10:00:00-07:00")
+        self.assertEqual(local, gh_graphql.utc_instant("2026-01-01T17:00:00Z"))
+        self.assertIsNotNone(local)
+        self.assertEqual(local.utcoffset().total_seconds(), 0)  # type: ignore[union-attr]
+
+    def test_an_empty_or_unparsable_stamp_is_none(self) -> None:
+        for stamp in ("", "not a time"):
+            self.assertIsNone(gh_graphql.utc_instant(stamp))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

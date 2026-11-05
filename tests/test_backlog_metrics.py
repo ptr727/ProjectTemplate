@@ -451,6 +451,19 @@ class ReviewTests(unittest.TestCase):
             (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (0, 1, 0)
         )
 
+    def test_times_with_an_offset_are_ordered_in_utc(self) -> None:
+        def review(at: str) -> dict[str, object]:
+            return {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}, "submittedAt": at}
+
+        early_ask = {**comment(f"@{RABBIT} review"), "createdAt": "2026-01-01T12:00:00Z"}
+        result = self.tally(
+            commits=[commit(SHA_A, at="2026-01-01T10:00:00-07:00")],
+            reviews=[review("2026-01-01T17:05:00Z")],
+            comments=[early_ask],
+        )
+        rabbit = result.bots["coderabbit"]
+        self.assertEqual((rabbit.explicit_rounds, rabbit.automatic_rounds), (0, 1))
+
     def test_a_refusal_before_an_ask_does_not_time_the_round(self) -> None:
         def review(body: str, at: str) -> dict[str, object]:
             return {
@@ -716,7 +729,7 @@ class ReviewCollectTests(unittest.TestCase):
             unittest.mock.patch.object(bm, "request", routed),
             self.assertRaises(bm.GhError),
         ):
-            bm.graphql("q", {})
+            bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
         self.assertEqual(len(started), 1)
 
     def test_a_graphql_error_becomes_a_gh_error(self) -> None:
@@ -726,7 +739,7 @@ class ReviewCollectTests(unittest.TestCase):
             ),
             self.assertRaises(bm.GhError) as raised,
         ):
-            bm.graphql("q", {})
+            bm.collect_reviews("o", "alpha", datetime.date(2026, 1, 1))
         self.assertIn("detail", str(raised.exception))
 
     def test_a_walk_error_becomes_a_gh_error_and_main_names_it(self) -> None:

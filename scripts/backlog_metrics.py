@@ -45,7 +45,7 @@ from typing import Any
 
 import pr_review_rounds as rounds
 import pr_review_side as side
-from gh_graphql import GraphQLError, request, run_subprocess, said_absent, walk
+from gh_graphql import GraphQLError, request, run_subprocess, said_absent, utc_instant, walk
 from pr_review_copilot import VOCABULARIES
 from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
@@ -269,28 +269,30 @@ def classify_rounds(
     `heads` is the gate's set of reviewed heads, so a refusal never counts as a round.
 
     A head arrives at its commit date. It is explicit when a trigger falls between that arrival
-    and the bot's first review of it. A head without both times cannot be classified. A trigger
-    always has a time, since GitHub's schema makes `createdAt` non-null on both of its sources.
+    and the bot's first review of it. A head without both times cannot be classified. Every time is
+    compared in UTC, since a commit date keeps the committer's own offset.
     """
     arrival = {
-        str((n.get("commit") or {}).get("oid")): str(
-            (n.get("commit") or {}).get("committedDate") or ""
+        str((n.get("commit") or {}).get("oid")): utc_instant(
+            str((n.get("commit") or {}).get("committedDate") or "")
         )
         for n in nodes_of(pr.get("commits"))
     }
-    first: dict[str, str] = {}
+    asked = [t for t in (utc_instant(s) for s in triggers) if t is not None]
+    first: dict[str, datetime.datetime | None] = {}
     for review in rounds.reviewer_nodes(dict(pr), "reviews", login):
         oid = str(rounds.commit_oid(review))
         if oid not in heads or rounds.refusal_of(review):
             continue
-        at = str(review.get("submittedAt") or "")
-        if oid not in first or (at and at < first[oid]):
+        at = utc_instant(str(review.get("submittedAt") or ""))
+        known = first.get(oid)
+        if oid not in first or (at is not None and (known is None or at < known)):
             first[oid] = at
     for oid, reviewed_at in first.items():
-        arrived = arrival.get(oid, "")
-        if not arrived or not reviewed_at:
+        arrived = arrival.get(oid)
+        if arrived is None or reviewed_at is None:
             stats.unclassified_rounds += 1
-        elif any(arrived <= t <= reviewed_at for t in triggers):
+        elif any(arrived <= t <= reviewed_at for t in asked):
             stats.explicit_rounds += 1
         else:
             stats.automatic_rounds += 1
@@ -683,11 +685,11 @@ for _token, _cap in (
 
 
 def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
-    """Run one GraphQL document through the shared reader, so a null node or error raises."""
-    try:
-        return dict(request(query, variables).data)
-    except GraphQLError as error:
-        raise GhError(f"{error} {error.detail}".strip()) from error
+    """Run one GraphQL document through the shared reader, so a null node or error raises.
+
+    The one caller reads through `walked`, which names a `GraphQLError` as a `GhError`.
+    """
+    return dict(request(query, variables).data)
 
 
 def walked(fetch: Callable[[str | None], dict]) -> Iterator[dict]:
