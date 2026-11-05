@@ -151,7 +151,7 @@ Subcommands
            move its merge and no thread is open on it, and one with no attestation exits 49. --request asks for a round anyway.
            The review policy can hold the Copilot request until the head's checks pass. An explicit CodeRabbit or Qodo
            is asked by a PR conversation comment once per head. An after-checks one is asked only on green checks,
-           which a wait that polls awaits after the Copilot poll within --timeout, and a wait that stops reads once.
+           awaited within --timeout after a poll for a Copilot round, and read once by any other wait, a held one's too.
            The bot id is read from the repository's most recently updated pull requests, the last
            HISTORY_PRS, widened once to HISTORY_PRS_WIDE. Nothing is requested where neither carries any Copilot
            activity. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90. A pull request
