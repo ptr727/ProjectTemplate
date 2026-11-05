@@ -9,12 +9,9 @@ reaches GitHub on its own, and every case can drive it with constructed payloads
 
 from __future__ import annotations
 
-import functools
-import subprocess
 from argparse import Namespace
 from collections.abc import Callable
 from datetime import UTC, datetime
-from urllib.parse import quote
 
 import pr_review_policy as review_policy
 from pr_review_checks import (
@@ -38,6 +35,7 @@ from pr_review_rounds import (
     reviewer_nodes,
 )
 
+COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
 
 
@@ -47,14 +45,15 @@ def side_command(name: str, command: str = "review") -> str:
 
 
 def head_arrived(pr: dict) -> str:
-    """When the head reached the pull request, read as its earliest check's start.
+    """When the head reached the pull request, read as its earliest check suite's creation.
 
-    A commit's own timestamp says when it was made rather than when it was pushed. So an earlier
-    ask or answer would read as one on a head pushed after it. The commit time stands in only
-    where no check has posted yet.
+    GitHub creates a head's suites at the push, so a commit's own older timestamp never stands in.
+    Empty while no suite exists yet, which every reader here takes as a head that just arrived.
     """
-    stamps = [n["since"] for n in check_nodes(pr) if n.get("since")]
-    return min(stamps) if stamps else (head_commit(pr).get("committedDate") or "")
+    suites = (head_commit(pr).get("checkSuites") or {}).get("nodes") or []
+    stamps = [n["createdAt"] for n in suites if n.get("createdAt")]
+    stamps += [n["since"] for n in check_nodes(pr) if n.get("since")]
+    return min(stamps) if stamps else ""
 
 
 def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
@@ -66,7 +65,7 @@ def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
     """
     nodes = [n for n in check_nodes(pr) if not hosted_check(n)]
     if not nodes:
-        since = age(head_arrived(pr), now)
+        since = age(head_arrived(pr), now) if head_arrived(pr) else None
         return "PENDING" if since is None or since <= grace else ""
     if any(check_shape(n, now, grace, stall) == "FAILED" for n in nodes):
         return "FAILURE"
@@ -88,7 +87,7 @@ def started(pr: dict, name: str, now: datetime, grace: float, stall: float) -> b
     after arrival it may still start, so asking then would buy a second round.
     """
     login, since = SIDE_LOGINS[name], head_arrived(pr)
-    elapsed = age(since, now)
+    elapsed = age(since, now) if since else None
     if elapsed is None or elapsed <= grace:
         return True
     running = {r.casefold() for r in hosted_reviews_running(pr, check_nodes(pr), now, grace, stall)}
@@ -113,20 +112,20 @@ def side_asks(pr: dict, body: str) -> list[dict]:
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
-    """Whether a request `body` was posted since the head arrived."""
+    """Whether a request `body` was posted since the head arrived, False while it has not."""
     since = head_arrived(pr)
-    return any((n.get("createdAt") or "") >= since for n in side_asks(pr, body))
+    return bool(since) and any((n.get("createdAt") or "") >= since for n in side_asks(pr, body))
 
 
 def side_rounds(pr: dict, name: str, body: str) -> int:
     """Rounds asked of or run by `name` on this pull request, whichever count is larger.
 
     CodeRabbit's formal reviews carry their commit, so its distinct reviewed heads count too. Qodo
-    edits one standing comment, so only the requests sent to it can be counted.
+    edits one standing comment, so its own rounds count as one once that comment exists.
     """
     asked = len(side_asks(pr, body))
     if name != "coderabbit":
-        return asked
+        return max(asked, 1 if qodo_comment(pr) else 0)
     heads = {commit_oid(n) for n in reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)} - {None}
     return max(asked, len(heads))
 
@@ -180,39 +179,44 @@ def side_unmet(pr: dict) -> list[str]:
     ]
 
 
+def asks_any(pr: dict) -> bool:
+    """Whether the policy on `pr` may ask any comment-triggered reviewer on this base."""
+    return any(bot.requests() for _, bot, _ in side_reviewers(pr))
+
+
 def request_side_reviews(
-    pr: dict,
+    read: Callable[[], dict],
     await_green: Callable[[], str],
     post: Callable[[str], dict],
-    now: datetime,
     windows: tuple[float, float],
-) -> list[str]:
+) -> tuple[list[str], str]:
     """Ask each comment-triggered reviewer the policy owes a round on this head, once per head.
 
-    Returns the lines to print. Nothing is sent where the reviewer answered since the head
-    arrived, or was asked since then. An automatic one is not asked while it has begun or may
-    still begin, per `started`, and `windows` holds the check grace and stall. Nothing is sent where its cap is spent, either. Nor where it
-    waits for green checks that are not. `await_green` is called at most once. `post` sends one
-    comment and returns the created node. An unconfirmed one ends the run, since it may have landed.
+    Returns the lines to print and what held a request back on the checks. Each reviewer is judged
+    on a fresh read at the current time, read again after any wait for green checks. Nothing is sent
+    where it answered or was asked since the head arrived, or its cap is spent. An automatic one is
+    not asked while it has begun or may still begin, per `started`. `post` sends one comment and
+    returns the created node, and an unconfirmed one ends the run, since it may have landed.
     """
     lines: list[str] = []
     held: str | None = None
+    pr = read()
     for name, bot, body in side_reviewers(pr):
         if not bot.requests() or side_answered(pr, name, body) or side_asked_on_head(pr, body):
             continue
-        if bot.trigger == "auto" and started(pr, name, now, *windows):
+        if bot.trigger == "auto" and started(pr, name, datetime.now(UTC), *windows):
             continue
         if not bot.rounds_left(side_rounds(pr, name, body)):
             lines.append(
-                f"note: the review policy allows {name} no further round here, so none was asked"
+                f"note: the review policy allows {name} no further round, so none was asked"
             )
             continue
         if bot.waits_for_checks():
-            held = await_green() if held is None else held
+            if held is None:
+                held, pr = await_green(), read()
             if held:
                 lines.append(
-                    f"note: the review policy asks {name} only once the head's checks pass, "
-                    f"and they read {held}, so it was not asked yet"
+                    f"note: {name} is asked only once the head's checks pass, and they read {held}"
                 )
                 continue
         made = post(body)
@@ -222,49 +226,7 @@ def request_side_reviews(
                 "unconfirmed: inspect the conversation before asking again, since it may have landed"
             )
         lines.append(f"auto-request: asked {name} for a round on the current head ({made['url']})")
-    return lines
-
-
-def contents_reader(
-    rest: Callable[[str, str], subprocess.CompletedProcess],
-    absent: Callable[[subprocess.CompletedProcess], bool],
-) -> review_policy.Reader:
-    """A policy reader over `rest`, one REST read with a jq projection, and `absent`.
-
-    A file GitHub says is absent reads None. Any other failure ends the run. So a policy that could
-    not be read is never taken for the hub default. That would quietly run a repository under rules
-    it opted out of.
-    """
-
-    def read(owner: str, repo: str, path: str, ref: str) -> str | None:
-        proc = rest(f"repos/{owner}/{repo}/contents/{path}?ref={quote(ref, safe='')}", ".content")
-        out = (proc.stdout or "").strip()
-        if proc.returncode == 0 and out:
-            return out
-        if proc.returncode != 0 and absent(proc):
-            return None
-        detail = (proc.stderr or out or "no output").strip()[:300]
-        raise SystemExit(f"review policy: {owner}/{repo} {path} at {ref} was not read ({detail})")
-
-    return read
-
-
-@functools.cache
-def policy_for(
-    owner: str,
-    repo: str,
-    base: str,
-    rest: Callable[[str, str], subprocess.CompletedProcess],
-    absent: Callable[[subprocess.CompletedProcess], bool],
-) -> review_policy.Policy:
-    """The review policy a pull request into `base` runs under, read once per run.
-
-    Read from the base rather than the head, so a pull request cannot change its own policy.
-    """
-    try:
-        return review_policy.fetch(owner, repo, base, contents_reader(rest, absent))
-    except review_policy.PolicyError as exc:
-        raise SystemExit(f"review policy: {exc}") from exc
+    return lines, held or ""
 
 
 def copilot_policy(pr: dict | None, requested: bool) -> review_policy.BotPolicy | None:
@@ -307,19 +269,18 @@ def await_green(
 
 
 def ask(
-    pr: dict, await_green: Callable[[], str], send: Callable[..., dict], args: Namespace
-) -> None:
-    """Send and print `request_side_reviews`'s requests, `send` posting one comment body."""
-
-    def post(body: str) -> dict:
-        node = send(body=body)
-        for key in ("addComment", "commentEdge", "node"):
-            node = node.get(key) or {}
-        return node
-
-    windows = (args.check_grace, args.check_stall)
-    for line in request_side_reviews(pr, await_green, post, datetime.now(UTC), windows):
+    read: Callable[[], dict],
+    await_green: Callable[[], str],
+    post: Callable[[str], dict],
+    args: Namespace,
+) -> str:
+    """Send and print `request_side_reviews`'s requests, and return what held one on the checks."""
+    lines, held = request_side_reviews(
+        read, await_green, post, (args.check_grace, args.check_stall)
+    )
+    for line in lines:
         print(line)
+    return held
 
 
 def checks_note(held: str) -> str:
@@ -335,7 +296,7 @@ def checks_status(held: str) -> int:
     then = "wait again once they conclude" if pending else "fix the build and push"
     print(
         f"status=CHECKS_BEFORE_REVIEW the head's checks read {held}, and the review policy "
-        f"holds the Copilot request until they pass: {then}"
+        f"holds the review request until they pass: {then}"
     )
     return 30 if pending else 40
 

@@ -26,11 +26,14 @@ from __future__ import annotations
 
 import base64
 import binascii
+import functools
 import json
 import re
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 POLICY_PATH = ".github/pr-review.json"
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "spec" / "pr-review.default.json"
@@ -200,3 +203,52 @@ def fetch(owner: str, repo: str, ref: str, read: Reader) -> Policy:
     if content is None:
         return load_default()
     return decode_contents(content, source)
+
+
+def contents_reader(
+    rest: Callable[[str, str], subprocess.CompletedProcess],
+    absent: Callable[[subprocess.CompletedProcess], bool],
+) -> Reader:
+    """A policy reader over `rest`, one retried REST read with a jq projection, and `absent`.
+
+    The projection emits the content as a JSON string, so a read that retries until it parses stops
+    at the first good one. A file GitHub says is absent reads None. Any other failure ends the run.
+    So a policy that could not be read is never taken for the hub default. That would quietly run a
+    repository under rules it opted out of.
+    """
+
+    def read(owner: str, repo: str, path: str, ref: str) -> str | None:
+        proc = rest(
+            f"repos/{owner}/{repo}/contents/{path}?ref={quote(ref, safe='')}", ".content | tojson"
+        )
+        out = (proc.stdout or "").strip()
+        if proc.returncode != 0 and absent(proc):
+            return None
+        try:
+            content = json.loads(out) if proc.returncode == 0 else None
+        except json.JSONDecodeError:
+            content = None
+        if isinstance(content, str) and content:
+            return content
+        detail = (proc.stderr or out or "no output").strip()[:300]
+        raise SystemExit(f"review policy: {owner}/{repo} {path} at {ref} was not read ({detail})")
+
+    return read
+
+
+@functools.cache
+def policy_for(
+    owner: str,
+    repo: str,
+    base: str,
+    rest: Callable[[str, str], subprocess.CompletedProcess],
+    absent: Callable[[subprocess.CompletedProcess], bool],
+) -> Policy:
+    """The review policy a pull request into `base` runs under, read once per run.
+
+    Read from the base rather than the head, so a pull request cannot change its own policy.
+    """
+    try:
+        return fetch(owner, repo, base, contents_reader(rest, absent))
+    except PolicyError as exc:
+        raise SystemExit(f"review policy: {exc}") from exc

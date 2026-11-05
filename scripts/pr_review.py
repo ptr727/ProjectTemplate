@@ -172,11 +172,14 @@ Subcommands
            them, the last unless that reviewer's newest output is a rate limit since it began.
            Where the rollup holds a type this cannot read, a BLOCKED hold's note says an unmet
            required check may sit in its unread part. It is also a round past --min-rounds not
-           yet landed.
+           yet landed. It is also checks the review policy waits on still running,
+           `status=CHECKS_BEFORE_REVIEW`, or a gated CodeRabbit or Qodo round not yet landed,
+           `status=SIDE_REVIEW_PENDING`.
            40 = no Copilot review covers the head, in any of these cases:
            - The reviewer answered outside a formal review.
            - The request returned success and recorded nothing on the pull request.
            - The reviewer writes under a login no query filters on.
+           - The review policy held the request until the checks pass, and they failed.
            41 = the newest round is a refusal or a quota state. The kind is printed in its status
            line and, for a refusal on this pull request, in the digest's `refusal=`. The cases are:
            - A refusal on the head. One saying every changed file is in Copilot's default review
@@ -244,6 +247,8 @@ from pathlib import Path
 import gh_graphql as shared
 import pr_review_policy as review_policy
 import pr_review_side as side
+
+mutated = shared.mutated
 from pr_review_answers import ack_lines, report_verdict
 from pr_review_checks import (
     CHECK_GRACE,
@@ -347,7 +352,7 @@ HISTORY_PRS_WIDE = 100
 Q_LIVE = """
 query($o:String!,$r:String!,$n:Int!){
   repository(owner:$o,name:$r){ pullRequest(number:$n){
-    id headRefOid state
+    id headRefOid state baseRefName baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ author{login} state commit{oid} submittedAt } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} createdAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
@@ -396,7 +401,7 @@ HELD_FIELDS = """
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) creator{ login } }
       }}}
-      checkSuites(last:50){ nodes{ databaseId status app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
+      checkSuites(last:50){ nodes{ databaseId status createdAt app{ slug } workflowRun{ databaseId workflow{ databaseId } } } }
     }}}
 """.replace("__CHECKS_WINDOW__", str(CHECKS_WINDOW))
 Q_HELD = """
@@ -476,7 +481,6 @@ LOCAL_REVIEW = Path(__file__).resolve().parent / "local_review.py"
 
 # The conversation-comment and thread mutations the runbook publishes.
 # `url` is fetched because it confirms the comment or reply carried a body.
-COMMENT_PATH = ("addComment", "commentEdge", "node")
 M_COMMENT = """
 mutation($subjectId:ID!,$body:String!){
   addComment(input:{subjectId:$subjectId, body:$body}){
@@ -530,13 +534,6 @@ def _is_workflow_run_error(error: object) -> bool:
     return isinstance(path, list) and bool(path) and path[-1] == "workflowRun"
 
 
-def mutated(data: dict, *path: str) -> dict:
-    """The object a mutation returned at `path` under `data`, empty wherever a step is absent."""
-    for key in path:
-        data = data.get(key) or {}
-    return data
-
-
 def unconfirmed(status: str, why: str, response: dict, code: int) -> int:
     """Print why a write is unconfirmed, then the response it returned, and return `code`."""
     print(f"status={status} {why}")
@@ -550,7 +547,7 @@ def gql(query: str, owner: str, repo: str, num: int) -> dict:
     if data.get(WORKFLOW_KEYS_UNAVAILABLE) and isinstance(pr, dict):
         pr[WORKFLOW_KEYS_UNAVAILABLE] = True
     if isinstance(pr, dict) and pr.get("baseRefName"):
-        pr[review_policy.PAYLOAD_KEY] = side.policy_for(
+        pr[review_policy.PAYLOAD_KEY] = review_policy.policy_for(
             owner, repo, pr["baseRefName"], reread, answered_absent
         )
     return pr
@@ -1050,7 +1047,7 @@ def comment_on_pr(owner: str, repo: str, num: int, body: str) -> int:
 
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     data = gh_graphql(M_COMMENT, subjectId=target["id"], body=body)
-    comment = mutated(data, *COMMENT_PATH)
+    comment = mutated(data, *side.COMMENT_PATH)
     if not comment.get("url") or (comment.get("body") or "") != body:
         return unconfirmed(
             "COMMENT_NOT_CONFIRMED",
@@ -1600,7 +1597,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and holds(snapshot)
         and (not answer or attested(snapshot))
     )
-    copilot = side.copilot_policy(snapshot, reviewer_requested(pr))
+    copilot = side.copilot_policy(pr, reviewer_requested(pr))
     retry, watch = "", False
     if snapshot and stopped and not held:
         state, line = transient_state(owner, repo, a.number, snapshot, stopped)
@@ -1642,9 +1639,12 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
-    if snapshot is not None and may_request:
-        post = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
-        side.ask(snapshot, await_green, post, a)
+    side_hold = ""
+    if may_request and side.asks_any(pr):
+        send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
+        side_hold = side.ask(
+            read_held, await_green, lambda body: mutated(send(body=body), *side.COMMENT_PATH), a
+        )
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:
@@ -1735,7 +1735,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             a.timeout,
         )
 
-    if snapshot is not None and side.side_unmet(snapshot) and not checks_hold:
+    if snapshot is not None and side.side_unmet(snapshot) and not checks_hold and not side_hold:
         backoff(snapshot, read_held, lambda p: bool(side.side_unmet(p)), start, a.timeout)
         final = None
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
@@ -1832,7 +1832,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             )
             return 45
         if owing := side.side_unmet(final):
-            return side.side_status(owing)
+            return side.checks_status(side_hold) if side_hold else side.side_status(owing)
         return 0
     # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)

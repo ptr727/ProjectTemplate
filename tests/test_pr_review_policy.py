@@ -75,7 +75,7 @@ def trusted(body: str, at: str) -> dict:
 
 def committed(pr: dict, at: str) -> dict:
     """`pr` with its head commit stamped as committed at `at`."""
-    pr["commits"]["nodes"][-1]["commit"]["committedDate"] = at
+    pr["commits"]["nodes"][-1]["commit"]["checkSuites"] = {"nodes": [{"createdAt": at}]}
     return pr
 
 
@@ -210,7 +210,7 @@ class TestReadContents(unittest.TestCase):
         answer: subprocess.CompletedProcess, ref: str = "develop"
     ) -> tuple[str | None, mock.MagicMock]:
         rest = mock.MagicMock(return_value=answer)
-        found = side.contents_reader(rest, pr_review.answered_absent)(
+        found = policy.contents_reader(rest, pr_review.answered_absent)(
             "o", "r", policy.POLICY_PATH, ref
         )
         return found, rest
@@ -221,12 +221,16 @@ class TestReadContents(unittest.TestCase):
         self.assertIn("?ref=feature%2Fx", rest.call_args.args[0])
 
     def test_any_other_failure_ends_the_run_rather_than_reading_the_default(self) -> None:
-        for answer in (proc(1, err="Server Error (HTTP 500)"), proc(0, out="")):
+        for answer in (
+            proc(1, err="Server Error (HTTP 500)"),
+            proc(0, out=""),
+            proc(0, out="abc="),
+        ):
             with self.subTest(answer=answer), self.assertRaisesRegex(SystemExit, "was not read"):
                 self.read(answer)
 
     def test_a_read_returns_the_content_field(self) -> None:
-        self.assertEqual("abc=", self.read(proc(0, out="abc=\n"))[0])
+        self.assertEqual("abc=", self.read(proc(0, out='"abc="\n'))[0])
 
 
 class TestCopilotCover(unittest.TestCase):
@@ -365,7 +369,7 @@ class TestRequestSideReviews(SideCase):
             return answer if answer is not None else node
 
         post, green = mock.MagicMock(side_effect=send), mock.MagicMock(return_value=held)
-        side.request_side_reviews(pr, green, post, NOW, WINDOWS)
+        side.request_side_reviews(lambda: pr, green, post, WINDOWS)
         return post, green
 
     def test_an_explicit_bot_is_asked_with_its_own_command_on_the_pull_request(self) -> None:
@@ -398,7 +402,7 @@ class TestRequestSideReviews(SideCase):
 def checked(*nodes: dict, at: str = fixtures.EARLY) -> dict:
     """A payload whose head carries `nodes` as its checks, committed at `at`."""
     pr = fixtures.payload([], checks=list(nodes))
-    pr["commits"]["nodes"][-1]["commit"]["committedDate"] = at
+    pr["commits"]["nodes"][-1]["commit"]["checkSuites"] = {"nodes": [{"createdAt": at}]}
     return pr
 
 
@@ -435,12 +439,13 @@ class TestChecksHold(unittest.TestCase):
         )
 
     def test_the_head_arrives_with_its_first_check_not_its_commit(self) -> None:
-        pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.EARLY)
+        pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.LATE)
+        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = fixtures.EARLY
         self.assertEqual(fixtures.LATE, side.head_arrived(pr))
-        self.assertEqual(fixtures.EARLY, side.head_arrived(checked(at=fixtures.EARLY)))
+        self.assertEqual("", side.head_arrived(fixtures.payload([])))
 
     def test_an_ask_before_a_later_push_is_not_one_on_the_head(self) -> None:
-        pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.EARLY)
+        pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.LATE)
         pr["comments"]["nodes"] = [trusted("/review", "2026-08-02T10:30:00Z")]
         self.assertFalse(side.side_asked_on_head(pr, "/review"))
 
@@ -468,11 +473,10 @@ class TestAutomaticStart(SideCase):
 
     def test_a_gated_automatic_bot_is_not_asked_inside_the_grace(self) -> None:
         pr = self.ruled(qodo=self.AUTO)
-        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = (
-            NOW - timedelta(seconds=10)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        just = (datetime.now(UTC) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        committed(pr, just)
         post = mock.MagicMock()
-        side.request_side_reviews(pr, mock.MagicMock(return_value=""), post, NOW, WINDOWS)
+        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post, WINDOWS)
         post.assert_not_called()
 
     def test_one_that_has_said_something_since_the_head_has_started(self) -> None:
@@ -494,8 +498,29 @@ class TestAutomaticStart(SideCase):
         post = mock.MagicMock(
             side_effect=lambda body: posted(body)["addComment"]["commentEdge"]["node"]
         )
-        side.request_side_reviews(pr, mock.MagicMock(return_value=""), post, NOW, WINDOWS)
+        side.request_side_reviews(lambda: pr, mock.MagicMock(return_value=""), post, WINDOWS)
         post.assert_called_once_with("/review")
+
+
+class TestSideCounts(SideCase):
+    def test_an_automatic_qodo_round_counts_once_its_comment_exists(self) -> None:
+        pr = self.ruled(qodo=EXPLICIT_QODO)
+        with mock.patch.object(side, "qodo_comment", return_value={"updatedAt": fixtures.EARLY}):
+            self.assertEqual(1, side.side_rounds(pr, "qodo", "/review"))
+        self.assertEqual(0, side.side_rounds(pr, "qodo", "/review"))
+
+    def test_only_a_policy_that_may_ask_a_side_reviewer_reads_again(self) -> None:
+        self.assertTrue(side.asks_any(self.ruled(qodo=EXPLICIT_QODO)))
+        self.assertFalse(side.asks_any(with_policy(fixtures.payload([]), policy.load_default())))
+
+    def test_a_head_with_no_suite_yet_reads_as_just_arrived(self) -> None:
+        bare = with_policy(
+            fixtures.payload([], comments=[trusted("/review", fixtures.LATE)]),
+            parsed(qodo=EXPLICIT_QODO),
+        )
+        self.assertFalse(side.side_asked_on_head(bare, "/review"))
+        self.assertEqual("PENDING", side.checks_hold(bare, NOW, *WINDOWS))
+        self.assertTrue(side.started(bare, "qodo", NOW, *WINDOWS))
 
 
 class TestSchemaParity(unittest.TestCase):

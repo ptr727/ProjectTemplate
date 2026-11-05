@@ -27,7 +27,7 @@ import pr_review_answers as answers
 import test_pr_review as fixtures
 
 _POLICY_PATCH = mock.patch.object(
-    pr_review.side, "policy_for", return_value=pr_review.review_policy.load_default()
+    pr_review.review_policy, "policy_for", return_value=pr_review.review_policy.load_default()
 )
 
 

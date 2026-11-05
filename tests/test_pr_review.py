@@ -48,7 +48,7 @@ from git_env import without_git_location
 from import_probe import import_delta
 
 _POLICY_PATCH = mock.patch.object(
-    pr_review.side, "policy_for", return_value=pr_review.review_policy.load_default()
+    pr_review.review_policy, "policy_for", return_value=pr_review.review_policy.load_default()
 )
 
 
@@ -1877,7 +1877,7 @@ class TestCheckShapes(unittest.TestCase):
     def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuites(last:50){ nodes{ databaseId status app{ slug } "
+            "checkSuites(last:50){ nodes{ databaseId status createdAt app{ slug } "
             "workflowRun{ databaseId workflow{ databaseId } } } }",
             query,
         )
