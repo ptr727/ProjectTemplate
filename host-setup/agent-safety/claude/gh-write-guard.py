@@ -1003,16 +1003,17 @@ def _rule_denial(op: str, br: str, rules: set[str] | None) -> str | None:
 def _commit_flags(args: list[str]) -> list[str]:
     """A commit's options before any `--`, each short cluster cut at its first value-taking flag.
 
-    The word after a detached value is skipped, so a message such as `-m "-n fix"` reads as no flag.
+    A value attached to its flag is dropped, and the word after a detached value is skipped. So a
+    message such as `-m "-n fix"` or `-m"a typo"` reads as no flag.
     """
     out: list[str] = []
     i = 0
     while i < len(args) and args[i] != "--":
         a = args[i]
-        if re.fullmatch(r"-[A-Za-z]+", a):
+        if len(a) > 1 and a[0] == "-" and a[1] != "-":
             cut = next((k for k, ch in enumerate(a) if ch in "mFcCt"), len(a))
             out.append(a[:cut])
-            i += a[-1] in "mFcCt"
+            i += cut == len(a) - 1
         elif a in _COMMIT_VALUES:
             i += 1
         elif a.startswith("-"):
@@ -1926,6 +1927,9 @@ _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
     ("git commit --pathspec-from-file=list -m x", "develop", "deny"),
     ('git commit -m "-p fix"', "develop", "allow"),
     ("git commit -nm x", "develop", "deny"),
+    ("git commit -minit .", "develop", "deny"),
+    ("git commit -minit -n", "develop", "deny"),
+    ('git commit -m"Fix a typo"', "develop", "allow"),
     ("git checkout main && git add a.yaml && git commit -m x", "develop", "deny"),
     ("git push origin develop --tags", "develop", "deny"),
     ('git push origin develop "$B"', "develop", "deny"),
@@ -2113,26 +2117,35 @@ def _in_place_selftest() -> bool | str:
         os.makedirs(os.path.join(repo, ".github", "dir"))
         got: list[object] = []
 
-        def publish(text: str) -> None:
+        def run(*steps: list[str]) -> bool:
+            git = [*_SELFTEST_GIT, "-C", repo]
+            return all(
+                subprocess.run([*git, *s], capture_output=True, check=False).returncode == 0
+                for s in steps
+            )
+
+        def commit(text: str) -> bool:
             with open(os.path.join(repo, _POLICY_BLOB.split(":")[1]), "w", encoding="utf-8") as f:
                 f.write(text)
             got.append(_in_place_branch(repo))
-            for step in (
-                ["add", "-A"],
-                ["commit", "-qm", "p"],
-                ["update-ref", "refs/remotes/origin/main", "HEAD"],
-            ):
-                subprocess.run(
-                    [*_SELFTEST_GIT, "-C", repo, *step], capture_output=True, check=False
-                )
-            got.append(_in_place_branch(repo))
+            return run(["add", "-A"], ["commit", "--no-verify", "-qm", "p"])
 
-        publish('{"guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}')
+        publish = ["update-ref", "refs/remotes/origin/main", "HEAD"]
+        if not commit(
+            '{"guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}'
+        ):
+            return "skip"
+        got.append(_in_place_branch(repo))
+        if not run(publish):
+            return "skip"
+        got.append(_in_place_branch(repo))
         got += [
             classify(f"git add {p}", repo, environ={})[0] for p in (".github/x.json", ".github/dir")
         ]
-        publish("{")
-        return got == [None, "develop", "allow", "deny", "develop", None]
+        if not commit("{") or not run(publish):
+            return "skip"
+        got.append(_in_place_branch(repo))
+        return got == [None, None, "develop", "allow", "deny", "develop", None]
 
 
 _PUSH_REPO_CASES: list[tuple[str, str | None]] = [

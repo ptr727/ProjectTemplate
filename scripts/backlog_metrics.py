@@ -734,7 +734,6 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
     file it would take as absent, or one stating no review section, reads as the hub default, each
     trigger marked `(default)`.
     """
-    absent: list[str] = []
 
     def read(owner: str, repo: str, path: str, ref: str) -> str | None:
         quoted = urllib.parse.quote(ref, safe="")
@@ -742,7 +741,6 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
             payload = run_gh(["api", f"repos/{owner}/{repo}/contents/{path}?ref={quoted}"])
         except GhError as error:
             if said_absent(str(error)):
-                absent.append(path)
                 return None
             raise
         content = payload.get("content") if isinstance(payload, dict) else None
