@@ -23,6 +23,7 @@ from pr_review_checks import (
     head_commit,
     reviewer_check,
     runs_open,
+    utc_instant,
 )
 from pr_review_payload import bot_entry, default_branch
 from pr_review_rounds import (
@@ -112,10 +113,12 @@ def side_asked_on_head(pr: dict, body: str) -> bool:
     The commit time is the one stamp that never moves once the head exists. A suite's creation
     comes later, so an ask posted before the first suite would read as older than the head. An ask
     for an earlier head, made after this one was committed, counts for this one too. That costs at
-    most one missed ask, never a duplicate paid round.
+    most one missed ask, never a duplicate paid round. The two stamps are compared as instants,
+    since a commit's keeps its committer's own offset where a comment's is UTC.
     """
-    since = head_commit(pr).get("committedDate") or ""
-    return bool(since) and any((n.get("createdAt") or "") >= since for n in side_asks(pr, body))
+    since = utc_instant(head_commit(pr).get("committedDate") or "")
+    asked = (utc_instant(n.get("createdAt") or "") for n in side_asks(pr, body))
+    return since is not None and any(at is not None and at >= since for at in asked)
 
 
 def side_rounds(pr: dict, name: str, body: str) -> int:
@@ -160,10 +163,22 @@ def asks_any(pr: dict) -> bool:
     return any(bot.requests() for _, bot, _ in side_reviewers(pr))
 
 
+def post_comment(
+    send: Callable[..., dict], dig: Callable[..., dict], body: str
+) -> tuple[dict, bool]:
+    """Post one conversation comment, returning the created node and whether it is confirmed.
+
+    `send` makes the mutation and `dig` reads the node off its response. Only a node carrying a URL
+    and exactly `body` confirms the write, and a caller treats any other as possibly landed.
+    """
+    made = dig(send(body=body), *COMMENT_PATH)
+    return made, bool(made.get("url")) and (made.get("body") or "") == body
+
+
 def request_side_reviews(
     read: Callable[[], dict],
     await_green: Callable[[], str],
-    post: Callable[[str], dict],
+    post: Callable[[str], tuple[dict, bool]],
     phase: str,
 ) -> list[str]:
     """Ask each comment-triggered reviewer the policy asks explicitly in `phase`, once per head.
@@ -174,7 +189,7 @@ def request_side_reviews(
     the wait is seen. Nothing is sent where its cap is spent. Nor where a cap applies and the comment
     window is cut, since the rounds spent cannot then be counted. The merge never waits on these
     reviewers, so a held ask is a note rather than an exit. `post` sends one comment and returns
-    the created node, and an unconfirmed one ends the run, since it may have landed. A pull request
+    `post_comment`'s answer, and an unconfirmed one ends the run, since it may have landed. A pull request
     no longer open is asked nothing, since a peer can merge or close it while `wait` polls.
     """
     lines: list[str] = []
@@ -208,8 +223,8 @@ def request_side_reviews(
                 continue
             if side_answered(pr, name) or side_asked_on_head(pr, body):
                 continue
-        made = post(body)
-        if not made.get("url") or (made.get("body") or "") != body:
+        made, confirmed = post(body)
+        if not confirmed:
             raise SystemExit(
                 f"the request to {name} returned no URL or a different body, so it is "
                 "unconfirmed: inspect the conversation before asking again, since it may have landed"
@@ -264,22 +279,25 @@ def ask(
     dig: Callable[..., dict],
     pr: dict | bool,
     phase: str,
+    poll: Callable[[], str] | None = None,
 ) -> None:
     """Send and print the `phase` requests, where `pr` is a payload whose policy asks any.
 
-    The checks an after-checks ask waits on are read once rather than polled. So the ask never
-    holds `wait` past the Copilot poll it follows, nor holds a wait that stops without one.
+    `poll` waits out the checks an after-checks ask waits on, as `await_green` does on the wait's
+    own clock. So a head whose checks outlast the Copilot poll is still asked once they pass, and
+    the timeout bounds the wait. Without one they are read once, for a wait that stops rather than
+    polls, so the ask holds no wait that stops without polling.
     """
     if not isinstance(pr, dict) or not asks_any(pr):
         return
 
-    def post(body: str) -> dict:
-        return dig(send(body=body), *COMMENT_PATH)
+    def post(body: str) -> tuple[dict, bool]:
+        return post_comment(send, dig, body)
 
     def checks_now() -> str:
         return checks_hold(read(), datetime.now(UTC), args.check_grace, args.check_stall)
 
-    for line in request_side_reviews(read, checks_now, post, phase):
+    for line in request_side_reviews(read, poll or checks_now, post, phase):
         print(line)
 
 

@@ -20,7 +20,7 @@ the same question in every mode.
 
 The policy is read from the pull request's base branch rather than its head. So a pull request
 cannot change the policy its own review runs under. A payload carries its policy under
-`PAYLOAD_KEY`, and a `bases` entry of `DEFAULT_BASE` names the default branch, whose name varies.
+`pr_review_payload.POLICY_KEY`, and a `bases` entry of `DEFAULT_BASE` names the default branch, whose name varies.
 """
 
 from __future__ import annotations
@@ -36,11 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
-from pr_review_payload import POLICY_KEY
-
 POLICY_PATH = ".github/pr-review.json"
 DEFAULT_PATH = Path(__file__).resolve().parent.parent / "spec" / "pr-review.default.json"
-PAYLOAD_KEY = POLICY_KEY
 VERSION = 1
 BOTS = ("copilot", "coderabbit", "qodo")
 TRIGGERS = ("auto", "explicit", "off")

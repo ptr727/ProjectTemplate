@@ -2,8 +2,8 @@
 
 This is a library module and has no command line. `gql` attaches the parsed policy to each payload
 it reads, under `POLICY_KEY`. A reader may not import `pr_review_policy`, which reads files and runs
-`gh`. So the key and the two reads every consumer of it repeats live here instead. That module's
-`PAYLOAD_KEY` is this key, so the writer and the readers cannot disagree on it.
+`gh`. So the key and the two reads every consumer of it repeats live here instead. The writer
+and the readers name this one constant, so they cannot disagree on it.
 """
 
 from __future__ import annotations
