@@ -51,6 +51,7 @@ def make_checkout(tmp: str, origin: str = "https://github.com/Acme/Widget.git") 
     path.mkdir()
     git("-C", str(path), "init", "-q")
     git("-C", str(path), "remote", "add", "origin", origin)
+    (path / ".editorconfig").write_text("root = true\n", encoding="utf-8")
     return path
 
 
@@ -230,6 +231,14 @@ class WriteCase(unittest.TestCase):
         agent_policy.write(self.rendered, self.checkout, "acme/widget")
         self.assertNotIn(b"\r", (self.checkout / ".pr_agent.toml").read_bytes())
         self.assertIn(b"\r\n", (self.checkout / ".coderabbit.yaml").read_bytes())
+
+    def test_an_integer_qodo_setting_is_rewritten(self) -> None:
+        (self.checkout / ".pr_agent.toml").write_text(
+            "[config]\ndisable_auto_feedback = 0\n", encoding="utf-8"
+        )
+        agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        text = (self.checkout / ".pr_agent.toml").read_text(encoding="utf-8")
+        self.assertIn("disable_auto_feedback = false", text)
 
     def test_a_boolean_pause_and_an_integer_enabled_are_rewritten(self) -> None:
         (self.checkout / ".coderabbit.yaml").write_text(

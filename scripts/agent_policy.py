@@ -318,7 +318,7 @@ def plan_toml(path: Path, want: dict[str, Any]) -> str | None:
     if not isinstance(config, dict):
         raise Refusal(f"{path}: config is not a table")
     value = want["disable_auto_feedback"]
-    if existing is not None and config.get("disable_auto_feedback") == value:
+    if existing is not None and exactly(config.get("disable_auto_feedback"), value):
         return None
     config["disable_auto_feedback"] = value
     return tomlkit.dumps(doc)
@@ -488,7 +488,7 @@ def judge_toml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
         except tomllib.TOMLDecodeError:
             return [(False, f"{TOML_PATH} does not parse as TOML")]
         got = (doc.get("config") or {}).get("disable_auto_feedback")
-        return [(isinstance(got, bool) and got == want["disable_auto_feedback"], msg)]
+        return [(exactly(got, want["disable_auto_feedback"]), msg)]
 
     return judge
 
