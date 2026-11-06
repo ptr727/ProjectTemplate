@@ -704,6 +704,29 @@ class RulesetsCase(unittest.TestCase):
             got = agent_policy.rulesets(explicit, "Fixture", "release", config)
             self.assertNotIn("copilot_code_review", [r["type"] for r in got["main"]["rules"]])
 
+    def test_a_kept_check_missing_from_its_payload_is_refused(self) -> None:
+        """A payload regenerated without the check would otherwise strip it fleet-wide unseen."""
+        for model, branch, rel in (
+            ("release", "main", "main.json"),
+            ("release", "develop", "develop.json"),
+            ("operational", "main", "main.json"),
+        ):
+            with self.subTest(model=model, branch=branch), tempfile.TemporaryDirectory() as tmp:
+                config = Path(tmp)
+                shutil.copytree(ROOT / "repo-config", config, dirs_exist_ok=True)
+                payload = json.loads((config / rel).read_text(encoding="utf-8"))
+                payload["rules"] = [
+                    r for r in payload["rules"] if r["type"] != "required_status_checks"
+                ]
+                (config / rel).write_text(json.dumps(payload), encoding="utf-8")
+                with self.assertRaises(agent_policy.Refusal):
+                    agent_policy.rulesets(registry(), "Fixture", model, config)
+                dropped = {"repos": [{"name": "Fixture", "pullRequestCheck": False}]}
+                got = agent_policy.rulesets(dropped, "Fixture", model, config)
+                self.assertNotIn(
+                    "required_status_checks", [r["type"] for r in got[branch]["rules"]]
+                )
+
     def test_copilot_follows_the_render(self) -> None:
         self.assertNotIn(
             "copilot_code_review", self.types(registry(copilot={"trigger": "explicit"}))["main"]

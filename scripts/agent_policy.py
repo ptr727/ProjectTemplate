@@ -184,6 +184,12 @@ def rulesets(
             f"{name}: the policy wants a Copilot rule, and {sources['main']} carries none to copy"
         )
     keep_check = entry_for(registry_data, name).get("pullRequestCheck") is not False
+    gated = ["main"] if model == "operational" else ["main", "develop"]
+    for branch in gated if keep_check else []:
+        if not any(r.get("type") == "required_status_checks" for r in payloads[branch]["rules"]):
+            raise Refusal(
+                f"{name}: the required status check is kept, and {sources[branch]} carries none"
+            )
     for branch, payload in payloads.items():
         rules = [r for r in payload["rules"] if r.get("type") != "copilot_code_review"]
         if wanted[branch]:
