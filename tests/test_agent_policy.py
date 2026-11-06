@@ -51,6 +51,7 @@ def make_checkout(tmp: str, origin: str = "https://github.com/Acme/Widget.git") 
     path.mkdir()
     git("-C", str(path), "init", "-q")
     git("-C", str(path), "remote", "add", "origin", origin)
+    (path / ".editorconfig").write_text("root = true\n", encoding="utf-8")
     return path
 
 
@@ -115,7 +116,11 @@ class FactsCase(unittest.TestCase):
             self.facts(),
             {
                 "copilotRule": {"main": True, "develop": False},
-                "coderabbit": {"enabled": True, "base_branches": ["^develop$"]},
+                "coderabbit": {
+                    "enabled": True,
+                    "base_branches": ["^develop$"],
+                    "auto_pause_after_reviewed_commits": 0,
+                },
                 "qodo": {"disable_auto_feedback": False},
             },
         )
@@ -132,7 +137,14 @@ class FactsCase(unittest.TestCase):
         got = self.facts(
             coderabbit={"trigger": "explicit", "bases": ["^release$"]}, qodo={"trigger": "off"}
         )
-        self.assertEqual(got["coderabbit"], {"enabled": False, "base_branches": ["^release$"]})
+        self.assertEqual(
+            got["coderabbit"],
+            {
+                "enabled": False,
+                "base_branches": ["^release$"],
+                "auto_pause_after_reviewed_commits": 0,
+            },
+        )
         self.assertEqual(got["qodo"], {"disable_auto_feedback": True})
 
 
@@ -196,6 +208,72 @@ class WriteCase(unittest.TestCase):
                 with self.subTest(lf=name):
                     self.assertNotIn(b"\r", (lf / name).read_bytes())
 
+    def test_a_new_file_takes_its_endings_from_the_editorconfig(self) -> None:
+        (self.checkout / ".editorconfig").write_text(
+            "root = true\n\n[*]\nend_of_line = lf\n\n[*.{json,yaml}]\nend_of_line = crlf\n",
+            encoding="utf-8",
+        )
+        agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        for name in (".coderabbit.yaml", ".github/agent-policy.json"):
+            with self.subTest(crlf=name):
+                out = (self.checkout / name).read_bytes()
+                self.assertIn(b"\r\n", out)
+                self.assertNotIn(b"\n", out.replace(b"\r\n", b""))
+        self.assertNotIn(b"\r", (self.checkout / ".pr_agent.toml").read_bytes())
+        second = agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        self.assertEqual([line.split()[0] for line in second], ["unchanged"] * 3)
+
+    def test_an_existing_file_keeps_its_endings_over_the_editorconfig(self) -> None:
+        (self.checkout / ".editorconfig").write_text(
+            "root = true\n\n[*]\nend_of_line = crlf\n", encoding="utf-8"
+        )
+        (self.checkout / ".pr_agent.toml").write_text(
+            "[pr_reviewer]\n", encoding="utf-8", newline=""
+        )
+        agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        self.assertNotIn(b"\r", (self.checkout / ".pr_agent.toml").read_bytes())
+        self.assertIn(b"\r\n", (self.checkout / ".coderabbit.yaml").read_bytes())
+
+    def test_an_integer_qodo_setting_is_rewritten(self) -> None:
+        (self.checkout / ".pr_agent.toml").write_text(
+            "[config]\ndisable_auto_feedback = 0\n", encoding="utf-8"
+        )
+        agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        text = (self.checkout / ".pr_agent.toml").read_text(encoding="utf-8")
+        self.assertIn("disable_auto_feedback = false", text)
+
+    def test_a_boolean_pause_and_an_integer_enabled_are_rewritten(self) -> None:
+        (self.checkout / ".coderabbit.yaml").write_text(
+            'reviews:\n  auto_review:\n    enabled: 1\n    base_branches:\n      - "^develop$"\n'
+            "    auto_pause_after_reviewed_commits: false\n",
+            encoding="utf-8",
+        )
+        (line,) = [
+            x
+            for x in agent_policy.write(self.rendered, self.checkout, "acme/widget")
+            if "yaml" in x
+        ]
+        self.assertTrue(line.startswith("wrote"), line)
+        doc = agent_policy_yaml_load(
+            (self.checkout / ".coderabbit.yaml").read_text(encoding="utf-8")
+        )
+        auto = doc["reviews"]["auto_review"]
+        self.assertIs(auto["enabled"], True)
+        self.assertEqual(type(auto["auto_pause_after_reviewed_commits"]), int)
+
+    def test_the_pause_is_added_beside_the_keys_already_there(self) -> None:
+        (self.checkout / ".coderabbit.yaml").write_text(
+            'reviews:\n  auto_review:\n    enabled: true\n    base_branches:\n      - "^develop$"\n    drafts: false\n',
+            encoding="utf-8",
+        )
+        agent_policy.write(self.rendered, self.checkout, "acme/widget")
+        doc = agent_policy_yaml_load(
+            (self.checkout / ".coderabbit.yaml").read_text(encoding="utf-8")
+        )
+        auto = doc["reviews"]["auto_review"]
+        self.assertEqual(auto["auto_pause_after_reviewed_commits"], 0)
+        self.assertEqual(auto["drafts"], False)
+
     def test_a_checkout_of_another_repo_is_refused_before_any_write(self) -> None:
         with self.assertRaises(agent_policy.Refusal):
             agent_policy.write(self.rendered, self.checkout, "acme/other")
@@ -258,6 +336,10 @@ reviews:
 """
 
 
+def want(enabled: bool, branches: list[str]) -> dict[str, object]:
+    return {"enabled": enabled, "base_branches": branches, "auto_pause_after_reviewed_commits": 0}
+
+
 class YamlPreservationCase(unittest.TestCase):
     """Changing the CodeRabbit keys keeps every comment and the quoting of the list."""
 
@@ -265,7 +347,7 @@ class YamlPreservationCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / ".coderabbit.yaml"
             path.write_text(HUB_SHAPED, encoding="utf-8")
-            text = agent_policy.plan_yaml(path, {"enabled": enabled, "base_branches": branches})
+            text = agent_policy.plan_yaml(path, want(enabled, branches))
         self.assertIsNotNone(text)
         assert text is not None
         return text
@@ -277,8 +359,7 @@ class YamlPreservationCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / ".coderabbit.yaml"
             path.write_text(HUB_SHAPED, encoding="utf-8")
-            want = {"enabled": True, "base_branches": ["^develop$"]}
-            self.assertIsNone(agent_policy.plan_yaml(path, want))
+            self.assertIsNone(agent_policy.plan_yaml(path, want(True, ["^develop$"])))
 
     def test_a_grown_list_keeps_the_comment_after_it(self) -> None:
         got = self.apply(True, ["^develop$", "^release/.*$"])
@@ -296,7 +377,7 @@ class YamlPreservationCase(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            got = agent_policy.plan_yaml(path, {"enabled": True, "base_branches": ["^develop$"]})
+            got = agent_policy.plan_yaml(path, want(True, ["^develop$"]))
         self.assertEqual(got, HUB_SHAPED)
 
     def test_an_emptied_list_keeps_both_comment_lines(self) -> None:
@@ -331,7 +412,10 @@ class CheckCase(unittest.TestCase):
         self.rendered = agent_policy.render(None, "Fixture", "release")
         self.files = {
             ".github/agent-policy.json": agent_policy.serialize(self.rendered),
-            ".coderabbit.yaml": "reviews:\n  auto_review:\n    enabled: true\n    base_branches:\n      - ^develop$\n",
+            ".coderabbit.yaml": (
+                "reviews:\n  auto_review:\n    enabled: true\n    base_branches:\n      - ^develop$\n"
+                "    auto_pause_after_reviewed_commits: 0\n"
+            ),
             ".pr_agent.toml": "[config]\ndisable_auto_feedback = false\n",
         }
 
@@ -365,9 +449,25 @@ class CheckCase(unittest.TestCase):
         files[".github/agent-policy.json"] = agent_policy.serialize(rendered)
         files[".coderabbit.yaml"] = (
             "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^b$', '^a$']\n"
+            "    auto_pause_after_reviewed_commits: 0\n"
         )
         got = agent_policy.check(rendered, lambda path: files[path])
         self.assertTrue(all(r.ok for r in got), got)
+
+    def test_a_coderabbit_file_that_pauses_fails(self) -> None:
+        for pause in (
+            "",
+            "    auto_pause_after_reviewed_commits: 5\n",
+            "    auto_pause_after_reviewed_commits: false\n",
+        ):
+            with self.subTest(pause=pause):
+                files = dict(self.files)
+                files[".coderabbit.yaml"] = (
+                    "reviews:\n  auto_review:\n    enabled: true\n    base_branches:\n      - ^develop$\n"
+                    + pause
+                )
+                (msg,) = self.failures(files)
+                self.assertIn("auto_pause_after_reviewed_commits is 0", msg)
 
     def test_an_absent_qodo_key_fails(self) -> None:
         files = dict(self.files)
@@ -470,7 +570,7 @@ class FactsImportCase(unittest.TestCase):
             f"sys.path.insert(0, {str(ROOT / 'scripts')!r});"
             "import agent_policy, pr_review_policy;"
             "agent_policy.main(sys.argv[1:]);"
-            "bad=[m for m in ('ruamel','tomlkit','markdown_it','yaml') if m in sys.modules];"
+            "bad=[m for m in ('ruamel','tomlkit','markdown_it','yaml','editorconfig') if m in sys.modules];"
             "sys.exit(1 if bad else 0)"
         )
         done = subprocess.run(
@@ -507,7 +607,10 @@ class CheckExitCase(unittest.TestCase):
         rendered = agent_policy.render(None, "X", "release")
         return {
             ".github/agent-policy.json": agent_policy.serialize(rendered),
-            ".coderabbit.yaml": "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^develop$']\n",
+            ".coderabbit.yaml": (
+                "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^develop$']\n"
+                "    auto_pause_after_reviewed_commits: 0\n"
+            ),
             ".pr_agent.toml": "[config]\ndisable_auto_feedback = false\n",
         }
 
