@@ -1,4 +1,4 @@
-"""One GraphQL transport and one cursor walker, shared by the scripts that read through `gh`.
+"""One GraphQL transport, one cursor walker, and one absent test, shared by the scripts reading through `gh`.
 
 This is a library module and has no command line. `pr_review.py`, `pr_cleanup.py`,
 `backlog_metrics.py`, and `handoff.py` import it as a sibling.
@@ -13,6 +13,7 @@ A transport that exited on its own would pick one of those for both.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable, Iterator, Sequence
 from typing import NamedTuple
@@ -52,6 +53,32 @@ class Response(NamedTuple):
 
 
 Runner = Callable[[list[str]], "tuple[int, str, str]"]
+
+
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+ABSENT = frozenset({"404", "422"})
+
+
+def said_absent(stderr: str) -> bool:
+    """Whether `gh`'s `stderr` says GitHub answered that the object is not there.
+
+    `HTTP_STATUS` is what `gh` prints only where GitHub answered. Outside `ABSENT`, the two returns
+    for an object that is not there, an answer means "not read" rather than "not there".
+    """
+    m = HTTP_STATUS.search(stderr)
+    return m is not None and m.group(1) in ABSENT
+
+
+ORIGIN = re.compile(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$")
+
+
+def origin_slug(url: str) -> str | None:
+    """The lowercase `owner/repo` a git remote URL names, or None where it names none.
+
+    The https, ssh, and scp-like forms read alike, with or without `.git` and a trailing slash.
+    """
+    m = ORIGIN.search(url)
+    return f"{m.group(1)}/{m.group(2)}".lower() if m else None
 
 
 def run_subprocess(argv: list[str]) -> tuple[int, str, str]:
@@ -123,6 +150,13 @@ def request(
     if (where := null_node(payload["data"])) is not None:
         raise NullNodeError(where)
     return Response(payload["data"], list(errors or []))
+
+
+def mutated(data: dict, *path: str) -> dict:
+    """The object a mutation returned at `path` under `data`, empty wherever a step is absent."""
+    for key in path:
+        data = data.get(key) or {}
+    return data
 
 
 def null_node(data: object, path: str = "") -> str | None:

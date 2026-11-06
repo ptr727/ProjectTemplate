@@ -26,6 +26,24 @@ import pr_review
 import pr_review_answers as answers
 import test_pr_review as fixtures
 
+_POLICY_PATCH = mock.patch.object(
+    pr_review.review_policy, "policy_for", return_value=pr_review.review_policy.load_default()
+)
+
+
+def setUpModule() -> None:
+    """Have every case read the hub default policy unless it patches its own.
+
+    So no case reaches for a contents API read it never staged. The default states the behavior
+    the gate had before policies.
+    """
+    _POLICY_PATCH.start()
+
+
+def tearDownModule() -> None:
+    _POLICY_PATCH.stop()
+
+
 HEAD = fixtures.HEAD
 MOVED = "b" * 40
 SQUASH = "c" * 40
@@ -807,6 +825,7 @@ ROUTED = {
             "CHECKS_NOT_MERGEABLE",
             "CHECKS_MISSING",
             "COPILOT_ERROR_TRANSIENT",
+            "CHECKS_BEFORE_REVIEW",
         ),
         "redrive",
     ),

@@ -26,7 +26,8 @@ The denied shapes, numbered as the README numbers them:
   5. a hand-rolled review-thread reply or resolve, where scripts/pr_review.py reply --resolve is
      the one-call path
   6. a mutating git operation run directly in a primary checkout rather than a linked worktree,
-     unless GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT grants it
+     unless GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT grants it.
+     The repository's agent policy on main can exempt an in-place commit on a branch it lists.
   7. a while, until, or arithmetic for loop that sleeps with no bound
 
 Run `gh-write-guard.py --selftest` to check the decision matrix without Claude Code.
@@ -114,6 +115,14 @@ _REBASE_VALUES = frozenset(
 _ALLOW_ENV = "GH_WRITE_GUARD_ALLOW"
 _ALLOW_PRIMARY_ENV = "GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT"
 _FALSY_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
+_POLICY_BLOB = "origin/main:.github/agent-policy.json"
+_IN_PLACE_SUBS = frozenset({"add", "commit", "rm", "mv", "push"})
+_COMMIT_VALUES = frozenset(
+    {"--message", "--file", "--reuse-message", "--reedit-message", "--template", "--author"}
+    | {"--date", "--cleanup", "--trailer", "--fixup", "--squash"}
+)
+_COMMIT_SWEEPS = frozenset({"--all", "--amend", "--patch", "--interactive", "--include", "--only"})
+_IN_PLACE_PUSH_FLAGS = frozenset({"-q", "--quiet", "-v", "--verbose", "-u", "--set-upstream"})
 
 _NODE_ID_LITERAL = re.compile(r"^(?:[A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})$")
 _NODE_ID_IN_QUERY = re.compile(r'"([A-Z]{1,5}_[A-Za-z0-9_\-]{12,}|MD[A-Za-z0-9]{12,})"')
@@ -779,6 +788,25 @@ def _current_push_branch(where: str | None, git_dir: str | None = None) -> str |
     return name if name and name != "HEAD" else None
 
 
+def _in_place_branch(target_dir: str) -> str | None:
+    """The branch checked out in `target_dir` when the repository's agent policy allows committing on it in place.
+
+    The policy is read from `origin/main`, never from the working tree or `develop`. An operational
+    repository takes direct pushes to `develop`, so a policy read there would let an agent grant
+    itself the exemption. Any fault reads as no exemption.
+    """
+    branch = _current_push_branch(target_dir)
+    if not branch or branch in ("main", "master"):
+        return None
+    try:
+        data = json.loads(_git_stdout(target_dir, ["show", _POLICY_BLOB]) or "")
+        allowed = data["guard"]["primaryCheckout"]["commitInPlace"]["branches"]
+        version = data["version"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return branch if version == 1 and isinstance(allowed, list) and branch in allowed else None
+
+
 def _bare_push_branch(cwd: str | None, c_dirs: list[str], git_dir: str | None) -> object:
     """The branch a push naming no refspec writes, or `_UNRESOLVED` where the text does not name its checkout.
 
@@ -973,22 +1001,37 @@ def _rule_denial(op: str, br: str, rules: set[str] | None) -> str | None:
     return None
 
 
-def _skips_hooks(sub: str, args: list[str]) -> bool:
-    """True when a commit or push carries `--no-verify`, or a commit its `-n` in a short cluster."""
+def _commit_flags(args: list[str]) -> list[str]:
+    """A commit's options before any `--`, each short cluster cut at its first value-taking flag.
+
+    A value attached to its flag is dropped, and the word after a detached value is skipped. So a
+    message such as `-m "-n fix"` or `-m"a typo"` reads as no flag.
+    """
+    out: list[str] = []
     i = 0
     while i < len(args) and args[i] != "--":
         a = args[i]
-        if a == "--no-verify":
-            return True
-        if sub == "commit" and re.fullmatch(r"-[A-Za-z]+", a):
-            for ch in a[1:]:
-                if ch == "n":
-                    return True
-                if ch in "mFcCt":
-                    break
-            i += a[-1] in "mFcCt"
+        if len(a) > 1 and a[0] == "-" and a[1] != "-":
+            cut = next((k for k, ch in enumerate(a) if ch in "mFcCt"), len(a))
+            out.append(a[:cut])
+            i += cut == len(a) - 1
+        elif a in _COMMIT_VALUES:
+            i += 1
+        elif a.startswith("-"):
+            out.append(a.split("=", 1)[0])
+        else:
+            out.append(a)
         i += 1
-    return False
+    return out + args[i:]
+
+
+def _skips_hooks(sub: str, args: list[str]) -> bool:
+    """True when a commit or push carries `--no-verify`, or a commit its `-n` in a short cluster."""
+    if sub == "commit":
+        flags = _commit_flags(args)
+        flags = flags[: flags.index("--")] if "--" in flags else flags
+        return any(a == "--no-verify" or re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", a) for a in flags)
+    return "--no-verify" in args[: args.index("--")] if "--" in args else "--no-verify" in args
 
 
 def _operands(args: list[str], values: frozenset[str]) -> list[str]:
@@ -1179,11 +1222,52 @@ def _delete_only_push(args: list[str]) -> bool:
     return True
 
 
+def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> bool:
+    """Whether an in-place commit on `branch` permits this subcommand, given the exemption's shapes.
+
+    A staging command names each path explicitly, since a blanket add is how a shared tree turns
+    into a mis-scoped commit. A commit stages nothing itself and rewrites nothing. A push updates
+    only `branch` on `origin`, and requirement 4 still judges force and the branch's live rules.
+    """
+    if sub == "push":
+        pos = [a for a in args if not a.startswith("-")]
+        specs = {branch, "HEAD", f"refs/heads/{branch}", f"{branch}:{branch}", f"HEAD:{branch}"}
+        return (
+            set(args) - set(pos) <= _IN_PLACE_PUSH_FLAGS
+            and len(pos) == 2
+            and pos[0] == "origin"
+            and pos[1] in specs
+        )
+    if sub == "commit":
+        flags = _commit_flags(args)
+        return not any(
+            not a.startswith("-")
+            or a == "--"
+            or a in _COMMIT_SWEEPS
+            or a.startswith("--pathspec")
+            or re.search(r"[apio]", a[1:])
+            and not a.startswith("--")
+            for a in flags
+        )
+    paths = args[args.index("--") + 1 :] if "--" in args else args
+    flags = args[: args.index("--")] if "--" in args else args
+    if not paths or len(paths) < (2 if sub == "mv" else 1) or any(a.startswith("-") for a in flags):
+        return False
+    if any(p in (".", "*") or p.startswith(":") or re.search(r"[*?\[]", p) for p in paths):
+        return False
+    if sub != "add":
+        return True
+    joined = [_join_dir(target, p) for p in paths]
+    return all(j is not None and not os.path.isdir(j) for j in joined)
+
+
 def _primary_denial(
     cmd: _Cmd,
     environ: dict[str, str],
     lookup: Callable[[str], bool | None],
     ref_resolver: Callable[[str, str], bool],
+    in_place: Callable[[str], str | None],
+    switched: bool = False,
 ) -> str | None:
     """Requirement 6: why this is a mutating git operation in a primary checkout, or None."""
     if _base(cmd.argv[0]) != "git":
@@ -1200,11 +1284,21 @@ def _primary_denial(
         return None
     if not lookup(target):
         return None
+    in_place_ok = git.sub in _IN_PLACE_SUBS and not git.configs and not switched
+    if (
+        in_place_ok
+        and (branch := in_place(target))
+        and _in_place_allows(git.sub, git.args, target, branch)
+    ):
+        return None
     return (
         f"This runs `git {git.sub}` directly in a primary checkout ({target}), not a linked "
         "worktree, where it can destroy another task's uncommitted work. Create a worktree for "
-        "the task (git worktree add) and run it there. The maintainer grants an exception only "
-        f"through {_ALLOW_PRIMARY_ENV}, set before the session starts. See GOVERNANCE.md "
+        "the task (git worktree add) and run it there. The maintainer grants an exception "
+        f"through {_ALLOW_PRIMARY_ENV}, set before the session starts, or for an in-place "
+        "commit through the repository's .github/agent-policy.json on main, whose exemption "
+        "takes explicit paths and pushes as `git push origin <the checked-out branch>`. See "
+        "GOVERNANCE.md "
         "'Repository Boundaries and Write Safety' and the repo-worktree skill."
     )
 
@@ -1451,6 +1545,7 @@ def classify(
     environ: dict[str, str] | None = None,
     primary_checkout_lookup: Callable[[str], bool | None] | None = None,
     ref_resolver: Callable[[str, str], bool] | None = None,
+    in_place_lookup: Callable[[str], str | None] | None = None,
 ) -> tuple[str, str]:
     """Return (decision, reason), the decision 'allow' or 'deny'.
 
@@ -1462,10 +1557,12 @@ def classify(
     - `environ`: the environment the session was launched with
     - `primary_checkout_lookup(dir)`: the primary-checkout test
     - `ref_resolver(dir, ref)`: the live ref check
+    - `in_place_lookup(dir)`: the branch the agent policy on `main` lets an agent commit on in place
     """
     env_in: dict[str, str] = dict(os.environ) if environ is None else environ
     lookup = primary_checkout_lookup or _is_primary_checkout
     resolver = ref_resolver or _resolves_as_ref
+    in_place = in_place_lookup or _in_place_branch
     cwd = _msys_drive_path(cwd)
     reading = _Reading()
     _read(cmd, cwd, {"GH_REPO": env_in["GH_REPO"]} if env_in.get("GH_REPO") else {}, reading)
@@ -1474,7 +1571,7 @@ def classify(
         if reason := _bypass_denial(c, current_branch, rules_lookup, switched):
             return "deny", reason
     for c in reading.cmds:
-        if reason := _primary_denial(c, env_in, lookup, resolver):
+        if reason := _primary_denial(c, env_in, lookup, resolver, in_place, switched):
             return "deny", reason
     if any(_unbounded_wait(segs, timed) for segs, timed in reading.texts):
         return "deny", _WAIT_REASON
@@ -1546,6 +1643,7 @@ _COMMIT_THEN_PUSH = (
 # (command, want, source), run in the worktree with no rules on any branch.
 # A source names the requirement whose plain shape a case is, the incident behind it, or the issue recording a shape a session hit.
 _CASES: list[tuple[str, str, str]] = [
+    ("git commit -m x -- -n", "allow", "R4"),
     ("gh pr comment 5 --body ok >/dev/null", "deny", "R1"),
     ("gh pr comment 5 --body ok 2>/dev/null", "deny", "R1"),
     ("gh pr comment 5 --body ok &>/dev/null", "deny", "R1"),
@@ -1799,6 +1897,68 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     (_COMMIT_THEN_PUSH, _RULES, "feature/x", "deny", "R4"),
 ]
 
+_IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
+    ("git add automations.yaml", "develop", "allow"),
+    ("git add automations.yaml", None, "deny"),
+    ("git add automations.yaml scripts.yaml", "develop", "allow"),
+    ("git add -- automations.yaml", "develop", "allow"),
+    ('git commit -m "Record live change"', "develop", "allow"),
+    ('git commit -m "Record live change"', None, "deny"),
+    ("git commit -S -m x", "develop", "allow"),
+    ("git commit -S -m x automations.yaml", "develop", "deny"),
+    ("git rm old.yaml", "develop", "allow"),
+    ("git mv a.yaml b.yaml", "develop", "allow"),
+    ("git push origin develop", "develop", "allow"),
+    ("git push", "develop", "deny"),
+    ("git push origin", "develop", "deny"),
+    ("git commit -m x -- -n", "develop", "deny"),
+    ("git push origin HEAD", "develop", "allow"),
+    ("git push origin develop", None, "deny"),
+    ("git add automations.yaml && git commit -m x && git push origin develop", "develop", "allow"),
+    ("git add -A", "develop", "deny"),
+    ("git add .", "develop", "deny"),
+    ("git add -u", "develop", "deny"),
+    ("git add 'automations/*.yaml'", "develop", "deny"),
+    ("git add :/", "develop", "deny"),
+    ("git add", "develop", "deny"),
+    ("git commit -am x", "develop", "deny"),
+    ("git commit -a -m x", "develop", "deny"),
+    ("git commit --amend --no-edit", "develop", "deny"),
+    ("git commit -p", "develop", "deny"),
+    ("git -c user.name=x commit -m x", "develop", "deny"),
+    ("git commit -m x .", "develop", "deny"),
+    ("git commit -m x -- automations", "develop", "deny"),
+    ("git commit -o -m x automations.yaml", "develop", "deny"),
+    ("git commit --pathspec-from-file=list -m x", "develop", "deny"),
+    ('git commit -m "-p fix"', "develop", "allow"),
+    ("git commit -nm x", "develop", "deny"),
+    ("git commit -minit .", "develop", "deny"),
+    ("git commit -minit -n", "develop", "deny"),
+    ('git commit -m"Fix a typo"', "develop", "allow"),
+    ("git checkout main && git add a.yaml && git commit -m x", "develop", "deny"),
+    ("git push origin develop --tags", "develop", "deny"),
+    ('git push origin develop "$B"', "develop", "deny"),
+    ("git push origin develop refs/tags/v1", "develop", "deny"),
+    ("git push -u origin develop", "develop", "allow"),
+    ("git mv old.yaml automations/", "develop", "allow"),
+    ('git add "$F"', "develop", "deny"),
+    ("git rm -r automations", "develop", "deny"),
+    ("git mv -f a.yaml b.yaml", "develop", "deny"),
+    ("git mv a.yaml", "develop", "deny"),
+    ("git push origin main", "develop", "deny"),
+    ("git push origin develop:main", "develop", "deny"),
+    ("git push origin develop feature/x", "develop", "deny"),
+    ("git push --force origin develop", "develop", "deny"),
+    ("git push fork develop", "develop", "deny"),
+    ("git push --tags", "develop", "deny"),
+    ("git push --all", "develop", "deny"),
+    ("git reset --hard", "develop", "deny"),
+    ("git stash", "develop", "deny"),
+    ("git checkout -- automations.yaml", "develop", "deny"),
+    ("git restore automations.yaml", "develop", "deny"),
+    ("git cherry-pick abc123", "develop", "deny"),
+]
+
 _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("git commit -m x", _PRIMARY, {}, "deny", "incident"),
     ("git add automations.yaml", _PRIMARY, {}, "deny", "3200"),
@@ -1948,6 +2108,51 @@ def _is_primary_checkout_selftest() -> bool | str:
         if not _build_selftest_repo(primary, [["worktree", "add", "-q", linked, "-b", "x"]]):
             return "skip"
         return _is_primary_checkout(primary) is True and _is_primary_checkout(linked) is False
+
+
+def _in_place_selftest() -> bool | str:
+    """Read a real repository's agent policy from `origin/main` alone, and judge a real directory add.
+
+    "skip" where the repository could not be built, which is neither a pass nor a failure.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = os.path.join(tmp, "live")
+        if not _build_selftest_repo(repo, []):
+            return "skip"
+        os.makedirs(os.path.join(repo, ".github", "dir"))
+        got: list[object] = []
+
+        def run(*steps: list[str]) -> bool:
+            git = [*_SELFTEST_GIT, "-C", repo]
+            return all(
+                subprocess.run([*git, *s], capture_output=True, check=False).returncode == 0
+                for s in steps
+            )
+
+        def commit(text: str) -> bool:
+            with open(os.path.join(repo, _POLICY_BLOB.split(":")[1]), "w", encoding="utf-8") as f:
+                f.write(text)
+            got.append(_in_place_branch(repo))
+            return run(["add", "-A"], ["commit", "--no-verify", "-qm", "p"])
+
+        publish = ["update-ref", "refs/remotes/origin/main", "HEAD"]
+        if not commit(
+            '{"version": 1, "guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}'
+        ):
+            return "skip"
+        got.append(_in_place_branch(repo))
+        if not run(publish):
+            return "skip"
+        got.append(_in_place_branch(repo))
+        got += [
+            classify(f"git add {p}", repo, environ={})[0] for p in (".github/x.json", ".github/dir")
+        ]
+        if not commit(
+            '{"version": 2, "guard": {"primaryCheckout": {"commitInPlace": {"branches": ["develop"]}}}}'
+        ) or not run(publish):
+            return "skip"
+        got.append(_in_place_branch(repo))
+        return got == [None, None, "develop", "allow", "deny", "develop", None]
 
 
 _PUSH_REPO_CASES: list[tuple[str, str | None]] = [
@@ -2134,6 +2339,7 @@ def _selftest_cases() -> int:
             "environ": {},
             "primary_checkout_lookup": _fixture_lookup,
             "ref_resolver": lambda _d, r: r in _REFS,
+            "in_place_lookup": lambda _d: None,
         }
         args.update(seams)
         got, _ = classify(cmd, **args)  # type: ignore[arg-type]
@@ -2155,6 +2361,9 @@ def _selftest_cases() -> int:
         )
     for cmd, cwd, environ, want, source in _CHECKOUT_CASES:
         check(cmd, want, source, cwd=cwd, environ=environ)
+    for cmd, listed, want in _IN_PLACE_CASES:
+        seams = {"cwd": _PRIMARY, "current_branch": listed or "develop"}
+        check(cmd, want, "3200", in_place_lookup=lambda _d, b=listed: b, **seams)
     with tempfile.TemporaryDirectory() as tmp:
         absent = os.path.join(tmp, "absent")
         for cmd, want, source in _NO_ORIGIN_CASES:
@@ -2167,6 +2376,11 @@ def _selftest_cases() -> int:
     ok = ok and live in (True, "skip")
     print(
         f"  {'FAIL' if live is False else 'ok  '} [live ] a real checkout reads as primary: {live}"
+    )
+    policy = _in_place_selftest()
+    ok = ok and policy in (True, "skip")
+    print(
+        f"  {'FAIL' if policy is False else 'ok  '} [live ] a real agent policy reads from main: {policy}"
     )
     print("SELFTEST PASS" if ok else "SELFTEST FAIL")
     return 0 if ok else 1

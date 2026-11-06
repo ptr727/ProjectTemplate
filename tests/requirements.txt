@@ -3,3 +3,5 @@
 markdown-it-py>=4.2.0
 pygments>=2.21.0
 pyyaml>=6
+ruamel.yaml>=0.18
+tomlkit>=0.13

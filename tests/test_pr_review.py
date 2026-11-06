@@ -47,6 +47,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
 from import_probe import import_delta
 
+DEFAULT_POLICY = pr_review.review_policy.load_default()
+_POLICY_PATCH = mock.patch.object(
+    pr_review.review_policy, "policy_for", return_value=pr_review.review_policy.load_default()
+)
+
+
+def setUpModule() -> None:
+    """Have every case read the hub default policy unless it patches its own.
+
+    So no case reaches for a contents API read it never staged. The default states the behavior
+    the gate had before policies.
+    """
+    _POLICY_PATCH.start()
+
+
+def tearDownModule() -> None:
+    _POLICY_PATCH.stop()
+
+
 REPO = Path(__file__).resolve().parent.parent
 # The gate and the reader modules it imports, which every whole-source guard below reads together.
 GATE_SOURCES = (
@@ -56,7 +75,9 @@ GATE_SOURCES = (
     "pr_review_rounds.py",
     "pr_review_digest.py",
     "pr_review_answers.py",
+    "pr_review_payload.py",
 )
+WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
 READER_IMPORTS = frozenset(
     {
@@ -70,6 +91,7 @@ READER_IMPORTS = frozenset(
         "pr_review_copilot",
         "pr_review_checks",
         "pr_review_check_lines",
+        "pr_review_payload",
         "pr_review_rounds",
     }
 )
@@ -80,6 +102,7 @@ READER_FLOORS = {
     "pr_review_rounds": "pr_review_copilot",
     "pr_review_digest": "pr_review_answers",
     "pr_review_answers": "pr_review_rounds",
+    "pr_review_payload": "typing",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -560,7 +583,10 @@ class GqlCase(unittest.TestCase):
         self.enterContext(mock.patch.object(pr_review, "page_files"))
 
         def fake(_query, _owner, _repo, _num):
-            return queue.pop(0) if len(queue) > 1 else queue[0]
+            pr = queue.pop(0) if len(queue) > 1 else queue[0]
+            if isinstance(pr, dict) and pr.get("baseRefName"):
+                pr.setdefault(pr_review.POLICY_KEY, DEFAULT_POLICY)
+            return pr
 
         patched = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=fake))
         self.enterContext(mock.patch.object(pr_review, "origin_owner", return_value="o"))
@@ -1640,6 +1666,13 @@ class TestCheckShapes(unittest.TestCase):
         self.assertIsNone(pr_review_checks.age("nonsense", NOW))
         self.assertEqual(900.0, pr_review_checks.age(ago(900), NOW))
 
+    def test_utc_instant_orders_an_offset_stamp_with_a_utc_one(self) -> None:
+        local = pr_review_checks.utc_instant("2026-01-01T10:00:00-07:00")
+        self.assertEqual(local, pr_review_checks.utc_instant("2026-01-01T17:00:00Z"))
+        self.assertEqual(str(local), "2026-01-01 17:00:00+00:00")
+        for stamp in ("", "nonsense", "2026-01-01T17:00:00"):
+            self.assertIsNone(pr_review_checks.utc_instant(stamp))
+
     def test_a_finished_check_carrying_no_conclusion_yet_is_settling_not_failing(self) -> None:
         """Reading an absent verdict as a failure invents a red check out of a race in the API.
 
@@ -1859,7 +1892,7 @@ class TestCheckShapes(unittest.TestCase):
     def test_the_rollup_query_asks_for_the_head_commits_own_suites(self) -> None:
         query = " ".join(pr_review.Q_FULL.split())
         self.assertIn(
-            "checkSuites(last:50){ nodes{ databaseId status app{ slug } "
+            "checkSuites(last:50){ nodes{ databaseId status createdAt app{ slug } "
             "workflowRun{ databaseId workflow{ databaseId } } } }",
             query,
         )
@@ -2855,7 +2888,9 @@ class TestNullNodes(unittest.TestCase):
             mock.patch.object(pr_review, "READ_RETRY_DELAYS", (0,)),
             mock.patch.object(pr_review.time, "sleep"),
         ):
-            self.assertEqual(clean, pr_review.gql("query", "o", "r", 7))
+            read = pr_review.gql("query", "o", "r", 7)
+        self.assertIsNotNone(read.pop(pr_review.POLICY_KEY))
+        self.assertEqual(clean, read)
         self.assertEqual(2, run.call_count)
 
     def test_a_null_node_that_stays_ends_the_run_naming_where_it_sat(self) -> None:
@@ -5059,7 +5094,7 @@ class TestCli(GqlCase):
 
     def test_a_feature_pull_request_with_no_round_is_never_requested(self) -> None:
         """Into a branch other than the default, the attested local pass alone covers the head."""
-        covered = "its head is covered by an attested local pass"
+        covered = "covers this head with an attested local pass"
         for attest, code, said, unsaid in (
             (False, 49, "No attested local pass covers this head yet", covered),
             (True, 0, covered, "No attested local pass covers this head yet"),
@@ -5089,7 +5124,7 @@ class TestCli(GqlCase):
         self.assertIn("No attested local pass covers this head yet", out)
         self.assertIn("a Copilot refusal on this head overrules it", out)
         self.assertNotIn("Run attest once", out)
-        self.assertNotIn("its head is covered by an attested local pass", out)
+        self.assertNotIn("covers this head with an attested local pass", out)
         self.assertNotIn("coverage=local", out)
 
     def test_status_reads_a_feature_pull_request_with_no_round_from_its_attestation(
@@ -6914,7 +6949,7 @@ class TestContract(unittest.TestCase):
         """
         source = "".join(
             (REPO / "scripts" / name).read_text(encoding="utf-8")
-            for name in (*GATE_SOURCES, "pr_cleanup.py")
+            for name in (*WRITE_SCANNED, "pr_cleanup.py")
         )
         for verb in (
             "-X POST",
@@ -6989,7 +7024,7 @@ class TestContract(unittest.TestCase):
         """
         source = (REPO / "scripts" / "pr_review.py").read_text(encoding="utf-8")
         # A node id literal anywhere in the source is an example a hand copies out of it.
-        for name in GATE_SOURCES:
+        for name in WRITE_SCANNED:
             with self.subTest(module=name):
                 self.assertNotIn("PRRT_", (REPO / "scripts" / name).read_text(encoding="utf-8"))
         parser_options = re.findall(r"add_argument\(\s*[\"'](--[a-z-]+)[\"']", source)
@@ -7004,7 +7039,7 @@ class TestContract(unittest.TestCase):
     def test_no_write_suppresses_or_forces_its_own_result(self) -> None:
         """A mutation whose output is discarded is a write nobody can say landed."""
         source = "".join(
-            (REPO / "scripts" / name).read_text(encoding="utf-8") for name in GATE_SOURCES
+            (REPO / "scripts" / name).read_text(encoding="utf-8") for name in WRITE_SCANNED
         )
         for tail in (">/dev/null", "2>/dev/null", "&>/dev/null", "|| true", "|| :", "shell=True"):
             with self.subTest(tail=tail):
@@ -7947,7 +7982,7 @@ class TestAttest(unittest.TestCase):
         replies = iter(heads)
         target = {"headRefOid": heads[0], "baseRefName": "develop"}
 
-        def gql(query: str, *_: object) -> dict:
+        def gql(query: str, *_: object, **__: object) -> dict:
             if query == pr_review.Q_ATTEST_BRANCH:
                 return {
                     "state": "OPEN",

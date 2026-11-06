@@ -13,6 +13,7 @@ import re
 from collections.abc import Iterator
 
 import pr_review_copilot as adapter
+from pr_review_payload import bot_entry, default_branch
 
 # Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
 REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
@@ -436,8 +437,11 @@ def coverage(pr: dict) -> tuple[str, str]:
 
     A statement on a round covering the head decides it, the worst winning, but `unknown` yields to
     an earlier partial. Where none states any, a file table stands in under `table_cover`, then
-    an attested local pass under `local_cover`.
+    an attested local pass under `local_cover`. That pass decides first where `copilot_settled`
+    holds, since the policy then waits on no Copilot reading.
     """
+    if copilot_settled(pr) and local_cover(pr):
+        return "local", f"an attested local pass recorded {attestation(pr)} finding(s)"
     rounds = head_reviews(pr)
     rank = ("full", "unknown", "partial")
     stated = [(r.coverage, r.coverage_line) for n in rounds if (r := reading(n)).coverage != "none"]
@@ -618,33 +622,55 @@ def attestation(pr: dict) -> str | None:
 
 
 def promotion(pr: dict) -> bool:
-    """Whether the pull request merges into the repository's default branch."""
-    default = ((pr.get("baseRepository") or {}).get("defaultBranchRef") or {}).get("name") or ""
-    return not default or pr.get("baseRefName") == default
+    """Whether a Copilot round rather than a local pass is to cover this head.
+
+    Without a review policy on the payload that is a merge into the default branch, the behavior
+    before `pr_review_policy` existed. With one, it is a base the policy's gated Copilot entry covers,
+    while a further round is allowed or one already covers the head. So a repository capping its
+    rounds falls back to an attested local pass once the cap is spent. An unread default branch
+    still demands the round, since nothing proves the base is not the default.
+    """
+    default, bot = default_branch(pr), bot_entry(pr, "copilot")
+    if not default or bot is None:
+        return not default or pr.get("baseRefName") == default
+    if not bot.gate or not bot.covers(pr.get("baseRefName") or "", default):
+        return False
+    return reviewed_head(pr) or bot.rounds_left(reviewed_heads(pr), reviews_truncated(pr))
+
+
+def reviewed_heads(pr: dict, login: str = REVIEWER) -> int:
+    """The distinct heads reviewer `login`'s own reviews cover on this pull request, refusals excluded."""
+    nodes = reviewer_nodes(pr, "reviews", login)
+    return len({commit_oid(n) for n in nodes if not refusal_of(n) and commit_oid(n)})
+
+
+def copilot_settled(pr: dict) -> bool:
+    """Whether no Copilot round can settle this head: Copilot off, ungated, or its cap spent or uncounted."""
+    bot = bot_entry(pr, "copilot")
+    spent = bot is not None and not bot.rounds_left(reviewed_heads(pr), reviews_truncated(pr))
+    return bot is not None and (bot.never_waited_on() or spent)
 
 
 def holds(pr: dict) -> bool:
     """Whether a local pass rather than a Copilot round is to cover this head, attested or not."""
-    return (
-        not promotion(pr)
-        and not reviews_truncated(pr)
-        and not partial_on_record(pr)
-        and not reviewer_requested(pr)
+    return not promotion(pr) and (
+        copilot_settled(pr)
+        or not (reviewer_requested(pr) or reviews_truncated(pr) or partial_on_record(pr))
     )
 
 
 def polled_past(pr: dict, ignore_quota: bool, request: bool) -> bool:
     """Whether `wait` reads on past a head refusal its body-less liveness read took for a round.
 
-    Only a head no Copilot round covers is read past. `--ignore-quota-signal` reads past any such
-    refusal. An excluded-files one is held for a local pass, or read past while a request is pending.
+    Only a head no Copilot round covers is read past, and `--ignore-quota-signal` reads past any.
+    An excluded-files one, or any `copilot_settled` waives, is held for a local pass, or read past
+    while a request is pending.
     """
     refusal = refusing_review(pr)
     if refusal is None or reviewed_head(pr):
         return False
-    return ignore_quota or (
-        excluded_refusal(refusal) and (reviewer_requested(pr) or (not request and holds(pr)))
-    )
+    waived = excluded_refusal(refusal) or copilot_settled(pr)
+    return ignore_quota or (waived and (reviewer_requested(pr) or (not request and holds(pr))))
 
 
 def local_cover(pr: dict) -> bool:
@@ -652,21 +678,19 @@ def local_cover(pr: dict) -> bool:
 
     It stands in only where all of these hold:
 
-    - The pull request is into a non-default branch.
+    - The review policy owes the head no Copilot round, by default off the default branch.
     - The head is one its writer attests.
-    - No round on record read part of a diff.
-    - The whole review history is in view.
+    - No round on record read part of a diff, and the whole review history is in view.
 
-    A refusal on this head
-    is Copilot's own word, which only a later Copilot round on the head spends. One saying every
-    changed file is in Copilot's default exclusions is the exception, since no round will follow it.
-    A refusal on an earlier head is spent by the head moving.
+    A refusal on this head is Copilot's own word, which only a later Copilot round on the head
+    spends. One saying every changed file is in Copilot's default exclusions is the exception,
+    since no round will follow it. A refusal on an earlier head is spent by the head moving. Where
+    `copilot_settled` holds, no round is coming at all, so only the first two conditions apply.
     """
+    if promotion(pr) or not attested(pr):
+        return False
     refusal = refusing_review(pr)
-    return (
+    return copilot_settled(pr) or (
         (refusal is None or excluded_refusal(refusal))
-        and not promotion(pr)
-        and attested(pr)
-        and not reviews_truncated(pr)
-        and not partial_on_record(pr)
+        and not (reviews_truncated(pr) or partial_on_record(pr))
     )

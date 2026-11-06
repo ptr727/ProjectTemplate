@@ -31,6 +31,12 @@ are this skill's own content.
   by creating a unique worktree (or clone) on its own feature branch. The primary checkout is
   the maintainer's own surface, so a session launched there isolates before writing rather than
   after noticing contention.
+- **An operational repository's live checkout is the exception.** There the standard is a
+  direct commit in place on `develop`, in the checkout the running service reads, per the
+  `branching-and-release-model` skill. A worktree stays available and is never required. The
+  host write guard allows the in-place commit only where the repository's
+  `.github/agent-policy.json` on `main` lists the checked-out branch. Staging stays by explicit
+  path, and reset, stash, clean, and a pathspec checkout stay denied there.
 - **A continuation re-isolates.** A session resuming prior work finds its branch already checked
   out somewhere and naturally resumes there. That instinct is the hazard, because a branch sitting checked out in a shared tree is exactly how two sessions end up in one checkout. Create a
   fresh worktree for the continuation and check the branch out there.

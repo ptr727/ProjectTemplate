@@ -2366,9 +2366,9 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
 
     Only the guard's own `os` takes Windows path semantics, since patching the shared module breaks
     `tempfile` for the rest of the suite. USERPROFILE is the home `ntpath.expanduser` reads, set to
-    the one the fixture table expanded `~` against at import. The one case that spawns git creates
-    a real checkout, so this test skips it.
-    Only `--selftest` run with the host's own paths covers it.
+    the one the fixture table expanded `~` against at import. The cases that spawn git create a
+    real checkout, so this test skips them.
+    Only `--selftest` run with the host's own paths covers them.
     """
 
     def test_selftest_passes_with_ntpath(self):
@@ -2383,6 +2383,7 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
             mock.patch.object(guard, "os", windows_os),
             mock.patch.dict(os.environ, {"USERPROFILE": os.path.expanduser("~")}),
             mock.patch.object(guard, "_is_primary_checkout_selftest", return_value="skip"),
+            mock.patch.object(guard, "_in_place_selftest", return_value="skip"),
             contextlib.redirect_stdout(out),
         ):
             status = guard._selftest()
