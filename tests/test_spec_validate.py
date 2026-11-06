@@ -1474,6 +1474,23 @@ class RegistryEntryGateCase(unittest.TestCase):
                     self.run_against(self.entry(hasDevelop=declared)),
                 )
 
+    def test_a_non_boolean_pull_request_check_is_refused(self) -> None:
+        """repo-config/configure.sh refuses it at its next run, so CI refuses it on the registry change instead."""
+        refused: list[object] = ["false", 0, []]
+        for declared in refused:
+            with self.subTest(declared=declared):
+                self.assertIn(
+                    "Fixture: pullRequestCheck",
+                    self.run_against(self.entry(pullRequestCheck=declared)),
+                )
+
+    def test_a_boolean_pull_request_check_passes(self) -> None:
+        for declared in (True, False):
+            with self.subTest(declared=declared):
+                self.assertNotIn(
+                    "pullRequestCheck", self.run_against(self.entry(pullRequestCheck=declared))
+                )
+
     def test_a_declared_false_has_develop_passes(self) -> None:
         """Presence is the test, so the answer for a repo with no develop branch is not read as an undeclared field."""
         self.assertNotIn("hasDevelop", self.run_against(self.entry(hasDevelop=False)))

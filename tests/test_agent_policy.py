@@ -670,7 +670,7 @@ class CommandLineCase(unittest.TestCase):
 class ComposeRulesetCase(unittest.TestCase):
     """configure.sh adds or strips the Copilot rule on a composed payload by the derived fact."""
 
-    def compose(self, src: Path, want: str) -> list[str]:
+    def compose(self, src: Path, want: str, check: str = "true") -> list[str]:
         if shutil.which("jq") is None:
             raise unittest.SkipTest("no jq on PATH")
         with tempfile.TemporaryDirectory() as tmp:
@@ -679,7 +679,7 @@ class ComposeRulesetCase(unittest.TestCase):
             quoted = [shlex.quote(str(p)) for p in (main, src, out)]
             script = (
                 f"main_source={quoted[0]}\n{COMPOSE}"
-                f"compose_ruleset {quoted[1]} {want} {quoted[2]}\n"
+                f"compose_ruleset {quoted[1]} {want} {check} {quoted[2]}\n"
             )
             done = run_bash(script, "jq")
             self.assertEqual(done.returncode, 0, done.stderr)
@@ -696,6 +696,23 @@ class ComposeRulesetCase(unittest.TestCase):
                 src = ROOT / "repo-config" / name
                 self.assertNotIn("copilot_code_review", self.compose(src, "false"))
                 self.assertEqual(self.compose(src, "true").count("copilot_code_review"), 1)
+
+    def test_the_status_check_rule_is_dropped_only_when_unwanted(self) -> None:
+        for name in ("main.json", "develop.json"):
+            with self.subTest(payload=name):
+                src = ROOT / "repo-config" / name
+                self.assertEqual(
+                    self.compose(src, "true", "true").count("required_status_checks"), 1
+                )
+                kept = self.compose(src, "true", "false")
+                self.assertNotIn("required_status_checks", kept)
+                self.assertEqual(kept.count("copilot_code_review"), 1)
+
+    def test_the_status_check_rule_is_never_added_to_a_payload_without_one(self) -> None:
+        src = ROOT / "repo-config" / "operational" / "develop.json"
+        for check in ("true", "false"):
+            with self.subTest(check=check):
+                self.assertNotIn("required_status_checks", self.compose(src, "false", check))
 
 
 class ValidateCase(unittest.TestCase):

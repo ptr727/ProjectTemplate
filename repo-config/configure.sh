@@ -21,6 +21,7 @@
 # It writes that file plus the CodeRabbit and Qodo settings derived from it into the checkout, and never stages or commits.
 # The caller commits the files through the ordinary pull request flow.
 # The same render decides whether each ruleset carries a Copilot code review rule, so a repo whose policy has no automatic Copilot gets no rule.
+# The registry's pullRequestCheck decides whether each ruleset requires the pull request status check, so a repo whose workflow cannot post it gets no rule.
 # Deriving the policy needs only Python, while writing the files and checking them run under uv.
 # The checkout is planned before the first API write, so a checkout that refuses stops the run with nothing applied.
 # Without --checkout apply writes no policy files and says so.
@@ -238,26 +239,43 @@ if ! policy_facts="$("${py_cmd[@]}" "$agent_policy" facts "${agent_policy_args[@
 fi
 copilot_main="$(jq -r '.copilotRule.main' <<<"$policy_facts" | sed $'s/\r$//')"
 copilot_develop="$(jq -r '.copilotRule.develop' <<<"$policy_facts" | sed $'s/\r$//')"
+# Printed as JSON so a string "false" is refused, and null-tested since jq's // reads a declared false as absent.
+pr_check=true
+if [ -f "$registry" ]; then
+    if ! pr_check="$(jq -c --arg n "$name" '[.repos[] | select(.name==$n)][0].pullRequestCheck | if . == null then true else . end' "$registry" | sed $'s/\r$//')"; then
+        echo "Failed to read pullRequestCheck from $registry (invalid JSON?)." >&2
+        exit 1
+    fi
+fi
+case "$pr_check" in
+true | false) ;;
+*)
+    echo "Registry pullRequestCheck for $name is $pr_check, not true or false. Aborting before any write." >&2
+    exit 1
+    ;;
+esac
 compose_dir="$(mktemp -d)"
 trap 'rm -rf "$compose_dir"' EXIT
-compose_ruleset() { # source-payload copilot-rule-wanted(true|false) output-file
-    local src="$1" want="$2" out="$3"
+compose_ruleset() { # source-payload copilot-rule-wanted(true|false) check-rule-wanted(true|false) output-file
+    local src="$1" want="$2" check="$3" out="$4"
     if [ ! -e "$src" ]; then
         echo "Required payload $src not found. Aborting to avoid a partially-applied configuration." >&2
         exit 1
     fi
-    if ! jq --argjson want "$want" --slurpfile template "$main_source" '
+    # The check rule is only ever dropped, never added, since operational/develop.json takes direct pushes that a required check would block.
+    if ! jq --argjson want "$want" --argjson check "$check" --slurpfile template "$main_source" '
         .rules |= map(select(.type != "copilot_code_review"))
         | if $want then .rules += [$template[0].rules[] | select(.type == "copilot_code_review")] else . end
+        | if $check then . else .rules |= map(select(.type != "required_status_checks")) end
     ' "$src" >"$out"; then
         echo "Could not compose the ruleset payload from $src. Aborting." >&2
         exit 1
     fi
 }
 main_ruleset="$compose_dir/main.json"
-compose_ruleset "$main_source" "$copilot_main" "$main_ruleset"
+compose_ruleset "$main_source" "$copilot_main" "$pr_check" "$main_ruleset"
 develop_composed="$compose_dir/develop.json"
-compose_ruleset "$develop_ruleset" "$copilot_develop" "$develop_composed"
+compose_ruleset "$develop_ruleset" "$copilot_develop" "$pr_check" "$develop_composed"
 develop_ruleset="$develop_composed"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
