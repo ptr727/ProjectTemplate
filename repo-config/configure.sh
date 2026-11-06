@@ -225,7 +225,7 @@ else
 fi
 
 # ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
-# The Copilot code review rule is the one rule whose presence follows the repo's rendered policy rather than the fleet payload.
+# The Copilot rule follows the repo's rendered policy, and the required status check rule follows the registry's pullRequestCheck.
 # The file main.json stays the template for that rule's parameters.
 # The compose needs only the interpreter above, since that path of the script imports nothing outside the standard library.
 # A failed render stops here, before any write.

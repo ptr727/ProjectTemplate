@@ -2149,16 +2149,17 @@ def check_settings_general(run):
 
 
 def expected_rulesets(registry_data, entry, model):
-    """The develop payload's path and both payloads `entry` should carry, as configure.sh composes them."""
+    """Each branch's source payload path and the payload `entry` should carry, as configure.sh composes it."""
     policy = validate.agent_policy_module()
     config = ROOT / "repo-config"
-    dev_payload = policy.ruleset_sources(model, config)["develop"].relative_to(ROOT).as_posix()
-    return dev_payload, policy.rulesets(registry_data, entry["name"], model, config)
+    sources = policy.ruleset_sources(model, config)
+    paths = {branch: path.relative_to(ROOT).as_posix() for branch, path in sources.items()}
+    return paths, policy.rulesets(registry_data, entry["name"], model, config)
 
 
 def check_rulesets_payload(run):
     model = workflow_model_of(run.entry, run.spec["registry"].get("defaults", {}))
-    dev_payload, expect = expected_rulesets(run.spec["registry"], run.entry, model)
+    sources, expect = expected_rulesets(run.spec["registry"], run.entry, model)
     # A repo with no rulesets returns an empty list, so a 404 is a failed call and raises.
     live_list = gh(f"repos/{run.slug}/rulesets?per_page=100") or []
     findings = []
@@ -2173,7 +2174,7 @@ def check_rulesets_payload(run):
             )
         live_rs = gh(f"repos/{run.slug}/rulesets/{ids[0]}")
         if normalize_ruleset(live_rs) != normalize_ruleset(payload):
-            source = dev_payload if name == "develop" else "repo-config/main.json"
+            source = sources[name]
             findings.append(
                 (
                     "DEFECT",

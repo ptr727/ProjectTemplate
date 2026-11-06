@@ -5573,9 +5573,10 @@ class ExpectedRulesetsCase(unittest.TestCase):
         self.assertNotIn("copilot_code_review", self.types(entry, "release")["main"])
         self.assertIn("copilot_code_review", self.types({"name": "Fixture"}, "release")["main"])
 
-    def test_the_operational_develop_payload_is_named(self) -> None:
-        source, _ = audit.expected_rulesets({"repos": []}, {"name": "Fixture"}, "operational")
-        self.assertEqual(source, "repo-config/operational/develop.json")
+    def test_each_source_payload_is_named(self) -> None:
+        sources, _ = audit.expected_rulesets({"repos": []}, {"name": "Fixture"}, "operational")
+        self.assertEqual(sources["develop"], "repo-config/operational/develop.json")
+        self.assertEqual(sources["main"], "repo-config/main.json")
 
 
 if __name__ == "__main__":
