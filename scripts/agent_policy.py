@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["ruamel.yaml>=0.18", "tomlkit>=0.13"]
+# dependencies = ["editorconfig>=0.17", "ruamel.yaml>=0.18", "tomlkit>=0.13"]
 # ///
 """Render a repository's agent policy from the registry, derive the bot-side settings, write and check them.
 
@@ -150,6 +150,7 @@ def facts(rendered: dict[str, Any]) -> dict[str, Any]:
         "coderabbit": {
             "enabled": crab.trigger == "auto",
             "base_branches": [anchored(b) for b in crab.bases if b != policy_lib.DEFAULT_BASE],
+            "auto_pause_after_reviewed_commits": 0,
         },
         "qodo": {"disable_auto_feedback": parsed.bot("qodo").trigger != "auto"},
     }
@@ -248,7 +249,8 @@ def set_base_branches(node: Any, items: list[str]) -> None:
 def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
     """The new .coderabbit.yaml text, or None where it already holds the wanted values.
 
-    Only reviews.auto_review.enabled and base_branches are set, so every other key and comment stays.
+    Only reviews.auto_review.enabled, base_branches and auto_pause_after_reviewed_commits are set.
+    So every other key and comment stays.
     """
     from io import StringIO
 
@@ -276,13 +278,20 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
         if not isinstance(node, dict):
             raise Refusal(f"{path}: {key} is not a mapping")
     branches = list(want["base_branches"])
-    same = node.get("enabled") == want["enabled"] and node.get("base_branches") == branches
+    pause = want["auto_pause_after_reviewed_commits"]
+    same = (
+        node.get("enabled") == want["enabled"]
+        and node.get("base_branches") == branches
+        and node.get("auto_pause_after_reviewed_commits") == pause
+    )
     if existing is not None and same:
         return None
     if node.get("enabled") != want["enabled"] or "enabled" not in node:
         node["enabled"] = want["enabled"]
     if node.get("base_branches") != branches or "base_branches" not in node:
         set_base_branches(node, branches)
+    if node.get("auto_pause_after_reviewed_commits") != pause:
+        node["auto_pause_after_reviewed_commits"] = pause
     out = StringIO()
     yaml.dump(doc, out)
     return out.getvalue()
@@ -318,28 +327,37 @@ def plan(rendered: dict[str, Any], checkout: Path, repo: str) -> list[tuple[str,
     verify_checkout(checkout, repo)
     want = facts(rendered)
     policy_file = checkout / policy_lib.POLICY_PATH
-    policy = keep_endings(current_text(policy_file), serialize(rendered))
+    policy = keep_endings(policy_file, serialize(rendered))
     return [
         (policy_lib.POLICY_PATH, None if current_text(policy_file) == policy else policy),
         (
             YAML_PATH,
-            keep_endings(
-                current_text(checkout / YAML_PATH),
-                plan_yaml(checkout / YAML_PATH, want["coderabbit"]),
-            ),
+            keep_endings(checkout / YAML_PATH, plan_yaml(checkout / YAML_PATH, want["coderabbit"])),
         ),
         (
             TOML_PATH,
-            keep_endings(
-                current_text(checkout / TOML_PATH), plan_toml(checkout / TOML_PATH, want["qodo"])
-            ),
+            keep_endings(checkout / TOML_PATH, plan_toml(checkout / TOML_PATH, want["qodo"])),
         ),
     ]
 
 
-def keep_endings(existing: str | None, text: str | None) -> str | None:
-    """`text` in CRLF where the file it replaces is CRLF, so a rewrite never flattens a CRLF file."""
-    if text is None or existing is None or "\r\n" not in existing:
+def wants_crlf(path: Path) -> bool:
+    """Whether `path` keeps CRLF: an existing file by its own endings, a new one by its .editorconfig."""
+    existing = current_text(path)
+    if existing is not None:
+        return "\r\n" in existing
+    import editorconfig
+
+    try:
+        props = editorconfig.get_properties(str(path.resolve()))
+    except editorconfig.EditorConfigError as exc:
+        raise Refusal(f"{path}: the .editorconfig governing it does not parse ({exc})") from exc
+    return props.get("end_of_line") == "crlf"
+
+
+def keep_endings(path: Path, text: str | None) -> str | None:
+    """`text` with the line endings `path` keeps, so a write never flips a file's endings."""
+    if text is None or not wants_crlf(path):
         return text
     return text.replace("\r\n", "\n").replace("\n", "\r\n")
 
@@ -436,13 +454,19 @@ def judge_yaml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
             return [(False, f"{YAML_PATH} does not parse as YAML")]
         auto = ((doc or {}).get("reviews") or {}).get("auto_review") or {}
         branches = auto.get("base_branches")
+        pause = want["auto_pause_after_reviewed_commits"]
         enabled_ok = auto.get("enabled") == want["enabled"]
         branches_ok = isinstance(branches, list) and set(branches) == set(want["base_branches"])
+        pause_ok = auto.get("auto_pause_after_reviewed_commits") == pause
         return [
             (enabled_ok, f"{YAML_PATH} reviews.auto_review.enabled is {want['enabled']}"),
             (
                 branches_ok,
                 f"{YAML_PATH} reviews.auto_review.base_branches is {want['base_branches']}",
+            ),
+            (
+                pause_ok,
+                f"{YAML_PATH} reviews.auto_review.auto_pause_after_reviewed_commits is {pause}",
             ),
         ]
 
