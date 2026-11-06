@@ -231,6 +231,25 @@ class WriteCase(unittest.TestCase):
         self.assertNotIn(b"\r", (self.checkout / ".pr_agent.toml").read_bytes())
         self.assertIn(b"\r\n", (self.checkout / ".coderabbit.yaml").read_bytes())
 
+    def test_a_boolean_pause_and_an_integer_enabled_are_rewritten(self) -> None:
+        (self.checkout / ".coderabbit.yaml").write_text(
+            'reviews:\n  auto_review:\n    enabled: 1\n    base_branches:\n      - "^develop$"\n'
+            "    auto_pause_after_reviewed_commits: false\n",
+            encoding="utf-8",
+        )
+        (line,) = [
+            x
+            for x in agent_policy.write(self.rendered, self.checkout, "acme/widget")
+            if "yaml" in x
+        ]
+        self.assertTrue(line.startswith("wrote"), line)
+        doc = agent_policy_yaml_load(
+            (self.checkout / ".coderabbit.yaml").read_text(encoding="utf-8")
+        )
+        auto = doc["reviews"]["auto_review"]
+        self.assertIs(auto["enabled"], True)
+        self.assertEqual(type(auto["auto_pause_after_reviewed_commits"]), int)
+
     def test_the_pause_is_added_beside_the_keys_already_there(self) -> None:
         (self.checkout / ".coderabbit.yaml").write_text(
             'reviews:\n  auto_review:\n    enabled: true\n    base_branches:\n      - "^develop$"\n    drafts: false\n',
@@ -425,7 +444,11 @@ class CheckCase(unittest.TestCase):
         self.assertTrue(all(r.ok for r in got), got)
 
     def test_a_coderabbit_file_that_pauses_fails(self) -> None:
-        for pause in ("", "    auto_pause_after_reviewed_commits: 5\n"):
+        for pause in (
+            "",
+            "    auto_pause_after_reviewed_commits: 5\n",
+            "    auto_pause_after_reviewed_commits: false\n",
+        ):
             with self.subTest(pause=pause):
                 files = dict(self.files)
                 files[".coderabbit.yaml"] = (
@@ -536,7 +559,7 @@ class FactsImportCase(unittest.TestCase):
             f"sys.path.insert(0, {str(ROOT / 'scripts')!r});"
             "import agent_policy, pr_review_policy;"
             "agent_policy.main(sys.argv[1:]);"
-            "bad=[m for m in ('ruamel','tomlkit','markdown_it','yaml') if m in sys.modules];"
+            "bad=[m for m in ('ruamel','tomlkit','markdown_it','yaml','editorconfig') if m in sys.modules];"
             "sys.exit(1 if bad else 0)"
         )
         done = subprocess.run(

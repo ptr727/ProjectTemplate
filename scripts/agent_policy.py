@@ -246,6 +246,13 @@ def set_base_branches(node: Any, items: list[str]) -> None:
     node.ca.items["base_branches"] = [None, None, token, None]
 
 
+def exactly(got: Any, want: bool | int) -> bool:
+    """Whether `got` is `want` in value and type, so YAML's `false` never reads as a pause of 0."""
+    if isinstance(want, bool):
+        return isinstance(got, bool) and got == want
+    return isinstance(got, int) and not isinstance(got, bool) and got == want
+
+
 def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
     """The new .coderabbit.yaml text, or None where it already holds the wanted values.
 
@@ -279,18 +286,16 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
             raise Refusal(f"{path}: {key} is not a mapping")
     branches = list(want["base_branches"])
     pause = want["auto_pause_after_reviewed_commits"]
-    same = (
-        node.get("enabled") == want["enabled"]
-        and node.get("base_branches") == branches
-        and node.get("auto_pause_after_reviewed_commits") == pause
-    )
+    enabled_ok = exactly(node.get("enabled"), want["enabled"])
+    pause_ok = exactly(node.get("auto_pause_after_reviewed_commits"), pause)
+    same = enabled_ok and pause_ok and node.get("base_branches") == branches
     if existing is not None and same:
         return None
-    if node.get("enabled") != want["enabled"] or "enabled" not in node:
+    if not enabled_ok:
         node["enabled"] = want["enabled"]
     if node.get("base_branches") != branches or "base_branches" not in node:
         set_base_branches(node, branches)
-    if node.get("auto_pause_after_reviewed_commits") != pause:
+    if not pause_ok:
         node["auto_pause_after_reviewed_commits"] = pause
     out = StringIO()
     yaml.dump(doc, out)
@@ -455,9 +460,9 @@ def judge_yaml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
         auto = ((doc or {}).get("reviews") or {}).get("auto_review") or {}
         branches = auto.get("base_branches")
         pause = want["auto_pause_after_reviewed_commits"]
-        enabled_ok = auto.get("enabled") == want["enabled"]
+        enabled_ok = exactly(auto.get("enabled"), want["enabled"])
         branches_ok = isinstance(branches, list) and set(branches) == set(want["base_branches"])
-        pause_ok = auto.get("auto_pause_after_reviewed_commits") == pause
+        pause_ok = exactly(auto.get("auto_pause_after_reviewed_commits"), pause)
         return [
             (enabled_ok, f"{YAML_PATH} reviews.auto_review.enabled is {want['enabled']}"),
             (
