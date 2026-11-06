@@ -586,8 +586,10 @@ def run(args: argparse.Namespace) -> int:
     elif args.command == "facts":
         print(json.dumps(facts(rendered)))
     elif args.command == "rulesets":
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
         for branch, payload in rulesets(registry_data, args.name, args.model).items():
-            (Path(args.out_dir) / f"{branch}.json").write_text(
+            (out_dir / f"{branch}.json").write_text(
                 json.dumps(payload, indent=4) + "\n", encoding="utf-8"
             )
     elif args.command == "write":

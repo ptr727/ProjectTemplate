@@ -704,6 +704,18 @@ class RulesetsCase(unittest.TestCase):
             got = agent_policy.rulesets(explicit, "Fixture", "release", config)
             self.assertNotIn("copilot_code_review", [r["type"] for r in got["main"]["rules"]])
 
+    def test_the_committed_payloads_compose_for_every_registry_entry(self) -> None:
+        """A regenerated payload missing a rule fails here, on the pull request that commits it."""
+        data = json.loads((ROOT / "registry" / "repos.json").read_text(encoding="utf-8"))
+        default = data.get("defaults", {}).get("workflowModel", "release")
+        for entry in data["repos"]:
+            model = entry.get("workflowModel", default)
+            with self.subTest(name=entry["name"]):
+                agent_policy.rulesets(data, entry["name"], model)
+        for model in agent_policy.MODELS:
+            with self.subTest(model=model):
+                agent_policy.rulesets({"repos": []}, "Fixture", model)
+
     def test_a_kept_check_missing_from_its_payload_is_refused(self) -> None:
         """A payload regenerated without the check would otherwise strip it fleet-wide unseen."""
         for model, branch, rel in (
@@ -759,15 +771,16 @@ class RulesetsCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "repos.json"
             path.write_text(json.dumps(self.entry(pullRequestCheck=False)), encoding="utf-8")
+            out = Path(tmp) / "fresh" / "dir"
             code = agent_policy.main(
                 [
                     "rulesets", "--registry", str(path), "--name", "Fixture",
-                    "--model", "release", "--out-dir", tmp,
+                    "--model", "release", "--out-dir", str(out),
                 ]
             )  # fmt: skip
             self.assertEqual(code, 0)
             for branch in ("main", "develop"):
-                payload = json.loads((Path(tmp) / f"{branch}.json").read_text(encoding="utf-8"))
+                payload = json.loads((out / f"{branch}.json").read_text(encoding="utf-8"))
                 self.assertEqual(payload["name"], branch)
                 types = [r["type"] for r in payload["rules"]]
                 self.assertNotIn("required_status_checks", types)
