@@ -21,3 +21,6 @@ informational = "summary"
 [review_agent_ux]
 # The severity badge is an image tag on the finding's title line, which hides the title from a text matcher.
 use_images_and_animations = false
+
+[config]
+disable_auto_feedback = false
