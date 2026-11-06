@@ -13,6 +13,7 @@ import contextlib
 import copy
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -688,6 +689,20 @@ class RulesetsCase(unittest.TestCase):
         self.assertNotIn("copilot_code_review", got["develop"])
         for branch in ("main", "develop"):
             self.assertEqual(got[branch].count("required_status_checks"), 1)
+
+    def test_a_wanted_copilot_rule_missing_from_main_is_refused(self) -> None:
+        """A main.json regenerated without the rule would otherwise strip it fleet-wide unseen."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp)
+            main = json.loads((ROOT / "repo-config" / "main.json").read_text(encoding="utf-8"))
+            main["rules"] = [r for r in main["rules"] if r["type"] != "copilot_code_review"]
+            (config / "main.json").write_text(json.dumps(main), encoding="utf-8")
+            shutil.copy(ROOT / "repo-config" / "develop.json", config / "develop.json")
+            with self.assertRaises(agent_policy.Refusal):
+                agent_policy.rulesets(registry(), "Fixture", "release", config)
+            explicit = registry(copilot={"trigger": "explicit"})
+            got = agent_policy.rulesets(explicit, "Fixture", "release", config)
+            self.assertNotIn("copilot_code_review", [r["type"] for r in got["main"]["rules"]])
 
     def test_copilot_follows_the_render(self) -> None:
         self.assertNotIn(

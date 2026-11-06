@@ -50,7 +50,7 @@ A repository declaring no environment has nothing asserted against it, though th
 
 ## Regenerating the Payloads
 
-To change the canonical rulesets, edit the live rulesets (fleet-wide changes happen at the hub), then regenerate the committed files from the current repo:
+To change the canonical rulesets, edit the live rulesets (fleet-wide changes happen at the hub), then regenerate the committed files from the current repo. That repo's composed rulesets must be the full payloads. So its policy places the Copilot rule on `main`, and its registry entry does not declare `pullRequestCheck: false`. Otherwise the regenerated files lose those rules for every repository, and `configure.sh` refuses to compose a Copilot rule `main.json` no longer carries:
 
 ```sh
 model=release # Set to release or operational for the payload set being regenerated.

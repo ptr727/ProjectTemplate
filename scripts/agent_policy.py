@@ -179,6 +179,10 @@ def rulesets(
     }
     copilot = [r for r in payloads["main"]["rules"] if r.get("type") == "copilot_code_review"]
     wanted = facts(render(registry_data, name, model))["copilotRule"]
+    if not copilot and any(wanted.values()):
+        raise Refusal(
+            f"{name}: the policy wants a Copilot rule, and {sources['main']} carries none to copy"
+        )
     keep_check = entry_for(registry_data, name).get("pullRequestCheck") is not False
     for branch, payload in payloads.items():
         rules = [r for r in payload["rules"] if r.get("type") != "copilot_code_review"]
