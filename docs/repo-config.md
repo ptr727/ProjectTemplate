@@ -50,11 +50,11 @@ A repository declaring no environment has nothing asserted against it, though th
 
 ## Regenerating the Payloads
 
-To change the canonical rulesets, edit the live rulesets (fleet-wide changes happen at the hub), then regenerate the committed files from the current repo. That repo's composed rulesets must be the full payloads. So its policy places the Copilot rule on `main`, and its registry entry does not declare `pullRequestCheck: false`. Otherwise the regenerated files lose those rules for every repository, and `configure.sh` refuses to compose a Copilot rule `main.json` no longer carries:
+To change the canonical rulesets, edit the live rulesets of a fleet repository carrying the full payloads, then regenerate the committed files from it. Its policy places the Copilot rule on `main`, and its registry entry does not declare `pullRequestCheck: false`. A repository failing either test, the hub included where its own policy drops the Copilot rule, regenerates files missing that rule for every repository. `configure.sh` then refuses to compose a Copilot rule `main.json` no longer carries. Set `repo` to the chosen repository:
 
 ```sh
 model=release # Set to release or operational for the payload set being regenerated.
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+repo="<owner>/<repo>" # A repository whose live rulesets are the full payloads, per the paragraph above.
 # Paginate so a name match on a later page is never missed - the same trap configure.sh guards against.
 # --paginate with --jq '.[]' emits one JSON object per ruleset across all pages; jq -s re-assembles them
 # into the single array the selections below expect.

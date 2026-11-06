@@ -226,7 +226,7 @@ fi
 
 # ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
 # The Copilot rule follows the repo's rendered policy, and the required status check rule follows the registry's pullRequestCheck.
-# The file main.json stays the template for that rule's parameters.
+# The file main.json stays the template for the Copilot rule's parameters.
 # The compose needs only the interpreter above, since that path of the script imports nothing outside the standard library.
 # A failed render stops here, before any write.
 agent_policy="$script_dir/../scripts/agent_policy.py"
