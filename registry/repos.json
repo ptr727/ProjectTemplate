@@ -20,6 +20,15 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "pythonDirectories": ["."],
+            "agentPolicy": {
+                "review": {
+                    "bots": {
+                        "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
+                        "coderabbit": { "trigger": "explicit", "when": "after-checks", "rounds": "once" },
+                        "qodo": { "trigger": "explicit", "when": "after-checks", "rounds": "once" }
+                    }
+                }
+            },
             "driftNotes": ["Governance hub, which audits its own rules against itself."]
         },
         {

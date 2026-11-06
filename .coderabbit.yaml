@@ -4,7 +4,7 @@ reviews:
   # Auto review covers only the default branch unless a base is listed here, each entry a regex.
   # The default branch stays included whatever is listed.
   auto_review:
-    enabled: true
+    enabled: false
     base_branches:
       - "^develop$"
     # A fleet pull request routinely passes five pushes before it merges.
