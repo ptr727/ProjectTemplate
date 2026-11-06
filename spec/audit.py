@@ -2150,14 +2150,10 @@ def check_settings_general(run):
 
 def expected_rulesets(registry_data, entry, model):
     """The develop payload's path and both payloads `entry` should carry, as configure.sh composes them."""
-    dev_payload = (
-        "repo-config/operational/develop.json"
-        if model == "operational"
-        else "repo-config/develop.json"
-    )
     policy = validate.agent_policy_module()
+    sources = policy.ruleset_sources(model, ROOT / "repo-config")
     rendered = policy.render(registry_data, entry["name"], model)
-    sources = {"develop": ROOT / dev_payload, "main": ROOT / "repo-config/main.json"}
+    dev_payload = sources["develop"].relative_to(ROOT).as_posix()
     return dev_payload, policy.rulesets(registry_data, entry["name"], rendered, sources)
 
 

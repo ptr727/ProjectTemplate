@@ -1475,7 +1475,7 @@ class RegistryEntryGateCase(unittest.TestCase):
                 )
 
     def test_a_non_boolean_pull_request_check_is_refused(self) -> None:
-        """repo-config/configure.sh refuses it at its next run, so CI refuses it on the registry change instead."""
+        """scripts/agent_policy.py reads anything but false as true, so a mistyped false would keep the rule."""
         refused: list[object] = ["false", 0, []]
         for declared in refused:
             with self.subTest(declared=declared):

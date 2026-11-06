@@ -1339,7 +1339,7 @@ def main(argv=()):
             )
         if "pullRequestCheck" in repo and not isinstance(repo["pullRequestCheck"], bool):
             errors.append(
-                f"{name}: pullRequestCheck {repo['pullRequestCheck']!r} must be true or false, and repo-config/configure.sh refuses whatever else is declared"
+                f"{name}: pullRequestCheck {repo['pullRequestCheck']!r} must be true or false, and scripts/agent_policy.py reads anything but false as true"
             )
         # Compared exactly against the names GitHub stores, by spec/audit.py's secret audit and by this file's own requires/forbids cross-check below.
         # A padded element is therefore reported missing from the actions store on every run.

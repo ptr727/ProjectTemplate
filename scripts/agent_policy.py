@@ -42,6 +42,7 @@ SCHEMA_URL = (
 YAML_PATH = ".coderabbit.yaml"
 TOML_PATH = ".pr_agent.toml"
 MODELS = ("release", "operational")
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "repo-config"
 
 
 class Refusal(ValueError):
@@ -157,11 +158,18 @@ def facts(rendered: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def ruleset_sources(model: str, config_dir: Path = CONFIG_DIR) -> dict[str, Path]:
+    """The committed payload each branch's ruleset is composed from under `model`."""
+    develop = "operational/develop.json" if model == "operational" else "develop.json"
+    return {"main": config_dir / "main.json", "develop": config_dir / develop}
+
+
 def rulesets(
     registry_data: Any, name: str, rendered: dict[str, Any], sources: dict[str, Path]
 ) -> dict[str, dict[str, Any]]:
     """Each branch's ruleset payload in `sources`, composed for the repository `name`.
 
+    The sources are `ruleset_sources` for the repository's model.
     The Copilot rule follows the render, taking its shape from the `main` source.
     The required status check rule is dropped where the entry's pullRequestCheck is false.
     repo-config/configure.sh applies and checks these, and spec/audit.py expects them.
@@ -556,8 +564,6 @@ def build_parser() -> argparse.ArgumentParser:
         if cmd == "check":
             one.add_argument("--ref", required=True, help="the branch or commit to read")
         if cmd == "rulesets":
-            one.add_argument("--main-source", required=True, help="the main ruleset payload")
-            one.add_argument("--develop-source", required=True, help="the develop ruleset payload")
             one.add_argument("--out-dir", required=True, help="where main.json and develop.json go")
     return parser
 
@@ -570,7 +576,7 @@ def run(args: argparse.Namespace) -> int:
     elif args.command == "facts":
         print(json.dumps(facts(rendered)))
     elif args.command == "rulesets":
-        sources = {"main": Path(args.main_source), "develop": Path(args.develop_source)}
+        sources = ruleset_sources(args.model)
         for branch, payload in rulesets(registry_data, args.name, rendered, sources).items():
             (Path(args.out_dir) / f"{branch}.json").write_text(
                 json.dumps(payload, indent=4) + "\n", encoding="utf-8"

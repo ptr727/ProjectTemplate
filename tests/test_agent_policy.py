@@ -562,14 +562,8 @@ class FactsImportCase(unittest.TestCase):
 
     def test_the_rulesets_path_imports_nothing_third_party(self) -> None:
         """configure.sh runs it under a bare interpreter rather than uv."""
-        config = ROOT / "repo-config"
         with tempfile.TemporaryDirectory() as tmp:
-            self.assert_standard_library_only(
-                [
-                    "rulesets", "--main-source", str(config / "main.json"),
-                    "--develop-source", str(config / "develop.json"), "--out-dir", tmp,
-                ]
-            )  # fmt: skip
+            self.assert_standard_library_only(["rulesets", "--out-dir", tmp])
 
     def assert_standard_library_only(self, command: list[str]) -> None:
         argv = ["agent_policy.py", command[0], "--registry", "none.json", "--name", "X"]
@@ -680,11 +674,8 @@ class CommandLineCase(unittest.TestCase):
 class RulesetsCase(unittest.TestCase):
     """The ruleset payloads configure.sh applies and spec/audit.py expects, composed per repository."""
 
-    CONFIG = ROOT / "repo-config"
-
     def types(self, data: object, model: str = "release") -> dict[str, list[str]]:
-        develop = "operational/develop.json" if model == "operational" else "develop.json"
-        sources = {"main": self.CONFIG / "main.json", "develop": self.CONFIG / develop}
+        sources = agent_policy.ruleset_sources(model)
         rendered = agent_policy.render(data, "Fixture", model)
         got = agent_policy.rulesets(data, "Fixture", rendered, sources)
         return {branch: [r["type"] for r in payload["rules"]] for branch, payload in got.items()}
@@ -735,8 +726,7 @@ class RulesetsCase(unittest.TestCase):
             code = agent_policy.main(
                 [
                     "rulesets", "--registry", str(path), "--name", "Fixture",
-                    "--model", "release", "--main-source", str(self.CONFIG / "main.json"),
-                    "--develop-source", str(self.CONFIG / "develop.json"), "--out-dir", tmp,
+                    "--model", "release", "--out-dir", tmp,
                 ]
             )  # fmt: skip
             self.assertEqual(code, 0)

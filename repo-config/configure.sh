@@ -28,7 +28,8 @@
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
 # The check mode is the read-only inverse, and it verifies the same five groups apply writes.
-# The ruleset and static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
+# The static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
+# The ruleset assertions compare against the payloads composed for the repo, the same ones apply writes.
 # A ruleset is checked on enforcement, on the rule-type set compared in both directions, and on the whole parameters object of every parameterized rule.
 # Comparing the parameters object rather than named fields means a parameter added to a payload is audited with no change here.
 # Both directions matter, since a rule added live that the payload never declared is drift this catches.
@@ -193,20 +194,18 @@ if [ -z "$model" ]; then
     fi
 fi
 case "$model" in
-release) develop_ruleset="$script_dir/develop.json" ;;
-operational) develop_ruleset="$script_dir/operational/develop.json" ;;
+release | operational) ;;
 *)
     echo "Unknown workflow model '$model' (expected release or operational)." >&2
     exit 1
     ;;
 esac
-main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
 
 # ----- Resolve a Python interpreter (shared by apply and check) -----
-# The policy facts and the description both come from plain Python scripts, so neither needs uv.
+# The ruleset composition and the description both come from plain Python scripts, so neither needs uv.
 # The name python3 is not universal.
 # Native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run.
 # So this runs it rather than just checking PATH (docs/host-setup.md).
@@ -234,8 +233,7 @@ agent_policy="$script_dir/../scripts/agent_policy.py"
 agent_policy_args=(--registry "$registry" --name "$name" --model "$model")
 compose_dir="$(mktemp -d)"
 trap 'rm -rf "$compose_dir"' EXIT
-if ! "${py_cmd[@]}" "$agent_policy" rulesets "${agent_policy_args[@]}" \
-    --main-source "$main_ruleset" --develop-source "$develop_ruleset" --out-dir "$compose_dir"; then
+if ! "${py_cmd[@]}" "$agent_policy" rulesets "${agent_policy_args[@]}" --out-dir "$compose_dir"; then
     echo "Could not compose the ruleset payloads for $repo. Aborting before any write." >&2
     exit 1
 fi
