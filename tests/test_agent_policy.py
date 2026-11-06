@@ -675,9 +675,7 @@ class RulesetsCase(unittest.TestCase):
     """The ruleset payloads configure.sh applies and spec/audit.py expects, composed per repository."""
 
     def types(self, data: object, model: str = "release") -> dict[str, list[str]]:
-        sources = agent_policy.ruleset_sources(model)
-        rendered = agent_policy.render(data, "Fixture", model)
-        got = agent_policy.rulesets(data, "Fixture", rendered, sources)
+        got = agent_policy.rulesets(data, "Fixture", model)
         return {branch: [r["type"] for r in payload["rules"]] for branch, payload in got.items()}
 
     @staticmethod

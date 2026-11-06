@@ -165,20 +165,20 @@ def ruleset_sources(model: str, config_dir: Path = CONFIG_DIR) -> dict[str, Path
 
 
 def rulesets(
-    registry_data: Any, name: str, rendered: dict[str, Any], sources: dict[str, Path]
+    registry_data: Any, name: str, model: str, config_dir: Path = CONFIG_DIR
 ) -> dict[str, dict[str, Any]]:
-    """Each branch's ruleset payload in `sources`, composed for the repository `name`.
+    """Each branch's ruleset payload under `model`, composed for the repository `name`.
 
-    The sources are `ruleset_sources` for the repository's model.
-    The Copilot rule follows the render, taking its shape from the `main` source.
+    The Copilot rule follows the render, taking its shape from the `main` payload.
     The required status check rule is dropped where the entry's pullRequestCheck is false.
     repo-config/configure.sh applies and checks these, and spec/audit.py expects them.
     """
+    sources = ruleset_sources(model, config_dir)
     payloads = {
         branch: json.loads(path.read_text(encoding="utf-8")) for branch, path in sources.items()
     }
     copilot = [r for r in payloads["main"]["rules"] if r.get("type") == "copilot_code_review"]
-    wanted = facts(rendered)["copilotRule"]
+    wanted = facts(render(registry_data, name, model))["copilotRule"]
     keep_check = entry_for(registry_data, name).get("pullRequestCheck") is not False
     for branch, payload in payloads.items():
         rules = [r for r in payload["rules"] if r.get("type") != "copilot_code_review"]
@@ -576,8 +576,7 @@ def run(args: argparse.Namespace) -> int:
     elif args.command == "facts":
         print(json.dumps(facts(rendered)))
     elif args.command == "rulesets":
-        sources = ruleset_sources(args.model)
-        for branch, payload in rulesets(registry_data, args.name, rendered, sources).items():
+        for branch, payload in rulesets(registry_data, args.name, args.model).items():
             (Path(args.out_dir) / f"{branch}.json").write_text(
                 json.dumps(payload, indent=4) + "\n", encoding="utf-8"
             )

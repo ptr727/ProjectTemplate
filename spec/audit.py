@@ -2151,10 +2151,9 @@ def check_settings_general(run):
 def expected_rulesets(registry_data, entry, model):
     """The develop payload's path and both payloads `entry` should carry, as configure.sh composes them."""
     policy = validate.agent_policy_module()
-    sources = policy.ruleset_sources(model, ROOT / "repo-config")
-    rendered = policy.render(registry_data, entry["name"], model)
-    dev_payload = sources["develop"].relative_to(ROOT).as_posix()
-    return dev_payload, policy.rulesets(registry_data, entry["name"], rendered, sources)
+    config = ROOT / "repo-config"
+    dev_payload = policy.ruleset_sources(model, config)["develop"].relative_to(ROOT).as_posix()
+    return dev_payload, policy.rulesets(registry_data, entry["name"], model, config)
 
 
 def check_rulesets_payload(run):
@@ -2175,7 +2174,12 @@ def check_rulesets_payload(run):
         live_rs = gh(f"repos/{run.slug}/rulesets/{ids[0]}")
         if normalize_ruleset(live_rs) != normalize_ruleset(payload):
             source = dev_payload if name == "develop" else "repo-config/main.json"
-            findings.append(("DEFECT", f"ruleset: {name} diverges from {source} (normalized diff)"))
+            findings.append(
+                (
+                    "DEFECT",
+                    f"ruleset: {name} diverges from the payload configure.sh composes from {source} (normalized diff)",
+                )
+            )
     for stray in [r["name"] for r in live_list if r["name"] not in expect]:
         findings.append(("DRIFT", f"ruleset: stray ruleset '{stray}'"))
     return findings
