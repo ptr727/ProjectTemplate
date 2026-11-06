@@ -682,11 +682,15 @@ def run_gate_on_files(overrides: dict[str, object], make_tree=None) -> str:
     """Run the real spec gate against a scratch tree whose files.json carries `overrides`, returning its output.
 
     The scratch tree holds spec/, registry/, an empty real/sub directory for a declared source to name, and the shipped repo-owned tests directory.
+    It also holds the scripts the gate imports to render a registry entry's agentPolicy, since the copied registry can carry one.
     """
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         shutil.copytree(validate.ROOT / "spec", root / "spec")
         shutil.copytree(validate.ROOT / "registry", root / "registry")
+        (root / "scripts").mkdir()
+        for module in ("agent_policy.py", "pr_review_policy.py", "gh_graphql.py"):
+            shutil.copy(validate.ROOT / "scripts" / module, root / "scripts" / module)
         (root / "real" / "sub").mkdir(parents=True)
         (root / "tests").mkdir()
         if make_tree is not None:

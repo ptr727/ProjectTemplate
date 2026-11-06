@@ -23,4 +23,4 @@ informational = "summary"
 use_images_and_animations = false
 
 [config]
-disable_auto_feedback = false
+disable_auto_feedback = true
