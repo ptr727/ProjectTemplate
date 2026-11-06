@@ -396,42 +396,6 @@ class YamlPreservationCase(unittest.TestCase):
         original[original.index("    base_branches:")] = "    base_branches: []"
         self.assertEqual(lines, original)
 
-    def test_an_appended_key_stays_above_the_comment_for_the_next_key(self) -> None:
-        tail = '  # Paths CodeRabbit skips.\n  path_filters:\n    - "!x/**"\n'
-        shapes = {
-            "list": '    enabled: true\n    base_branches:\n      - "^develop$"\n',
-            "scalar": '    base_branches:\n      - "^develop$"\n    enabled: true\n',
-            "scalar with its own comment": (
-                '    base_branches:\n      - "^develop$"\n    enabled: true  # on\n'
-            ),
-        }
-        for name, body in shapes.items():
-            with self.subTest(shape=name), tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / ".coderabbit.yaml"
-                path.write_text("reviews:\n  auto_review:\n" + body + tail, encoding="utf-8")
-                got = agent_policy.plan_yaml(path, want(True, ["^develop$"]))
-                assert got is not None
-                self.assertEqual(
-                    got,
-                    "reviews:\n  auto_review:\n"
-                    + body
-                    + "    auto_pause_after_reviewed_commits: 0\n"
-                    + tail,
-                )
-
-    def test_an_absent_list_lands_above_the_comment_for_the_next_key(self) -> None:
-        tail = '  # Paths CodeRabbit skips.\n  path_filters:\n    - "!x/**"\n'
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / ".coderabbit.yaml"
-            path.write_text(
-                "reviews:\n  auto_review:\n    enabled: true\n"
-                "    auto_pause_after_reviewed_commits: 0\n" + tail,
-                encoding="utf-8",
-            )
-            got = agent_policy.plan_yaml(path, want(True, ["^develop$"]))
-        assert got is not None
-        self.assertTrue(got.endswith('      - "^develop$"\n' + tail), got)
-
     def test_an_enabled_flip_keeps_the_trailing_comment(self) -> None:
         got = self.apply(False, ["^develop$"])
         self.assertEqual(got, HUB_SHAPED.replace("enabled: true  #", "enabled: false #"))

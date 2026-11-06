@@ -211,61 +211,6 @@ def lf_text(path: Path) -> str | None:
     return None if text is None else text.replace("\r\n", "\n")
 
 
-def pop_trailing_comment(node: Any) -> Any:
-    """Detach the full-line comments after a mapping's last value, which ruamel keeps on that value.
-
-    They introduce whatever follows the mapping, so a key appended to it must not land above them.
-    """
-    from copy import copy
-
-    from ruamel.yaml.comments import CommentedMap, CommentedSeq
-
-    if not node:
-        return None
-    last = list(node.keys())[-1]
-    value = node[last]
-    if isinstance(value, CommentedSeq):
-        entry = value.ca.items.get(len(value) - 1) if len(value) else None
-        if not entry or entry[0] is None:
-            return None
-        token = entry[0]
-        entry[0] = None
-        return token
-    if isinstance(value, CommentedMap):
-        return pop_trailing_comment(value)
-    entry = node.ca.items.get(last)
-    if not entry or len(entry) < 3 or entry[2] is None:
-        return None
-    token = entry[2]
-    if token.value.startswith("\n"):
-        entry[2] = None
-        return token
-    eol, newline, rest = token.value.partition("\n")
-    if not rest.strip():
-        return None
-    token.value = eol + newline
-    moved = copy(token)
-    moved.value = "\n" + rest
-    return moved
-
-
-def put(node: Any, key: str, value: Any) -> None:
-    """Set `key`, appending an absent one below the mapping's last value and above its trailing comments."""
-    from ruamel.yaml.comments import CommentedSeq
-
-    if key in node:
-        node[key] = value
-        return
-    held = pop_trailing_comment(node)
-    node[key] = value
-    if held is None:
-        return
-    if isinstance(value, CommentedSeq) and len(value):
-        value.ca.items[len(value) - 1] = [held, None]
-    else:
-        node.ca.items[key] = [None, None, held, None]
-
-
 def set_base_branches(node: Any, items: list[str]) -> None:
     """Make node['base_branches'] hold `items`, double-quoted, keeping the comment that follows the list."""
     from ruamel.yaml.comments import CommentedSeq
@@ -274,7 +219,7 @@ def set_base_branches(node: Any, items: list[str]) -> None:
     quoted = [DoubleQuotedScalarString(item) for item in items]
     seq = node.get("base_branches")
     if not isinstance(seq, CommentedSeq):
-        put(node, "base_branches", CommentedSeq(quoted))
+        node["base_branches"] = CommentedSeq(quoted)
         return
     # A comment after a block list hangs off the list's last item, so replacing the list would drop it.
     held = seq.ca.items.pop(len(seq) - 1, None) if len(seq) else None
@@ -347,11 +292,11 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
     if existing is not None and same:
         return None
     if not enabled_ok:
-        put(node, "enabled", want["enabled"])
+        node["enabled"] = want["enabled"]
     if node.get("base_branches") != branches or "base_branches" not in node:
         set_base_branches(node, branches)
     if not pause_ok:
-        put(node, "auto_pause_after_reviewed_commits", pause)
+        node["auto_pause_after_reviewed_commits"] = pause
     out = StringIO()
     yaml.dump(doc, out)
     return out.getvalue()
