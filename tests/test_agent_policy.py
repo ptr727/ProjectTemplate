@@ -13,8 +13,6 @@ import contextlib
 import copy
 import io
 import json
-import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,16 +21,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
 
-from test_configure_archived import lift, run_bash
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "spec"))
 
 import agent_policy
 import validate
-
-COMPOSE = lift(r"(compose_ruleset\(\) \{.*?\n\}\n)")
 
 
 def registry(**override: object) -> dict[str, object]:
@@ -564,14 +558,30 @@ class TopLevelCase(unittest.TestCase):
 
 class FactsImportCase(unittest.TestCase):
     def test_the_facts_path_imports_nothing_third_party(self) -> None:
+        self.assert_standard_library_only(["facts"])
+
+    def test_the_rulesets_path_imports_nothing_third_party(self) -> None:
+        """configure.sh runs it under a bare interpreter rather than uv."""
+        config = ROOT / "repo-config"
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assert_standard_library_only(
+                [
+                    "rulesets", "--main-source", str(config / "main.json"),
+                    "--develop-source", str(config / "develop.json"), "--out-dir", tmp,
+                ]
+            )  # fmt: skip
+
+    def assert_standard_library_only(self, command: list[str]) -> None:
+        argv = ["agent_policy.py", command[0], "--registry", "none.json", "--name", "X"]
+        argv += ["--model", "release", *command[1:]]
         code = (
             "import sys, runpy;"
-            f"sys.argv=['agent_policy.py','facts','--registry','none.json','--name','X','--model','release'];"
+            f"sys.argv={argv!r};"
             f"sys.path.insert(0, {str(ROOT / 'scripts')!r});"
             "import agent_policy, pr_review_policy;"
-            "agent_policy.main(sys.argv[1:]);"
+            "rc=agent_policy.main(sys.argv[1:]);"
             "bad=[m for m in ('ruamel','tomlkit','markdown_it','yaml','editorconfig') if m in sys.modules];"
-            "sys.exit(1 if bad else 0)"
+            "sys.exit(1 if bad or rc else 0)"
         )
         done = subprocess.run(
             [sys.executable, "-I", "-c", code],
@@ -667,52 +677,74 @@ class CommandLineCase(unittest.TestCase):
         self.assertEqual(done.returncode, 1)
 
 
-class ComposeRulesetCase(unittest.TestCase):
-    """configure.sh adds or strips the Copilot rule on a composed payload by the derived fact."""
+class RulesetsCase(unittest.TestCase):
+    """The ruleset payloads configure.sh applies and spec/audit.py expects, composed per repository."""
 
-    def compose(self, src: Path, want: str, check: str = "true") -> list[str]:
-        if shutil.which("jq") is None:
-            raise unittest.SkipTest("no jq on PATH")
-        with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "out.json"
-            main = ROOT / "repo-config" / "main.json"
-            quoted = [shlex.quote(str(p)) for p in (main, src, out)]
-            script = (
-                f"main_source={quoted[0]}\n{COMPOSE}"
-                f"compose_ruleset {quoted[1]} {want} {check} {quoted[2]}\n"
-            )
-            done = run_bash(script, "jq")
-            self.assertEqual(done.returncode, 0, done.stderr)
-            return [rule["type"] for rule in json.loads(out.read_text(encoding="utf-8"))["rules"]]
+    CONFIG = ROOT / "repo-config"
 
-    def test_main_keeps_or_loses_the_rule(self) -> None:
-        main = ROOT / "repo-config" / "main.json"
-        self.assertEqual(self.compose(main, "true").count("copilot_code_review"), 1)
-        self.assertNotIn("copilot_code_review", self.compose(main, "false"))
+    def types(self, data: object, model: str = "release") -> dict[str, list[str]]:
+        develop = "operational/develop.json" if model == "operational" else "develop.json"
+        sources = {"main": self.CONFIG / "main.json", "develop": self.CONFIG / develop}
+        rendered = agent_policy.render(data, "Fixture", model)
+        got = agent_policy.rulesets(data, "Fixture", rendered, sources)
+        return {branch: [r["type"] for r in payload["rules"]] for branch, payload in got.items()}
 
-    def test_develop_gains_the_rule_only_when_wanted(self) -> None:
-        for name in ("develop.json", "operational/develop.json"):
-            with self.subTest(payload=name):
-                src = ROOT / "repo-config" / name
-                self.assertNotIn("copilot_code_review", self.compose(src, "false"))
-                self.assertEqual(self.compose(src, "true").count("copilot_code_review"), 1)
+    @staticmethod
+    def entry(**fields: object) -> dict[str, object]:
+        return {"repos": [{"name": "Fixture", **fields}, {"name": "Other"}]}
 
-    def test_the_status_check_rule_is_dropped_only_when_unwanted(self) -> None:
-        for name in ("main.json", "develop.json"):
-            with self.subTest(payload=name):
-                src = ROOT / "repo-config" / name
-                self.assertEqual(
-                    self.compose(src, "true", "true").count("required_status_checks"), 1
-                )
-                kept = self.compose(src, "true", "false")
-                self.assertNotIn("required_status_checks", kept)
-                self.assertEqual(kept.count("copilot_code_review"), 1)
+    def test_the_default_keeps_copilot_on_main_and_the_check_on_both(self) -> None:
+        got = self.types(registry())
+        self.assertEqual(got["main"].count("copilot_code_review"), 1)
+        self.assertNotIn("copilot_code_review", got["develop"])
+        for branch in ("main", "develop"):
+            self.assertEqual(got[branch].count("required_status_checks"), 1)
 
-    def test_the_status_check_rule_is_never_added_to_a_payload_without_one(self) -> None:
-        src = ROOT / "repo-config" / "operational" / "develop.json"
-        for check in ("true", "false"):
+    def test_copilot_follows_the_render(self) -> None:
+        self.assertNotIn(
+            "copilot_code_review", self.types(registry(copilot={"trigger": "explicit"}))["main"]
+        )
+        both = self.types(registry(copilot={"bases": ["@default", "^develop$"]}))
+        self.assertEqual(both["develop"].count("copilot_code_review"), 1)
+
+    def test_a_declared_false_drops_the_check_and_nothing_else(self) -> None:
+        kept = self.types(self.entry())
+        dropped = self.types(self.entry(pullRequestCheck=False))
+        for branch in ("main", "develop"):
+            with self.subTest(branch=branch):
+                want = [t for t in kept[branch] if t != "required_status_checks"]
+                self.assertEqual(dropped[branch], want)
+
+    def test_only_a_declared_false_drops_the_check(self) -> None:
+        other = {"repos": [{"name": "Fixture"}, {"name": "Other", "pullRequestCheck": False}]}
+        cases: list[object] = [self.entry(pullRequestCheck=True), other, {"repos": []}, None]
+        for data in cases:
+            with self.subTest(data=data):
+                self.assertIn("required_status_checks", self.types(data)["main"])
+
+    def test_the_check_is_never_added_to_a_payload_without_one(self) -> None:
+        for check in (True, False):
             with self.subTest(check=check):
-                self.assertNotIn("required_status_checks", self.compose(src, "false", check))
+                got = self.types(self.entry(pullRequestCheck=check), "operational")
+                self.assertNotIn("required_status_checks", got["develop"])
+
+    def test_the_cli_writes_both_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "repos.json"
+            path.write_text(json.dumps(self.entry(pullRequestCheck=False)), encoding="utf-8")
+            code = agent_policy.main(
+                [
+                    "rulesets", "--registry", str(path), "--name", "Fixture",
+                    "--model", "release", "--main-source", str(self.CONFIG / "main.json"),
+                    "--develop-source", str(self.CONFIG / "develop.json"), "--out-dir", tmp,
+                ]
+            )  # fmt: skip
+            self.assertEqual(code, 0)
+            for branch in ("main", "develop"):
+                payload = json.loads((Path(tmp) / f"{branch}.json").read_text(encoding="utf-8"))
+                self.assertEqual(payload["name"], branch)
+                types = [r["type"] for r in payload["rules"]]
+                self.assertNotIn("required_status_checks", types)
 
 
 class ValidateCase(unittest.TestCase):

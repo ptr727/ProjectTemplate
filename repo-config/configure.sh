@@ -225,58 +225,22 @@ else
     exit 1
 fi
 
-# ----- Derive the agent policy facts and compose the ruleset payloads (shared by apply and check) -----
+# ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
 # The Copilot code review rule is the one rule whose presence follows the repo's rendered policy rather than the fleet payload.
 # The file main.json stays the template for that rule's parameters.
-# The facts read needs only the interpreter above, since that path of the script imports nothing outside the standard library.
+# The compose needs only the interpreter above, since that path of the script imports nothing outside the standard library.
 # A failed render stops here, before any write.
-main_source="$main_ruleset"
 agent_policy="$script_dir/../scripts/agent_policy.py"
 agent_policy_args=(--registry "$registry" --name "$name" --model "$model")
-if ! policy_facts="$("${py_cmd[@]}" "$agent_policy" facts "${agent_policy_args[@]}")"; then
-    echo "Could not derive the agent policy for $repo. Aborting before any write." >&2
-    exit 1
-fi
-copilot_main="$(jq -r '.copilotRule.main' <<<"$policy_facts" | sed $'s/\r$//')"
-copilot_develop="$(jq -r '.copilotRule.develop' <<<"$policy_facts" | sed $'s/\r$//')"
-# Printed as JSON so a string "false" is refused, and null-tested since jq's // reads a declared false as absent.
-pr_check=true
-if [ -f "$registry" ]; then
-    if ! pr_check="$(jq -c --arg n "$name" '[.repos[] | select(.name==$n)][0].pullRequestCheck | if . == null then true else . end' "$registry" | sed $'s/\r$//')"; then
-        echo "Failed to read pullRequestCheck from $registry (invalid JSON?)." >&2
-        exit 1
-    fi
-fi
-case "$pr_check" in
-true | false) ;;
-*)
-    echo "Registry pullRequestCheck for $name is $pr_check, not true or false. Aborting before any write." >&2
-    exit 1
-    ;;
-esac
 compose_dir="$(mktemp -d)"
 trap 'rm -rf "$compose_dir"' EXIT
-compose_ruleset() { # source-payload copilot-rule-wanted(true|false) check-rule-wanted(true|false) output-file
-    local src="$1" want="$2" check="$3" out="$4"
-    if [ ! -e "$src" ]; then
-        echo "Required payload $src not found. Aborting to avoid a partially-applied configuration." >&2
-        exit 1
-    fi
-    # The check rule is only ever dropped, never added, since operational/develop.json takes direct pushes that a required check would block.
-    if ! jq --argjson want "$want" --argjson check "$check" --slurpfile template "$main_source" '
-        .rules |= map(select(.type != "copilot_code_review"))
-        | if $want then .rules += [$template[0].rules[] | select(.type == "copilot_code_review")] else . end
-        | if $check then . else .rules |= map(select(.type != "required_status_checks")) end
-    ' "$src" >"$out"; then
-        echo "Could not compose the ruleset payload from $src. Aborting." >&2
-        exit 1
-    fi
-}
+if ! "${py_cmd[@]}" "$agent_policy" rulesets "${agent_policy_args[@]}" \
+    --main-source "$main_ruleset" --develop-source "$develop_ruleset" --out-dir "$compose_dir"; then
+    echo "Could not compose the ruleset payloads for $repo. Aborting before any write." >&2
+    exit 1
+fi
 main_ruleset="$compose_dir/main.json"
-compose_ruleset "$main_source" "$copilot_main" "$pr_check" "$main_ruleset"
-develop_composed="$compose_dir/develop.json"
-compose_ruleset "$develop_ruleset" "$copilot_develop" "$pr_check" "$develop_composed"
-develop_ruleset="$develop_composed"
+develop_ruleset="$compose_dir/develop.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
 # Absence keeps the About panel following the README.

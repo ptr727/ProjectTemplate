@@ -5550,33 +5550,32 @@ class RegistryCase(unittest.TestCase):
 
 
 class ExpectedRulesetsCase(unittest.TestCase):
-    """The audit expects the rulesets repo-config/configure.sh composes, status check included or not."""
+    """The audit expects the rulesets repo-config/configure.sh composes, through the same function."""
 
     @staticmethod
     def types(entry: dict[str, Any], model: str) -> dict[str, list[str]]:
-        _, expect = audit.expected_rulesets(entry, model)
+        _, expect = audit.expected_rulesets({"repos": [entry]}, entry, model)
         return {name: [r["type"] for r in payload["rules"]] for name, payload in expect.items()}
 
-    def test_an_entry_declaring_nothing_keeps_the_check_on_both_release_rulesets(self) -> None:
-        for name, types in self.types({"name": "Fixture"}, "release").items():
-            with self.subTest(ruleset=name):
-                self.assertEqual(types.count("required_status_checks"), 1)
-
-    def test_a_declared_false_drops_the_check_and_nothing_else(self) -> None:
+    def test_a_declared_false_drops_the_check_from_both(self) -> None:
         kept = self.types({"name": "Fixture"}, "release")
         dropped = self.types({"name": "Fixture", "pullRequestCheck": False}, "release")
         for name in ("develop", "main"):
             with self.subTest(ruleset=name):
+                self.assertIn("required_status_checks", kept[name])
                 self.assertEqual(
                     dropped[name], [t for t in kept[name] if t != "required_status_checks"]
                 )
 
-    def test_the_operational_develop_payload_is_named_and_unchanged(self) -> None:
-        source, _ = audit.expected_rulesets({"name": "Fixture"}, "operational")
+    def test_a_policy_with_no_automatic_copilot_expects_no_copilot_rule(self) -> None:
+        bots = {"copilot": {"trigger": "explicit"}}
+        entry = {"name": "Fixture", "agentPolicy": {"review": {"bots": bots}}}
+        self.assertNotIn("copilot_code_review", self.types(entry, "release")["main"])
+        self.assertIn("copilot_code_review", self.types({"name": "Fixture"}, "release")["main"])
+
+    def test_the_operational_develop_payload_is_named(self) -> None:
+        source, _ = audit.expected_rulesets({"repos": []}, {"name": "Fixture"}, "operational")
         self.assertEqual(source, "repo-config/operational/develop.json")
-        types = self.types({"name": "Fixture", "pullRequestCheck": False}, "operational")
-        self.assertNotIn("required_status_checks", types["develop"])
-        self.assertIn("deletion", types["develop"])
 
 
 if __name__ == "__main__":

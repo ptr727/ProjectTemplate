@@ -2148,30 +2148,22 @@ def check_settings_general(run):
     return findings
 
 
-def expected_rulesets(entry, model):
-    """The develop and main payloads `entry` should carry, as repo-config/configure.sh composes them.
-
-    A registry pullRequestCheck of false drops the required status check rule from both.
-    That is how configure.sh applies them, since a repository that cannot post the check is
-    otherwise blocked for good.
-    """
+def expected_rulesets(registry_data, entry, model):
+    """The develop payload's path and both payloads `entry` should carry, as configure.sh composes them."""
     dev_payload = (
         "repo-config/operational/develop.json"
         if model == "operational"
         else "repo-config/develop.json"
     )
-    expect = {"develop": load(dev_payload), "main": load("repo-config/main.json")}
-    if entry.get("pullRequestCheck") is False:
-        for payload in expect.values():
-            payload["rules"] = [
-                r for r in payload.get("rules", []) if r.get("type") != "required_status_checks"
-            ]
-    return dev_payload, expect
+    policy = validate.agent_policy_module()
+    rendered = policy.render(registry_data, entry["name"], model)
+    sources = {"develop": ROOT / dev_payload, "main": ROOT / "repo-config/main.json"}
+    return dev_payload, policy.rulesets(registry_data, entry["name"], rendered, sources)
 
 
 def check_rulesets_payload(run):
     model = workflow_model_of(run.entry, run.spec["registry"].get("defaults", {}))
-    dev_payload, expect = expected_rulesets(run.entry, model)
+    dev_payload, expect = expected_rulesets(run.spec["registry"], run.entry, model)
     # A repo with no rulesets returns an empty list, so a 404 is a failed call and raises.
     live_list = gh(f"repos/{run.slug}/rulesets?per_page=100") or []
     findings = []

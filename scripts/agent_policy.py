@@ -8,11 +8,12 @@
 The registry is the one place a repository's review policy is chosen.
 This script renders `.github/agent-policy.json` from `spec/agent-policy.default.json` plus the entry's optional `agentPolicy` override.
 It derives the settings the bots read from their own files and the Copilot ruleset rule from that render.
+`rulesets` composes the branch ruleset payloads from that rule and the entry's pullRequestCheck.
 `write` puts the three files into a checkout and never stages or commits.
 `check` reads them back from the repository at a ref and reports drift.
 
 The libraries behind `write` and `check` are imported inside those subcommands.
-So `render` and `facts` run, and spec/validate.py imports `render`, with the standard library alone.
+So `render`, `facts` and `rulesets` run, and spec/validate.py imports `render`, with the standard library alone.
 
 Exit codes: 0 ok, 1 a refusal, drift or a missing file, 2 the command could not run.
 `check` exits 2 when any file could not be read, after printing every file's line.
@@ -154,6 +155,31 @@ def facts(rendered: dict[str, Any]) -> dict[str, Any]:
         },
         "qodo": {"disable_auto_feedback": parsed.bot("qodo").trigger != "auto"},
     }
+
+
+def rulesets(
+    registry_data: Any, name: str, rendered: dict[str, Any], sources: dict[str, Path]
+) -> dict[str, dict[str, Any]]:
+    """Each branch's ruleset payload in `sources`, composed for the repository `name`.
+
+    The Copilot rule follows the render, taking its shape from the `main` source.
+    The required status check rule is dropped where the entry's pullRequestCheck is false.
+    repo-config/configure.sh applies and checks these, and spec/audit.py expects them.
+    """
+    payloads = {
+        branch: json.loads(path.read_text(encoding="utf-8")) for branch, path in sources.items()
+    }
+    copilot = [r for r in payloads["main"]["rules"] if r.get("type") == "copilot_code_review"]
+    wanted = facts(rendered)["copilotRule"]
+    keep_check = entry_for(registry_data, name).get("pullRequestCheck") is not False
+    for branch, payload in payloads.items():
+        rules = [r for r in payload["rules"] if r.get("type") != "copilot_code_review"]
+        if wanted[branch]:
+            rules += copilot
+        if not keep_check:
+            rules = [r for r in rules if r.get("type") != "required_status_checks"]
+        payload["rules"] = rules
+    return payloads
 
 
 def load_registry(path: str) -> Any:
@@ -512,6 +538,7 @@ def build_parser() -> argparse.ArgumentParser:
     for cmd, text in (
         ("render", "print .github/agent-policy.json"),
         ("facts", "print the bot-side settings derived from the render"),
+        ("rulesets", "write the main and develop ruleset payloads composed for the repository"),
         ("write", "write the three files into a checkout, never staging or committing"),
         ("check", "compare the repository's files at a ref with the render"),
     ):
@@ -528,15 +555,26 @@ def build_parser() -> argparse.ArgumentParser:
             )
         if cmd == "check":
             one.add_argument("--ref", required=True, help="the branch or commit to read")
+        if cmd == "rulesets":
+            one.add_argument("--main-source", required=True, help="the main ruleset payload")
+            one.add_argument("--develop-source", required=True, help="the develop ruleset payload")
+            one.add_argument("--out-dir", required=True, help="where main.json and develop.json go")
     return parser
 
 
 def run(args: argparse.Namespace) -> int:
-    rendered = render(load_registry(args.registry), args.name, args.model)
+    registry_data = load_registry(args.registry)
+    rendered = render(registry_data, args.name, args.model)
     if args.command == "render":
         sys.stdout.write(serialize(rendered))
     elif args.command == "facts":
         print(json.dumps(facts(rendered)))
+    elif args.command == "rulesets":
+        sources = {"main": Path(args.main_source), "develop": Path(args.develop_source)}
+        for branch, payload in rulesets(registry_data, args.name, rendered, sources).items():
+            (Path(args.out_dir) / f"{branch}.json").write_text(
+                json.dumps(payload, indent=4) + "\n", encoding="utf-8"
+            )
     elif args.command == "write":
         for line in write(rendered, Path(args.checkout), args.repo, args.dry_run):
             print(line)
