@@ -88,6 +88,10 @@
                 "workflowModel": { "$ref": "#/$defs/workflowModel" },
                 "lineEndings": { "$ref": "#/$defs/lineEndings" },
                 "hasDevelop": { "type": "boolean" },
+                "pullRequestCheck": {
+                    "type": "boolean",
+                    "$comment": "Whether the repository's pull request workflow posts the required check `Check pull request workflow status job`. Absent means true. false records a repository with no pull request workflow, or one whose aggregator posts another name. scripts/agent_policy.py rulesets then drops the required status check rule from each ruleset that carries one, which would otherwise block every pull request for good. repo-config/configure.sh applies and checks that composition, and spec/audit.py expects it. Once the repository carries a conformant test-pull-request.yml, this field is removed and a fresh configure.sh apply writes the rule back."
+                },
                 "agentPolicy": {
                     "type": "object",
                     "additionalProperties": false,

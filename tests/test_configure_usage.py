@@ -107,6 +107,7 @@ class UsageCase(unittest.TestCase):
         ):
             with self.subTest(args=args):
                 result, calls = self.run_configure(*args)
+                self.assertNotIn("Could not compose", result.stderr)
                 self.assertNotEqual(calls, "", result.stderr)
 
 
