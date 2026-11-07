@@ -269,7 +269,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), with no release pipeline. Its validate hook runs the kicad-cli ERC and DRC checks.", "The custom parts are vendored in a project-local lib/ copied from the KiCadLibrary 2.0.0 release, so the design needs no external part library."]
+            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), with no release pipeline.", "Its project-local lib/ is a frozen copy of the KiCadLibrary 2.0.0 release parts, which later KiCadLibrary releases do not update."]
         },
         {
             "name": "PhotoCleaner",
