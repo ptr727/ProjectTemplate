@@ -18,11 +18,11 @@ from pathlib import Path
 
 from test_configure_archived import lift, run_bash
 
-MODEL_RESOLUTION = lift(r'(if \[ -z "\$model" \]; then\n.*?\nesac\n)(?=main_ruleset=)')
+MODEL_RESOLUTION = lift(r'(if \[ -z "\$model" \]; then\n.*?\nesac\n)(?=settings_file=)')
 
 
 class WorkflowModelCase(unittest.TestCase):
-    """With no --model, the registry's model selects the develop ruleset."""
+    """With no --model, the registry's model is the one resolved."""
 
     def run_region(self, tmp: str, registry_text: str, crlf: bool) -> tuple[int, str, str]:
         registry = Path(tmp) / "repos.json"
@@ -45,7 +45,7 @@ class WorkflowModelCase(unittest.TestCase):
             path_line = f'PATH={shlex.quote(str(bin_dir))}:"$PATH"'
         script = (
             f"{path_line}\nregistry={shlex.quote(str(registry))}\nname=Fixture\n"
-            f"model=''\nscript_dir=/x\n{MODEL_RESOLUTION}echo \"$develop_ruleset\"\n"
+            f"model=''\nscript_dir=/x\n{MODEL_RESOLUTION}echo \"$model\"\n"
         )
         result = run_bash(script, "jq", "sed", "awk")
         return result.returncode, result.stdout, result.stderr
@@ -58,13 +58,13 @@ class WorkflowModelCase(unittest.TestCase):
             code, out, err = self.run_region(tmp, self.entry(), True)
             self.assertEqual(code, 0, err)
             self.assertNotIn("Unknown workflow model", err)
-            self.assertEqual(out, "/x/operational/develop.json\n")
+            self.assertEqual(out, "operational\n")
 
     def test_plain_lf_output_resolves_the_same(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             code, out, err = self.run_region(tmp, self.entry(), False)
             self.assertEqual(code, 0, err)
-            self.assertEqual(out, "/x/operational/develop.json\n")
+            self.assertEqual(out, "operational\n")
 
     def test_a_registry_that_will_not_parse_fails_with_the_guards_own_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

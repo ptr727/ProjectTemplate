@@ -21,13 +21,15 @@
 # It writes that file plus the CodeRabbit and Qodo settings derived from it into the checkout, and never stages or commits.
 # The caller commits the files through the ordinary pull request flow.
 # The same render decides whether each ruleset carries a Copilot code review rule, so a repo whose policy has no automatic Copilot gets no rule.
+# The registry's pullRequestCheck decides whether each ruleset requires the pull request status check, so a repo whose workflow cannot post it gets no rule.
 # Deriving the policy needs only Python, while writing the files and checking them run under uv.
 # The checkout is planned before the first API write, so a checkout that refuses stops the run with nothing applied.
 # Without --checkout apply writes no policy files and says so.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
 # The check mode is the read-only inverse, and it verifies the same five groups apply writes.
-# The ruleset and static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
+# The static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
+# The ruleset assertions compare against the payloads composed for the repo, the same ones apply writes.
 # A ruleset is checked on enforcement, on the rule-type set compared in both directions, and on the whole parameters object of every parameterized rule.
 # Comparing the parameters object rather than named fields means a parameter added to a payload is audited with no change here.
 # Both directions matter, since a rule added live that the payload never declared is drift this catches.
@@ -192,20 +194,18 @@ if [ -z "$model" ]; then
     fi
 fi
 case "$model" in
-release) develop_ruleset="$script_dir/develop.json" ;;
-operational) develop_ruleset="$script_dir/operational/develop.json" ;;
+release | operational) ;;
 *)
     echo "Unknown workflow model '$model' (expected release or operational)." >&2
     exit 1
     ;;
 esac
-main_ruleset="$script_dir/main.json"
 settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
 
 # ----- Resolve a Python interpreter (shared by apply and check) -----
-# The policy facts and the description both come from plain Python scripts, so neither needs uv.
+# The ruleset composition and the description both come from plain Python scripts, so neither needs uv.
 # The name python3 is not universal.
 # Native Windows can register a Microsoft Store stub under that name that resolves on PATH but fails when actually run.
 # So this runs it rather than just checking PATH (docs/host-setup.md).
@@ -224,41 +224,21 @@ else
     exit 1
 fi
 
-# ----- Derive the agent policy facts and compose the ruleset payloads (shared by apply and check) -----
-# The Copilot code review rule is the one rule whose presence follows the repo's rendered policy rather than the fleet payload.
-# The file main.json stays the template for that rule's parameters.
-# The facts read needs only the interpreter above, since that path of the script imports nothing outside the standard library.
+# ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
+# The Copilot rule follows the repo's rendered policy, and the required status check rule follows the registry's pullRequestCheck.
+# The file main.json stays the template for the Copilot rule's parameters.
+# The compose needs only the interpreter above, since that path of the script imports nothing outside the standard library.
 # A failed render stops here, before any write.
-main_source="$main_ruleset"
 agent_policy="$script_dir/../scripts/agent_policy.py"
 agent_policy_args=(--registry "$registry" --name "$name" --model "$model")
-if ! policy_facts="$("${py_cmd[@]}" "$agent_policy" facts "${agent_policy_args[@]}")"; then
-    echo "Could not derive the agent policy for $repo. Aborting before any write." >&2
-    exit 1
-fi
-copilot_main="$(jq -r '.copilotRule.main' <<<"$policy_facts" | sed $'s/\r$//')"
-copilot_develop="$(jq -r '.copilotRule.develop' <<<"$policy_facts" | sed $'s/\r$//')"
 compose_dir="$(mktemp -d)"
 trap 'rm -rf "$compose_dir"' EXIT
-compose_ruleset() { # source-payload copilot-rule-wanted(true|false) output-file
-    local src="$1" want="$2" out="$3"
-    if [ ! -e "$src" ]; then
-        echo "Required payload $src not found. Aborting to avoid a partially-applied configuration." >&2
-        exit 1
-    fi
-    if ! jq --argjson want "$want" --slurpfile template "$main_source" '
-        .rules |= map(select(.type != "copilot_code_review"))
-        | if $want then .rules += [$template[0].rules[] | select(.type == "copilot_code_review")] else . end
-    ' "$src" >"$out"; then
-        echo "Could not compose the ruleset payload from $src. Aborting." >&2
-        exit 1
-    fi
-}
+if ! "${py_cmd[@]}" "$agent_policy" rulesets "${agent_policy_args[@]}" --out-dir "$compose_dir"; then
+    echo "Could not compose the ruleset payloads for $repo. Aborting before any write." >&2
+    exit 1
+fi
 main_ruleset="$compose_dir/main.json"
-compose_ruleset "$main_source" "$copilot_main" "$main_ruleset"
-develop_composed="$compose_dir/develop.json"
-compose_ruleset "$develop_ruleset" "$copilot_develop" "$develop_composed"
-develop_ruleset="$develop_composed"
+develop_ruleset="$compose_dir/develop.json"
 
 # ----- Resolve the declared description (optional, shared by apply and check) -----
 # Absence keeps the About panel following the README.

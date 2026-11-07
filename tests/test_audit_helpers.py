@@ -5549,5 +5549,35 @@ class RegistryCase(unittest.TestCase):
         self.assertEqual(audit.registered_check("no.such-check"), {})
 
 
+class ExpectedRulesetsCase(unittest.TestCase):
+    """The audit expects the rulesets repo-config/configure.sh composes, through the same function."""
+
+    @staticmethod
+    def types(entry: dict[str, Any], model: str) -> dict[str, list[str]]:
+        _, expect = audit.expected_rulesets({"repos": [entry]}, entry, model)
+        return {name: [r["type"] for r in payload["rules"]] for name, payload in expect.items()}
+
+    def test_a_declared_false_drops_the_check_from_both(self) -> None:
+        kept = self.types({"name": "Fixture"}, "release")
+        dropped = self.types({"name": "Fixture", "pullRequestCheck": False}, "release")
+        for name in ("develop", "main"):
+            with self.subTest(ruleset=name):
+                self.assertIn("required_status_checks", kept[name])
+                self.assertEqual(
+                    dropped[name], [t for t in kept[name] if t != "required_status_checks"]
+                )
+
+    def test_a_policy_with_no_automatic_copilot_expects_no_copilot_rule(self) -> None:
+        bots = {"copilot": {"trigger": "explicit"}}
+        entry = {"name": "Fixture", "agentPolicy": {"review": {"bots": bots}}}
+        self.assertNotIn("copilot_code_review", self.types(entry, "release")["main"])
+        self.assertIn("copilot_code_review", self.types({"name": "Fixture"}, "release")["main"])
+
+    def test_each_source_payload_is_named(self) -> None:
+        sources, _ = audit.expected_rulesets({"repos": []}, {"name": "Fixture"}, "operational")
+        self.assertEqual(sources["develop"], "repo-config/operational/develop.json")
+        self.assertEqual(sources["main"], "repo-config/main.json")
+
+
 if __name__ == "__main__":
     unittest.main()

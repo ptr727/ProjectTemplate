@@ -2148,14 +2148,18 @@ def check_settings_general(run):
     return findings
 
 
+def expected_rulesets(registry_data, entry, model):
+    """Each branch's source payload path and the payload `entry` should carry, as configure.sh composes it."""
+    policy = validate.agent_policy_module()
+    config = ROOT / "repo-config"
+    sources = policy.ruleset_sources(model, config)
+    paths = {branch: path.relative_to(ROOT).as_posix() for branch, path in sources.items()}
+    return paths, policy.rulesets(registry_data, entry["name"], model, config)
+
+
 def check_rulesets_payload(run):
     model = workflow_model_of(run.entry, run.spec["registry"].get("defaults", {}))
-    dev_payload = (
-        "repo-config/operational/develop.json"
-        if model == "operational"
-        else "repo-config/develop.json"
-    )
-    expect = {"develop": load(dev_payload), "main": load("repo-config/main.json")}
+    sources, expect = expected_rulesets(run.spec["registry"], run.entry, model)
     # A repo with no rulesets returns an empty list, so a 404 is a failed call and raises.
     live_list = gh(f"repos/{run.slug}/rulesets?per_page=100") or []
     findings = []
@@ -2170,8 +2174,13 @@ def check_rulesets_payload(run):
             )
         live_rs = gh(f"repos/{run.slug}/rulesets/{ids[0]}")
         if normalize_ruleset(live_rs) != normalize_ruleset(payload):
-            source = dev_payload if name == "develop" else "repo-config/main.json"
-            findings.append(("DEFECT", f"ruleset: {name} diverges from {source} (normalized diff)"))
+            source = sources[name]
+            findings.append(
+                (
+                    "DEFECT",
+                    f"ruleset: {name} diverges from the payload configure.sh composes from {source} (normalized diff)",
+                )
+            )
     for stray in [r["name"] for r in live_list if r["name"] not in expect]:
         findings.append(("DRIFT", f"ruleset: stray ruleset '{stray}'"))
     return findings

@@ -32,7 +32,7 @@ Remove all classic branch-protection rules and stray rulesets. Run `configure.sh
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout. The command asserts every applied ruleset, setting, label, security feature, and the fleet project link, plus the deployment environments described below. It exits non-zero on drift (the ruleset and settings checks are driven by the committed payloads, so they stay repo-agnostic). Or import each ruleset by hand with `gh api -X POST repos/<owner>/<repo>/rulesets --input repo-config/<name>.json` (operational repos use `operational/develop.json` for `develop`). `gh ruleset` is read-only, so creation goes through `gh api`. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout. The command asserts every applied ruleset, setting, label, security feature, and the fleet project link, plus the deployment environments described below. It exits non-zero on drift (the settings checks are driven by the committed payloads, and the ruleset checks by the payloads composed for the repo). Or import each ruleset by hand from the payloads `configure.sh` composes for the repo. Write them with `uv run --no-project --script scripts/agent_policy.py rulesets --registry registry/repos.json --name <repo> --model <release|operational> --out-dir <dir>`. Then run `gh api -X POST repos/<owner>/<repo>/rulesets --input <dir>/<name>.json` for each of `develop` and `main`. `gh ruleset` is read-only, so creation goes through `gh api`. [`repo-config/README.md` "Rulesets"][repo-config-readme-rulesets] says what the composition changes. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
 ## Deployment Environments
 
@@ -50,11 +50,11 @@ A repository declaring no environment has nothing asserted against it, though th
 
 ## Regenerating the Payloads
 
-To change the canonical rulesets, edit the live rulesets (fleet-wide changes happen at the hub), then regenerate the committed files from the current repo:
+To change the canonical rulesets, edit the live rulesets of a fleet repository carrying the full payloads, then regenerate the committed files from it. Its policy places the Copilot rule on `main`, and its registry entry does not declare `pullRequestCheck: false`. A repository failing either test regenerates files missing the Copilot rule or the required status check. The hub fails the first wherever its own policy drops the Copilot rule. `configure.sh` then refuses to compose for any repository wanting the rule the files lost. Set `repo` to the chosen repository:
 
 ```sh
 model=release # Set to release or operational for the payload set being regenerated.
-repo="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+repo="<owner>/<repo>" # A repository whose live rulesets are the full payloads, per the paragraph above.
 # Paginate so a name match on a later page is never missed - the same trap configure.sh guards against.
 # --paginate with --jq '.[]' emits one JSON object per ruleset across all pages; jq -s re-assembles them
 # into the single array the selections below expect.
@@ -81,3 +81,4 @@ done
 <!-- Repo -->
 
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[repo-config-readme-rulesets]: ../repo-config/README.md#rulesets
