@@ -356,6 +356,18 @@
             "url": "https://github.com/ptr727/GoogleTo1Password",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
+        },
+        {
+            "name": "coderabbit",
+            "url": "https://github.com/ptr727/coderabbit",
+            "status": "excluded",
+            "exclusionReason": "CodeRabbit's central configuration for the owner, not a fleet project. Its whole content is written by scripts/central_config.py, which docs/repo-config.md \"Central Bot Settings\" describes, so it owes no fleet baseline."
+        },
+        {
+            "name": "pr-agent-settings",
+            "url": "https://github.com/ptr727/pr-agent-settings",
+            "status": "excluded",
+            "exclusionReason": "Qodo's central configuration for the owner, not a fleet project. Its whole content is written by scripts/central_config.py, which docs/repo-config.md \"Central Bot Settings\" describes, so it owes no fleet baseline."
         }
     ]
 }
