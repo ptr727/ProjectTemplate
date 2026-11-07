@@ -86,6 +86,13 @@ BEFORE_FLAG = {
     ),
     "repo-config/configure.sh": ("check",),
     "scripts/canonical_review.py": ("list",),
+    "scripts/central_config.py": (
+        "precondition",
+        "--repo",
+        "Example/coderabbit",
+        "--registry",
+        "registry/repos.json",
+    ),
     "scripts/carry.py": ("check", "Example", "--target", "."),
     "scripts/handoff.py": ("current", "--repo", "Example/Example"),
     "scripts/local_review.py": ("status",),

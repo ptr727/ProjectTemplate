@@ -34,6 +34,26 @@ repo-config/configure.sh apply owner/repo release|operational
 
 Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout. The command asserts every applied ruleset, setting, label, security feature, and the fleet project link, plus the deployment environments described below. It exits non-zero on drift (the settings checks are driven by the committed payloads, and the ruleset checks by the payloads composed for the repo). Or import each ruleset by hand from the payloads `configure.sh` composes for the repo. Write them with `uv run --no-project --script scripts/agent_policy.py rulesets --registry registry/repos.json --name <repo> --model <release|operational> --out-dir <dir>`. Then run `gh api -X POST repos/<owner>/<repo>/rulesets --input <dir>/<name>.json` for each of `develop` and `main`. `gh ruleset` is read-only, so creation goes through `gh api`. [`repo-config/README.md` "Rulesets"][repo-config-readme-rulesets] says what the composition changes. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
 
+## Central Bot Settings
+
+CodeRabbit reads a repository named `coderabbit` under the owner as central configuration, and Qodo reads `pr-agent-settings`. Each holds a README and one config file that turns automatic review off account-wide. A repository carrying its own `.coderabbit.yaml` or `.pr_agent.toml` uses that file instead.
+
+`scripts/central_config.py` writes both repositories from the hub. The READMEs are hand-authored sources under `repo-config/central/`, and the config text is a constant in the script. The two settings repositories are not registry entries.
+
+A central file with automatic review off silences the bot on every repository that lacks its own file. So the config file exists only while every live registry repository under the owner carries its own file. That file sits on its default branch and sets the same key to a bool. That key is `reviews.auto_review.enabled` for CodeRabbit and `config.disable_auto_feedback` for Qodo. An earlier central file without this gate silenced CodeRabbit on the repositories that had no file of their own yet.
+
+- `precondition` prints `ok` or `FAIL` per repository. It exits 0 when the gate holds, 1 when it does not, and 2 when a read could not run.
+- `write` puts the README, and the config file only while the gate holds, into a checkout. It removes a config file the gate no longer allows and prints a `withheld` line naming the repositories that lack their own file. It never stages or commits, and `--dry-run` writes nothing.
+- `check` reads the settings repository at a ref, `main` by default, and reports drift from what `write` produces. A config file present while the gate fails is drift.
+
+```sh
+uv run --no-project --script scripts/central_config.py precondition --repo ptr727/coderabbit --registry registry/repos.json
+uv run --no-project --script scripts/central_config.py write --repo ptr727/coderabbit --registry registry/repos.json --checkout <checkout of ptr727/coderabbit>
+uv run --no-project --script scripts/central_config.py check --repo ptr727/pr-agent-settings --registry registry/repos.json --ref main
+```
+
+Carrying the result into a settings repository is a pull request there, and it needs the maintainer's go-ahead.
+
 ## Deployment Environments
 
 `check` asserts that every environment the registry entry's `environments` declares exists and carries the declared deployment-branch policy, and `apply` writes none. The asymmetry is deliberate. An environment's secrets and variables are credentials that exist nowhere in the hub. So an `apply` could create the environment and set its policy and still leave it unable to publish, while reporting success. Their names are enumerable through the API, and their values in the case of a variable. But no tool here queries those stores. That is a choice about what this script owns rather than a limit the API imposes. The policy is checkable on its own and worth checking, because it decides which refs may deploy at all. On an OIDC publish that is half the gate: a ref the policy excludes mints no token.
