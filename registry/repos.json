@@ -98,6 +98,14 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
+            "agentPolicy": {
+                "review": {
+                    "bots": {
+                        "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
+                        "coderabbit": { "trigger": "explicit", "when": "after-checks", "rounds": "once" }
+                    }
+                }
+            },
             "driftNotes": [
                 "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs), private.",
                 "Source-release repo: source-only, no PyPI - a tag plus a source zip on manual dispatch (releaseTrigger dispatch-only).",
@@ -120,6 +128,14 @@
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
             "pythonDirectories": ["RegressionTests"],
+            "agentPolicy": {
+                "review": {
+                    "bots": {
+                        "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
+                        "coderabbit": { "trigger": "explicit", "when": "after-checks", "rounds": "once" }
+                    }
+                }
+            },
             "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config, PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
@@ -174,6 +190,14 @@
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
             "pythonDirectories": ["CloudInit", "Cloudflare", "MutationSweep", "Notify", "Trackers", "USBDev", "VPS", "scripts"],
+            "agentPolicy": {
+                "review": {
+                    "bots": {
+                        "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
+                        "coderabbit": { "trigger": "explicit", "when": "after-checks", "rounds": "once" }
+                    }
+                }
+            },
             "driftNotes": ["Maintainer home-lab code repo (docker-compose stacks, host install and lifecycle scripts, Firewalla configs), installed onto the Proxmox host and the VPS rather than edited in place, so it runs the release model. It is Linux-consumed, so lineEndings lf.", "Reclassified from operational to release on 2026-09-24 (HomeAutomation-Config #425). The -Config suffix in its name predates the reclassification.", "Declares python since 2026-10-27 (ProjectTemplate #2255), after its CI came to gate eight Python directories through the hub validator. The maintainer reversed the earlier decision, on HomeAutomation-Config #438, to keep python undeclared.", "Renamed from HomeAutomation for fleet naming consistency (config repos are *-Config). The Vantage controller config is split out to its own Vantage-Config repo (lf default, only `.dc` pinned CRLF), not carried here, and the legacy Vantage/ subtree is stripped."]
         },
         {
@@ -236,16 +260,16 @@
         {
             "name": "DevKitCIoT",
             "url": "https://github.com/ptr727/DevKitCIoT",
+            "description": "ESP32-DevKitC IoT controller board with a PSU, AC relay, dry contact inputs, and temperature sensor.",
             "status": "cataloged",
             "types": ["eda"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
-            "pullRequestCheck": false,
             "publish": [],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["EDA/KiCad PCB design + fabrication data (gerbers/BOM), with no CI on any branch, no release pipeline.", "Depends on KiCadLibrary as an upstream part source (manual git clone).", "Branch hygiene: develop and main have diverged (not forward-only), and feature/kicad10-upgrade is merged (PR#4) but retained for the in-progress KiCad 10 migration. A stale THT branch was removed in the 2026-07 sweep."]
+            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), with no release pipeline.", "Its project-local lib/ is a frozen copy of the KiCadLibrary 2.0.0 release parts, which later KiCadLibrary releases do not update."]
         },
         {
             "name": "PhotoCleaner",
