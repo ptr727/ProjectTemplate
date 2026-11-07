@@ -146,6 +146,35 @@ class PreconditionCase(unittest.TestCase):
         results = self.holds(fleet_files(), data)
         self.assertEqual(len(results), 2)
 
+    def test_excluded_entries_are_ignored_and_a_dot_git_url_reads(self) -> None:
+        data = {
+            "repos": [
+                {"name": "Widget", "url": "https://github.com/Acme/Widget", "status": "cataloged"},
+                {
+                    "name": "Settings",
+                    "url": "https://github.com/Acme/Settings",
+                    "status": "excluded",
+                },
+                {
+                    "name": "Gadget",
+                    "url": "https://github.com/Acme/Gadget.git",
+                    "status": "cataloged",
+                },
+            ]
+        }
+        results = self.holds(fleet_files(), data)
+        self.assertEqual([r.ok for r in results], [True, True])
+
+    def test_an_owner_with_no_live_repository_refuses(self) -> None:
+        empty: dict[str, object] = {"repos": []}
+        for data in (
+            registry(("Other/Widget", "cataloged")),
+            registry(("Acme/Old", "archived"), ("Acme/Settings", "excluded")),
+            empty,
+        ):
+            with self.subTest(data=data), self.assertRaises(central_config.Refusal):
+                self.holds(fleet_files(), data)
+
     def test_the_qodo_key_must_be_a_bool_too(self) -> None:
         gh = fleet_files(toml_text="[config]\ndisable_auto_feedback = 1\n")
         results = central_config.precondition(QODO, FLEET, gh)

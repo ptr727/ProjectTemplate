@@ -38,6 +38,7 @@ from agent_policy import (
     gh_reader,
     gh_rest,
     keep_endings,
+    lf_text,
     load_registry,
     verify_checkout,
 )
@@ -87,24 +88,32 @@ def settings_for(repo: str) -> tuple[str, str, Settings]:
 def source_readme(name: str) -> str:
     """The hand-authored README for the settings repository, as LF text."""
     path = CENTRAL_DIR / name / README_PATH
-    text = current_text(path)
+    text = lf_text(path)
     if text is None:
         raise Refusal(f"{path} is missing")
-    return text.replace("\r\n", "\n")
+    return text
 
 
 def fleet_repos(registry_data: Any, owner: str) -> list[str]:
-    """The `owner/name` of every live registry repository under `owner`."""
+    """The `owner/name` of every live registry repository under `owner`, refusing where there is none.
+
+    An archived or excluded entry is skipped, since no review runs there for a central file to silence.
+    Every other status counts, so a status this script does not know keeps the gate shut rather than open.
+    An empty list would hold the gate vacuously, which is how a mistyped owner would land the central file.
+    """
     if not isinstance(registry_data, dict):
         raise Refusal("the registry file is absent or not an object")
     found = []
     for entry in registry_data.get("repos", []):
-        if not isinstance(entry, dict) or entry.get("status") == "archived":
+        if not isinstance(entry, dict) or entry.get("status") in ("archived", "excluded"):
             continue
-        parts = str(entry.get("url", "")).rstrip("/").split("/")
-        if len(parts) < 2 or parts[-2].lower() != owner.lower():
-            continue
-        found.append(f"{parts[-2]}/{parts[-1]}")
+        match = gh_graphql.ORIGIN.search(str(entry.get("url", "")))
+        if match and match.group(1).lower() == owner.lower():
+            found.append(f"{match.group(1)}/{match.group(2)}")
+    if not found:
+        raise Refusal(
+            f"the registry lists no live repository under {owner}, so the gate measures nothing"
+        )
     return found
 
 

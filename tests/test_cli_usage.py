@@ -89,7 +89,7 @@ BEFORE_FLAG = {
     "scripts/central_config.py": (
         "precondition",
         "--repo",
-        "Example/coderabbit",
+        "ptr727/coderabbit",
         "--registry",
         "registry/repos.json",
     ),
