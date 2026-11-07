@@ -6,8 +6,9 @@
 """Write and check the central bot-settings repositories from the hub.
 
 CodeRabbit reads a repository named `coderabbit` under the owner as central configuration, and Qodo reads `pr-agent-settings`.
-A repository carrying its own file ignores the central one, so a central file is safe only once every fleet repository carries its own.
-The central file therefore exists only while every live registry repository under the owner sets that key in its own file on its default branch.
+A repository's own file wins over the central one: CodeRabbit ignores the central file, and Qodo overrides each key the own file sets.
+The central file turns automatic review off, so it is safe only once every fleet repository sets that key itself.
+So it exists only while every live registry repository under the owner sets the key in its own file on its default branch.
 `precondition` reports that gate, `write` puts the settings repository's files into a checkout, and `check` reads them back at a ref.
 The README comes from `repo-config/central/<name>/README.md`, and the config text is a constant in this file.
 
@@ -101,7 +102,7 @@ def source_readme(name: str) -> str:
 def fleet_repos(registry_data: Any, owner: str) -> list[str]:
     """The `owner/name` of every live registry repository under `owner`, refusing where there is none.
 
-    An archived or excluded entry is skipped, since no review runs there for a central file to silence.
+    An archived or excluded entry is skipped, since it sits outside the fleet, and the account-wide auto-off default is meant to reach it.
     Every other status counts, so a status this script does not know keeps the gate shut rather than open.
     An entry naming no readable url refuses, since skipping it would drop a repository from the gate.
     An empty list would hold the gate vacuously, which is how a mistyped owner would land the central file.
