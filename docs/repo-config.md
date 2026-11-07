@@ -45,7 +45,7 @@ A central file with automatic review off silences the bot on every repository th
 
 - `precondition` prints `ok` or `FAIL` per repository. It exits 0 when the gate holds, 1 when it does not, and 2 when a read could not run.
 - `write` puts the README, and the config file only while the gate holds, into a checkout. It removes a config file the gate no longer allows and prints a `withheld` line naming the repositories that lack their own file. It never stages or commits, and `--dry-run` writes nothing.
-- `check` reads the settings repository at a ref, `main` by default, and reports drift from what `write` produces. A config file present while the gate fails is drift.
+- `check` reads the settings repository at a ref, `main` by default, and reports drift from what `write` produces. A config file present while the gate fails is drift, and one withheld while the gate fails is not.
 
 ```sh
 uv run --no-project --script scripts/central_config.py precondition --repo ptr727/coderabbit --registry registry/repos.json

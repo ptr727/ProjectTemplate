@@ -373,6 +373,19 @@ class MainCase(unittest.TestCase):
         gh.broken.add("Acme/Widget")
         self.assertEqual(self.invoke(self.argv("precondition"), gh)[0], 2)
 
+    def test_write_and_check_exit_0_on_a_withheld_config(self) -> None:
+        gh = fleet_files(yaml_text=None)
+        gh.files["Acme/coderabbit"] = {"README.md": central_config.source_readme("coderabbit")}
+        code, out = self.invoke(self.argv("check"), gh)
+        self.assertEqual(code, 0, out)
+        self.assertIn("is withheld while", out)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = make_checkout(tmp, "https://github.com/Acme/coderabbit.git")
+            argv = [*self.argv("write"), "--checkout", str(checkout)]
+            code, out = self.invoke(argv, gh)
+        self.assertEqual(code, 0, out)
+        self.assertIn("withheld .coderabbit.yaml", out)
+
     def test_a_refusal_exits_1_and_a_missing_registry_too(self) -> None:
         self.assertEqual(self.invoke(self.argv("precondition", "Acme/Widget"), fleet_files())[0], 1)
         argv = [

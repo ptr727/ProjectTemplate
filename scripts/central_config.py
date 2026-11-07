@@ -14,7 +14,8 @@ The README comes from `repo-config/central/<name>/README.md`, and the config tex
 The YAML parser is imported inside the code that needs it.
 
 Exit codes: 0 ok, 1 a refusal, a failed precondition or drift, 2 a read or the command could not run.
-`write` exits 0 whether it wrote the config or withheld it, since withholding is the gate working.
+Only `precondition` exits 1 on a failed gate, since a withheld config is the gate working.
+So `write` exits 0 whether it wrote the config or withheld it, and `check` reads a withheld config as no drift.
 """
 
 from __future__ import annotations
@@ -269,7 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="central_config.py",
         description="Write and check the central CodeRabbit and Qodo settings repositories.",
         epilog="Exit codes: 0 ok, 1 a refusal, a failed precondition or drift, 2 a read or the command could not run. "
-        "write exits 0 whether it wrote the config or withheld it.",
+        "Only precondition exits 1 on a failed gate. A withheld config is no drift to check, and write exits 0 on it.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     for cmd, text in (
