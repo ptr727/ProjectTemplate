@@ -6,7 +6,7 @@ Qodo's organization-wide configuration for the `ptr727` repositories.
 
 [Qodo][qodo-link] reads a repository named `pr-agent-settings` under an organization or account as that owner's central configuration. It reads `.pr_agent.toml` from this repository's default branch for every repository under the owner. A repository carrying its own `.pr_agent.toml` on its default branch overrides each key that file sets, and inherits the rest from here.
 
-A fleet repository chooses which reviewers run, on which branches, and when, in its own `.github/agent-policy.json`. That file is rendered from the [ProjectTemplate][projecttemplate-link] registry, together with the repository's `.coderabbit.yaml` and `.pr_agent.toml`. Every rendered file sets `config.disable_auto_feedback`. So once present, that key here reaches only a repository the registry renders no files for, such as a new one. It turns automatic feedback off, so it starts no review nobody asked for.
+A fleet repository chooses which reviewers run, on which branches, and when, in its own `.github/agent-policy.json`. That file is rendered from the [ProjectTemplate][projecttemplate-link] registry, together with the repository's `.coderabbit.yaml` and `.pr_agent.toml`. Every rendered `.pr_agent.toml` sets `config.disable_auto_feedback`. So once present, that key here reaches only a repository the registry renders no files for, such as a new one. It turns automatic feedback off, so it starts no review nobody asked for.
 
 ## Status
 
