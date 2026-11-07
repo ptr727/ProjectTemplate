@@ -102,8 +102,7 @@
                 "review": {
                     "bots": {
                         "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
-                        "coderabbit": { "trigger": "off" },
-                        "qodo": { "trigger": "off" }
+                        "coderabbit": { "trigger": "explicit", "when": "after-checks", "rounds": "once" }
                     }
                 }
             },
@@ -195,8 +194,7 @@
                 "review": {
                     "bots": {
                         "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
-                        "coderabbit": { "trigger": "off" },
-                        "qodo": { "trigger": "off" }
+                        "coderabbit": { "trigger": "explicit", "when": "after-checks", "rounds": "once" }
                     }
                 }
             },
