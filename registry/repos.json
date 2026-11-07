@@ -98,6 +98,15 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
+            "agentPolicy": {
+                "review": {
+                    "bots": {
+                        "copilot": { "trigger": "explicit", "when": "after-checks", "maxRounds": 3 },
+                        "coderabbit": { "trigger": "off" },
+                        "qodo": { "trigger": "off" }
+                    }
+                }
+            },
             "driftNotes": [
                 "Personal Python toolkit (uv/pyproject, src/ + tests/ + analysis/data/docs), private.",
                 "Source-release repo: source-only, no PyPI - a tag plus a source zip on manual dispatch (releaseTrigger dispatch-only).",
