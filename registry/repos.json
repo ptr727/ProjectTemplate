@@ -245,7 +245,7 @@
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), with no release pipeline. develop carries the validate-task caller and a kicad-cli ERC/DRC validate hook, which main gets at the pending promotion.", "Custom parts are vendored in a project-local lib/ copied from the KiCadLibrary 2.0.0 release, so there is no external part library dependency.", "Branch hygiene: develop carries the hub standup and main does not yet. The promotion resolves the diverged KiCad files on a branch cut from main."]
+            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), with no release pipeline. develop carries the validate-task caller and a kicad-cli ERC/DRC validate hook, which main gets at the pending promotion.", "develop vendors the custom parts in a project-local lib/ copied from the KiCadLibrary 2.0.0 release, which main gets at the pending promotion. Until then main still documents the external part library.", "Branch hygiene: develop carries the hub standup and main does not yet. The promotion resolves the diverged KiCad files on a branch cut from main."]
         },
         {
             "name": "PhotoCleaner",
