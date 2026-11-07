@@ -240,12 +240,11 @@
             "types": ["eda"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
-            "pullRequestCheck": false,
             "publish": [],
             "requiredSecrets": [],
             "consumerModel": "pull",
             "releaseTrigger": "none",
-            "driftNotes": ["EDA/KiCad PCB design + fabrication data (gerbers/BOM), with no CI on any branch, no release pipeline.", "Depends on KiCadLibrary as an upstream part source (manual git clone).", "Branch hygiene: develop and main have diverged (not forward-only), and feature/kicad10-upgrade is merged (PR#4) but retained for the in-progress KiCad 10 migration. A stale THT branch was removed in the 2026-07 sweep."]
+            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM). CI is the validate-task caller plus a kicad-cli ERC/DRC validate hook, with no release pipeline.", "Custom parts are vendored in a project-local lib/ copied from the KiCadLibrary 2.0.0 release, so there is no external part library dependency.", "Branch hygiene: develop carries the hub standup and main does not yet. The promotion resolves the diverged KiCad files on a branch cut from main."]
         },
         {
             "name": "PhotoCleaner",
