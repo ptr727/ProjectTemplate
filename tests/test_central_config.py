@@ -131,6 +131,12 @@ class PreconditionCase(unittest.TestCase):
                 self.assertTrue(all(not r.ok and not r.unreadable for r in results))
                 self.assertIn("Acme/Widget", results[0].msg)
 
+    def test_an_unparseable_toml_fails_rather_than_raising(self) -> None:
+        gh = fleet_files(toml_text="[config\ndisable_auto_feedback = true\n")
+        results = central_config.precondition(QODO, FLEET, gh)
+        self.assertTrue(all(not r.ok and not r.unreadable for r in results))
+        self.assertIn("does not parse", results[0].msg)
+
     def test_one_failing_repo_fails_only_itself(self) -> None:
         gh = fleet_files()
         del gh.files["Acme/Gadget"][".coderabbit.yaml"]

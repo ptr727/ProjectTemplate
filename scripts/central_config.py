@@ -183,6 +183,7 @@ def lacking(results: list[Result]) -> str:
 
 
 def require_readable(results: list[Result]) -> None:
+    """Raise Unreadable naming each repository whose read did not answer."""
     unread = [r.msg for r in results if r.unreadable]
     if unread:
         raise Unreadable("; ".join(unread))
@@ -251,16 +252,19 @@ def check(
             msg = f"{settings.config} {'equals' if same else 'differs from'} the generated text"
             results.append(Result(same, msg))
         return results
-    who = f"{sum(not r.ok for r in pre)} repo(s) lack their own file: {lacking(pre)}"
+    count = sum(not r.ok for r in pre)
     if config is None:
+        who = f"{count} repo(s) lack their own file: {lacking(pre)}"
         results.append(Result(True, f"{settings.config} is withheld while {who}"))
     else:
+        who = f"{count} repo(s) lacking their own file ({lacking(pre)})"
         msg = f"{settings.config} is present and silences {settings.bot} on {who}, run write to remove it"
         results.append(Result(False, msg))
     return results
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The command line: three subcommands, each naming the settings repository and the registry."""
     parser = argparse.ArgumentParser(
         prog="central_config.py",
         description="Write and check the central CodeRabbit and Qodo settings repositories.",
@@ -293,6 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_command(args: argparse.Namespace, run: gh_graphql.Runner) -> int:
+    """Run the parsed subcommand, print its lines, and return its exit code."""
     registry_data = load_registry(args.registry)
     if args.command == "write":
         for line in write(args.repo, registry_data, Path(args.checkout), args.dry_run, run):
@@ -310,6 +315,7 @@ def run_command(args: argparse.Namespace, run: gh_graphql.Runner) -> int:
 
 
 def main(argv: list[str] | None = None, run: gh_graphql.Runner = gh_graphql.run_subprocess) -> int:
+    """Parse `argv`, run it through `run` for every gh call, and map a refusal or failure to its exit code."""
     args = build_parser().parse_args(argv)
     try:
         return run_command(args, run)
