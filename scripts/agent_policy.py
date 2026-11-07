@@ -411,12 +411,17 @@ def keep_endings(path: Path, text: str | None) -> str | None:
     return text.replace("\r\n", "\n").replace("\n", "\r\n")
 
 
-def write(rendered: dict[str, Any], checkout: Path, repo: str, dry_run: bool = False) -> list[str]:
-    """Write the three files into `checkout`, returning one status line per file.
+def apply(
+    checkout: Path,
+    steps: list[tuple[str, str | None]],
+    dry_run: bool = False,
+    remove: tuple[str, ...] = (),
+) -> list[str]:
+    """Write each planned text and delete each path in `remove`, returning one status line per path.
 
-    A dry run plans only and reports `would write` in place of `wrote`.
+    A planned text of None, or a removal whose path is already absent, reports `unchanged`.
+    A dry run reports `would write` or `would remove` and touches nothing.
     """
-    steps = plan(rendered, checkout, repo)
     lines = []
     for path, text in steps:
         if text is None:
@@ -428,7 +433,24 @@ def write(rendered: dict[str, Any], checkout: Path, repo: str, dry_run: bool = F
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8", newline="")
             lines.append(f"wrote {path}")
+    for path in remove:
+        target = checkout / path
+        if not target.exists():
+            lines.append(f"unchanged {path}")
+        elif dry_run:
+            lines.append(f"would remove {path}")
+        else:
+            target.unlink()
+            lines.append(f"removed {path}")
     return lines
+
+
+def write(rendered: dict[str, Any], checkout: Path, repo: str, dry_run: bool = False) -> list[str]:
+    """Write the three files into `checkout`, returning one status line per file.
+
+    A dry run plans only and reports `would write` in place of `wrote`.
+    """
+    return apply(checkout, plan(rendered, checkout, repo), dry_run)
 
 
 def gh_rest(

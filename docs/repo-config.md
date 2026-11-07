@@ -13,6 +13,7 @@ The hub holds all fleet-wide repository configuration:
 - `labels.json` declares the fleet label set.
 - `project.json` declares the fleet project every repository is linked to, by owner, number, and title.
 - `configure.sh` applies or checks those payloads through the GitHub API.
+- `central/` holds the READMEs `scripts/central_config.py` writes into the central bot-settings repositories, per "Central Bot Settings" below.
 
 Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. Commands that operate before registry enrollment pass the model explicitly.
 
@@ -33,6 +34,26 @@ repo-config/configure.sh apply owner/repo release|operational
 ```
 
 Then validate the result with `repo-config/configure.sh check owner/repo release|operational`, run from the same checkout. The command asserts every applied ruleset, setting, label, security feature, and the fleet project link, plus the deployment environments described below. It exits non-zero on drift (the settings checks are driven by the committed payloads, and the ruleset checks by the payloads composed for the repo). Or import each ruleset by hand from the payloads `configure.sh` composes for the repo. Write them with `uv run --no-project --script scripts/agent_policy.py rulesets --registry registry/repos.json --name <repo> --model <release|operational> --out-dir <dir>`. Then run `gh api -X POST repos/<owner>/<repo>/rulesets --input <dir>/<name>.json` for each of `develop` and `main`. `gh ruleset` is read-only, so creation goes through `gh api`. [`repo-config/README.md` "Rulesets"][repo-config-readme-rulesets] says what the composition changes. The required check binds by name and only turns green after the repo's PR workflow runs once. To edit a live ruleset, GET it, change the field, and PUT the whole writable subset back (a partial PUT `422`s).
+
+## Central Bot Settings
+
+CodeRabbit reads a repository named `coderabbit` under the owner as central configuration, and Qodo reads `pr-agent-settings`. Each holds a README and one config file that turns automatic review off account-wide. A repository carrying its own `.coderabbit.yaml` uses that file instead. A repository carrying its own `.pr_agent.toml` overrides each key that file sets.
+
+`scripts/central_config.py` writes both repositories from the hub. The READMEs are hand-authored sources under `repo-config/central/`, and the config text is a constant in the script. Each settings repository has a registry entry with `status: "excluded"`, so the fleet audit expects no baseline from it.
+
+A central file with automatic review off silences the bot on every repository that lacks its own file. So the config file exists only while every live registry repository under the owner carries its own file. Each repository's own file sits on its default branch and sets the same key to a bool. A live repository is any entry that is neither archived nor excluded, and a registry listing none under the owner refuses rather than passing. That key is `reviews.auto_review.enabled` for CodeRabbit and `config.disable_auto_feedback` for Qodo. An earlier central file without this gate silenced CodeRabbit on the repositories that had no file of their own yet.
+
+- `precondition` prints `ok` or `FAIL` per repository. It exits 0 when the gate holds, 1 when it does not, and 2 when a read could not run.
+- `write` puts the README, and the config file only while the gate holds, into a checkout. It removes a config file the gate no longer allows and prints a `withheld` line naming the repositories that lack their own file. It never stages or commits, and `--dry-run` writes nothing.
+- `check` reads the settings repository at a ref, `main` by default, and reports drift from what `write` produces. A config file present while the gate fails is drift, and one withheld while the gate fails is not.
+
+```sh
+uv run --no-project --script scripts/central_config.py precondition --repo ptr727/coderabbit --registry registry/repos.json
+uv run --no-project --script scripts/central_config.py write --repo ptr727/coderabbit --registry registry/repos.json --checkout <checkout of ptr727/coderabbit>
+uv run --no-project --script scripts/central_config.py check --repo ptr727/pr-agent-settings --registry registry/repos.json --ref main
+```
+
+Carrying the result into a settings repository is a pull request there, and it needs the maintainer's go-ahead. `write` reads the gate once, and the file takes effect only when that pull request merges. So run `check` just before the merge and again after it. Run it again whenever a repository joins the registry.
 
 ## Deployment Environments
 
