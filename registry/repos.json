@@ -236,6 +236,7 @@
         {
             "name": "DevKitCIoT",
             "url": "https://github.com/ptr727/DevKitCIoT",
+            "description": "ESP32-DevKitC IoT controller board with a PSU, AC relay, dry contact inputs, and temperature sensor.",
             "status": "cataloged",
             "types": ["eda"],
             "groundTruthBranch": "main",
