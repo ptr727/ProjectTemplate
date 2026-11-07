@@ -13,6 +13,7 @@ The hub holds all fleet-wide repository configuration:
 - `labels.json` declares the fleet label set.
 - `project.json` declares the fleet project every repository is linked to, by owner, number, and title.
 - `configure.sh` applies or checks those payloads through the GitHub API.
+- `central/` holds the READMEs `scripts/central_config.py` writes into the central bot-settings repositories, per "Central Bot Settings" below.
 
 Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. Commands that operate before registry enrollment pass the model explicitly.
 
@@ -36,7 +37,7 @@ Then validate the result with `repo-config/configure.sh check owner/repo release
 
 ## Central Bot Settings
 
-CodeRabbit reads a repository named `coderabbit` under the owner as central configuration, and Qodo reads `pr-agent-settings`. Each holds a README and one config file that turns automatic review off account-wide. A repository carrying its own `.coderabbit.yaml` or `.pr_agent.toml` uses that file instead.
+CodeRabbit reads a repository named `coderabbit` under the owner as central configuration, and Qodo reads `pr-agent-settings`. Each holds a README and one config file that turns automatic review off account-wide. A repository carrying its own `.coderabbit.yaml` uses that file instead. A repository carrying its own `.pr_agent.toml` overrides each key that file sets.
 
 `scripts/central_config.py` writes both repositories from the hub. The READMEs are hand-authored sources under `repo-config/central/`, and the config text is a constant in the script. Each settings repository has a registry entry with `status: "excluded"`, so the fleet audit expects no baseline from it.
 
@@ -52,7 +53,7 @@ uv run --no-project --script scripts/central_config.py write --repo ptr727/coder
 uv run --no-project --script scripts/central_config.py check --repo ptr727/pr-agent-settings --registry registry/repos.json --ref main
 ```
 
-Carrying the result into a settings repository is a pull request there, and it needs the maintainer's go-ahead.
+Carrying the result into a settings repository is a pull request there, and it needs the maintainer's go-ahead. `write` reads the gate once, and the file takes effect only when that pull request merges. So run `check` just before the merge and again after it. Run it again whenever a repository joins the registry.
 
 ## Deployment Environments
 

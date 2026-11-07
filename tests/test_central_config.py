@@ -165,6 +165,12 @@ class PreconditionCase(unittest.TestCase):
         results = self.holds(fleet_files(), data)
         self.assertEqual([r.ok for r in results], [True, True])
 
+    def test_an_entry_naming_no_readable_url_refuses(self) -> None:
+        for bad in ("not a mapping", {"name": "Widget", "status": "cataloged"}):
+            data: dict[str, object] = {"repos": [bad]}
+            with self.subTest(bad=bad), self.assertRaises(central_config.Refusal):
+                self.holds(fleet_files(), data)
+
     def test_an_owner_with_no_live_repository_refuses(self) -> None:
         empty: dict[str, object] = {"repos": []}
         for data in (

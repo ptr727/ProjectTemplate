@@ -14,6 +14,7 @@ The README comes from `repo-config/central/<name>/README.md`, and the config tex
 The YAML parser is imported inside the code that needs it.
 
 Exit codes: 0 ok, 1 a refusal, a failed precondition or drift, 2 a read or the command could not run.
+`write` exits 0 whether it wrote the config or withheld it, since withholding is the gate working.
 """
 
 from __future__ import annotations
@@ -99,16 +100,20 @@ def fleet_repos(registry_data: Any, owner: str) -> list[str]:
 
     An archived or excluded entry is skipped, since no review runs there for a central file to silence.
     Every other status counts, so a status this script does not know keeps the gate shut rather than open.
+    An entry naming no readable url refuses, since skipping it would drop a repository from the gate.
     An empty list would hold the gate vacuously, which is how a mistyped owner would land the central file.
     """
     if not isinstance(registry_data, dict):
         raise Refusal("the registry file is absent or not an object")
     found = []
     for entry in registry_data.get("repos", []):
-        if not isinstance(entry, dict) or entry.get("status") in ("archived", "excluded"):
+        url = entry.get("url") if isinstance(entry, dict) else None
+        match = gh_graphql.ORIGIN.search(url) if isinstance(url, str) else None
+        if match is None:
+            raise Refusal(f"registry entry {entry!r} names no readable repository url")
+        if entry.get("status") in ("archived", "excluded"):
             continue
-        match = gh_graphql.ORIGIN.search(str(entry.get("url", "")))
-        if match and match.group(1).lower() == owner.lower():
+        if match.group(1).lower() == owner.lower():
             found.append(f"{match.group(1)}/{match.group(2)}")
     if not found:
         raise Refusal(
@@ -273,7 +278,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="central_config.py",
         description="Write and check the central CodeRabbit and Qodo settings repositories.",
-        epilog="Exit codes: 0 ok, 1 a refusal, a failed precondition or drift, 2 a read or the command could not run.",
+        epilog="Exit codes: 0 ok, 1 a refusal, a failed precondition or drift, 2 a read or the command could not run. "
+        "write exits 0 whether it wrote the config or withheld it.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
     for cmd, text in (
