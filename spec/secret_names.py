@@ -154,6 +154,12 @@ def secret_file_name(name: str, scope: str, repo: str) -> str:
     if scope == "fleet":
         return f"github_{name.lower()}"
     if scope == "repository":
+        # CODESTYLE.md lets a repository name field keep its hyphens, since `_` alone separates fields.
+        # A name carrying `_` or `.` would not split back into its fields, so it cannot form one.
+        if "_" in repo or "." in repo:
+            raise SecretNameError(
+                f"repository {repo} carries '_' or '.', so it has no secret file name"
+            )
         return f"github_{repo.lower()}_{name.lower()}"
     raise SecretNameError(f"secret {name} has the scope {scope!r}, not one of {SECRET_SCOPES}")
 

@@ -58,6 +58,12 @@ class SecretFileNameCase(unittest.TestCase):
             "github_example-repo_codecov_token",
         )
 
+    def test_a_repo_name_with_an_underscore_or_a_dot_has_no_repository_file(self) -> None:
+        """Every `_` separates fields, so a repo name carrying one, or a dot, could not split back."""
+        for repo in ("Example_Repo", "Example.Repo"):
+            with self.subTest(repo=repo), self.assertRaises(secret_names.SecretNameError):
+                secret_names.secret_file_name("CODECOV_TOKEN", "repository", repo)
+
     def test_an_unknown_scope_raises(self) -> None:
         with self.assertRaises(secret_names.SecretNameError):
             secret_names.secret_file_name("CODECOV_TOKEN", "environment", "ExampleRepo")

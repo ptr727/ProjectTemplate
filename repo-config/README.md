@@ -28,7 +28,7 @@ Publish credentials required per mechanism are enumerated in `spec/secrets.json`
 
 ### Provisioning From `~/.secrets/`
 
-`configure.sh apply` ends with a secrets group. It reads each secret a repository owes from the host's `~/.secrets/` directory. It writes the value to every store that needs it. The names come from the same resolver `spec/audit.py` uses, which is `spec/secret_names.py`. So the names the audit expects and the names `apply` sets cannot disagree. Both cover cataloged registry entries only. An excluded or archived entry owes nothing, and neither does a repository with no entry. The group is skipped for each with a note. The repository named on the command line must also be the one the registry entry's `url` names. Otherwise the group refuses to run. A cataloged repository whose ground branch does not exist yet is skipped with a note naming why. `apply` still applies every other group and then exits non-zero. `apply --dry-run` exits non-zero, and `check` reports the reason as a note.
+`configure.sh apply` ends with a secrets group. It reads each secret a repository owes from the host's `~/.secrets/` directory. It writes the value to every store that needs it. The names come from the same resolver `spec/audit.py` uses, which is `spec/secret_names.py`. So the names the audit expects and the names `apply` sets cannot disagree. Both cover cataloged registry entries only. An excluded or archived entry owes nothing, and neither does a repository with no entry. The group is skipped for each with a note. The repository named on the command line must also be the one the registry entry's `url` names. Otherwise `apply` stops in its pre-flight with nothing written, and `check` fails its secrets group. A cataloged repository whose ground branch does not exist yet is skipped with a note naming why. `apply` still applies every other group and then exits non-zero. `apply --dry-run` exits non-zero, and `check` reports the reason as a note.
 
 Each name carries a scope in `spec/secrets.json`, and the scope decides the one file the value is read from.
 
@@ -41,7 +41,7 @@ Each name carries a scope in `spec/secrets.json`, and the scope decides the one 
 | `DOCKER_HUB_ACCESS_TOKEN` | fleet | `github_docker_hub_access_token` |
 | `CODECOV_TOKEN` | repository | `github_<repo>_codecov_token` |
 
-A fleet name has one value shared by every repository that needs it. A repository name has a value of its own per repository, and `<repo>` is the repository name in lower case with its hyphens kept. A new required name with no scope fails `spec/validate.py`, so every name is classified explicitly.
+A fleet name has one value shared by every repository that needs it. A repository name has a value of its own per repository, and `<repo>` is the repository name in lower case with its hyphens kept. That is the repository name field CODESTYLE.md "Script and Utility File Names" defines, so a repository whose name carries `_` or `.` is refused. A new required name with no scope fails `spec/validate.py`, so every name is classified explicitly.
 
 The scopes are strict:
 
