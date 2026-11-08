@@ -26,6 +26,37 @@ A repository whose pull request workflow cannot post that check records `pullReq
 
 Publish credentials required per mechanism are enumerated in `spec/secrets.json`. A repo needs only the mechanisms its own publish targets use, so a source-only repo needs none of the publish credentials below. NuGet and PyPI use keyless OIDC Trusted Publishing (no stored key, so the publish job needs `id-token: write`, and PyPI additionally an `environment: pypi` gate). That publish job belongs to the repo's own workflow file. That is because trusted publishing validates the OIDC token's `job_workflow_ref` claim against the repository owning the package, and rejects a reusable workflow's ref. So `id-token: write` is granted at that one entry point and nowhere else. The registry-side policy is the other half of that pairing and is configured on nuget.org or PyPI rather than here. It names the repository and the workflow file the push runs from. So moving the push between workflow files means repointing the policy in the same change. Docker Hub has no OIDC equivalent and uses a stored `DOCKER_HUB_USERNAME` + `DOCKER_HUB_ACCESS_TOKEN` in both the Actions and Dependabot secret stores. Codegen and merge-bot repos add a GitHub App (`CODEGEN_APP_CLIENT_ID` + `CODEGEN_APP_PRIVATE_KEY` in both stores, and the app must be installed, not just created). App-token call sites use `client-id`, never the deprecated `app-id`.
 
+### Provisioning From `~/.secrets/`
+
+`configure.sh apply` ends with a secrets group. It reads each secret a repository owes from the host's `~/.secrets/` directory. It writes the value to every store that needs it. The names come from the same resolver `spec/audit.py` uses, which is `spec/secret_names.py`. So the names the audit expects and the names `apply` sets cannot disagree. A repository with no registry entry owes nothing the registry can name, so the group is skipped for it with a note.
+
+Each name carries a scope in `spec/secrets.json`, and the scope decides the one file the value is read from.
+
+| Name | Scope | File under `~/.secrets/` |
+| --- | --- | --- |
+| `CODEGEN_APP_CLIENT_ID` | fleet | `github_codegen_app_client_id` |
+| `CODEGEN_APP_PRIVATE_KEY` | fleet | `github_codegen_app_private_key` |
+| `NUGET_USERNAME` | fleet | `github_nuget_username` |
+| `DOCKER_HUB_USERNAME` | fleet | `github_docker_hub_username` |
+| `DOCKER_HUB_ACCESS_TOKEN` | fleet | `github_docker_hub_access_token` |
+| `CODECOV_TOKEN` | repository | `github_<repo>_codecov_token` |
+
+A fleet name has one value shared by every repository that needs it. A repository name has a value of its own per repository, and `<repo>` is the repository name in lower case with its hyphens kept. A new required name with no scope fails `spec/validate.py`, so every name is classified explicitly.
+
+The scopes are strict:
+
+- Only the file the scope names is ever read, and nothing falls back to another file, an environment variable, or an ambient value. A missing file is reported, never replaced.
+- The same name at the other scope is a stray. A stray is a bad secret file or a scope that changed in config. So `apply` and `apply --dry-run` report every one and exit non-zero before any write. A stray is never read and never deleted.
+- The directory is mode `700` and each file mode `600`. Four kinds of file are refused, each with a sentence naming it. They are a file open to group or other, a symlink, a file holding a carriage return, and an empty file. An empty file is the placeholder `scaffold` creates, so it is refused until it is filled.
+
+Every name whose file is readable is written on every run to each store that needs it. The store's current value is ignored, since a stored value can never be read back to compare. The value reaches `gh secret set` on standard input and never in an argument, and nothing prints it. A failed write stops the run with the `gh` error. When the writes finish, two lists name what could not be set. One is for names with no file and one is for files that were refused. The run then exits non-zero if either list holds anything. A secret on GitHub that nothing claims is reported by `check` and never deleted. Environment-scoped secrets are not provisioned here.
+
+`apply --dry-run` runs the whole pre-flight and prints, per store, each name with its scope and file, then the missing and refused lists. It writes nothing and prints no value. Only the secrets group has a dry run, so the other groups are not previewed.
+
+`python3 spec/resolve_secrets.py scaffold` pre-creates every expected file so only the values need filling. It walks every non-archived registry entry and reads each default branch tree through read-only `gh` calls. So it creates no Codecov file for a repository without tests. It creates the directory as mode `700` and each missing file as an empty mode `600` file. It refuses a directory that exists with group or other access. It never opens, changes, or deletes an existing file. It lists what it created, what was already present, and any file nothing claims. A wrong-scope file found anywhere in the directory stops it before it creates anything. The `--secrets-dir DIR` option chooses another directory, and `--dry-run` creates nothing.
+
+`check` lists both secret stores of the repository. It fails on a required name that is absent and on a forbidden name that is present. It reports an unclaimed name without failing, and it notes that values are never readable through the API.
+
 ## Labels
 
 The triage labels classify an issue by the kind of work it needs. So a backlog sweep can pick the gates and scripts ahead of the prose defects. The gates and scripts converge. The prose defects re-enter the review loop when worked one bundle at a time. An issue recording work to be done carries exactly one of these four, or `enhancement` for a feature, beside whatever surface labels it also carries. An issue holding nothing but a question for the maintainer records no such work, so it carries no triage label at all.

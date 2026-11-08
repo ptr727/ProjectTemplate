@@ -24,6 +24,8 @@ import posixpath
 import re
 import sys
 
+import secret_names  # sibling, standard library only
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # Scope-selector vocabularies, per spec/scope-model.md, kept in sync with the $defs in registry/repos.schema.json.
@@ -889,6 +891,47 @@ def utf8_console() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
+
+
+def secret_scope_errors(secrets, repos):
+    """Each secret name a baseline, a mechanism, or a registry requiredSecrets list requires has a declared scope.
+
+    A name with none is an error, so a new secret is classified explicitly and never by a silent default.
+    A scope outside secret_names.SECRET_SCOPES is an error too, since configure.sh derives a file name from it.
+    """
+    scopes = secrets.get("secretScopes")
+    if not isinstance(scopes, dict):
+        return ["secrets.json: 'secretScopes' is not an object"]
+    errors = [
+        f"secrets.json: secretScopes['{name}'] must be one of {', '.join(secret_names.SECRET_SCOPES)}"
+        for name, scope in scopes.items()
+        if scope not in secret_names.SECRET_SCOPES
+    ]
+    required = {}
+    sets = [("baseline", secrets.get("baseline"))]
+    mechanisms = secrets.get("mechanisms")
+    sets += [
+        (f"mechanism '{m}'", v)
+        for m, v in (mechanisms if isinstance(mechanisms, dict) else {}).items()
+    ]
+    for label, entry in sets:
+        requires = entry.get("requires") if isinstance(entry, dict) else None
+        for name in requires if isinstance(requires, list) else []:
+            if isinstance(name, str):
+                required.setdefault(name, label)
+    repo_list = repos.get("repos")
+    for repo in repo_list if isinstance(repo_list, list) else []:
+        # A malformed list is reported by the per-entry checks, so it is skipped here rather than raised on.
+        declared = repo.get("requiredSecrets") if isinstance(repo, dict) else None
+        for name in declared if isinstance(declared, list) else []:
+            if isinstance(name, str):
+                required.setdefault(name, f"registry entry {repo.get('name')} requiredSecrets")
+    errors += [
+        f"secrets.json: {name} is required by {label} but has no secretScopes entry"
+        for name, label in required.items()
+        if name not in scopes
+    ]
+    return errors
 
 
 def main(argv=()):
@@ -1904,6 +1947,7 @@ def main(argv=()):
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
+    errors += secret_scope_errors(secrets, repos)
     if errors:
         print("Spec validation FAILED:")
         for err in errors:

@@ -15,7 +15,7 @@ import time
 import unittest
 import unittest.mock
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from import_probe import import_delta
 
@@ -255,6 +255,65 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         )
 
         self.assertEqual(validate.markdown_section(text, "Rule"), "\nkept\n")
+
+
+class SecretScopeCase(unittest.TestCase):
+    """Every name a baseline, a mechanism, or a registry requiredSecrets list requires has a declared scope."""
+
+    SECRETS: ClassVar[dict[str, Any]] = {
+        "baseline": {"requires": ["BASE_ONE"], "forbids": []},
+        "mechanisms": {"docker-hub": {"requires": ["DOCKER_ONE"], "forbids": []}},
+        "secretScopes": {"BASE_ONE": "fleet", "DOCKER_ONE": "fleet", "REPO_ONE": "repository"},
+    }
+    REPOS: ClassVar[dict[str, Any]] = {
+        "repos": [{"name": "Fixture", "requiredSecrets": ["REPO_ONE"]}]
+    }
+
+    def errors(self, secrets: dict[str, Any], repos: dict[str, Any] | None = None):
+        return validate.secret_scope_errors(secrets, self.REPOS if repos is None else repos)
+
+    def test_the_shipped_spec_is_clean(self) -> None:
+        self.assertEqual(
+            validate.secret_scope_errors(
+                validate.load("spec/secrets.json"), validate.load("registry/repos.json")
+            ),
+            [],
+        )
+
+    def test_a_fully_scoped_spec_is_clean(self) -> None:
+        self.assertEqual(self.errors(self.SECRETS), [])
+
+    def test_a_baseline_name_with_no_scope_is_an_error(self) -> None:
+        scopes = {k: v for k, v in self.SECRETS["secretScopes"].items() if k != "BASE_ONE"}
+        errors = self.errors({**self.SECRETS, "secretScopes": scopes})
+        self.assertEqual(
+            errors, ["secrets.json: BASE_ONE is required by baseline but has no secretScopes entry"]
+        )
+
+    def test_a_mechanism_name_with_no_scope_is_an_error(self) -> None:
+        scopes = {k: v for k, v in self.SECRETS["secretScopes"].items() if k != "DOCKER_ONE"}
+        errors = self.errors({**self.SECRETS, "secretScopes": scopes})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("DOCKER_ONE is required by mechanism 'docker-hub'", errors[0])
+
+    def test_a_registry_required_secret_with_no_scope_is_an_error(self) -> None:
+        repos = {"repos": [{"name": "Fixture", "requiredSecrets": ["NEW_SECRET"]}]}
+        errors = self.errors(self.SECRETS, repos)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("NEW_SECRET is required by registry entry Fixture requiredSecrets", errors[0])
+
+    def test_a_scope_outside_the_two_is_an_error(self) -> None:
+        scopes = {**self.SECRETS["secretScopes"], "REPO_ONE": "environment"}
+        errors = self.errors({**self.SECRETS, "secretScopes": scopes})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("secretScopes['REPO_ONE'] must be one of fleet, repository", errors[0])
+
+    def test_a_missing_or_malformed_scope_table_is_an_error(self) -> None:
+        tables: list[Any] = [None, [], "fleet"]
+        for table in tables:
+            with self.subTest(table=table):
+                errors = self.errors({**self.SECRETS, "secretScopes": table})
+                self.assertEqual(errors, ["secrets.json: 'secretScopes' is not an object"])
 
 
 class PlainImportCase(unittest.TestCase):

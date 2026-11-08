@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure or validate a repository against the committed fleet config in this directory, via the GitHub API.
 #
-#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>]   # create-or-update settings + labels + rulesets + the fleet project link (writes), and with --checkout the agent policy files
+#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>] [--dry-run]   # create-or-update settings + labels + rulesets + the fleet project link + secrets (writes), and with --checkout the agent policy files
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it.
@@ -10,14 +10,16 @@
 # The repo defaults to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
 #
-# The apply mode writes five groups, in order, plus a sixth when --checkout names a local checkout of the repo.
+# The apply mode writes five groups, in order.
+# It adds the agent policy files when --checkout names a local checkout of the repo.
+# A last group of secrets follows.
 # First settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only when it exists).
 # Then the Dependabot vulnerability alerts and automated security updates.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
 # Then the link to the fleet project declared in project.json, written only when the live link list does not already hold it.
 # The develop ruleset is develop.json where the model is PR-gated, or operational/develop.json for direct signed pushes.
-# The sixth group renders the repo's .github/agent-policy.json from the registry through scripts/agent_policy.py.
+# The agent policy files render the repo's .github/agent-policy.json from the registry through scripts/agent_policy.py.
 # It writes that file plus the CodeRabbit and Qodo settings derived from it into the checkout, and never stages or commits.
 # The caller commits the files through the ordinary pull request flow.
 # The same render decides whether each ruleset carries a Copilot code review rule, so a repo whose policy has no automatic Copilot gets no rule.
@@ -25,6 +27,17 @@
 # Deriving the policy needs only Python, while writing the files and checking them run under uv.
 # The checkout is planned before the first API write, so a checkout that refuses stops the run with nothing applied.
 # Without --checkout apply writes no policy files and says so.
+# The secrets group runs last, after the agent policy files, and sets each secret name the repo owes from the host's ~/.secrets/ directory.
+# The names come from spec/resolve_secrets.py, which resolves them from the registry and the default branch tree exactly as spec/audit.py does.
+# Each name is scoped in spec/secrets.json, and a fleet name is read from github_<name> while a repository name is read from github_<repo>_<name>.
+# Only the file a name's scope names is read.
+# A file at the wrong scope is a stray that stops the run before any write.
+# Every name whose file is present is written to every store that needs it on every run.
+# The value goes on stdin and never in an argument.
+# A name with no file and a file the secrets library refuses are each reported in their own list.
+# Either one makes the run exit non-zero after the other secrets are set.
+# A secret on GitHub that nothing claims is never deleted, and the check mode reports it.
+# The --dry-run option runs the whole pre-flight and prints what the secrets group would set, writing nothing, and the other groups have no dry run.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
 # The check mode is the read-only inverse, and it verifies the same five groups apply writes.
@@ -44,7 +57,7 @@
 # What is unaudited is a static setting absent from settings.json and a label labels.json does not declare.
 # That is because those two groups are asserted in the payload's direction only, where a ruleset's rule-type set is compared both ways.
 # The check mode also asserts one group apply never writes, the existence and deployment-branch policy of every environment the registry declares for the repo.
-# It is check-only because an environment's secrets and variables are credentials that exist nowhere in this repository.
+# It is check-only because an environment's secrets and variables are credentials that no group here provisions.
 # An apply would therefore create an environment that cannot publish and report success.
 # Their names are enumerable through the API, and a variable's value too.
 # What this script does not check is therefore a choice about what it owns rather than a limit the API imposes.
@@ -52,8 +65,10 @@
 # It is also worth checking because, on an OIDC publish, that is half the gate: a ref the policy excludes mints no token.
 # A repo declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run.
 # An environment the registry does not declare is reported rather than asserted, since GitHub creates some on its own.
-# Secret names are checked separately, by spec/audit.py from a hub checkout.
-# This script leaves them a manual-verify note for their values, which are never readable via the API.
+# The check mode also asserts the repository-level secret names in both stores, which are the ones the secrets group writes.
+# A name the repo owes must be present, a forbidden name must be absent, and a name nothing claims is reported and never asserted.
+# Environment-scoped secrets are neither written nor checked here, since they depend on the environment provisioning that has not landed.
+# A secret's value is never readable via the API, so a present name says nothing about whether its value is right.
 set -Eeuo pipefail
 
 # ----- Command + target + model -----
@@ -62,12 +77,14 @@ usage() {
 Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
        repo-config/configure.sh apply|check release|operational
        repo-config/configure.sh apply [owner/repo] [release|operational] --checkout <path>
+       repo-config/configure.sh apply [owner/repo] [release|operational] --dry-run
        repo-config/configure.sh --help
 
   apply   create or update the fleet configuration on the repo (writes)
   check   validate the repo against the fleet configuration, non-zero on drift (reads)
 
   --checkout <path>   with apply only, also write the agent policy files into this local checkout of the repo
+  --dry-run           with apply only, run the pre-flight and print the secrets that would be set, writing nothing
 
 The repo defaults to the current gh repo, and the model to the registry lookup.
 USAGE
@@ -91,6 +108,7 @@ esac
 # The option is parsed ahead of the positionals, so it may sit before or after them.
 checkout=""
 checkout_given=false
+dry_run=false
 positional=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -109,6 +127,10 @@ while [ "$#" -gt 0 ]; do
     --checkout=*)
         checkout="${1#--checkout=}"
         checkout_given=true
+        shift
+        ;;
+    --dry-run)
+        dry_run=true
         shift
         ;;
     -*) refuse "Unknown option '$1'" ;;
@@ -131,6 +153,9 @@ if [ "$checkout_given" = true ]; then
     if [ -z "$checkout" ]; then
         refuse "Option '--checkout' needs a path"
     fi
+fi
+if [ "$dry_run" = true ] && [ "$cmd" != apply ]; then
+    refuse "Option '--dry-run' is valid only with apply"
 fi
 if [ "$#" -gt 2 ]; then
     refuse "Too many arguments (expected at most a repo and a model)"
@@ -250,6 +275,142 @@ if [ -f "$registry" ]; then
         exit 1
     fi
 fi
+
+# ----- Secret names and the host files they are read from (shared by apply and check) -----
+# The names a repo owes come from spec/resolve_secrets.py, which spec/audit.py shares through spec/secret_names.py, so the two cannot disagree.
+# A repo with no registry entry owes nothing the registry can name.
+# The secrets group is therefore skipped for it with a note rather than failing the other groups.
+# That matches how an absent entry is treated for the model and the description above.
+secrets_spec="$script_dir/../spec/secrets.json"
+resolve_secrets="$script_dir/../spec/resolve_secrets.py"
+secrets_registered=false
+if [ -f "$registry" ]; then
+    # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
+    if ! entry_count="$(jqr --arg n "$name" '[.repos[] | select(.name == $n)] | length' "$registry")"; then
+        echo "Failed to read $registry to resolve the entry for $name." >&2
+        exit 1
+    fi
+    if [ "$entry_count" -gt 0 ]; then
+        secrets_registered=true
+    fi
+fi
+# The secrets library is the hub's own copy, the sanctioned reader of a private secret file per GOVERNANCE.md "Repo-Scoped Secrets".
+# shellcheck disable=SC1091  # The linter runs without -x, and the library is linted as a file of its own.
+. "$script_dir/../lib/sh/secrets.sh"
+
+# Resolve the secret names this repo owes from its default branch tree, leaving the resolver's JSON in secret_names_json.
+# The tree is read through the API rather than from a checkout, so the answer is the one spec/audit.py computes whatever directory this runs in.
+# A truncated or unreadable tree fails, since a partial one would drop the codecov file a repo with tests owes.
+# It returns non-zero with its own message on any failure, so the caller decides whether that stops the run or reports a failed check.
+load_secret_names() {
+    local branch tree
+    if ! branch="$(gh api "repos/$repo" --jq '.default_branch')"; then
+        echo "Failed to read the default branch of $repo, so its secret names cannot be resolved." >&2
+        return 1
+    fi
+    if ! tree="$(gh api "repos/$repo/git/trees/$branch?recursive=1")"; then
+        echo "Failed to read the $branch tree of $repo, so its secret names cannot be resolved." >&2
+        return 1
+    fi
+    if ! jq -e '(.tree | type == "array") and (.truncated != true)' >/dev/null 2>&1 <<<"$tree"; then
+        echo "The $branch tree of $repo is truncated or unreadable, so its secret names cannot be resolved." >&2
+        return 1
+    fi
+    # The paths are separated by NUL bytes, since a path may hold a newline and NUL is the one byte it cannot hold.
+    if ! secret_names_json="$(printf '%s' "$tree" | jq -j '.tree[] | select(.type == "blob") | .path + "\u0000"' | "${py_cmd[@]}" "$resolve_secrets" names -- "$secrets_spec" "$registry" "$name")"; then
+        echo "Could not resolve the secret names for $repo." >&2
+        return 1
+    fi
+}
+
+# Read every secret this repo owes from the directory in $1 and sort each into ready, missing, or refused.
+# A stray stops the run here, before any write, and a stray is never read.
+# It is a file the secrets directory holds for a name at the scope spec/secrets.json does not declare for it.
+# Either the file is bad or the scope changed in config, and neither is something to resolve by picking one of the two files.
+# The directory is an argument so a test passes a temporary one and nothing repurposes HOME.
+# Each name is read from exactly the file its scope names, through secret_set_verdict, with no fallback to the other scope.
+# The library does not refuse an empty file, so a file holding no visible character is refused here as an unfilled placeholder.
+# It exits rather than returns on a stray, because a caller testing a function's status would switch errexit off inside it.
+# The result is tab separated lines in secret_ready (name, scope, file, stores), secret_missing (the same), and secret_refused (name, file, sentence).
+plan_secrets() {
+    local dir="$1" strays stray rows sname scope file stores verdict path found=""
+    secret_ready=""
+    secret_missing=""
+    secret_refused=""
+    strays="$(jqr '.strays[]' <<<"$secret_names_json")"
+    while IFS= read -r stray; do
+        if [ -z "$stray" ]; then continue; fi
+        if [ -e "$dir/$stray" ] || [ -L "$dir/$stray" ]; then
+            found+="  $dir/$stray"$'\n'
+        fi
+    done <<<"$strays"
+    if [ -n "$found" ]; then
+        echo "Secret files at the wrong scope were found for $repo. None was read or changed. Remove the one that is not meant to be there, or fix its scope in spec/secrets.json, then run again:" >&2
+        printf '%s' "$found" >&2
+        echo "Aborting before any write." >&2
+        exit 1
+    fi
+    rows="$(jqr '.rows[] | [.name, .scope, .file, (.stores | join(","))] | @tsv' <<<"$secret_names_json")"
+    while IFS=$'\t' read -r sname scope file stores; do
+        if [ -z "$sname" ]; then continue; fi
+        path="$dir/$file"
+        verdict="$(secret_set_verdict "$path")"
+        case "$verdict" in
+        readable)
+            if grep -q '[^[:space:]]' "$path"; then
+                secret_ready+="$sname"$'\t'"$scope"$'\t'"$file"$'\t'"$stores"$'\n'
+            else
+                secret_refused+="$sname"$'\t'"$file"$'\t'"$path is empty, an unfilled placeholder"$'\n'
+            fi
+            ;;
+        missing*) secret_missing+="$sname"$'\t'"$scope"$'\t'"$file"$'\t'"$stores"$'\n' ;;
+        *) secret_refused+="$sname"$'\t'"$file"$'\t'"${verdict#refused }"$'\n' ;;
+        esac
+    done <<<"$rows"
+}
+
+# Print the secrets no file could supply, and the ones whose file was refused, as two separate lists.
+# They are separate because the fixes differ: a missing file is created and filled, and a refused file is repaired.
+# It prints nothing for an empty list.
+report_secret_problems() { # secrets-dir
+    local sname scope file stores why
+    if [ -n "$secret_missing" ]; then
+        echo "Secrets with no file, so not set:"
+        while IFS=$'\t' read -r sname scope file stores; do
+            if [ -z "$sname" ]; then continue; fi
+            echo "  $sname ($scope, stores: ${stores//,/ }) expects $1/$file"
+        done <<<"$secret_missing"
+    fi
+    if [ -n "$secret_refused" ]; then
+        echo "Secrets whose file was refused, so not set:"
+        while IFS=$'\t' read -r sname file why; do
+            if [ -z "$sname" ]; then continue; fi
+            echo "  $sname: $why"
+        done <<<"$secret_refused"
+    fi
+}
+
+# Print what the secrets group would set, per store, without writing or printing a value, then the problems, and exit.
+# The exit status is the one a real apply would end with, so a dry run that exits 0 predicts a run that does.
+# Only the secrets group has a dry run, and the message says so rather than imply the other groups were previewed.
+dry_run_secrets() { # secrets-dir
+    local store sname scope file stores
+    echo "Dry run for $repo. Nothing is written and no secret value is printed. Only the secrets group has a dry run, so the settings, labels, rulesets, project link, and agent policy files are not previewed."
+    for store in actions dependabot; do
+        echo "Secrets that would be set in the $store store from $1:"
+        while IFS=$'\t' read -r sname scope file stores; do
+            if [ -z "$sname" ]; then continue; fi
+            case ",$stores," in
+            *",$store,"*) echo "  $sname ($scope) from $file" ;;
+            esac
+        done <<<"$secret_ready"
+    done
+    report_secret_problems "$1"
+    if [ -n "$secret_missing$secret_refused" ]; then
+        exit 1
+    fi
+    exit 0
+}
 
 # ----- Ruleset id lookup (shared by apply and check) -----
 # Map a ruleset name to the id of the first match, leaving it empty when nothing matches.
@@ -495,6 +656,33 @@ apply_project() { # project-node-id
     echo "Linked $repo to project '$title' ($owner, number $number)"
 }
 
+# Set every ready secret in every store that needs it, then report what could not be set and fail if anything could not.
+# The plan was computed by cmd_apply's pre-flight, so a stray or an unreadable tree never reaches here.
+# Each value goes to gh on stdin from its file and is never in an argument or echoed.
+# The gh CLI strips trailing carriage returns and line feeds from a value read on stdin, so the file is passed as it is.
+# Every name whose file is present is written on every run, whatever the live store holds, since a value is never readable to compare against.
+# The writes run unguarded under `set -e`, so a failed write stops the run with gh's own error and nothing suppressed.
+# This function is never called in a condition, which would switch errexit off inside it.
+# It therefore ends the run itself when something is missing or refused.
+apply_secrets() { # secrets-dir
+    local dir="$1" sname scope file stores store
+    local -a store_list
+    while IFS=$'\t' read -r sname scope file stores; do
+        if [ -z "$sname" ]; then continue; fi
+        IFS=, read -r -a store_list <<<"$stores"
+        for store in "${store_list[@]}"; do
+            # The file is the write's stdin, which also keeps gh from reading the remaining rows of this loop.
+            gh secret set "$sname" --repo "$repo" --app "$store" <"$dir/$file"
+            echo "Set $sname ($scope) in the $store store of $repo"
+        done
+    done <<<"$secret_ready"
+    report_secret_problems "$dir"
+    if [ -n "$secret_missing$secret_refused" ]; then
+        echo "Configuration applied to $repo except for the secrets listed above, which were not set." >&2
+        exit 1
+    fi
+}
+
 cmd_apply() {
     local f private disc payload project_id why
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
@@ -530,6 +718,21 @@ cmd_apply() {
     # That is because it is a read.
     # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with four groups of writes already applied.
     project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
+    # The secret plan is computed here too, since the tree and the files it reads can fail after every API write otherwise.
+    # A stray exits inside plan_secrets, and a dry run exits inside dry_run_secrets, so neither reaches a write.
+    if [ "$secrets_registered" = true ]; then
+        if ! load_secret_names; then
+            echo "Aborting before any write." >&2
+            exit 1
+        fi
+        plan_secrets "${HOME:?}/.secrets"
+        if [ "$dry_run" = true ]; then
+            dry_run_secrets "$HOME/.secrets"
+        fi
+    elif [ "$dry_run" = true ]; then
+        echo "Dry run for $repo. It has no registry entry in $registry, so no secret names are declared and there is nothing to preview."
+        exit 0
+    fi
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
     # They still fail loud, since gh errors go to stderr and a failed write aborts the script.
@@ -570,6 +773,12 @@ cmd_apply() {
         uv run --no-project --script "$agent_policy" write "${agent_policy_args[@]}" --repo "$repo" --checkout "$checkout"
     else
         echo "Note: the agent policy files were not written. Run '$0 apply${repo_arg:+ $repo} --checkout <path>' to write them into a checkout, then commit them through a pull request."
+    fi
+    # ----- Secrets, read from the host's ~/.secrets/ and written last -----
+    if [ "$secrets_registered" = true ]; then
+        apply_secrets "$HOME/.secrets"
+    else
+        echo "Note: $repo has no registry entry in $registry, so no secret names are declared and none were set."
     fi
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
 }
@@ -948,6 +1157,52 @@ check_agent_policy() { # the repo's default branch must carry the files the regi
     fi
 }
 
+check_secrets() {
+    local store live sname claimed forbidden wanted
+    if [ "$secrets_registered" != true ]; then
+        note "secrets: no registry entry named '$name', so no secret names are declared to check."
+        return
+    fi
+    if ! load_secret_names; then
+        fail "secrets - could not resolve the secret names $repo owes"
+        return
+    fi
+    # Each list is read into a variable before its loop for the reason check_settings gives: a jq failure inside `done < <(...)` skips the body silently.
+    claimed="$(jqr '.rows[].name' <<<"$secret_names_json")"
+    forbidden="$(jqr '.forbidden[]' <<<"$secret_names_json")"
+    for store in actions dependabot; do
+        # The list is paginated, since a store holding more names than one page would otherwise report a later one as missing.
+        if ! live="$(gh api --paginate "repos/$repo/$store/secrets" --jq '.secrets[].name')"; then
+            fail "secrets - could not list the $store store"
+            continue
+        fi
+        # shellcheck disable=SC2016  # $s is a jq --arg variable, not a shell expansion
+        wanted="$(jqr --arg s "$store" '.rows[] | select(.stores | index($s)) | .name' <<<"$secret_names_json")"
+        while IFS= read -r sname; do
+            if [ -z "$sname" ]; then continue; fi
+            if grep -qxF -- "$sname" <<<"$live"; then
+                pass "secret $sname is in the $store store"
+            else
+                fail "secret $sname is missing from the $store store"
+            fi
+        done <<<"$wanted"
+        while IFS= read -r sname; do
+            if [ -z "$sname" ]; then continue; fi
+            if grep -qxF -- "$sname" <<<"$live"; then
+                fail "forbidden secret $sname is present in the $store store"
+            fi
+        done <<<"$forbidden"
+        # A name nothing claims is reported rather than asserted, and never deleted.
+        while IFS= read -r sname; do
+            if [ -z "$sname" ]; then continue; fi
+            if ! grep -qxF -- "$sname" <<<"$claimed" && ! grep -qxF -- "$sname" <<<"$forbidden"; then
+                note "secret $sname in the $store store is claimed by no applicable mechanism (reported, never deleted)"
+            fi
+        done <<<"$live"
+    done
+    note "secret values are never readable via the API, so verify by hand that a value is valid"
+}
+
 cmd_check() {
     echo "Validating configuration for $repo (model: $model)"
     check_ruleset "$develop_ruleset"
@@ -958,9 +1213,7 @@ cmd_check() {
     check_project
     check_environments
     check_agent_policy
-    # Secret names are asserted by spec/audit.py, not here.
-    # A secret's value is never readable via the API regardless, repository-scoped and environment-scoped alike.
-    note "run uv run --no-project --script spec/audit.py [RepoName] (the registry name, not owner/repo) for required secret names, then verify by hand that their values are valid"
+    check_secrets
     if [ "$FAILED" -ne 0 ]; then
         echo "Configuration drift detected on $repo."
         exit 1
