@@ -297,6 +297,21 @@ class SecretScopeCase(unittest.TestCase):
                 self.assertEqual(len(errors), 1)
                 self.assertIn(f"registry entry {name}:", errors[0])
 
+    def test_a_test_carrying_type_keeps_its_codecov_claim_with_no_tree_read(self) -> None:
+        """Validate reads no tree, so a python repo owes its repository-scoped Codecov name regardless."""
+        secrets = {
+            **self.SECRETS,
+            "mechanisms": {
+                "codecov": {"requires": ["CODECOV_ONE"], "forbids": [], "stores": ["actions"]}
+            },
+            "typeMechanisms": {"python": "codecov"},
+            "secretScopes": {**self.SECRETS["secretScopes"], "CODECOV_ONE": "repository"},
+        }
+        repos = {"repos": [{"name": "Example.Repo", "status": "cataloged", "types": ["python"]}]}
+        errors = self.errors(secrets, repos)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("registry entry Example.Repo:", errors[0])
+
     def test_a_cataloged_name_with_a_dot_owing_only_fleet_names_is_clean(self) -> None:
         """A repository owing only fleet-scoped names needs no repository name field."""
         repos = {"repos": [{"name": "example.github.io", "status": "cataloged"}]}
