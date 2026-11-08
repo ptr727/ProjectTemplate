@@ -228,7 +228,7 @@ def compare_stores(
     for store, present in live.items():
         for name in sorted(present & forbidden):
             findings.append(("DEFECT", f"secrets: forbidden {name} present in the {store} store"))
-        for name in sorted(present - required.get(store, set())):
+        for name in sorted(present - required[store]):
             findings.append(
                 (
                     "DRIFT",
