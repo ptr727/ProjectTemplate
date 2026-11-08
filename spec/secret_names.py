@@ -158,9 +158,7 @@ def secret_file_name(name: str, scope: str, repo: str) -> str:
     if scope == "fleet":
         return f"{FILE_PREFIX}{name.lower()}"
     if scope == "repository":
-        # CODESTYLE.md lets a repository name field keep its hyphens, since `_` alone separates fields.
-        # A name carrying `_` or `.` would not split back into its fields, so it cannot form one.
-        if "_" in repo or "." in repo:
+        if not forms_repository_field(repo):
             raise SecretNameError(
                 f"repository {repo} carries '_' or '.', so it has no secret file name"
             )
@@ -168,9 +166,23 @@ def secret_file_name(name: str, scope: str, repo: str) -> str:
     raise SecretNameError(f"secret {name} has the scope {scope!r}, not one of {SECRET_SCOPES}")
 
 
-def wrong_scope_file_name(name: str, scope: str, repo: str) -> str:
-    """The file a secret would have at the other scope, which must never exist beside the right one."""
+def forms_repository_field(repo: str) -> bool:
+    """Whether REPO can be the repository name field of a host file name, per CODESTYLE.md.
+
+    The field keeps its hyphens, since `_` alone separates fields.
+    A name carrying `_` or `.` would not split back into its fields, so it cannot form one.
+    """
+    return "_" not in repo and "." not in repo
+
+
+def wrong_scope_file_name(name: str, scope: str, repo: str) -> str | None:
+    """The file a secret would have at the other scope, which must never exist beside the right one.
+
+    None where REPO cannot form a repository name field, since no such twin can exist for it.
+    """
     other = "repository" if scope == "fleet" else "fleet"
+    if other == "repository" and not forms_repository_field(repo):
+        return None
     return secret_file_name(name, other, repo)
 
 
@@ -242,7 +254,9 @@ def secret_plan(
                 "stores": [store for store in STORES if name in required[store]],
             }
         )
-        strays.add(wrong_scope_file_name(name, scope, repo))
+        stray = wrong_scope_file_name(name, scope, repo)
+        if stray is not None:
+            strays.add(stray)
     strays -= {row["file"] for row in rows}
     plan: dict[str, Any] = {"rows": rows, "forbidden": sorted(forbidden), "strays": sorted(strays)}
     if live is not None:

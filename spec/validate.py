@@ -931,16 +931,20 @@ def secret_scope_errors(secrets, repos):
         for name, label in required.items()
         if name not in scopes
     ]
-    # Every cataloged repo owes the fleet baseline, and its stray check spells a repository name field.
-    # So a name that cannot form that field stops configure.sh and scaffold, and is refused here first.
-    errors += [
-        f"registry entry {repo.get('name')}: a cataloged name carrying '_' or '.' has no secret file name"
-        for repo in (repo_list if isinstance(repo_list, list) else [])
-        if isinstance(repo, dict)
-        and repo.get("status") == "cataloged"
-        and isinstance(repo.get("name"), str)
-        and ("_" in repo["name"] or "." in repo["name"])
-    ]
+    # A cataloged repo owing a repository-scoped name needs a repository name field.
+    # A name carrying '_' or '.' cannot form one, so configure.sh and scaffold would stop on it.
+    # It is refused here first.
+    # The plan reads no tree, so a test-carrying type keeps its Codecov claim, the conservative answer.
+    for repo in repo_list if isinstance(repo_list, list) else []:
+        if not isinstance(repo, dict) or repo.get("status") != "cataloged":
+            continue
+        name = repo.get("name")
+        if not isinstance(name, str) or secret_names.forms_repository_field(name):
+            continue
+        try:
+            secret_names.secret_plan(secrets, repo, None, name)
+        except secret_names.SecretNameError as e:
+            errors.append(f"registry entry {name}: {e}")
     return errors
 
 

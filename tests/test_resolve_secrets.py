@@ -64,6 +64,11 @@ class SecretFileNameCase(unittest.TestCase):
             with self.subTest(repo=repo), self.assertRaises(secret_names.SecretNameError):
                 secret_names.secret_file_name("CODECOV_TOKEN", "repository", repo)
 
+    def test_a_fleet_name_has_no_stray_where_the_repo_cannot_form_the_field(self) -> None:
+        self.assertIsNone(
+            secret_names.wrong_scope_file_name("NUGET_USERNAME", "fleet", "example.github.io")
+        )
+
     def test_an_unknown_scope_raises(self) -> None:
         with self.assertRaises(secret_names.SecretNameError):
             secret_names.secret_file_name("CODECOV_TOKEN", "environment", "ExampleRepo")

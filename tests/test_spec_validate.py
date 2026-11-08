@@ -283,13 +283,24 @@ class SecretScopeCase(unittest.TestCase):
     def test_a_fully_scoped_spec_is_clean(self) -> None:
         self.assertEqual(self.errors(self.SECRETS), [])
 
-    def test_a_cataloged_name_with_an_underscore_or_a_dot_is_an_error(self) -> None:
+    def test_a_cataloged_name_with_an_underscore_or_a_dot_owing_a_repository_name_is_an_error(
+        self,
+    ) -> None:
         for name in ("Example_Repo", "Example.Repo"):
             with self.subTest(name=name):
-                repos = {"repos": [{"name": name, "status": "cataloged"}]}
+                repos = {
+                    "repos": [
+                        {"name": name, "status": "cataloged", "requiredSecrets": ["REPO_ONE"]}
+                    ]
+                }
                 errors = self.errors(self.SECRETS, repos)
                 self.assertEqual(len(errors), 1)
                 self.assertIn(f"registry entry {name}:", errors[0])
+
+    def test_a_cataloged_name_with_a_dot_owing_only_fleet_names_is_clean(self) -> None:
+        """A repository owing only fleet-scoped names needs no repository name field."""
+        repos = {"repos": [{"name": "example.github.io", "status": "cataloged"}]}
+        self.assertEqual(self.errors(self.SECRETS, repos), [])
 
     def test_an_excluded_name_with_an_underscore_owes_no_secret_file(self) -> None:
         repos = {"repos": [{"name": "Example_Repo", "status": "excluded"}]}
