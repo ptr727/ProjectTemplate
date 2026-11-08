@@ -348,8 +348,6 @@ RATE_LIMITED_REPLY_COMMENT = (
     "Review rate limited.\n</details>\n"
 )
 
-# The reply as CodeRabbit now writes it: markup and blank lines sit between the summary and the sentence.
-# The invocation id is a placeholder.
 RATE_LIMITED_MARKUP_REPLY_COMMENT = (
     "<!-- This is an auto-generated reply by CodeRabbit -->\n"
     "<!-- CodeRabbit review command invocation: v2:HASH -->\n"
@@ -4745,7 +4743,7 @@ class TestCli(GqlCase):
                 self.assertIn("(reviewing: CodeRabbit)", self.out.getvalue())
 
     def test_a_rate_limited_hosted_review_does_not_hold_an_attested_head(self) -> None:
-        """Either reply shape ends the wait, and the digest still reports the limit."""
+        """The marker and both reply shapes end the wait, and the digest still reports the limit."""
         for body in (
             RATE_LIMITED_COMMENT,
             RATE_LIMITED_REPLY_COMMENT,
@@ -4766,7 +4764,7 @@ class TestCli(GqlCase):
                 self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
                 with mock.patch.object(pr_review.time, "sleep"):
                     self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
-                self.assertNotIn("CHECKS_PENDING", self.out.getvalue())
+                self.assertIn("other_rate_limited=coderabbitai", self.out.getvalue())
 
     def test_the_held_poll_reads_the_narrow_query_and_the_verdict_the_full_one(self) -> None:
         """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`.
