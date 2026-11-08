@@ -214,7 +214,7 @@ def compare_stores(
 
     The levels are OK for a required name that is present and DEFECT for a required name that is missing.
     DEFECT also covers a forbidden name that is present, and DRIFT covers a name no applicable mechanism claims.
-    A claim is per store, so a name one store owes is still DRIFT in the other store, where nothing owes it.
+    A claim is per store, so a name only one store owes is DRIFT when the other store holds it.
     A forbidden name that is present is also unclaimed, so it is reported at both levels, as AUDIT.md documents.
     The audit and repo-config/configure.sh both read their findings from here, so they cannot disagree.
     """
