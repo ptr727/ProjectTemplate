@@ -322,6 +322,18 @@ class SecretScopeCase(unittest.TestCase):
         self.assertEqual([row["scope"] for row in plan["rows"]], ["fleet"])
         self.assertEqual(self.errors(secrets, repos), [])
 
+    def test_a_malformed_dotted_entry_is_skipped_rather_than_raised_on(self) -> None:
+        """The per-entry checks report these shapes, so the scope check must not crash on them."""
+        for field in (
+            {"requiredSecrets": None},
+            {"requiredSecrets": [["A"]]},
+            {"publish": None},
+            {"publish": ["not-an-object"]},
+        ):
+            with self.subTest(field=field):
+                repos = {"repos": [{"name": "Example.Repo", "status": "cataloged", **field}]}
+                self.assertEqual(self.errors(self.SECRETS, repos), [])
+
     def test_an_excluded_name_with_an_underscore_owes_no_secret_file(self) -> None:
         repos = {"repos": [{"name": "Example_Repo", "status": "excluded"}]}
         self.assertEqual(self.errors(self.SECRETS, repos), [])
@@ -1715,6 +1727,22 @@ class RegistryEntryGateCase(unittest.TestCase):
         )
         self.assertNotIn("Traceback", output)
         self.assertIn("Fixture: requiredSecrets must be an array of secret names", output)
+
+    def test_a_non_list_publish_reports_rather_than_raises(self) -> None:
+        """The per-entry loop iterates publish, so a null or a number there raised before any error printed."""
+        for value in (None, 7):
+            with self.subTest(value=value):
+                entry = self.entry(
+                    status="cataloged",
+                    types=["source-only"],
+                    consumerModel="pull",
+                    hasDevelop=True,
+                    classificationPending=None,
+                )
+                entry["publish"] = value
+                output = self.run_against(entry)
+                self.assertNotIn("Traceback", output)
+                self.assertIn("Fixture: publish must be an array of publish entries", output)
 
     def test_an_unhashable_required_secret_reports_rather_than_raises(self) -> None:
         """A container-type guard passes a nested list, which then raises on the way into the cross-check's set().
