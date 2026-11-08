@@ -43,7 +43,7 @@
 # Every group except secrets is idempotent, so applying the same configuration twice changes nothing there.
 # The secrets group rewrites every owed secret on every run, since a stored value cannot be read back to compare.
 #
-# The check mode is the read-only inverse, and it verifies the same five groups apply writes.
+# The check mode is the read-only inverse, and it verifies the same groups apply writes.
 # The static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.
 # The ruleset assertions compare against the payloads composed for the repo, the same ones apply writes.
 # A ruleset is checked on enforcement, on the rule-type set compared in both directions, and on the whole parameters object of every parameterized rule.
@@ -311,7 +311,7 @@ fi
 # It returns non-zero with its own message on any failure, so the caller decides whether that stops the run or reports a failed check.
 load_secret_names() {
     if ! secret_names_json="$("${py_cmd[@]}" "$resolve_secrets" names --slug "$repo" "$@" -- "$secrets_spec" "$registry" "$name")"; then
-        echo "Could not resolve the secret names for $repo from its tree." >&2
+        echo "Could not resolve the secret names for $repo. The line above names the cause." >&2
         return 1
     fi
     if ! secret_names_skip="$(jqr '.skip // empty' <<<"$secret_names_json")"; then
