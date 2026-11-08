@@ -23,7 +23,7 @@ The carried `AUDIT.md` reaches the hub at `main` for its configuration check. Th
 
 Downstream repositories carry no copy of `spec/secrets.json`. `baseline` applies to every fleet repo by definition. `mechanisms`/`targetMechanisms`/`typeMechanisms` resolve from the registry entry (a repo's `publish[]` targets and `types[]`) rather than from anything repo-specific. So a per-repo copy could only restate the hub's own computation or drift from it between resyncs. `uv run --no-project --script spec/audit.py [RepoName]`, run from a hub checkout, resolves the required set the same way the mechanized `repo-setup` check does. `targetMechanisms`/`typeMechanisms` selects each applicable mechanism from the registry entry. `baseline` plus the selected `mechanisms` plus the registry entry's own `requiredSecrets[]` (the repo's domain-specific additions) gives the required and forbidden names. The result is cross-checked against the repo's live Actions and Dependabot secret stores.
 
-`configure.sh apply` sets those same names, resolved by the same `spec/secret_names.py`, from the host's `~/.secrets/` directory. `configure.sh check` asserts them per store. The file each value is read from follows the name's scope in `spec/secrets.json`. See [`repo-config/README.md`](../repo-config/README.md) "Provisioning From `~/.secrets/`" for the file names, the strict-scope rule, and the `scaffold` command that pre-creates the files.
+`configure.sh apply` sets those same names, resolved by the same `spec/secret_names.py`, from the host's `~/.secrets/` directory. `configure.sh check` asserts them per store. The file each value is read from follows the name's scope in `spec/secrets.json`. See [`repo-config/README.md` "Provisioning From `~/.secrets/`"][repo-config-readme-provisioning] for the file names, the strict-scope rule, and the `scaffold` command that pre-creates the files.
 
 ## Applying the Config
 
@@ -104,4 +104,5 @@ done
 <!-- Repo -->
 
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[repo-config-readme-provisioning]: ../repo-config/README.md#provisioning-from-secrets
 [repo-config-readme-rulesets]: ../repo-config/README.md#rulesets

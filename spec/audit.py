@@ -53,6 +53,7 @@ from fidelity_text import (
     strip_sections,
 )
 from secret_names import (  # noqa: F401  # re-exported, since the tests and helpers name them on audit
+    compare_stores,
     coverage_candidate_types,
     coverage_claiming_types,
     declared_types,
@@ -2149,23 +2150,7 @@ def check_secrets_names(run):
         data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
     required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree)
-    findings = [
-        ("DEFECT", f"secrets: {name} missing from the {store} store")
-        for store, names in required.items()
-        for name in sorted(names - stores[store])
-    ]
-    claimed_names = required["actions"] | required["dependabot"]
-    for store, present in stores.items():
-        for name in sorted(present & forbidden):
-            findings.append(("DEFECT", f"secrets: forbidden {name} present in the {store} store"))
-        for name in sorted(present - claimed_names):
-            findings.append(
-                (
-                    "DRIFT",
-                    f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)",
-                )
-            )
-    return findings
+    return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
 
 
 def check_dependabot_ecosystems(run):

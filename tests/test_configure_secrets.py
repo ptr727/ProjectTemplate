@@ -27,6 +27,22 @@ from test_configure_environments import JQR, REPORTERS, lift, require
 HUB = Path(__file__).resolve().parents[1]
 SPEC = HUB / "spec"
 LIBRARY = HUB / "lib" / "sh" / "secrets.sh"
+sys.path.insert(0, str(SPEC))
+import resolve_secrets
+
+SECRETS = json.loads((SPEC / "secrets.json").read_text(encoding="utf-8"))
+
+# The library reads file modes through `stat -c` and is tested only on Linux, so a case that needs a mode is too.
+POSIX_ONLY = unittest.skipUnless(
+    sys.platform == "linux",
+    "the secrets library reads POSIX modes, as tests/test_secrets_sh.py does",
+)
+# A stub gh is a shebang script on PATH, which Windows' CreateProcess cannot run when python spawns gh.
+# Only a `gh.exe` is found there, so a case that has python spawn the stub is skipped on Windows.
+# The same behavior runs in process, with run_subprocess stubbed, in tests/test_resolve_secrets.py.
+NEEDS_SPAWNED_GH = unittest.skipIf(
+    os.name == "nt", "CreateProcess runs only a gh.exe, never a shebang stub on PATH"
+)
 
 REGISTRY = {
     "repos": [
@@ -50,7 +66,13 @@ PLAN = (
 GH_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >>"$GH_DIR/argv"
 case "$*" in
-"api repos/owner/ExampleRepo/git/trees/"*"?recursive=1") cat "$GH_DIR/tree.json" ;;
+"api repos/owner/ExampleRepo/git/trees/"*"?recursive=1")
+    if [ -f "$GH_DIR/tree.status" ]; then
+        echo "gh: error (HTTP $(cat "$GH_DIR/tree.status"))" >&2
+        exit 1
+    fi
+    cat "$GH_DIR/tree.json"
+    ;;
 "api --paginate repos/owner/ExampleRepo/actions/secrets --jq .secrets[].name") cat "$GH_DIR/list.actions" ;;
 "api --paginate repos/owner/ExampleRepo/dependabot/secrets --jq .secrets[].name") cat "$GH_DIR/list.dependabot" ;;
 "secret set "*)
@@ -94,39 +116,32 @@ class Fixture:
         stub.chmod(0o755)
         self.registry = self.root / "repos.json"
         self.registry.write_text(json.dumps(REGISTRY), encoding="utf-8")
-        self.tree = tree
+        self.live: dict[str, set[str]] | None = None
         self.write_tree(tree)
         for store in ("actions", "dependabot"):
             (self.gh_dir / f"list.{store}").write_text("", encoding="utf-8")
 
     def write_tree(self, tree: tuple[str, ...], truncated: bool = False) -> None:
+        self.tree = tree
         payload = {"tree": [{"type": "blob", "path": p} for p in tree], "truncated": truncated}
         (self.gh_dir / "tree.json").write_text(json.dumps(payload), encoding="utf-8")
 
     def names_json(self) -> str:
-        """The resolver's own output for ExampleRepo, so the harness feeds the script what it really gets."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(SPEC / "resolve_secrets.py"),
-                "names",
-                "--slug",
-                "owner/ExampleRepo",
-                "--",
-                str(SPEC / "secrets.json"),
-                str(self.registry),
-                "ExampleRepo",
-            ],
-            capture_output=True,
-            check=True,
-            timeout=30,
-            env=dict(
-                os.environ,
-                PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}",
-                GH_DIR=str(self.gh_dir),
-            ),
+        """The resolver's own plan for ExampleRepo, so the harness feeds the script what it really gets.
+
+        It is computed in process, with the tree and the live stores handed over, so no gh is spawned.
+        """
+        registry = json.loads(self.registry.read_text(encoding="utf-8"))
+        live = self.live
+        plan = resolve_secrets.resolve_names(
+            SECRETS,
+            registry,
+            "ExampleRepo",
+            "owner/ExampleRepo",
+            lambda slug, branch: set(self.tree),
+            (lambda slug: live) if live is not None else None,
         )
-        return result.stdout.decode().strip()
+        return json.dumps(plan)
 
     def fill(self, file_name: str, value: str, mode: int = 0o600) -> Path:
         path = self.secrets / file_name
@@ -196,6 +211,7 @@ def assert_no_value_leaked(case: unittest.TestCase, fix: Fixture, *outputs: str)
 APPLY = 'plan_secrets "$dir"\napply_secrets "$dir"\n'
 
 
+@POSIX_ONLY
 class ApplyCase(unittest.TestCase):
     """The apply path: values go to stdin only, in every store a name needs."""
 
@@ -346,6 +362,7 @@ class ApplyCase(unittest.TestCase):
             assert_no_value_leaked(self, fix, result.stdout, result.stderr)
 
 
+@POSIX_ONLY
 class StrayCase(unittest.TestCase):
     """A file at the wrong scope aborts before any write, and is never read."""
 
@@ -401,6 +418,7 @@ class StrayCase(unittest.TestCase):
             self.assertNotIn("is mode", result.stderr)
 
 
+@POSIX_ONLY
 class DryRunCase(unittest.TestCase):
     """The dry run lists by store and scope, and makes no write."""
 
@@ -434,6 +452,7 @@ class DryRunCase(unittest.TestCase):
             self.assertEqual(fix.argv(), "")
 
 
+@NEEDS_SPAWNED_GH
 class LoadNamesCase(unittest.TestCase):
     """The tree read that feeds the resolver, through the script's own function."""
 
@@ -443,6 +462,7 @@ class LoadNamesCase(unittest.TestCase):
         script = "\n".join(
             [
                 options,
+                lift(JQR),
                 lift(r"(load_secret_names\(\) \{.*?^\})"),
                 f"py_cmd=({shlex.quote(sys.executable)})",
                 f"resolve_secrets={shlex.quote(str(SPEC / 'resolve_secrets.py'))}",
@@ -469,7 +489,7 @@ class LoadNamesCase(unittest.TestCase):
             env=env,
         )
 
-    def test_the_resolver_sees_the_default_branch_tree(self) -> None:
+    def test_the_resolver_reads_the_tree_that_decides_codecov(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fix = Fixture(tmp, tree=("tests/test_a.py",))
             result = self.load(fix)
@@ -501,6 +521,20 @@ class LoadNamesCase(unittest.TestCase):
             fix.registry.write_text(json.dumps(registry), encoding="utf-8")
             self.assertIn("git/trees/develop?recursive=1", self.load_and_log(fix))
 
+    def test_a_missing_ground_branch_loads_as_a_skip_and_not_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp)
+            (fix.gh_dir / "tree.status").write_text("404", encoding="utf-8")
+            result = self.load(fix)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            plan = json.loads(result.stdout)
+            self.assertEqual(plan["rows"], [])
+            self.assertEqual(
+                plan["skip"], "the main branch of owner/ExampleRepo does not exist yet"
+            )
+            (fix.gh_dir / "tree.status").write_text("500", encoding="utf-8")
+            self.assertIn("LOAD_FAILED", self.load(fix).stdout)
+
     def load_and_log(self, fix: Fixture) -> str:
         (fix.gh_dir / "argv").unlink(missing_ok=True)
         result = self.load(fix)
@@ -513,15 +547,14 @@ class CheckCase(unittest.TestCase):
 
     def check(self, fix: Fixture) -> subprocess.CompletedProcess[str]:
         lifted = lift(r"(check_secrets\(\) \{.*?^\})")
-        # The tree read has its own cases, so the plan the fixture already holds stands in for it here.
+        # The tree and store reads have their own cases, so the plan the fixture holds stands in for them here.
         return fix.run(
-            f"{lifted}\nload_secret_names() {{ return 0; }}\nsecrets_registered=true\nname=ExampleRepo\n"
+            f"{lifted}\nload_secret_names() {{ secret_names_skip=; }}\nsecrets_registered=true\nname=ExampleRepo\n"
             'check_secrets\necho "FAILED=$FAILED"\n'
         )
 
     def list_stores(self, fix: Fixture, actions: list[str], dependabot: list[str]) -> None:
-        (fix.gh_dir / "list.actions").write_text("\n".join(actions) + "\n", encoding="utf-8")
-        (fix.gh_dir / "list.dependabot").write_text("\n".join(dependabot) + "\n", encoding="utf-8")
+        fix.live = {"actions": set(actions), "dependabot": set(dependabot)}
 
     OWED: ClassVar[list[str]] = [
         "CODECOV_TOKEN",
@@ -547,7 +580,7 @@ class CheckCase(unittest.TestCase):
             self.list_stores(fix, self.OWED, [n for n in self.OWED if n != "CODECOV_TOKEN"])
             result = self.check(fix)
             self.assertIn(
-                "  FAIL secret CODECOV_TOKEN is missing from the dependabot store", result.stdout
+                "  FAIL secrets: CODECOV_TOKEN missing from the dependabot store", result.stdout
             )
             self.assertNotIn("missing from the actions store", result.stdout)
             self.assertIn("FAILED=1", result.stdout)
@@ -558,7 +591,7 @@ class CheckCase(unittest.TestCase):
             self.list_stores(fix, [*self.OWED, "CODEGEN_APP_ID"], self.OWED)
             result = self.check(fix)
             self.assertIn(
-                "  FAIL forbidden secret CODEGEN_APP_ID is present in the actions store",
+                "  FAIL secrets: forbidden CODEGEN_APP_ID present in the actions store",
                 result.stdout,
             )
             self.assertIn("FAILED=1", result.stdout)
@@ -569,7 +602,7 @@ class CheckCase(unittest.TestCase):
             self.list_stores(fix, [*self.OWED, "LEFTOVER_NAME"], self.OWED)
             result = self.check(fix)
             self.assertIn(
-                "secret LEFTOVER_NAME in the actions store is claimed by no applicable mechanism",
+                "secrets: LEFTOVER_NAME in the actions store is claimed by no applicable mechanism",
                 result.stdout,
             )
             self.assertIn("FAILED=0", result.stdout)
@@ -669,7 +702,7 @@ class PrologueCase(unittest.TestCase):
 class StatusGateCase(unittest.TestCase):
     """Only a cataloged registry entry owes secrets, as only those are audited."""
 
-    GATE = r"(secrets_registered=false\nsecrets_skip_reason=.*?\nfi\n)"
+    GATE = r'(secrets_registered=false\nsecret_names_skip=""\nsecrets_skip_reason=.*?\nfi\n)'
 
     def gate(self, status: str) -> subprocess.CompletedProcess[str]:
         bash = require("bash")
@@ -731,9 +764,53 @@ class StatusGateCase(unittest.TestCase):
         self.assertIn("provisioned only for a cataloged registry entry", apply_body)
 
 
+class MissingBranchCase(unittest.TestCase):
+    """A ground branch that does not exist yet skips the secrets group without aborting the other groups."""
+
+    def apply_body(self) -> str:
+        text = (HUB / "repo-config" / "configure.sh").read_text(encoding="utf-8")
+        return text.split("cmd_apply() {\n", 1)[1].split("\n}\n", 1)[0]
+
+    def test_check_reports_the_reason_as_a_note_and_not_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp)
+            lifted = lift(r"(check_secrets\(\) \{.*?^\})")
+            result = fix.run(
+                f"{lifted}\nload_secret_names() {{ secret_names_skip='the main branch of owner/ExampleRepo does not exist yet'; }}\n"
+                'secrets_registered=true\ncheck_secrets\necho "FAILED=$FAILED"\n'
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("the main branch of owner/ExampleRepo does not exist yet", result.stdout)
+            self.assertNotIn("  FAIL ", result.stdout)
+            self.assertIn("FAILED=0", result.stdout)
+
+    def test_dry_run_prints_the_reason_and_exits_non_zero(self) -> None:
+        body = self.apply_body()
+        start = body.index('if [ -n "$secret_names_skip" ]; then')
+        block = body[start : start + 450]
+        self.assertIn("Dry run for $repo. Secrets would not be set", block)
+        self.assertIn("exit 1", block)
+        self.assertLess(start, body.index("General repository settings"))
+
+    def test_apply_notes_the_reason_sets_nothing_and_ends_non_zero(self) -> None:
+        body = self.apply_body()
+        self.assertIn(
+            'if [ "$secrets_registered" = true ] && [ -n "$secret_names_skip" ]; then\n'
+            '        echo "Note: no secret was set',
+            body,
+        )
+        # The skip branch precedes the write, and the final exit follows every group.
+        self.assertLess(body.index("no secret was set"), body.index("apply_secrets "))
+        tail = body[body.index("no secret was set") :]
+        self.assertLess(tail.index("exit 1"), tail.index("Configuration applied to $repo. Run"))
+        # The plan, which reads the secrets directory, is not run for a skipped repo.
+        self.assertIn("else\n            plan_secrets", body)
+
+
 class SlugRefusalCase(unittest.TestCase):
     """A slug the registry entry does not name stops the run before any write, and fails the check."""
 
+    @NEEDS_SPAWNED_GH
     def test_the_load_fails_for_a_slug_the_entry_does_not_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fix = Fixture(tmp)

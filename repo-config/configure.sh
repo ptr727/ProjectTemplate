@@ -37,6 +37,8 @@
 # A name with no file and a file the secrets library refuses are each reported in their own list.
 # Either one makes the run exit non-zero after the other secrets are set.
 # A secret on GitHub that nothing claims is never deleted, and the check mode reports it.
+# A cataloged repo whose ground branch does not exist yet is skipped with a note, and the other groups still apply.
+# The run then ends non-zero, so it never reads as fully provisioned.
 # The --dry-run option runs the whole pre-flight and prints what the secrets group would set, writing nothing, and the other groups have no dry run.
 # Applying the same configuration twice changes nothing, so the mode is idempotent.
 #
@@ -287,6 +289,7 @@ fi
 secrets_spec="$script_dir/../spec/secrets.json"
 resolve_secrets="$script_dir/../spec/resolve_secrets.py"
 secrets_registered=false
+secret_names_skip=""
 secrets_skip_reason="$repo has no entry in $registry"
 if [ "$archived_status" = cataloged ]; then
     secrets_registered=true
@@ -298,13 +301,20 @@ fi
 . "$script_dir/../lib/sh/secrets.sh"
 
 # Resolve the secret names this repo owes, leaving the resolver's JSON in secret_names_json.
+# Any argument is passed to the resolver, which check uses to add the live store findings.
+# A ground branch that does not exist yet is a state and not a failure, so the resolver answers it with a skip sentence.
+# That sentence is left in secret_names_skip, and the callers decide what an unset group means for their run.
 # The resolver reads the tree of the registry's ground branch through read-only gh calls.
 # That keeps one tree reader, which is not restated here.
 # A truncated or unreadable tree fails, since a partial one would drop the codecov file a repo with tests owes.
 # It returns non-zero with its own message on any failure, so the caller decides whether that stops the run or reports a failed check.
 load_secret_names() {
-    if ! secret_names_json="$("${py_cmd[@]}" "$resolve_secrets" names --slug "$repo" -- "$secrets_spec" "$registry" "$name")"; then
+    if ! secret_names_json="$("${py_cmd[@]}" "$resolve_secrets" names --slug "$repo" "$@" -- "$secrets_spec" "$registry" "$name")"; then
         echo "Could not resolve the secret names for $repo from its tree." >&2
+        return 1
+    fi
+    if ! secret_names_skip="$(jqr '.skip // empty' <<<"$secret_names_json")"; then
+        echo "Could not read the resolver's answer for $repo." >&2
         return 1
     fi
 }
@@ -711,9 +721,17 @@ cmd_apply() {
             echo "Aborting before any write." >&2
             exit 1
         fi
-        plan_secrets "${HOME:?}/.secrets"
-        if [ "$dry_run" = true ]; then
-            dry_run_secrets "$HOME/.secrets"
+        if [ -n "$secret_names_skip" ]; then
+            # The other groups still apply, and the run ends non-zero below so it never reads as fully provisioned.
+            if [ "$dry_run" = true ]; then
+                echo "Dry run for $repo. Secrets would not be set, since $secret_names_skip."
+                exit 1
+            fi
+        else
+            plan_secrets "${HOME:?}/.secrets"
+            if [ "$dry_run" = true ]; then
+                dry_run_secrets "$HOME/.secrets"
+            fi
         fi
     elif [ "$dry_run" = true ]; then
         echo "Dry run for $repo. Secrets are provisioned only for a cataloged registry entry, and $secrets_skip_reason, so there is nothing to preview."
@@ -761,10 +779,16 @@ cmd_apply() {
         echo "Note: the agent policy files were not written. Run '$0 apply${repo_arg:+ $repo} --checkout <path>' to write them into a checkout, then commit them through a pull request."
     fi
     # ----- Secrets, read from the host's ~/.secrets/ and written last -----
-    if [ "$secrets_registered" = true ]; then
+    if [ "$secrets_registered" = true ] && [ -n "$secret_names_skip" ]; then
+        echo "Note: no secret was set, since $secret_names_skip."
+    elif [ "$secrets_registered" = true ]; then
         apply_secrets "$HOME/.secrets"
     else
         echo "Note: secrets are provisioned only for a cataloged registry entry, and $secrets_skip_reason, so none were set."
+    fi
+    if [ -n "$secret_names_skip" ]; then
+        echo "Configuration applied to $repo except for the secrets, which were not set. Run it again once the branch exists." >&2
+        exit 1
     fi
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
 }
@@ -1144,48 +1168,29 @@ check_agent_policy() { # the repo's default branch must carry the files the regi
 }
 
 check_secrets() {
-    local store live sname claimed forbidden wanted
+    local level text findings
     if [ "$secrets_registered" != true ]; then
         note "secrets: only a cataloged registry entry owes secrets, and $secrets_skip_reason, so none are asserted."
         return
     fi
-    if ! load_secret_names; then
+    # The comparison is secret_names.compare_stores, the one the audit uses, so its findings are only mapped here.
+    if ! load_secret_names --live; then
         fail "secrets - could not resolve the secret names $repo owes"
         return
     fi
-    # Each list is read into a variable before its loop for the reason check_settings gives: a jq failure inside `done < <(...)` skips the body silently.
-    claimed="$(jqr '.rows[].name' <<<"$secret_names_json")"
-    forbidden="$(jqr '.forbidden[]' <<<"$secret_names_json")"
-    for store in actions dependabot; do
-        # The list is paginated, since a store holding more names than one page would otherwise report a later one as missing.
-        if ! live="$(gh api --paginate "repos/$repo/$store/secrets" --jq '.secrets[].name')"; then
-            fail "secrets - could not list the $store store"
-            continue
-        fi
-        # shellcheck disable=SC2016  # $s is a jq --arg variable, not a shell expansion
-        wanted="$(jqr --arg s "$store" '.rows[] | select(.stores | index($s)) | .name' <<<"$secret_names_json")"
-        while IFS= read -r sname; do
-            if [ -z "$sname" ]; then continue; fi
-            if grep -qxF -- "$sname" <<<"$live"; then
-                pass "secret $sname is in the $store store"
-            else
-                fail "secret $sname is missing from the $store store"
-            fi
-        done <<<"$wanted"
-        while IFS= read -r sname; do
-            if [ -z "$sname" ]; then continue; fi
-            if grep -qxF -- "$sname" <<<"$live"; then
-                fail "forbidden secret $sname is present in the $store store"
-            fi
-        done <<<"$forbidden"
-        # A name nothing claims is reported rather than asserted, and never deleted.
-        while IFS= read -r sname; do
-            if [ -z "$sname" ]; then continue; fi
-            if ! grep -qxF -- "$sname" <<<"$claimed" && ! grep -qxF -- "$sname" <<<"$forbidden"; then
-                note "secret $sname in the $store store is claimed by no applicable mechanism (reported, never deleted)"
-            fi
-        done <<<"$live"
-    done
+    if [ -n "$secret_names_skip" ]; then
+        note "secrets: $secret_names_skip, so none are asserted."
+        return
+    fi
+    # The findings are read into a variable before the loop for the reason check_settings gives: a jq failure inside `done < <(...)` skips the body silently.
+    findings="$(jqr '.findings[] | [.[0], .[1]] | @tsv' <<<"$secret_names_json")"
+    while IFS=$'\t' read -r level text; do
+        case "$level" in
+        OK) pass "$text" ;;
+        DEFECT) fail "$text" ;;
+        DRIFT) note "$text (reported, never deleted)" ;;
+        esac
+    done <<<"$findings"
     note "secret values are never readable via the API, so verify by hand that a value is valid"
 }
 

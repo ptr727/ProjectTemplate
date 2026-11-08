@@ -13,7 +13,6 @@ import io
 import json
 import os
 import stat
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -147,6 +146,27 @@ class AuditAgreementCase(unittest.TestCase):
                         from_plan[store].add(row["name"])
                 self.assertEqual(self.audit_missing(e, tree), from_plan)
 
+    def test_audit_and_the_cli_get_the_same_findings_for_one_set_of_live_stores(self) -> None:
+        e = entry(publish=[{"target": "docker"}])
+        live = {
+            "actions": {"CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_ID", "LEFTOVER", "CODECOV_TOKEN"},
+            "dependabot": {"CODEGEN_APP_PRIVATE_KEY", "CODECOV_TOKEN"},
+        }
+        run = SimpleNamespace(
+            spec={"secrets": SECRETS}, entry=e, tree=TESTED, slug="owner/ExampleRepo"
+        )
+
+        def answer(path: str, ok404: bool = False) -> Any:
+            store = path.split("/")[-2].split("?")[0] if "/secrets" in path else ""
+            return {"secrets": [{"name": n} for n in sorted(live[store])]}
+
+        with unittest.mock.patch.object(audit, "gh", answer):
+            from_audit = audit.check_secrets_names(run)
+        plan = secret_names.secret_plan(SECRETS, e, TESTED, "ExampleRepo", live)
+        from_cli = [tuple(f) for f in plan["findings"] if f[0] != "OK"]
+        self.assertEqual(from_audit, from_cli)
+        self.assertTrue(from_cli)
+
     def test_the_names_moved_out_of_audit_are_still_importable_from_it(self) -> None:
         for moved in (
             "in_test_directory",
@@ -196,80 +216,100 @@ class SecretPlanCase(unittest.TestCase):
             secret_names.secret_plan(without, entry(), TESTED, "ExampleRepo")
 
 
-GH_TREE_STUB = """#!/bin/sh
-printf '%s\\n' "$*" >>"$GH_DIR/argv"
-case "$*" in
-"api repos/owner/ExampleRepo/git/trees/"*"?recursive=1") cat "$GH_DIR/tree.json" ;;
-*)
-    echo "unexpected gh call: $*" >&2
-    exit 97
-    ;;
-esac
-"""
+class FakeGh:
+    """Stands in for scripts/gh_graphql.run_subprocess, recording each argv and answering from what it was given.
+
+    Nothing is spawned, so the cases below run the same on every platform.
+    A spawned stub `gh` cannot, since Windows' CreateProcess finds only a `gh.exe`.
+    """
+
+    def __init__(
+        self,
+        tree: tuple[str, ...] = (),
+        truncated: bool = False,
+        tree_status: str | None = None,
+        live: dict[str, tuple[str, ...]] | None = None,
+        missing_gh: bool = False,
+    ) -> None:
+        self.tree = tree
+        self.truncated = truncated
+        self.tree_status = tree_status
+        self.live = live or {}
+        self.missing_gh = missing_gh
+        self.calls: list[str] = []
+
+    def __call__(self, argv: list[str]) -> tuple[int, str, str]:
+        self.calls.append(" ".join(argv))
+        if self.missing_gh:
+            raise resolve_secrets.gh_graphql_module().GraphQLError("could not run gh: not found")
+        endpoint = next(a for a in argv if a.startswith("repos/"))
+        if "/git/trees/" in endpoint:
+            if self.tree_status is not None:
+                if self.tree_status == "none":
+                    return 1, "", "gh: boom\n"
+                return 1, "", f"gh: error (HTTP {self.tree_status})\n"
+            payload = {
+                "tree": [{"type": "blob", "path": p} for p in self.tree],
+                "truncated": self.truncated,
+            }
+            return 0, json.dumps(payload), ""
+        store = endpoint.split("/")[-2]
+        return 0, "".join(f"{n}\n" for n in self.live.get(store, ())), ""
 
 
 class NamesCliCase(unittest.TestCase):
-    """`resolve_secrets.py names`, run as configure.sh runs it, with a stub gh serving the tree."""
+    """`resolve_secrets.py names`, driven through main() with gh answered in process."""
 
     def run_names(
         self,
         registry: Any,
         name: str,
-        tree: tuple[str, ...] = (),
+        gh: FakeGh | None = None,
         secrets: Any = None,
-        truncated: bool = False,
-    ) -> tuple[subprocess.CompletedProcess[bytes], str]:
+        live: bool = False,
+        slug: str = "owner/ExampleRepo",
+    ) -> tuple[int, str, str, FakeGh]:
+        gh = gh or FakeGh()
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "bin").mkdir()
-            (root / "gh").mkdir()
-            stub = root / "bin" / "gh"
-            stub.write_text(GH_TREE_STUB, encoding="utf-8")
-            stub.chmod(0o755)
-            payload = {"tree": [{"type": "blob", "path": p} for p in tree], "truncated": truncated}
-            (root / "gh" / "tree.json").write_text(json.dumps(payload), encoding="utf-8")
-            reg = root / "repos.json"
+            reg = Path(tmp) / "repos.json"
             reg.write_text(json.dumps(registry), encoding="utf-8")
-            spec = root / "secrets.json"
+            spec = Path(tmp) / "secrets.json"
             spec.write_text(json.dumps(SECRETS if secrets is None else secrets), encoding="utf-8")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(HUB / "spec" / "resolve_secrets.py"),
-                    "names",
-                    "--slug",
-                    "owner/ExampleRepo",
-                    "--",
-                    str(spec),
-                    str(reg),
-                    name,
-                ],
-                capture_output=True,
-                check=False,
-                timeout=30,
-                env=dict(
-                    os.environ,
-                    PATH=f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}",
-                    GH_DIR=str(root / "gh"),
+            args = [
+                "names",
+                "--slug",
+                slug,
+                *(["--live"] if live else []),
+                "--",
+                str(spec),
+                str(reg),
+                name,
+            ]
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                unittest.mock.patch.object(
+                    resolve_secrets.gh_graphql_module(), "run_subprocess", gh
                 ),
-            )
-            argv = root / "gh" / "argv"
-            return result, argv.read_text(encoding="utf-8") if argv.exists() else ""
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                code = resolve_secrets.main(args)
+            return code, out.getvalue(), err.getvalue(), gh
 
     def test_the_tree_the_stub_serves_decides_codecov(self) -> None:
         registry = {"repos": [entry()]}
-        with_tests, _ = self.run_names(registry, "ExampleRepo", ("tests/test_a.py",))
-        self.assertEqual(with_tests.returncode, 0, with_tests.stderr)
-        self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(with_tests.stdout)["rows"]])
-        without, _ = self.run_names(registry, "ExampleRepo", ("src/a.py",))
-        self.assertNotIn("CODECOV_TOKEN", [r["name"] for r in json.loads(without.stdout)["rows"]])
+        code, out, err, _ = self.run_names(registry, "ExampleRepo", FakeGh(("tests/test_a.py",)))
+        self.assertEqual(code, 0, err)
+        self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(out)["rows"]])
+        _, out, _, _ = self.run_names(registry, "ExampleRepo", FakeGh(("src/a.py",)))
+        self.assertNotIn("CODECOV_TOKEN", [r["name"] for r in json.loads(out)["rows"]])
 
     def test_a_path_holding_a_newline_stays_one_path(self) -> None:
-        result, _ = self.run_names(
-            {"repos": [entry()]}, "ExampleRepo", ("tests/odd\nname_test.py",)
+        code, out, err, _ = self.run_names(
+            {"repos": [entry()]}, "ExampleRepo", FakeGh(("tests/odd\nname_test.py",))
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(result.stdout)["rows"]])
+        self.assertEqual(code, 0, err)
+        self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(out)["rows"]])
 
     def test_the_tree_is_read_on_the_ground_branch_the_audit_reads(self) -> None:
         cases: list[tuple[str, Any, str]] = [
@@ -287,10 +327,12 @@ class NamesCliCase(unittest.TestCase):
         ]
         for label, registry, branch in cases:
             with self.subTest(label):
-                result, argv = self.run_names(registry, "ExampleRepo", ("tests/test_a.py",))
-                self.assertEqual(result.returncode, 0, result.stderr)
+                code, _, err, gh = self.run_names(
+                    registry, "ExampleRepo", FakeGh(("tests/test_a.py",))
+                )
+                self.assertEqual(code, 0, err)
                 self.assertEqual(
-                    argv.strip(), f"api repos/owner/ExampleRepo/git/trees/{branch}?recursive=1"
+                    gh.calls, [f"gh api repos/owner/ExampleRepo/git/trees/{branch}?recursive=1"]
                 )
 
     def test_a_slug_the_entry_does_not_name_is_refused_before_any_tree_read(self) -> None:
@@ -301,20 +343,20 @@ class NamesCliCase(unittest.TestCase):
         ]
         for label, declared in cases:
             with self.subTest(label):
-                result, argv = self.run_names({"repos": [declared]}, "ExampleRepo")
-                self.assertEqual(result.returncode, 1)
-                self.assertIn(b"owner/ExampleRepo", result.stderr)
-                self.assertIn(b"Refusing", result.stderr)
-                self.assertEqual(result.stdout, b"")
-                self.assertEqual(argv, "")
+                code, out, err, gh = self.run_names({"repos": [declared]}, "ExampleRepo")
+                self.assertEqual(code, 1)
+                self.assertIn("owner/ExampleRepo", err)
+                self.assertIn("Refusing", err)
+                self.assertEqual(out, "")
+                self.assertEqual(gh.calls, [])
 
     def test_the_slug_comparison_ignores_case(self) -> None:
-        result, _ = self.run_names(
+        code, _, err, _ = self.run_names(
             {"repos": [entry(url="https://github.com/OWNER/exampleREPO")]},
             "ExampleRepo",
-            ("tests/test_a.py",),
+            FakeGh(("tests/test_a.py",)),
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(code, 0, err)
 
     def test_each_loud_failure_exits_one_with_a_message(self) -> None:
         cases: list[tuple[str, Any, str, Any]] = [
@@ -337,25 +379,99 @@ class NamesCliCase(unittest.TestCase):
         ]
         for label, registry, name, secrets in cases:
             with self.subTest(label):
-                result, _ = self.run_names(registry, name, ("tests/test_a.py",), secrets)
-                self.assertEqual(result.returncode, 1)
-                self.assertTrue(result.stderr.strip())
-                self.assertNotIn(b"Traceback", result.stderr)
-                self.assertEqual(result.stdout, b"")
+                code, out, err, _ = self.run_names(
+                    registry, name, FakeGh(("tests/test_a.py",)), secrets
+                )
+                self.assertEqual(code, 1)
+                self.assertTrue(err.strip())
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(out, "")
 
     def test_a_truncated_tree_fails_naming_the_repo(self) -> None:
-        result, _ = self.run_names(
-            {"repos": [entry()]}, "ExampleRepo", ("tests/test_a.py",), truncated=True
+        code, out, err, _ = self.run_names(
+            {"repos": [entry()]}, "ExampleRepo", FakeGh(("tests/test_a.py",), truncated=True)
         )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn(b"owner/ExampleRepo", result.stderr)
-        self.assertEqual(result.stdout, b"")
+        self.assertEqual(code, 1)
+        self.assertIn("owner/ExampleRepo", err)
+        self.assertEqual(out, "")
+
+    def test_a_missing_ground_branch_is_a_reported_state_and_not_a_failure(self) -> None:
+        for status in ("404", "409"):
+            with self.subTest(status=status):
+                code, out, err, _ = self.run_names(
+                    {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_status=status)
+                )
+                self.assertEqual(code, 0, err)
+                plan = json.loads(out)
+                self.assertEqual((plan["rows"], plan["strays"], plan["forbidden"]), ([], [], []))
+                self.assertEqual(
+                    plan["skip"], "the main branch of owner/ExampleRepo does not exist yet"
+                )
+
+    def test_every_other_gh_failure_still_exits_one(self) -> None:
+        for status in ("403", "500", "none"):
+            with self.subTest(status=status):
+                code, out, err, _ = self.run_names(
+                    {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_status=status)
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("owner/ExampleRepo", err)
+
+    def test_a_missing_gh_is_a_clear_error_and_not_a_traceback(self) -> None:
+        code, out, err, _ = self.run_names(
+            {"repos": [entry()]}, "ExampleRepo", FakeGh(missing_gh=True)
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("could not run gh", err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(out, "")
+
+    def test_live_adds_the_findings_of_the_store_comparison(self) -> None:
+        owed = ("CODECOV_TOKEN", "CODEGEN_APP_CLIENT_ID", "CODEGEN_APP_PRIVATE_KEY")
+        gh = FakeGh(
+            ("tests/test_a.py",),
+            live={"actions": (*owed, "CODEGEN_APP_ID", "LEFTOVER"), "dependabot": owed[1:]},
+        )
+        registry = {"repos": [entry(types=["python"])]}
+        code, out, err, _ = self.run_names(registry, "ExampleRepo", gh, live=True)
+        self.assertEqual(code, 0, err)
+        findings = [tuple(f) for f in json.loads(out)["findings"]]
+        self.assertIn(("OK", "secrets: CODECOV_TOKEN is in the actions store"), findings)
+        self.assertIn(
+            ("DEFECT", "secrets: CODECOV_TOKEN missing from the dependabot store"), findings
+        )
+        self.assertIn(
+            ("DEFECT", "secrets: forbidden CODEGEN_APP_ID present in the actions store"), findings
+        )
+        self.assertIn(
+            (
+                "DRIFT",
+                "secrets: LEFTOVER in the actions store is claimed by no applicable mechanism (stale?)",
+            ),
+            findings,
+        )
+        self.assertTrue(any("--paginate" in c for c in gh.calls))
+
+    def test_a_skipped_branch_reads_no_store(self) -> None:
+        code, out, _, gh = self.run_names(
+            {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_status="404"), live=True
+        )
+        self.assertEqual(code, 0)
+        self.assertNotIn("findings", json.loads(out))
+        self.assertFalse(any("--paginate" in c for c in gh.calls))
 
 
-def tree_reader(trees: dict[str, set[str]], branches: list[tuple[str, str]] | None = None):
+def tree_reader(
+    trees: dict[str, set[str]],
+    branches: list[tuple[str, str]] | None = None,
+    missing: frozenset[str] = frozenset(),
+):
     def read(slug: str, branch: str) -> set[str]:
         if branches is not None:
             branches.append((slug, branch))
+        if slug in missing:
+            raise resolve_secrets.BranchMissing(f"the {branch} branch of {slug} does not exist yet")
         if slug not in trees:
             raise resolve_secrets.ResolveError(f"{slug}: the tree could not be read")
         return trees[slug]
@@ -395,22 +511,28 @@ FLEET: dict[str, Any] = {
 TREES = {"owner/ExampleRepo": TESTED, "owner/Other-Repo": UNTESTED}
 
 
+# Windows keeps no POSIX permission bits, so a mode it reports back is not the one scaffold asked for.
+POSIX_MODES = os.name != "nt"
+
+
 class ScaffoldCase(unittest.TestCase):
     """The scaffold creates only what is missing, in a private directory, and never touches what exists."""
 
     def run_scaffold(
         self, directory: Path, dry_run: bool = False, fleet: Any = FLEET, trees: Any = TREES
-    ) -> tuple[list[str], list[str], list[str], list[str]]:
+    ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
         return resolve_secrets.scaffold(SECRETS, fleet, directory, dry_run, tree_reader(trees))
 
     def test_it_creates_the_directory_private_and_each_file_empty_and_private(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / ".secrets"
-            created, present, strays, unclaimed = self.run_scaffold(directory)
-            self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+            created, present, strays, unclaimed, _ = self.run_scaffold(directory)
+            if POSIX_MODES:
+                self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
             self.assertEqual(sorted(p.name for p in directory.iterdir()), created)
             for path in directory.iterdir():
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
+                if POSIX_MODES:
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
                 self.assertEqual(path.stat().st_size, 0, path.name)
             self.assertEqual((present, strays, unclaimed), ([], [], []))
             # Fleet names once, repository names per repo, and codecov only where tests exist.
@@ -430,7 +552,7 @@ class ScaffoldCase(unittest.TestCase):
             kept.chmod(0o640)
             os.utime(kept, ns=(1_000_000_000_000_000_000, 1_000_000_000_000_000_000))
             before = kept.stat()
-            created, present, _, _ = self.run_scaffold(directory)
+            created, present, _, _, _ = self.run_scaffold(directory)
             after = kept.stat()
             self.assertEqual(kept.read_text(encoding="utf-8"), "sentinel-kept-value-1\n")
             self.assertEqual(
@@ -440,12 +562,13 @@ class ScaffoldCase(unittest.TestCase):
             self.assertIn("github_codegen_app_client_id", present)
             self.assertNotIn("github_codegen_app_client_id", created)
 
+    @unittest.skipUnless(POSIX_MODES, "Windows keeps no POSIX permission bits to compare")
     def test_an_existing_directory_keeps_its_mode_whatever_it_is(self) -> None:
         for mode in (0o750, 0o755):
             with self.subTest(mode=oct(mode)), tempfile.TemporaryDirectory() as tmp:
                 directory = Path(tmp)
                 directory.chmod(mode)
-                created, _, _, _ = self.run_scaffold(directory)
+                created, _, _, _, _ = self.run_scaffold(directory)
                 self.assertTrue(created)
                 self.assertEqual(stat.S_IMODE(directory.stat().st_mode), mode)
 
@@ -453,7 +576,7 @@ class ScaffoldCase(unittest.TestCase):
         """An excluded or archived entry is skipped, and its tree is never read."""
         branches: list[tuple[str, str]] = []
         with tempfile.TemporaryDirectory() as tmp:
-            created, _, _, _ = resolve_secrets.scaffold(
+            created, _, _, _, _ = resolve_secrets.scaffold(
                 SECRETS, FLEET, Path(tmp) / "s", True, tree_reader(TREES, branches)
             )
         self.assertEqual(sorted(s for s, _ in branches), ["owner/ExampleRepo", "owner/Other-Repo"])
@@ -469,7 +592,7 @@ class ScaffoldCase(unittest.TestCase):
             other.write_text("sentinel-stray-value-2\n", encoding="utf-8")
             # A stray nothing opens stays reported even where its mode would refuse a read.
             other.chmod(0o000)
-            created, _, strays, _ = self.run_scaffold(directory)
+            created, _, strays, _, _ = self.run_scaffold(directory)
             self.assertEqual(created, [])
             self.assertEqual(
                 strays, ["github_codecov_token", "github_other-repo_codegen_app_client_id"]
@@ -486,7 +609,7 @@ class ScaffoldCase(unittest.TestCase):
             directory.chmod(0o700)
             (directory / "github_oldrepo_codecov_token").write_text("", encoding="utf-8")
             (directory / "notes.txt").write_text("not a secret file\n", encoding="utf-8")
-            created, _, strays, unclaimed = self.run_scaffold(directory)
+            created, _, strays, unclaimed, _ = self.run_scaffold(directory)
             self.assertEqual(strays, [])
             self.assertEqual(unclaimed, ["github_oldrepo_codecov_token"])
             self.assertTrue((directory / "github_oldrepo_codecov_token").exists())
@@ -495,7 +618,7 @@ class ScaffoldCase(unittest.TestCase):
     def test_a_dry_run_creates_nothing_even_the_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / ".secrets"
-            created, _, _, _ = self.run_scaffold(directory, dry_run=True)
+            created, _, _, _, _ = self.run_scaffold(directory, dry_run=True)
             self.assertTrue(created)
             self.assertFalse(directory.exists())
 
@@ -543,11 +666,30 @@ class ScaffoldCase(unittest.TestCase):
                 Path(collided[0]).read_text(encoding="utf-8"), "sentinel-raced-value-1\n"
             )
 
+    def test_a_repo_without_its_ground_branch_is_listed_and_the_others_are_still_scaffolded(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "s"
+            created, _, strays, _, skipped = resolve_secrets.scaffold(
+                SECRETS,
+                FLEET,
+                directory,
+                False,
+                tree_reader(TREES, missing=frozenset({"owner/Other-Repo"})),
+            )
+            self.assertEqual(strays, [])
+            self.assertEqual(
+                skipped, ["Other-Repo: the main branch of owner/Other-Repo does not exist yet"]
+            )
+            self.assertIn("github_examplerepo_codecov_token", created)
+            self.assertTrue((directory / "github_examplerepo_codecov_token").exists())
+
     def test_a_second_run_creates_nothing_new(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / ".secrets"
-            first, _, _, _ = self.run_scaffold(directory)
-            created, present, _, _ = self.run_scaffold(directory)
+            first, _, _, _, _ = self.run_scaffold(directory)
+            created, present, _, _, _ = self.run_scaffold(directory)
             self.assertEqual(created, [])
             self.assertEqual(present, first)
 
@@ -555,7 +697,9 @@ class ScaffoldCase(unittest.TestCase):
 class ScaffoldCliCase(unittest.TestCase):
     """The command line around the scaffold: lists, exit status, and what it refuses to print."""
 
-    def run_cli(self, *args: str, trees: Any = TREES) -> tuple[int, str, str]:
+    def run_cli(
+        self, *args: str, trees: Any = TREES, missing: frozenset[str] = frozenset()
+    ) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory() as root:
             (Path(root) / "spec").mkdir()
             (Path(root) / "registry").mkdir()
@@ -564,7 +708,9 @@ class ScaffoldCliCase(unittest.TestCase):
             out, err = io.StringIO(), io.StringIO()
             with (
                 unittest.mock.patch.object(resolve_secrets, "ROOT", Path(root)),
-                unittest.mock.patch.object(resolve_secrets, "read_tree", tree_reader(trees)),
+                unittest.mock.patch.object(
+                    resolve_secrets, "read_tree", tree_reader(trees, missing=missing)
+                ),
                 contextlib.redirect_stdout(out),
                 contextlib.redirect_stderr(err),
             ):
@@ -583,6 +729,22 @@ class ScaffoldCliCase(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn("Created (0):", out)
 
+    def test_a_repo_without_its_ground_branch_gets_its_own_heading_and_exits_one(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / ".secrets"
+            code, out, err = self.run_cli(
+                "scaffold",
+                "--secrets-dir",
+                str(directory),
+                missing=frozenset({"owner/Other-Repo"}),
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("Skipped, with no ground branch to read yet (1):", out)
+            self.assertIn("Other-Repo: the main branch of owner/Other-Repo does not exist yet", out)
+            self.assertIn("Created (", out)
+            self.assertTrue((directory / "github_examplerepo_codecov_token").exists())
+            self.assertIn("once each branch exists", err)
+
     def test_a_stray_exits_one_and_creates_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -600,6 +762,38 @@ class ScaffoldCliCase(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("owner/ExampleRepo", err)
             self.assertFalse((Path(tmp) / "s").exists())
+
+
+class CompareStoresCase(unittest.TestCase):
+    """The one comparison of live store names with what a repo owes, whatever reads the stores."""
+
+    REQUIRED: ClassVar[dict[str, set[str]]] = {"actions": {"A", "B"}, "dependabot": {"A"}}
+
+    def test_each_level_is_reported_in_the_audit_order(self) -> None:
+        live = {"actions": {"A", "FORBID", "EXTRA"}, "dependabot": set()}
+        findings = secret_names.compare_stores(self.REQUIRED, {"FORBID"}, live)
+        self.assertEqual(
+            findings,
+            [
+                ("OK", "secrets: A is in the actions store"),
+                ("DEFECT", "secrets: B missing from the actions store"),
+                ("DEFECT", "secrets: A missing from the dependabot store"),
+                ("DEFECT", "secrets: forbidden FORBID present in the actions store"),
+                (
+                    "DRIFT",
+                    "secrets: EXTRA in the actions store is claimed by no applicable mechanism (stale?)",
+                ),
+                (
+                    "DRIFT",
+                    "secrets: FORBID in the actions store is claimed by no applicable mechanism (stale?)",
+                ),
+            ],
+        )
+
+    def test_a_clean_set_has_only_ok_findings(self) -> None:
+        live = {"actions": {"A", "B"}, "dependabot": {"A"}}
+        levels = {level for level, _ in secret_names.compare_stores(self.REQUIRED, set(), live)}
+        self.assertEqual(levels, {"OK"})
 
 
 class TreeBlobsCase(unittest.TestCase):

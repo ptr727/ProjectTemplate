@@ -1808,7 +1808,7 @@ class GroundBranchReaderCase(unittest.TestCase):
     no registry defaults, so a declared `defaults.groundTruthBranch` validated clean and was read by nothing.
     That is the defect whatever shape the resolve takes. Refusing the read is one rule where naming the
     shapes was an enumeration that kept leaving a gap. It is stated as a property of any reader rather than as a history
-    of the three files READERS names. This is because the history differs per file and pinning it here bought nothing.
+    of the files READERS names. This is because the history differs per file and pinning it here bought nothing.
     Three attempts to state it precisely each shipped a different false claim about spec/audit.py, while the rule
     itself never depended on which file carried what.
 

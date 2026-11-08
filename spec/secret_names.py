@@ -175,13 +175,49 @@ def secret_scope(secrets: dict[str, Any], name: str) -> str:
     return str(scope)
 
 
+def compare_stores(
+    required: dict[str, set[str]], forbidden: set[str], live: dict[str, set[str]]
+) -> list[tuple[str, str]]:
+    """The findings from comparing the live secret names per store with what the repo owes, as (level, text).
+
+    The levels are OK for a required name that is present and DEFECT for a required name that is missing.
+    DEFECT also covers a forbidden name that is present, and DRIFT covers a name no applicable mechanism claims.
+    A forbidden name that is present is also unclaimed, so it is reported at both levels, as AUDIT.md documents.
+    The audit and repo-config/configure.sh both read their findings from here, so they cannot disagree.
+    """
+    findings = []
+    for store, names in required.items():
+        for name in sorted(names):
+            if name in live[store]:
+                findings.append(("OK", f"secrets: {name} is in the {store} store"))
+            else:
+                findings.append(("DEFECT", f"secrets: {name} missing from the {store} store"))
+    claimed_names = required["actions"] | required["dependabot"]
+    for store, present in live.items():
+        for name in sorted(present & forbidden):
+            findings.append(("DEFECT", f"secrets: forbidden {name} present in the {store} store"))
+        for name in sorted(present - claimed_names):
+            findings.append(
+                (
+                    "DRIFT",
+                    f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)",
+                )
+            )
+    return findings
+
+
 def secret_plan(
-    secrets: dict[str, Any], entry: dict[str, Any], tree: set[str] | None, repo: str
+    secrets: dict[str, Any],
+    entry: dict[str, Any],
+    tree: set[str] | None,
+    repo: str,
+    live: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     """One row per required secret name, the forbidden names, and the wrong-scope file names for this repo.
 
     Each row carries the name, its scope, the file it is read from, and the stores that need it.
     A stray is the file the name would have at the other scope.
+    Given the live names per store, the plan also carries the findings of compare_stores.
     """
     required, forbidden = resolve_secret_stores(secrets, entry, tree)
     rows = []
@@ -198,4 +234,7 @@ def secret_plan(
         )
         strays.add(wrong_scope_file_name(name, scope, repo))
     strays -= {row["file"] for row in rows}
-    return {"rows": rows, "forbidden": sorted(forbidden), "strays": sorted(strays)}
+    plan: dict[str, Any] = {"rows": rows, "forbidden": sorted(forbidden), "strays": sorted(strays)}
+    if live is not None:
+        plan["findings"] = compare_stores(required, forbidden, live)
+    return plan

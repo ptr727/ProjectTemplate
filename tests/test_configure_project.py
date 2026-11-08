@@ -566,7 +566,7 @@ class WiringCase(unittest.TestCase):
             )
             script = (
                 f"repo=ptr727/Fixture\nmodel=release\nrepo_arg=\ndescription=\ncheckout_given=false\n"
-                f"secrets_registered=false\ndry_run=false\nregistry=registry.json\nsecrets_skip_reason=none\n"
+                f"secrets_registered=false\ndry_run=false\nregistry=registry.json\nsecrets_skip_reason=none\nsecret_names_skip=\n"
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
                 f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
                 f"project_file={files['project']}\n{stubs}{body}cmd_apply\n"
