@@ -40,7 +40,8 @@
 # A cataloged repo whose ground branch does not exist yet is skipped with a note, and the other groups still apply.
 # The run then ends non-zero, so it never reads as fully provisioned.
 # The --dry-run option runs the whole pre-flight and prints what the secrets group would set, writing nothing, and the other groups have no dry run.
-# Applying the same configuration twice changes nothing, so the mode is idempotent.
+# Every group except secrets is idempotent, so applying the same configuration twice changes nothing there.
+# The secrets group rewrites every owed secret on every run, since a stored value cannot be read back to compare.
 #
 # The check mode is the read-only inverse, and it verifies the same five groups apply writes.
 # The static-settings assertions are driven by the committed payloads, so they stay repo-agnostic.

@@ -685,6 +685,47 @@ class ScaffoldCase(unittest.TestCase):
             self.assertIn("github_examplerepo_codecov_token", created)
             self.assertTrue((directory / "github_examplerepo_codecov_token").exists())
 
+    def scaffold_with_other_repo_skipped(
+        self, directory: Path
+    ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+        return resolve_secrets.scaffold(
+            SECRETS,
+            FLEET,
+            directory,
+            False,
+            tree_reader(TREES, missing=frozenset({"owner/Other-Repo"})),
+        )
+
+    def test_a_skipped_repos_existing_files_are_claimed_and_never_created(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            kept = directory / "github_other-repo_codecov_token"
+            kept.write_text("sentinel-held-value-1\n", encoding="utf-8")
+            created, present, strays, unclaimed, _ = self.scaffold_with_other_repo_skipped(
+                directory
+            )
+            self.assertIn("github_other-repo_codecov_token", present)
+            self.assertEqual((strays, unclaimed), ([], []))
+            self.assertEqual(kept.read_text(encoding="utf-8"), "sentinel-held-value-1\n")
+            self.assertFalse([c for c in created if "other-repo" in c])
+            self.assertFalse(
+                [p.name for p in directory.iterdir() if "other-repo" in p.name and p != kept]
+            )
+
+    def test_a_skipped_repos_wrong_scope_file_still_stops_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            (directory / "github_other-repo_codegen_app_client_id").write_text("", encoding="utf-8")
+            created, _, strays, _, skipped = self.scaffold_with_other_repo_skipped(directory)
+            self.assertEqual(strays, ["github_other-repo_codegen_app_client_id"])
+            self.assertEqual(created, [])
+            self.assertTrue(skipped)
+            self.assertEqual(
+                [p.name for p in directory.iterdir()], ["github_other-repo_codegen_app_client_id"]
+            )
+
     def test_a_second_run_creates_nothing_new(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / ".secrets"

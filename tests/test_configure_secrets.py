@@ -689,14 +689,23 @@ class PrologueCase(unittest.TestCase):
             )
             return result, calls.read_text(encoding="utf-8") if calls.exists() else ""
 
-    def test_apply_and_check_pass_the_prologue_to_the_first_api_call(self) -> None:
-        for command in ("apply", "check"):
-            with self.subTest(command=command):
-                result, calls = self.run_real(command)
-                self.assertNotIn("command not found", result.stderr)
-                self.assertNotIn("to resolve the entry", result.stderr)
-                self.assertNotIn("Could not compose", result.stderr)
-                self.assertNotEqual(calls, "", result.stderr)
+    def assert_past_the_prologue(self, command: str) -> None:
+        result, calls = self.run_real(command)
+        self.assertNotIn("command not found", result.stderr)
+        self.assertNotIn("to resolve the entry", result.stderr)
+        self.assertNotIn("Could not compose", result.stderr)
+        self.assertNotEqual(calls, "", result.stderr)
+
+    def test_apply_passes_the_prologue_to_the_first_api_call(self) -> None:
+        self.assert_past_the_prologue("apply")
+
+    @NEEDS_SPAWNED_GH
+    def test_check_passes_the_prologue_and_runs_its_secrets_group(self) -> None:
+        """Check runs on to its secrets group, where Python spawns gh, so the stub must be runnable by CreateProcess.
+
+        The prologue is shared with apply, which keeps that coverage on every platform.
+        """
+        self.assert_past_the_prologue("check")
 
 
 class StatusGateCase(unittest.TestCase):

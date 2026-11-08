@@ -202,16 +202,19 @@ def read_live_names(slug: str) -> dict[str, set[str]]:
 
 def fleet_expectations(
     secrets: dict[str, Any], registry: Any, tree_reader: Callable[[str, str], set[str]]
-) -> tuple[dict[str, list[str]], set[str], list[str]]:
-    """The expected file names mapped to the repos expecting each, every wrong-scope file name, and the skipped repos.
+) -> tuple[dict[str, list[str]], set[str], set[str], list[str]]:
+    """The expected files mapped to their repos, the files held for skipped repos, every wrong-scope file, and the skipped repos.
 
     A repo whose ground branch does not exist yet is skipped with its reason, and the walk goes on.
+    It is not scaffolded, but the files it owes are held, so its existing files never read as unclaimed.
+    Its wrong-scope files count as strays too.
 
     Only cataloged entries are walked, since the audit covers only those and an excluded or archived one owes nothing.
     """
     if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
         raise ResolveError("registry is not an object with a 'repos' array")
     expected: dict[str, list[str]] = {}
+    held: set[str] = set()
     strays: set[str] = set()
     skipped: list[str] = []
     for entry in registry["repos"]:
@@ -222,17 +225,25 @@ def fleet_expectations(
         if not isinstance(name, str) or slug is None:
             raise ResolveError(f"registry entry {name!r} has no name or no GitHub url")
         try:
-            tree = tree_reader(slug, ground_branch(entry, registry))
+            try:
+                tree: set[str] | None = tree_reader(slug, ground_branch(entry, registry))
+                skip = None
+            except BranchMissing as e:
+                # Without a tree no test directory can be seen, and an unread tree is read as every candidate keeping its claim.
+                # That is the right reading here, since claiming a file too many only keeps it from being called unclaimed.
+                # Nothing is created from it, because only `expected` drives creation.
+                tree, skip = None, str(e)
             plan = secret_names.secret_plan(secrets, entry, tree, name)
-        except BranchMissing as e:
-            skipped.append(f"{name}: {e}")
-            continue
         except secret_names.SecretNameError as e:
             raise ResolveError(f"{name}: {e}") from e
+        strays |= set(plan["strays"])
+        if skip is not None:
+            skipped.append(f"{name}: {skip}")
+            held |= {row["file"] for row in plan["rows"]}
+            continue
         for row in plan["rows"]:
             expected.setdefault(row["file"], []).append(name)
-        strays |= set(plan["strays"])
-    return expected, strays - set(expected), skipped
+    return expected, held - set(expected), strays - set(expected) - held, skipped
 
 
 def scaffold(
@@ -249,13 +260,13 @@ def scaffold(
     Every tree is read and every stray looked for before the first file is created.
     A listing of the directory names entries and opens none of them.
     """
-    expected, wrong_scope, skipped = fleet_expectations(secrets, registry, tree_reader)
+    expected, held, wrong_scope, skipped = fleet_expectations(secrets, registry, tree_reader)
     on_disk = set()
     if directory.is_dir():
         on_disk = {e.name for e in os.scandir(directory) if e.name.startswith(FILE_PREFIX)}
     strays = sorted(on_disk & wrong_scope)
-    present = sorted(on_disk & set(expected))
-    unclaimed = sorted(on_disk - set(expected) - wrong_scope)
+    present = sorted(on_disk & (set(expected) | held))
+    unclaimed = sorted(on_disk - set(expected) - held - wrong_scope)
     if strays:
         return [], present, strays, unclaimed, skipped
     created = sorted(set(expected) - on_disk)
