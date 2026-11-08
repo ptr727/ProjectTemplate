@@ -162,8 +162,6 @@ class Fixture:
         options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
         lifted = "\n".join(lift(pattern) for pattern in PLAN)
         names = self.names_json()
-        # Resolving the names read the tree through the stub, which is not a call the script under test made.
-        (self.gh_dir / "argv").unlink(missing_ok=True)
         script = "\n".join(
             [
                 options,

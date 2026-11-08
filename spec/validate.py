@@ -931,6 +931,16 @@ def secret_scope_errors(secrets, repos):
         for name, label in required.items()
         if name not in scopes
     ]
+    # Every cataloged repo owes the fleet baseline, and its stray check spells a repository name field.
+    # So a name that cannot form that field stops configure.sh and scaffold, and is refused here first.
+    errors += [
+        f"registry entry {repo.get('name')}: a cataloged name carrying '_' or '.' has no secret file name"
+        for repo in (repo_list if isinstance(repo_list, list) else [])
+        if isinstance(repo, dict)
+        and repo.get("status") == "cataloged"
+        and isinstance(repo.get("name"), str)
+        and ("_" in repo["name"] or "." in repo["name"])
+    ]
     return errors
 
 

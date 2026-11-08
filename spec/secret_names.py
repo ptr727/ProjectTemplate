@@ -18,6 +18,10 @@ STORES = ("actions", "dependabot")
 SECRET_SCOPES = ("fleet", "repository")
 
 
+# Every host secret file name starts with this, and scaffold reads its strays from the files that do.
+FILE_PREFIX = "github_"
+
+
 class SecretNameError(Exception):
     """A secret declaration the caller must fail loud on rather than read around."""
 
@@ -152,7 +156,7 @@ def secret_file_name(name: str, scope: str, repo: str) -> str:
     Both are lower case, and a repo name keeps its hyphens.
     """
     if scope == "fleet":
-        return f"github_{name.lower()}"
+        return f"{FILE_PREFIX}{name.lower()}"
     if scope == "repository":
         # CODESTYLE.md lets a repository name field keep its hyphens, since `_` alone separates fields.
         # A name carrying `_` or `.` would not split back into its fields, so it cannot form one.
@@ -160,7 +164,7 @@ def secret_file_name(name: str, scope: str, repo: str) -> str:
             raise SecretNameError(
                 f"repository {repo} carries '_' or '.', so it has no secret file name"
             )
-        return f"github_{repo.lower()}_{name.lower()}"
+        return f"{FILE_PREFIX}{repo.lower()}_{name.lower()}"
     raise SecretNameError(f"secret {name} has the scope {scope!r}, not one of {SECRET_SCOPES}")
 
 

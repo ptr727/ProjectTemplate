@@ -43,8 +43,6 @@ import validate  # sibling, import-safe (its main is guarded)
 
 ROOT = Path(__file__).resolve().parent.parent
 
-FILE_PREFIX = "github_"
-
 
 class ResolveError(Exception):
     """A condition the CLI must fail loud on."""
@@ -263,7 +261,9 @@ def scaffold(
     expected, held, wrong_scope, skipped = fleet_expectations(secrets, registry, tree_reader)
     on_disk = set()
     if directory.is_dir():
-        on_disk = {e.name for e in os.scandir(directory) if e.name.startswith(FILE_PREFIX)}
+        on_disk = {
+            e.name for e in os.scandir(directory) if e.name.startswith(secret_names.FILE_PREFIX)
+        }
     strays = sorted(on_disk & wrong_scope)
     present = sorted(on_disk & (set(expected) | held))
     unclaimed = sorted(on_disk - set(expected) - held - wrong_scope)

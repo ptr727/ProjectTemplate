@@ -283,6 +283,18 @@ class SecretScopeCase(unittest.TestCase):
     def test_a_fully_scoped_spec_is_clean(self) -> None:
         self.assertEqual(self.errors(self.SECRETS), [])
 
+    def test_a_cataloged_name_with_an_underscore_or_a_dot_is_an_error(self) -> None:
+        for name in ("Example_Repo", "Example.Repo"):
+            with self.subTest(name=name):
+                repos = {"repos": [{"name": name, "status": "cataloged"}]}
+                errors = self.errors(self.SECRETS, repos)
+                self.assertEqual(len(errors), 1)
+                self.assertIn(f"registry entry {name}:", errors[0])
+
+    def test_an_excluded_name_with_an_underscore_owes_no_secret_file(self) -> None:
+        repos = {"repos": [{"name": "Example_Repo", "status": "excluded"}]}
+        self.assertEqual(self.errors(self.SECRETS, repos), [])
+
     def test_a_baseline_name_with_no_scope_is_an_error(self) -> None:
         scopes = {k: v for k, v in self.SECRETS["secretScopes"].items() if k != "BASE_ONE"}
         errors = self.errors({**self.SECRETS, "secretScopes": scopes})
