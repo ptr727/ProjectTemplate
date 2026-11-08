@@ -324,7 +324,12 @@ class SecretScopeCase(unittest.TestCase):
 
     def test_a_malformed_dotted_entry_is_skipped_rather_than_raised_on(self) -> None:
         """The per-entry checks report these shapes, so the scope check must not crash on them."""
-        for field in ({"requiredSecrets": None}, {"publish": ["not-an-object"]}):
+        for field in (
+            {"requiredSecrets": None},
+            {"requiredSecrets": [["A"]]},
+            {"publish": None},
+            {"publish": ["not-an-object"]},
+        ):
             with self.subTest(field=field):
                 repos = {"repos": [{"name": "Example.Repo", "status": "cataloged", **field}]}
                 self.assertEqual(self.errors(self.SECRETS, repos), [])
