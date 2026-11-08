@@ -41,7 +41,7 @@ Each name carries a scope in `spec/secrets.json`, and the scope decides the one 
 | `DOCKER_HUB_ACCESS_TOKEN` | fleet | `github_docker_hub_access_token` |
 | `CODECOV_TOKEN` | repository | `github_<repo>_codecov_token` |
 
-A fleet name has one value shared by every repository that needs it. A repository name has a value of its own per repository, and `<repo>` is the repository name in lower case with its hyphens kept. That is the repository name field CODESTYLE.md "Script and Utility File Names" defines. A cataloged repository whose name carries `_` or `.` is therefore refused when it owes a repository-scoped name. `spec/validate.py` reads no tree, so a `python` or `csharp` type counts as owing its Codecov name whatever its tree holds. Otherwise one owing only fleet-scoped names is provisioned as any other. A new required name with no scope fails `spec/validate.py`, so every name is classified explicitly.
+A fleet name has one value shared by every repository that needs it. A repository name has a value of its own per repository, and `<repo>` is the repository name in lower case with its hyphens kept. That is the repository name field CODESTYLE.md "Script and Utility File Names" defines. A cataloged repository whose name carries `_` or `.` is therefore refused when it owes a repository-scoped name. `spec/validate.py` reads no tree, so a type that owes coverage counts as owing its Codecov name whatever its tree holds. That is `python`, or `csharp` unless the entry declares it `lint-only`. Otherwise one owing only fleet-scoped names is provisioned as any other. A new required name with no scope fails `spec/validate.py`, so every name is classified explicitly.
 
 The scopes are strict:
 

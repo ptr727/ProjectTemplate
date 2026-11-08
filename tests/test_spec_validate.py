@@ -21,6 +21,7 @@ from import_probe import import_delta
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 import audit
+import secret_names
 import validate
 
 CHECK_TYPES = {"types": {"python": {"checks": [{"id": "python.typed"}]}}, "crossCutting": {}}
@@ -314,8 +315,12 @@ class SecretScopeCase(unittest.TestCase):
 
     def test_a_cataloged_name_with_a_dot_owing_only_fleet_names_is_clean(self) -> None:
         """A repository owing only fleet-scoped names needs no repository name field."""
+        # The baseline is given a store, so a fleet row is planned and its stray is actually spelled.
+        secrets = {**self.SECRETS, "baseline": {**self.SECRETS["baseline"], "stores": ["actions"]}}
         repos = {"repos": [{"name": "example.github.io", "status": "cataloged"}]}
-        self.assertEqual(self.errors(self.SECRETS, repos), [])
+        plan = secret_names.secret_plan(secrets, repos["repos"][0], None, "example.github.io")
+        self.assertEqual([row["scope"] for row in plan["rows"]], ["fleet"])
+        self.assertEqual(self.errors(secrets, repos), [])
 
     def test_an_excluded_name_with_an_underscore_owes_no_secret_file(self) -> None:
         repos = {"repos": [{"name": "Example_Repo", "status": "excluded"}]}
