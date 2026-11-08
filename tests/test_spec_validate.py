@@ -322,6 +322,13 @@ class SecretScopeCase(unittest.TestCase):
         self.assertEqual([row["scope"] for row in plan["rows"]], ["fleet"])
         self.assertEqual(self.errors(secrets, repos), [])
 
+    def test_a_malformed_dotted_entry_is_skipped_rather_than_raised_on(self) -> None:
+        """The per-entry checks report these shapes, so the scope check must not crash on them."""
+        for field in ({"requiredSecrets": None}, {"publish": ["not-an-object"]}):
+            with self.subTest(field=field):
+                repos = {"repos": [{"name": "Example.Repo", "status": "cataloged", **field}]}
+                self.assertEqual(self.errors(self.SECRETS, repos), [])
+
     def test_an_excluded_name_with_an_underscore_owes_no_secret_file(self) -> None:
         repos = {"repos": [{"name": "Example_Repo", "status": "excluded"}]}
         self.assertEqual(self.errors(self.SECRETS, repos), [])

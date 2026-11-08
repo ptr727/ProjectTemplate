@@ -945,6 +945,14 @@ def secret_scope_errors(secrets, repos):
         name = repo.get("name")
         if not isinstance(name, str) or secret_names.forms_repository_field(name):
             continue
+        # A malformed requiredSecrets or publish is reported by the per-entry checks, so it is skipped here.
+        # The plan reads both fields bare, so it would raise rather than add to the error list.
+        declared = repo.get("requiredSecrets", [])
+        publish = repo.get("publish", [])
+        if not isinstance(declared, list) or not all(isinstance(s, str) for s in declared):
+            continue
+        if not isinstance(publish, list) or not all(isinstance(p, dict) for p in publish):
+            continue
         try:
             secret_names.secret_plan(secrets, repo, None, name)
         except secret_names.SecretNameError as e:
