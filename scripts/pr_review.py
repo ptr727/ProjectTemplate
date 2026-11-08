@@ -97,7 +97,9 @@ Subcommands
            the head, identity and commit only, and its empty body there is its own "reviewed,
            nothing to flag" shape, not a gap.
            `other_rate_limited` names one whose newest comment or review is its own rate-limit
-           notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
+           notice, as the structural marker or as the command reply with or without markup
+           around its sentence. Such a reviewer's pending check holds neither `wait` nor `merge`.
+           `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
            the account quota or an error whose run log names a rate limit, `ERROR` for any other
            error refusal, `EXCLUDED` for one saying every changed file is in Copilot's default
            review exclusions, `YES` for any other refusal. Under `ERROR`, a `RUN LOG READING` line

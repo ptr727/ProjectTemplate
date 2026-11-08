@@ -698,13 +698,19 @@ class TestUnmetItems(MergeCase):
             ["CHECKS_PENDING a hosted review of the head is running: CodeRabbit"],
             self.unmet_on(self.clean(merge="UNSTABLE", checks=[reviewing])),
         )
-        limited = fixtures.comment(
-            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
-            body=fixtures.RATE_LIMITED_COMMENT,
-            at=fixtures.real_ago(30),
-        )
-        quiet = self.clean(merge="UNSTABLE", checks=[reviewing], comments=[limited])
-        self.assertEqual([], self.unmet_on(quiet))
+        for body in (
+            fixtures.RATE_LIMITED_COMMENT,
+            fixtures.RATE_LIMITED_REPLY_COMMENT,
+            fixtures.RATE_LIMITED_MARKUP_REPLY_COMMENT,
+        ):
+            with self.subTest(body=body):
+                limited = fixtures.comment(
+                    login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
+                    body=body,
+                    at=fixtures.real_ago(30),
+                )
+                quiet = self.clean(merge="UNSTABLE", checks=[reviewing], comments=[limited])
+                self.assertEqual([], self.unmet_on(quiet))
 
     def test_a_refusal_handed_on_prints_pending_and_one_out_of_scope_reads_nothing(self) -> None:
         self.assertEqual(1, self.run_merge(target(isDraft=True)))
