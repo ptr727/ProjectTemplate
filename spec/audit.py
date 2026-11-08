@@ -52,6 +52,19 @@ from fidelity_text import (
     section_key,
     strip_sections,
 )
+from secret_names import (  # noqa: F401  # re-exported, since the tests and helpers name them on audit
+    compare_stores,
+    coverage_candidate_types,
+    coverage_claiming_types,
+    coverage_types,
+    declared_types,
+    ground_branch_of,
+    in_test_directory,
+    is_csharp_test_project,
+    is_python_test_module,
+    resolve_secret_stores,
+    tree_blobs,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -148,12 +161,7 @@ def repo_tree_blobs(slug, ground_head):
     sha = (((ground_head or {}).get("commit") or {}).get("commit") or {}).get("tree", {}).get("sha")
     if not sha:
         return None
-    tree = gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True)
-    if not tree or "tree" not in tree or tree.get("truncated"):
-        return None
-    return {
-        n["path"]: (n.get("sha"), n.get("mode")) for n in tree["tree"] if n.get("type") == "blob"
-    }
+    return tree_blobs(gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True))
 
 
 def blob_field(blobs, index):
@@ -169,57 +177,6 @@ def repo_tree_entries(slug, ground_head):
 def repo_tree(slug, ground_head):
     entries = repo_tree_entries(slug, ground_head)
     return None if entries is None else set(entries)
-
-
-def in_test_directory(path):
-    """Whether any directory segment of path names a test directory, compared case-insensitively."""
-    return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])
-
-
-def is_python_test_module(path):
-    """Whether path is a module pytest discovers by name, wherever in the tree it sits."""
-    name = path.rsplit("/", 1)[-1]
-    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
-
-
-def is_csharp_test_project(path):
-    """Whether path is a C# project either named or located as a test project."""
-    if not path.endswith(".csproj"):
-        return False
-    name = path.rsplit("/", 1)[-1]
-    segments = name[: -len(".csproj")].lower().split(".")
-    return (
-        "Test" in name
-        or any(segment in ("test", "tests") for segment in segments)
-        or in_test_directory(path)
-    )
-
-
-def coverage_candidate_types(types, repo_profiles):
-    """The declared types whose profile leaves them owing coverage at all, before tests are looked for."""
-    profiles = repo_profiles if isinstance(repo_profiles, dict) else {}
-    return [t for t in types if t == "python" or profiles.get(t) != "lint-only"]
-
-
-def coverage_claiming_types(types, type_mechanisms, tree):
-    """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and codecov.yml.
-
-    `tree` is the blob path set, or None when unread, and then every candidate keeps its claim.
-    """
-    detectors = {
-        "csharp": lambda paths: any(is_csharp_test_project(p) for p in paths),
-        "python": lambda paths: any(
-            (p.endswith(".py") and in_test_directory(p)) or is_python_test_module(p) for p in paths
-        ),
-    }
-    claiming = []
-    for name in types:
-        if type_mechanisms.get(name) != "codecov":
-            continue
-        detect = detectors.get(name)
-        if tree is None or detect is None or detect(tree):
-            claiming.append(name)
-    return claiming
 
 
 def python_directories_of(entry):
@@ -251,12 +208,6 @@ def expected_python_directories(entry, tree):
 
 # The catalog's hook snippets carry this helper into repos of every language, so it is fleet tooling rather than the repo's own Python.
 CARRIED_PYTHON_HELPERS = {"hub_fetch_run.py", "hub-fetch-run.py"}
-
-
-def declared_types(entry):
-    """The string elements of the registry entry's `types` list, or an empty list where `types` is not a list."""
-    types = entry.get("types")
-    return [t for t in types if isinstance(t, str)] if isinstance(types, list) else []
 
 
 def is_repo_python(path):
@@ -1916,21 +1867,6 @@ def classify_branch_drift(base, main, develop):
     return behind, diverged
 
 
-def ground_branch_of(entry, branch=None, defaults=None):
-    """The branch this audit reads, the registry's `groundTruthBranch` unless overridden.
-
-    A declared empty string is kept for spec/validate.py to refuse, rather than defaulted away.
-    """
-    if branch:
-        return branch
-    if "groundTruthBranch" in entry:
-        return entry["groundTruthBranch"]
-    defaults = defaults or {}
-    if "groundTruthBranch" in defaults:
-        return defaults["groundTruthBranch"]
-    return "main"
-
-
 @functools.cache
 def registered_checks():
     """spec/checks.json's checks, in the order the audit runs them."""
@@ -1980,11 +1916,7 @@ class Run:
 
     @functools.cached_property
     def coverage_types(self):
-        candidates = coverage_candidate_types(
-            declared_types(self.entry), self.entry.get("profiles", {})
-        )
-        mechanisms = self.spec["secrets"].get("typeMechanisms", {})
-        return coverage_claiming_types(candidates, mechanisms, self.tree)
+        return coverage_types(self.spec["secrets"], self.entry, self.tree)
 
     @functools.cached_property
     def baseline(self):
@@ -2214,42 +2146,8 @@ def check_secrets_names(run):
     for store in ("actions", "dependabot"):
         data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
-    mechanisms = [
-        secrets["targetMechanisms"].get(p.get("target")) for p in run.entry.get("publish", [])
-    ]
-    for name in declared_types(run.entry):
-        mechanism = secrets.get("typeMechanisms", {}).get(name)
-        if mechanism != "codecov" or name in run.coverage_types:
-            mechanisms.append(mechanism)
-    claimed = [secrets["mechanisms"][m] for m in mechanisms if m and m in secrets["mechanisms"]]
-    required = {"actions": set(), "dependabot": set()}
-    for store in secrets["baseline"].get("stores", []):
-        required[store] |= set(secrets["baseline"].get("requires", []))
-    for mech in claimed:
-        for store in mech.get("stores", []):
-            required[store] |= set(mech.get("requires", []))
-    # The registry requiredSecrets are the domain-specific additions, per STANDUP.md, expected in the actions store.
-    required["actions"] |= set(run.entry.get("requiredSecrets", []))
-    forbidden = set(secrets["baseline"].get("forbids", []))
-    for mech in claimed:
-        forbidden |= set(mech.get("forbids", []))
-    findings = [
-        ("DEFECT", f"secrets: {name} missing from the {store} store")
-        for store, names in required.items()
-        for name in sorted(names - stores[store])
-    ]
-    claimed_names = required["actions"] | required["dependabot"]
-    for store, present in stores.items():
-        for name in sorted(present & forbidden):
-            findings.append(("DEFECT", f"secrets: forbidden {name} present in the {store} store"))
-        for name in sorted(present - claimed_names):
-            findings.append(
-                (
-                    "DRIFT",
-                    f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)",
-                )
-            )
-    return findings
+    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree)
+    return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
 
 
 def check_dependabot_ecosystems(run):

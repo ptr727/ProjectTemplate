@@ -18,11 +18,14 @@ whatever plain python3 repo-config/configure.sh finds.
 import argparse
 import collections
 import fnmatch
+import importlib
 import json
 import pathlib
 import posixpath
 import re
 import sys
+
+import secret_names  # sibling, standard library only
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -325,17 +328,20 @@ def canonical_file_in_root(rel_path):
     return resolved.is_file() and resolved.is_relative_to(ROOT)
 
 
-def agent_policy_module():
-    """`scripts/agent_policy.py`, imported on first use rather than at module import.
+def scripts_module(name):
+    """The hub's `scripts/<name>.py`, imported on first use rather than at module import.
 
     Lazily, because the scripts directory is not on the path of a plain `python3 spec/resolve_description.py`.
     """
     scripts = str(ROOT / "scripts")
     if scripts not in sys.path:
         sys.path.append(scripts)
-    import agent_policy
+    return importlib.import_module(name)
 
-    return agent_policy
+
+def agent_policy_module():
+    """`scripts/agent_policy.py`, through scripts_module."""
+    return scripts_module("agent_policy")
 
 
 def agent_policy_errors_for_repo(repo, name, model):
@@ -889,6 +895,61 @@ def utf8_console() -> None:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
+
+
+def secret_scope_errors(secrets, repos):
+    """Each secret name a baseline, a mechanism, or a registry requiredSecrets list requires has a declared scope.
+
+    A name with none is an error, so a new secret is classified explicitly and never by a silent default.
+    A scope outside secret_names.SECRET_SCOPES is an error too, since configure.sh derives a file name from it.
+    """
+    scopes = secrets.get("secretScopes")
+    if not isinstance(scopes, dict):
+        return ["secrets.json: 'secretScopes' is not an object"]
+    errors = [
+        f"secrets.json: secretScopes['{name}'] must be one of {', '.join(secret_names.SECRET_SCOPES)}"
+        for name, scope in scopes.items()
+        if scope not in secret_names.SECRET_SCOPES
+    ]
+    required = {}
+    sets = [("baseline", secrets.get("baseline"))]
+    mechanisms = secrets.get("mechanisms")
+    sets += [
+        (f"mechanism '{m}'", v)
+        for m, v in (mechanisms if isinstance(mechanisms, dict) else {}).items()
+    ]
+    for label, entry in sets:
+        requires = entry.get("requires") if isinstance(entry, dict) else None
+        for name in requires if isinstance(requires, list) else []:
+            if isinstance(name, str):
+                required.setdefault(name, label)
+    repo_list = repos.get("repos")
+    for repo in repo_list if isinstance(repo_list, list) else []:
+        # A malformed list is reported by the per-entry checks, so it is skipped here rather than raised on.
+        declared = repo.get("requiredSecrets") if isinstance(repo, dict) else None
+        for name in declared if isinstance(declared, list) else []:
+            if isinstance(name, str):
+                required.setdefault(name, f"registry entry {repo.get('name')} requiredSecrets")
+    errors += [
+        f"secrets.json: {name} is required by {label} but has no secretScopes entry"
+        for name, label in required.items()
+        if name not in scopes
+    ]
+    # A cataloged repo owing a repository-scoped name needs a repository name field.
+    # A name carrying '_' or '.' cannot form one, so configure.sh and scaffold would stop on it.
+    # It is refused here first.
+    # The plan reads no tree, so a test-carrying type keeps its Codecov claim, the conservative answer.
+    for repo in repo_list if isinstance(repo_list, list) else []:
+        if not isinstance(repo, dict) or repo.get("status") != "cataloged":
+            continue
+        name = repo.get("name")
+        if not isinstance(name, str) or secret_names.forms_repository_field(name):
+            continue
+        try:
+            secret_names.secret_plan(secrets, repo, None, name)
+        except secret_names.SecretNameError as e:
+            errors.append(f"registry entry {name}: {e}")
+    return errors
 
 
 def main(argv=()):
@@ -1904,6 +1965,7 @@ def main(argv=()):
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
+    errors += secret_scope_errors(secrets, repos)
     if errors:
         print("Spec validation FAILED:")
         for err in errors:

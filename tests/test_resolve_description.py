@@ -64,5 +64,28 @@ class ResolveDescriptionCase(unittest.TestCase):
             resolve_description.resolve_description(registry, "Fixture")
 
 
+class RegistryEntryCase(unittest.TestCase):
+    """The lookup both this script and spec/resolve_secrets.py share."""
+
+    def test_the_one_matching_entry_is_returned(self) -> None:
+        entry = {"name": "Fixture", "types": ["python"]}
+        registry = {"repos": [{"name": "Other"}, entry]}
+        self.assertIs(resolve_description.registry_entry(registry, "Fixture"), entry)
+
+    def test_no_match_is_none_rather_than_an_error(self) -> None:
+        self.assertIsNone(resolve_description.registry_entry({"repos": []}, "Fixture"))
+
+    def test_each_unsound_lookup_raises(self) -> None:
+        cases: list[tuple[str, object]] = [
+            ("a missing repos array", {}),
+            ("a duplicate", {"repos": [{"name": "Fixture"}, {"name": "Fixture"}]}),
+            ("a case-only near-miss", {"repos": [{"name": "fixture"}]}),
+            ("a padded near-miss", {"repos": [{"name": " Fixture "}]}),
+        ]
+        for label, registry in cases:
+            with self.subTest(label), self.assertRaises(resolve_description.ResolveError):
+                resolve_description.registry_entry(registry, "Fixture")  # type: ignore[arg-type]
+
+
 if __name__ == "__main__":
     unittest.main()
