@@ -18,6 +18,7 @@ whatever plain python3 repo-config/configure.sh finds.
 import argparse
 import collections
 import fnmatch
+import importlib
 import json
 import pathlib
 import posixpath
@@ -327,17 +328,20 @@ def canonical_file_in_root(rel_path):
     return resolved.is_file() and resolved.is_relative_to(ROOT)
 
 
-def agent_policy_module():
-    """`scripts/agent_policy.py`, imported on first use rather than at module import.
+def scripts_module(name):
+    """The hub's `scripts/<name>.py`, imported on first use rather than at module import.
 
     Lazily, because the scripts directory is not on the path of a plain `python3 spec/resolve_description.py`.
     """
     scripts = str(ROOT / "scripts")
     if scripts not in sys.path:
         sys.path.append(scripts)
-    import agent_policy
+    return importlib.import_module(name)
 
-    return agent_policy
+
+def agent_policy_module():
+    """`scripts/agent_policy.py`, through scripts_module."""
+    return scripts_module("agent_policy")
 
 
 def agent_policy_errors_for_repo(repo, name, model):

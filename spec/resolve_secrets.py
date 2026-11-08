@@ -60,17 +60,9 @@ class BranchMissing(ResolveError):
     """A ground branch that does not exist yet, which is a state to report and not a failure."""
 
 
-def gh_graphql_module():
-    """`scripts/gh_graphql.py`, imported on first use, since the scripts directory is not on a plain python3's path.
-
-    The path is taken from this file rather than ROOT, which a test may point elsewhere.
-    """
-    scripts = str(Path(__file__).resolve().parent.parent / "scripts")
-    if scripts not in sys.path:
-        sys.path.append(scripts)
-    import gh_graphql
-
-    return gh_graphql
+def gh_graphql_module() -> Any:
+    """`scripts/gh_graphql.py`, through validate.scripts_module, whose ROOT no test points elsewhere."""
+    return validate.scripts_module("gh_graphql")
 
 
 def registry_entry(registry: Any, name: str) -> dict[str, Any]:
