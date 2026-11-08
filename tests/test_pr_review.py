@@ -348,6 +348,13 @@ RATE_LIMITED_REPLY_COMMENT = (
     "Review rate limited.\n</details>\n"
 )
 
+RATE_LIMITED_MARKUP_REPLY_COMMENT = (
+    "<!-- This is an auto-generated reply by CodeRabbit -->\n"
+    "<!-- CodeRabbit review command invocation: v2:HASH -->\n"
+    "<details>\n<summary>\u26a0\ufe0f Action not completed</summary>\n"
+    "<dl>\n<dt>\n<p>\n<dd>\n<br>\n\nReview rate limited.\n\n</dd>\n</dl>\n</details>\n"
+)
+
 
 def thread(
     tid: str,
@@ -1068,12 +1075,19 @@ class TestOtherReviewers(GqlCase):
             "<details>\n<summary>Action not completed</summary>\n\nSomething else.\n"
         )
         unmarked = "<details>\n<summary>Action not completed</summary>\n\nReview rate limited.\n"
+        other_markup_reply = (
+            "<!-- This is an auto-generated reply by CodeRabbit -->\n"
+            "<details>\n<summary>Action not completed</summary>\n<dl>\n<dd>\n<br>\n\n"
+            "Something else. Review rate limited.\n</dd>\n</dl>\n</details>\n"
+        )
         summary = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n"
         for body, expected in (
             (RATE_LIMITED_REPLY_COMMENT, "coderabbit.ai"),
+            (RATE_LIMITED_MARKUP_REPLY_COMMENT, "coderabbit.ai"),
             (RATE_LIMITED_COMMENT, "coderabbit.ai"),
             (summary, None),
             (other_reply, None),
+            (other_markup_reply, None),
             (unmarked, None),
         ):
             with self.subTest(body=body):
@@ -4729,18 +4743,28 @@ class TestCli(GqlCase):
                 self.assertIn("(reviewing: CodeRabbit)", self.out.getvalue())
 
     def test_a_rate_limited_hosted_review_does_not_hold_an_attested_head(self) -> None:
-        reviewing = status_context("CodeRabbit", "PENDING", created=real_ago(60))
-        pr = self.into(
-            payload([review(oid=OLD)], merge="UNSTABLE", checks=[reviewing]), attest=True
-        )
-        limited = comment(
-            login=pr_review_rounds.CODERABBIT_LOGIN, body=RATE_LIMITED_COMMENT, at=real_ago(30)
-        )
-        pr["comments"]["nodes"].append(limited)
-        self.answer(pr)
-        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
-        with mock.patch.object(pr_review.time, "sleep"):
-            self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+        """The marker and both reply shapes end the wait, and the digest still reports the limit."""
+        for body in (
+            RATE_LIMITED_COMMENT,
+            RATE_LIMITED_REPLY_COMMENT,
+            RATE_LIMITED_MARKUP_REPLY_COMMENT,
+        ):
+            with self.subTest(body=body):
+                self.out.seek(0)
+                self.out.truncate()
+                reviewing = status_context("CodeRabbit", "PENDING", created=real_ago(60))
+                pr = self.into(
+                    payload([review(oid=OLD)], merge="UNSTABLE", checks=[reviewing]), attest=True
+                )
+                limited = comment(
+                    login=pr_review_rounds.CODERABBIT_LOGIN, body=body, at=real_ago(30)
+                )
+                pr["comments"]["nodes"].append(limited)
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with mock.patch.object(pr_review.time, "sleep"):
+                    self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
+                self.assertIn("other_rate_limited=coderabbitai", self.out.getvalue())
 
     def test_the_held_poll_reads_the_narrow_query_and_the_verdict_the_full_one(self) -> None:
         """The digest needs the threads and files the poll leaves out, so it reads `Q_FULL`.
