@@ -352,7 +352,7 @@ RATE_LIMITED_MARKUP_REPLY_COMMENT = (
     "<!-- This is an auto-generated reply by CodeRabbit -->\n"
     "<!-- CodeRabbit review command invocation: v2:HASH -->\n"
     "<details>\n<summary>\u26a0\ufe0f Action not completed</summary>\n"
-    "<dl>\n<dd>\n<br>\n\nReview rate limited.\n\n</dd>\n</dl>\n</details>\n"
+    "<dl>\n<dt>\n<p>\n<dd>\n<br>\n\nReview rate limited.\n\n</dd>\n</dl>\n</details>\n"
 )
 
 
